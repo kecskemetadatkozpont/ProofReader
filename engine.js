@@ -91,7 +91,7 @@
         if (key === 'TeX') { html += 'T<span class="latex-e">e</span>X'; spoken += 'TeX'; continue; }
         if (key === 'today') { html += 'June 2026'; spoken += 'June 2026'; continue; }
         if (key === 'ldots' || key === 'dots') { html += '&hellip;'; spoken += '…'; continue; }
-        if (key === 'cite' || key === 'citep' || key === 'citet' || key === 'citeauthor') { html += '<span class="cite">[?]</span>'; continue; }
+        if (key === 'cite' || key === 'citep' || key === 'citet' || key === 'citeauthor') { html += resolveCite(arg); continue; }
         if (key === 'ref' || key === 'eqref' || key === 'pageref' || key === 'autoref' || key === 'cref') { html += '<span class="cite">??</span>'; continue; }
         if (key === 'label' || key === 'index' || key === 'vspace' || key === 'hspace' || key === 'noindent' || key === 'centering' || key === 'small' || key === 'normalsize' || key === 'large' || key === 'Large' || key === 'huge' || key === 'bfseries' || key === 'itshape') { continue; }
         if (key === 'footnote') { html += '<sup class="fn">*</sup>'; continue; }
@@ -205,6 +205,7 @@
         if (lvl === 'section') { ctx.c.section++; ctx.c.subsection = 0; ctx.c.subsubsection = 0; num = ctx.c.section + '  '; }
         else if (lvl === 'subsection') { ctx.c.subsection++; ctx.c.subsubsection = 0; num = ctx.c.section + '.' + ctx.c.subsection + '  '; }
         else if (lvl === 'subsubsection') { ctx.c.subsubsection++; num = ctx.c.section + '.' + ctx.c.subsection + '.' + ctx.c.subsubsection + '  '; }
+        if (ROPTS && ROPTS.numberSections === false) num = '';
         var tag = lvl === 'section' ? 'h2' : lvl === 'subsection' ? 'h3' : 'h4';
         var sid = newSent(ctx, r.spoken, offset + braceAt + 1, offset + g.end - 1);
         html += '<' + tag + ' class="hd ' + lvl + '">' + (num ? '<span class="secnum">' + num + '</span>' : '') + wrap(sid, r.html) + '</' + tag + '>';
@@ -403,9 +404,74 @@
     return html;
   }
 
+  var CITES = null, BIB = null, ROPTS = null;
+  function cleanTex(s) { return String(s == null ? '' : s).replace(/[{}]/g, '').replace(/\\[a-zA-Z]+\s*/g, '').replace(/\s+/g, ' ').trim(); }
+  function parseBibFields(s) {
+    var f = {}, re = /(\w+)\s*=\s*(\{|")/g, m;
+    while ((m = re.exec(s))) {
+      var name = m[1].toLowerCase(), open = m[2], start = m.index + m[0].length, j = start;
+      if (open === '{') { var d = 1; while (j < s.length && d > 0) { var c = s[j]; if (c === '{') d++; else if (c === '}') d--; j++; } f[name] = s.slice(start, j - 1); re.lastIndex = j; }
+      else { var e = s.indexOf('"', start); if (e < 0) e = s.length; f[name] = s.slice(start, e); re.lastIndex = e + 1; }
+    }
+    return f;
+  }
+  function parseBib(files) {
+    var db = {};
+    Object.keys(files || {}).forEach(function (k) {
+      var f = files[k]; if (!f || f.type !== 'bib' || !f.content) return;
+      var txt = f.content, re = /@(\w+)\s*\{\s*([^,\s}]+)\s*,/g, m;
+      while ((m = re.exec(txt))) {
+        if (/^(comment|string|preamble)$/i.test(m[1])) continue;
+        var key = m[2], start = m.index + m[0].length, d = 1, j = start;
+        while (j < txt.length && d > 0) { var c = txt[j]; if (c === '{') d++; else if (c === '}') d--; j++; }
+        db[key] = { type: m[1].toLowerCase(), key: key, fields: parseBibFields(txt.slice(start, j - 1)) };
+        re.lastIndex = j;
+      }
+    });
+    return db;
+  }
+  function bibFirstLast(a) { if (!a) return 'Anon.'; var first = a.split(/\s+and\s+/i)[0].trim(); if (first.indexOf(',') >= 0) return cleanTex(first.split(',')[0]); var w = cleanTex(first).split(/\s+/); return w[w.length - 1] || first; }
+  function bibAuthors(a) {
+    if (!a) return '';
+    var parts = a.split(/\s+and\s+/i).map(function (p) { p = p.trim(); if (p.indexOf(',') >= 0) { var s = p.split(','); return cleanTex(s[0]) + (s[1] ? ', ' + cleanTex(s[1]) : ''); } return cleanTex(p); });
+    if (parts.length > 4) return parts.slice(0, 3).join('; ') + ' et al.';
+    return parts.join('; ');
+  }
+  function resolveCite(keysStr) {
+    if (!CITES) return '<span class="cite">[?]</span>';
+    var style = (ROPTS && ROPTS.citeStyle) || 'numeric';
+    var keys = String(keysStr || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+    if (!keys.length) return '<span class="cite">[?]</span>';
+    var out = keys.map(function (key) {
+      if (!CITES.map[key]) { CITES.order.push(key); CITES.map[key] = CITES.order.length; }
+      if (style === 'authoryear') { var e = BIB[key]; return e ? (bibFirstLast(e.fields.author) + ', ' + (cleanTex(e.fields.year) || 'n.d.')) : key; }
+      return String(CITES.map[key]);
+    });
+    return '<span class="cite">' + (style === 'authoryear' ? '(' + out.join('; ') + ')' : '[' + out.join(', ') + ']') + '</span>';
+  }
+  function renderReferences() {
+    if (!CITES || !CITES.order.length) return '';
+    var style = (ROPTS && ROPTS.citeStyle) || 'numeric';
+    var items = CITES.order.map(function (key, idx) {
+      var e = BIB[key], n = idx + 1;
+      var label = style === 'authoryear' ? '' : '<span class="refnum">[' + n + ']</span> ';
+      var body;
+      if (e) {
+        var f = e.fields, au = escapeHtml(bibAuthors(f.author)), yr = f.year ? ' (' + escapeHtml(cleanTex(f.year)) + ')' : '',
+          ti = f.title ? ' <span class="reftitle">' + escapeHtml(cleanTex(f.title)) + '</span>.' : '',
+          ven = escapeHtml(cleanTex(f.journal || f.booktitle || f.publisher || ''));
+        body = au + yr + '.' + ti + (ven ? ' <em>' + ven + '</em>.' : '');
+      } else { body = '<span class="cite">' + escapeHtml(key) + '</span> — not found in .bib'; }
+      return '<li class="refitem">' + label + body + '</li>';
+    }).join('');
+    return '<div class="references"><h2 class="hd section refs-h">References</h2><ol class="reflist' + (style === 'authoryear' ? ' ay' : '') + '">' + items + '</ol></div>';
+  }
+
   function process(source, files) {
     var ctx = { sid: 0, sentences: [], c: { section: 0, subsection: 0, subsubsection: 0, figure: 0, table: 0, equation: 0 }, files: files || {}, meta: {}, diagnostics: [] };
     DIAG = ctx.diagnostics;
+    ROPTS = (typeof window !== 'undefined' && window.PR_RENDEROPTS) || {};
+    BIB = parseBib(ctx.files); CITES = { order: [], map: {} };
     var bodyStart = 0, body = source, bodyOffset = 0, preamble = '';
     var bm = /\\begin\{document\}/.exec(source);
     if (bm) {
@@ -433,7 +499,7 @@
     // sort sentences by start so editor caret mapping is monotonic
     ctx.sentences.sort(function (a, b) { return a.start - b.start; });
     var diags = ctx.diagnostics; DIAG = null;
-    return { html: '<div class="paper">' + bodyHtml + '</div>', sentences: ctx.sentences, meta: ctx.meta, diagnostics: diags };
+    return { html: '<div class="paper">' + bodyHtml + renderReferences() + '</div>', sentences: ctx.sentences, meta: ctx.meta, diagnostics: diags };
   }
 
   window.LatexEngine = { process: process, inline: inline };

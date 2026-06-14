@@ -10,11 +10,15 @@
     "serifSize": 17,
     "monoSize": 13.5,
     "paperWidth": 720,
-    "dimInactive": true
+    "dimInactive": true,
+    "renderMode": "auto",
+    "numberSections": true,
+    "citeStyle": "numeric"
   }/*EDITMODE-END*/;
 
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const PROJECT_ID = new URLSearchParams(location.search).get('p');
+  if (typeof window !== 'undefined' && !window.PR_RENDEROPTS) window.PR_RENDEROPTS = { numberSections: true, citeStyle: 'numeric' };
 
   /* data: URLs don't render reliably for PDFs inside iframes/objects (Chrome blocks them),
      so convert to a same-origin Blob URL which the built-in PDF viewer accepts. */
@@ -85,6 +89,9 @@
     const [compiled, setCompiled] = useState(() => window.LatexEngine.process((init.files[init.active] && init.files[init.active].content) || '', init.files));
     const [signTick, setSignTick] = useState(0);
     const SIZE_LIMIT = 50 * 1024 * 1024;
+    const [uploads, setUploads] = useState([]);
+    const uploadSeq = useRef(0);
+    const [renderStale, setRenderStale] = useState(false);
 
     const [idx, setIdxState] = useState(init.idx);
     const [status, setStatusState] = useState('idle'); // idle | playing | paused
@@ -241,9 +248,10 @@
       }
     }, [files, active]);
 
-    /* ---- debounced recompile ---- */
+    /* ---- debounced recompile (gated to manual mode) ---- */
     const compileTimer = useRef(null);
     useEffect(() => {
+      if (t.renderMode === 'manual') { setRenderStale(true); return; }
       clearTimeout(compileTimer.current);
       compileTimer.current = setTimeout(() => {
         const c = window.LatexEngine.process(source, files);
@@ -251,7 +259,20 @@
         setIdx(clamp(idxRef.current || 0, 0, Math.max(0, c.sentences.length - 1)));
       }, 220);
       return () => clearTimeout(compileTimer.current);
-    }, [source]);
+    }, [source, t.renderMode]);
+
+    /* ---- render options (section numbering + citation style) ---- */
+    useEffect(() => {
+      window.PR_RENDEROPTS = { numberSections: t.numberSections !== false, citeStyle: (t.citeStyle === 'author-year' ? 'authoryear' : 'numeric') };
+      try { setCompiled(window.LatexEngine.process(source, files)); } catch (e) { }
+    }, [t.numberSections, t.citeStyle]);
+
+    /* ---- manual render (Cmd/Ctrl+Enter or the Render button) ---- */
+    const renderNow = () => { try { const c = window.LatexEngine.process(source, files); setCompiled(c); setRenderStale(false); setIdx(clamp(idxRef.current || 0, 0, Math.max(0, c.sentences.length - 1))); } catch (e) { } };
+    useEffect(() => {
+      const onKey = (e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); renderNow(); } };
+      window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey);
+    }, [source, files]);
 
     /* recompile immediately when switching files; restore that document's reading position */
     useEffect(() => {
@@ -512,21 +533,28 @@
 
     /* ---- file upload (into the selected folder) ---- */
     const fileInput = useRef(null);
-    function putBinary(path, blob, type, name, after) {
+    function uAdd(name, size, status, reason) { const id = 'u' + (++uploadSeq.current); setUploads((l) => [...l, { id: id, name: name, size: size || 0, status: status || 'queued', reason: reason || '' }]); return id; }
+    function uSet(id, patch) { setUploads((l) => l.map((it) => it.id === id ? { ...it, ...patch } : it)); }
+
+    function putBinary(path, blob, type, name, after, uid) {
+      if (uid == null) uid = uAdd(name || bn(path), blob && blob.size, 'uploading'); else uSet(uid, { status: 'uploading' });
       if (window.PRUploads && window.PRUploads.enabled && projectId) {
         window.PRUploads.put(projectId, name || bn(path), blob).then((meta) => {
           setFiles((f) => ({ ...f, [path]: { type: type, storagePath: meta.storagePath, name: meta.name, size: meta.size, mime: meta.mime } }));
           setOrder((o) => o.includes(path) ? o : [...o, path]);
           window.PRUploads.signedUrl(meta.storagePath).then(() => setSignTick((t) => t + 1));
+          uSet(uid, { status: 'done' });
           if (after) after(bn(path));
-        }, (err) => { try { const c = { ...filesRef.current }; delete c[path]; filesRef.current = c; } catch (e) { } alert('Upload failed: ' + ((err && err.message) || err)); });
+        }, (err) => { try { const c = { ...filesRef.current }; delete c[path]; filesRef.current = c; } catch (e) { } uSet(uid, { status: 'error', reason: (err && err.message) || String(err) }); });
       } else {
         const r = new FileReader();
         r.onload = () => {
           setFiles((f) => ({ ...f, [path]: { type: type, dataURL: String(r.result) } }));
           setOrder((o) => o.includes(path) ? o : [...o, path]);
+          uSet(uid, { status: 'done' });
           if (after) after(bn(path));
         };
+        r.onerror = () => uSet(uid, { status: 'error', reason: 'Could not read file' });
         r.readAsDataURL(blob);
       }
     }
@@ -536,19 +564,22 @@
       const dir = currentDir;
       list.forEach((file) => {
         const isText = /\.(tex|bib|cls|sty|txt)$/i.test(file.name);
-        const isImg = /\.(png|jpe?g|gif|svg|pdf)$/i.test(file.name);
+        const isImg = /\.(png|jpe?g|gif|svg|webp|pdf)$/i.test(file.name);
         const isPdf = /\.pdf$/i.test(file.name);
-        if (!isText && !isImg) return;
-        if (!isText && file.size > SIZE_LIMIT) { alert('“' + file.name + '” is larger than 50 MB and was skipped.'); return; }
+        if (!isText && !isImg) { uAdd(file.name, file.size, 'skipped', 'Unsupported format'); return; }
+        if (!isText && file.size > SIZE_LIMIT) { uAdd(file.name, file.size, 'skipped', 'Larger than 50 MB'); return; }
         const path = uniquePath((p) => !!filesRef.current[p], pjoin(dir, file.name));
         filesRef.current = { ...filesRef.current, [path]: {} }; // reserve to avoid same-batch collisions
         if (isText) {
+          const uid = uAdd(file.name, file.size, 'uploading');
           const r = new FileReader();
           r.onload = () => {
             setFiles((f) => ({ ...f, [path]: { type: /\.bib$/i.test(file.name) ? 'bib' : 'tex', content: String(r.result) } }));
             setOrder((o) => o.includes(path) ? o : [...o, path]);
             if (/\.tex$/i.test(file.name)) setActive(path);
+            uSet(uid, { status: 'done' });
           };
+          r.onerror = () => uSet(uid, { status: 'error', reason: 'Could not read file' });
           r.readAsText(file);
         } else {
           putBinary(path, file, isPdf ? 'pdf' : 'image', file.name);
@@ -577,7 +608,8 @@
         const rel = (file.webkitRelativePath || file.name).replace(/\\/g, '/');
         const isText = /\.(tex|bib|cls|sty|txt)$/i.test(file.name);
         const isImg = /\.(png|jpe?g|gif|svg|pdf)$/i.test(file.name);
-        if ((!isText && !isImg) || file.size > SIZE_LIMIT) { skipped++; return; }
+        if (!isText && !isImg) { uAdd(file.name, file.size, 'skipped', 'Unsupported format'); return; }
+        if (file.size > SIZE_LIMIT) { uAdd(file.name, file.size, 'skipped', 'Larger than 50 MB'); return; }
         const path = uniquePath((p) => !!filesRef.current[p] || reserved[p], dir ? dir + '/' + rel : rel);
         reserved[path] = 1; filesRef.current = { ...filesRef.current, [path]: {} };
         const segs = path.split('/'); segs.pop();
@@ -593,12 +625,15 @@
       setExpanded((s) => { const n = new Set(s); if (dir) n.add(dir); newFolders.forEach((f) => n.add(f)); return n; });
       items.forEach((it) => {
         if (it.isText) {
+          const uid = uAdd(bn(it.path), it.file.size, 'uploading');
           const r = new FileReader();
           r.onload = () => {
             setFiles((f) => ({ ...f, [it.path]: { type: /\.bib$/i.test(it.file.name) ? 'bib' : 'tex', content: String(r.result) } }));
             setOrder((o) => o.includes(it.path) ? o : [...o, it.path]);
             if (it.makeActive) setActive(it.path);
+            uSet(uid, { status: 'done' });
           };
+          r.onerror = () => uSet(uid, { status: 'error', reason: 'Could not read file' });
           r.readAsText(it.file);
         } else {
           putBinary(it.path, it.file, /\.pdf$/i.test(it.file.name) ? 'pdf' : 'image', it.file.name);
@@ -1191,6 +1226,9 @@
         {storageWarn && <div className="storage-toast"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M8 5v4" strokeLinecap="round" /><circle cx="8" cy="11.5" r=".6" fill="currentColor" /><path d="M8 2l6 11H2z" strokeLinejoin="round" /></svg><div><b>Storage is full</b><span>Your latest change may not have saved. Delete old versions or large attachments to free space.</span></div><button onClick={() => setStorageWarn(false)}>✕</button></div>}
         {voiceOpen && <Collab.VoiceSettings engine={voice.engine} elevenVoice={voice.elevenVoice} model={voice.model} stability={voice.stability} similarity={voice.similarity} set={(patch) => setVoice((v) => Object.assign({}, v, patch))} />}
 
+        {uploads.length > 0 && <UploadModal items={uploads} onClose={() => setUploads([])} />}
+        {t.renderMode === 'manual' && renderStale && <button className="render-pill" onClick={renderNow} title="Render preview (⌘/Ctrl + Enter)"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M13 8a5 5 0 11-1.5-3.5M13 2v3h-3" strokeLinecap="round" strokeLinejoin="round" /></svg>Render preview</button>}
+
         {cmdk && <CommandPalette onClose={() => setCmdk(false)} items={[
           { group: 'Reading', label: status === 'playing' ? 'Pause reading' : 'Play — read aloud', hint: 'Space', run: play },
           { group: 'Reading', label: 'Stop reading', run: stop },
@@ -1201,6 +1239,7 @@
           { group: 'Document', label: 'Version history', run: () => setDrawer({ open: true, tab: 'history' }) },
           { group: 'Document', label: 'Activity', run: () => setDrawer({ open: true, tab: 'activity' }) },
           { group: 'Document', label: 'Share…', run: () => setShareOpen(true) },
+          { group: 'Document', label: 'Render preview now', hint: '⌘⏎', run: renderNow },
           { group: 'Document', label: 'Print / Export PDF', run: () => onPrintDoc && onPrintDoc() },
         ].concat(outline.map((o) => ({ group: 'Go to', label: o.title, hint: o.kind, run: () => gotoOffset(o.off) })))} />}
 
@@ -1213,6 +1252,15 @@
           <TweakSlider label="Preview text" value={t.serifSize} min={13} max={22} step={0.5} unit="px" onChange={(v) => setTweak('serifSize', v)} />
           <TweakSlider label="Editor text" value={t.monoSize} min={11} max={18} step={0.5} unit="px" onChange={(v) => setTweak('monoSize', v)} />
           <TweakSlider label="Page width" value={t.paperWidth} min={560} max={900} step={10} unit="px" onChange={(v) => setTweak('paperWidth', v)} />
+          <TweakSection label="Rendering" />
+          <TweakRadio label="Preview" value={t.renderMode || 'auto'} options={["auto", "manual"]} onChange={(v) => setTweak('renderMode', v)} />
+          <TweakToggle label="Number sections" value={t.numberSections !== false} onChange={(v) => setTweak('numberSections', v)} />
+          <TweakRadio label="Citations" value={t.citeStyle || 'numeric'} options={["numeric", "author-year"]} onChange={(v) => setTweak('citeStyle', v)} />
+          <TweakSection label="Export" />
+          <button className="tp-pdf-btn" onClick={() => onPrintDoc && onPrintDoc()}>
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M8 2v8M8 10l-3-3M8 10l3-3M3 12.5h10" strokeLinecap="round" strokeLinejoin="round" /></svg>
+            Download PDF
+          </button>
         </TweaksPanel>
       </div>
     );
@@ -1406,6 +1454,48 @@
           </div>
         </div>
       </footer>
+    );
+  }
+
+  function statusIcon(s) {
+    if (s === 'uploading' || s === 'queued') return <span className="up-spin" />;
+    if (s === 'done') return '\u2713';
+    if (s === 'skipped') return '\u2298';
+    if (s === 'error') return '!';
+    return '\u2022';
+  }
+  function UploadModal(props) {
+    const { items, onClose } = props;
+    const settled = items.every((it) => it.status === 'done' || it.status === 'skipped' || it.status === 'error');
+    const done = items.filter((it) => it.status === 'done').length;
+    const skipped = items.filter((it) => it.status === 'skipped').length;
+    const failed = items.filter((it) => it.status === 'error').length;
+    const active = items.length - done - skipped - failed;
+    useEffect(() => {
+      if (settled && skipped === 0 && failed === 0 && items.length) { const t = setTimeout(onClose, 1800); return () => clearTimeout(t); }
+    }, [settled, skipped, failed, items.length]);
+    const fmt = (n) => !n ? '' : n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(0) + ' KB' : (n / 1048576).toFixed(1) + ' MB';
+    return (
+      <div className="up-scrim" onMouseDown={() => { if (settled) onClose(); }}>
+        <div className="up-modal" onMouseDown={(e) => e.stopPropagation()}>
+          <div className="up-head">
+            <b>{settled ? 'Upload complete' : 'Uploading files'}</b>
+            <button className="up-x" onClick={onClose} disabled={!settled} title={settled ? 'Close' : 'Uploads in progress…'}>✕</button>
+            <span className="up-sub">{active > 0 ? active + ' in progress · ' : ''}{done} done{skipped ? ' · ' + skipped + ' skipped' : ''}{failed ? ' · ' + failed + ' failed' : ''}</span>
+          </div>
+          <div className="up-list">
+            {items.map((it) => (
+              <div className={'up-row up-' + it.status} key={it.id}>
+                <span className="up-ic">{statusIcon(it.status)}</span>
+                <span className="up-name" title={it.name}>{it.name}</span>
+                <span className="up-meta">{it.status === 'uploading' || it.status === 'queued'
+                  ? <span className="up-bar"><i /></span>
+                  : (it.status === 'skipped' || it.status === 'error') ? it.reason : fmt(it.size)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
     );
   }
 
