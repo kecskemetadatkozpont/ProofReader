@@ -1,0 +1,212 @@
+/* ProofReader — cloud-backed store. Loads AFTER store.js and backend.js.
+ * Only takes over window.PRStore in 'cloud' mode; otherwise the local store
+ * from store.js stays in place (demo mode), so the app never breaks.
+ *
+ * Model: each project is one nested object stored in projects.data (jsonb).
+ * Reads are synchronous from an in-memory CACHE (warm-seeded from localStorage,
+ * refreshed from Supabase). Writes update CACHE + warm copy + notify, then push
+ * to Supabase in the background. Realtime + window-focus keep collaborators in
+ * sync. This preserves the exact PRStore surface the app already calls. */
+(function () {
+  'use strict';
+  var BE = window.PR_BACKEND;
+  if (!BE || BE.mode !== 'cloud') return;           // demo/sign-in → keep local store
+  var sb = BE.sb, me = BE.user;
+
+  var PLAN = { free: { storage: 50 * 1024 * 1024, chars: 10000, label: 'Free' }, pro: { storage: 1024 * 1024 * 1024, chars: 200000, label: 'Pro' } };
+  var WARM = 'proofreader:cloud:' + me.id + ':projects';
+  var PREFS = 'proofreader:cloud:' + me.id + ':prefs';
+  var USAGE = 'proofreader:cloud:' + me.id + ':usage';
+  var READING = 'proofreader:cloud:' + me.id + ':reading';
+
+  function clone(o) { return JSON.parse(JSON.stringify(o)); }
+  function uuid() { try { return crypto.randomUUID(); } catch (e) { return 'xxxxxxxx-xxxx-4xxx-axxx-xxxxxxxxxxxx'.replace(/[x]/g, function () { return (Math.random() * 16 | 0).toString(16); }); } }
+  function detUuid(seed) { var h = 0x811c9dc5, b = []; for (var i = 0; i < 16; i++) { for (var j = 0; j < seed.length; j++) { h ^= seed.charCodeAt(j) + i * 131; h = Math.imul(h, 16777619); } b.push((h >>> 0) & 0xff); } var x = b.map(function (n) { return ('0' + n.toString(16)).slice(-2); }).join(''); return x.slice(0, 8) + '-' + x.slice(8, 12) + '-4' + x.slice(13, 16) + '-a' + x.slice(17, 20) + '-' + x.slice(20, 32); }
+  function sid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+  function nowISO() { return new Date().toISOString(); }
+
+  /* ---- cache ---- */
+  var CACHE = [];
+  (function warm() { try { CACHE = JSON.parse(localStorage.getItem(WARM) || '[]') || []; } catch (e) { CACHE = []; } })();
+  function persistWarm() { try { localStorage.setItem(WARM, JSON.stringify(CACHE)); } catch (e) { } }
+
+  function normalize(p) {
+    if (!p) return p;
+    if (!p.ownerId) p.ownerId = me.id;
+    if (!p.members) p.members = [];
+    if (!p.link) p.link = { enabled: false, role: 'viewer' };
+    if (!p.activity) p.activity = [];
+    if (!p.versions) p.versions = [];
+    if (!p.annotations) p.annotations = [];
+    if (!p.folders) p.folders = [];
+    return p;
+  }
+  function idx(id) { for (var i = 0; i < CACHE.length; i++) if (CACHE[i].id === id) return i; return -1; }
+
+  function blankFiles(title) {
+    var tex = '\\documentclass[11pt]{article}\n\\usepackage{amsmath}\n\\usepackage{graphicx}\n\n' +
+      '\\title{' + (title || 'Untitled') + '}\n\\author{Your Name}\n\\date{\\today}\n\n' +
+      '\\begin{document}\n\\maketitle\n\n\\section{Introduction}\n' +
+      'Start writing here. Press play in the toolbar to hear this sentence read aloud. ' +
+      'Click any sentence in the editor to set where reading begins.\n\n' +
+      '\\section{Background}\nAdd your content, equations, figures and tables.\n\n\\end{document}\n';
+    return { active: 'main.tex', order: ['main.tex'], folders: [], files: { 'main.tex': { type: 'tex', content: tex } } };
+  }
+  function sampleFiles() { var s = window.PR_SAMPLE; return s ? { active: s.active, order: s.order.slice(), files: clone(s.files), folders: (s.folders || []).slice() } : blankFiles('Sample'); }
+
+  /* ---- realtime notify ---- */
+  var subs = [];
+  function notify() { subs.forEach(function (cb) { try { cb(); } catch (e) { } }); }
+  function subscribe(cb) { subs.push(cb); return function () { subs = subs.filter(function (x) { return x !== cb; }); }; }
+
+  /* ---- server push (debounced per project) ---- */
+  var pending = {}, timers = {};
+  function pushProject(p) {
+    pending[p.id] = p;
+    clearTimeout(timers[p.id]);
+    timers[p.id] = setTimeout(function () { flush(p.id); }, 500);
+  }
+  function flush(id) {
+    var p = pending[id]; if (!p) return; delete pending[id];
+    var row = { id: p.id, owner_id: p.ownerId || me.id, title: p.title || 'Untitled project', data: p, deleted_at: p.deletedAt || null, updated_at: nowISO() };
+    sb.from('projects').upsert(row).then(function (r) {
+      if (r.error) { console.warn('[PR] save failed, will retry', r.error.message); pending[id] = p; clearTimeout(timers[id]); timers[id] = setTimeout(function () { flush(id); }, 4000); return; }
+      syncMembers(p);
+    }).catch(function (e) { console.warn('[PR] save error', e); });
+  }
+  function syncMembers(p) {
+    try {
+      var rows = (p.members || []).filter(function (m) { return m.userId && m.userId !== p.ownerId; }).map(function (m) { return { project_id: p.id, user_id: m.userId, role: m.role }; });
+      if (rows.length) sb.from('project_members').upsert(rows).then(function () { }).catch(function () { });
+    } catch (e) { }
+  }
+  function hardDelete(id) { sb.from('projects').update({ deleted_at: nowISO() }).eq('id', id).then(function () { }).catch(function () { }); }
+
+  /* ---- hydrate from server ---- */
+  function mergeRow(p) { if (!p || !p.id) return; var i = idx(p.id); if (i >= 0) CACHE[i] = normalize(p); else CACHE.push(normalize(p)); }
+  function hydrate() {
+    return sb.from('projects').select('id,data,updated_at,deleted_at').is('deleted_at', null).then(function (r) {
+      if (r.error) { console.warn('[PR] hydrate failed', r.error.message); return; }
+      var seen = {};
+      (r.data || []).forEach(function (row) { var p = row.data || { id: row.id, title: 'Untitled', files: {}, order: [] }; p.id = row.id; seen[row.id] = 1; mergeRow(p); });
+      // drop cached projects that no longer exist server-side (and weren't pending local creates)
+      CACHE = CACHE.filter(function (p) { return seen[p.id] || pending[p.id]; });
+      persistWarm(); notify(); loadProfilesFor(CACHE);
+    }).catch(function (e) { console.warn('[PR] hydrate error', e); });
+  }
+  function loadProfilesFor(projects) {
+    var ids = {}; projects.forEach(function (p) { (p.members || []).forEach(function (m) { if (m.userId) ids[m.userId] = 1; }); if (p.ownerId) ids[p.ownerId] = 1; });
+    var need = Object.keys(ids).filter(function (id) { return !BE.profiles[id]; });
+    if (!need.length) return;
+    sb.from('profiles').select('id,name,email,avatar_url,color,plan').in('id', need).then(function (r) {
+      if (r && r.data) { r.data.forEach(function (u) { BE.profiles[u.id] = { id: u.id, name: u.name, email: u.email, avatar: u.avatar_url, color: u.color || BE.colorFor(u.id), plan: u.plan || 'free' }; }); BE.cacheProfiles(); notify(); }
+    }).catch(function () { });
+  }
+
+  // initial hydrate + realtime + focus refresh
+  hydrate();
+  try {
+    sb.channel('projects-feed').on('postgres_changes', { event: '*', schema: 'public', table: 'projects' }, function () { hydrate(); }).subscribe();
+  } catch (e) { }
+  window.addEventListener('focus', function () { hydrate(); });
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) hydrate(); });
+
+  /* ---- helpers reused by the app ---- */
+  function countSentences(project) { try { var f = project.files[project.active]; if (!f || f.type !== 'tex' || !window.LatexEngine) return null; return window.LatexEngine.process(f.content, project.files).sentences.length; } catch (e) { return null; } }
+  function titleGuess(project) { var f = project.files[project.active]; if (f && f.type === 'tex') { var m = /\\title\{([\s\S]*?)\}/.exec(f.content); if (m) { var t = m[1].replace(/\\\\/g, ' ').replace(/\\[a-zA-Z]+\{?|[{}~]/g, '').replace(/\s+/g, ' ').trim(); if (t) return t; } } return project.title; }
+  function bytesOf(project) { try { return new Blob([JSON.stringify({ f: project.files, v: project.versions })]).size; } catch (e) { return JSON.stringify(project.files || {}).length; } }
+
+  function readJSON(k, d) { try { return JSON.parse(localStorage.getItem(k)) || d; } catch (e) { return d; } }
+  function writeJSON(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { } }
+
+  var Store = {
+    PLAN: PLAN,
+    subscribe: subscribe,
+    _notify: notify,
+    _hydrate: hydrate,
+
+    raw: function () { return CACHE.map(normalize); },
+    list: function () { return this.raw().slice().sort(function (a, b) { return (b.updated || 0) - (a.updated || 0); }); },
+    listFor: function (userId) { return this.list().filter(function (p) { return p.ownerId === userId || p.members.some(function (m) { return m.userId === userId; }); }).map(function (p) { p._shared = p.ownerId !== userId; return p; }); },
+    get: function (id) { var i = idx(id); return i >= 0 ? normalize(CACHE[i]) : null; },
+
+    roleOf: function (project, userId) { if (!project) return null; if (project.ownerId === userId) return 'owner'; var m = (project.members || []).filter(function (m) { return m.userId === userId; })[0]; if (m) return m.role; if (project.link && project.link.enabled) return project.link.role; return null; },
+    canEdit: function (project, userId) { var r = this.roleOf(project, userId); return r === 'owner' || r === 'editor'; },
+    canComment: function (project, userId) { var r = this.roleOf(project, userId); return r === 'owner' || r === 'editor' || r === 'commenter'; },
+
+    save: function (project) {
+      normalize(project); project.updated = Date.now();
+      var i = idx(project.id); if (i >= 0) CACHE[i] = project; else CACHE.push(project);
+      persistWarm(); pushProject(project); notify(); return project;
+    },
+    create: function (title, template) {
+      var base = template === 'sample' ? sampleFiles() : blankFiles(title);
+      var p = normalize({ id: uuid(), title: title || 'Untitled project', created: Date.now(), updated: Date.now(), idx: 0, ownerId: me.id, files: base.files, order: base.order, folders: base.folders || [], active: base.active });
+      this.save(p); this.logActivity(p.id, me.id, 'created', p.title); return p;
+    },
+    duplicate: function (id) { var s = this.get(id); if (!s) return null; var p = clone(s); p.id = uuid(); p.title = s.title + ' (copy)'; p.created = p.updated = Date.now(); p.ownerId = me.id; p.members = []; p.activity = []; return this.save(p); },
+    rename: function (id, title) { var p = this.get(id); if (!p) return; p.title = title; this.save(p); },
+    remove: function (id) { var i = idx(id); if (i >= 0) CACHE.splice(i, 1); persistWarm(); hardDelete(id); notify(); },
+
+    /* sharing */
+    addMember: function (id, userId, role) { var p = this.get(id); if (!p) return; if (userId === p.ownerId) return; var m = p.members.filter(function (x) { return x.userId === userId; })[0]; if (m) m.role = role; else p.members.push({ userId: userId, role: role, invitedAt: Date.now() }); this.save(p); this.logActivity(id, me.id, 'shared with', (window.PRAuth.byId(userId) || {}).name || userId); },
+    setRole: function (id, userId, role) { this.addMember(id, userId, role); },
+    removeMember: function (id, userId) { var p = this.get(id); if (!p) return; p.members = p.members.filter(function (m) { return m.userId !== userId; }); this.save(p); try { sb.from('project_members').delete().eq('project_id', id).eq('user_id', userId).then(function () { }); } catch (e) { } },
+    setLink: function (id, enabled, role) { var p = this.get(id); if (!p) return; p.link = { enabled: enabled, role: role || p.link.role || 'viewer' }; this.save(p); },
+
+    /* activity */
+    logActivity: function (id, actorId, verb, target) { var p = this.get(id); if (!p) return; p.activity = p.activity || []; p.activity.unshift({ id: sid(), actorId: actorId, verb: verb, target: target || '', at: Date.now() }); p.activity = p.activity.slice(0, 80); this.save(p); },
+
+    /* versions */
+    addVersion: function (id, label, authorId, named) {
+      var p = this.get(id); if (!p) return null;
+      var snap = {}; Object.keys(p.files).forEach(function (k) { var f = p.files[k]; if (f && f.content != null && f.dataURL == null) snap[k] = { type: f.type, content: f.content }; });
+      var last = p.versions[0]; if (last && !named && JSON.stringify(last.files) === JSON.stringify(snap)) return null;
+      var v = { id: sid(), label: label, authorId: authorId, createdAt: Date.now(), files: snap, named: !!named };
+      p.versions.unshift(v); var autos = 0; p.versions = p.versions.filter(function (x) { if (x.named) return true; autos++; return autos <= 15; });
+      this.save(p); if (named) this.logActivity(id, authorId, 'saved version', label); return v;
+    },
+    listVersions: function (id) { var p = this.get(id); return p ? p.versions : []; },
+    restoreVersion: function (id, versionId) {
+      var p = this.get(id); if (!p) return; var v = p.versions.filter(function (x) { return x.id === versionId; })[0]; if (!v) return;
+      this.addVersion(id, 'Before restore', me.id, true); p = this.get(id);
+      var restored = {}; Object.keys(p.files).forEach(function (k) { if (p.files[k] && p.files[k].dataURL != null) restored[k] = p.files[k]; });
+      Object.keys(v.files).forEach(function (k) { restored[k] = clone(v.files[k]); });
+      p.files = restored; p.order = (p.order || []).filter(function (k) { return restored[k]; });
+      Object.keys(restored).forEach(function (k) { if (p.order.indexOf(k) < 0) p.order.push(k); });
+      if (!p.files[p.active]) p.active = p.order[0] || '';
+      this.save(p); this.logActivity(id, me.id, 'restored', v.label); return p;
+    },
+
+    /* annotations */
+    listAnnotations: function (id) { var p = this.get(id); return p ? p.annotations : []; },
+    addAnnotation: function (id, ann) { var p = this.get(id); if (!p) return null; ann.id = sid(); ann.createdAt = Date.now(); ann.replies = ann.replies || []; ann.status = ann.status || 'open'; p.annotations.push(ann); this.save(p); this.logActivity(id, ann.authorId, ann.kind === 'todo' ? 'added a to-do' : 'commented', ann.anchor && ann.anchor.quote ? '“' + ann.anchor.quote.slice(0, 40) + '”' : ''); return ann; },
+    updateAnnotation: function (id, annId, patch) { var p = this.get(id); if (!p) return; var a = p.annotations.filter(function (x) { return x.id === annId; })[0]; if (!a) return; Object.assign(a, patch); this.save(p); },
+    replyAnnotation: function (id, annId, authorId, body, extra) { var p = this.get(id); if (!p) return; var a = p.annotations.filter(function (x) { return x.id === annId; })[0]; if (!a) return; extra = extra || {}; a.replies.push({ id: sid(), authorId: authorId, body: body, at: Date.now(), mentions: extra.mentions || [], attachments: extra.attachments || [] }); this.save(p); },
+    deleteAnnotation: function (id, annId) { var p = this.get(id); if (!p) return; p.annotations = p.annotations.filter(function (x) { return x.id !== annId; }); this.save(p); },
+
+    /* usage / metering (local per user for now; server metering arrives with voice) */
+    month: function () { var d = new Date(); return d.getFullYear() + '-' + (d.getMonth() + 1); },
+    addTts: function (userId, chars) { var u = readJSON(USAGE, {}); var m = this.month(); var rec = u[userId]; if (!rec || rec.month !== m) rec = { month: m, chars: 0, requests: 0 }; rec.chars += chars; rec.requests += 1; u[userId] = rec; writeJSON(USAGE, u); notify(); },
+    usage: function (userId) { var u = readJSON(USAGE, {}); var rec = u[userId] && u[userId].month === this.month() ? u[userId] : { chars: 0, requests: 0 }; var bytes = 0; this.raw().forEach(function (p) { if (p.ownerId === userId) bytes += bytesOf(p); }); var user = (window.PRAuth.byId(userId)) || { plan: 'free' }; var plan = PLAN[user.plan] || PLAN.free; return { storageBytes: bytes, storageLimit: plan.storage, chars: rec.chars, charLimit: plan.chars, requests: rec.requests, planLabel: plan.label }; },
+
+    /* reading sessions */
+    getReading: function (userId, projectId) { var r = readJSON(READING, {}); return r[userId + ':' + projectId] || null; },
+    setReading: function (userId, projectId, i) { var r = readJSON(READING, {}); r[userId + ':' + projectId] = { idx: i, at: Date.now() }; writeJSON(READING, r); },
+
+    /* prefs */
+    prefs: function () { return readJSON(PREFS, {}); },
+    setPrefs: function (p) { writeJSON(PREFS, Object.assign(this.prefs(), p)); },
+
+    countSentences: countSentences, titleGuess: titleGuess, bytesOf: bytesOf,
+    seedIfEmpty: function () {
+      if (CACHE.length) return;
+      var s = sampleFiles();
+      var p = normalize({ id: detUuid('starter:' + me.id), title: 'Welcome — your first ProofReader project', created: Date.now(), updated: Date.now(), idx: 0, ownerId: me.id, files: s.files, order: s.order, folders: s.folders || [], active: s.active });
+      this.save(p);
+    }
+  };
+
+  window.PRStore = Store;
+  console.info('[PR] cloud store active for', me.email || me.id);
+})();
