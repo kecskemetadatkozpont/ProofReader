@@ -2,13 +2,17 @@
  * local mock in auth.js. Loads AFTER supabase-js, config.js and auth.js.
  *
  * Modes:
- *   'cloud'  — a Supabase session exists → real identity + cloud store.
- *   'demo'   — user chose demo mode → keep the local mock (auth.js/store.js).
- *   'signin' — no session, no choice yet → show the sign-in overlay.
+ *   'cloud'   — a session exists → real identity + cloud store.
+ *   'pending' — just returned from Google (OAuth hash/code present) → show a
+ *               "Signing you in…" splash, resolve the session, then reload.
+ *   'demo'    — user chose demo mode → keep the local mock (auth.js/store.js).
+ *   'signin'  — no session, no choice → show the sign-in overlay.
  *
- * In cloud mode we OVERRIDE window.PRAuth with a real implementation that keeps
- * the exact surface the app already calls (current/byId/byEmail/users/signIn/
- * signOut/initials/startPresence/SEED). store-cloud.js does the same for PRStore.
+ * Robustness: the synchronous boot decision reads OUR OWN session cache
+ * (proofreader:session), written whenever Supabase reports a session. This is
+ * decoupled from supabase-js's internal storage format, which removes the
+ * "logged in but bounced back to Continue" race. Supabase still owns the real
+ * token used for authorized queries; our cache only drives the boot UI.
  */
 (function () {
   'use strict';
@@ -24,15 +28,6 @@
   function colorFor(id) { var h = 0; id = String(id || ''); for (var i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0; return PALETTE[h % PALETTE.length]; }
   function initials(name) { return String(name || '?').trim().split(/\s+/).slice(0, 2).map(function (w) { return w[0]; }).join('').toUpperCase(); }
 
-  function projRef() { try { return cfg.supabaseUrl.match(/https?:\/\/([^.]+)\./)[1]; } catch (e) { return ''; } }
-  function readPersistedSession() {
-    try {
-      var raw = localStorage.getItem('sb-' + projRef() + '-auth-token');
-      if (!raw) return null;
-      var o = JSON.parse(raw); var s = o && o.currentSession ? o.currentSession : o;
-      return (s && s.user) ? s : null;
-    } catch (e) { return null; }
-  }
   function userFromSession(s) {
     if (!s || !s.user) return null;
     var u = s.user, m = u.user_metadata || {};
@@ -44,11 +39,34 @@
     };
   }
 
+  /* ---- our own session cache (decoupled from supabase internals) ---- */
+  var SESSION_KEY = 'proofreader:session';
+  function readMyUser() { try { var o = JSON.parse(localStorage.getItem(SESSION_KEY) || 'null'); return (o && o.user && o.user.id) ? o.user : null; } catch (e) { return null; } }
+  function writeMyUser(user) { try { localStorage.setItem(SESSION_KEY, JSON.stringify({ user: user, at: Date.now() })); } catch (e) { } }
+  function clearMyUser() { try { localStorage.removeItem(SESSION_KEY); } catch (e) { } }
+
+  /* ---- detect a return from the OAuth provider ---- */
+  function oauthError() {
+    var h = location.hash || '', q = location.search || '';
+    var m = /[#&?]error=([^&]+)/.exec(h) || /[#&?]error=([^&]+)/.exec(q);
+    if (!m) return null;
+    var dm = /error_description=([^&]+)/.exec(h) || /error_description=([^&]+)/.exec(q);
+    try { return decodeURIComponent((dm ? dm[1] : m[1]).replace(/\+/g, ' ')); } catch (e) { return m[1]; }
+  }
+  function hasOAuthReturn() {
+    return /[#&](access_token|provider_token|refresh_token)=/.test(location.hash || '')
+      || (/[?&]code=/.test(location.search || '') && !/[?&]error=/.test(location.search || ''));
+  }
+
   var MODE_KEY = 'proofreader:mode';
-  var persisted = readPersistedSession();
+  var authErr = oauthError();
+  var savedUser = readMyUser();
   var chosenDemo = localStorage.getItem(MODE_KEY) === 'demo';
-  var mode = persisted ? 'cloud' : (chosenDemo ? 'demo' : 'signin');
-  var me = persisted ? userFromSession(persisted) : null;
+  var returning = hasOAuthReturn() || !!authErr;
+  var mode = savedUser ? 'cloud'
+    : (returning ? 'pending'
+      : (chosenDemo ? 'demo' : 'signin'));
+  var me = savedUser || null;
 
   // profile cache (sync lookups for collaborators); seed with myself
   var PROFILES = {};
@@ -56,14 +74,19 @@
   (function seedProfiles() { try { var c = JSON.parse(localStorage.getItem('proofreader:profiles') || '{}'); Object.keys(c).forEach(function (k) { if (!PROFILES[k]) PROFILES[k] = c[k]; }); } catch (e) { } })();
   function cacheProfiles() { try { localStorage.setItem('proofreader:profiles', JSON.stringify(PROFILES)); } catch (e) { } }
 
+  function cleanUrl() { return location.href.split('#')[0].split('?')[0]; }
+  function rebootInto(url) { if (sessionStorage.getItem('pr_reboot') === '2') return; sessionStorage.setItem('pr_reboot', '2'); location.replace(url || cleanUrl()); }
+
   function signInWithGoogle() {
     localStorage.removeItem(MODE_KEY);
-    return sb.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: location.href.split('#')[0] } });
+    sessionStorage.removeItem('pr_reboot');
+    return sb.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: cleanUrl() } });
   }
-  function chooseDemo() { localStorage.setItem(MODE_KEY, 'demo'); removeOverlay(); }
+  function chooseDemo() { localStorage.setItem(MODE_KEY, 'demo'); removeOverlay(); removeSplash(); }
   function signOut() {
     localStorage.removeItem(MODE_KEY);
-    sb.auth.signOut().then(function () { location.reload(); }).catch(function () { location.reload(); });
+    clearMyUser();
+    sb.auth.signOut().then(function () { location.replace(cleanUrl()); }).catch(function () { location.replace(cleanUrl()); });
   }
 
   var BE = window.PR_BACKEND = {
@@ -104,58 +127,86 @@
     };
   }
 
-  /* ---- async reconciliation: refresh real session + my profile ---- */
+  /* ---- async reconciliation ---- */
   sb.auth.getSession().then(function (res) {
     var s = res && res.data && res.data.session;
-    if (s && mode !== 'cloud') {
-      // signed in (e.g. just returned from Google) but booted non-cloud → reboot
-      if (!sessionStorage.getItem('pr_reboot')) { sessionStorage.setItem('pr_reboot', '1'); location.reload(); }
-      return;
-    }
-    sessionStorage.removeItem('pr_reboot');
-    if (s && me) {
-      var fresh = userFromSession(s); if (fresh) { me = Object.assign(me, fresh); PROFILES[me.id] = me; }
-      // pull my plan/profile row
+    if (s) {
+      var u = userFromSession(s); if (u) writeMyUser(u);
+      if (mode !== 'cloud') { rebootInto(cleanUrl()); return; }   // pending/signin → become cloud
+      sessionStorage.removeItem('pr_reboot');
+      if (u && me) { me = Object.assign(me, u); PROFILES[me.id] = me; }
       sb.from('profiles').select('plan,name,avatar_url,color').eq('id', me.id).maybeSingle().then(function (r) {
         if (r && r.data) { me.plan = r.data.plan || 'free'; if (r.data.color) me.color = r.data.color; PROFILES[me.id] = me; cacheProfiles(); if (window.PRStore && window.PRStore._notify) window.PRStore._notify(); }
-      });
+      }).catch(function () { });
+    } else {
+      // no real session
+      if (mode === 'cloud') { clearMyUser(); rebootInto(cleanUrl()); return; }   // stale cache → sign out
+      if (mode === 'pending') { showSigninError(authErr || 'Sign-in didn’t complete. Please try again.'); }
     }
-  }).catch(function () { });
-
-  sb.auth.onAuthStateChange(function (event) {
-    if (event === 'SIGNED_IN' && mode !== 'cloud') { if (!sessionStorage.getItem('pr_reboot')) { sessionStorage.setItem('pr_reboot', '1'); location.reload(); } }
+  }).catch(function (e) {
+    if (mode === 'pending') showSigninError('Could not reach the sign-in service. Check your connection and try again.');
   });
 
-  /* ---- sign-in overlay (only when no session & no demo choice) ---- */
+  sb.auth.onAuthStateChange(function (event, session) {
+    if (event === 'SIGNED_IN' && session) { writeMyUser(userFromSession(session)); if (mode !== 'cloud') rebootInto(cleanUrl()); }
+    if (event === 'SIGNED_OUT') { clearMyUser(); }
+  });
+
+  // Safety net: if pending hangs (no session, no error) let the user retry.
+  if (mode === 'pending') { setTimeout(function () { if (!readMyUser() && document.getElementById('pr-splash')) showSigninError(authErr || 'Sign-in is taking too long. Please try again.'); }, 7000); }
+
+  /* ---- shared overlay styles ---- */
+  function injectCss() {
+    if (document.getElementById('pr-auth-css')) return;
+    var css = '#pr-signin,#pr-splash{position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;background:radial-gradient(120% 120% at 50% 0%,#f4f5fb 0%,#eceef1 60%);font-family:"IBM Plex Sans",system-ui,sans-serif}'
+      + '.pr-card{width:380px;max-width:calc(100% - 32px);background:#fff;border-radius:18px;box-shadow:0 20px 60px rgba(20,24,40,.18);padding:38px 34px;text-align:center}'
+      + '.pr-mk{width:54px;height:54px;border-radius:15px;margin:0 auto 16px;display:grid;place-items:center;background:linear-gradient(135deg,#6366f1,#8b5cf6);box-shadow:0 6px 16px rgba(79,70,229,.4)}'
+      + '.pr-mk span{width:23px;height:23px;border-radius:50%;border:3.5px solid #fff;border-right-color:transparent;transform:rotate(-20deg)}'
+      + '.pr-mk.spin span{animation:pr-spin .8s linear infinite}@keyframes pr-spin{to{transform:rotate(340deg)}}'
+      + '.pr-card h1{font-size:21px;margin:0 0 4px;letter-spacing:-.3px;color:#1d2430}'
+      + '.pr-card p{font-size:13.5px;color:#5b6473;margin:0 0 24px;line-height:1.5}'
+      + '.pr-g{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;height:46px;border:1px solid #dadce0;border-radius:11px;background:#fff;color:#1d2430;font-size:14.5px;font-weight:600;cursor:pointer}'
+      + '.pr-g:hover{background:#f7f8fc;border-color:#c7cad1}'
+      + '.pr-demo{margin-top:14px;border:0;background:transparent;color:#6b7280;font-size:12.5px;font-weight:600;cursor:pointer}'
+      + '.pr-demo:hover{color:#4f46e5}'
+      + '.pr-sep{margin:22px 0 4px;border-top:1px solid #eceef1}'
+      + '.pr-note{font-size:11px;color:#9aa1ac;margin-top:18px;line-height:1.5}'
+      + '.pr-err{font-size:12.5px;color:#b42318;background:#fdeef0;border:1px solid #fbd5d5;border-radius:9px;padding:9px 11px;margin:0 0 18px;line-height:1.45;word-break:break-word}';
+    var st = document.createElement('style'); st.id = 'pr-auth-css'; st.textContent = css; document.head.appendChild(st);
+  }
+  var GBTN = '<svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.6 2.4 30.2 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.9 6.1C12.4 13.3 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.1 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.4c-.5 2.9-2.1 5.3-4.5 6.9l7 5.4C43.2 37.5 46.1 31.6 46.1 24.5z"/><path fill="#FBBC05" d="M10.5 28.3c-.5-1.4-.7-2.9-.7-4.3s.3-3 .7-4.3l-7.9-6.1C1 16.6 0 20.2 0 24s1 7.4 2.6 10.4l7.9-6.1z"/><path fill="#34A853" d="M24 48c6.2 0 11.5-2 15.3-5.5l-7-5.4c-2 1.3-4.5 2.1-8.3 2.1-6.3 0-11.6-3.8-13.5-9.2l-7.9 6.1C6.5 42.6 14.6 48 24 48z"/></svg>';
+
+  /* ---- "Signing you in…" splash (pending) ---- */
+  function removeSplash() { var el = document.getElementById('pr-splash'); if (el) el.remove(); }
+  function showSplash() {
+    if (document.getElementById('pr-splash')) return; injectCss();
+    var d = document.createElement('div'); d.id = 'pr-splash';
+    d.innerHTML = '<div class="pr-card"><div class="pr-mk spin"><span></span></div>'
+      + '<h1>Signing you in…</h1><p>Connecting your Google account. This only takes a moment.</p></div>';
+    (document.body || document.documentElement).appendChild(d);
+  }
+
+  /* ---- sign-in overlay ---- */
   function removeOverlay() { var el = document.getElementById('pr-signin'); if (el) el.remove(); }
-  function showOverlay() {
-    if (document.getElementById('pr-signin')) return;
-    var css = '#pr-signin{position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;background:radial-gradient(120% 120% at 50% 0%,#f4f5fb 0%,#eceef1 60%);font-family:"IBM Plex Sans",system-ui,sans-serif}'
-      + '#pr-signin .card{width:380px;max-width:calc(100% - 32px);background:#fff;border-radius:18px;box-shadow:0 20px 60px rgba(20,24,40,.18);padding:38px 34px;text-align:center}'
-      + '#pr-signin .mk{width:54px;height:54px;border-radius:15px;margin:0 auto 16px;display:grid;place-items:center;background:linear-gradient(135deg,#6366f1,#8b5cf6);box-shadow:0 6px 16px rgba(79,70,229,.4)}'
-      + '#pr-signin .mk span{width:23px;height:23px;border-radius:50%;border:3.5px solid #fff;border-right-color:transparent;transform:rotate(-20deg)}'
-      + '#pr-signin h1{font-size:21px;margin:0 0 4px;letter-spacing:-.3px;color:#1d2430}'
-      + '#pr-signin p{font-size:13.5px;color:#5b6473;margin:0 0 24px;line-height:1.5}'
-      + '#pr-signin .g{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;height:46px;border:1px solid #dadce0;border-radius:11px;background:#fff;color:#1d2430;font-size:14.5px;font-weight:600;cursor:pointer}'
-      + '#pr-signin .g:hover{background:#f7f8fc;border-color:#c7cad1}'
-      + '#pr-signin .demo{margin-top:14px;border:0;background:transparent;color:#6b7280;font-size:12.5px;font-weight:600;cursor:pointer}'
-      + '#pr-signin .demo:hover{color:#4f46e5}'
-      + '#pr-signin .sep{margin:22px 0 4px;border-top:1px solid #eceef1}'
-      + '#pr-signin .note{font-size:11px;color:#9aa1ac;margin-top:18px;line-height:1.5}';
-    var g = '<svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.6 2.4 30.2 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.9 6.1C12.4 13.3 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.1 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.4c-.5 2.9-2.1 5.3-4.5 6.9l7 5.4C43.2 37.5 46.1 31.6 46.1 24.5z"/><path fill="#FBBC05" d="M10.5 28.3c-.5-1.4-.7-2.9-.7-4.3s.3-3 .7-4.3l-7.9-6.1C1 16.6 0 20.2 0 24s1 7.4 2.6 10.4l7.9-6.1z"/><path fill="#34A853" d="M24 48c6.2 0 11.5-2 15.3-5.5l-7-5.4c-2 1.3-4.5 2.1-8.3 2.1-6.3 0-11.6-3.8-13.5-9.2l-7.9 6.1C6.5 42.6 14.6 48 24 48z"/></svg>';
-    var st = document.createElement('style'); st.textContent = css; document.head.appendChild(st);
+  function showOverlay(errMsg) {
+    removeSplash();
+    if (document.getElementById('pr-signin')) { if (errMsg) { var ex = document.querySelector('#pr-signin .pr-err'); if (ex) ex.textContent = errMsg; } return; }
+    injectCss();
     var d = document.createElement('div'); d.id = 'pr-signin';
-    d.innerHTML = '<div class="card"><div class="mk"><span></span></div>'
+    d.innerHTML = '<div class="pr-card"><div class="pr-mk"><span></span></div>'
       + '<h1>Sign in to ProofReader</h1><p>Your projects sync to the cloud and stay safe across devices.</p>'
-      + '<button class="g" id="pr-google">' + g + 'Continue with Google</button>'
-      + '<div class="sep"></div>'
-      + '<button class="demo" id="pr-demo">Continue in demo mode (this browser only)</button>'
-      + '<div class="note">Demo mode keeps everything in this browser, like before. Sign in to save to the cloud.</div></div>';
-    document.body.appendChild(d);
+      + (errMsg ? '<div class="pr-err">' + errMsg + '</div>' : '')
+      + '<button class="pr-g" id="pr-google">' + GBTN + 'Continue with Google</button>'
+      + '<div class="pr-sep"></div>'
+      + '<button class="pr-demo" id="pr-demo">Continue in demo mode (this browser only)</button>'
+      + '<div class="pr-note">Demo mode keeps everything in this browser, like before. Sign in to save to the cloud.</div></div>';
+    (document.body || document.documentElement).appendChild(d);
     document.getElementById('pr-google').onclick = function () { this.textContent = 'Redirecting…'; signInWithGoogle(); };
     document.getElementById('pr-demo').onclick = chooseDemo;
   }
-  if (mode === 'signin') {
-    if (document.body) showOverlay(); else document.addEventListener('DOMContentLoaded', showOverlay);
-  }
+  function showSigninError(msg) { console.warn('[PR] sign-in error:', msg); try { history.replaceState(null, '', cleanUrl()); } catch (e) { } showOverlay(msg); }
+
+  // initial paint
+  function paint() { if (mode === 'pending') showSplash(); else if (mode === 'signin') showOverlay(authErr || null); }
+  if (document.body) paint(); else document.addEventListener('DOMContentLoaded', paint);
 })();
