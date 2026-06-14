@@ -45,6 +45,16 @@
   function writeMyUser(user) { try { localStorage.setItem(SESSION_KEY, JSON.stringify({ user: user, at: Date.now() })); } catch (e) { } }
   function clearMyUser() { try { localStorage.removeItem(SESSION_KEY); } catch (e) { } }
 
+  // Self-heal: make sure my profile row exists (covers any account whose
+  // sign-up trigger didn't create one). Allowed by insert_own_profile +
+  // write_own_profile RLS (id must equal auth.uid()).
+  function ensureProfile(u) {
+    if (!u || !u.id) return;
+    sb.from('profiles').upsert({ id: u.id, email: u.email, name: u.name, avatar_url: u.avatar }, { onConflict: 'id' })
+      .then(function (r) { if (r && r.error) console.warn('[PR] profile upsert:', r.error.message); })
+      .catch(function () { });
+  }
+
   /* ---- detect a return from the OAuth provider ---- */
   function oauthError() {
     var h = location.hash || '', q = location.search || '';
@@ -135,6 +145,7 @@
       if (mode !== 'cloud') { rebootInto(cleanUrl()); return; }   // pending/signin → become cloud
       sessionStorage.removeItem('pr_reboot');
       if (u && me) { me = Object.assign(me, u); PROFILES[me.id] = me; }
+      ensureProfile(me);
       sb.from('profiles').select('plan,name,avatar_url,color').eq('id', me.id).maybeSingle().then(function (r) {
         if (r && r.data) { me.plan = r.data.plan || 'free'; if (r.data.color) me.color = r.data.color; PROFILES[me.id] = me; cacheProfiles(); if (window.PRStore && window.PRStore._notify) window.PRStore._notify(); }
       }).catch(function () { });
