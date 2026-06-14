@@ -1,4 +1,4 @@
-/* ProofReader auth + presence (prototype, client-side mock of Google sign-in).
+/* Aloud auth + presence (prototype, client-side mock of Google sign-in).
  * Multiple seeded users share this browser's storage, so "sharing" works for real:
  * sign in as one user, share, switch user -> it appears under "Shared with me".
  * Presence/real-time across tabs uses BroadcastChannel + storage events. */

@@ -1,4 +1,4 @@
-/* ProofReader LaTeX engine
+/* Aloud LaTeX engine
  * process(source, files) -> { html, sentences:[{id,text,start,end}], title, meta }
  *  - html: typeset-like HTML for the preview; spoken sentences wrapped in
  *          <span class="sent" data-sid="N">...</span>
@@ -387,7 +387,7 @@
     for (var i = 0; i < keys.length; i++) {
       var k = keys[i];
       if (k === name || k.replace(/\.[^.]+$/, '') === name.replace(/\.[^.]+$/, '') || k.split('/').pop() === name.split('/').pop()) {
-        if (ctx.files[k].type === 'image') return ctx.files[k].dataURL || ctx.files[k].src;
+        if (ctx.files[k].type === 'image') return ctx.files[k].dataURL || (ctx.files[k].storagePath && window.PR_SIGNED ? window.PR_SIGNED[ctx.files[k].storagePath] : null) || ctx.files[k].src;
       }
     }
     return null;

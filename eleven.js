@@ -1,4 +1,4 @@
-/* ProofReader — ElevenLabs voice integration (bring-your-own-key, browser-side).
+/* Aloud — ElevenLabs voice integration (bring-your-own-key, browser-side).
  *
  * window.PREleven
  *   getKey()/setKey(k)/hasKey()            — API key, stored in localStorage (this browser only)
@@ -130,7 +130,7 @@
     },
 
     test: function (cfg) {
-      return this.getAudio('This is how I sound. ProofReader will read your document in this voice.', cfg, null);
+      return this.getAudio('This is how I sound. Aloud will read your document in this voice.', cfg, null);
     },
 
     clearCache: function () {

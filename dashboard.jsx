@@ -1,4 +1,4 @@
-/* ProofReader dashboard: accounts, projects, sharing, activity, usage. */
+/* Aloud dashboard: accounts, projects, sharing, activity, usage. */
 const { useState, useEffect, useRef, useCallback } = React;
 const Store = window.PRStore;
 const Auth = window.PRAuth;
@@ -32,7 +32,7 @@ function SignIn({ onSignIn }) {
     <div className="signin">
       <div className="signin-card">
         <div className="brand-mark"><span></span></div>
-        <h1>Sign in to ProofReader</h1>
+        <h1>Sign in to Aloud</h1>
         <p>Listen to your manuscripts, collaborate, and proofread by ear.</p>
         {!pick
           ? <button className="google-btn" onClick={() => setPick(true)}>
@@ -293,7 +293,7 @@ function App() {
   return (
     <div>
       <header className="topbar">
-        <div className="brand"><div className="brand-mark"><span></span></div><div className="brand-text"><b>ProofReader</b><i>LaTeX read-aloud editor</i></div></div>
+        <div className="brand"><div className="brand-mark"><span></span></div><div className="brand-text"><b>Aloud</b><i>LaTeX read-aloud editor</i></div></div>
         <div className="top-right">
           <button className="btn-ghost" onClick={() => setModal('activity')}><svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.4"><circle cx="8" cy="8" r="6" /><path d="M8 5v3l2 1.5" strokeLinecap="round" /></svg>Activity</button>
           <button className="usage-chip" onClick={() => setModal('usage')} title="Storage used"><span>Storage</span><span className="mini"><i style={{ width: stPct + '%' }} /></span></button>

@@ -1,4 +1,4 @@
-/* ProofReader — cloud-backed store. Loads AFTER store.js and backend.js.
+/* Aloud — cloud-backed store. Loads AFTER store.js and backend.js.
  * Only takes over window.PRStore in 'cloud' mode; otherwise the local store
  * from store.js stays in place (demo mode), so the app never breaks.
  *
@@ -39,6 +39,13 @@
     if (!p.versions) p.versions = [];
     if (!p.annotations) p.annotations = [];
     if (!p.folders) p.folders = [];
+    // --- structural integrity: the editor needs a valid active tex file ---
+    if (!p.files || typeof p.files !== 'object') p.files = {};
+    if (!Array.isArray(p.order)) p.order = Object.keys(p.files);
+    var texKeys = Object.keys(p.files).filter(function (k) { return p.files[k] && p.files[k].type === 'tex'; });
+    if (!texKeys.length) { var b = blankFiles(p.title); p.files = b.files; p.order = b.order; p.active = b.active; p.folders = b.folders || []; }
+    else if (!p.active || !p.files[p.active] || p.files[p.active].type !== 'tex') { p.active = texKeys[0]; }
+    Object.keys(p.files).forEach(function (k) { if (p.order.indexOf(k) < 0) p.order.push(k); });
     return p;
   }
   function idx(id) { for (var i = 0; i < CACHE.length; i++) if (CACHE[i].id === id) return i; return -1; }
@@ -85,13 +92,31 @@
   /* ---- hydrate from server ---- */
   function mergeRow(p) { if (!p || !p.id) return; var i = idx(p.id); if (i >= 0) CACHE[i] = normalize(p); else CACHE.push(normalize(p)); }
   function hydrate() {
-    return sb.from('projects').select('id,data,updated_at,deleted_at').is('deleted_at', null).then(function (r) {
-      if (r.error) { console.warn('[PR] hydrate failed', r.error.message); return; }
-      var seen = {};
-      (r.data || []).forEach(function (row) { var p = row.data || { id: row.id, title: 'Untitled', files: {}, order: [] }; p.id = row.id; seen[row.id] = 1; mergeRow(p); });
-      // drop cached projects that no longer exist server-side (and weren't pending local creates)
-      CACHE = CACHE.filter(function (p) { return seen[p.id] || pending[p.id]; });
-      persistWarm(); notify(); loadProfilesFor(CACHE);
+    // Scope the editor's project list to what THIS user owns or is a member of
+    // (explicit, not RLS-implicit) so an admin's own editor isn't flooded with
+    // every project the admin can read via admin RLS.
+    var ownedQ = sb.from('projects').select('id,data,updated_at,deleted_at').eq('owner_id', me.id).is('deleted_at', null);
+    var memQ = sb.from('project_members').select('project_id').eq('user_id', me.id);
+    return Promise.all([ownedQ, memQ]).then(function (res) {
+      var owned = res[0], mem = res[1];
+      if (owned.error) { console.warn('[PR] hydrate failed', owned.error.message); return; }
+      var rows = (owned.data || []).slice();
+      var memIds = (mem && mem.data ? mem.data.map(function (m) { return m.project_id; }) : []);
+      function finish(sharedRows) {
+        var all = rows.concat(sharedRows || []);
+        var seen = {};
+        all.forEach(function (row) {
+          var p = (row.data && typeof row.data === 'object' && row.data.files) ? row.data
+            : { id: row.id, title: (row.data && row.data.title) || 'Untitled project', ownerId: me.id };
+          p.id = row.id; seen[row.id] = 1; mergeRow(p);
+        });
+        CACHE = CACHE.filter(function (p) { return seen[p.id] || pending[p.id]; });
+        persistWarm(); notify(); loadProfilesFor(CACHE);
+      }
+      if (memIds.length) {
+        sb.from('projects').select('id,data,updated_at,deleted_at').in('id', memIds).is('deleted_at', null)
+          .then(function (sr) { finish(sr.data || []); }, function () { finish([]); });
+      } else { finish([]); }
     }).catch(function (e) { console.warn('[PR] hydrate error', e); });
   }
   function loadProfilesFor(projects) {
@@ -170,7 +195,7 @@
     restoreVersion: function (id, versionId) {
       var p = this.get(id); if (!p) return; var v = p.versions.filter(function (x) { return x.id === versionId; })[0]; if (!v) return;
       this.addVersion(id, 'Before restore', me.id, true); p = this.get(id);
-      var restored = {}; Object.keys(p.files).forEach(function (k) { if (p.files[k] && p.files[k].dataURL != null) restored[k] = p.files[k]; });
+      var restored = {}; Object.keys(p.files).forEach(function (k) { if (p.files[k] && (p.files[k].dataURL != null || p.files[k].storagePath != null)) restored[k] = p.files[k]; });
       Object.keys(v.files).forEach(function (k) { restored[k] = clone(v.files[k]); });
       p.files = restored; p.order = (p.order || []).filter(function (k) { return restored[k]; });
       Object.keys(restored).forEach(function (k) { if (p.order.indexOf(k) < 0) p.order.push(k); });
@@ -202,7 +227,7 @@
     seedIfEmpty: function () {
       if (CACHE.length) return;
       var s = sampleFiles();
-      var p = normalize({ id: detUuid('starter:' + me.id), title: 'Welcome — your first ProofReader project', created: Date.now(), updated: Date.now(), idx: 0, ownerId: me.id, files: s.files, order: s.order, folders: s.folders || [], active: s.active });
+      var p = normalize({ id: detUuid('starter:' + me.id), title: 'Welcome — your first Aloud project', created: Date.now(), updated: Date.now(), idx: 0, ownerId: me.id, files: s.files, order: s.order, folders: s.folders || [], active: s.active });
       this.save(p);
     }
   };

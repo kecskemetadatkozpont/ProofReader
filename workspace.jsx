@@ -1,4 +1,4 @@
-/* ProofReader dynamic window management — split-tree workspace + panes.
+/* Aloud dynamic window management — split-tree workspace + panes.
  * Exposes window.WS (pure tree ops) and window.Workspace (React components).
  * The Editor in app.jsx owns all state and passes a ctx object down. */
 (function () {
@@ -105,8 +105,9 @@
         </div>;
       }
       const data = ctx.getFileData(pane.file);
-      if (!data) return <Missing label="PDF" />;
-      return <PdfView data={data} url={ctx.getFileURL(pane.file)} />;
+      const url = ctx.getFileURL(pane.file);
+      if (!data && !url) return <Missing label="PDF" />;
+      return <PdfView data={data} url={url} />;
     }
     if (pane.kind === 'image') {
       const url = ctx.getFileURL(pane.file);
@@ -497,13 +498,12 @@
     useEffect(() => {
       let cancelled = false; const lib = window.pdfjsLib; const cont = ref.current;
       if (!cont) return;
-      if (!lib || !data) { setState('error'); return; }
+      if (!lib || (!data && !url)) { setState('error'); return; }
       setState('loading'); cont.innerHTML = '';
       let task; let watchdog = setTimeout(() => { if (!cancelled) setState((s) => s === 'loading' ? 'error' : s); }, 12000);
       (async () => {
         try {
-          const bytes = dataURLToBytes(data);
-          task = lib.getDocument({ data: bytes, disableStream: true, disableAutoFetch: true });
+          task = data ? lib.getDocument({ data: dataURLToBytes(data), disableStream: true, disableAutoFetch: true }) : lib.getDocument({ url: url });
           const pdf = await task.promise; if (cancelled) return;
           clearTimeout(watchdog);
           const width = Math.max(280, cont.clientWidth - 28);
@@ -525,7 +525,7 @@
         } catch (e) { clearTimeout(watchdog); if (!cancelled) setState('error'); }
       })();
       return () => { cancelled = true; clearTimeout(watchdog); };
-    }, [data]);
+    }, [data, url]);
     return <div className="pdf-view-wrap">
       <div className="pdf-view" ref={ref} />
       {state === 'loading' && <div className="pdf-status">Loading PDF…</div>}

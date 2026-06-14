@@ -1,4 +1,4 @@
-/* ProofReader — backend bootstrap: real Google auth + session, on top of the
+/* Aloud — backend bootstrap: real Google auth + session, on top of the
  * local mock in auth.js. Loads AFTER supabase-js, config.js and auth.js.
  *
  * Modes:
@@ -146,8 +146,15 @@
       sessionStorage.removeItem('pr_reboot');
       if (u && me) { me = Object.assign(me, u); PROFILES[me.id] = me; }
       ensureProfile(me);
-      sb.from('profiles').select('plan,name,avatar_url,color').eq('id', me.id).maybeSingle().then(function (r) {
-        if (r && r.data) { me.plan = r.data.plan || 'free'; if (r.data.color) me.color = r.data.color; PROFILES[me.id] = me; cacheProfiles(); if (window.PRStore && window.PRStore._notify) window.PRStore._notify(); }
+      try { sb.from('profiles').update({ last_active_at: new Date().toISOString() }).eq('id', me.id).then(function () { }, function () { }); } catch (e) { }
+      sb.from('profiles').select('plan,name,avatar_url,color,status,role,affiliation').eq('id', me.id).maybeSingle().then(function (r) {
+        if (r && r.data) {
+          me.plan = r.data.plan || 'free'; if (r.data.color) me.color = r.data.color;
+          me.status = r.data.status || 'incomplete'; me.role = r.data.role || 'user'; me.affiliation = r.data.affiliation || '';
+          PROFILES[me.id] = me; cacheProfiles();
+          if (window.PRStore && window.PRStore._notify) window.PRStore._notify();
+          try { window.dispatchEvent(new CustomEvent('pr-profile', { detail: { status: me.status, role: me.role, affiliation: me.affiliation } })); } catch (e) { }
+        }
       }).catch(function () { });
     } else {
       // no real session
@@ -205,7 +212,7 @@
     injectCss();
     var d = document.createElement('div'); d.id = 'pr-signin';
     d.innerHTML = '<div class="pr-card"><div class="pr-mk"><span></span></div>'
-      + '<h1>Sign in to ProofReader</h1><p>Your projects sync to the cloud and stay safe across devices.</p>'
+      + '<h1>Sign in to Aloud</h1><p>Your projects sync to the cloud and stay safe across devices.</p>'
       + (errMsg ? '<div class="pr-err">' + errMsg + '</div>' : '')
       + '<button class="pr-g" id="pr-google">' + GBTN + 'Continue with Google</button>'
       + '<div class="pr-sep"></div>'

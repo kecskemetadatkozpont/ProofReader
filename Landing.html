@@ -1,0 +1,882 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Aloud — Hear your paper. Catch what your eyes miss.</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --accent: #4f46e5; --accent-d: #4338ca; --accent-l: #6366f1;
+      --ink: #1a2030; --muted: #5b6473; --faint: #8a92a0;
+      --line: #e6e8ee; --soft: #f5f6f9; --softer: #fafbfc; --paper: #ffffff;
+      --be: #7c3aed; --reading: #ffe08a; --green: #1f8a5b; --green-bg: #e7f6ee;
+      --radius: 14px; --shadow: 0 1px 2px rgba(16,24,40,.04), 0 12px 32px rgba(16,24,40,.08);
+      --maxw: 1180px;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { margin: 0; background: var(--paper); color: var(--ink); font-family: 'IBM Plex Sans', system-ui, sans-serif; line-height: 1.55; -webkit-font-smoothing: antialiased; }
+    a { color: inherit; text-decoration: none; }
+    h1, h2, h3 { margin: 0; line-height: 1.12; letter-spacing: -.02em; }
+    p { margin: 0; }
+    .wrap { width: var(--maxw); max-width: calc(100% - 48px); margin: 0 auto; }
+
+    /* ---------- nav ---------- */
+    .nav { position: sticky; top: 0; z-index: 50; background: rgba(255,255,255,.82); backdrop-filter: saturate(1.4) blur(12px); border-bottom: 1px solid var(--line); }
+    .nav-in { display: flex; align-items: center; gap: 28px; height: 64px; }
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 17px; letter-spacing: -.02em; }
+    .brand .mk { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; background: linear-gradient(135deg, #6366f1, #8b5cf6); box-shadow: 0 3px 8px rgba(79,70,229,.35); }
+    .brand .mk span { width: 13px; height: 13px; border-radius: 50%; border: 2.6px solid #fff; border-right-color: transparent; transform: rotate(-20deg); }
+    .nav-links { display: flex; gap: 24px; margin-left: 8px; }
+    .nav-links a { font-size: 14px; color: var(--muted); font-weight: 500; }
+    .nav-links a:hover { color: var(--ink); }
+    .nav-cta { margin-left: auto; display: flex; align-items: center; gap: 14px; }
+    .btn { display: inline-flex; align-items: center; justify-content: center; gap: 9px; font-family: inherit; font-size: 14.5px; font-weight: 600; border-radius: 10px; padding: 10px 18px; cursor: pointer; border: 1px solid transparent; transition: transform .08s ease, background .15s, border-color .15s, box-shadow .15s; white-space: nowrap; }
+    .btn:active { transform: translateY(1px); }
+    .btn-primary { background: var(--accent); color: #fff; box-shadow: 0 1px 2px rgba(79,70,229,.4), 0 6px 16px rgba(79,70,229,.22); }
+    .btn-primary:hover { background: var(--accent-d); }
+    .btn-ghost { color: var(--ink); }
+    .btn-ghost:hover { color: var(--accent); }
+    .btn-outline { background: #fff; border-color: var(--line); color: var(--ink); }
+    .btn-outline:hover { border-color: #c9cdd6; }
+    .btn-lg { padding: 13px 24px; font-size: 15.5px; }
+    .nav-signin { font-size: 14px; font-weight: 600; color: var(--ink); }
+    .nav-signin:hover { color: var(--accent); }
+
+    /* ---------- hero ---------- */
+    .hero { padding: 64px 0 30px; background: radial-gradient(120% 90% at 80% -10%, #f1f0fe 0%, rgba(241,240,254,0) 55%), var(--paper); }
+    .hero-grid { display: grid; grid-template-columns: 1.02fr 1.1fr; gap: 56px; align-items: center; }
+    .eyebrow { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 600; color: var(--accent-d); background: #ecebfd; border: 1px solid #ddd9fb; padding: 5px 12px; border-radius: 30px; letter-spacing: .01em; }
+    .eyebrow .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 3px rgba(31,138,91,.18); }
+    h1.hero-title { font-size: 50px; font-weight: 700; margin: 20px 0 0; letter-spacing: -.03em; }
+    h1.hero-title .hl { background: linear-gradient(transparent 62%, #ffe08a 62%); padding: 0 2px; }
+    .hero-sub { font-size: 18.5px; color: var(--muted); margin-top: 20px; max-width: 30em; }
+    .hero-actions { display: flex; align-items: center; gap: 14px; margin-top: 30px; flex-wrap: wrap; }
+    .hero-note { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--faint); margin-top: 16px; }
+    .hero-note svg { width: 15px; height: 15px; color: var(--green); }
+
+    /* ---------- app mock ---------- */
+    .mock { background: #fff; border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); overflow: hidden; }
+    .mock-bar { display: flex; align-items: center; gap: 10px; padding: 11px 14px; border-bottom: 1px solid var(--line); background: var(--softer); }
+    .mock-dots { display: flex; gap: 6px; }
+    .mock-dots i { width: 11px; height: 11px; border-radius: 50%; background: #dfe2e8; }
+    .mock-dots i:nth-child(1) { background: #f0a9a0; } .mock-dots i:nth-child(2) { background: #f3d08a; } .mock-dots i:nth-child(3) { background: #a8d8b0; }
+    .mock-title { font-size: 12.5px; color: var(--faint); font-weight: 500; }
+    .mock-peers { margin-left: auto; display: flex; align-items: center; }
+    .mock-peers .av { width: 24px; height: 24px; border-radius: 50%; border: 2px solid #fff; display: grid; place-items: center; font-size: 10px; font-weight: 700; color: #fff; margin-left: -7px; }
+    .mock-body { display: grid; grid-template-columns: 128px 1fr 1fr; height: 348px; }
+    .mock-tree { border-right: 1px solid var(--line); background: var(--softer); padding: 12px 8px; font-size: 12px; }
+    .mock-tree .ti { display: flex; align-items: center; gap: 7px; padding: 5px 8px; border-radius: 7px; color: var(--muted); }
+    .mock-tree .ti.on { background: #ecebfd; color: var(--accent-d); font-weight: 600; }
+    .mock-tree .ti .fi { width: 12px; height: 12px; opacity: .8; }
+    .mock-src { border-right: 1px solid var(--line); padding: 14px 12px; font-family: 'JetBrains Mono', monospace; font-size: 11.5px; line-height: 1.85; overflow: hidden; color: #3a4250; background: #fff; }
+    .mock-src .ln { white-space: pre; }
+    .mock-src .k { color: #7c3aed; } .mock-src .b { color: #b45309; } .mock-src .a { color: #2563eb; } .mock-src .c { color: #94a0af; }
+    .mock-prev { padding: 16px 16px; font-family: 'Source Serif 4', Georgia, serif; font-size: 13px; line-height: 1.62; color: #232a36; overflow: hidden; }
+    .mock-prev h4 { font-size: 15px; margin: 0 0 8px; font-weight: 700; }
+    .mock-prev .s { transition: background .35s, box-shadow .35s; border-radius: 3px; padding: 0 1px; }
+    .mock-prev .s.reading { background: var(--reading); box-shadow: 0 0 0 3px var(--reading); }
+    .mock-foot { display: flex; align-items: center; gap: 14px; padding: 10px 14px; border-top: 1px solid var(--line); background: var(--softer); }
+    .mock-play { width: 30px; height: 30px; border-radius: 50%; background: var(--accent); color: #fff; display: grid; place-items: center; box-shadow: 0 4px 10px rgba(79,70,229,.35); flex: none; }
+    .mock-play svg { width: 13px; height: 13px; }
+    .mock-prog { flex: 1; }
+    .mock-prog .lbl { font-size: 11px; color: var(--faint); margin-bottom: 5px; }
+    .mock-prog .track { height: 4px; border-radius: 3px; background: #e2e5ec; overflow: hidden; }
+    .mock-prog .fill { height: 100%; width: 14%; background: linear-gradient(90deg, var(--accent), #8b5cf6); border-radius: 3px; transition: width .4s ease; }
+    .eq { display: flex; align-items: flex-end; gap: 2px; height: 16px; }
+    .eq i { width: 3px; background: var(--accent-l); border-radius: 2px; animation: eq 1s ease-in-out infinite; }
+    .eq i:nth-child(2){ animation-delay:.15s } .eq i:nth-child(3){ animation-delay:.3s } .eq i:nth-child(4){ animation-delay:.45s }
+    @keyframes eq { 0%,100%{ height:5px } 50%{ height:15px } }
+
+    /* ---------- trust band ---------- */
+    .band { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--softer); }
+    .band-in { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 14px 34px; padding: 18px 0; }
+    .chip { display: inline-flex; align-items: center; gap: 9px; font-size: 13.5px; color: var(--muted); font-weight: 500; }
+    .chip svg { width: 16px; height: 16px; color: var(--accent); }
+
+    /* ---------- sections ---------- */
+    section { scroll-margin-top: 80px; }
+    .sec { padding: 88px 0; }
+    .sec.alt { background: var(--softer); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+    .sec-head { max-width: 660px; margin: 0 auto 52px; text-align: center; }
+    .sec-tag { font-size: 13px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+    .sec-head h2 { font-size: 34px; font-weight: 700; margin-top: 12px; }
+    .sec-head p { font-size: 17px; color: var(--muted); margin-top: 14px; }
+
+    /* feature rows */
+    .frow { display: grid; grid-template-columns: 1fr 1fr; gap: 56px; align-items: center; }
+    .frow + .frow { margin-top: 88px; }
+    .frow.rev .fr-media { order: -1; }
+    .fr-kicker { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; color: var(--accent); letter-spacing: .02em; }
+    .fr-kicker .ic { width: 26px; height: 26px; border-radius: 8px; background: #ecebfd; display: grid; place-items: center; }
+    .fr-kicker .ic svg { width: 15px; height: 15px; color: var(--accent-d); }
+    .frow h3 { font-size: 26px; font-weight: 700; margin: 16px 0 0; }
+    .frow .fr-body { font-size: 16px; color: var(--muted); margin-top: 14px; }
+    .fr-list { list-style: none; padding: 0; margin: 20px 0 0; display: grid; gap: 11px; }
+    .fr-list li { display: flex; gap: 11px; font-size: 14.5px; color: var(--ink); }
+    .fr-list li svg { width: 18px; height: 18px; color: var(--green); flex: none; margin-top: 1px; }
+    .fr-media { background: #fff; border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 18px; }
+
+    /* small feature grid */
+    .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+    .card { background: #fff; border: 1px solid var(--line); border-radius: var(--radius); padding: 24px; transition: border-color .15s, box-shadow .15s, transform .15s; }
+    .card:hover { border-color: #d3d6df; box-shadow: var(--shadow); transform: translateY(-2px); }
+    .card .ci { width: 40px; height: 40px; border-radius: 11px; background: #ecebfd; display: grid; place-items: center; margin-bottom: 16px; }
+    .card .ci svg { width: 20px; height: 20px; color: var(--accent-d); }
+    .card h4 { font-size: 16.5px; font-weight: 700; margin: 0 0 7px; }
+    .card p { font-size: 14px; color: var(--muted); }
+
+    /* how it works */
+    .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; counter-reset: st; }
+    .step { position: relative; padding: 28px 24px; background: #fff; border: 1px solid var(--line); border-radius: var(--radius); }
+    .step .n { counter-increment: st; width: 38px; height: 38px; border-radius: 11px; background: var(--accent); color: #fff; font-weight: 700; font-size: 17px; display: grid; place-items: center; margin-bottom: 16px; }
+    .step .n::before { content: counter(st); }
+    .step h4 { font-size: 17px; font-weight: 700; margin: 0 0 8px; }
+    .step p { font-size: 14.5px; color: var(--muted); }
+
+    /* roadmap */
+    .road { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+    .rcard { position: relative; background: #fff; border: 1px dashed #cfd3de; border-radius: var(--radius); padding: 22px; }
+    .rcard .soon { position: absolute; top: 16px; right: 16px; font-size: 10.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--be); background: #f1eaff; border: 1px solid #e3d6ff; padding: 3px 9px; border-radius: 20px; }
+    .rcard .ri { width: 38px; height: 38px; border-radius: 10px; background: #f4f0ff; display: grid; place-items: center; margin-bottom: 14px; }
+    .rcard .ri svg { width: 19px; height: 19px; color: var(--be); }
+    .rcard h4 { font-size: 16px; font-weight: 700; margin: 0 0 6px; padding-right: 70px; }
+    .rcard p { font-size: 13.5px; color: var(--muted); }
+
+    /* free band */
+    .free { background: linear-gradient(135deg, #4f46e5, #7c3aed); color: #fff; border-radius: 22px; padding: 48px; text-align: center; box-shadow: 0 20px 50px rgba(79,70,229,.28); }
+    .free h2 { font-size: 30px; font-weight: 700; }
+    .free p { font-size: 17px; opacity: .92; margin-top: 12px; max-width: 34em; margin-inline: auto; }
+    .free .btn-primary { background: #fff; color: var(--accent-d); margin-top: 26px; box-shadow: 0 8px 20px rgba(0,0,0,.18); }
+    .free .btn-primary:hover { background: #f3f2ff; }
+
+    /* FAQ */
+    .faq { max-width: 820px; margin: 0 auto; }
+    .qa { border-bottom: 1px solid var(--line); }
+    .qa button { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 16px; background: none; border: 0; font-family: inherit; font-size: 16.5px; font-weight: 600; color: var(--ink); text-align: left; padding: 22px 4px; cursor: pointer; }
+    .qa button .pm { flex: none; width: 22px; height: 22px; position: relative; }
+    .qa button .pm::before, .qa button .pm::after { content: ''; position: absolute; background: var(--accent); border-radius: 2px; transition: transform .2s, opacity .2s; }
+    .qa button .pm::before { top: 10px; left: 3px; right: 3px; height: 2px; }
+    .qa button .pm::after { left: 10px; top: 3px; bottom: 3px; width: 2px; }
+    .qa.open button .pm::after { transform: scaleY(0); opacity: 0; }
+    .qa .ans { max-height: 0; overflow: hidden; transition: max-height .26s ease; }
+    .qa .ans p { font-size: 15px; color: var(--muted); padding: 0 4px 22px; max-width: 64ch; }
+    .qa.open .ans { max-height: 240px; }
+
+    /* footer */
+    footer { border-top: 1px solid var(--line); background: var(--softer); padding: 56px 0 34px; }
+    .foot-grid { display: grid; grid-template-columns: 1.6fr 1fr 1fr 1fr; gap: 32px; }
+    .foot-brand p { font-size: 13.5px; color: var(--muted); margin-top: 14px; max-width: 26em; }
+    .foot-col h5 { font-size: 12.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--faint); margin: 0 0 14px; }
+    .foot-col a { display: block; font-size: 14px; color: var(--muted); padding: 5px 0; }
+    .foot-col a:hover { color: var(--accent); }
+    .foot-base { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 40px; padding-top: 22px; border-top: 1px solid var(--line); font-size: 13px; color: var(--faint); }
+
+    /* ---------- explain-aloud demo ---------- */
+    .demo-stage { position: relative; max-width: 880px; margin: 0 auto; }
+    .demo-win { position: relative; background: #fff; border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); overflow: hidden; }
+    .demo-doc { position: relative; padding: 30px 34px 38px; font-family: 'Source Serif 4', Georgia, serif; font-size: 16px; line-height: 1.75; color: #232a36; min-height: 372px; }
+    .demo-doc h4 { font-family: 'IBM Plex Sans', sans-serif; font-size: 15px; font-weight: 700; margin: 0 0 12px; color: var(--ink); }
+    .eqblock { display: inline-flex; align-items: center; padding: 6px 12px; margin: 2px 2px; border-radius: 9px; background: var(--soft); border: 1px solid var(--line); cursor: pointer; transition: background .25s, border-color .25s, box-shadow .25s, transform .25s; font-family: 'JetBrains Mono', 'Source Serif 4', serif; }
+    .eqblock.hot { background: #ecebfd; border-color: #c7c2f7; box-shadow: 0 0 0 4px rgba(79,70,229,.12); transform: translateY(-1px); }
+    /* inline math typesetting */
+    .frac { display: inline-flex; flex-direction: column; text-align: center; vertical-align: middle; margin: 0 5px; font-size: .92em; }
+    .frac .num { border-bottom: 1.5px solid currentColor; padding: 0 7px 1px; }
+    .frac .den { padding: 1px 7px 0; }
+    .sqrt { display: inline-flex; align-items: flex-start; }
+    .sqrt .rad { border-top: 1.5px solid currentColor; padding: 1px 2px 0; margin-left: 1px; }
+    .mathfn { font-style: italic; }
+    /* fake cursor */
+    .demo-cursor { position: absolute; left: 0; top: 0; width: 20px; height: 20px; z-index: 6; transform: translate(60px, 200px); transition: transform 1s cubic-bezier(.4,.1,.2,1); pointer-events: none; filter: drop-shadow(0 2px 3px rgba(0,0,0,.25)); }
+    .demo-cursor svg { width: 100%; height: 100%; }
+    .demo-cursor .ring { position: absolute; inset: -6px; border-radius: 50%; border: 2px solid var(--accent); opacity: 0; }
+    .demo-cursor.click .ring { animation: clickring .5s ease-out; }
+    @keyframes clickring { 0% { opacity: .7; transform: scale(.4); } 100% { opacity: 0; transform: scale(1.6); } }
+    .demo-tip { position: absolute; z-index: 6; background: var(--ink); color: #fff; font-family: 'IBM Plex Sans', sans-serif; font-size: 11.5px; font-weight: 600; padding: 5px 10px; border-radius: 8px; opacity: 0; transform: translateY(4px); transition: opacity .2s, transform .2s; pointer-events: none; white-space: nowrap; }
+    .demo-tip::after { content: ''; position: absolute; bottom: -4px; left: 16px; width: 8px; height: 8px; background: var(--ink); transform: rotate(45deg); }
+    .demo-tip.show { opacity: 1; transform: translateY(0); }
+    /* modal */
+    .demo-modal { position: absolute; inset: 0; z-index: 8; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(20,22,34,.34); backdrop-filter: blur(2px); opacity: 0; visibility: hidden; transition: opacity .28s; }
+    .demo-modal.show { opacity: 1; visibility: visible; }
+    .dm-card { width: 460px; max-width: 100%; background: #fff; border-radius: 16px; box-shadow: 0 24px 60px rgba(16,20,40,.32); overflow: hidden; transform: translateY(10px) scale(.96); opacity: 0; transition: transform .3s cubic-bezier(.2,.8,.2,1), opacity .3s; }
+    .demo-modal.show .dm-card { transform: translateY(0) scale(1); opacity: 1; }
+    .dm-head { display: flex; align-items: center; gap: 11px; padding: 15px 18px; border-bottom: 1px solid var(--line); }
+    .dm-head .dm-ic { width: 30px; height: 30px; border-radius: 9px; background: #f1eaff; color: var(--be); display: grid; place-items: center; font-family: 'JetBrains Mono', monospace; font-weight: 600; font-size: 13px; flex: none; }
+    .dm-head .dm-t { font-family: 'IBM Plex Sans', sans-serif; font-weight: 700; font-size: 15.5px; flex: 1; }
+    .dm-head .dm-x { width: 26px; height: 26px; border-radius: 7px; border: 0; background: var(--soft); color: var(--muted); cursor: pointer; font-size: 13px; }
+    .dm-eq { padding: 20px 18px; text-align: center; font-family: 'JetBrains Mono', 'Source Serif 4', serif; font-size: 18px; color: #232a36; background: var(--softer); border-bottom: 1px solid var(--line); }
+    .dm-expl { padding: 16px 18px 6px; }
+    .dm-line { display: flex; gap: 9px; font-family: 'IBM Plex Sans', sans-serif; font-size: 13.5px; line-height: 1.45; color: var(--muted); margin-bottom: 8px; opacity: 0; transform: translateY(5px); transition: opacity .3s, transform .3s; }
+    .dm-line .b { flex: none; width: 6px; height: 6px; border-radius: 50%; background: #cbb6f5; margin-top: 7px; transition: background .25s; }
+    .dm-line.on { opacity: 1; transform: translateY(0); }
+    .dm-line.reading { color: var(--ink); }
+    .dm-line.reading .b { background: var(--be); box-shadow: 0 0 0 3px rgba(124,58,237,.16); }
+    .dm-readbar { display: flex; align-items: center; gap: 12px; padding: 13px 18px; border-top: 1px solid var(--line); background: var(--softer); }
+    .dm-readbar .dm-play { width: 30px; height: 30px; border-radius: 50%; background: var(--be); color: #fff; display: grid; place-items: center; flex: none; box-shadow: 0 4px 10px rgba(124,58,237,.32); }
+    .dm-readbar .dm-play svg { width: 12px; height: 12px; }
+    .dm-readbar .dm-lbl { font-family: 'IBM Plex Sans', sans-serif; font-size: 12px; color: var(--muted); font-weight: 500; }
+    .dm-wave { display: flex; align-items: center; gap: 3px; height: 18px; margin-left: auto; }
+    .dm-wave i { width: 3px; height: 5px; background: #c3b0ef; border-radius: 2px; }
+    .demo-modal.show .dm-wave i { animation: dmwave 1s ease-in-out infinite; background: var(--be); }
+    .dm-wave i:nth-child(2){animation-delay:.1s} .dm-wave i:nth-child(3){animation-delay:.2s} .dm-wave i:nth-child(4){animation-delay:.3s} .dm-wave i:nth-child(5){animation-delay:.4s} .dm-wave i:nth-child(6){animation-delay:.5s} .dm-wave i:nth-child(7){animation-delay:.15s} .dm-wave i:nth-child(8){animation-delay:.35s}
+    @keyframes dmwave { 0%,100% { height: 4px; } 50% { height: 16px; } }
+    .demo-replay { display: inline-flex; align-items: center; gap: 8px; margin: 18px auto 0; border: 1px solid var(--line); background: #fff; color: var(--ink); font-family: 'IBM Plex Sans', sans-serif; font-size: 13.5px; font-weight: 600; padding: 9px 16px; border-radius: 10px; cursor: pointer; }
+    .demo-replay:hover { border-color: #c9cdd6; color: var(--accent); }
+    .soon-inline { display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--be); background: #f1eaff; border: 1px solid #e3d6ff; padding: 2px 8px; border-radius: 20px; vertical-align: middle; margin-left: 4px; }
+
+    @media (max-width: 980px) {
+      .hero-grid, .frow, .frow.rev { grid-template-columns: 1fr; gap: 36px; }
+      .frow.rev .fr-media { order: 0; }
+      .grid3, .steps, .road { grid-template-columns: 1fr 1fr; }
+      .foot-grid { grid-template-columns: 1fr 1fr; }
+      h1.hero-title { font-size: 40px; }
+      .nav-links { display: none; }
+    }
+    @media (max-width: 620px) {
+      .grid3, .steps, .road, .foot-grid { grid-template-columns: 1fr; }
+      .mock-body { grid-template-columns: 1fr 1fr; }
+      .mock-tree { display: none; }
+      h1.hero-title { font-size: 33px; }
+      .sec { padding: 60px 0; }
+      .free { padding: 34px 22px; }
+    }
+    @media (prefers-reduced-motion: reduce) { .eq i { animation: none; } html { scroll-behavior: auto; } }
+  </style>
+</head>
+
+<body>
+
+  <!-- NAV -->
+  <header class="nav">
+    <div class="wrap nav-in">
+      <a class="brand" href="#top"><span class="mk"><span></span></span>Aloud</a>
+      <nav class="nav-links">
+        <a href="#features">Features</a>
+        <a href="#how">How it works</a>
+        <a href="#workflow">Workflow</a>
+        <a href="#roadmap">Roadmap</a>
+        <a href="#faq">FAQ</a>
+      </nav>
+      <div class="nav-cta">
+        <a class="nav-signin" href="ProofReader.html">Sign in</a>
+        <a class="btn btn-primary" href="ProofReader.html">Get started — free</a>
+      </div>
+    </div>
+  </header>
+
+  <!-- HERO -->
+  <a id="top"></a>
+  <section class="hero">
+    <div class="wrap hero-grid">
+      <div class="hero-copy">
+        <span class="eyebrow"><span class="dot"></span>Read-aloud LaTeX editor for researchers</span>
+        <h1 class="hero-title">Hear your paper. Catch what your eyes miss.</h1>
+        <p class="hero-sub">Aloud is a browser-based LaTeX editor that reads your manuscript back to you, sentence by sentence — so typos, clumsy phrasing and missing words surface before your reviewers find them. Write, listen, collaborate, and track every change in one place.</p>
+        <div class="hero-actions">
+          <a class="btn btn-primary btn-lg" href="ProofReader.html">
+            <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#fff" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.6 2.4 30.2 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.9 6.1C12.4 13.3 17.7 9.5 24 9.5z" opacity=".0"/></svg>
+            Start writing — it's free
+          </a>
+          <a class="btn btn-outline btn-lg" href="#features">See features</a>
+        </div>
+        <div class="hero-note">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M13.5 4.5L6.5 12 3 8.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          No install · Sign in with Google · Free for academic research
+        </div>
+      </div>
+
+      <!-- APP MOCK -->
+      <div class="mock" aria-hidden="true">
+        <div class="mock-bar">
+          <div class="mock-dots"><i></i><i></i><i></i></div>
+          <div class="mock-title">acoustic-review.tex — Aloud</div>
+          <div class="mock-peers">
+            <span class="av" style="background:#4f46e5">A</span>
+            <span class="av" style="background:#0e9f6e">M</span>
+            <span class="av" style="background:#d9760b">K</span>
+          </div>
+        </div>
+        <div class="mock-body">
+          <div class="mock-tree">
+            <div class="ti on"><svg class="fi" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M3.5 2.5h6l3 3V13a.5.5 0 01-.5.5h-8A.5.5 0 013 13V3a.5.5 0 01.5-.5z"/></svg>main.tex</div>
+            <div class="ti"><svg class="fi" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M3 2.5h7l3 3V13a.5.5 0 01-.5.5h-9A.5.5 0 013 13z"/></svg>references.bib</div>
+            <div class="ti"><svg class="fi" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/></svg>figure.png</div>
+          </div>
+          <div class="mock-src">
+            <div class="ln"><span class="k">\section</span>{<span class="b">Results</span>}</div>
+            <div class="ln"></div>
+            <div class="ln">The audible review</div>
+            <div class="ln">workflow recovers</div>
+            <div class="ln"><span class="c">% reviewer caught</span></div>
+            <div class="ln">more issues than the</div>
+            <div class="ln">silent baseline as</div>
+            <div class="ln">review time grows.</div>
+            <div class="ln"></div>
+            <div class="ln"><span class="k">\cite</span>{<span class="a">novak2024</span>}</div>
+          </div>
+          <div class="mock-prev">
+            <h4>Results</h4>
+            <p>
+              <span class="s" data-i="0">The audible review workflow recovers more issues than the silent baseline as review time grows.</span>
+              <span class="s" data-i="1"> Each sentence is highlighted as it is read aloud.</span>
+              <span class="s" data-i="2"> Reviewers caught 38% more errors in the first ten minutes.</span>
+              <span class="s" data-i="3"> The effect held across all five participants.</span>
+            </p>
+          </div>
+        </div>
+        <div class="mock-foot">
+          <div class="mock-play"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M5 3.5l8 4.5-8 4.5z"/></svg></div>
+          <div class="mock-prog">
+            <div class="lbl" id="mock-lbl">Reading sentence 1 of 28</div>
+            <div class="track"><div class="fill" id="mock-fill"></div></div>
+          </div>
+          <div class="eq"><i></i><i></i><i></i><i></i></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- TRUST BAND -->
+  <div class="band">
+    <div class="wrap band-in">
+      <span class="chip"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 1l2 4.3 4.7.6-3.4 3.3.8 4.6L8 11.6 3.9 13.8l.8-4.6L1.3 5.9 6 5.3z"/></svg>Read-aloud, sentence by sentence</span>
+      <span class="chip"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="12" height="10" rx="1.5"/><path d="M2 6h12"/></svg>Runs in the browser</span>
+      <span class="chip"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="5" cy="5" r="2"/><circle cx="11" cy="11" r="2"/><path d="M6.5 6.5l3 3"/></svg>Real-time collaboration</span>
+      <span class="chip"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 1.7l5.5 2.4V8c0 3.4-2.3 5.6-5.5 6.5C4.8 13.6 2.5 11.4 2.5 8V4.1z"/></svg>Cloud-synced &amp; safe</span>
+    </div>
+  </div>
+
+  <!-- SIGNATURE FEATURE -->
+  <section class="sec" id="features">
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="sec-tag">Why Aloud</div>
+        <h2>Your ears notice what your eyes skim over</h2>
+        <p>You have read your introduction forty times. Aloud reads it back to you out loud, highlighting each sentence — the fastest way to catch the awkward clause you keep glossing over.</p>
+      </div>
+
+      <div class="frow">
+        <div class="fr-copy">
+          <span class="fr-kicker"><span class="ic"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 6v4h2l3 2.5v-9L5 6z"/><path d="M11 5.5a3.5 3.5 0 010 5" stroke-linecap="round"/></svg></span>Read-aloud narration</span>
+          <h3>Press play and proofread with your ears</h3>
+          <p class="fr-body">Aloud speaks your document one sentence at a time and highlights exactly where it is. Click any sentence to jump there; edit while it reads and it pauses, then offers to resume. Natural-sounding AI voices are available, with a free browser voice by default.</p>
+          <ul class="fr-list">
+            <li><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M13.5 4.5L6.5 12 3 8.5" stroke-linecap="round" stroke-linejoin="round"/></svg>Sentence-synced highlighting in the live preview</li>
+            <li><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M13.5 4.5L6.5 12 3 8.5" stroke-linecap="round" stroke-linejoin="round"/></svg>Click-to-listen from any point; resume where you left off</li>
+            <li><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M13.5 4.5L6.5 12 3 8.5" stroke-linecap="round" stroke-linejoin="round"/></svg>Adjustable speed and voice</li>
+          </ul>
+        </div>
+        <div class="fr-media">
+          <div class="mock" style="box-shadow:none;border:0">
+            <div class="mock-prev" style="font-size:14px">
+              <h4 style="font-size:16px">Introduction</h4>
+              <p>
+                <span class="s">Peer review is slow because reading is silent.</span>
+                <span class="s reading"> When a paper is read aloud, the reviewer's attention follows the voice and lingers on every word.</span>
+                <span class="s"> We test whether audible review improves error recovery.</span>
+              </p>
+            </div>
+            <div class="mock-foot" style="border-radius:0 0 12px 12px">
+              <div class="mock-play"><svg viewBox="0 0 16 16" fill="currentColor"><rect x="4.5" y="3.5" width="2.6" height="9" rx="1"/><rect x="9" y="3.5" width="2.6" height="9" rx="1"/></svg></div>
+              <div class="mock-prog"><div class="lbl">Reading sentence 2 of 28 · 1.0×</div><div class="track"><div class="fill" style="width:32%"></div></div></div>
+              <div class="eq"><i></i><i></i><i></i><i></i></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="frow rev">
+        <div class="fr-copy">
+          <span class="fr-kicker"><span class="ic"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2.5 3.5h11v9h-11z"/><path d="M8 3.5v9M2.5 8h5.5" stroke-linecap="round"/></svg></span>LaTeX editor + live preview</span>
+          <h3>A real LaTeX editor, no setup required</h3>
+          <p class="fr-body">Write LaTeX with autocomplete for commands, environments, citations and cross-references; smart bracket pairing; snippets; and a split live preview that compiles as you type. Diagnostics flag problems inline — with one-click fixes for the common ones.</p>
+          <ul class="fr-list">
+            <li><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M13.5 4.5L6.5 12 3 8.5" stroke-linecap="round" stroke-linejoin="round"/></svg>Autocomplete for <code style="font-family:'JetBrains Mono',monospace;font-size:.85em">\cite</code>, <code style="font-family:'JetBrains Mono',monospace;font-size:.85em">\ref</code>, environments &amp; commands</li>
+            <li><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M13.5 4.5L6.5 12 3 8.5" stroke-linecap="round" stroke-linejoin="round"/></svg>Find &amp; replace with regex, multi-file project tree</li>
+            <li><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M13.5 4.5L6.5 12 3 8.5" stroke-linecap="round" stroke-linejoin="round"/></svg>Inline diagnostics with one-click quick-fixes</li>
+          </ul>
+        </div>
+        <div class="fr-media">
+          <div class="mock-body" style="grid-template-columns:1fr 1fr;height:230px;border:1px solid var(--line);border-radius:12px;overflow:hidden">
+            <div class="mock-src" style="font-size:11px">
+              <div class="ln"><span class="k">\begin</span>{<span class="b">equation</span>}</div>
+              <div class="ln">  E = mc^2</div>
+              <div class="ln"><span class="k">\end</span>{<span class="b">equation</span>}</div>
+              <div class="ln"></div>
+              <div class="ln">See <span class="k">\ref</span>{<span class="a">fig:1</span>}</div>
+              <div class="ln">and <span class="k">\cite</span>{<span class="a">novak</span>}.</div>
+            </div>
+            <div class="mock-prev" style="font-size:13px">
+              <p style="font-family:'Source Serif 4',serif">An equation renders live:</p>
+              <p style="text-align:center;font-family:'Source Serif 4',serif;font-style:italic;margin:10px 0">E = mc²</p>
+              <p style="font-family:'Source Serif 4',serif">See Figure 1 and [1].</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="frow">
+        <div class="fr-copy">
+          <span class="fr-kicker"><span class="ic"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="5" cy="5" r="2.2"/><circle cx="11" cy="11" r="2.2"/><path d="M6.6 6.6l2.8 2.8" stroke-linecap="round"/></svg></span>Live collaboration</span>
+          <h3>Write together, see each other live</h3>
+          <p class="fr-body">Invite co-authors and watch their cursors move in real time. Leave comments and to-dos anchored to a passage, assign them, and follow a shared activity feed — every change is attributed and nothing is lost.</p>
+          <ul class="fr-list">
+            <li><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M13.5 4.5L6.5 12 3 8.5" stroke-linecap="round" stroke-linejoin="round"/></svg>Live cursors &amp; presence</li>
+            <li><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M13.5 4.5L6.5 12 3 8.5" stroke-linecap="round" stroke-linejoin="round"/></svg>Comments &amp; to-dos anchored to the text, with assignees</li>
+            <li><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M13.5 4.5L6.5 12 3 8.5" stroke-linecap="round" stroke-linejoin="round"/></svg>Roles: editor, commenter, viewer</li>
+          </ul>
+        </div>
+        <div class="fr-media">
+          <div style="border:1px solid var(--line);border-radius:12px;padding:16px;background:#fff">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+              <span class="av" style="width:26px;height:26px;border-radius:50%;background:#4f46e5;color:#fff;display:grid;place-items:center;font-size:11px;font-weight:700">A</span>
+              <span style="font-size:13px;color:var(--muted)"><b style="color:var(--ink)">Anna</b> is editing · <span style="color:#0e9f6e">Márk</span> viewing</span>
+            </div>
+            <div style="font-family:'Source Serif 4',serif;font-size:13.5px;line-height:1.6;color:#232a36;border-left:3px solid #ffe08a;padding-left:12px;margin-bottom:14px">The proposed method outperforms the baseline<span style="display:inline-block;width:2px;height:15px;background:#4f46e5;vertical-align:-2px;margin:0 1px;border-radius:1px"></span> across all metrics.</div>
+            <div style="background:var(--soft);border-radius:10px;padding:11px 13px;font-size:12.5px">
+              <div style="display:flex;gap:8px;align-items:center;margin-bottom:5px"><span class="av" style="width:20px;height:20px;border-radius:50%;background:#d9760b;color:#fff;display:grid;place-items:center;font-size:9px;font-weight:700">K</span><b>Kata</b><span style="color:var(--faint)">· comment</span></div>
+              <div style="color:var(--muted)">Can we soften “outperforms” to “improves on”? ✅ to-do for Anna</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- EXPLAIN-ALOUD DEMO -->
+  <section class="sec" id="demo">
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="sec-tag">See it in action</div>
+        <h2>Click a dense equation — hear it explained</h2>
+        <p>A preview of <b>Explain aloud</b>: tap any equation and Aloud breaks it down in plain language, then reads the explanation back to you. <span class="soon-inline">Coming soon</span></p>
+      </div>
+
+      <div class="demo-stage">
+        <div class="demo-win">
+          <div class="mock-bar">
+            <div class="mock-dots"><i></i><i></i><i></i></div>
+            <div class="mock-title">attention.tex — Aloud</div>
+          </div>
+          <div class="demo-doc">
+            <h4>3.2 Scaled dot-product attention</h4>
+            <p>The core operation of the Transformer computes attention over a set of values, weighted by the compatibility of queries and keys:</p>
+            <p style="text-align:center;margin:18px 0">
+              <span class="eqblock" id="demoEq">
+                <span class="mathfn">Attention</span>(Q,&nbsp;K,&nbsp;V) =
+                <span class="mathfn">softmax</span>(<span class="frac"><span class="num">QK<sup>T</sup></span><span class="den"><span class="sqrt">&radic;<span class="rad">d<sub>k</sub></span></span></span></span>)&nbsp;V
+              </span>
+            </p>
+            <p>where <em>Q</em>, <em>K</em> and <em>V</em> are matrices of queries, keys and values.</p>
+            <div class="demo-tip" id="demoTip">Click to explain &amp; read aloud</div>
+            <div class="demo-cursor" id="demoCursor">
+              <span class="ring"></span>
+              <svg viewBox="0 0 20 20" fill="#1a2030" stroke="#fff" stroke-width="1.2"><path d="M3 2l13 7-5.5 1.5L8 17z"/></svg>
+            </div>
+          </div>
+
+          <div class="demo-modal" id="demoModal">
+            <div class="dm-card">
+              <div class="dm-head">
+                <span class="dm-ic">ƒx</span>
+                <span class="dm-t">Explain this equation</span>
+                <button class="dm-x" id="demoClose">✕</button>
+              </div>
+              <div class="dm-eq">
+                <span class="mathfn">softmax</span>(<span class="frac"><span class="num">QK<sup>T</sup></span><span class="den"><span class="sqrt">&radic;<span class="rad">d<sub>k</sub></span></span></span></span>)&nbsp;V
+              </div>
+              <div class="dm-expl" id="demoExpl">
+                <div class="dm-line"><span class="b"></span><span>This is <b>scaled dot-product attention</b> — the heart of a Transformer.</span></div>
+                <div class="dm-line"><span class="b"></span><span><b>QKᵀ</b> scores how well each query matches every key.</span></div>
+                <div class="dm-line"><span class="b"></span><span>Dividing by <b>√dₖ</b> keeps those scores from growing too large.</span></div>
+                <div class="dm-line"><span class="b"></span><span><b>softmax</b> turns the scores into weights that sum to one.</span></div>
+                <div class="dm-line"><span class="b"></span><span>Multiplying by <b>V</b> returns a weighted blend of the values.</span></div>
+              </div>
+              <div class="dm-readbar">
+                <span class="dm-play"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M5 3.5l8 4.5-8 4.5z"/></svg></span>
+                <span class="dm-lbl" id="demoReadLbl">Reading explanation aloud…</span>
+                <span class="dm-wave"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div style="text-align:center"><button class="demo-replay" id="demoReplay"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M13 8a5 5 0 11-1.5-3.5M13 2v3h-3" stroke-linecap="round" stroke-linejoin="round"/></svg>Replay</button></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SMALL FEATURE GRID -->
+  <section class="sec alt">
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="sec-tag">Everything in one place</div>
+        <h2>Built for the way papers actually get written</h2>
+      </div>
+      <div class="grid3">
+        <div class="card">
+          <div class="ci"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 1.5l1.9 4 4.3.5-3.2 2.9.9 4.3L8 11l-3.8 2.1.9-4.3L1.9 6l4.3-.5z"/></svg></div>
+          <h4>Proofreading diagnostics</h4>
+          <p>Unbalanced braces, missing <code style="font-family:'JetBrains Mono',monospace;font-size:.85em">\end</code>, undefined references and more — flagged inline, many fixable in one click.</p>
+        </div>
+        <div class="card">
+          <div class="ci"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 13V3.5A1.5 1.5 0 014.5 2H10l3 3v8a.5.5 0 01-.5.5H4a1 1 0 01-1-1z"/><path d="M6 8h4M6 10.5h4" stroke-linecap="round"/></svg></div>
+          <h4>Comments &amp; to-dos</h4>
+          <p>Anchor discussion to a sentence, assign action items, set due dates, and resolve threads as the draft progresses.</p>
+        </div>
+        <div class="card">
+          <div class="ci"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 4v4l2.5 1.5" stroke-linecap="round"/><circle cx="8" cy="8" r="6.2"/></svg></div>
+          <h4>Version history</h4>
+          <p>Automatic snapshots plus named milestones. Compare any two versions and restore safely — restoring never destroys.</p>
+        </div>
+        <div class="card">
+          <div class="ci"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3.5 2.5h6l3 3V13a.5.5 0 01-.5.5h-8A.5.5 0 013 13V3a.5.5 0 01.5-.5z"/><path d="M6 8.5h4M6 10.5h2.5" stroke-linecap="round"/><path d="M9.5 2.5v3h3"/></svg></div>
+          <h4>Write mode (WYSIWYG)</h4>
+          <p>Prefer prose? Edit the rendered document directly — bold, italics, links, lists, tables and images — and it round-trips back to clean LaTeX.</p>
+        </div>
+        <div class="card">
+          <div class="ci"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 8s2.5-4.5 6-4.5S14 8 14 8s-2.5 4.5-6 4.5S2 8 2 8z"/><circle cx="8" cy="8" r="1.8"/></svg></div>
+          <h4>Cost-controlled AI voice</h4>
+          <p>Premium AI narration is metered and cached globally, so a sentence is ever synthesized once — quality without runaway bills.</p>
+        </div>
+        <div class="card">
+          <div class="ci"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 1.7l5.5 2.4V8c0 3.4-2.3 5.6-5.5 6.5C4.8 13.6 2.5 11.4 2.5 8V4.1z"/><path d="M5.8 8l1.6 1.6 3-3.2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+          <h4>Your data, kept safe</h4>
+          <p>Everything syncs to the cloud with version history and per-account isolation, so a cleared browser never loses your work.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- HOW IT WORKS -->
+  <section class="sec" id="how">
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="sec-tag">How it works</div>
+        <h2>From draft to polished in three moves</h2>
+      </div>
+      <div class="steps">
+        <div class="step">
+          <div class="n"></div>
+          <h4>Write or paste your LaTeX</h4>
+          <p>Start a project in the browser, upload your <code style="font-family:'JetBrains Mono',monospace;font-size:.85em">.tex</code> and <code style="font-family:'JetBrains Mono',monospace;font-size:.85em">.bib</code>, and see it compile live. No local toolchain to install.</p>
+        </div>
+        <div class="step">
+          <div class="n"></div>
+          <h4>Listen &amp; proofread</h4>
+          <p>Press play. Aloud reads each sentence and highlights it, while diagnostics flag anything that won't compile or reads wrong.</p>
+        </div>
+        <div class="step">
+          <div class="n"></div>
+          <h4>Collaborate &amp; track</h4>
+          <p>Invite co-authors, resolve comments and to-dos, and rely on version history so every change is attributed and recoverable.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- RESEARCH WORKFLOW (coming soon) -->
+  <section class="sec" id="workflow">
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="sec-tag">Where Aloud is headed</div>
+        <h2>From idea to published paper — in one place</h2>
+        <p>We're extending Aloud beyond the editor into the full research workflow — from picking your target journal to running the experiments behind your figures. <span class="soon-inline">In development</span></p>
+      </div>
+
+      <!-- 1. Journal-aware project setup -->
+      <div class="frow">
+        <div class="fr-copy">
+          <span class="fr-kicker"><span class="ic"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 2.5h7l3 3V13a.5.5 0 01-.5.5h-9A.5.5 0 013 13z"/><path d="M6 6.5h4M6 9h4M6 11h2.5" stroke-linecap="round"/></svg></span>Journal-aware project setup <span class="soon-inline">Coming soon</span></span>
+          <h3>Start from your target journal</h3>
+          <p class="fr-body">Choose where you want to publish. Aloud loads that journal's submission requirements — structure, length, reference style, figure specs — and guides your manuscript to match as you write.</p>
+          <ul class="fr-list">
+            <li><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M13.5 4.5L6.5 12 3 8.5" stroke-linecap="round" stroke-linejoin="round"/></svg>Pick from leading journals — or add your own</li>
+            <li><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M13.5 4.5L6.5 12 3 8.5" stroke-linecap="round" stroke-linejoin="round"/></svg>A live checklist against the journal's guidelines</li>
+            <li><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M13.5 4.5L6.5 12 3 8.5" stroke-linecap="round" stroke-linejoin="round"/></svg>Reference style &amp; section template applied automatically</li>
+          </ul>
+        </div>
+        <div class="fr-media">
+          <div style="font-family:'IBM Plex Sans',sans-serif">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+              <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--faint)">Target journal</span>
+              <span style="font-size:11px;color:var(--green);font-weight:600;background:var(--green-bg);padding:3px 9px;border-radius:20px">Requirements loaded</span>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;border:1px solid var(--line);border-radius:10px;padding:11px 14px;background:var(--softer);margin-bottom:14px">
+              <span style="font-weight:600;font-size:14px">Nature Methods</span>
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" style="color:var(--muted)"><path d="M4 6l4 4 4-4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <div style="display:grid;gap:11px">
+              <div style="display:flex;align-items:center;gap:10px;font-size:13.5px;color:var(--ink)"><svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="#1f8a5b" stroke-width="1.8" style="flex:none"><circle cx="8" cy="8" r="6.5" stroke="#cfeadd"/><path d="M5.2 8.2l1.9 1.9 3.7-4" stroke-linecap="round" stroke-linejoin="round"/></svg>Abstract ≤ 150 words</div>
+              <div style="display:flex;align-items:center;gap:10px;font-size:13.5px;color:var(--ink)"><svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="#1f8a5b" stroke-width="1.8" style="flex:none"><circle cx="8" cy="8" r="6.5" stroke="#cfeadd"/><path d="M5.2 8.2l1.9 1.9 3.7-4" stroke-linecap="round" stroke-linejoin="round"/></svg>Structured IMRaD sections</div>
+              <div style="display:flex;align-items:center;gap:10px;font-size:13.5px;color:var(--muted)"><span style="width:16px;height:16px;border:1.7px solid #cdd2db;border-radius:50%;flex:none"></span>Vancouver reference style</div>
+              <div style="display:flex;align-items:center;gap:10px;font-size:13.5px;color:var(--muted)"><span style="width:16px;height:16px;border:1.7px solid #cdd2db;border-radius:50%;flex:none"></span>Figures at 300 dpi · ≤ 5 main</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 2. Research gap analysis -->
+      <div class="frow rev">
+        <div class="fr-copy">
+          <span class="fr-kicker"><span class="ic"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14" stroke-linecap="round"/></svg></span>Research gap analysis <span class="soon-inline">Coming soon</span></span>
+          <h3>Find the gap worth filling</h3>
+          <p class="fr-body">Enter your topic areas and Aloud maps the surrounding literature, surfacing under-explored gaps — then cross-checks them against what your target journal actually publishes, so you aim at the right opening.</p>
+          <ul class="fr-list">
+            <li><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M13.5 4.5L6.5 12 3 8.5" stroke-linecap="round" stroke-linejoin="round"/></svg>Topic-driven scan of the literature landscape</li>
+            <li><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M13.5 4.5L6.5 12 3 8.5" stroke-linecap="round" stroke-linejoin="round"/></svg>Highlights under-explored gaps and saturated areas</li>
+            <li><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M13.5 4.5L6.5 12 3 8.5" stroke-linecap="round" stroke-linejoin="round"/></svg>Matched to your journal's accepted scope</li>
+          </ul>
+        </div>
+        <div class="fr-media">
+          <div style="font-family:'IBM Plex Sans',sans-serif">
+            <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--faint);margin-bottom:10px">Your topics</div>
+            <div style="display:flex;flex-wrap:wrap;gap:7px;margin-bottom:16px">
+              <span style="font-size:12.5px;font-weight:600;color:var(--accent-d);background:#ecebfd;border:1px solid #ddd9fb;padding:4px 10px;border-radius:20px">audible proofreading</span>
+              <span style="font-size:12.5px;font-weight:600;color:var(--accent-d);background:#ecebfd;border:1px solid #ddd9fb;padding:4px 10px;border-radius:20px">peer-review UX</span>
+            </div>
+            <div style="position:relative;border:1px solid var(--line);border-radius:10px;background:var(--softer);padding:14px;height:118px;overflow:hidden">
+              <span style="position:absolute;left:18px;top:20px;font-size:11px;color:var(--faint);background:#fff;border:1px solid var(--line);padding:3px 8px;border-radius:14px">TTS quality</span>
+              <span style="position:absolute;right:24px;top:16px;font-size:11px;color:var(--faint);background:#fff;border:1px solid var(--line);padding:3px 8px;border-radius:14px">crowd review</span>
+              <span style="position:absolute;left:34%;bottom:40px;font-size:11.5px;font-weight:700;color:#fff;background:var(--accent);padding:5px 11px;border-radius:16px;box-shadow:0 4px 10px rgba(79,70,229,.3)">Under-explored gap</span>
+              <span style="position:absolute;right:18px;bottom:14px;font-size:11px;color:var(--green);font-weight:600;background:var(--green-bg);padding:3px 9px;border-radius:14px">Fits scope ✓</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 3. Compute runs -->
+      <div class="frow">
+        <div class="fr-copy">
+          <span class="fr-kicker"><span class="ic"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2.5" y="2.5" width="11" height="11" rx="2"/><path d="M5.5 6l1.5 2-1.5 2M9 10h2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>Run compute beside your paper <span class="soon-inline">Coming soon</span></span>
+          <h3>Crunch your data where you write</h3>
+          <p class="fr-body">Launch resource-heavy jobs on a dataset from inside the project — train a model, run an analysis, benchmark a method — and pull the results straight into your figures and tables, without leaving the editor.</p>
+          <ul class="fr-list">
+            <li><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M13.5 4.5L6.5 12 3 8.5" stroke-linecap="round" stroke-linejoin="round"/></svg>Run heavy jobs on your datasets, in-project</li>
+            <li><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M13.5 4.5L6.5 12 3 8.5" stroke-linecap="round" stroke-linejoin="round"/></svg>Track progress without leaving the editor</li>
+            <li><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M13.5 4.5L6.5 12 3 8.5" stroke-linecap="round" stroke-linejoin="round"/></svg>Send outputs straight into figures &amp; tables</li>
+          </ul>
+        </div>
+        <div class="fr-media">
+          <div style="font-family:'IBM Plex Sans',sans-serif">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+              <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--faint)">Runs</span>
+              <span style="font-size:11px;color:var(--muted);font-weight:600">project · acoustic-review</span>
+            </div>
+            <div style="display:grid;gap:9px">
+              <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:#fff">
+                <div style="display:flex;align-items:center;justify-content:space-between;font-size:13px;margin-bottom:7px"><span style="font-family:'JetBrains Mono',monospace;font-size:12px">train_baseline.py · dataset_v3</span><span style="font-size:11px;font-weight:700;color:var(--accent-d);background:#ecebfd;padding:2px 8px;border-radius:12px">GPU</span></div>
+                <div style="display:flex;align-items:center;gap:9px"><div style="flex:1;height:5px;border-radius:3px;background:#e2e5ec;overflow:hidden"><div style="width:68%;height:100%;background:linear-gradient(90deg,var(--accent),#8b5cf6);border-radius:3px"></div></div><span style="font-size:11px;color:var(--muted);font-weight:600">Running · 68%</span></div>
+              </div>
+              <div style="display:flex;align-items:center;justify-content:space-between;border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:#fff;font-size:13px">
+                <span style="font-family:'JetBrains Mono',monospace;font-size:12px">stats_eval.R · results.csv</span>
+                <span style="display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--green);font-weight:600"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M13.5 4.5L6.5 12 3 8.5" stroke-linecap="round" stroke-linejoin="round"/></svg>→ Figure 3</span>
+              </div>
+              <div style="display:flex;align-items:center;justify-content:space-between;border:1px dashed #cfd3de;border-radius:10px;padding:10px 12px;background:var(--softer);font-size:13px;color:var(--muted)">
+                <span style="font-family:'JetBrains Mono',monospace;font-size:12px">benchmark.py</span>
+                <span style="font-size:11px;font-weight:600">Queued</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ROADMAP -->
+  <section class="sec alt" id="roadmap">
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="sec-tag">Also on the roadmap</div>
+        <h2>AI built for academic writing — in development</h2>
+        <p>We are building assistive AI features carefully, with the same cost-controlled, privacy-respecting approach. Here's what's coming.</p>
+      </div>
+      <div class="road">
+        <div class="rcard"><span class="soon">Coming soon</span><div class="ri"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 12l2.5-7 2.5 7M3.8 10h3.4"/><path d="M10 5v7M10 5c2 0 2.5 1.3 2.5 2s-.5 2-2.5 2" stroke-linecap="round"/></svg></div><h4>AI proofreader</h4><p>Grammar and style suggestions tuned for academic English — sentence by sentence, in context.</p></div>
+        <div class="rcard"><span class="soon">Coming soon</span><div class="ri"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 4h10M3 8h6M3 12h8" stroke-linecap="round"/></svg></div><h4>Explain aloud</h4><p>Turn a dense equation or passage into a plain-language explanation — then hear it read back.</p></div>
+        <div class="rcard"><span class="soon">Coming soon</span><div class="ri"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M5 2.5h6l2.5 2.5V13a.5.5 0 01-.5.5H5z"/><path d="M3 5v9.5h7"/></svg></div><h4>Reference checker</h4><p>Catch missing, duplicated or uncited references and broken cross-references before submission.</p></div>
+        <div class="rcard"><span class="soon">Coming soon</span><div class="ri"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 3h8v10l-4-2-4 2z"/></svg></div><h4>Abstract drafting</h4><p>Generate a first-draft abstract or summary from your finished sections, in your own structure.</p></div>
+        <div class="rcard"><span class="soon">Coming soon</span><div class="ri"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6.3"/><path d="M2 8h12M8 2c1.8 1.8 1.8 10.2 0 12M8 2c-1.8 1.8-1.8 10.2 0 12"/></svg></div><h4>Multilingual narration</h4><p>Listen to your paper — or a translation of it — in multiple languages, with natural voices.</p></div>
+        <div class="rcard"><span class="soon">Coming soon</span><div class="ri"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 3.5h10v7H7l-3 2.5V10.5H3z"/></svg></div><h4>Voice Q&amp;A</h4><p>Ask a question about your document and get a spoken answer grounded in its content.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FREE BAND -->
+  <section class="sec">
+    <div class="wrap">
+      <div class="free">
+        <h2>Free for academic research groups</h2>
+        <p>Aloud is free for researchers and their teams. Sign in with your Google account, tell us your university affiliation, and start writing once your account is approved.</p>
+        <a class="btn btn-primary btn-lg" href="ProofReader.html">Get started — free</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section class="sec alt" id="faq">
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="sec-tag">FAQ</div>
+        <h2>Questions, answered</h2>
+      </div>
+      <div class="faq">
+        <div class="qa"><button>Is it really free?<span class="pm"></span></button><div class="ans"><p>Yes — Aloud is free for academic research groups. You sign in with Google and provide your university affiliation; an administrator approves new accounts before first use.</p></div></div>
+        <div class="qa"><button>Do I need to install LaTeX?<span class="pm"></span></button><div class="ans"><p>No. Aloud runs entirely in your browser, including the live preview. There is no local toolchain to set up — open the editor and start writing.</p></div></div>
+        <div class="qa"><button>Which voices are used for read-aloud?<span class="pm"></span></button><div class="ans"><p>A free built-in browser voice is the default. Natural-sounding AI voices are also available; they are metered and cached so the same sentence is never synthesized twice, keeping costs predictable.</p></div></div>
+        <div class="qa"><button>Can I collaborate with co-authors?<span class="pm"></span></button><div class="ans"><p>Yes. Invite co-authors to a project and see their cursors live. Comments and to-dos anchor to specific passages, with editor, commenter and viewer roles.</p></div></div>
+        <div class="qa"><button>Is my work safe?<span class="pm"></span></button><div class="ans"><p>Your projects sync to the cloud with automatic version history and per-account isolation, so a cleared browser or a single mistaken edit never loses your work.</p></div></div>
+        <div class="qa"><button>What do I need to register?<span class="pm"></span></button><div class="ans"><p>A Google account and your university affiliation (searchable from a global list). MTMT and ORCID identifiers are optional but recommended for researchers.</p></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FINAL CTA -->
+  <section class="sec">
+    <div class="wrap" style="text-align:center;max-width:680px">
+      <h2 style="font-size:36px;font-weight:700">Stop re-reading. Start hearing.</h2>
+      <p style="font-size:18px;color:var(--muted);margin-top:16px">Catch the errors your eyes have learned to skip — and write your next paper with your ears open.</p>
+      <div style="display:flex;gap:14px;justify-content:center;margin-top:28px;flex-wrap:wrap">
+        <a class="btn btn-primary btn-lg" href="ProofReader.html">Start writing — it's free</a>
+        <a class="btn btn-outline btn-lg" href="#features">Explore features</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- FOOTER -->
+  <footer>
+    <div class="wrap">
+      <div class="foot-grid">
+        <div class="foot-brand">
+          <a class="brand" href="#top"><span class="mk"><span></span></span>Aloud</a>
+          <p>The read-aloud LaTeX editor for researchers. Write, listen, collaborate and track — all in your browser.</p>
+        </div>
+        <div class="foot-col">
+          <h5>Product</h5>
+          <a href="#features">Features</a>
+          <a href="#how">How it works</a>
+          <a href="#roadmap">Roadmap</a>
+          <a href="ProofReader.html">Open the editor</a>
+        </div>
+        <div class="foot-col">
+          <h5>Get started</h5>
+          <a href="ProofReader.html">Sign in with Google</a>
+          <a href="ProofReader.html">Create a project</a>
+          <a href="#faq">FAQ</a>
+        </div>
+        <div class="foot-col">
+          <h5>For researchers</h5>
+          <a href="#faq">University affiliation</a>
+          <a href="#faq">MTMT &amp; ORCID</a>
+          <a href="#free">Free for academia</a>
+        </div>
+      </div>
+      <div class="foot-base">
+        <span>© 2026 Aloud. Free for academic research.</span>
+        <span>Made for researchers who read out loud.</span>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    // FAQ accordion
+    document.querySelectorAll('.qa button').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var qa = b.parentElement;
+        var open = qa.classList.contains('open');
+        document.querySelectorAll('.qa').forEach(function (x) { x.classList.remove('open'); });
+        if (!open) qa.classList.add('open');
+      });
+    });
+
+    // Hero mock: cycle the "reading" highlight + progress
+    (function () {
+      if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        var first = document.querySelector('.mock-prev .s[data-i="0"]'); if (first) first.classList.add('reading'); return;
+      }
+      var sents = Array.prototype.slice.call(document.querySelectorAll('.hero .mock-prev .s'));
+      var fill = document.getElementById('mock-fill');
+      var lbl = document.getElementById('mock-lbl');
+      var base = [1, 8, 15, 22], i = 0;
+      function tick() {
+        sents.forEach(function (s) { s.classList.remove('reading'); });
+        var s = sents[i % sents.length]; if (s) s.classList.add('reading');
+        var n = base[i % base.length];
+        if (fill) fill.style.width = Math.round((n / 28) * 100) + '%';
+        if (lbl) lbl.textContent = 'Reading sentence ' + n + ' of 28';
+        i++;
+      }
+      tick(); setInterval(tick, 2200);
+    })();
+
+    // Explain-aloud demo: cursor → click → modal → read-aloud, looped
+    (function () {
+      var stage = document.getElementById('demo');
+      if (!stage) return;
+      var eq = document.getElementById('demoEq'), cur = document.getElementById('demoCursor');
+      var tip = document.getElementById('demoTip'), modal = document.getElementById('demoModal');
+      var lines = Array.prototype.slice.call(document.querySelectorAll('#demoExpl .dm-line'));
+      var lbl = document.getElementById('demoReadLbl');
+      var timers = [], loopT = null, running = false;
+      var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      function at(ms, fn) { timers.push(setTimeout(fn, ms)); }
+      function clearAll() { timers.forEach(clearTimeout); timers = []; if (loopT) { clearTimeout(loopT); loopT = null; } }
+      function place(el, dx, dy) {
+        var s = el.getBoundingClientRect(), d = el.offsetParent ? el.offsetParent.getBoundingClientRect() : { left: 0, top: 0 };
+        return [s.left - d.left + (dx == null ? s.width / 2 : dx), s.top - d.top + (dy == null ? s.height / 2 : dy)];
+      }
+      function reset() {
+        modal.classList.remove('show'); eq.classList.remove('hot'); tip.classList.remove('show'); cur.classList.remove('click');
+        lines.forEach(function (l) { l.classList.remove('on', 'reading'); });
+        if (lbl) lbl.textContent = 'Reading explanation aloud…';
+      }
+      function staticState() {
+        eq.classList.add('hot'); modal.classList.add('show');
+        lines.forEach(function (l) { l.classList.add('on'); });
+      }
+      function run() {
+        if (running) clearAll();
+        running = true; reset();
+        if (reduce) { staticState(); running = false; return; }
+        var p = place(eq, eq.offsetWidth / 2, eq.offsetHeight / 2);
+        cur.style.transform = 'translate(60px, 210px)';
+        at(500, function () { cur.style.transform = 'translate(' + (p[0] - 4) + 'px,' + (p[1] - 2) + 'px)'; });
+        at(1450, function () { eq.classList.add('hot'); var tp = place(eq, 0, eq.offsetHeight); tip.style.left = tp[0] + 'px'; tip.style.top = (tp[1] + 8) + 'px'; tip.classList.add('show'); });
+        at(2300, function () { cur.classList.add('click'); });
+        at(2360, function () { cur.classList.remove('click'); });
+        at(2600, function () { tip.classList.remove('show'); modal.classList.add('show'); });
+        var base = 3050;
+        lines.forEach(function (l, i) {
+          at(base + i * 230, function () { l.classList.add('on'); });
+          at(base + 700 + i * 900, function () { lines.forEach(function (x) { x.classList.remove('reading'); }); l.classList.add('reading'); if (lbl) lbl.textContent = 'Reading \u2014 line ' + (i + 1) + ' of ' + lines.length; });
+        });
+        var endRead = base + 700 + lines.length * 900;
+        at(endRead, function () { lines.forEach(function (x) { x.classList.remove('reading'); }); if (lbl) lbl.textContent = 'Explanation read aloud \u2713'; });
+        at(endRead + 1700, function () { modal.classList.remove('show'); eq.classList.remove('hot'); cur.style.transform = 'translate(60px, 210px)'; });
+        loopT = setTimeout(function () { running = false; run(); }, endRead + 3200);
+      }
+      var replay = document.getElementById('demoReplay');
+      if (replay) replay.addEventListener('click', function () { clearAll(); running = false; run(); });
+      eq.addEventListener('click', function () { clearAll(); running = false; run(); });
+      // start when scrolled into view
+      var started = false;
+      var io = new IntersectionObserver(function (ents) {
+        ents.forEach(function (e) { if (e.isIntersecting && !started) { started = true; run(); } });
+      }, { threshold: .35 });
+      io.observe(stage);
+    })();
+  </script>
+
+  <template id="__bundler_thumbnail">
+    <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+      <rect width="100" height="100" rx="22" fill="#4f46e5" />
+      <circle cx="50" cy="50" r="20" fill="none" stroke="#fff" stroke-width="6" stroke-linecap="round" stroke-dasharray="80 40" />
+      <path d="M40 42v16l14-8z" fill="#fff" />
+    </svg>
+  </template>
+</body>
+
+</html>

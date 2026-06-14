@@ -1,4 +1,4 @@
-/* Seed project for ProofReader */
+/* Seed project for Aloud */
 window.PR_SAMPLE = (function () {
   var tex = String.raw`\documentclass[11pt]{article}
 \usepackage{amsmath}
@@ -13,7 +13,7 @@ window.PR_SAMPLE = (function () {
 \maketitle
 
 \begin{abstract}
-We present \emph{ProofReader}, a system that reads a scientific manuscript aloud while
+We present \emph{Aloud}, a system that reads a scientific manuscript aloud while
 highlighting the sentence currently being spoken. Authors can pause at any point,
 correct the the text in place, and resume listening from the sentence they just edited.
 Our experiments show that audible proofreading helps writers catch agreement errors
@@ -67,14 +67,14 @@ recovers more issues than the silent baseline (amber) as review time grows.}
 \begin{tabular}{lcc}
 Method & Errors/min & Recall \\
 Silent baseline & 1.8 & 0.61 \\
-ProofReader & 3.4 & 0.88 \\
+Aloud & 3.4 & 0.88 \\
 \end{tabular}
 \caption{Main results on the draft-paper corpus. Higher is better for both metrics.}
 \end{table}
 
 \section{Conclusion}
 Listening to a manuscript is a simple but powerful way to find mistakes, and the results
-is encouraging. By keeping the spoken position tied to the editable source, ProofReader
+is encouraging. By keeping the spoken position tied to the editable source, Aloud
 turns proofreading into a comfortable, continuous loop of listen, fix, and continue.
 
 \end{document}

@@ -1,4 +1,4 @@
-/* Lightweight diff for ProofReader version compare (LCS over words / lines). */
+/* Lightweight diff for Aloud version compare (LCS over words / lines). */
 (function () {
   'use strict';
   function lcs(a, b) {

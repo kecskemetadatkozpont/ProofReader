@@ -1,4 +1,4 @@
-/* ProofReader app */
+/* Aloud app */
 (function () {
   const { useState, useEffect, useRef, useMemo, useLayoutEffect, useCallback } = React;
   const { useTweaks, TweaksPanel, TweakSection, TweakSlider, TweakRadio, TweakSelect, TweakColor, TweakToggle } = window;
@@ -56,6 +56,18 @@
       const seed = window.PR_SAMPLE;
       project = { id: null, title: 'Sample paper', files: JSON.parse(JSON.stringify(seed.files)), order: seed.order.slice(), active: seed.active, folders: (seed.folders || []).slice(), idx: 0 };
     }
+    // Defensive: guarantee a valid active tex file so the editor can never
+    // hard-fail (e.g. a cloud project whose data was empty/malformed).
+    if (!project.files || typeof project.files !== 'object') project.files = {};
+    if (!project.files[project.active] || project.files[project.active].type !== 'tex') {
+      const texKey = Object.keys(project.files).find((k) => project.files[k] && project.files[k].type === 'tex');
+      if (texKey) { project.active = texKey; }
+      else {
+        const seed = window.PR_SAMPLE;
+        project.files = JSON.parse(JSON.stringify(seed.files)); project.order = seed.order.slice(); project.active = seed.active; project.folders = (seed.folders || []).slice();
+      }
+    }
+    if (!Array.isArray(project.order) || !project.order.length) project.order = Object.keys(project.files);
     return {
       projectId: project.id, title: project.title, ownerId: project.ownerId,
       files: project.files, order: project.order, active: project.active, folders: project.folders || [],
@@ -70,7 +82,9 @@
     const [files, setFiles] = useState(init.files);
     const [order, setOrder] = useState(init.order);
     const [active, setActive] = useState(init.active);
-    const [compiled, setCompiled] = useState(() => window.LatexEngine.process(init.files[init.active].content, init.files));
+    const [compiled, setCompiled] = useState(() => window.LatexEngine.process((init.files[init.active] && init.files[init.active].content) || '', init.files));
+    const [signTick, setSignTick] = useState(0);
+    const SIZE_LIMIT = 50 * 1024 * 1024;
 
     const [idx, setIdxState] = useState(init.idx);
     const [status, setStatusState] = useState('idle'); // idle | playing | paused
@@ -217,6 +231,15 @@
       if (window.speechSynthesis) window.speechSynthesis.onvoiceschanged = refresh;
       return () => { if (window.speechSynthesis) window.speechSynthesis.cancel(); };
     }, []);
+
+    /* ---- sign cloud-stored binaries, then recompile so images resolve ---- */
+    useEffect(() => {
+      if (window.PRUploads && window.PRUploads.enabled) {
+        window.PRUploads.ensureSigned(files).then((changed) => {
+          if (changed) { setSignTick((t) => t + 1); try { setCompiled(window.LatexEngine.process((files[active] && files[active].content) || '', files)); } catch (e) { } }
+        });
+      }
+    }, [files, active]);
 
     /* ---- debounced recompile ---- */
     const compileTimer = useRef(null);
@@ -489,6 +512,25 @@
 
     /* ---- file upload (into the selected folder) ---- */
     const fileInput = useRef(null);
+    function putBinary(path, blob, type, name, after) {
+      if (window.PRUploads && window.PRUploads.enabled && projectId) {
+        window.PRUploads.put(projectId, name || bn(path), blob).then((meta) => {
+          setFiles((f) => ({ ...f, [path]: { type: type, storagePath: meta.storagePath, name: meta.name, size: meta.size, mime: meta.mime } }));
+          setOrder((o) => o.includes(path) ? o : [...o, path]);
+          window.PRUploads.signedUrl(meta.storagePath).then(() => setSignTick((t) => t + 1));
+          if (after) after(bn(path));
+        }, (err) => { try { const c = { ...filesRef.current }; delete c[path]; filesRef.current = c; } catch (e) { } alert('Upload failed: ' + ((err && err.message) || err)); });
+      } else {
+        const r = new FileReader();
+        r.onload = () => {
+          setFiles((f) => ({ ...f, [path]: { type: type, dataURL: String(r.result) } }));
+          setOrder((o) => o.includes(path) ? o : [...o, path]);
+          if (after) after(bn(path));
+        };
+        r.readAsDataURL(blob);
+      }
+    }
+
     function onUpload(e) {
       const list = Array.from(e.target.files || []);
       const dir = currentDir;
@@ -497,19 +539,20 @@
         const isImg = /\.(png|jpe?g|gif|svg|pdf)$/i.test(file.name);
         const isPdf = /\.pdf$/i.test(file.name);
         if (!isText && !isImg) return;
-        if (!isText && file.size > 8 * 1024 * 1024) { alert('“' + file.name + '” is larger than 8 MB and was skipped (prototype storage limit).'); return; }
+        if (!isText && file.size > SIZE_LIMIT) { alert('“' + file.name + '” is larger than 50 MB and was skipped.'); return; }
         const path = uniquePath((p) => !!filesRef.current[p], pjoin(dir, file.name));
         filesRef.current = { ...filesRef.current, [path]: {} }; // reserve to avoid same-batch collisions
-        const r = new FileReader();
-        r.onload = () => {
-          const entry = isText
-            ? { type: /\.bib$/i.test(file.name) ? 'bib' : 'tex', content: String(r.result) }
-            : { type: isPdf ? 'pdf' : 'image', dataURL: String(r.result) };
-          setFiles((f) => ({ ...f, [path]: entry }));
-          setOrder((o) => o.includes(path) ? o : [...o, path]);
-          if (isText && /\.tex$/i.test(file.name)) setActive(path);
-        };
-        if (isText) r.readAsText(file); else r.readAsDataURL(file);
+        if (isText) {
+          const r = new FileReader();
+          r.onload = () => {
+            setFiles((f) => ({ ...f, [path]: { type: /\.bib$/i.test(file.name) ? 'bib' : 'tex', content: String(r.result) } }));
+            setOrder((o) => o.includes(path) ? o : [...o, path]);
+            if (/\.tex$/i.test(file.name)) setActive(path);
+          };
+          r.readAsText(file);
+        } else {
+          putBinary(path, file, isPdf ? 'pdf' : 'image', file.name);
+        }
         if (dir) setExpanded((s) => new Set(s).add(dir));
       });
       e.target.value = '';
@@ -534,7 +577,7 @@
         const rel = (file.webkitRelativePath || file.name).replace(/\\/g, '/');
         const isText = /\.(tex|bib|cls|sty|txt)$/i.test(file.name);
         const isImg = /\.(png|jpe?g|gif|svg|pdf)$/i.test(file.name);
-        if ((!isText && !isImg) || file.size > 4 * 1024 * 1024) { skipped++; return; }
+        if ((!isText && !isImg) || file.size > SIZE_LIMIT) { skipped++; return; }
         const path = uniquePath((p) => !!filesRef.current[p] || reserved[p], dir ? dir + '/' + rel : rel);
         reserved[path] = 1; filesRef.current = { ...filesRef.current, [path]: {} };
         const segs = path.split('/'); segs.pop();
@@ -544,21 +587,22 @@
         if (makeActive) firstTex = path;
         items.push({ file, path, isText, makeActive });
       });
-      const note = (n) => alert(n + ' file' + (n === 1 ? '' : 's') + ' skipped — only .tex, .bib, .cls, .sty, .txt and images under 4 MB are imported.');
+      const note = (n) => alert(n + ' file' + (n === 1 ? '' : 's') + ' skipped — only .tex, .bib, .cls, .sty, .txt, images and PDFs under 50 MB are imported.');
       if (!items.length) { if (skipped) note(skipped); return; }
       if (newFolders.size) setFolders((fs) => { const set = new Set(fs); newFolders.forEach((f) => set.add(f)); return Array.from(set); });
       setExpanded((s) => { const n = new Set(s); if (dir) n.add(dir); newFolders.forEach((f) => n.add(f)); return n; });
       items.forEach((it) => {
-        const r = new FileReader();
-        r.onload = () => {
-          const entry = it.isText
-            ? { type: /\.bib$/i.test(it.file.name) ? 'bib' : 'tex', content: String(r.result) }
-            : { type: /\.pdf$/i.test(it.file.name) ? 'pdf' : 'image', dataURL: String(r.result) };
-          setFiles((f) => ({ ...f, [it.path]: entry }));
-          setOrder((o) => o.includes(it.path) ? o : [...o, it.path]);
-          if (it.makeActive) setActive(it.path);
-        };
-        if (it.isText) r.readAsText(it.file); else r.readAsDataURL(it.file);
+        if (it.isText) {
+          const r = new FileReader();
+          r.onload = () => {
+            setFiles((f) => ({ ...f, [it.path]: { type: /\.bib$/i.test(it.file.name) ? 'bib' : 'tex', content: String(r.result) } }));
+            setOrder((o) => o.includes(it.path) ? o : [...o, it.path]);
+            if (it.makeActive) setActive(it.path);
+          };
+          r.readAsText(it.file);
+        } else {
+          putBinary(it.path, it.file, /\.pdf$/i.test(it.file.name) ? 'pdf' : 'image', it.file.name);
+        }
       });
       if (skipped) setTimeout(() => note(skipped), 120);
     }
@@ -773,17 +817,13 @@
     function onInsertImagePicked(e) {
       const file = (e.target.files || [])[0]; e.target.value = '';
       if (!file || !/\.(png|jpe?g|gif|svg)$/i.test(file.name)) return;
+      if (file.size > SIZE_LIMIT) { alert('Image is larger than 50 MB.'); return; }
       const path = uniquePath((p) => !!filesRef.current[p], pjoin(currentDir, file.name));
       filesRef.current = { ...filesRef.current, [path]: {} };
-      const r = new FileReader();
-      r.onload = () => {
-        setFiles((f) => ({ ...f, [path]: { type: 'image', dataURL: String(r.result) } }));
-        setOrder((o) => o.includes(path) ? o : [...o, path]);
-        const name = bn(path);
+      putBinary(path, file, 'image', file.name, (name) => {
         const fig = '\\begin{figure}[h]\n\\centering\n\\includegraphics[width=0.7\\linewidth]{' + name + '}\n\\caption{Caption}\n\\label{fig:' + name.replace(/\.[^.]+$/, '') + '}\n\\end{figure}';
         onInsertBlock(fig, pendingImgOffset.current);
-      };
-      r.readAsDataURL(file);
+      });
     }
     // Write mode: insert a pasted/dropped image blob as a figure.
     const onInsertImageBlob = (blob, off) => {
@@ -791,14 +831,9 @@
       const ext = ((blob.type || 'image/png').split('/')[1] || 'png').replace('jpeg', 'jpg').replace('svg+xml', 'svg');
       const path = uniquePath((p) => !!filesRef.current[p], pjoin(currentDir, 'pasted-' + Date.now() + '.' + ext));
       filesRef.current = { ...filesRef.current, [path]: {} };
-      const r = new FileReader();
-      r.onload = () => {
-        setFiles((f) => ({ ...f, [path]: { type: 'image', dataURL: String(r.result) } }));
-        setOrder((o) => o.includes(path) ? o : [...o, path]);
-        const name = bn(path);
+      putBinary(path, blob, 'image', bn(path), (name) => {
         onInsertBlock('\\begin{figure}[h]\n\\centering\n\\includegraphics[width=0.7\\linewidth]{' + name + '}\n\\caption{Caption}\n\\label{fig:' + name.replace(/\.[^.]+$/, '') + '}\n\\end{figure}', off);
-      };
-      r.readAsDataURL(blob);
+      });
     };
 
     // bib keys (for \cite autocomplete) parsed from every .bib file in the project
@@ -917,26 +952,22 @@
     function onPdfPicked(e) {
       const file = (e.target.files || [])[0]; e.target.value = '';
       if (!file || !/\.pdf$/i.test(file.name)) { if (file) alert('Please choose a PDF file.'); return; }
-      if (file.size > 8 * 1024 * 1024) { alert('PDF is larger than 8 MB (prototype limit).'); return; }
-      const r = new FileReader();
-      r.onload = () => {
-        const path = uniquePath((p) => !!filesRef.current[p], pjoin(currentDir, file.name));
-        setFiles((f) => ({ ...f, [path]: { type: 'pdf', dataURL: String(r.result) } }));
-        setOrder((o) => o.includes(path) ? o : [...o, path]);
-        addPaneNextTo(WS.mkPane('pdf', null, path), 'row');
-      };
-      r.readAsDataURL(file);
+      if (file.size > SIZE_LIMIT) { alert('PDF is larger than 50 MB.'); return; }
+      const path = uniquePath((p) => !!filesRef.current[p], pjoin(currentDir, file.name));
+      filesRef.current = { ...filesRef.current, [path]: {} };
+      putBinary(path, file, 'pdf', file.name, () => { addPaneNextTo(WS.mkPane('pdf', null, path), 'row'); });
     }
     const blobURLs = useRef({});
     const getFileURL = useCallback((file) => {
       const f = files[file]; if (!f) return null;
+      if (f.storagePath && window.PR_SIGNED && window.PR_SIGNED[f.storagePath]) return window.PR_SIGNED[f.storagePath];
       if (f.type === 'pdf' && f.dataURL) {
         const cached = blobURLs.current[file];
         if (cached && cached.dataURL === f.dataURL) return cached.url;
         try { const url = URL.createObjectURL(dataURLToBlob(f.dataURL)); blobURLs.current[file] = { dataURL: f.dataURL, url: url }; return url; } catch (e) { return f.dataURL; }
       }
       return f.dataURL || f.src || null;
-    }, [files]);
+    }, [files, signTick]);
     const getFileData = useCallback((file) => { const f = files[file]; return f && f.dataURL ? f.dataURL : null; }, [files]);
     const onPrintDoc = useCallback((docId) => {
       const comp = getCompiled(docId); if (!comp) return;
@@ -1034,7 +1065,7 @@
               <svg viewBox="0 0 16 16" width="15" height="15"><path d="M10 3L5 8l5 5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
             </a>
             <div className="brand-mark"><span></span></div>
-            <div className="brand-text"><b>{init.title || 'ProofReader'}</b><i>LaTeX read-aloud editor</i></div>
+            <div className="brand-text"><b>{init.title || 'Aloud'}</b><i>LaTeX read-aloud editor</i></div>
           </div>
           <div className="topbar-center">
             <span className="file-chip"><svg viewBox="0 0 16 16" className="dot"><circle cx="8" cy="8" r="4" /></svg>{active ? bn(active) : 'No file open'}</span>

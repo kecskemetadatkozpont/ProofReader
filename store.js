@@ -1,4 +1,4 @@
-/* Shared project store for ProofReader (localStorage-backed, Phase 1 prototype).
+/* Shared project store for Aloud (localStorage-backed, Phase 1 prototype).
  * Requires sample.js and auth.js. Adds collaboration: members/roles, share links,
  * activity log, versions, annotations (comments + to-dos), usage metering,
  * reading sessions, and cross-tab realtime notifications. */
@@ -20,7 +20,7 @@
   function read(k, d) { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return d; } }
   function readAll() { return read(KEY, []) || []; }
   function trySet(k, v) { try { localStorage.setItem(k, v); return true; } catch (e) { return false; } }
-  function storageFull() { try { window.dispatchEvent(new CustomEvent('pr-storage-full')); } catch (e) { } console.warn('[ProofReader] localStorage is full — save could not complete.'); }
+  function storageFull() { try { window.dispatchEvent(new CustomEvent('pr-storage-full')); } catch (e) { } console.warn('[Aloud] localStorage is full — save could not complete.'); }
   function trimVersions(arr, keepAutos) {
     return arr.map(function (p) {
       if (!p.versions || !p.versions.length) return p;

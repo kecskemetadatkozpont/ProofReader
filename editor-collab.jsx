@@ -1,4 +1,4 @@
-/* ProofReader editor collaboration UI (presentational). Exposes window.Collab. */
+/* Aloud editor collaboration UI (presentational). Exposes window.Collab. */
 (function () {
   const { useState, useEffect, useRef } = React;
   const Auth = window.PRAuth;
@@ -41,7 +41,7 @@
     const files = Array.from(fileList || []);
     let n = files.length; const out = []; if (!n) { cb([]); return; }
     files.forEach((file) => {
-      if (file.size > 4 * 1024 * 1024) { alert('“' + file.name + '” is larger than 4 MB and was skipped (prototype storage limit).'); if (--n === 0) cb(out); return; }
+      if (file.size > 50 * 1024 * 1024) { alert('“' + file.name + '” is larger than 50 MB and was skipped.'); if (--n === 0) cb(out); return; }
       const isImg = /^image\//.test(file.type);
       const r = new FileReader();
       r.onload = () => { out.push({ id: Math.random().toString(36).slice(2), name: file.name, type: isImg ? 'image' : 'file', mime: file.type, size: file.size, dataURL: String(r.result) }); if (--n === 0) cb(out); };
