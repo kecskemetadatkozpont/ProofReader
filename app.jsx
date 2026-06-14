@@ -1007,7 +1007,8 @@
     }, [files, signTick]);
     const getFileData = useCallback((file) => { const f = files[file]; return f && f.dataURL ? f.dataURL : null; }, [files]);
     const onPrintDoc = useCallback((docId) => {
-      const comp = getCompiled(docId); if (!comp) return;
+      docId = docId || active;
+      const comp = getCompiled(docId); if (!comp) { alert('Nothing to render yet — open a document first.'); return; }
       const w = window.open('', '_blank'); if (!w) { alert('Please allow pop-ups to export the PDF.'); return; }
       w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>' + docLabel(docId) + '</title>' +
         '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">' +
@@ -1015,7 +1016,7 @@
         '<style>body{margin:0;background:#fff;font-family:"Source Serif 4",Georgia,serif;color:#1d2430;line-height:1.6}.paper{max-width:680px;margin:0 auto;padding:48px 40px}h1,h2,h3{font-family:inherit}.sent{}@media print{.paper{max-width:none}}</style>' +
         '</head><body><div class="paper">' + comp.html + '</div></body></html>');
       w.document.close(); w.focus(); setTimeout(() => { try { w.print(); } catch (e) { } }, 700);
-    }, [getCompiled, docLabel]);
+    }, [getCompiled, docLabel, active]);
     const myProjects = useCallback(() => (window.PRStore ? window.PRStore.listFor(me.id).filter((p) => p.id !== projectId) : []), [projectId]);
     const projTexFiles = useCallback((p) => Object.keys(p.files || {}).filter((f) => p.files[f] && p.files[f].type === 'tex'), []);
     const externalDocsList = useCallback(() => Object.keys(extDocs.current).map((docId) => ({ docId, label: docLabel(docId) })), [extTick]);
