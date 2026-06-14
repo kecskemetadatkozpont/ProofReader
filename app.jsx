@@ -19,6 +19,8 @@
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const PROJECT_ID = new URLSearchParams(location.search).get('p');
   if (typeof window !== 'undefined' && !window.PR_RENDEROPTS) window.PR_RENDEROPTS = { numberSections: true, citeStyle: 'numeric' };
+  // Standalone (e.g. GitHub Pages, no host toolbar) → show our own Tweaks button.
+  const PR_STANDALONE = (() => { try { return window.top === window.self; } catch (e) { return true; } })();
 
   /* data: URLs don't render reliably for PDFs inside iframes/objects (Chrome blocks them),
      so convert to a same-origin Blob URL which the built-in PDF viewer accepts. */
@@ -1228,6 +1230,8 @@
 
         {uploads.length > 0 && <UploadModal items={uploads} onClose={() => setUploads([])} />}
         {t.renderMode === 'manual' && renderStale && <button className="render-pill" onClick={renderNow} title="Render preview (⌘/Ctrl + Enter)"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M13 8a5 5 0 11-1.5-3.5M13 2v3h-3" strokeLinecap="round" strokeLinejoin="round" /></svg>Render preview</button>}
+
+        {PR_STANDALONE && <button className="tweaks-fab" onClick={() => window.postMessage({ type: '__activate_edit_mode' }, '*')} title="Settings & Tweaks"><svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.6"><circle cx="10" cy="10" r="2.7" /><path d="M10 2.5v2M10 15.5v2M2.5 10h2M15.5 10h2M4.7 4.7l1.4 1.4M13.9 13.9l1.4 1.4M4.7 15.3l1.4-1.4M13.9 6.1l1.4-1.4" strokeLinecap="round" /></svg></button>}
 
         {cmdk && <CommandPalette onClose={() => setCmdk(false)} items={[
           { group: 'Reading', label: status === 'playing' ? 'Pause reading' : 'Play — read aloud', hint: 'Space', run: play },
