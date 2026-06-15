@@ -243,6 +243,11 @@
       // chapter/fragment — a fragment alone produces "No pages of output" (status -253) in real pdfTeX.
       const roots = Object.keys(files).filter((p) => files[p] && files[p].type === 'tex' && /\\documentclass/.test(files[p].content || ''));
       if (roots.length && roots.indexOf(main) < 0) main = (roots.indexOf(active) >= 0 ? active : roots[0]);
+      // Rebase to the main file's directory so the engine compiles from the root: the SwiftLaTeX worker
+      // chdir's to /work and reads "<mainfile-without-.tex>.pdf", so a main .tex inside a subfolder (e.g.
+      // an uploaded "Overleaf bundle" under a prefix) yields status -253 even for a valid document.
+      const mainDir = main.indexOf('/') >= 0 ? main.slice(0, main.lastIndexOf('/') + 1) : '';
+      const rebase = (p) => (mainDir && p.indexOf(mainDir) === 0) ? p.slice(mainDir.length) : p;
       const out = [];
       try { if (window.PRUploads && window.PRUploads.ensureSigned) await window.PRUploads.ensureSigned(files); } catch (e) { }
       // collect image paths the .tex actually references (so MemFS paths match \includegraphics)
@@ -264,9 +269,9 @@
       Object.keys(files).forEach((path) => {
         const f = files[path]; if (!f) return;
         const isText = f.type === 'tex' || f.type === 'bib' || /\.(bbl|cls|sty|def|clo|cfg|tex|bib|ltx)$/i.test(path);
-        if (isText) { out.push({ path: path, text: f.content != null ? f.content : '' }); return; }
+        if (isText) { out.push({ path: rebase(path), text: f.content != null ? f.content : '' }); return; }
         if ((f.type === 'image' || f.type === 'pdf') && f.dataURL) {
-          try { pushBinary(path, dataURLToBytes(f.dataURL)); } catch (e) { }
+          try { pushBinary(rebase(path), dataURLToBytes(f.dataURL)); } catch (e) { }
         }
       });
       // binaries that need fetching: bundled assets (.src), or cloud signed URLs (.storagePath)
@@ -276,9 +281,9 @@
       });
       await Promise.all(toFetch.map(async (p) => {
         const f = files[p]; const u = f.src || (window.PR_SIGNED && window.PR_SIGNED[f.storagePath]);
-        try { const r = await fetch(u); pushBinary(p, new Uint8Array(await r.arrayBuffer())); } catch (e) { }
+        try { const r = await fetch(u); pushBinary(rebase(p), new Uint8Array(await r.arrayBuffer())); } catch (e) { }
       }));
-      return { mainFile: main, files: out };
+      return { mainFile: rebase(main), files: out };
     }, [files, active]);
 
     const requestCompile = useCallback((docId, force) => {
