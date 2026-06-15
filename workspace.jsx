@@ -636,10 +636,18 @@
     // re-highlight when the active spoken sentence changes
     useEffect(() => { applyHighlight(); }, [curSid, state]);
 
+    // register this pane's scroll element so comment/todo selection (ctx.onPreviewMouseUp) works here too
+    useEffect(() => {
+      if (ctx.registerPreview && ref.current) ctx.registerPreview(pane.id, ref.current);
+      return () => { if (ctx.registerPreview) ctx.registerPreview(pane.id, null); };
+    }, [pane.id]);
+
     // The ref'd scroll div is imperatively filled (kept empty in JSX so React never reconciles its
     // children); status overlays are React-managed siblings inside the positioned pdf-view-wrap.
     return <React.Fragment>
-      <div className="ct-scroll" ref={ref} onClick={(e) => ctx.onPreviewClick && ctx.onPreviewClick(pane, e)} />
+      <div className="ct-scroll" ref={ref}
+        onClick={(e) => ctx.onPreviewClick && ctx.onPreviewClick(pane, e)}
+        onMouseUp={(e) => ctx.onPreviewMouseUp && ctx.onPreviewMouseUp(pane, e)} />
       {state === 'loading' && <div className="pdf-status">Renderelés…</div>}
       {state === 'error' && <div className="pdf-status">Nem sikerült megjeleníteni.</div>}
     </React.Fragment>;
@@ -679,7 +687,7 @@
     const [dz, setDz] = useState(null); // active drop zone while dragging over
     const bodyRef = useRef(null);
     const focused = ctx.focusedPaneId === pane.id;
-    const syncable = pane.kind === 'source' || pane.kind === 'preview';
+    const syncable = pane.kind === 'source' || pane.kind === 'preview' || pane.kind === 'compiled';
     const color = syncable ? ctx.docColor(pane.docId) : null;
     const active = syncable && pane.docId === ctx.activeDocId;
     useEffect(() => { if (!menu) return; const c = () => setMenu(null); window.addEventListener('click', c); return () => window.removeEventListener('click', c); }, [menu]);
