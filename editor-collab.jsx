@@ -36,6 +36,34 @@
     </div>;
   }
 
+  /* Hover card for an annotated sentence — shows each comment/to-do, its text and author,
+   * floating just outside the sentence's top-right corner. */
+  function AnnoPopover({ pop, onEnter, onLeave }) {
+    if (!pop || !pop.items || !pop.items.length) return null;
+    const W = 300;
+    let left = pop.right + 10;
+    if (left + W > window.innerWidth - 10) left = Math.max(10, pop.left - W - 10); // flip to the left if off-screen
+    let top = Math.max(8, pop.top - 6);
+    if (top + 70 > window.innerHeight) top = Math.max(8, window.innerHeight - 80);
+    return <div className="anno-pop2" style={{ top: top, left: left, width: W }} onMouseEnter={onEnter} onMouseLeave={onLeave}>
+      {pop.items.map((it, i) => <div key={i} className="anno-pop2-item">
+        <div className="anno-pop2-head">
+          <span className="anno-pop2-av" style={{ background: it.color }}>{it.initials}</span>
+          <span className="anno-pop2-author">{it.author}</span>
+          <span className={'anno-pop2-kind ' + (it.kind === 'todo' ? 'todo' : 'comment')}>
+            {it.kind === 'todo'
+              ? <svg viewBox="0 0 16 16" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 8.5l3 3 6.5-7.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+              : <svg viewBox="0 0 16 16" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M2.5 3.5h11v7H8l-3 2.5V10.5h-2.5z" strokeLinejoin="round" /></svg>}
+            {it.kind === 'todo' ? 'To-do' : 'Comment'}
+          </span>
+          {it.when ? <span className="anno-pop2-when">{it.when}</span> : null}
+        </div>
+        {it.due ? <div className="anno-pop2-due">⏷ {it.due}</div> : null}
+        <div className="anno-pop2-body">{it.body ? it.body : <i className="anno-pop2-empty">(nincs szöveg)</i>}</div>
+      </div>)}
+    </div>;
+  }
+
   /* ---- attachments + mentions helpers ---- */
   function readAttachments(fileList, cb) {
     const files = Array.from(fileList || []);
@@ -428,5 +456,5 @@
     </div></div>;
   }
 
-  window.Collab = { Avatar, PresenceBar, ResumePill, SelectionToolbar, RightDrawer, VoiceSettings, ShareModal, DiffModal };
+  window.Collab = { Avatar, PresenceBar, ResumePill, SelectionToolbar, AnnoPopover, RightDrawer, VoiceSettings, ShareModal, DiffModal };
 })();

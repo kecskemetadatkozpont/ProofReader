@@ -551,18 +551,22 @@
     const stRef = useRef(null);
     const [state, setState] = useState('loading'); // loading | ready | error
     const isActive = docId === ctx.activeDocId;
-    const curSid = (isActive && ctx.sentence && ctx.status !== 'idle') ? ctx.sentence.id : null;
+    const playing = isActive && ctx.status && ctx.status !== 'idle';
+    // follow the current sentence even when idle (cursor sync from the editor), not only while reading
+    const curSid = (isActive && ctx.sentence) ? ctx.sentence.id : null;
     const curSidRef = useRef(curSid); curSidRef.current = curSid;
+    const playingRef = useRef(playing); playingRef.current = playing;
     const annoMap = ctx.annoSids ? ctx.annoSids(docId) : {};
     const annoRef = useRef(annoMap); annoRef.current = annoMap;
 
     function applyHighlight(root) {
       root = root || (ref.current);
       if (!root) return;
-      root.querySelectorAll('.ct-textlayer > span.sent-cur').forEach((s) => s.classList.remove('sent-cur'));
+      root.querySelectorAll('.ct-textlayer > span.sent-cur, .ct-textlayer > span.sent-cursor').forEach((s) => s.classList.remove('sent-cur', 'sent-cursor'));
       const sid = curSidRef.current; if (sid == null) return;
+      const cls = playingRef.current ? 'sent-cur' : 'sent-cursor';
       const spans = root.querySelectorAll('.ct-textlayer > span[data-sid="' + sid + '"]');
-      spans.forEach((s) => s.classList.add('sent-cur'));
+      spans.forEach((s) => s.classList.add(cls));
       if (spans[0]) { try { spans[0].scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) { } }
     }
     // highlight sentences that carry a comment/to-do (lazy-safe: applied per page + on annotation change)
@@ -586,8 +590,7 @@
           const pdf = await lib.getDocument({ data: bytes.slice(), disableStream: true, disableAutoFetch: true }).promise;
           if (cancelled) return;
           const comp = ctx.getCompiled(docId); const sentences = (comp && comp.sentences) || [];
-          const eng = []; sentences.forEach((s) => ctNorm(s.text).forEach((w) => eng.push({ sid: s.id, w })));
-          let ei = 0;
+          const engSent = sentences.map((s) => ({ id: s.id, words: ctNorm(s.text) }));
           const width = Math.max(280, root.clientWidth - 28);
           const dpr = window.devicePixelRatio || 1;
           const base1 = (await pdf.getPage(1)).getViewport({ scale: 1 });
@@ -599,21 +602,37 @@
             div.style.height = Math.floor(base1.height * scale) + 'px';
             root.appendChild(div); st.pageDivs[n] = div;
           }
-          // align engine sentences → PDF text items, in document order (greedy resync)
+          // ---- robust alignment: anchor each engine sentence's START in the PDF token stream ----
+          // (per-token greedy mis-syncs at headings/math/tables/page furniture; signature anchoring is stable.)
+          const pageItems = {}; const pTok = []; const itemFirstTok = {};
           for (let n = 1; n <= pdf.numPages; n++) {
             const tc = await (await pdf.getPage(n)).getTextContent(); if (cancelled) return;
-            const sids = new Array(tc.items.length);
-            for (let i = 0; i < tc.items.length; i++) {
-              const ws = ctNorm(tc.items[i].str);
-              let chosen = ei < eng.length ? eng[ei].sid : (eng.length ? eng[eng.length - 1].sid : null);
-              for (let k = 0; k < ws.length; k++) {
-                let found = -1; for (let j = ei; j < Math.min(ei + 12, eng.length); j++) { if (eng[j].w === ws[k]) { found = j; break; } }
-                if (found >= 0) ei = found;
-                if (ei < eng.length) chosen = eng[ei].sid;
-                ei = Math.min(ei + 1, eng.length);
-              }
-              sids[i] = chosen;
+            const arr = tc.items.map((it) => ctNorm(it.str)); pageItems[n] = arr;
+            arr.forEach((ws, i) => { itemFirstTok[n + ':' + i] = ws.length ? pTok.length : -1; for (let k = 0; k < ws.length; k++) pTok.push(ws[k]); });
+          }
+          const sigOf = (words) => { const o = []; for (let k = 0; k < words.length && o.length < 4; k++) if (words[k].length >= 3) o.push(words[k]); return o.length ? o : words.slice(0, 2); };
+          const findSig = (s, from) => {
+            if (!s.length) return -1; const lim = Math.min(pTok.length, from + 600);
+            for (let start = from; start < lim; start++) {
+              if (pTok[start] !== s[0]) continue;
+              let pi = start + 1, k = 1, gaps = 0;
+              while (k < s.length && pi < pTok.length && gaps < 8) { if (pTok[pi] === s[k]) { k++; pi++; } else { pi++; gaps++; } }
+              if (k >= Math.min(s.length, 2)) return start;
             }
+            return -1;
+          };
+          const anchors = []; let cursor = 0;
+          engSent.forEach((s) => { const a = findSig(sigOf(s.words), cursor); if (a >= 0) { anchors.push({ tok: a, id: s.id }); cursor = a + 1; } });
+          const sentAtTok = (g) => {
+            if (!anchors.length) return engSent[0] && engSent[0].id;
+            if (g < 0) return anchors[0].id;
+            let lo = 0, hi = anchors.length - 1, ans = anchors[0];
+            while (lo <= hi) { const mid = (lo + hi) >> 1; if (anchors[mid].tok <= g) { ans = anchors[mid]; lo = mid + 1; } else hi = mid - 1; }
+            return ans.id;
+          };
+          for (let n = 1; n <= pdf.numPages; n++) {
+            const arr = pageItems[n]; const sids = new Array(arr.length);
+            for (let i = 0; i < arr.length; i++) sids[i] = sentAtTok(itemFirstTok[n + ':' + i]);
             st.sids[n] = sids;
           }
           if (cancelled) return;
@@ -647,7 +666,7 @@
     }, [bytes, docId]);
 
     // re-highlight when the active spoken sentence changes
-    useEffect(() => { applyHighlight(); }, [curSid, state]);
+    useEffect(() => { applyHighlight(); }, [curSid, playing, state]);
     // re-apply comment/to-do highlights to already-rendered pages when annotations change
     useEffect(() => { applyAnno(); }, [JSON.stringify(annoMap), state]);
 
@@ -660,7 +679,7 @@
     // The ref'd scroll div is imperatively filled (kept empty in JSX so React never reconciles its
     // children); status overlays are React-managed siblings inside the positioned pdf-view-wrap.
     return <React.Fragment>
-      <div className="ct-scroll" ref={ref}
+      <div className="ct-scroll" ref={ref} data-doc={docId}
         onClick={(e) => ctx.onPreviewClick && ctx.onPreviewClick(pane, e)}
         onMouseUp={(e) => ctx.onPreviewMouseUp && ctx.onPreviewMouseUp(pane, e)} />
       {state === 'loading' && <div className="pdf-status">Renderelés…</div>}

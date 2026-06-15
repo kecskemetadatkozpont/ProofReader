@@ -258,6 +258,7 @@
     .ct-textlayer > span { color: transparent; position: absolute; white-space: pre; cursor: pointer; transform-origin: 0 0; border-radius: 2px; }
     .ct-textlayer > span.sent:hover { background: rgba(79,70,229,.18); }
     .ct-textlayer > span.sent-cur { background: rgba(255,170,0,.42); box-shadow: 0 0 0 1px rgba(255,140,0,.35); }
+    .ct-textlayer > span.sent-cursor { background: rgba(79,70,229,.26); box-shadow: 0 0 0 1px rgba(79,70,229,.3); }
     /* comment/to-do highlight on the compiled PDF (reuse preview colors; reset padding/margin for positioned spans) */
     .ct-textlayer > span.sent.has-comment, .ct-textlayer > span.sent.has-todo, .ct-textlayer > span.sent.has-both { padding: 0; margin: 0; }
     .img-pane { background: #2a2530; display: grid; place-items: center; overflow: auto; padding: 14px; }
@@ -670,6 +671,23 @@
     .anno-av:first-child { margin-left: 0; }
     .anno-ic { display: inline-grid; place-items: center; margin-left: 3px; }
     .anno-ic.comment { color: var(--accent); } .anno-ic.todo { color: #c2710c; }
+    /* hover card for an annotated sentence — comment/to-do text + author, floating at the sentence corner */
+    .anno-pop2 { position: fixed; z-index: 82; background: var(--pane, #fff); border: 1px solid var(--line, #e4e7ec); border-radius: 11px;
+      box-shadow: 0 12px 34px rgba(20,24,40,.22), 0 2px 8px rgba(20,24,40,.10); padding: 3px; max-height: 280px; overflow-y: auto;
+      font-family: 'IBM Plex Sans', system-ui, sans-serif; color: var(--ink, #1a2030); animation: annoPopIn .12s ease-out; }
+    @keyframes annoPopIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: none; } }
+    .anno-pop2-item { padding: 8px 10px; }
+    .anno-pop2-item + .anno-pop2-item { border-top: 1px solid var(--line, #eef0f3); }
+    .anno-pop2-head { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; }
+    .anno-pop2-av { width: 18px; height: 18px; border-radius: 50%; color: #fff; font-size: 9px; font-weight: 700; display: inline-grid; place-items: center; flex: none; }
+    .anno-pop2-author { font-weight: 600; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .anno-pop2-kind { display: inline-flex; align-items: center; gap: 3px; font-size: 10.5px; font-weight: 600; padding: 1.5px 8px; border-radius: 20px; margin-left: auto; flex: none; }
+    .anno-pop2-kind.comment { color: var(--accent, #4f46e5); background: color-mix(in srgb, var(--accent, #4f46e5) 13%, transparent); }
+    .anno-pop2-kind.todo { color: #c2710c; background: color-mix(in srgb, #d9760b 15%, transparent); }
+    .anno-pop2-when { font-size: 10.5px; color: var(--muted, #9aa0aa); flex: none; }
+    .anno-pop2-due { font-size: 11px; color: #c2710c; margin: -2px 0 4px; font-weight: 600; }
+    .anno-pop2-body { font-size: 12.5px; line-height: 1.45; color: var(--ink, #2a3040); white-space: pre-wrap; word-break: break-word; }
+    .anno-pop2-empty { color: var(--muted, #9aa0aa); }
 
     /* resume pill */
     .resume-pill { position: fixed; bottom: 90px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 9px; background: var(--ink); color: #fff; padding: 8px 8px 8px 14px; border-radius: 24px; box-shadow: 0 8px 26px rgba(0,0,0,.3); z-index: 30; font-size: 13px; }

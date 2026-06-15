@@ -1020,6 +1020,40 @@
       return map;
     }, [displayAnns, annotations, active, getCompiled]);
 
+    // annotations on a given sentence (for the hover card): body, author, kind, due
+    const annoForSentence = useCallback((docId, sid) => {
+      const comp = getCompiled(docId); if (!comp) return [];
+      const s = comp.sentences.find((x) => String(x.id) === String(sid)); if (!s) return [];
+      const anns = docId === active ? displayAnns : annotations;
+      const A = window.PRAuth;
+      return anns.filter((a) => a.anchor && a.anchor.file === docId && !a._orphan && a.status !== 'resolved' && a.status !== 'done' && a.anchor.start < s.end && a.anchor.end > s.start)
+        .map((a) => { const au = A && A.byId(a.authorId); return { kind: a.kind, body: a.body, due: a.due, author: au ? au.name : 'Valaki', color: (au && au.color) ? au.color : '#8a8f98', initials: (au && A.initials) ? A.initials(au.name) : '•' }; });
+    }, [getCompiled, displayAnns, annotations, active]);
+
+    // hover card showing the comment/to-do text + author at the sentence's top-right corner
+    const [annoPop, setAnnoPop] = useState(null);
+    const annoPopTimer = useRef(null);
+    useEffect(() => {
+      const SEL = '.sent.has-comment, .sent.has-todo, .sent.has-both';
+      let curEl = null;
+      const over = (e) => {
+        const el = e.target.closest && e.target.closest(SEL);
+        if (!el || el === curEl) return;
+        curEl = el; clearTimeout(annoPopTimer.current);
+        const root = el.closest('[data-doc]'); const docId = root ? root.getAttribute('data-doc') : active;
+        const items = annoForSentence(docId, el.getAttribute('data-sid'));
+        if (!items.length) { setAnnoPop(null); return; }
+        const r = el.getBoundingClientRect();
+        setAnnoPop({ top: r.top, left: r.left, right: r.right, items: items });
+      };
+      const out = (e) => {
+        const el = e.target.closest && e.target.closest(SEL); if (!el) return;
+        curEl = null; annoPopTimer.current = setTimeout(() => setAnnoPop(null), 220);
+      };
+      document.addEventListener('mouseover', over); document.addEventListener('mouseout', out);
+      return () => { document.removeEventListener('mouseover', over); document.removeEventListener('mouseout', out); clearTimeout(annoPopTimer.current); };
+    }, [annoForSentence, active]);
+
     function startAnnotation(kind) {
       const r = selRange.current;
       const file = selDocRef.current && isCurProj(selDocRef.current) ? selDocRef.current : active;
@@ -1362,6 +1396,7 @@
         {editPaused && <Collab.ResumePill label={'Paused while you edit — resume from sentence ' + (idx + 1)} onResume={() => { setEditPaused(false); play(); }} onDismiss={() => setEditPaused(false)} />}
         {storageWarn && <div className="storage-toast"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M8 5v4" strokeLinecap="round" /><circle cx="8" cy="11.5" r=".6" fill="currentColor" /><path d="M8 2l6 11H2z" strokeLinejoin="round" /></svg><div><b>Storage is full</b><span>Your latest change may not have saved. Delete old versions or large attachments to free space.</span></div><button onClick={() => setStorageWarn(false)}>✕</button></div>}
         {voiceOpen && <Collab.VoiceSettings engine={voice.engine} elevenVoice={voice.elevenVoice} model={voice.model} stability={voice.stability} similarity={voice.similarity} set={(patch) => setVoice((v) => Object.assign({}, v, patch))} />}
+        {annoPop && <Collab.AnnoPopover pop={annoPop} onEnter={() => clearTimeout(annoPopTimer.current)} onLeave={() => setAnnoPop(null)} />}
 
         {uploads.length > 0 && <UploadModal items={uploads} onClose={() => setUploads([])} />}
         {t.renderMode === 'manual' && renderStale && <button className="render-pill" onClick={renderNow} title="Render preview (⌘/Ctrl + Enter)"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M13 8a5 5 0 11-1.5-3.5M13 2v3h-3" strokeLinecap="round" strokeLinejoin="round" /></svg>Render preview</button>}
