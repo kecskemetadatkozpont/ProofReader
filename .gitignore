@@ -1,0 +1,13 @@
+# Large reference PDFs (the Overleaf master is 140 MB — over GitHub's 100 MB file limit; not part of the app)
+ReferencePDF/
+
+# Standalone pdf.js read-aloud proof-of-concept (dev artifact; depends on ReferencePDF, not deployed)
+pdfjs-poc/
+
+# Internal working analysis (not needed for the Pages build)
+ANALYSIS_Aloud_vs_Overleaf.md
+
+# OS / editor junk
+.DS_Store
+**/.DS_Store
+*.bak

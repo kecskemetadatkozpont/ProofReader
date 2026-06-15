@@ -34,6 +34,11 @@
     else { const dec = decodeURIComponent(data); bytes = new Uint8Array(dec.length); for (let j = 0; j < dec.length; j++) bytes[j] = dec.charCodeAt(j); }
     return new Blob([bytes], { type: mime });
   }
+  function dataURLToBytes(dataURL) {
+    const i = dataURL.indexOf(','); const head = dataURL.slice(0, i); const body = dataURL.slice(i + 1);
+    if (/;base64/i.test(head)) { const bin = atob(body); const b = new Uint8Array(bin.length); for (let j = 0; j < bin.length; j++) b[j] = bin.charCodeAt(j); return b; }
+    const dec = decodeURIComponent(body); const b = new Uint8Array(dec.length); for (let j = 0; j < dec.length; j++) b[j] = dec.charCodeAt(j); return b;
+  }
 
   /* ---- path helpers ---- */
   const dn = (p) => { const i = p.lastIndexOf('/'); return i < 0 ? '' : p.slice(0, i); };
@@ -225,6 +230,87 @@
       return out;
     }, [openDocIds, files, extTick, active]);
     const getCompiled = useCallback((docId) => docId === active ? compiled : otherCompiled[docId], [active, compiled, otherCompiled]);
+
+    /* ---- real-TeX compile (in-browser pdfTeX → PDF) for 'compiled' panes — hybrid Version B ----
+       Default: window.AloudTeX.compile() (SwiftLaTeX WASM + TeXlyre packages, GitHub-Pages-native).
+       Exact:   window.AloudTeX.compileExact() → external TeX Live 2026 API (byte-identical). */
+    const [pdfCompiled, setPdfCompiled] = useState({});
+    const pdfCompiledRef = useRef(pdfCompiled); pdfCompiledRef.current = pdfCompiled;
+    const pdfCompileTimers = useRef({});
+    const assembleTexFiles = useCallback(async (docId) => {
+      const main = (docId && docId[0] !== '@' && files[docId] && files[docId].type === 'tex') ? docId : active;
+      const out = [];
+      try { if (window.PRUploads && window.PRUploads.ensureSigned) await window.PRUploads.ensureSigned(files); } catch (e) { }
+      // collect image paths the .tex actually references (so MemFS paths match \includegraphics)
+      const mainText = (files[main] && files[main].content) || '';
+      const refPaths = []; let mm; const reGI = /\\includegraphics\s*(?:\[[^\]]*\])?\s*\{([^}]+)\}/g;
+      while ((mm = reGI.exec(mainText))) refPaths.push(mm[1].trim());
+      const baseNoExt = (p) => { const b = (p || '').split('/').pop(); return b.replace(/\.[^.]+$/, ''); };
+      const targetsFor = (keyPath) => {
+        const targets = [keyPath]; const kb = baseNoExt(keyPath);
+        const ext = (keyPath.match(/\.[a-z0-9]+$/i) || [''])[0];
+        refPaths.forEach((rp) => {
+          let t = rp; if (!/\.[a-z0-9]+$/i.test(t)) t = t + ext;   // graphicx may omit the extension
+          if (t !== keyPath && baseNoExt(t) === kb && targets.indexOf(t) < 0) targets.push(t);
+        });
+        return targets;
+      };
+      const pushBinary = (path, bytes) => { targetsFor(path).forEach((t) => out.push({ path: t, bytes: bytes })); };
+
+      Object.keys(files).forEach((path) => {
+        const f = files[path]; if (!f) return;
+        const isText = f.type === 'tex' || f.type === 'bib' || /\.(bbl|cls|sty|def|clo|cfg|tex|bib|ltx)$/i.test(path);
+        if (isText) { out.push({ path: path, text: f.content != null ? f.content : '' }); return; }
+        if ((f.type === 'image' || f.type === 'pdf') && f.dataURL) {
+          try { pushBinary(path, dataURLToBytes(f.dataURL)); } catch (e) { }
+        }
+      });
+      // binaries that need fetching: bundled assets (.src), or cloud signed URLs (.storagePath)
+      const toFetch = Object.keys(files).filter((p) => {
+        const f = files[p]; if (!f || (f.type !== 'image' && f.type !== 'pdf') || f.dataURL) return false;
+        return f.src || (f.storagePath && window.PR_SIGNED && window.PR_SIGNED[f.storagePath]);
+      });
+      await Promise.all(toFetch.map(async (p) => {
+        const f = files[p]; const u = f.src || (window.PR_SIGNED && window.PR_SIGNED[f.storagePath]);
+        try { const r = await fetch(u); pushBinary(p, new Uint8Array(await r.arrayBuffer())); } catch (e) { }
+      }));
+      return { mainFile: main, files: out };
+    }, [files, active]);
+
+    const requestCompile = useCallback((docId, force) => {
+      docId = docId || active;
+      if (!docId || !window.AloudTeX) return;
+      const first = force || !pdfCompiledRef.current[docId];
+      clearTimeout(pdfCompileTimers.current[docId]);
+      const run = async () => {
+        if (window.AloudTeX.isBusy && window.AloudTeX.isBusy()) { pdfCompileTimers.current[docId] = setTimeout(run, 700); return; }
+        setPdfCompiled((s) => ({ ...s, [docId]: { ...(s[docId] || {}), busy: true, err: null } }));
+        try {
+          const input = await assembleTexFiles(docId);
+          const r = await window.AloudTeX.compile({ mainFile: input.mainFile, files: input.files, passes: 3 });
+          setPdfCompiled((s) => ({ ...s, [docId]: { busy: false, pdf: r.ok ? r.pdf : ((s[docId] || {}).pdf || null), log: r.log, pages: r.pages, status: r.status, mode: 'browser', err: r.ok ? null : ('Fordítás nem sikerült (status ' + r.status + ')'), ms: r.ms, ts: Date.now() } }));
+        } catch (e) {
+          setPdfCompiled((s) => ({ ...s, [docId]: { ...(s[docId] || {}), busy: false, err: String((e && e.message) || e), mode: 'browser', ts: Date.now() } }));
+        }
+      };
+      pdfCompileTimers.current[docId] = setTimeout(run, first ? 0 : 1300);
+    }, [assembleTexFiles, active]);
+
+    const onCompileExact = useCallback(async (docId) => {
+      docId = docId || active;
+      if (!window.AloudTeX) return;
+      if (!window.ALOUD_TEX_EXACT_ENDPOINT) { alert('A byte-azonos „Pontos PDF"-hez külső TeX Live 2026 compile-API kell.\nÁllítsd be: window.ALOUD_TEX_EXACT_ENDPOINT = "https://…".'); return; }
+      setPdfCompiled((s) => ({ ...s, [docId]: { ...(s[docId] || {}), busy: true, err: null } }));
+      try {
+        const input = await assembleTexFiles(docId);
+        const r = await window.AloudTeX.compileExact({ mainFile: input.mainFile, files: input.files });
+        setPdfCompiled((s) => ({ ...s, [docId]: { busy: false, pdf: r.pdf, pages: r.pages, status: 0, mode: 'exact', err: null, ts: Date.now() } }));
+      } catch (e) {
+        setPdfCompiled((s) => ({ ...s, [docId]: { ...(s[docId] || {}), busy: false, err: String((e && e.message) || e), ts: Date.now() } }));
+      }
+    }, [assembleTexFiles, active]);
+
+    const getCompiledPdf = useCallback((docId) => pdfCompiled[docId] || null, [pdfCompiled]);
 
     /* ---- voices ---- */
     useEffect(() => {
@@ -977,6 +1063,7 @@
       if (k === 'split') setLayout({ id: WS.nid(), type: 'split', dir: 'row', ratio: 0.5, a: WS.mkPane('source', active), b: WS.mkPane('preview', active) });
       else if (k === 'preview') setLayout(WS.mkPane('preview', active));
       else if (k === 'source') setLayout(WS.mkPane('source', active));
+      else if (k === 'compiled') setLayout({ id: WS.nid(), type: 'split', dir: 'row', ratio: 0.5, a: WS.mkPane('source', active), b: WS.mkPane('compiled', active) });
       else if (k === 'threeup') {
         const pdfs = order.filter((f) => files[f] && files[f].type === 'pdf');
         const third = pdfs.length ? WS.mkPane('pdf', null, pdfs[0]) : { id: WS.nid(), type: 'pane', kind: 'pdf', docId: active };
@@ -1195,6 +1282,7 @@
               monoSize: t.monoSize, canEdit, canComment, bibKeys,
               writeMode, setWrite: setWriteMode, onPreviewEdit, onBlockTransform, onInsertBlock, onTableEdit, onInsertImage, onInsertImageBlob,
               isCurProj, docExists, readOnlyDoc, getSource, getCompiled, docLabel, docColor,
+              getCompiledPdf, requestCompile, onCompileExact,
               canClose: window.WS.allPanes(layout).length > 1,
               onFocus: wsOnFocus, onAdd: wsOnAdd, onSplit: wsOnAdd, onClose: wsOnClose, onSolo: wsOnSolo, onSetRatio: wsOnSetRatio,
               dragId, onDragStart: (id) => setDragId(id), onDragEnd: () => setDragId(null), onMovePane: wsOnMovePane,

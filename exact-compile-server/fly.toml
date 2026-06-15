@@ -1,0 +1,20 @@
+# Fly.io deploy config for the Aloud exact-compile service.
+#   fly launch --no-deploy        (creates the app; or: fly apps create aloud-tex)
+#   fly deploy
+# Scale-to-zero keeps it ~free when idle; first request after idle cold-starts (~seconds).
+app = "aloud-tex"
+primary_region = "fra"          # pick one near you (fra/cdg/ams/iad…)
+
+[build]
+  dockerfile = "Dockerfile"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = true      # scale to zero when idle (cheap)
+  auto_start_machines = true
+  min_machines_running = 0
+
+[[vm]]
+  size = "shared-cpu-2x"
+  memory = "2gb"                 # a 200+ page tikz thesis wants headroom; bump to 4gb if OOM

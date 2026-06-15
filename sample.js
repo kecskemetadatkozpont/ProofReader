@@ -2,6 +2,7 @@
 window.PR_SAMPLE = (function () {
   var tex = String.raw`\documentclass[11pt]{article}
 \usepackage{amsmath}
+\usepackage{amssymb}
 \usepackage{graphicx}
 \usepackage{hyperref}
 

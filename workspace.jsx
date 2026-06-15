@@ -15,7 +15,7 @@
   function allPanes(n, out) { out = out || []; if (!n) return out; if (isPane(n)) out.push(n); else { allPanes(n.a, out); allPanes(n.b, out); } return out; }
   function find(n, id) { if (!n) return null; if (n.id === id) return n; if (isPane(n)) return null; return find(n.a, id) || find(n.b, id); }
   function firstPane(n) { return isPane(n) ? n : (firstPane(n.a) || firstPane(n.b)); }
-  function collectDocs(n) { const s = []; allPanes(n).forEach((p) => { if ((p.kind === 'source' || p.kind === 'preview') && p.docId) { if (s.indexOf(p.docId) < 0) s.push(p.docId); } }); return s; }
+  function collectDocs(n) { const s = []; allPanes(n).forEach((p) => { if ((p.kind === 'source' || p.kind === 'preview' || p.kind === 'compiled') && p.docId) { if (s.indexOf(p.docId) < 0) s.push(p.docId); } }); return s; }
 
   function setRatio(n, id, ratio) {
     if (!n || isPane(n)) return n;
@@ -68,9 +68,10 @@
     source: <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M6 4L3 8l3 4M10 4l3 4-3 4" strokeLinecap="round" strokeLinejoin="round" /></svg>,
     preview: <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M3 3h10v10H3z" /><path d="M5 6h6M5 8.5h6M5 11h4" strokeLinecap="round" /></svg>,
     pdf: <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M4 2h6l3 3v9H4z" strokeLinejoin="round" /><path d="M5.5 9h1.2a1 1 0 000-2H5.5v4" strokeLinecap="round" strokeLinejoin="round" /></svg>,
-    image: <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><rect x="2.5" y="3" width="11" height="10" rx="1.5" /><circle cx="6" cy="6.5" r="1" /><path d="M3 11l3-2.5 2.5 2 3-3 2 2.5" strokeLinejoin="round" /></svg>
+    image: <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><rect x="2.5" y="3" width="11" height="10" rx="1.5" /><circle cx="6" cy="6.5" r="1" /><path d="M3 11l3-2.5 2.5 2 3-3 2 2.5" strokeLinejoin="round" /></svg>,
+    compiled: <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M4 2h6l3 3v9H4z" strokeLinejoin="round" /><path d="M6.5 8.5l-1.2 1.2 1.2 1.2M9.5 8.5l1.2 1.2-1.2 1.2" strokeLinecap="round" strokeLinejoin="round" /></svg>
   };
-  const KIND_LABEL = { source: 'Source', preview: 'Preview', pdf: 'PDF', image: 'Image' };
+  const KIND_LABEL = { source: 'Source', preview: 'Preview', pdf: 'PDF', image: 'Image', compiled: 'Compiled' };
 
   /* ---------------- pane body renderers ---------------- */
   function PaneBody({ pane, ctx }) {
@@ -113,6 +114,10 @@
       const url = ctx.getFileURL(pane.file);
       if (!url) return <Missing label="image" />;
       return <div className="img-pane"><img src={url} alt={pane.file} /></div>;
+    }
+    if (pane.kind === 'compiled') {
+      if (!ctx.docExists(pane.docId)) return <Missing label="document" />;
+      return <CompiledView pane={pane} ctx={ctx} />;
     }
     return null;
   }
@@ -492,18 +497,20 @@
     const dec = decodeURIComponent(body); const b = new Uint8Array(dec.length); for (let j = 0; j < dec.length; j++) b[j] = dec.charCodeAt(j); return b;
   }
   /* PDF.js canvas renderer — renders from raw bytes (blob/data URLs are blocked in sandboxed previews). */
-  function PdfView({ data, url }) {
+  function PdfView({ data, url, bytes }) {
     const ref = useRef(null);
     const [state, setState] = useState('loading'); // loading | done | error
     useEffect(() => {
       let cancelled = false; const lib = window.pdfjsLib; const cont = ref.current;
       if (!cont) return;
-      if (!lib || (!data && !url)) { setState('error'); return; }
+      if (!lib || (!data && !url && !bytes)) { setState('error'); return; }
       setState('loading'); cont.innerHTML = '';
-      let task; let watchdog = setTimeout(() => { if (!cancelled) setState((s) => s === 'loading' ? 'error' : s); }, 12000);
+      let task; let watchdog = setTimeout(() => { if (!cancelled) setState((s) => s === 'loading' ? 'error' : s); }, 30000);
       (async () => {
         try {
-          task = data ? lib.getDocument({ data: dataURLToBytes(data), disableStream: true, disableAutoFetch: true }) : lib.getDocument({ url: url });
+          task = bytes ? lib.getDocument({ data: bytes.slice(), disableStream: true, disableAutoFetch: true })
+            : data ? lib.getDocument({ data: dataURLToBytes(data), disableStream: true, disableAutoFetch: true })
+            : lib.getDocument({ url: url });
           const pdf = await task.promise; if (cancelled) return;
           clearTimeout(watchdog);
           const width = Math.max(280, cont.clientWidth - 28);
@@ -525,11 +532,144 @@
         } catch (e) { clearTimeout(watchdog); if (!cancelled) setState('error'); }
       })();
       return () => { cancelled = true; clearTimeout(watchdog); };
-    }, [data, url]);
+    }, [data, url, bytes]);
     return <div className="pdf-view-wrap">
       <div className="pdf-view" ref={ref} />
       {state === 'loading' && <div className="pdf-status">Loading PDF…</div>}
       {state === 'error' && <div className="pdf-status">Couldn’t render this PDF inline.{url ? <> <a href={url} target="_blank" rel="noopener">Open in a new tab ↗</a></> : null}</div>}
+    </div>;
+  }
+
+  /* Compiled-PDF viewer with read-aloud sync: lazy-renders pages + a clickable text layer whose
+   * spans are aligned to the engine's spoken sentences (data-sid). Highlights the active sentence
+   * and routes clicks through ctx.onPreviewClick (same read-from-here contract as the Preview pane). */
+  function ctNorm(s) { return (s || '').toLowerCase().replace(/[^a-z0-9áéíóöőúüű]+/gi, ' ').trim().split(/\s+/).filter(Boolean); }
+  function CompiledPdfView({ pane, ctx, bytes }) {
+    const docId = pane.docId;
+    const ref = useRef(null);
+    const stRef = useRef(null);
+    const [state, setState] = useState('loading'); // loading | ready | error
+    const isActive = docId === ctx.activeDocId;
+    const curSid = (isActive && ctx.sentence && ctx.status !== 'idle') ? ctx.sentence.id : null;
+    const curSidRef = useRef(curSid); curSidRef.current = curSid;
+
+    function applyHighlight(root) {
+      root = root || (ref.current);
+      if (!root) return;
+      root.querySelectorAll('.ct-textlayer > span.sent-cur').forEach((s) => s.classList.remove('sent-cur'));
+      const sid = curSidRef.current; if (sid == null) return;
+      const spans = root.querySelectorAll('.ct-textlayer > span[data-sid="' + sid + '"]');
+      spans.forEach((s) => s.classList.add('sent-cur'));
+      if (spans[0]) { try { spans[0].scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) { } }
+    }
+
+    useEffect(() => {
+      let cancelled = false; const lib = window.pdfjsLib; const root = ref.current;
+      if (!lib || !bytes || !root) { setState('error'); return; }
+      setState('loading'); root.innerHTML = '';
+      const st = stRef.current = { pageDivs: {}, sids: {}, rendered: {}, io: null };
+      (async () => {
+        try {
+          const pdf = await lib.getDocument({ data: bytes.slice(), disableStream: true, disableAutoFetch: true }).promise;
+          if (cancelled) return;
+          const comp = ctx.getCompiled(docId); const sentences = (comp && comp.sentences) || [];
+          const eng = []; sentences.forEach((s) => ctNorm(s.text).forEach((w) => eng.push({ sid: s.id, w })));
+          let ei = 0;
+          const width = Math.max(280, root.clientWidth - 28);
+          const dpr = window.devicePixelRatio || 1;
+          const base1 = (await pdf.getPage(1)).getViewport({ scale: 1 });
+          const scale = Math.min(2.0, width / base1.width);
+          // placeholders (lazy)
+          for (let n = 1; n <= pdf.numPages; n++) {
+            const div = document.createElement('div'); div.className = 'ct-page'; div.dataset.page = n;
+            div.style.width = Math.floor(base1.width * scale) + 'px';
+            div.style.height = Math.floor(base1.height * scale) + 'px';
+            root.appendChild(div); st.pageDivs[n] = div;
+          }
+          // align engine sentences → PDF text items, in document order (greedy resync)
+          for (let n = 1; n <= pdf.numPages; n++) {
+            const tc = await (await pdf.getPage(n)).getTextContent(); if (cancelled) return;
+            const sids = new Array(tc.items.length);
+            for (let i = 0; i < tc.items.length; i++) {
+              const ws = ctNorm(tc.items[i].str);
+              let chosen = ei < eng.length ? eng[ei].sid : (eng.length ? eng[eng.length - 1].sid : null);
+              for (let k = 0; k < ws.length; k++) {
+                let found = -1; for (let j = ei; j < Math.min(ei + 12, eng.length); j++) { if (eng[j].w === ws[k]) { found = j; break; } }
+                if (found >= 0) ei = found;
+                if (ei < eng.length) chosen = eng[ei].sid;
+                ei = Math.min(ei + 1, eng.length);
+              }
+              sids[i] = chosen;
+            }
+            st.sids[n] = sids;
+          }
+          if (cancelled) return;
+          setState('ready');
+          const renderPage = async (n) => {
+            if (st.rendered[n] || cancelled) return; st.rendered[n] = true;
+            const page = await pdf.getPage(n);
+            const cssVp = page.getViewport({ scale }); const vp = page.getViewport({ scale: scale * dpr });
+            const canvas = document.createElement('canvas'); canvas.className = 'ct-canvas';
+            canvas.width = vp.width; canvas.height = vp.height;
+            canvas.style.width = Math.floor(cssVp.width) + 'px'; canvas.style.height = Math.floor(cssVp.height) + 'px';
+            st.pageDivs[n].appendChild(canvas);
+            await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise; if (cancelled) return;
+            const tl = document.createElement('div'); tl.className = 'ct-textlayer';
+            tl.style.width = Math.floor(cssVp.width) + 'px'; tl.style.height = Math.floor(cssVp.height) + 'px';
+            tl.style.setProperty('--scale-factor', scale); tl.style.setProperty('--total-scale-factor', scale);
+            st.pageDivs[n].appendChild(tl);
+            const tc = await page.getTextContent(); const textDivs = [];
+            await lib.renderTextLayer({ textContent: tc, container: tl, viewport: cssVp, textDivs: textDivs }).promise;
+            const sids = st.sids[n] || [];
+            textDivs.forEach((sp, i) => { const sid = sids[i]; if (sid != null) { sp.classList.add('sent'); sp.dataset.sid = sid; } });
+            applyHighlight(root);
+          };
+          st.renderPage = renderPage;
+          const io = new IntersectionObserver((ents) => { ents.forEach((e) => { if (e.isIntersecting) renderPage(+e.target.dataset.page).catch(() => { }); }); }, { root: root, rootMargin: '800px 0px' });
+          Object.keys(st.pageDivs).forEach((n) => io.observe(st.pageDivs[n]));
+          st.io = io;
+        } catch (e) { if (!cancelled) setState('error'); }
+      })();
+      return () => { cancelled = true; if (stRef.current && stRef.current.io) stRef.current.io.disconnect(); };
+    }, [bytes, docId]);
+
+    // re-highlight when the active spoken sentence changes
+    useEffect(() => { applyHighlight(); }, [curSid, state]);
+
+    // The ref'd scroll div is imperatively filled (kept empty in JSX so React never reconciles its
+    // children); status overlays are React-managed siblings inside the positioned pdf-view-wrap.
+    return <React.Fragment>
+      <div className="ct-scroll" ref={ref} onClick={(e) => ctx.onPreviewClick && ctx.onPreviewClick(pane, e)} />
+      {state === 'loading' && <div className="pdf-status">Renderelés…</div>}
+      {state === 'error' && <div className="pdf-status">Nem sikerült megjeleníteni.</div>}
+    </React.Fragment>;
+  }
+
+  /* Compiled view — runs the real TeX engine (in-browser SwiftLaTeX by default; external API for the
+   * byte-identical "Pontos PDF"), then renders the resulting PDF via CompiledPdfView. Hybrid Version B. */
+  function CompiledView({ pane, ctx }) {
+    const docId = pane.docId;
+    const st = ctx.getCompiledPdf ? ctx.getCompiledPdf(docId) : null;
+    const src = ctx.getSource ? ctx.getSource(docId) : '';
+    // initial compile on mount
+    useEffect(() => { if (ctx.requestCompile) ctx.requestCompile(docId, true); }, [docId]);
+    // debounced recompile when the source changes (Version B auto-recompile)
+    useEffect(() => { if (ctx.requestCompile) ctx.requestCompile(docId, false); }, [src]);
+    const busy = !!(st && st.busy), pdf = st && st.pdf, err = st && st.err;
+    const modeLabel = st && st.mode === 'exact' ? 'pontos (TeX Live 2026)' : 'böngésző (pdfTeX)';
+    return <div className="pdf-render">
+      <div className="pdf-render-bar">
+        <span>Compiled · {ctx.docLabel(docId)}{st && st.pages ? ' · ' + st.pages + ' o.' : ''} · {modeLabel}{busy ? ' · fordítás…' : ''}</span>
+        <span style={{ display: 'inline-flex', gap: 6 }}>
+          <button onClick={() => ctx.requestCompile && ctx.requestCompile(docId, true)} disabled={busy}>Újrafordítás</button>
+          <button onClick={() => ctx.onCompileExact && ctx.onCompileExact(docId)} disabled={busy} title="Byte-azonos PDF külső TeX Live 2026 API-val">Pontos PDF</button>
+        </span>
+      </div>
+      <div className="pdf-view-wrap" style={{ flex: 1, minHeight: 0 }}>
+        {err ? <div className="pdf-status">Fordítási hiba: {String(err).slice(0, 200)}</div>
+          : pdf ? <CompiledPdfView pane={pane} ctx={ctx} bytes={pdf} />
+          : <div className="pdf-status">{busy ? 'Fordítás folyamatban…' : 'Várakozás a fordításra…'}</div>}
+      </div>
     </div>;
   }
 
@@ -617,6 +757,7 @@
         <div className="ws-seg">
           <button className={pane.kind === 'source' ? 'on' : ''} onClick={() => { ctx.onRebind(pane, { kind: 'source' }); close(); }}>Source</button>
           <button className={pane.kind === 'preview' ? 'on' : ''} onClick={() => { ctx.onRebind(pane, { kind: 'preview' }); close(); }}>Preview</button>
+          <button className={pane.kind === 'compiled' ? 'on' : ''} onClick={() => { ctx.onRebind(pane, { kind: 'compiled' }); close(); }}>Compiled</button>
         </div>
         <div className="ws-menu-h">Document</div>
         {texFiles.map((f) => <button key={f} className={'ws-menu-i' + (pane.docId === f ? ' sel' : '')} onClick={() => { ctx.onRebind(pane, { docId: f }); close(); }}><span className="ws-sync-dot" style={{ background: ctx.docColor(f) }} />{bn(f)}</button>)}
@@ -681,6 +822,7 @@
         <div className="ws-menu-h">Add to workspace</div>
         <button className="ws-menu-i" onClick={() => { ctx.onAddKind('preview', ctx.activeDocId); onClose(); }}>{IC.preview}Preview of this document</button>
         <button className="ws-menu-i" onClick={() => { ctx.onAddKind('source', ctx.activeDocId); onClose(); }}>{IC.source}Source of this document</button>
+        <button className="ws-menu-i" onClick={() => { ctx.onAddKind('compiled', ctx.activeDocId); onClose(); }}>{IC.compiled}Compiled (real TeX → PDF)</button>
         <div className="ws-menu-sep" />
         {texFiles.length > 1 && <button className="ws-menu-i" onClick={() => setSub('file')}>{IC.preview}Another file in this project…<span className="ws-chev">›</span></button>}
         <button className="ws-menu-i" onClick={() => setSub('article')}>{IC.source}Another article (my projects)…<span className="ws-chev">›</span></button>
@@ -725,6 +867,7 @@
       ['split', 'Split', 'M2 3h12v10H2z M8 3v10'],
       ['preview', 'Preview only', 'M2 3h12v10H2z M5 6h6M5 8.5h6M5 11h4'],
       ['source', 'Source only', 'M2 3h12v10H2z M6 6L4 8l2 2M10 6l2 2-2 2'],
+      ['compiled', 'Source + Compiled (real TeX)', 'M2 3h12v10H2z M8 3v10 M10 6l1.3 1.3L10 8.6'],
       ['threeup', '3-up + PDF', 'M2 3h12v10H2z M6.5 3v10M10.5 3v10'],
     ];
     return <div className="ws-presets">
