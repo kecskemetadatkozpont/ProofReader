@@ -170,7 +170,7 @@
     const [diagOpen, setDiagOpen] = useState(false);
     const pf0 = window.PRStore ? window.PRStore.prefs() : {};
     const [voice, setVoice] = useState({
-      engine: pf0.engine || 'browser',
+      engine: pf0.engine || 'eleven',
       elevenVoice: (pf0.elevenVoice && pf0.elevenVoice.length > 12) ? pf0.elevenVoice : '21m00Tcm4TlvDq8ikWAM',
       model: pf0.model || 'eleven_multilingual_v2',
       stability: pf0.stability == null ? 50 : pf0.stability,
@@ -426,6 +426,15 @@
       if (i >= sents.length) { setIdx(sents.length ? sents.length - 1 : 0); setStatus('idle'); return; }
       setIdx(i); setStatus('playing');
       const mySeq = ++seqRef.current;
+
+      /* ElevenLabs selected but no API key yet — guide the user to add it instead of silently
+         falling back to the browser voice. The key is entered once in Voice settings (per browser). */
+      if (cfg.engine === 'eleven' && (!window.PREleven || !window.PREleven.hasKey())) {
+        setElevenBusy(false);
+        setElevenErr('Add your ElevenLabs API key in Voice settings (the gear ▾) to read aloud with ElevenLabs.');
+        setVoiceOpen(true); setStatus('paused');
+        return;
+      }
 
       /* ElevenLabs path — fetch (or reuse cached) audio for this sentence, then play it. */
       if (cfg.engine === 'eleven' && window.PREleven && window.PREleven.hasKey()) {
@@ -983,6 +992,34 @@
       return Object.assign({}, a, { _orphan: true });
     }), [annotations, source, active]);
 
+    // annotation ranges for the LaTeX-code highlight (CodeEditor marks): subtle comment/to-do underlay
+    const annoMarksFor = useCallback((docId) => {
+      if (!docId || docId[0] === '@') return [];
+      const anns = docId === active ? displayAnns : annotations;
+      const out = [];
+      anns.forEach((a) => {
+        if (!a.anchor || a.anchor.file !== docId || a._orphan || a.status === 'resolved' || a.status === 'done') return;
+        if (a.anchor.end > a.anchor.start) out.push({ s: a.anchor.start, e: a.anchor.end, cls: a.kind === 'todo' ? 'anno-t' : 'anno-c' });
+      });
+      return out;
+    }, [displayAnns, annotations, active]);
+
+    // sentence-id → 'comment'|'todo'|'both' map for highlighting annotated sentences on the compiled PDF
+    const annoSidsFor = useCallback((docId) => {
+      if (!docId || docId[0] === '@') return {};
+      const comp = getCompiled(docId); if (!comp) return {};
+      const anns = docId === active ? displayAnns : annotations;
+      const map = {};
+      anns.forEach((a) => {
+        if (!a.anchor || a.anchor.file !== docId || a._orphan || a.status === 'resolved' || a.status === 'done') return;
+        const k = a.kind === 'todo' ? 'todo' : 'comment';
+        comp.sentences.forEach((s) => {
+          if (a.anchor.start < s.end && a.anchor.end > s.start) map[s.id] = !map[s.id] ? k : (map[s.id] === k ? k : 'both');
+        });
+      });
+      return map;
+    }, [displayAnns, annotations, active, getCompiled]);
+
     function startAnnotation(kind) {
       const r = selRange.current;
       const file = selDocRef.current && isCurProj(selDocRef.current) ? selDocRef.current : active;
@@ -1291,7 +1328,7 @@
               monoSize: t.monoSize, canEdit, canComment, bibKeys,
               writeMode, setWrite: setWriteMode, onPreviewEdit, onBlockTransform, onInsertBlock, onTableEdit, onInsertImage, onInsertImageBlob,
               isCurProj, docExists, readOnlyDoc, getSource, getCompiled, docLabel, docColor,
-              getCompiledPdf, requestCompile, onCompileExact,
+              getCompiledPdf, requestCompile, onCompileExact, annoMarks: annoMarksFor, annoSids: annoSidsFor,
               canClose: window.WS.allPanes(layout).length > 1,
               onFocus: wsOnFocus, onAdd: wsOnAdd, onSplit: wsOnAdd, onClose: wsOnClose, onSolo: wsOnSolo, onSetRatio: wsOnSetRatio,
               dragId, onDragStart: (id) => setDragId(id), onDragEnd: () => setDragId(null), onMovePane: wsOnMovePane,

@@ -419,6 +419,8 @@
     } else if (props.readStart != null && props.readEnd != null && props.readEnd > props.readStart) {
       marks = [{ s: props.readStart, e: props.readEnd, cls: 'rd' }];
     }
+    // subtle comment/to-do underlay (highlight() sorts; overlaps resolve gracefully)
+    if (props.annoMarks && props.annoMarks.length) marks = marks.concat(props.annoMarks);
 
     const fontStyle = { fontSize: props.fontSize + 'px', lineHeight: props.lineHeight + 'px' };
 

@@ -91,6 +91,7 @@
         onSelectRange={(s, e) => ctx.onSourceSel(pane, s, e)}
         selectReq={active ? ctx.selectReq : null}
         bibKeys={ctx.bibKeys}
+        annoMarks={ctx.annoMarks ? ctx.annoMarks(pane.docId) : null}
         fontSize={ctx.monoSize} lineHeight={Math.round(ctx.monoSize * 1.6)} />;
     }
     if (pane.kind === 'preview') {
@@ -552,6 +553,8 @@
     const isActive = docId === ctx.activeDocId;
     const curSid = (isActive && ctx.sentence && ctx.status !== 'idle') ? ctx.sentence.id : null;
     const curSidRef = useRef(curSid); curSidRef.current = curSid;
+    const annoMap = ctx.annoSids ? ctx.annoSids(docId) : {};
+    const annoRef = useRef(annoMap); annoRef.current = annoMap;
 
     function applyHighlight(root) {
       root = root || (ref.current);
@@ -561,6 +564,16 @@
       const spans = root.querySelectorAll('.ct-textlayer > span[data-sid="' + sid + '"]');
       spans.forEach((s) => s.classList.add('sent-cur'));
       if (spans[0]) { try { spans[0].scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) { } }
+    }
+    // highlight sentences that carry a comment/to-do (lazy-safe: applied per page + on annotation change)
+    function applyAnno(root) {
+      root = root || (ref.current); if (!root) return;
+      const map = annoRef.current || {};
+      root.querySelectorAll('.ct-textlayer > span.sent').forEach((s) => {
+        s.classList.remove('has-comment', 'has-todo', 'has-both');
+        const k = map[s.dataset.sid];
+        if (k) s.classList.add(k === 'both' ? 'has-both' : k === 'todo' ? 'has-todo' : 'has-comment');
+      });
     }
 
     useEffect(() => {
@@ -622,7 +635,7 @@
             await lib.renderTextLayer({ textContent: tc, container: tl, viewport: cssVp, textDivs: textDivs }).promise;
             const sids = st.sids[n] || [];
             textDivs.forEach((sp, i) => { const sid = sids[i]; if (sid != null) { sp.classList.add('sent'); sp.dataset.sid = sid; } });
-            applyHighlight(root);
+            applyHighlight(root); applyAnno(root);
           };
           st.renderPage = renderPage;
           const io = new IntersectionObserver((ents) => { ents.forEach((e) => { if (e.isIntersecting) renderPage(+e.target.dataset.page).catch(() => { }); }); }, { root: root, rootMargin: '800px 0px' });
@@ -635,6 +648,8 @@
 
     // re-highlight when the active spoken sentence changes
     useEffect(() => { applyHighlight(); }, [curSid, state]);
+    // re-apply comment/to-do highlights to already-rendered pages when annotations change
+    useEffect(() => { applyAnno(); }, [JSON.stringify(annoMap), state]);
 
     // register this pane's scroll element so comment/todo selection (ctx.onPreviewMouseUp) works here too
     useEffect(() => {
