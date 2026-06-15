@@ -238,7 +238,11 @@
     const pdfCompiledRef = useRef(pdfCompiled); pdfCompiledRef.current = pdfCompiled;
     const pdfCompileTimers = useRef({});
     const assembleTexFiles = useCallback(async (docId) => {
-      const main = (docId && docId[0] !== '@' && files[docId] && files[docId].type === 'tex') ? docId : active;
+      let main = (docId && docId[0] !== '@' && files[docId] && files[docId].type === 'tex') ? docId : active;
+      // Compile the real ROOT document (the one with \documentclass) even if the pane is bound to a
+      // chapter/fragment — a fragment alone produces "No pages of output" (status -253) in real pdfTeX.
+      const roots = Object.keys(files).filter((p) => files[p] && files[p].type === 'tex' && /\\documentclass/.test(files[p].content || ''));
+      if (roots.length && roots.indexOf(main) < 0) main = (roots.indexOf(active) >= 0 ? active : roots[0]);
       const out = [];
       try { if (window.PRUploads && window.PRUploads.ensureSigned) await window.PRUploads.ensureSigned(files); } catch (e) { }
       // collect image paths the .tex actually references (so MemFS paths match \includegraphics)
@@ -288,7 +292,7 @@
         try {
           const input = await assembleTexFiles(docId);
           const r = await window.AloudTeX.compile({ mainFile: input.mainFile, files: input.files, passes: 3 });
-          setPdfCompiled((s) => ({ ...s, [docId]: { busy: false, pdf: r.ok ? r.pdf : ((s[docId] || {}).pdf || null), log: r.log, pages: r.pages, status: r.status, mode: 'browser', err: r.ok ? null : ('Fordítás nem sikerült (status ' + r.status + ')'), ms: r.ms, ts: Date.now() } }));
+          setPdfCompiled((s) => ({ ...s, [docId]: { busy: false, pdf: r.ok ? r.pdf : ((s[docId] || {}).pdf || null), log: r.log, pages: r.pages, status: r.status, mode: 'browser', err: r.ok ? null : (r.reason || ('Fordítás nem sikerült (status ' + r.status + ')')), ms: r.ms, ts: Date.now() } }));
         } catch (e) {
           setPdfCompiled((s) => ({ ...s, [docId]: { ...(s[docId] || {}), busy: false, err: String((e && e.message) || e), mode: 'browser', ts: Date.now() } }));
         }

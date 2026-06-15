@@ -659,14 +659,14 @@
     const modeLabel = st && st.mode === 'exact' ? 'pontos (TeX Live 2026)' : 'böngésző (pdfTeX)';
     return <div className="pdf-render">
       <div className="pdf-render-bar">
-        <span>Compiled · {ctx.docLabel(docId)}{st && st.pages ? ' · ' + st.pages + ' o.' : ''} · {modeLabel}{busy ? ' · fordítás…' : ''}</span>
+        <span>Compiled · {ctx.docLabel(docId)}{st && st.pages ? ' · ' + st.pages + ' o.' : ''} · {modeLabel}{busy ? ' · fordítás…' : (err ? ' · ⚠ fordítási hiba' : '')}</span>
         <span style={{ display: 'inline-flex', gap: 6 }}>
           <button onClick={() => ctx.requestCompile && ctx.requestCompile(docId, true)} disabled={busy}>Újrafordítás</button>
           <button onClick={() => ctx.onCompileExact && ctx.onCompileExact(docId)} disabled={busy} title="Byte-azonos PDF külső TeX Live 2026 API-val">Pontos PDF</button>
         </span>
       </div>
       <div className="pdf-view-wrap" style={{ flex: 1, minHeight: 0 }}>
-        {err ? <div className="pdf-status">Fordítási hiba: {String(err).slice(0, 200)}</div>
+        {err && !pdf ? <div className="pdf-status" style={{ maxWidth: '82%', whiteSpace: 'normal', lineHeight: 1.45, textAlign: 'center', background: 'rgba(120,30,30,.55)' }}>⚠️ {String(err)}</div>
           : pdf ? <CompiledPdfView pane={pane} ctx={ctx} bytes={pdf} />
           : <div className="pdf-status">{busy ? 'Fordítás folyamatban…' : 'Várakozás a fordításra…'}</div>}
       </div>

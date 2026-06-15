@@ -102,12 +102,27 @@
         if (r && r.status !== 0 && !r.pdf) break;
       }
       var ms = ((window.performance || Date).now ? performance.now() : Date.now()) - t0;
+      var ok = !!(r && r.pdf);
       return {
-        ok: !!(r && r.pdf), pdf: r ? r.pdf || null : null, log: r ? r.log || '' : '',
+        ok: ok, pdf: r ? r.pdf || null : null, log: r ? r.log || '' : '',
         pages: parsePages(r && r.log), status: r ? r.status : -1, ms: Math.round(ms),
+        reason: ok ? null : compileReason(r && r.log, r ? r.status : -1),
         engine: 'browser:swiftlatex-pdftex-1.40.21',
       };
     } finally { busy = false; }
+  }
+
+  // Turn a raw pdfTeX log + status into a human-readable failure reason.
+  function compileReason(log, status) {
+    log = String(log || '');
+    if (/No pages of output/.test(log) || status === -253) {
+      return 'A fordító 0 oldalt produkált — a fordított .tex valószínűleg töredék vagy üres ' +
+        '(hiányzik a \\documentclass / \\begin{document}…\\end{document} keret). Kösd a panelt a fő dokumentumra.';
+    }
+    var miss = /(LaTeX Error: File `[^']+' not found|! Package [^\n]+ Error:[^\n]+|! Undefined control sequence[\s\S]{0,80}|! LaTeX Error:[^\n]+|! Emergency stop|Fatal error occurred)/.exec(log);
+    if (miss) return miss[1].replace(/\s+/g, ' ').slice(0, 220);
+    if (status !== 0) return 'Fordítási hiba (status ' + status + ').';
+    return 'A fordítás nem készített PDF-et (ismeretlen ok).';
   }
 
   // External TeX Live API (byte-identical). Contract: POST JSON
