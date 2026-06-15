@@ -590,7 +590,6 @@
           const pdf = await lib.getDocument({ data: bytes.slice(), disableStream: true, disableAutoFetch: true }).promise;
           if (cancelled) return;
           const comp = ctx.getCompiled(docId); const sentences = (comp && comp.sentences) || [];
-          const engSent = sentences.map((s) => ({ id: s.id, words: ctNorm(s.text) }));
           const width = Math.max(280, root.clientWidth - 28);
           const dpr = window.devicePixelRatio || 1;
           const base1 = (await pdf.getPage(1)).getViewport({ scale: 1 });
@@ -602,37 +601,35 @@
             div.style.height = Math.floor(base1.height * scale) + 'px';
             root.appendChild(div); st.pageDivs[n] = div;
           }
-          // ---- robust alignment: anchor each engine sentence's START in the PDF token stream ----
-          // (per-token greedy mis-syncs at headings/math/tables/page furniture; signature anchoring is stable.)
-          const pageItems = {}; const pTok = []; const itemFirstTok = {};
+          // ---- alignment: monotonic token match (engine spoken words → PDF tokens) ----
+          // Granular per-token advance keeps each sentence's span set small (no clumping); a 2-word-confirmed
+          // forward resync avoids wrong jumps on common words; PDF-only tokens (page numbers, table cells,
+          // equation numbers, figure furniture) keep the CURRENT sentence instead of desyncing. Per-item majority vote.
+          const E = []; sentences.forEach((s) => ctNorm(s.text).forEach((w) => E.push({ w: w, sid: s.id })));
+          const firstSid = sentences.length ? sentences[0].id : null;
+          const lastSid = sentences.length ? sentences[sentences.length - 1].id : null;
+          const pageItems = {}; const P = []; const itemRange = {};
           for (let n = 1; n <= pdf.numPages; n++) {
             const tc = await (await pdf.getPage(n)).getTextContent(); if (cancelled) return;
             const arr = tc.items.map((it) => ctNorm(it.str)); pageItems[n] = arr;
-            arr.forEach((ws, i) => { itemFirstTok[n + ':' + i] = ws.length ? pTok.length : -1; for (let k = 0; k < ws.length; k++) pTok.push(ws[k]); });
+            arr.forEach((ws, i) => { const s0 = P.length; for (let k = 0; k < ws.length; k++) P.push(ws[k]); itemRange[n + ':' + i] = [s0, P.length]; });
           }
-          const sigOf = (words) => { const o = []; for (let k = 0; k < words.length && o.length < 4; k++) if (words[k].length >= 3) o.push(words[k]); return o.length ? o : words.slice(0, 2); };
-          const findSig = (s, from) => {
-            if (!s.length) return -1; const lim = Math.min(pTok.length, from + 600);
-            for (let start = from; start < lim; start++) {
-              if (pTok[start] !== s[0]) continue;
-              let pi = start + 1, k = 1, gaps = 0;
-              while (k < s.length && pi < pTok.length && gaps < 8) { if (pTok[pi] === s[k]) { k++; pi++; } else { pi++; gaps++; } }
-              if (k >= Math.min(s.length, 2)) return start;
-            }
-            return -1;
-          };
-          const anchors = []; let cursor = 0;
-          engSent.forEach((s) => { const a = findSig(sigOf(s.words), cursor); if (a >= 0) { anchors.push({ tok: a, id: s.id }); cursor = a + 1; } });
-          const sentAtTok = (g) => {
-            if (!anchors.length) return engSent[0] && engSent[0].id;
-            if (g < 0) return anchors[0].id;
-            let lo = 0, hi = anchors.length - 1, ans = anchors[0];
-            while (lo <= hi) { const mid = (lo + hi) >> 1; if (anchors[mid].tok <= g) { ans = anchors[mid]; lo = mid + 1; } else hi = mid - 1; }
-            return ans.id;
-          };
+          const tokSid = new Array(P.length); let ei = 0;
+          for (let pi = 0; pi < P.length; pi++) {
+            const pw = P[pi];
+            if (ei < E.length && E[ei].w === pw) { tokSid[pi] = E[ei].sid; ei++; continue; }
+            let r = -1; const lim = Math.min(ei + 60, E.length);
+            for (let j = ei + 1; j < lim; j++) { if (E[j].w === pw && (pi + 1 >= P.length || (E[j + 1] && E[j + 1].w === P[pi + 1]))) { r = j; break; } }
+            if (r >= 0) { ei = r; tokSid[pi] = E[ei].sid; ei++; }
+            else tokSid[pi] = ei < E.length ? E[ei].sid : lastSid;
+          }
           for (let n = 1; n <= pdf.numPages; n++) {
             const arr = pageItems[n]; const sids = new Array(arr.length);
-            for (let i = 0; i < arr.length; i++) sids[i] = sentAtTok(itemFirstTok[n + ':' + i]);
+            for (let i = 0; i < arr.length; i++) {
+              const rg = itemRange[n + ':' + i]; let sid = firstSid;
+              if (rg && rg[1] > rg[0]) { const votes = {}; let best = null, bc = 0; for (let t = rg[0]; t < rg[1]; t++) { const v = tokSid[t]; if (v == null) continue; votes[v] = (votes[v] || 0) + 1; if (votes[v] > bc) { bc = votes[v]; best = v; } } if (best != null) sid = best; }
+              sids[i] = sid;
+            }
             st.sids[n] = sids;
           }
           if (cancelled) return;

@@ -36,7 +36,7 @@ Commands such as \texttt{\textbackslash cite} and math are removed from the audi
 while their positions in the source are preserved.
 Sentence boundaries are detected with the rule below, where $b_i$ marks a boundary:
 \begin{equation}
-b_i = \mathbb{1}\!\left[\, t_i \in \{.,!,?\} \;\wedge\; \text{depth}(i)=0 \,\right].
+b_i = \mathbf{1}\!\left[\, t_i \in \{.,!,?\} \;\wedge\; \text{depth}(i)=0 \,\right].
 \end{equation}
 Here $\text{depth}(i)$ counts unmatched braces and math delimiters, so punctuation
 inside an equation never splits a sentence.
