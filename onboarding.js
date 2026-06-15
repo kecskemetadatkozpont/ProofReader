@@ -206,7 +206,9 @@
 
   /* ---------- route by status ---------- */
   function route(status, role, affiliation) {
-    if (status === 'approved') { unmount(); if (role === 'admin') adminButton(); return; }
+    // Admin access now lives in the React top bar (app.jsx / dashboard.jsx), gated on role,
+    // so we no longer add the floating bottom-right button that overlapped the tweaks gear.
+    if (status === 'approved') { unmount(); return; }
     if (status === 'pending') return pending();
     if (status === 'rejected') return rejected();
     if (status === 'suspended') return suspended();

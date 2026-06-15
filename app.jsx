@@ -155,6 +155,9 @@
     const selRange = useRef({ start: 0, end: 0 });
     const [previewSel, setPreviewSel] = useState(null); // {top,left} when selection made in preview
     const [shareOpen, setShareOpen] = useState(false);
+    // admin role (cloud only) — drives the top-bar Admin link (replaces the old bottom-right floating button)
+    const [isAdmin, setIsAdmin] = useState(() => !!(window.PR_BACKEND && window.PR_BACKEND.user && window.PR_BACKEND.user.role === 'admin'));
+    useEffect(() => { const h = (e) => setIsAdmin(!!(e.detail && e.detail.role === 'admin')); window.addEventListener('pr-profile', h); return () => window.removeEventListener('pr-profile', h); }, []);
     const [voiceOpen, setVoiceOpen] = useState(false);
     const [acctOpen, setAcctOpen] = useState(false);
     const [diffVersion, setDiffVersion] = useState(null);
@@ -197,12 +200,15 @@
 
     /* ---- document helpers (docId = current-project file path, or '@pid/file' for an external reference) ---- */
     const isCurProj = useCallback((docId) => !!docId && docId[0] !== '@', []);
-    const docExists = useCallback((docId) => !docId ? false : (docId[0] === '@' ? !!extDocs.current[docId] : (!!files[docId] && files[docId].type === 'tex')), [files]);
-    const readOnlyDoc = useCallback((docId) => !isCurProj(docId), [isCurProj]);
+    // text-like files that can be shown in the editor (.tex drives the compile; .bib/.cls/.sty are viewable too)
+    const isTextDoc = (docId) => { const f = files[docId]; return !!f && (f.type === 'tex' || f.type === 'bib' || f.type === 'cls' || f.type === 'sty'); };
+    const docExists = useCallback((docId) => !docId ? false : (docId[0] === '@' ? !!extDocs.current[docId] : isTextDoc(docId)), [files]);
+    // .tex is editable; other text files (.bib/.cls/.sty) are shown read-only
+    const readOnlyDoc = useCallback((docId) => !isCurProj(docId) || (isCurProj(docId) && files[docId] && files[docId].type !== 'tex'), [isCurProj, files]);
     const getSource = useCallback((docId) => {
       if (!docId) return '';
       if (docId[0] === '@') return (extDocs.current[docId] || {}).source || '';
-      return files[docId] && files[docId].type === 'tex' ? files[docId].content : '';
+      return isTextDoc(docId) ? (files[docId].content || '') : '';
     }, [files]);
     const docLabel = useCallback((docId) => {
       if (!docId) return 'Empty';
@@ -1270,7 +1276,7 @@
               <svg viewBox="0 0 16 16" width="15" height="15"><path d="M10 3L5 8l5 5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
             </a>
             <div className="brand-mark"><span></span></div>
-            <div className="brand-text"><b>{init.title || 'Aloud'}</b><i>LaTeX read-aloud editor</i></div>
+            <div className="brand-text"><b>{init.title || 'Aloud'}</b><i>LaTeX read-aloud editor</i><span id="pr-ver-slot" className="pr-ver-slot"></span></div>
           </div>
           <div className="topbar-center">
             <span className="file-chip"><svg viewBox="0 0 16 16" className="dot"><circle cx="8" cy="8" r="4" /></svg>{active ? bn(active) : 'No file open'}</span>
@@ -1284,6 +1290,9 @@
               <button className={'ct' + (drawer.open && drawer.tab === 'history' ? ' on' : '')} title="Version history" onClick={() => toggleDrawer('history')}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M8 4v4l3 1.5" strokeLinecap="round" /><path d="M2.5 8a5.5 5.5 0 105.5-5.5A5.5 5.5 0 003.2 5" /><path d="M2.5 2.5V5H5" strokeLinecap="round" strokeLinejoin="round" /></svg></button>
               <button className={'ct' + (drawer.open && drawer.tab === 'activity' ? ' on' : '')} title="Activity" onClick={() => toggleDrawer('activity')}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M2 8h3l1.5 4 3-8L13.5 8H14" strokeLinecap="round" strokeLinejoin="round" /></svg></button>
             </div>
+            {isAdmin && <a className="btn btn-icon" href="Admin.html" title="Admin">
+              <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"><path d="M8 1.8l5 1.9v3.6c0 3-2.1 5.2-5 6.1-2.9-.9-5-3.1-5-6.1V3.7z" /><path d="M5.8 8l1.6 1.6L10.4 6.5" /></svg>
+            </a>}
             <button className="btn" onClick={() => setShareOpen(true)}>
               <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4"><circle cx="4" cy="8" r="2" /><circle cx="12" cy="4" r="2" /><circle cx="12" cy="12" r="2" /><path d="M5.8 7l4.4-2.2M5.8 9l4.4 2.2" /></svg>Share
             </button>
@@ -1313,7 +1322,22 @@
         <div className="workspace">
           <FilePanel files={files} order={order} folders={folders} active={active}
             expanded={expanded} currentDir={currentDir} renaming={renaming}
-            onOpen={(p) => { const f = files[p]; if (f && (f.type === 'pdf' || f.type === 'image')) wsOnAddMedia(f.type, p); else setActive(p); }} onToggle={toggleExpand} onSetDir={setCurrentDir}
+            onOpen={(p) => {
+              const f = files[p];
+              if (f && (f.type === 'pdf' || f.type === 'image')) { wsOnAddMedia(f.type, p); return; }
+              if (!docExists(p)) return;
+              // rebind the source/preview/compiled panes that follow the active doc so the clicked file shows
+              const old = active;
+              if (p !== old) setLayout((lay) => {
+                const SK = { source: 1, preview: 1, compiled: 1 };
+                const followers = WS.allPanes(lay).filter((pane) => SK[pane.kind] && pane.docId === old);
+                let r = lay;
+                if (followers.length) followers.forEach((pane) => { r = WS.patchPane(r, pane.id, { docId: p }); });
+                else { const fp = WS.allPanes(lay).find((pane) => SK[pane.kind]); if (fp) r = WS.patchPane(r, fp.id, { docId: p }); }
+                return r;
+              });
+              setActive(p);
+            }} onToggle={toggleExpand} onSetDir={setCurrentDir}
             onNewFile={addFile} onNewFolder={addFolder} onUploadClick={() => fileInput.current.click()} onUploadFolderClick={() => dirInput.current.click()}
             onCommitRename={commitRename} onCancelRename={() => setRenaming(null)} onStartRename={(type, path) => setRenaming({ type, path })}
             onDeleteFile={deleteFile} onDeleteFolder={deleteFolder} onMove={moveItem} />

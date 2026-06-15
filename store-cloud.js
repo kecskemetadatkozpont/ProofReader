@@ -14,6 +14,7 @@
   var sb = BE.sb, me = BE.user;
 
   var PLAN = { free: { storage: 50 * 1024 * 1024, chars: 10000, label: 'Free' }, pro: { storage: 1024 * 1024 * 1024, chars: 200000, label: 'Pro' } };
+  var TRASH_TTL = 7 * 24 * 60 * 60 * 1000; // trashed projects restorable for 7 days, then auto-purged
   var WARM = 'proofreader:cloud:' + me.id + ':projects';
   var PREFS = 'proofreader:cloud:' + me.id + ':prefs';
   var USAGE = 'proofreader:cloud:' + me.id + ':usage';
@@ -95,7 +96,9 @@
     // Scope the editor's project list to what THIS user owns or is a member of
     // (explicit, not RLS-implicit) so an admin's own editor isn't flooded with
     // every project the admin can read via admin RLS.
-    var ownedQ = sb.from('projects').select('id,data,updated_at,deleted_at').eq('owner_id', me.id).is('deleted_at', null);
+    // include trashed (deleted_at not null) for the OWNER so the Trash view can list/restore them;
+    // shared projects below stay deleted_at-null so collaborators never see an owner's trash.
+    var ownedQ = sb.from('projects').select('id,data,updated_at,deleted_at').eq('owner_id', me.id);
     var memQ = sb.from('project_members').select('project_id').eq('user_id', me.id);
     return Promise.all([ownedQ, memQ]).then(function (res) {
       var owned = res[0], mem = res[1];
@@ -108,7 +111,11 @@
         all.forEach(function (row) {
           var p = (row.data && typeof row.data === 'object' && row.data.files) ? row.data
             : { id: row.id, title: (row.data && row.data.title) || 'Untitled project', ownerId: me.id };
-          p.id = row.id; seen[row.id] = 1; mergeRow(p);
+          p.id = row.id;
+          // reconcile the deleted_at column with the embedded flag (column is source of truth)
+          if (row.deleted_at) { if (!p.deletedAt) p.deletedAt = Date.parse(row.deleted_at) || Date.now(); }
+          else if (p.deletedAt) { delete p.deletedAt; }
+          seen[row.id] = 1; mergeRow(p);
         });
         CACHE = CACHE.filter(function (p) { return seen[p.id] || pending[p.id]; });
         persistWarm(); notify(); loadProfilesFor(CACHE);
@@ -139,7 +146,14 @@
   /* ---- helpers reused by the app ---- */
   function countSentences(project) { try { var f = project.files[project.active]; if (!f || f.type !== 'tex' || !window.LatexEngine) return null; return window.LatexEngine.process(f.content, project.files).sentences.length; } catch (e) { return null; } }
   function titleGuess(project) { var f = project.files[project.active]; if (f && f.type === 'tex') { var m = /\\title\{([\s\S]*?)\}/.exec(f.content); if (m) { var t = m[1].replace(/\\\\/g, ' ').replace(/\\[a-zA-Z]+\{?|[{}~]/g, '').replace(/\s+/g, ' ').trim(); if (t) return t; } } return project.title; }
-  function bytesOf(project) { try { return new Blob([JSON.stringify({ f: project.files, v: project.versions })]).size; } catch (e) { return JSON.stringify(project.files || {}).length; } }
+  function bytesOf(project) {
+    try {
+      var meta = new Blob([JSON.stringify({ f: project.files, v: project.versions })]).size;
+      var media = 0; var f = project.files || {};
+      Object.keys(f).forEach(function (k) { if (f[k] && typeof f[k].size === 'number') media += f[k].size; }); // images live in Supabase Storage; count their byte size
+      return meta + media;
+    } catch (e) { return JSON.stringify(project.files || {}).length; }
+  }
 
   function readJSON(k, d) { try { return JSON.parse(localStorage.getItem(k)) || d; } catch (e) { return d; } }
   function writeJSON(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { } }
@@ -151,8 +165,10 @@
     _hydrate: hydrate,
 
     raw: function () { return CACHE.map(normalize); },
-    list: function () { return this.raw().slice().sort(function (a, b) { return (b.updated || 0) - (a.updated || 0); }); },
-    listFor: function (userId) { return this.list().filter(function (p) { return p.ownerId === userId || p.members.some(function (m) { return m.userId === userId; }); }).map(function (p) { p._shared = p.ownerId !== userId; return p; }); },
+    list: function () { return this.raw().filter(function (p) { return !p.deletedAt; }).slice().sort(function (a, b) { return (b.updated || 0) - (a.updated || 0); }); },
+    listFor: function (userId) { this.purgeExpired(); return this.list().filter(function (p) { return p.ownerId === userId || p.members.some(function (m) { return m.userId === userId; }); }).map(function (p) { p._shared = p.ownerId !== userId; return p; }); },
+    listTrashedFor: function (userId) { this.purgeExpired(); return this.raw().filter(function (p) { return p.deletedAt && p.ownerId === userId; }).sort(function (a, b) { return (b.deletedAt || 0) - (a.deletedAt || 0); }); },
+    trashTtl: TRASH_TTL,
     get: function (id) { var i = idx(id); return i >= 0 ? normalize(CACHE[i]) : null; },
 
     roleOf: function (project, userId) { if (!project) return null; if (project.ownerId === userId) return 'owner'; var m = (project.members || []).filter(function (m) { return m.userId === userId; })[0]; if (m) return m.role; if (project.link && project.link.enabled) return project.link.role; return null; },
@@ -164,14 +180,29 @@
       var i = idx(project.id); if (i >= 0) CACHE[i] = project; else CACHE.push(project);
       persistWarm(); pushProject(project); notify(); return project;
     },
-    create: function (title, template) {
+    create: function (title, template, opts) {
+      opts = opts || {};
       var base = template === 'sample' ? sampleFiles() : blankFiles(title);
-      var p = normalize({ id: uuid(), title: title || 'Untitled project', created: Date.now(), updated: Date.now(), idx: 0, ownerId: me.id, files: base.files, order: base.order, folders: base.folders || [], active: base.active });
-      this.save(p); this.logActivity(p.id, me.id, 'created', p.title); return p;
+      var p = normalize({ id: uuid(), title: title || 'Untitled project', created: Date.now(), updated: Date.now(), idx: 0, ownerId: me.id, files: base.files, order: base.order, folders: base.folders || [], active: base.active, journal: (opts.journal || '').trim() });
+      if (opts.members && opts.members.length) {
+        p.members = opts.members.filter(function (m) { return m && m.userId && m.userId !== me.id; })
+          .map(function (m) { return { userId: m.userId, role: m.role || 'editor', invitedAt: Date.now() }; });
+      }
+      this.save(p); this.logActivity(p.id, me.id, 'created', p.title);
+      (p.members || []).forEach(function (m) { Store.logActivity(p.id, me.id, 'shared with', (window.PRAuth && window.PRAuth.byId(m.userId) || {}).name || m.userId); });
+      return p;
     },
-    duplicate: function (id) { var s = this.get(id); if (!s) return null; var p = clone(s); p.id = uuid(); p.title = s.title + ' (copy)'; p.created = p.updated = Date.now(); p.ownerId = me.id; p.members = []; p.activity = []; return this.save(p); },
+    duplicate: function (id) { var s = this.get(id); if (!s) return null; var p = clone(s); p.id = uuid(); p.title = s.title + ' (copy)'; p.created = p.updated = Date.now(); p.ownerId = me.id; p.members = []; p.activity = []; delete p.deletedAt; return this.save(p); },
     rename: function (id, title) { var p = this.get(id); if (!p) return; p.title = title; this.save(p); },
-    remove: function (id) { var i = idx(id); if (i >= 0) CACHE.splice(i, 1); persistWarm(); hardDelete(id); notify(); },
+    setJournal: function (id, journal) { var p = this.get(id); if (!p) return; p.journal = (journal || '').trim(); this.save(p); },
+    /* ---- trash (soft-delete, 7-day retention, restorable) ---- */
+    remove: function (id) { var p = this.get(id); if (!p) return; p.deletedAt = Date.now(); this.save(p); this.logActivity(id, me.id, 'moved to trash', p.title); },
+    restore: function (id) { var p = this.get(id); if (!p) return; delete p.deletedAt; this.save(p); this.logActivity(id, me.id, 'restored', p.title); },
+    purge: function (id) { var i = idx(id); if (i >= 0) CACHE.splice(i, 1); persistWarm(); delete pending[id]; try { sb.from('projects').delete().eq('id', id).then(function (r) { if (r && r.error) hardDelete(id); }, function () { hardDelete(id); }); } catch (e) { hardDelete(id); } notify(); },
+    purgeExpired: function () {
+      var now = Date.now(), self = this;
+      CACHE.filter(function (p) { return p.deletedAt && (now - p.deletedAt) > TRASH_TTL; }).forEach(function (p) { self.purge(p.id); });
+    },
 
     /* sharing */
     addMember: function (id, userId, role) { var p = this.get(id); if (!p) return; if (userId === p.ownerId) return; var m = p.members.filter(function (x) { return x.userId === userId; })[0]; if (m) m.role = role; else p.members.push({ userId: userId, role: role, invitedAt: Date.now() }); this.save(p); this.logActivity(id, me.id, 'shared with', (window.PRAuth.byId(userId) || {}).name || userId); },
@@ -213,7 +244,7 @@
     /* usage / metering (local per user for now; server metering arrives with voice) */
     month: function () { var d = new Date(); return d.getFullYear() + '-' + (d.getMonth() + 1); },
     addTts: function (userId, chars) { var u = readJSON(USAGE, {}); var m = this.month(); var rec = u[userId]; if (!rec || rec.month !== m) rec = { month: m, chars: 0, requests: 0 }; rec.chars += chars; rec.requests += 1; u[userId] = rec; writeJSON(USAGE, u); notify(); },
-    usage: function (userId) { var u = readJSON(USAGE, {}); var rec = u[userId] && u[userId].month === this.month() ? u[userId] : { chars: 0, requests: 0 }; var bytes = 0; this.raw().forEach(function (p) { if (p.ownerId === userId) bytes += bytesOf(p); }); var user = (window.PRAuth.byId(userId)) || { plan: 'free' }; var plan = PLAN[user.plan] || PLAN.free; return { storageBytes: bytes, storageLimit: plan.storage, chars: rec.chars, charLimit: plan.chars, requests: rec.requests, planLabel: plan.label }; },
+    usage: function (userId) { var u = readJSON(USAGE, {}); var rec = u[userId] && u[userId].month === this.month() ? u[userId] : { chars: 0, requests: 0 }; var bytes = 0; this.raw().forEach(function (p) { if (p.ownerId === userId && !p.deletedAt) bytes += bytesOf(p); }); var user = (window.PRAuth.byId(userId)) || { plan: 'free' }; var plan = PLAN[user.plan] || PLAN.free; return { storageBytes: bytes, storageLimit: plan.storage, chars: rec.chars, charLimit: plan.chars, requests: rec.requests, planLabel: plan.label }; },
 
     /* reading sessions */
     getReading: function (userId, projectId) { var r = readJSON(READING, {}); return r[userId + ':' + projectId] || null; },

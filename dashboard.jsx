@@ -24,6 +24,10 @@ function hashBars(seed) {
 }
 function fmtBytes(b) { if (b < 1024) return b + ' B'; if (b < 1048576) return (b / 1024).toFixed(0) + ' KB'; if (b < 1073741824) return (b / 1048576).toFixed(1) + ' MB'; return (b / 1073741824).toFixed(2) + ' GB'; }
 const ROLES = ['editor', 'commenter', 'viewer'];
+const isUrl = (s) => /^https?:\/\//i.test(String(s || '').trim());
+function journalLabel(j) { if (!j) return ''; const m = /^https?:\/\/([^/]+)/i.exec(j); return m ? m[1].replace(/^www\./, '') : j; }
+const jStyle = { display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 6, fontSize: 11.5, fontWeight: 600, color: '#475569', background: '#eef2f7', borderRadius: 6, padding: '2px 7px', maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textDecoration: 'none' };
+const isCloudMode = () => !!(window.PR_BACKEND && window.PR_BACKEND.mode === 'cloud');
 
 /* ---------------- sign-in ---------------- */
 function SignIn({ onSignIn }) {
@@ -58,18 +62,63 @@ function SignIn({ onSignIn }) {
 }
 
 /* ---------------- modals ---------------- */
-function NewModal({ onClose, onCreate }) {
-  const [title, setTitle] = useState(''); const [tpl, setTpl] = useState('sample'); const ref = useRef(null);
+function CollabRow({ user, role, onRole, onRemove }) {
+  return (
+    <div className="member-row">
+      <Avatar user={user} size={28} />
+      <span className="mname">{user.name}<small>{user.email}</small></span>
+      <select className="sel" value={role} onChange={(e) => onRole(e.target.value)}>{ROLES.map((r) => <option key={r} value={r}>{r}</option>)}</select>
+      <button className="btn-text" style={{ color: '#dc2626' }} onClick={onRemove}>Remove</button>
+    </div>
+  );
+}
+
+function NewModal({ me, onClose, onCreate }) {
+  const [title, setTitle] = useState('');
+  const [tpl, setTpl] = useState('sample');
+  const [journal, setJournal] = useState('');
+  const [email, setEmail] = useState('');
+  const [role, setRole] = useState('editor');
+  const [collabs, setCollabs] = useState([]); // [{user, role}]
+  const [err, setErr] = useState('');
+  const ref = useRef(null);
   useEffect(() => { if (ref.current) ref.current.focus(); }, []);
-  const create = () => onCreate(title.trim() || 'Untitled project', tpl);
+
+  const addCollab = async () => {
+    const e = email.trim(); if (!e) return;
+    const dup = collabs.some((c) => (c.user.email || '').toLowerCase() === e.toLowerCase()) || (me && (me.email || '').toLowerCase() === e.toLowerCase());
+    if (dup) { setErr('Already added.'); return; }
+    let u = Auth.byEmail(e);
+    if (!u && isCloudMode() && window.PR_BACKEND.findUserByEmail) { setErr('Searching…'); u = await window.PR_BACKEND.findUserByEmail(e); }
+    if (!u) { setErr(isCloudMode() ? 'No registered user with that email.' : 'No user with that email. Try: ' + Auth.users().map((x) => x.email).join(', ')); return; }
+    setCollabs((cs) => cs.concat([{ user: u, role }])); setEmail(''); setErr('');
+  };
+  const create = () => onCreate(title.trim() || 'Untitled project', tpl, { journal: journal.trim(), members: collabs.map((c) => ({ userId: c.user.id, role: c.role })) });
+
   return (
     <div className="overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-head"><h3>New project</h3><p>Give it a name and pick a starting point.</p></div>
+        <div className="modal-head"><h3>New project</h3><p>Name it, choose a target journal, and invite collaborators.</p></div>
         <div className="modal-body">
           <div className="field-label">Project name</div>
           <input ref={ref} className="text-input" value={title} placeholder="e.g. NeurIPS submission" onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') create(); }} />
-          <div className="tpl-row">
+
+          <div className="field-label" style={{ marginTop: 14 }}>Target journal <span className="usage-sub" style={{ fontWeight: 400 }}>· name or submission link, optional</span></div>
+          <input className="text-input" value={journal} placeholder="e.g. Sensors (MDPI) — https://susy.mdpi.com/…" onChange={(e) => setJournal(e.target.value)} />
+
+          <div className="field-label" style={{ marginTop: 14 }}>Invite collaborators <span className="usage-sub" style={{ fontWeight: 400 }}>· optional</span></div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input className="text-input" list="newuserlist" value={email} placeholder="name@lab.edu" onChange={(e) => { setEmail(e.target.value); setErr(''); }} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addCollab(); } }} style={{ flex: 1 }} />
+            <datalist id="newuserlist">{Auth.users().map((u) => <option key={u.id} value={u.email}>{u.name}</option>)}</datalist>
+            <select className="sel" value={role} onChange={(e) => setRole(e.target.value)}>{ROLES.map((r) => <option key={r} value={r}>{r}</option>)}</select>
+            <button className="btn-ghost" style={{ height: 42 }} onClick={addCollab}>Add</button>
+          </div>
+          {err && <div className="usage-sub" style={{ color: err === 'Searching…' ? '#64748b' : '#dc2626', marginTop: 6 }}>{err}</div>}
+          {collabs.map((c, i) => <CollabRow key={c.user.id} user={c.user} role={c.role}
+            onRole={(r) => setCollabs((cs) => cs.map((x, j) => j === i ? { user: x.user, role: r } : x))}
+            onRemove={() => setCollabs((cs) => cs.filter((_, j) => j !== i))} />)}
+
+          <div className="tpl-row" style={{ marginTop: 16 }}>
             <button className={'tpl' + (tpl === 'blank' ? ' on' : '')} onClick={() => setTpl('blank')}>
               <div className="tpl-ico"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M4 2h5l3 3v9H4z" /><path d="M9 2v3h3" /></svg></div>
               <b>Blank</b><small>A minimal article skeleton.</small>
@@ -87,12 +136,14 @@ function NewModal({ onClose, onCreate }) {
 }
 
 function ShareModal({ project, me, onClose, onChange }) {
-  const [email, setEmail] = useState(''); const [role, setRole] = useState('editor');
+  const [email, setEmail] = useState(''); const [role, setRole] = useState('editor'); const [err, setErr] = useState('');
   const owner = Auth.byId(project.ownerId);
-  const invite = () => {
-    const u = Auth.byEmail(email.trim());
-    if (!u) { alert('No user with that email in this prototype. Try: ' + Auth.users().map((x) => x.email).join(', ')); return; }
-    Store.addMember(project.id, u.id, role); setEmail(''); onChange();
+  const invite = async () => {
+    const e = email.trim(); if (!e) return;
+    let u = Auth.byEmail(e);
+    if (!u && isCloudMode() && window.PR_BACKEND.findUserByEmail) { setErr('Searching…'); u = await window.PR_BACKEND.findUserByEmail(e); }
+    if (!u) { setErr(isCloudMode() ? 'No registered user with that email.' : 'No user with that email. Try: ' + Auth.users().map((x) => x.email).join(', ')); return; }
+    Store.addMember(project.id, u.id, role); setEmail(''); setErr(''); onChange();
   };
   const link = location.origin + location.pathname.replace(/Projects\.html$/, '') + 'ProofReader.html?p=' + project.id;
   return (
@@ -102,11 +153,12 @@ function ShareModal({ project, me, onClose, onChange }) {
         <div className="modal-body">
           <div className="field-label">Invite by email</div>
           <div style={{ display: 'flex', gap: 8 }}>
-            <input className="text-input" list="userlist" value={email} placeholder="name@lab.edu" onChange={(e) => setEmail(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') invite(); }} style={{ flex: 1 }} />
+            <input className="text-input" list="userlist" value={email} placeholder="name@lab.edu" onChange={(e) => { setEmail(e.target.value); setErr(''); }} onKeyDown={(e) => { if (e.key === 'Enter') invite(); }} style={{ flex: 1 }} />
             <datalist id="userlist">{Auth.users().map((u) => <option key={u.id} value={u.email}>{u.name}</option>)}</datalist>
             <select className="sel" value={role} onChange={(e) => setRole(e.target.value)}>{ROLES.map((r) => <option key={r} value={r}>{r}</option>)}</select>
             <button className="btn-primary" style={{ height: 42 }} onClick={invite}>Invite</button>
           </div>
+          {err && <div className="usage-sub" style={{ color: err === 'Searching…' ? '#64748b' : '#dc2626', marginTop: 6 }}>{err}</div>}
 
           <div className="field-label" style={{ marginTop: 18 }}>People with access</div>
           <div className="member-row">
@@ -259,7 +311,31 @@ function Card({ project, me, onOpen, onMenu, menuOpen, onClose, onRename, onDupl
           <span className="sep" /><span>{fileCount} file{fileCount === 1 ? '' : 's'}</span>
           {sentences != null && <><span className="sep" /><span>{sentences} sentences</span></>}
         </div>
+        {project.journal && (isUrl(project.journal)
+          ? <a href={project.journal} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} style={jStyle} title={project.journal}>↗ {journalLabel(project.journal)}</a>
+          : <span style={jStyle} title={project.journal}>{journalLabel(project.journal)}</span>)}
         {members.length > 1 && <div className="members-stack">{members.slice(0, 5).map((u, i) => <Avatar key={i} user={u} size={22} />)}</div>}
+      </div>
+    </div>
+  );
+}
+
+function TrashCard({ project, ttl, onRestore, onPurge }) {
+  const left = Math.max(0, (ttl || 0) - (Date.now() - (project.deletedAt || 0)));
+  const days = Math.max(0, Math.ceil(left / 86400000));
+  return (
+    <div className="card" style={{ cursor: 'default' }}>
+      <div className="thumb" style={{ opacity: 0.55, filter: 'grayscale(0.5)' }}><MiniPage project={project} /></div>
+      <div className="card-foot">
+        <div className="card-title">{project.title}</div>
+        <div className="card-meta">
+          <span>Deleted {relTime(project.deletedAt)}</span>
+          <span className="sep" /><span style={{ color: days <= 1 ? '#dc2626' : undefined }}>{days} day{days === 1 ? '' : 's'} left</span>
+        </div>
+        <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+          <button className="btn-ghost" onClick={onRestore}><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"><path d="M3 8a5 5 0 105-5 5 5 0 00-4.5 2.8" /><path d="M3 3v2.5h2.5" /></svg>Restore</button>
+          <button className="btn-text" style={{ color: '#dc2626' }} onClick={onPurge}>Delete forever</button>
+        </div>
       </div>
     </div>
   );
@@ -274,18 +350,21 @@ function App() {
   const [modal, setModal] = useState(null); // 'new' | 'usage' | 'activity'
   const [shareId, setShareId] = useState(null);
   const [tab, setTab] = useState('all');
+  const [isAdmin, setIsAdmin] = useState(() => !!(window.PR_BACKEND && window.PR_BACKEND.user && window.PR_BACKEND.user.role === 'admin'));
   const [, force] = useState(0);
 
   const refresh = useCallback(() => { if (me) { Store.seedIfEmpty(); setProjects(Store.listFor(me.id)); } }, [me]);
   useEffect(() => { refresh(); }, [me]);
   useEffect(() => Store.subscribe(refresh), [refresh]);
   useEffect(() => { const c = () => { setMenuId(null); setAcctOpen(false); }; window.addEventListener('click', c); return () => window.removeEventListener('click', c); }, []);
+  useEffect(() => { const h = (e) => setIsAdmin(!!(e.detail && e.detail.role === 'admin')); window.addEventListener('pr-profile', h); return () => window.removeEventListener('pr-profile', h); }, []);
 
   if (!me) return <SignIn onSignIn={(id) => { Auth.signIn(id); setMe(Auth.byId(id)); }} />;
 
   const open = (id) => { location.href = 'ProofReader.html?p=' + encodeURIComponent(id); };
-  const create = (title, tpl) => { const p = Store.create(title, tpl); open(p.id); };
-  const shown = projects.filter((p) => tab === 'all' ? true : tab === 'owned' ? !p._shared : p._shared);
+  const create = (title, tpl, opts) => { const p = Store.create(title, tpl, opts); open(p.id); };
+  const trashed = Store.listTrashedFor ? Store.listTrashedFor(me.id) : [];
+  const shown = tab === 'trash' ? [] : projects.filter((p) => tab === 'all' ? true : tab === 'owned' ? !p._shared : p._shared);
   const usage = Store.usage(me.id);
   const stPct = Math.min(100, usage.storageBytes / usage.storageLimit * 100);
   const shareProject = shareId ? Store.get(shareId) : null;
@@ -293,8 +372,9 @@ function App() {
   return (
     <div>
       <header className="topbar">
-        <div className="brand"><div className="brand-mark"><span></span></div><div className="brand-text"><b>Aloud</b><i>LaTeX read-aloud editor</i></div></div>
+        <div className="brand"><div className="brand-mark"><span></span></div><div className="brand-text"><b>Aloud</b><i>LaTeX read-aloud editor</i><span id="pr-ver-slot" className="pr-ver-slot"></span></div></div>
         <div className="top-right">
+          {isAdmin && <a className="btn-ghost" href="Admin.html" title="Admin console"><svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"><path d="M8 1.8l5 1.9v3.6c0 3-2.1 5.2-5 6.1-2.9-.9-5-3.1-5-6.1V3.7z" /><path d="M5.8 8l1.6 1.6L10.4 6.5" /></svg>Admin</a>}
           <button className="btn-ghost" onClick={() => setModal('activity')}><svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.4"><circle cx="8" cy="8" r="6" /><path d="M8 5v3l2 1.5" strokeLinecap="round" /></svg>Activity</button>
           <button className="usage-chip" onClick={() => setModal('usage')} title="Storage used"><span>Storage</span><span className="mini"><i style={{ width: stPct + '%' }} /></span></button>
           <button className="btn-primary" onClick={() => setModal('new')}><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M8 3v10M3 8h10" /></svg>New project</button>
@@ -312,27 +392,40 @@ function App() {
           <div><h1>Your projects</h1><p>Welcome back, {me.name.split(' ')[0]} · open one to edit and hear it read aloud</p></div>
         </div>
         <div className="tabs">
-          {[['all', 'All'], ['owned', 'Owned by me'], ['shared', 'Shared with me']].map(([k, l]) => (
+          {[['all', 'All'], ['owned', 'Owned by me'], ['shared', 'Shared with me'], ['trash', 'Trash' + (trashed.length ? ' (' + trashed.length + ')' : '')]].map(([k, l]) => (
             <button key={k} className={'tab' + (tab === k ? ' on' : '')} onClick={() => setTab(k)}>{l}</button>
           ))}
         </div>
 
-        {shown.length === 0 && tab !== 'all'
-          ? <div className="empty"><h2>Nothing here yet</h2><p>{tab === 'shared' ? 'Projects others share with you will appear here.' : 'Create a project to get started.'}</p></div>
-          : <div className="grid">
-              {tab !== 'shared' && <button className="card new-card" onClick={() => setModal('new')}><div className="plus"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M8 3v10M3 8h10" /></svg></div><span>New project</span></button>}
-              {shown.map((p) => (
-                <Card key={p.id} project={p} me={me} onOpen={() => open(p.id)}
-                  menuOpen={menuId === p.id} onMenu={() => setMenuId(menuId === p.id ? null : p.id)} onClose={() => setMenuId(null)}
-                  onShare={() => setShareId(p.id)}
-                  onRename={(t) => { Store.rename(p.id, t); refresh(); }}
-                  onDuplicate={() => { Store.duplicate(p.id); refresh(); }}
-                  onDelete={() => { Store.remove(p.id); refresh(); }} />
-              ))}
-            </div>}
+        {tab === 'trash'
+          ? (trashed.length === 0
+              ? <div className="empty"><h2>Trash is empty</h2><p>Deleted projects are kept here for 7 days, then permanently removed.</p></div>
+              : <>
+                  <p className="usage-sub" style={{ margin: '2px 2px 14px' }}>Deleted projects are kept for 7 days, then permanently removed. Restore one to bring it back to your projects.</p>
+                  <div className="grid">
+                    {trashed.map((p) => (
+                      <TrashCard key={p.id} project={p} ttl={Store.trashTtl}
+                        onRestore={() => { Store.restore(p.id); refresh(); }}
+                        onPurge={() => { if (window.confirm('Permanently delete “' + p.title + '”? This cannot be undone.')) { Store.purge(p.id); refresh(); } }} />
+                    ))}
+                  </div>
+                </>)
+          : shown.length === 0 && tab !== 'all'
+            ? <div className="empty"><h2>Nothing here yet</h2><p>{tab === 'shared' ? 'Projects others share with you will appear here.' : 'Create a project to get started.'}</p></div>
+            : <div className="grid">
+                {tab !== 'shared' && <button className="card new-card" onClick={() => setModal('new')}><div className="plus"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M8 3v10M3 8h10" /></svg></div><span>New project</span></button>}
+                {shown.map((p) => (
+                  <Card key={p.id} project={p} me={me} onOpen={() => open(p.id)}
+                    menuOpen={menuId === p.id} onMenu={() => setMenuId(menuId === p.id ? null : p.id)} onClose={() => setMenuId(null)}
+                    onShare={() => setShareId(p.id)}
+                    onRename={(t) => { Store.rename(p.id, t); refresh(); }}
+                    onDuplicate={() => { Store.duplicate(p.id); refresh(); }}
+                    onDelete={() => { Store.remove(p.id); refresh(); }} />
+                ))}
+              </div>}
       </div>
 
-      {modal === 'new' && <NewModal onClose={() => setModal(null)} onCreate={create} />}
+      {modal === 'new' && <NewModal me={me} onClose={() => setModal(null)} onCreate={create} />}
       {modal === 'usage' && <UsageModal me={me} onClose={() => setModal(null)} />}
       {modal === 'activity' && <ActivityModal projects={projects} onClose={() => setModal(null)} />}
       {shareProject && <ShareModal project={shareProject} me={me} onClose={() => setShareId(null)} onChange={() => { force((n) => n + 1); refresh(); }} />}

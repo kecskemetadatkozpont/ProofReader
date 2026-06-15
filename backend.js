@@ -103,7 +103,25 @@
     sb: sb, mode: mode, user: me, colorFor: colorFor,
     profiles: PROFILES, cacheProfiles: cacheProfiles,
     signInWithGoogle: signInWithGoogle, chooseDemo: chooseDemo, signOut: signOut,
-    ready: Promise.resolve()
+    ready: Promise.resolve(),
+    // Resolve a registered site user by exact email (cloud only). Checks the in-memory
+    // profile cache first, then queries Supabase. Resolves to a normalized profile or null.
+    findUserByEmail: function (email) {
+      var e = String(email || '').trim().toLowerCase(); if (!e) return Promise.resolve(null);
+      var hit = Object.keys(PROFILES).map(function (k) { return PROFILES[k]; }).filter(function (u) { return (u.email || '').toLowerCase() === e; })[0];
+      if (hit) return Promise.resolve(hit);
+      return sb.from('profiles').select('id,name,email,avatar_url,color,plan').ilike('email', e).limit(1)
+        .then(function (r) { var row = r && r.data && r.data[0]; if (!row) return null; var u = { id: row.id, name: row.name, email: row.email, avatar: row.avatar_url, color: row.color || colorFor(row.id), plan: row.plan || 'free' }; PROFILES[u.id] = u; cacheProfiles(); return u; })
+        .catch(function () { return null; });
+    },
+    // Free-text search of registered users (cloud only) for collaborator pickers.
+    searchUsers: function (query) {
+      var q = String(query || '').trim(); if (q.length < 2) return Promise.resolve([]);
+      var esc = q.replace(/[%,]/g, ' ');
+      return sb.from('profiles').select('id,name,email,avatar_url,color,plan').or('email.ilike.%' + esc + '%,name.ilike.%' + esc + '%').limit(8)
+        .then(function (r) { return (r && r.data ? r.data : []).map(function (row) { var u = { id: row.id, name: row.name, email: row.email, avatar: row.avatar_url, color: row.color || colorFor(row.id), plan: row.plan || 'free' }; PROFILES[u.id] = u; return u; }); })
+        .catch(function () { return []; });
+    }
   };
 
   /* ---- cloud identity overrides PRAuth ---- */

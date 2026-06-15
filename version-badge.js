@@ -17,7 +17,11 @@
     '.pr-ver.stale{opacity:1;cursor:pointer;background:#b4530f;border-color:#e0801e;color:#fff;padding:6px 12px;box-shadow:0 4px 16px rgba(0,0,0,.3);}',
     '.pr-ver.stale .pr-ver-dot{background:#ffd27a;animation:prVerPulse 1.1s ease-in-out infinite;}',
     '@keyframes prVerPulse{0%,100%{opacity:1;}50%{opacity:.35;}}',
-    '.pr-ver-txt{white-space:nowrap;}'
+    '.pr-ver-txt{white-space:nowrap;}',
+    /* when hosted next to the logo (in #pr-ver-slot) flow inline instead of fixed */
+    '.pr-ver-slot{display:block;margin-top:2px;}',
+    '.pr-ver-slot .pr-ver{position:static;left:auto;bottom:auto;padding:1px 7px;font-size:9.5px;opacity:.6;background:rgba(255,255,255,.1);}',
+    '.pr-ver-slot .pr-ver.stale{opacity:1;padding:3px 9px;}'
   ].join('');
   var st = document.createElement('style'); st.textContent = css; (document.head || document.documentElement).appendChild(st);
 
@@ -35,8 +39,16 @@
   plain();
   chip.addEventListener('click', function () { if (chip.classList.contains('stale')) { try { location.reload(true); } catch (e) { location.reload(); } } });
 
-  function mount() { if (document.body && !chip.parentNode) document.body.appendChild(chip); }
-  if (document.body) mount(); else document.addEventListener('DOMContentLoaded', mount);
+  // prefer a slot next to the top-left logo (#pr-ver-slot, rendered by React); retry briefly, then fall back to fixed
+  function mount(tries) {
+    tries = tries || 0;
+    if (chip.parentNode) return;
+    var slot = document.getElementById('pr-ver-slot');
+    if (slot) { slot.appendChild(chip); return; }
+    if (tries >= 20) { if (document.body) document.body.appendChild(chip); return; } // give up → fixed fallback
+    setTimeout(function () { mount(tries + 1); }, 200);
+  }
+  mount();
 
   function check() {
     fetch('version.json?cb=' + (new Date()).getTime(), { cache: 'no-store' })
