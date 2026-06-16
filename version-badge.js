@@ -18,10 +18,18 @@
     '.pr-ver.stale .pr-ver-dot{background:#ffd27a;animation:prVerPulse 1.1s ease-in-out infinite;}',
     '@keyframes prVerPulse{0%,100%{opacity:1;}50%{opacity:.35;}}',
     '.pr-ver-txt{white-space:nowrap;}',
-    /* when hosted next to the logo (in #pr-ver-slot) flow inline instead of fixed */
-    '.pr-ver-slot{display:block;margin-top:2px;}',
-    '.pr-ver-slot .pr-ver{position:static;left:auto;bottom:auto;padding:1px 7px;font-size:9.5px;opacity:.6;background:rgba(255,255,255,.1);}',
-    '.pr-ver-slot .pr-ver.stale{opacity:1;padding:3px 9px;}'
+    /* when hosted next to the logo (in #pr-ver-slot) flow inline instead of fixed.
+       Colours track the page theme via --ink (the chip lives inside the themed .app
+       subtree in the editor and under :root on the dashboard), so it stays readable
+       on both the white topbar and the dark "night" topbar. */
+    '.pr-ver-slot{display:block;margin-top:3px;}',
+    '.pr-ver-slot .pr-ver{position:static;left:auto;bottom:auto;padding:2px 8px;font-size:9.5px;font-weight:700;letter-spacing:.01em;opacity:1;',
+    'color:color-mix(in srgb, var(--ink, #1d2430) 82%, transparent);',
+    'background:color-mix(in srgb, var(--ink, #1d2430) 7%, transparent);',
+    'border:1px solid color-mix(in srgb, var(--ink, #1d2430) 18%, transparent);}',
+    '.pr-ver-slot .pr-ver:hover{color:var(--ink, #1d2430);background:color-mix(in srgb, var(--ink, #1d2430) 12%, transparent);}',
+    '.pr-ver-slot .pr-ver-dot{box-shadow:0 0 0 2px color-mix(in srgb, #3fb27f 22%, transparent);}',
+    '.pr-ver-slot .pr-ver.stale{opacity:1;padding:3px 10px;color:#fff;background:#b4530f;border-color:#e0801e;}'
   ].join('');
   var st = document.createElement('style'); st.textContent = css; (document.head || document.documentElement).appendChild(st);
 

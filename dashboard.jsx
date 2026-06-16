@@ -277,7 +277,7 @@ function MiniPage({ project }) {
     </div>
   );
 }
-function Card({ project, me, onOpen, onMenu, menuOpen, onClose, onRename, onDuplicate, onDelete, onShare }) {
+function Card({ project, me, onOpen, onRename, onDuplicate, onDelete, onShare }) {
   const [renaming, setRenaming] = useState(false);
   const [val, setVal] = useState(project.title);
   const inputRef = useRef(null);
@@ -289,15 +289,6 @@ function Card({ project, me, onOpen, onMenu, menuOpen, onClose, onRename, onDupl
   const commit = () => { onRename(val.trim() || project.title); setRenaming(false); };
   return (
     <div className="card" onClick={() => { if (!renaming) onOpen(); }}>
-      <button className="kebab" onClick={(e) => { e.stopPropagation(); onMenu(); }}><svg viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="3" r="1.4" /><circle cx="8" cy="8" r="1.4" /><circle cx="8" cy="13" r="1.4" /></svg></button>
-      {menuOpen && (
-        <div className="menu" onClick={(e) => e.stopPropagation()}>
-          <button className="mi" onClick={() => { onShare(); onClose(); }}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><circle cx="4" cy="8" r="2" /><circle cx="12" cy="4" r="2" /><circle cx="12" cy="12" r="2" /><path d="M5.8 7l4.4-2.2M5.8 9l4.4 2.2" /></svg>Share</button>
-          <button className="mi" onClick={() => { setRenaming(true); onClose(); }}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M11 2l3 3-8 8H3v-3z" /></svg>Rename</button>
-          <button className="mi" onClick={() => { onDuplicate(); onClose(); }}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><rect x="5" y="5" width="9" height="9" rx="1.5" /><path d="M11 5V3.5A1.5 1.5 0 009.5 2H3.5A1.5 1.5 0 002 3.5v6A1.5 1.5 0 003.5 11H5" /></svg>Duplicate</button>
-          {isOwner && <><div className="divider" /><button className="mi danger" onClick={() => { onDelete(); onClose(); }}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M3 4h10M6 4V2.5h4V4M5 4l.6 9h4.8L11 4" strokeLinecap="round" /></svg>Delete</button></>}
-        </div>
-      )}
       <div className="thumb">
         {project._shared && <span className="shared-badge"><Avatar user={Auth.byId(project.ownerId)} size={16} />Shared</span>}
         <MiniPage project={project} />
@@ -315,6 +306,26 @@ function Card({ project, me, onOpen, onMenu, menuOpen, onClose, onRename, onDupl
           ? <a href={project.journal} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} style={jStyle} title={project.journal}>↗ {journalLabel(project.journal)}</a>
           : <span style={jStyle} title={project.journal}>{journalLabel(project.journal)}</span>)}
         {members.length > 1 && <div className="members-stack">{members.slice(0, 5).map((u, i) => <Avatar key={i} user={u} size={22} />)}</div>}
+        {!renaming && (
+          <div className="card-actions" onClick={(e) => e.stopPropagation()}>
+            <button className="ca ca-open" onClick={onOpen} title="Open in the editor">
+              <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 2.2l2.8 2.8-7.4 7.4-3.2.4.4-3.2z" /><path d="M10.2 3l2.8 2.8" /></svg>Open
+            </button>
+            <button className="ca" onClick={onShare} title="Share with collaborators">
+              <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="4" cy="8" r="2" /><circle cx="12" cy="4" r="2" /><circle cx="12" cy="12" r="2" /><path d="M5.8 7l4.4-2.2M5.8 9l4.4 2.2" /></svg>Share
+            </button>
+            <span className="ca-grow" />
+            <button className="ca ca-ico" onClick={() => setRenaming(true)} title="Rename" aria-label="Rename project">
+              <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 2.2l2.8 2.8-7.4 7.4-3.2.4.4-3.2z" /></svg>
+            </button>
+            <button className="ca ca-ico" onClick={onDuplicate} title="Duplicate" aria-label="Duplicate project">
+              <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="5" y="5" width="9" height="9" rx="1.5" /><path d="M11 5V3.5A1.5 1.5 0 009.5 2H3.5A1.5 1.5 0 002 3.5v6A1.5 1.5 0 003.5 11H5" /></svg>
+            </button>
+            {isOwner && <button className="ca ca-ico ca-danger" onClick={onDelete} title="Move to trash" aria-label="Move project to trash">
+              <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M3 4h10M6 4V2.5h4V4M5 4l.6 9h4.8L11 4" /></svg>
+            </button>}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -345,7 +356,6 @@ function TrashCard({ project, ttl, onRestore, onPurge }) {
 function App() {
   const [me, setMe] = useState(() => Auth.current());
   const [projects, setProjects] = useState([]);
-  const [menuId, setMenuId] = useState(null);
   const [acctOpen, setAcctOpen] = useState(false);
   const [modal, setModal] = useState(null); // 'new' | 'usage' | 'activity'
   const [shareId, setShareId] = useState(null);
@@ -356,7 +366,7 @@ function App() {
   const refresh = useCallback(() => { if (me) { Store.seedIfEmpty(); setProjects(Store.listFor(me.id)); } }, [me]);
   useEffect(() => { refresh(); }, [me]);
   useEffect(() => Store.subscribe(refresh), [refresh]);
-  useEffect(() => { const c = () => { setMenuId(null); setAcctOpen(false); }; window.addEventListener('click', c); return () => window.removeEventListener('click', c); }, []);
+  useEffect(() => { const c = () => setAcctOpen(false); window.addEventListener('click', c); return () => window.removeEventListener('click', c); }, []);
   useEffect(() => { const h = (e) => setIsAdmin(!!(e.detail && e.detail.role === 'admin')); window.addEventListener('pr-profile', h); return () => window.removeEventListener('pr-profile', h); }, []);
 
   if (!me) return <SignIn onSignIn={(id) => { Auth.signIn(id); setMe(Auth.byId(id)); }} />;
@@ -416,7 +426,6 @@ function App() {
                 {tab !== 'shared' && <button className="card new-card" onClick={() => setModal('new')}><div className="plus"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M8 3v10M3 8h10" /></svg></div><span>New project</span></button>}
                 {shown.map((p) => (
                   <Card key={p.id} project={p} me={me} onOpen={() => open(p.id)}
-                    menuOpen={menuId === p.id} onMenu={() => setMenuId(menuId === p.id ? null : p.id)} onClose={() => setMenuId(null)}
                     onShare={() => setShareId(p.id)}
                     onRename={(t) => { Store.rename(p.id, t); refresh(); }}
                     onDuplicate={() => { Store.duplicate(p.id); refresh(); }}
