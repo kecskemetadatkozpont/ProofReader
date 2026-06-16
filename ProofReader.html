@@ -397,6 +397,9 @@
     .sent.reading { background: var(--reading); box-shadow: 0 0 0 3px var(--reading); }
     .preview-scroll.reading-mode .sent:not(.reading) { opacity: calc(1 - .5 * var(--dim)); }
     .sent:hover { cursor: pointer; }
+    /* ♪ marks sentences whose ElevenLabs audio is already generated (free to replay, no extra credit) */
+    .sent.voiced::after { content: '\266A'; font-size: .72em; line-height: 0; color: var(--accent); opacity: .6; margin-left: 2px; vertical-align: super; font-weight: 700; user-select: none; pointer-events: none; }
+    .sent.voiced:hover::after { opacity: 1; }
 
     /* write mode (WYSIWYG editing in the preview) */
     .wm-seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; margin-right: 4px; flex: none; }

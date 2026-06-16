@@ -107,6 +107,16 @@
       });
     }).catch(function () { return false; });
   }
+  function idbAllKeys() {
+    return openDB().then(function (db) {
+      if (!db || !db.transaction) return [];
+      return new Promise(function (res) {
+        try { var r = db.transaction(IDB_STORE, 'readonly').objectStore(IDB_STORE).getAllKeys();
+          r.onsuccess = function () { res(r.result || []); }; r.onerror = function () { res([]); };
+        } catch (e) { res([]); }
+      });
+    }).catch(function () { return []; });
+  }
 
   /* ---- shared audio cache: Supabase Storage (so re-listens and SHARED projects don't re-charge) ----
    * Objects are content-addressed by a SHA-256 of (text, voice, model, settings), so the key is not
@@ -193,6 +203,13 @@
     hasKey: function () { return !!this.getKey(); },
 
     cached: function (text, cfg) { return !!cache[cfgKey(text, cfg)]; },
+    keyFor: function (text, cfg) { return cfgKey(text, cfg); },
+    // Set of cache keys with already-generated audio (memory + IndexedDB) — used to flag
+    // which sentences will replay for free (no extra ElevenLabs credit).
+    cachedKeys: function () {
+      var mem = Object.keys(cache);
+      return idbAllKeys().then(function (ks) { var s = {}; mem.forEach(function (k) { s[k] = 1; }); (ks || []).forEach(function (k) { s[k] = 1; }); return s; });
+    },
 
     // One real synthesis call (cache miss) — returns an MP3 Blob.
     _synth: function (text, cfg, key) {

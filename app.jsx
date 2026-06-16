@@ -199,6 +199,9 @@
     const audioRef = useRef(null);                 // current ElevenLabs <audio> element
     const [elevenBusy, setElevenBusy] = useState(false); // synthesizing current sentence
     const [elevenErr, setElevenErr] = useState(null);
+    const [voicedKeys, setVoicedKeys] = useState({}); // cache keys with already-generated audio (free to replay)
+    const refreshVoiced = useCallback(() => { if (window.PREleven && window.PREleven.cachedKeys) window.PREleven.cachedKeys().then(setVoicedKeys).catch(() => {}); }, []);
+    useEffect(() => { refreshVoiced(); const h = () => refreshVoiced(); window.addEventListener('pr-tts', h); return () => window.removeEventListener('pr-tts', h); }, [refreshVoiced]);
 
     const editedRef = useRef(false);
     const myRole = window.PRStore ? (window.PRStore.roleOf({ ownerId: projMeta.ownerId, members: projMeta.members, link: projMeta.link }, me.id) || 'viewer') : 'owner';
@@ -1287,6 +1290,24 @@
         });
       });
     }, [displayAnns, annotations, compiled, otherCompiled, active, layout, soloPaneId]);
+
+    // flag sentences whose ElevenLabs audio is already generated (♪ — replays free, no extra credit)
+    useLayoutEffect(() => {
+      const roots = Array.from(document.querySelectorAll('.preview-scroll'));
+      roots.forEach((root) => root.querySelectorAll('.sent.voiced').forEach((el) => { el.classList.remove('voiced'); el.removeAttribute('title'); }));
+      const E = window.PREleven;
+      if (voice.engine !== 'eleven' || !E || !E.keyFor) return;
+      const cfg = { elevenVoice: voice.elevenVoice, model: voice.model, stability: voice.stability, similarity: voice.similarity };
+      roots.forEach((root) => {
+        const docId = root.getAttribute('data-doc'); if (!docId || docId[0] === '@') return;
+        const comp = getCompiled(docId); if (!comp) return;
+        comp.sentences.forEach((s) => {
+          if (!s.text || !voicedKeys[E.keyFor(s.text, cfg)]) return;
+          const el = root.querySelector('.sent[data-sid="' + s.id + '"]');
+          if (el) { el.classList.add('voiced'); el.title = 'Voiced with ElevenLabs — replays free, no extra credits'; }
+        });
+      });
+    }, [voicedKeys, voice.engine, voice.elevenVoice, voice.model, voice.stability, voice.similarity, compiled, otherCompiled, active, layout, soloPaneId]);
 
     const sentence = compiled.sentences[idx];
     const total = compiled.sentences.length;
