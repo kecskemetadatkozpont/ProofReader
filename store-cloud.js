@@ -76,7 +76,11 @@
   }
   function flush(id) {
     var p = pending[id]; if (!p) return; delete pending[id];
-    var row = { id: p.id, owner_id: p.ownerId || me.id, title: p.title || 'Untitled project', data: p, deleted_at: p.deletedAt || null, updated_at: nowISO() };
+    // deleted_at is a timestamptz column — serialise the epoch-ms flag as ISO, NOT a raw
+    // number (a bare integer fails the timestamptz cast and rejects the whole upsert, which
+    // is why soft-deletes used to vanish on reload).
+    var delAt = p.deletedAt ? new Date(p.deletedAt).toISOString() : null;
+    var row = { id: p.id, owner_id: p.ownerId || me.id, title: p.title || 'Untitled project', data: p, deleted_at: delAt, updated_at: nowISO() };
     sb.from('projects').upsert(row).then(function (r) {
       if (r.error) { console.warn('[PR] save failed, will retry', r.error.message); pending[id] = p; clearTimeout(timers[id]); timers[id] = setTimeout(function () { flush(id); }, 4000); return; }
       syncMembers(p);
@@ -200,8 +204,11 @@
     rename: function (id, title) { var p = this.get(id); if (!p) return; p.title = title; this.save(p); },
     setJournal: function (id, journal) { var p = this.get(id); if (!p) return; p.journal = (journal || '').trim(); this.save(p); },
     /* ---- trash (soft-delete, 7-day retention, restorable) ---- */
-    remove: function (id) { var p = this.get(id); if (!p) return; p.deletedAt = Date.now(); this.save(p); this.logActivity(id, me.id, 'moved to trash', p.title); },
-    restore: function (id) { var p = this.get(id); if (!p) return; delete p.deletedAt; this.save(p); this.logActivity(id, me.id, 'restored', p.title); },
+    // The save() debounce (500ms) + the deleted_at column both matter here, so we also
+    // push the deleted_at flag DIRECTLY and immediately — a fast reload after delete/restore
+    // must not lose the state if the debounced upsert hasn't fired yet.
+    remove: function (id) { var p = this.get(id); if (!p) return; p.deletedAt = Date.now(); this.save(p); this.logActivity(id, me.id, 'moved to trash', p.title); try { sb.from('projects').update({ deleted_at: new Date(p.deletedAt).toISOString() }).eq('id', id).then(function () {}, function () {}); } catch (e) {} },
+    restore: function (id) { var p = this.get(id); if (!p) return; delete p.deletedAt; this.save(p); this.logActivity(id, me.id, 'restored', p.title); try { sb.from('projects').update({ deleted_at: null }).eq('id', id).then(function () {}, function () {}); } catch (e) {} },
     purge: function (id) { var i = idx(id); if (i >= 0) CACHE.splice(i, 1); persistWarm(); delete pending[id]; try { sb.from('projects').delete().eq('id', id).then(function (r) { if (r && r.error) hardDelete(id); }, function () { hardDelete(id); }); } catch (e) { hardDelete(id); } notify(); },
     purgeExpired: function () {
       var now = Date.now(), self = this;
