@@ -167,13 +167,28 @@
     try { window.dispatchEvent(new CustomEvent('pr-tts', { detail: { projectId: projectId } })); } catch (e) { }
   }
 
+  // Turn a non-OK ElevenLabs response into an actionable Error (reads the JSON detail).
+  function apiError(r, what) {
+    return r.text().then(function (t) {
+      var detail = '';
+      try { var j = JSON.parse(t); detail = (j.detail && (j.detail.message || j.detail.status)) || (typeof j.detail === 'string' ? j.detail : ''); } catch (e) { }
+      if (r.status === 401 || r.status === 403) {
+        return new Error('ElevenLabs rejected your API key (' + r.status + ')' + (detail ? ' — ' + detail : '') +
+          '. Check the key is correct and not expired, and that it has the “Voices” (read) permission in ElevenLabs → Profile → API keys. Then re-enter it.');
+      }
+      return new Error((what || 'Request failed') + ' (' + r.status + ')' + (detail ? ' — ' + String(detail).slice(0, 160) : ''));
+    }, function () { return new Error((what || 'Request failed') + ' (' + r.status + ')'); });
+  }
+
   var PREleven = {
     voices: VOICES,
     models: MODELS,
 
     getKey: function () { try { return localStorage.getItem(KEY) || ''; } catch (e) { return ''; } },
     setKey: function (k) {
-      try { if (k) localStorage.setItem(KEY, k.trim()); else localStorage.removeItem(KEY); } catch (e) { }
+      // tolerate pasted surrounding quotes / whitespace
+      k = (k || '').trim().replace(/^["'`]+|["'`]+$/g, '').trim();
+      try { if (k) localStorage.setItem(KEY, k); else localStorage.removeItem(KEY); } catch (e) { }
     },
     hasKey: function () { return !!this.getKey(); },
 
@@ -238,7 +253,7 @@
       var key = this.getKey();
       if (!key) return Promise.reject(new Error('no-key'));
       return fetch(ENDPOINT + '/user/subscription', { headers: { 'xi-api-key': key } })
-        .then(function (r) { if (!r.ok) throw new Error('usage ' + r.status); return r.json(); })
+        .then(function (r) { if (!r.ok) return apiError(r, 'Could not read usage').then(function (e) { throw e; }); return r.json(); })
         .then(function (j) { return { used: j.character_count, limit: j.character_limit, tier: j.tier || j.character_limit }; });
     },
 
@@ -249,7 +264,7 @@
       var key = this.getKey();
       if (!key) return Promise.reject(new Error('no-key'));
       return fetch(ENDPOINT + '/voices', { headers: { 'xi-api-key': key } })
-        .then(function (r) { if (!r.ok) throw new Error('Could not load voices (' + r.status + ')'); return r.json(); })
+        .then(function (r) { if (!r.ok) return apiError(r, 'Could not load voices').then(function (e) { throw e; }); return r.json(); })
         .then(function (j) {
           return (j.voices || []).map(function (v) {
             var cat = v.category || 'premade';

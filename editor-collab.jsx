@@ -413,7 +413,11 @@
         // if the current selection isn't one this account can use, prefer one of the user's own voices
         if (vs.length && !vs.some((v) => v.id === p.elevenVoice)) p.set({ elevenVoice: (vs.find((v) => v.mine) || vs[0]).id });
         setStatus({ type: 'ok', msg: mineN ? (mineN + ' of your voices · ' + vs.length + ' available') : ('No custom voices yet · ' + vs.length + ' premade available') });
-      }).catch((e) => { if (!auto) setStatus({ type: 'err', msg: (e && e.message) || 'Could not load voices.' }); else setStatus(null); });
+      }).catch((e) => {
+        const msg = (e && e.message) || 'Could not load voices.';
+        if (/rejected your API key|\(401\)|\(403\)/.test(msg)) { setEditingKey(true); setStatus({ type: 'err', msg: msg }); return; }
+        if (!auto) setStatus({ type: 'err', msg: msg }); else setStatus(null);
+      });
     };
     const testVoice = () => {
       if (!E) return;
