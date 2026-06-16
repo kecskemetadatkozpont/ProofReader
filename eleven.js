@@ -31,13 +31,26 @@
     { id: 'pFZP5JQG7iQjIQuC4Bku', name: 'Lily — warm British' }
   ];
 
-  // Models — selectable dynamically in the voice panel.
+  // Models — selectable dynamically in the voice panel. Eleven v3 first (default, most expressive).
   var MODELS = [
-    { id: 'eleven_multilingual_v2', name: 'Multilingual v2 — best quality' },
+    { id: 'eleven_v3', name: 'Eleven v3 — most expressive (default)' },
+    { id: 'eleven_multilingual_v2', name: 'Multilingual v2 — robust quality' },
     { id: 'eleven_turbo_v2_5', name: 'Turbo v2.5 — low latency' },
     { id: 'eleven_flash_v2_5', name: 'Flash v2.5 — fastest & cheapest' },
     { id: 'eleven_monolingual_v1', name: 'English v1 — legacy' }
   ];
+  var DEFAULT_MODEL = 'eleven_v3';
+
+  // Approximate credits charged per character, by model (ElevenLabs bills per character;
+  // Flash/Turbo are half-price). Used only to ESTIMATE credits for the per-thesis counter —
+  // the exact charge is the character count, surfaced alongside.
+  var CREDIT_MULT = {
+    eleven_v3: 1,
+    eleven_multilingual_v2: 1,
+    eleven_monolingual_v1: 1,
+    eleven_turbo_v2_5: 0.5,
+    eleven_flash_v2_5: 0.5
+  };
 
   function hash(s) {
     var h = 0, i, c;
@@ -55,6 +68,105 @@
     };
   }
 
+  /* ---- persistent audio cache: IndexedDB (this browser) ---- */
+  var IDB_NAME = 'pr_tts', IDB_STORE = 'audio', _dbp = null;
+  function openDB() {
+    if (_dbp) return _dbp;
+    _dbp = new Promise(function (res) {
+      try {
+        if (!window.indexedDB) return res(null);
+        var req = indexedDB.open(IDB_NAME, 1);
+        req.onupgradeneeded = function () { try { req.result.createObjectStore(IDB_STORE); } catch (e) { } };
+        req.onsuccess = function () { res(req.result); };
+        req.onerror = function () { res(null); };
+      } catch (e) { res(null); }
+    });
+    return _dbp;
+  }
+  function idbGet(k) {
+    return openDB().then(function (db) {
+      if (!db) return null;
+      return new Promise(function (res) {
+        try { var r = db.transaction(IDB_STORE, 'readonly').objectStore(IDB_STORE).get(k);
+          r.onsuccess = function () { res(r.result || null); }; r.onerror = function () { res(null); };
+        } catch (e) { res(null); }
+      });
+    }).catch(function () { return null; });
+  }
+  // resolves true only once the transaction durably commits (so a quota/abort failure is observable)
+  function idbPut(k, blob) {
+    return openDB().then(function (db) {
+      if (!db) return false;
+      return new Promise(function (res) {
+        try {
+          var tx = db.transaction(IDB_STORE, 'readwrite');
+          tx.objectStore(IDB_STORE).put(blob, k);
+          tx.oncomplete = function () { res(true); };
+          tx.onerror = tx.onabort = function () { res(false); };
+        } catch (e) { res(false); }
+      });
+    }).catch(function () { return false; });
+  }
+
+  /* ---- shared audio cache: Supabase Storage (so re-listens and SHARED projects don't re-charge) ----
+   * Objects are content-addressed by a SHA-256 of (text, voice, model, settings), so the key is not
+   * enumerable and a user can only reach audio whose exact source text they already hold (i.e. a
+   * project they have access to). Writes are first-writer-wins (upsert:false) so the immutable,
+   * content-addressed object can't be poisoned. Best-effort: a missing 'tts-cache' bucket or absent
+   * policies trips _cloudOff for the session and playback falls back to direct synthesis. */
+  var CLOUD_BUCKET = 'tts-cache', _cloudOff = false;
+  function sbClient() { var BE = window.PR_BACKEND; return (BE && BE.mode === 'cloud' && BE.sb) ? BE.sb : null; }
+  function cloudKey(text, cfg) {
+    var s = [text, cfg.elevenVoice, cfg.model, cfg.stability, cfg.similarity].join('');
+    try {
+      if (window.crypto && crypto.subtle && window.TextEncoder) {
+        return crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)).then(function (buf) {
+          var b = new Uint8Array(buf), h = ''; for (var i = 0; i < b.length; i++) h += ('0' + b[i].toString(16)).slice(-2); return h;
+        }).catch(function () { return hash(s); });
+      }
+    } catch (e) { }
+    return Promise.resolve(hash(s));
+  }
+  function isDup(err) { return !!err && (/duplicate|already exists|resource already/i.test(err.message || '') || String(err.statusCode || err.status || '') === '409'); }
+  // a missing OBJECT is a normal cache miss; a missing BUCKET / policy / auth error means cloud is unusable
+  function tripOn(err) {
+    if (!err || isDup(err)) return false;
+    var m = err.message || '', sc = String(err.statusCode || err.status || '');
+    if (/object not found/i.test(m)) return false;
+    return /bucket|row-level|policy|denied|unauthor|permission/i.test(m) || sc === '400' || sc === '403';
+  }
+  function cloudGet(text, cfg) {
+    if (_cloudOff) return Promise.resolve(null);
+    var sb = sbClient(); if (!sb || !sb.storage) return Promise.resolve(null);
+    return cloudKey(text, cfg).then(function (name) {
+      return sb.storage.from(CLOUD_BUCKET).download(name + '.mp3').then(function (r) {
+        if (r && r.data) return r.data;
+        if (r && tripOn(r.error)) _cloudOff = true;
+        return null;
+      });
+    }).catch(function () { return null; });
+  }
+  function cloudPut(text, cfg, blob) {
+    if (_cloudOff) return Promise.resolve();
+    var sb = sbClient(); if (!sb || !sb.storage) return Promise.resolve();
+    return cloudKey(text, cfg).then(function (name) {
+      return sb.storage.from(CLOUD_BUCKET).upload(name + '.mp3', blob, { contentType: 'audio/mpeg', upsert: false }).then(function (r) {
+        if (r && tripOn(r.error)) _cloudOff = true; // Duplicate (already cached) is benign, handled by tripOn/isDup
+      });
+    }).catch(function () { });
+  }
+
+  function multFor(model) { return CREDIT_MULT[model] != null ? CREDIT_MULT[model] : 1; }
+  // record a REAL charge (cache miss only) against the user's monthly meter and the per-thesis counter
+  function meter(userId, projectId, text, cfg) {
+    if (!userId || !window.PRStore || !window.PRStore.addTts) return;
+    var chars = (text || '').length;
+    var credits = Math.round(chars * multFor(cfg.model || DEFAULT_MODEL));
+    try { window.PRStore.addTts(userId, chars, { projectId: projectId, credits: credits, model: cfg.model || DEFAULT_MODEL }); } catch (e) { }
+    // local notify() doesn't reach same-tab subscribers, so signal the live counter directly
+    try { window.dispatchEvent(new CustomEvent('pr-tts', { detail: { projectId: projectId } })); } catch (e) { }
+  }
+
   var PREleven = {
     voices: VOICES,
     models: MODELS,
@@ -67,23 +179,11 @@
 
     cached: function (text, cfg) { return !!cache[cfgKey(text, cfg)]; },
 
-    getAudio: function (text, cfg, userId) {
-      var k = cfgKey(text, cfg);
-      if (cache[k]) return Promise.resolve(cache[k].url);
-      if (inflight[k]) return inflight[k];
-
-      var key = this.getKey();
-      if (!key) return Promise.reject(new Error('no-key'));
-
-      var url = ENDPOINT + '/text-to-speech/' + encodeURIComponent(cfg.elevenVoice) +
-        '?output_format=mp3_44100_128';
-      var body = {
-        text: text,
-        model_id: cfg.model || 'eleven_multilingual_v2',
-        voice_settings: settings(cfg)
-      };
-
-      var p = fetch(url, {
+    // One real synthesis call (cache miss) — returns an MP3 Blob.
+    _synth: function (text, cfg, key) {
+      var url = ENDPOINT + '/text-to-speech/' + encodeURIComponent(cfg.elevenVoice) + '?output_format=mp3_44100_128';
+      var body = { text: text, model_id: cfg.model || DEFAULT_MODEL, voice_settings: settings(cfg) };
+      return fetch(url, {
         method: 'POST',
         headers: { 'xi-api-key': key, 'Content-Type': 'application/json', 'Accept': 'audio/mpeg' },
         body: JSON.stringify(body)
@@ -96,25 +196,50 @@
           });
         }
         return r.blob();
-      }).then(function (blob) {
-        var u = URL.createObjectURL(blob);
-        cache[k] = { url: u, blob: blob };
-        delete inflight[k];
-        // Meter only real synthesis — cache hits cost nothing.
-        if (userId && window.PRStore) window.PRStore.addTts(userId, text.length);
-        return u;
-      }).catch(function (e) { delete inflight[k]; throw e; });
+      });
+    },
+
+    // Resolve audio for one sentence, charging ONLY on a true cache miss.
+    // Lookup order: in-memory → IndexedDB (this browser) → Supabase Storage (shared) → synthesize.
+    getAudio: function (text, cfg, userId, projectId) {
+      var self = this, k = cfgKey(text, cfg);
+      if (cache[k]) return Promise.resolve(cache[k].url);
+      if (inflight[k]) return inflight[k];
+      function finalize(blob) { var u = URL.createObjectURL(blob); cache[k] = { url: u, blob: blob }; return u; }
+
+      var p = idbGet(k).then(function (b) {
+        if (b) { return finalize(b); }                                 // local persistent hit (free)
+        return cloudGet(text, cfg).then(function (cb) {
+          if (cb) { idbPut(k, cb); return finalize(cb); }               // shared cloud hit (free)
+          var key = self.getKey();
+          if (!key) throw new Error('no-key');
+          return self._synth(text, cfg, key).then(function (blob) {     // real synthesis (charged once)
+            idbPut(k, blob); cloudPut(text, cfg, blob);
+            meter(userId, projectId, text, cfg);
+            return finalize(blob);
+          });
+        });
+      }).then(function (u) { delete inflight[k]; return u; }, function (e) { delete inflight[k]; throw e; });
 
       inflight[k] = p;
       return p;
     },
 
-    prefetch: function (items, cfg, userId) {
+    prefetch: function (items, cfg, userId, projectId) {
       var self = this;
       if (!self.hasKey()) return;
       (items || []).forEach(function (it) {
-        if (it && it.text) self.getAudio(it.text, cfg, userId).catch(function () { });
+        if (it && it.text) self.getAudio(it.text, cfg, userId, projectId).catch(function () { });
       });
+    },
+
+    // Real account-level usage straight from ElevenLabs (characters used / limit this period).
+    accountUsage: function () {
+      var key = this.getKey();
+      if (!key) return Promise.reject(new Error('no-key'));
+      return fetch(ENDPOINT + '/user/subscription', { headers: { 'xi-api-key': key } })
+        .then(function (r) { if (!r.ok) throw new Error('usage ' + r.status); return r.json(); })
+        .then(function (j) { return { used: j.character_count, limit: j.character_limit, tier: j.tier || j.character_limit }; });
     },
 
     // Pull the account's full voice list (the ElevenLabs "My Voices" library + premade).

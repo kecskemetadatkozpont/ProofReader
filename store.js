@@ -7,6 +7,7 @@
   var KEY = 'proofreader:projects';
   var PREFS = 'proofreader:prefs';
   var USAGE = 'proofreader:usage';
+  var TTS = 'proofreader:tts';
   var READING = 'proofreader:reading';
   var TICK = 'proofreader:tick';
   var TRASH_TTL = 7 * 24 * 60 * 60 * 1000; // deleted projects are kept (restorable) for 7 days, then auto-purged
@@ -236,11 +237,23 @@
 
     /* ---- usage / metering ---- */
     month: function () { var d = new Date(); return d.getFullYear() + '-' + (d.getMonth() + 1); },
-    addTts: function (userId, chars) {
+    addTts: function (userId, chars, opts) {
+      opts = opts || {};
       var u = read(USAGE, {}) || {}; var m = this.month();
       var rec = u[userId]; if (!rec || rec.month !== m) rec = { month: m, chars: 0, requests: 0 };
       rec.chars += chars; rec.requests += 1; u[userId] = rec;
-      try { localStorage.setItem(USAGE, JSON.stringify(u)); } catch (e) { } notify();
+      try { localStorage.setItem(USAGE, JSON.stringify(u)); } catch (e) { }
+      // per-thesis real-charge counter (only cache misses reach here)
+      if (opts.projectId) {
+        var t = read(TTS, {}) || {}; var pk = userId + ':' + opts.projectId;
+        var pr = t[pk] || { chars: 0, credits: 0, requests: 0 };
+        pr.chars += chars; pr.credits += (opts.credits != null ? opts.credits : chars); pr.requests += 1; pr.lastAt = Date.now();
+        t[pk] = pr; try { localStorage.setItem(TTS, JSON.stringify(t)); } catch (e) { }
+      }
+      notify();
+    },
+    ttsForProject: function (userId, projectId) {
+      var t = read(TTS, {}) || {}; return t[userId + ':' + projectId] || { chars: 0, credits: 0, requests: 0 };
     },
     usage: function (userId) {
       var u = read(USAGE, {}) || {}; var rec = u[userId] && u[userId].month === this.month() ? u[userId] : { chars: 0, requests: 0 };

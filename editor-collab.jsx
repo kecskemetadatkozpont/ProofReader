@@ -315,7 +315,7 @@
           {(!p.activity || !p.activity.length) && <div className="empty-d">Edits, comments and shares show up here.</div>}
           {(p.activity || []).map((a) => { const u = Auth.byId(a.actorId); return <div className="act-d" key={a.id}><Avatar user={u} size={24} /><div><b>{u ? u.name.split(' ')[0] : a.actorId}</b> {a.verb} {a.target}<div className="act-t">{rel(a.at)} ago</div></div></div>; })}
         </>}
-        {p.tab === 'kpi' && <KpiPanel metrics={p.metrics} journalMeta={p.journalMeta} journal={p.journal} templateId={p.templateId} submission={p.submission} onSetStatus={p.onSetStatus} canEdit={p.canEdit} />}
+        {p.tab === 'kpi' && <KpiPanel metrics={p.metrics} journalMeta={p.journalMeta} journal={p.journal} templateId={p.templateId} submission={p.submission} onSetStatus={p.onSetStatus} canEdit={p.canEdit} tts={p.tts} engine={p.engine} model={p.model} />}
       </div>
       <Lightbox />
     </aside>;
@@ -366,6 +366,16 @@
         {STATUSES.map((s) => <option key={s} value={s}>{s.replace(/-/g, ' ').replace(/^\w/, (c) => c.toUpperCase())}</option>)}
       </select>
       {sub.submittedAt && <div className="kpi-note" style={{ marginTop: 6 }}>Submitted {rel(sub.submittedAt)} ago · {Math.max(0, Math.round((Date.now() - sub.submittedAt) / 86400000))} days in pipeline</div>}
+
+      <div className="kpi-h" style={{ marginTop: 16 }}>Narration cost {p.engine === 'eleven' ? <span className="kpi-sub">· ElevenLabs{p.model ? ' · ' + p.model : ''}</span> : null}</div>
+      {(() => { const t = p.tts || { chars: 0, credits: 0, requests: 0 }; return <>
+        <div className="kpi-stats" style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
+          <div className="kpi-stat"><b>{(t.chars || 0).toLocaleString()}</b><span>characters</span></div>
+          <div className="kpi-stat"><b>≈{(t.credits || 0).toLocaleString()}</b><span>credits (est.)</span></div>
+          <div className="kpi-stat"><b>{t.requests || 0}</b><span>syntheses</span></div>
+        </div>
+        <div className="kpi-note" style={{ marginTop: 6 }}>Characters are the exact charge on your ElevenLabs key for this thesis (only new sentences are billed — re-listening and audio already generated, also for collaborators on a shared project, is free from cache). Credits are estimated (Flash/Turbo are half-price); your account's real usage is shown in the voice panel.{t.chars ? '' : ' Nothing synthesized yet.'}</div>
+      </>; })()}
     </div>;
   }
 
@@ -375,10 +385,12 @@
     const [editingKey, setEditingKey] = useState(!(E && E.hasKey()));
     const [voiceList, setVoiceList] = useState(E ? E.voices : []);
     const [status, setStatus] = useState(null); // { type:'ok'|'err'|'busy', msg }
+    const [acct, setAcct] = useState(null); // real ElevenLabs account usage
     const testRef = useRef(null);
     const connected = !!(E && E.hasKey());
 
     useEffect(() => () => { if (testRef.current) { try { testRef.current.pause(); } catch (e) { } } }, []);
+    useEffect(() => { if (connected && E.accountUsage) E.accountUsage().then(setAcct).catch(() => { }); }, []); // eslint-disable-line
     // auto-load the voices this key is actually allowed to use (free tier can't use Library voices)
     useEffect(() => { if (connected) loadVoices(true); }, []); // eslint-disable-line
 
@@ -453,7 +465,8 @@
           <svg viewBox="0 0 16 16" width="11" height="11" fill="currentColor"><path d="M4 3l9 5-9 5z" /></svg>Test voice
         </button></div>
         {status ? <div className={'vp-status ' + status.type}>{status.msg}</div> : null}
-        <div className="vp-note">Your key stays in this browser and calls ElevenLabs directly. On the free plan only your account's default voices work via the API — Voice Library voices need a paid plan (Starter, $5/mo). Audio is cached per sentence and the next sentences prefetch for gapless playback. For production, route through a backend so the key stays server-side.</div>
+        {acct && typeof acct.used === 'number' ? <div className="vp-status">ElevenLabs account: {acct.used.toLocaleString()} / {(acct.limit || 0).toLocaleString()} characters used this period.</div> : null}
+        <div className="vp-note">Your key stays in this browser and calls ElevenLabs directly. On the free plan only your account's default voices work via the API — Voice Library voices need a paid plan (Starter, $5/mo). Each sentence's audio is saved (in this browser, and — on a shared cloud project — for collaborators too), so re-listening never re-charges; only new sentences are billed. The per-thesis charge is tracked in the KPIs panel.</div>
       </> : <div className="vp-note">Uses your browser's built-in speech — free and offline. Pick a specific browser voice in the transport bar.</div>}
     </div>;
   }

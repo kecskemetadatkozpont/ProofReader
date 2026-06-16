@@ -18,6 +18,7 @@
   var WARM = 'proofreader:cloud:' + me.id + ':projects';
   var PREFS = 'proofreader:cloud:' + me.id + ':prefs';
   var USAGE = 'proofreader:cloud:' + me.id + ':usage';
+  var TTS = 'proofreader:cloud:' + me.id + ':tts';
   var READING = 'proofreader:cloud:' + me.id + ':reading';
 
   function clone(o) { return JSON.parse(JSON.stringify(o)); }
@@ -254,7 +255,18 @@
 
     /* usage / metering (local per user for now; server metering arrives with voice) */
     month: function () { var d = new Date(); return d.getFullYear() + '-' + (d.getMonth() + 1); },
-    addTts: function (userId, chars) { var u = readJSON(USAGE, {}); var m = this.month(); var rec = u[userId]; if (!rec || rec.month !== m) rec = { month: m, chars: 0, requests: 0 }; rec.chars += chars; rec.requests += 1; u[userId] = rec; writeJSON(USAGE, u); notify(); },
+    addTts: function (userId, chars, opts) {
+      opts = opts || {};
+      var u = readJSON(USAGE, {}); var m = this.month(); var rec = u[userId]; if (!rec || rec.month !== m) rec = { month: m, chars: 0, requests: 0 }; rec.chars += chars; rec.requests += 1; u[userId] = rec; writeJSON(USAGE, u);
+      if (opts.projectId) {
+        var t = readJSON(TTS, {}); var pk = userId + ':' + opts.projectId;
+        var pr = t[pk] || { chars: 0, credits: 0, requests: 0 };
+        pr.chars += chars; pr.credits += (opts.credits != null ? opts.credits : chars); pr.requests += 1; pr.lastAt = Date.now();
+        t[pk] = pr; writeJSON(TTS, t);
+      }
+      notify();
+    },
+    ttsForProject: function (userId, projectId) { var t = readJSON(TTS, {}); return t[userId + ':' + projectId] || { chars: 0, credits: 0, requests: 0 }; },
     usage: function (userId) { var u = readJSON(USAGE, {}); var rec = u[userId] && u[userId].month === this.month() ? u[userId] : { chars: 0, requests: 0 }; var bytes = 0; this.raw().forEach(function (p) { if (p.ownerId === userId && !p.deletedAt) bytes += bytesOf(p); }); var user = (window.PRAuth.byId(userId)) || { plan: 'free' }; var plan = PLAN[user.plan] || PLAN.free; return { storageBytes: bytes, storageLimit: plan.storage, chars: rec.chars, charLimit: plan.chars, requests: rec.requests, planLabel: plan.label }; },
 
     /* reading sessions */

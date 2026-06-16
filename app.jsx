@@ -164,7 +164,7 @@
     const meRef = useRef(me); meRef.current = me;
     const [annotations, setAnnotations] = useState(() => projectId && window.PRStore ? window.PRStore.listAnnotations(projectId) : []);
     const [versions, setVersions] = useState(() => projectId && window.PRStore ? window.PRStore.listVersions(projectId) : []);
-    const [projMeta, setProjMeta] = useState(() => { const p = projectId && window.PRStore ? window.PRStore.get(projectId) : null; return p ? { members: p.members, ownerId: p.ownerId, link: p.link, activity: p.activity, templateId: p.templateId, journalMeta: p.journalMeta, limits: p.limits, journal: p.journal, submission: p.submission } : { members: [], ownerId: me.id, link: { enabled: false, role: 'viewer' }, activity: [] }; });
+    const [projMeta, setProjMeta] = useState(() => { const p = projectId && window.PRStore ? window.PRStore.get(projectId) : null; const tts = (window.PRStore && window.PRStore.ttsForProject && projectId) ? window.PRStore.ttsForProject(me.id, projectId) : null; return p ? { members: p.members, ownerId: p.ownerId, link: p.link, activity: p.activity, templateId: p.templateId, journalMeta: p.journalMeta, limits: p.limits, journal: p.journal, submission: p.submission, tts: tts } : { members: [], ownerId: me.id, link: { enabled: false, role: 'viewer' }, tts: tts }; });
     const [drawer, setDrawer] = useState({ open: false, tab: 'comments' });
     const [draft, setDraft] = useState(null);
     const [selQuote, setSelQuote] = useState('');
@@ -191,7 +191,7 @@
     const [voice, setVoice] = useState({
       engine: pf0.engine || 'eleven',
       elevenVoice: (pf0.elevenVoice && pf0.elevenVoice.length > 12) ? pf0.elevenVoice : '21m00Tcm4TlvDq8ikWAM',
-      model: pf0.model || 'eleven_multilingual_v2',
+      model: pf0.model || 'eleven_v3',
       stability: pf0.stability == null ? 50 : pf0.stability,
       similarity: pf0.similarity == null ? 75 : pf0.similarity
     });
@@ -433,10 +433,15 @@
       if (!projectId || !window.PRStore) return;
       const p = window.PRStore.get(projectId); if (!p) return;
       setAnnotations(p.annotations); setVersions(p.versions);
-      setProjMeta({ members: p.members, ownerId: p.ownerId, link: p.link, activity: p.activity, templateId: p.templateId, journalMeta: p.journalMeta, limits: p.limits, journal: p.journal, submission: p.submission });
+      setProjMeta({ members: p.members, ownerId: p.ownerId, link: p.link, activity: p.activity, templateId: p.templateId, journalMeta: p.journalMeta, limits: p.limits, journal: p.journal, submission: p.submission, tts: window.PRStore.ttsForProject ? window.PRStore.ttsForProject(me.id, projectId) : null });
     }, [projectId]);
     useEffect(() => { if (window.PRStore) return window.PRStore.subscribe(refreshCollab); }, [refreshCollab]);
     useEffect(() => { refreshCollab(); }, []); // re-sync annotations/versions from storage after mount
+    // live per-thesis narration counter: a real ElevenLabs charge fires 'pr-tts' (same-tab notify() doesn't)
+    useEffect(() => {
+      const h = () => { if (window.PRStore && window.PRStore.ttsForProject) setProjMeta((m) => Object.assign({}, m, { tts: window.PRStore.ttsForProject(me.id, projectId) })); };
+      window.addEventListener('pr-tts', h); return () => window.removeEventListener('pr-tts', h);
+    }, []);
     useEffect(() => {
       if (!projectId || !window.PRAuth) return;
       const pr = window.PRAuth.startPresence(projectId, me.id); pr.on(setPeers); return pr.stop;
@@ -477,7 +482,7 @@
       if (cfg.engine === 'eleven' && window.PREleven && window.PREleven.hasKey()) {
         setElevenErr(null);
         if (!window.PREleven.cached(sents[i].text, cfg)) setElevenBusy(true);
-        window.PREleven.getAudio(sents[i].text, cfg, meRef.current.id).then((url) => {
+        window.PREleven.getAudio(sents[i].text, cfg, meRef.current.id, projectId).then((url) => {
           if (seqRef.current !== mySeq) return;
           setElevenBusy(false);
           if (statusRef.current !== 'playing') return;
@@ -487,7 +492,7 @@
           a.onerror = () => { if (seqRef.current === mySeq) { setElevenErr('Playback failed.'); setStatus('paused'); } };
           a.play().catch(() => { });
           /* prefetch the next 1–2 sentences for gapless playback */
-          window.PREleven.prefetch([sents[i + 1], sents[i + 2]], cfg, meRef.current.id);
+          window.PREleven.prefetch([sents[i + 1], sents[i + 2]], cfg, meRef.current.id, projectId);
         }).catch((err) => {
           if (seqRef.current !== mySeq) return;
           setElevenBusy(false);
@@ -1441,7 +1446,7 @@
             versions={versions} onCompare={(v) => setDiffVersion(v)} onRestore={onRestore} onSaveVersion={onSaveVersion}
             activity={projMeta.activity}
             metrics={kpiMetrics} journalMeta={projMeta.journalMeta} journal={projMeta.journal} templateId={projMeta.templateId}
-            submission={projMeta.submission} onSetStatus={setSubmissionStatus} />}
+            submission={projMeta.submission} onSetStatus={setSubmissionStatus} tts={projMeta.tts} engine={voice.engine} model={voice.model} />}
           <input ref={pdfInput} type="file" accept="application/pdf,.pdf" style={{ display: 'none' }} onChange={onPdfPicked} />
           <input ref={imgInsertInput} type="file" accept="image/png,image/jpeg,image/gif,image/svg+xml,.png,.jpg,.jpeg,.gif,.svg" style={{ display: 'none' }} onChange={onInsertImagePicked} />
         </div>
