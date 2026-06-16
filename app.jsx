@@ -1069,6 +1069,18 @@
       return map;
     }, [displayAnns, annotations, active, getCompiled]);
 
+    // map of sentence ids whose ElevenLabs audio is already generated (♪ — free to replay), per doc
+    const voicedSidsFor = useCallback((docId) => {
+      if (!docId || docId[0] === '@') return {};
+      const E = window.PREleven;
+      if (voice.engine !== 'eleven' || !E || !E.keyFor) return {};
+      const comp = getCompiled(docId); if (!comp) return {};
+      const cfg = { elevenVoice: voice.elevenVoice, model: voice.model, stability: voice.stability, similarity: voice.similarity };
+      const map = {};
+      comp.sentences.forEach((s) => { if (s.text && voicedKeys[E.keyFor(s.text, cfg)]) map[s.id] = 1; });
+      return map;
+    }, [voicedKeys, voice.engine, voice.elevenVoice, voice.model, voice.stability, voice.similarity, getCompiled]);
+
     // annotations on a given sentence (for the hover card): body, author, kind, due
     const annoForSentence = useCallback((docId, sid) => {
       const comp = getCompiled(docId); if (!comp) return [];
@@ -1448,7 +1460,7 @@
               monoSize: t.monoSize, canEdit, canComment, bibKeys,
               writeMode, setWrite: setWriteMode, onPreviewEdit, onBlockTransform, onInsertBlock, onTableEdit, onInsertImage, onInsertImageBlob,
               isCurProj, docExists, readOnlyDoc, getSource, getCompiled, docLabel, docColor,
-              getCompiledPdf, requestCompile, onCompileExact, annoMarks: annoMarksFor, annoSids: annoSidsFor,
+              getCompiledPdf, requestCompile, onCompileExact, annoMarks: annoMarksFor, annoSids: annoSidsFor, voicedSids: voicedSidsFor,
               canClose: window.WS.allPanes(layout).length > 1,
               onFocus: wsOnFocus, onAdd: wsOnAdd, onSplit: wsOnAdd, onClose: wsOnClose, onSolo: wsOnSolo, onSetRatio: wsOnSetRatio,
               dragId, onDragStart: (id) => setDragId(id), onDragEnd: () => setDragId(null), onMovePane: wsOnMovePane,

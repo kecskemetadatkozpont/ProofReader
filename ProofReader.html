@@ -261,6 +261,9 @@
     .ct-textlayer > span.sent-cursor { background: rgba(79,70,229,.26); box-shadow: 0 0 0 1px rgba(79,70,229,.3); }
     /* comment/to-do highlight on the compiled PDF (reuse preview colors; reset padding/margin for positioned spans) */
     .ct-textlayer > span.sent.has-comment, .ct-textlayer > span.sent.has-todo, .ct-textlayer > span.sent.has-both { padding: 0; margin: 0; }
+    /* ♪ marks sentences already voiced with ElevenLabs (free to replay) — faint tint + a note on the last span */
+    .ct-textlayer > span.sent.voiced { background: color-mix(in srgb, var(--accent) 9%, transparent); }
+    .ct-textlayer > span.sent.voiced-end::after { content: '\266A'; color: var(--accent); opacity: .9; font-weight: 700; margin-left: 1px; pointer-events: none; }
     .img-pane { background: #2a2530; display: grid; place-items: center; overflow: auto; padding: 14px; }
     .img-pane img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 3px; box-shadow: 0 4px 18px rgba(0,0,0,.4); }
     .pane-missing { display: flex; flex-direction: column; gap: 8px; align-items: center; justify-content: center; color: var(--muted); font-size: 13px; text-align: center; padding: 20px; }

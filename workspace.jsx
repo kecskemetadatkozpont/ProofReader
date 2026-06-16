@@ -558,6 +558,8 @@
     const playingRef = useRef(playing); playingRef.current = playing;
     const annoMap = ctx.annoSids ? ctx.annoSids(docId) : {};
     const annoRef = useRef(annoMap); annoRef.current = annoMap;
+    const voicedMap = ctx.voicedSids ? ctx.voicedSids(docId) : {};
+    const voicedRef = useRef(voicedMap); voicedRef.current = voicedMap;
 
     function applyHighlight(root) {
       root = root || (ref.current);
@@ -578,6 +580,15 @@
         const k = map[s.dataset.sid];
         if (k) s.classList.add(k === 'both' ? 'has-both' : k === 'todo' ? 'has-todo' : 'has-comment');
       });
+    }
+    // mark sentences whose ElevenLabs audio is already generated; ♪ goes on the LAST span per sentence
+    function applyVoiced(root) {
+      root = root || (ref.current); if (!root) return;
+      const map = voicedRef.current || {};
+      root.querySelectorAll('.ct-textlayer > span.voiced, .ct-textlayer > span.voiced-end').forEach((s) => { s.classList.remove('voiced', 'voiced-end'); s.removeAttribute('title'); });
+      const bySid = {};
+      root.querySelectorAll('.ct-textlayer > span.sent').forEach((s) => { const id = s.dataset.sid; if (map[id]) { s.classList.add('voiced'); (bySid[id] = bySid[id] || []).push(s); } });
+      Object.keys(bySid).forEach((id) => { const arr = bySid[id]; const last = arr[arr.length - 1]; last.classList.add('voiced-end'); last.title = 'Voiced with ElevenLabs — replays free, no extra credits'; });
     }
 
     useEffect(() => {
@@ -651,7 +662,7 @@
             await lib.renderTextLayer({ textContent: tc, container: tl, viewport: cssVp, textDivs: textDivs }).promise;
             const sids = st.sids[n] || [];
             textDivs.forEach((sp, i) => { const sid = sids[i]; if (sid != null) { sp.classList.add('sent'); sp.dataset.sid = sid; } });
-            applyHighlight(root); applyAnno(root);
+            applyHighlight(root); applyAnno(root); applyVoiced(root);
           };
           st.renderPage = renderPage;
           const io = new IntersectionObserver((ents) => { ents.forEach((e) => { if (e.isIntersecting) renderPage(+e.target.dataset.page).catch(() => { }); }); }, { root: root, rootMargin: '800px 0px' });
@@ -666,6 +677,8 @@
     useEffect(() => { applyHighlight(); }, [curSid, playing, state]);
     // re-apply comment/to-do highlights to already-rendered pages when annotations change
     useEffect(() => { applyAnno(); }, [JSON.stringify(annoMap), state]);
+    // re-apply ♪ voiced markers when the cached-audio set or voice changes
+    useEffect(() => { applyVoiced(); }, [JSON.stringify(voicedMap), state]);
 
     // register this pane's scroll element so comment/todo selection (ctx.onPreviewMouseUp) works here too
     useEffect(() => {
