@@ -268,7 +268,7 @@
   }
 
   function RightDrawer(p) {
-    const tabs = [['comments', 'Comments'], ['todos', 'To-dos'], ['history', 'History'], ['activity', 'Activity']];
+    const tabs = [['comments', 'Comments'], ['todos', 'To-dos'], ['history', 'History'], ['activity', 'Activity'], ['kpi', 'KPIs']];
     const comments = p.annotations.filter((a) => a.kind === 'comment');
     const todos = p.annotations.filter((a) => a.kind === 'todo');
     const openCount = p.annotations.filter((a) => a.status === 'open' && a.kind === 'comment').length;
@@ -315,9 +315,58 @@
           {(!p.activity || !p.activity.length) && <div className="empty-d">Edits, comments and shares show up here.</div>}
           {(p.activity || []).map((a) => { const u = Auth.byId(a.actorId); return <div className="act-d" key={a.id}><Avatar user={u} size={24} /><div><b>{u ? u.name.split(' ')[0] : a.actorId}</b> {a.verb} {a.target}<div className="act-t">{rel(a.at)} ago</div></div></div>; })}
         </>}
+        {p.tab === 'kpi' && <KpiPanel metrics={p.metrics} journalMeta={p.journalMeta} journal={p.journal} templateId={p.templateId} submission={p.submission} onSetStatus={p.onSetStatus} canEdit={p.canEdit} />}
       </div>
       <Lightbox />
     </aside>;
+  }
+
+  /* ---- KPI / format-compliance panel (Tier A auto-tracked + Tier B reference + Tier C status) ---- */
+  var KPI_STATUS = { ok: ['#1c7a47', '#e6f3ec', 'On track'], warn: ['#b4530f', '#fdecdf', 'Near limit'], over: ['#dc2626', '#fef2f2', 'Over / missing'], info: ['#475569', '#eef2f7', ''], na: ['#94a3b8', '#f1f5f9', 'Compile to measure'], missing: ['#b4530f', '#fdecdf', 'Not found'] };
+  var STATUSES = ['drafting', 'internal-review', 'submitted', 'under-review', 'major-revision', 'minor-revision', 'accepted', 'rejected', 'published'];
+  function KpiPanel(p) {
+    var m = p.metrics, jm = p.journalMeta, sub = p.submission || {};
+    function badge(st) { var c = KPI_STATUS[st] || KPI_STATUS.info; return <span className="kpi-badge" style={{ color: c[0], background: c[1] }}>{st === 'ok' ? '✓' : st === 'over' ? '!' : st === 'warn' ? '~' : st === 'missing' ? '?' : '·'}</span>; }
+    function pct(v, lim) { if (v == null || !lim) return 0; return Math.min(100, Math.round(v / lim * 100)); }
+    var stat = [];
+    if (m) {
+      stat = [['Words', m.words != null ? '≈ ' + m.words.toLocaleString() : '—'], ['Pages', m.pages != null ? m.pages : '—'],
+        ['Figures', m.figures], ['Tables', m.tables], ['Equations', m.equations], ['References', m.references],
+        ['Keywords', m.keywords != null ? m.keywords : '—'], ['Reading', m.readingMin + ' min']];
+    }
+    return <div className="kpi">
+      {!m && <div className="empty-d">Open a .tex document to see live manuscript metrics.</div>}
+      {m && <>
+        <div className="kpi-h">Format compliance {p.templateId && <span className="kpi-sub">· {p.templateId}</span>}</div>
+        {m.checks.map((c) => {
+          var st = c.status, c2 = KPI_STATUS[st] || KPI_STATUS.info;
+          return <div className="kpi-row" key={c.key}>
+            <div className="kpi-row-h"><span>{c.label}</span><span className="kpi-val">{c.value == null ? '—' : (c.unit === '%' ? c.value + '%' : c.value)}{c.limit && c.unit !== '%' ? <i className="kpi-lim"> / {c.limit}{c.unit ? ' ' + c.unit : ''}</i> : null} {badge(st)}</span></div>
+            <div className="kpi-bar"><i style={{ width: (c.unit === '%' ? (c.value || 0) : pct(c.value, c.limit)) + '%', background: c2[0] }} /></div>
+            {c.note && <div className="kpi-note">{c.note}</div>}
+          </div>;
+        })}
+        <div className="kpi-stats">{stat.map((s, i) => <div className="kpi-stat" key={i}><b>{s[1]}</b><span>{s[0]}</span></div>)}</div>
+      </>}
+
+      <div className="kpi-h" style={{ marginTop: 16 }}>Journal metrics {p.journal && <span className="kpi-sub">· {p.journal}</span>}</div>
+      {jm
+        ? <>
+            <div className="kpi-jgrid">
+              {[['Impact Factor', jm.impactFactor], ['CiteScore', jm.citeScore], ['SJR', jm.sjr], ['Quartile', jm.quartile], ['h-index', jm.hIndex], ['Acceptance', jm.acceptanceRate], ['APC', jm.apc], ['Open access', jm.oaModel]]
+                .filter((r) => r[1]).map((r, i) => <div className="kpi-j" key={i}><span>{r[0]}</span><b>{r[1]}</b></div>)}
+            </div>
+            {jm.indexing && <div className="kpi-note" style={{ marginTop: 6 }}>Indexing: {jm.indexing}</div>}
+            <div className="kpi-prov">Reference data ({jm.impactFactorYear || 'as-of n/a'}, confidence: {jm.confidence || 'n/a'}). Source: {jm.source}. <b>Verify before relying.</b></div>
+          </>
+        : <div className="empty-d">No venue selected. Create a project from a journal template to see its bibliometrics.</div>}
+
+      <div className="kpi-h" style={{ marginTop: 16 }}>Submission status</div>
+      <select className="kpi-status-sel" value={sub.status || 'drafting'} disabled={!p.canEdit} onChange={(e) => p.onSetStatus && p.onSetStatus(e.target.value)}>
+        {STATUSES.map((s) => <option key={s} value={s}>{s.replace(/-/g, ' ').replace(/^\w/, (c) => c.toUpperCase())}</option>)}
+      </select>
+      {sub.submittedAt && <div className="kpi-note" style={{ marginTop: 6 }}>Submitted {rel(sub.submittedAt)} ago · {Math.max(0, Math.round((Date.now() - sub.submittedAt) / 86400000))} days in pipeline</div>}
+    </div>;
   }
 
   function VoiceSettings(p) {

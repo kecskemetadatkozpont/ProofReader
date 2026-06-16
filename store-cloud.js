@@ -182,8 +182,12 @@
     },
     create: function (title, template, opts) {
       opts = opts || {};
-      var base = template === 'sample' ? sampleFiles() : blankFiles(title);
-      var p = normalize({ id: uuid(), title: title || 'Untitled project', created: Date.now(), updated: Date.now(), idx: 0, ownerId: me.id, files: base.files, order: base.order, folders: base.folders || [], active: base.active, journal: (opts.journal || '').trim() });
+      var reg = window.PR_TEMPLATES && window.PR_TEMPLATES.byId ? window.PR_TEMPLATES.byId(template) : null;
+      var base = reg && window.PR_TEMPLATES.filesFor(template, { title: title });
+      if (!base) base = template === 'sample' ? sampleFiles() : blankFiles(title);
+      var journal = (opts.journal || (reg && reg.journalMeta ? reg.name : '') || '').trim();
+      var p = normalize({ id: uuid(), title: title || 'Untitled project', created: Date.now(), updated: Date.now(), idx: 0, ownerId: me.id, files: base.files, order: base.order, folders: base.folders || [], active: base.active, journal: journal });
+      if (reg) { p.templateId = reg.id; if (reg.journalMeta) p.journalMeta = clone(reg.journalMeta); if (reg.limits) p.limits = clone(reg.limits); }
       if (opts.members && opts.members.length) {
         p.members = opts.members.filter(function (m) { return m && m.userId && m.userId !== me.id; })
           .map(function (m) { return { userId: m.userId, role: m.role || 'editor', invitedAt: Date.now() }; });

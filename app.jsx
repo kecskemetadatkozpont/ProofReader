@@ -148,7 +148,7 @@
     const meRef = useRef(me); meRef.current = me;
     const [annotations, setAnnotations] = useState(() => projectId && window.PRStore ? window.PRStore.listAnnotations(projectId) : []);
     const [versions, setVersions] = useState(() => projectId && window.PRStore ? window.PRStore.listVersions(projectId) : []);
-    const [projMeta, setProjMeta] = useState(() => { const p = projectId && window.PRStore ? window.PRStore.get(projectId) : null; return p ? { members: p.members, ownerId: p.ownerId, link: p.link, activity: p.activity } : { members: [], ownerId: me.id, link: { enabled: false, role: 'viewer' }, activity: [] }; });
+    const [projMeta, setProjMeta] = useState(() => { const p = projectId && window.PRStore ? window.PRStore.get(projectId) : null; return p ? { members: p.members, ownerId: p.ownerId, link: p.link, activity: p.activity, templateId: p.templateId, journalMeta: p.journalMeta, limits: p.limits, journal: p.journal, submission: p.submission } : { members: [], ownerId: me.id, link: { enabled: false, role: 'viewer' }, activity: [] }; });
     const [drawer, setDrawer] = useState({ open: false, tab: 'comments' });
     const [draft, setDraft] = useState(null);
     const [selQuote, setSelQuote] = useState('');
@@ -327,6 +327,20 @@
 
     const getCompiledPdf = useCallback((docId) => pdfCompiled[docId] || null, [pdfCompiled]);
 
+    /* ---- live manuscript KPIs (auto-tracked format compliance vs the template's limits) ---- */
+    const kpiPages = (pdfCompiled[active] && pdfCompiled[active].pages) || null;
+    const kpiMetrics = useMemo(() => {
+      if (!window.PRMetrics) return null;
+      try { return window.PRMetrics.compute(source, files, { pages: kpiPages, limits: projMeta.limits }); } catch (e) { return null; }
+    }, [source, files, kpiPages, projMeta.limits]);
+    const setSubmissionStatus = useCallback((status) => {
+      if (!projectId || !window.PRStore) return;
+      const sub = Object.assign({}, projMeta.submission || {}, { status: status, updatedAt: Date.now() });
+      if (status === 'submitted' && !sub.submittedAt) sub.submittedAt = Date.now();
+      const p = window.PRStore.get(projectId); if (p) { p.submission = sub; window.PRStore.save(p); }
+      setProjMeta((m) => Object.assign({}, m, { submission: sub }));
+    }, [projectId, projMeta.submission]);
+
     /* ---- voices ---- */
     useEffect(() => {
       function refresh() {
@@ -402,7 +416,7 @@
       if (!projectId || !window.PRStore) return;
       const p = window.PRStore.get(projectId); if (!p) return;
       setAnnotations(p.annotations); setVersions(p.versions);
-      setProjMeta({ members: p.members, ownerId: p.ownerId, link: p.link, activity: p.activity });
+      setProjMeta({ members: p.members, ownerId: p.ownerId, link: p.link, activity: p.activity, templateId: p.templateId, journalMeta: p.journalMeta, limits: p.limits, journal: p.journal, submission: p.submission });
     }, [projectId]);
     useEffect(() => { if (window.PRStore) return window.PRStore.subscribe(refreshCollab); }, [refreshCollab]);
     useEffect(() => { refreshCollab(); }, []); // re-sync annotations/versions from storage after mount
@@ -1289,6 +1303,7 @@
               <button className={'ct' + (drawer.open && drawer.tab === 'todos' ? ' on' : '')} title="To-dos" onClick={() => toggleDrawer('todos')}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><rect x="2.5" y="2.5" width="11" height="11" rx="2" /><path d="M5.5 8l2 2 3.5-4" strokeLinecap="round" strokeLinejoin="round" /></svg>{openTodos ? <i className="ct-badge">{openTodos}</i> : null}</button>
               <button className={'ct' + (drawer.open && drawer.tab === 'history' ? ' on' : '')} title="Version history" onClick={() => toggleDrawer('history')}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M8 4v4l3 1.5" strokeLinecap="round" /><path d="M2.5 8a5.5 5.5 0 105.5-5.5A5.5 5.5 0 003.2 5" /><path d="M2.5 2.5V5H5" strokeLinecap="round" strokeLinejoin="round" /></svg></button>
               <button className={'ct' + (drawer.open && drawer.tab === 'activity' ? ' on' : '')} title="Activity" onClick={() => toggleDrawer('activity')}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M2 8h3l1.5 4 3-8L13.5 8H14" strokeLinecap="round" strokeLinejoin="round" /></svg></button>
+              <button className={'ct' + (drawer.open && drawer.tab === 'kpi' ? ' on' : '')} title="KPIs & format compliance" onClick={() => toggleDrawer('kpi')}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M2 14V8M6 14V4M10 14v-3M14 14V6" strokeLinecap="round" /></svg></button>
             </div>
             {isAdmin && <a className="btn btn-icon" href="Admin.html" title="Admin">
               <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"><path d="M8 1.8l5 1.9v3.6c0 3-2.1 5.2-5 6.1-2.9-.9-5-3.1-5-6.1V3.7z" /><path d="M5.8 8l1.6 1.6L10.4 6.5" /></svg>
@@ -1403,7 +1418,9 @@
             annotations={displayAnns} draft={draft} onSaveDraft={saveDraft} onCancelDraft={() => setDraft(null)}
             onReply={onReply} onResolve={onResolve} onDelete={onDeleteAnn} onToggleTodo={onToggleTodo} onJump={onJumpAnn} onEdit={onEditAnn}
             versions={versions} onCompare={(v) => setDiffVersion(v)} onRestore={onRestore} onSaveVersion={onSaveVersion}
-            activity={projMeta.activity} />}
+            activity={projMeta.activity}
+            metrics={kpiMetrics} journalMeta={projMeta.journalMeta} journal={projMeta.journal} templateId={projMeta.templateId}
+            submission={projMeta.submission} onSetStatus={setSubmissionStatus} />}
           <input ref={pdfInput} type="file" accept="application/pdf,.pdf" style={{ display: 'none' }} onChange={onPdfPicked} />
           <input ref={imgInsertInput} type="file" accept="image/png,image/jpeg,image/gif,image/svg+xml,.png,.jpg,.jpeg,.gif,.svg" style={{ display: 'none' }} onChange={onInsertImagePicked} />
         </div>

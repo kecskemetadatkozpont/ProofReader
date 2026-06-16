@@ -82,7 +82,11 @@ function NewModal({ me, onClose, onCreate }) {
   const [collabs, setCollabs] = useState([]); // [{user, role}]
   const [err, setErr] = useState('');
   const ref = useRef(null);
+  const journalTouched = useRef(false);
   useEffect(() => { if (ref.current) ref.current.focus(); }, []);
+  const tplGroups = (window.PR_TEMPLATES && window.PR_TEMPLATES.groups) ? window.PR_TEMPLATES.groups() : null;
+  const pickTpl = (t) => { setTpl(t.id); if (!journalTouched.current) setJournal(t.journalMeta ? t.name : ''); };
+  const qOf = (m) => { const x = (m && m.quartile || '').match(/Q[1-4]/); return x ? x[0] : ''; };
 
   const addCollab = async () => {
     const e = email.trim(); if (!e) return;
@@ -97,14 +101,14 @@ function NewModal({ me, onClose, onCreate }) {
 
   return (
     <div className="overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-head"><h3>New project</h3><p>Name it, choose a target journal, and invite collaborators.</p></div>
+      <div className="modal" style={{ width: 640 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head"><h3>New project</h3><p>Name it, pick a target venue (format &amp; KPIs auto-tracked), and invite collaborators.</p></div>
         <div className="modal-body">
           <div className="field-label">Project name</div>
           <input ref={ref} className="text-input" value={title} placeholder="e.g. NeurIPS submission" onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') create(); }} />
 
           <div className="field-label" style={{ marginTop: 14 }}>Target journal <span className="usage-sub" style={{ fontWeight: 400 }}>· name or submission link, optional</span></div>
-          <input className="text-input" value={journal} placeholder="e.g. Sensors (MDPI) — https://susy.mdpi.com/…" onChange={(e) => setJournal(e.target.value)} />
+          <input className="text-input" value={journal} placeholder="e.g. Sensors (MDPI) — https://susy.mdpi.com/…" onChange={(e) => { setJournal(e.target.value); journalTouched.current = true; }} />
 
           <div className="field-label" style={{ marginTop: 14 }}>Invite collaborators <span className="usage-sub" style={{ fontWeight: 400 }}>· optional</span></div>
           <div style={{ display: 'flex', gap: 8 }}>
@@ -118,16 +122,32 @@ function NewModal({ me, onClose, onCreate }) {
             onRole={(r) => setCollabs((cs) => cs.map((x, j) => j === i ? { user: x.user, role: r } : x))}
             onRemove={() => setCollabs((cs) => cs.filter((_, j) => j !== i))} />)}
 
-          <div className="tpl-row" style={{ marginTop: 16 }}>
-            <button className={'tpl' + (tpl === 'blank' ? ' on' : '')} onClick={() => setTpl('blank')}>
-              <div className="tpl-ico"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M4 2h5l3 3v9H4z" /><path d="M9 2v3h3" /></svg></div>
-              <b>Blank</b><small>A minimal article skeleton.</small>
-            </button>
-            <button className={'tpl' + (tpl === 'sample' ? ' on' : '')} onClick={() => setTpl('sample')}>
-              <div className="tpl-ico"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M3 3h10v10H3z" /><path d="M5 6h6M5 8.5h6M5 11h4" strokeLinecap="round" /></svg></div>
-              <b>Sample paper</b><small>Full demo with figures &amp; math.</small>
-            </button>
-          </div>
+          <div className="field-label" style={{ marginTop: 16 }}>Start from a template <span className="usage-sub" style={{ fontWeight: 400 }}>· WoS/Scopus venue formats, with KPIs auto-tracked in the editor</span></div>
+          {tplGroups
+            ? <div className="tpl-gallery">
+                {tplGroups.map((g) => (
+                  <div key={g.group} className="tpl-group">
+                    <div className="tpl-group-h">{g.group}</div>
+                    <div className="tpl-grid">
+                      {g.items.map((t) => (
+                        <button key={t.id} className={'tpl-card' + (tpl === t.id ? ' on' : '')} onClick={() => pickTpl(t)} title={t.description}>
+                          <div className="tpl-card-top"><b>{t.name}</b>{t.indexing && /WoS/.test(t.indexing) ? <span className="idx-badge">WoS</span> : (t.indexing && /Scopus/.test(t.indexing) ? <span className="idx-badge scopus">Scopus</span> : null)}</div>
+                          <small className="tpl-cls">{t.documentClass}</small>
+                          {t.journalMeta && <div className="tpl-kpi">
+                            {t.journalMeta.impactFactor && !/n\/a/.test(t.journalMeta.impactFactor) && <span>IF {t.journalMeta.impactFactor}</span>}
+                            {t.journalMeta.citeScore && !/n\/a|level|high/i.test(t.journalMeta.citeScore) && <span>CS {t.journalMeta.citeScore}</span>}
+                            {qOf(t.journalMeta) && <span className="q">{qOf(t.journalMeta)}</span>}
+                          </div>}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            : <div className="tpl-row">
+                <button className={'tpl' + (tpl === 'blank' ? ' on' : '')} onClick={() => setTpl('blank')}><b>Blank</b><small>A minimal article skeleton.</small></button>
+                <button className={'tpl' + (tpl === 'sample' ? ' on' : '')} onClick={() => setTpl('sample')}><b>Sample paper</b><small>Full demo with figures &amp; math.</small></button>
+              </div>}
         </div>
         <div className="modal-foot"><button className="btn-ghost" onClick={onClose}>Cancel</button><button className="btn-primary" onClick={create}>Create project</button></div>
       </div>
