@@ -4,6 +4,22 @@
   const { useTweaks, TweaksPanel, TweakSection, TweakSlider, TweakRadio, TweakSelect, TweakColor, TweakToggle } = window;
   const Collab = window.Collab;
 
+  // Importable text formats (LaTeX sources + build artifacts like .bbl + Markdown notes).
+  const TEXT_EXT_RE = /\.(tex|bib|cls|sty|txt|bbl|bst|md|markdown)$/i;
+  // Map a filename to its editor doc-type. .tex/.txt stay 'tex' (full LaTeX pipeline);
+  // the rest are plain-text docs we display and edit but never feed to the LaTeX engine.
+  function fileTypeOf(name) {
+    const ext = ((name || '').split('.').pop() || '').toLowerCase();
+    if (ext === 'bib') return 'bib';
+    if (ext === 'bbl') return 'bbl';
+    if (ext === 'bst') return 'bst';
+    if (ext === 'cls') return 'cls';
+    if (ext === 'sty') return 'sty';
+    if (ext === 'md' || ext === 'markdown') return 'md';
+    return 'tex';
+  }
+  const TEXT_TYPES = { tex: 1, bib: 1, bbl: 1, bst: 1, cls: 1, sty: 1, md: 1 };
+
   const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
     "theme": "paper",
     "reading": "#ffe08a",
@@ -200,11 +216,12 @@
 
     /* ---- document helpers (docId = current-project file path, or '@pid/file' for an external reference) ---- */
     const isCurProj = useCallback((docId) => !!docId && docId[0] !== '@', []);
-    // text-like files that can be shown in the editor (.tex drives the compile; .bib/.cls/.sty are viewable too)
-    const isTextDoc = (docId) => { const f = files[docId]; return !!f && (f.type === 'tex' || f.type === 'bib' || f.type === 'cls' || f.type === 'sty'); };
+    // text-like files that can be shown/edited in the editor (.tex drives the compile;
+    // .bib/.cls/.sty/.bbl/.bst/.md are plain-text docs we display and edit too)
+    const isTextDoc = (docId) => { const f = files[docId]; return !!f && !!TEXT_TYPES[f.type]; };
     const docExists = useCallback((docId) => !docId ? false : (docId[0] === '@' ? !!extDocs.current[docId] : isTextDoc(docId)), [files]);
-    // .tex is editable; other text files (.bib/.cls/.sty) are shown read-only
-    const readOnlyDoc = useCallback((docId) => !isCurProj(docId) || (isCurProj(docId) && files[docId] && files[docId].type !== 'tex'), [isCurProj, files]);
+    // any text file in the current project is editable; external (@) and binary docs are read-only
+    const readOnlyDoc = useCallback((docId) => !isCurProj(docId) || !isTextDoc(docId), [isCurProj, files]);
     const getSource = useCallback((docId) => {
       if (!docId) return '';
       if (docId[0] === '@') return (extDocs.current[docId] || {}).source || '';
@@ -689,7 +706,7 @@
       const list = Array.from(e.target.files || []);
       const dir = currentDir;
       list.forEach((file) => {
-        const isText = /\.(tex|bib|cls|sty|txt)$/i.test(file.name);
+        const isText = TEXT_EXT_RE.test(file.name);
         const isImg = /\.(png|jpe?g|gif|svg|webp|pdf)$/i.test(file.name);
         const isPdf = /\.pdf$/i.test(file.name);
         if (!isText && !isImg) { uAdd(file.name, file.size, 'skipped', 'Unsupported format'); return; }
@@ -700,7 +717,7 @@
           const uid = uAdd(file.name, file.size, 'uploading');
           const r = new FileReader();
           r.onload = () => {
-            setFiles((f) => ({ ...f, [path]: { type: /\.bib$/i.test(file.name) ? 'bib' : 'tex', content: String(r.result) } }));
+            setFiles((f) => ({ ...f, [path]: { type: fileTypeOf(file.name), content: String(r.result) } }));
             setOrder((o) => o.includes(path) ? o : [...o, path]);
             if (/\.tex$/i.test(file.name)) setActive(path);
             uSet(uid, { status: 'done' });
@@ -732,7 +749,7 @@
       const items = [];
       list.forEach((file) => {
         const rel = (file.webkitRelativePath || file.name).replace(/\\/g, '/');
-        const isText = /\.(tex|bib|cls|sty|txt)$/i.test(file.name);
+        const isText = TEXT_EXT_RE.test(file.name);
         const isImg = /\.(png|jpe?g|gif|svg|pdf)$/i.test(file.name);
         if (!isText && !isImg) { uAdd(file.name, file.size, 'skipped', 'Unsupported format'); return; }
         if (file.size > SIZE_LIMIT) { uAdd(file.name, file.size, 'skipped', 'Larger than 50 MB'); return; }
@@ -745,7 +762,7 @@
         if (makeActive) firstTex = path;
         items.push({ file, path, isText, makeActive });
       });
-      const note = (n) => alert(n + ' file' + (n === 1 ? '' : 's') + ' skipped — only .tex, .bib, .cls, .sty, .txt, images and PDFs under 50 MB are imported.');
+      const note = (n) => alert(n + ' file' + (n === 1 ? '' : 's') + ' skipped — only .tex, .bib, .bbl, .bst, .cls, .sty, .txt, .md, images and PDFs under 50 MB are imported.');
       if (!items.length) { if (skipped) note(skipped); return; }
       if (newFolders.size) setFolders((fs) => { const set = new Set(fs); newFolders.forEach((f) => set.add(f)); return Array.from(set); });
       setExpanded((s) => { const n = new Set(s); if (dir) n.add(dir); newFolders.forEach((f) => n.add(f)); return n; });
@@ -754,7 +771,7 @@
           const uid = uAdd(bn(it.path), it.file.size, 'uploading');
           const r = new FileReader();
           r.onload = () => {
-            setFiles((f) => ({ ...f, [it.path]: { type: /\.bib$/i.test(it.file.name) ? 'bib' : 'tex', content: String(r.result) } }));
+            setFiles((f) => ({ ...f, [it.path]: { type: fileTypeOf(it.file.name), content: String(r.result) } }));
             setOrder((o) => o.includes(it.path) ? o : [...o, it.path]);
             if (it.makeActive) setActive(it.path);
             uSet(uid, { status: 'done' });
@@ -792,7 +809,11 @@
       if (!name || name === bn(path)) return;
       if (type === 'file') {
         const np = uniquePath(fileTaken, pjoin(dn(path), name));
-        const nf = { ...files }; nf[np] = nf[path]; delete nf[path]; setFiles(nf);
+        const nf = { ...files }; const cur = nf[path];
+        // re-derive the doc-type from the new extension for text files (so untitled.tex → notes.md
+        // becomes a markdown doc, not a compiled .tex); never touch image/pdf types
+        nf[np] = (cur && TEXT_TYPES[cur.type]) ? { ...cur, type: fileTypeOf(name) } : cur;
+        delete nf[path]; setFiles(nf);
         setOrder(order.map((p) => p === path ? np : p));
         if (active === path) setActive(np);
       } else {
@@ -1311,7 +1332,7 @@
             <button className="btn" onClick={() => setShareOpen(true)}>
               <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4"><circle cx="4" cy="8" r="2" /><circle cx="12" cy="4" r="2" /><circle cx="12" cy="12" r="2" /><path d="M5.8 7l4.4-2.2M5.8 9l4.4 2.2" /></svg>Share
             </button>
-            <input ref={fileInput} type="file" multiple accept=".tex,.bib,.cls,.sty,.txt,.pdf,application/pdf,image/*" style={{ display: 'none' }} onChange={onUpload} />
+            <input ref={fileInput} type="file" multiple accept=".tex,.bib,.bbl,.bst,.cls,.sty,.txt,.md,.markdown,.pdf,application/pdf,image/*" style={{ display: 'none' }} onChange={onUpload} />
             <input ref={dirInput} type="file" multiple style={{ display: 'none' }} onChange={onUploadFolder} />
             <button className="btn btn-icon" title="Upload files" onClick={() => fileInput.current.click()}>
               <svg viewBox="0 0 16 16" width="15" height="15"><path d="M8 2v8M8 2L5 5M8 2l3 3M3 11v2a1 1 0 001 1h8a1 1 0 001-1v-2" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
