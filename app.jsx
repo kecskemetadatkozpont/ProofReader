@@ -200,6 +200,7 @@
     const [elevenBusy, setElevenBusy] = useState(false); // synthesizing current sentence
     const [elevenErr, setElevenErr] = useState(null);
     const [voicedKeys, setVoicedKeys] = useState({}); // cache keys with already-generated audio (free to replay)
+    const [reviewFocus, setReviewFocus] = useState(null); // review annotation id to focus in the Review drawer
     const refreshVoiced = useCallback(() => { if (window.PREleven && window.PREleven.cachedKeys) window.PREleven.cachedKeys().then(setVoicedKeys).catch(() => {}); }, []);
     useEffect(() => { refreshVoiced(); const h = () => refreshVoiced(); window.addEventListener('pr-tts', h); return () => window.removeEventListener('pr-tts', h); }, [refreshVoiced]);
 
@@ -249,8 +250,8 @@
       openDocIds.forEach((docId) => {
         if (docId === active) return;
         try {
-          if (docId[0] === '@') { const d = extDocs.current[docId]; if (d && (d.source || '').length < 120000) out[docId] = window.LatexEngine.process(d.source, d.files || {}); }
-          else if (files[docId] && files[docId].type === 'tex' && (files[docId].content || '').length < 120000) out[docId] = window.LatexEngine.process(files[docId].content, files);
+          if (docId[0] === '@') { const d = extDocs.current[docId]; if (d && (d.source || '').length < 600000) out[docId] = window.LatexEngine.process(d.source, d.files || {}); }
+          else if (files[docId] && files[docId].type === 'tex' && (files[docId].content || '').length < 600000) out[docId] = window.LatexEngine.process(files[docId].content, files);
         } catch (e) { }
       });
       return out;
@@ -1047,6 +1048,7 @@
       const anns = docId === active ? displayAnns : annotations;
       const out = [];
       anns.forEach((a) => {
+        if (a.kind === 'review') return;
         if (!a.anchor || a.anchor.file !== docId || a._orphan || a.status === 'resolved' || a.status === 'done') return;
         if (a.anchor.end > a.anchor.start) out.push({ s: a.anchor.start, e: a.anchor.end, cls: a.kind === 'todo' ? 'anno-t' : 'anno-c' });
       });
@@ -1060,10 +1062,30 @@
       const anns = docId === active ? displayAnns : annotations;
       const map = {};
       anns.forEach((a) => {
+        if (a.kind === 'review') return; // review has its own marker layer
         if (!a.anchor || a.anchor.file !== docId || a._orphan || a.status === 'resolved' || a.status === 'done') return;
         const k = a.kind === 'todo' ? 'todo' : 'comment';
         comp.sentences.forEach((s) => {
           if (a.anchor.start < s.end && a.anchor.end > s.start) map[s.id] = !map[s.id] ? k : (map[s.id] === k ? k : 'both');
+        });
+      });
+      return map;
+    }, [displayAnns, annotations, active, getCompiled]);
+
+    // sentence-id → worst review severity, for the AI-review marker layer (mirrors annoSidsFor)
+    const reviewSidsFor = useCallback((docId) => {
+      if (!docId || docId[0] === '@') return {};
+      const comp = getCompiled(docId); if (!comp) return {};
+      const anns = docId === active ? displayAnns : annotations;
+      const rank = { major: 3, minor: 2, nit: 1 };
+      const map = {};
+      anns.forEach((a) => {
+        if (a.kind !== 'review' || !a.anchor || a.anchor.file !== docId || a._orphan || a.status === 'resolved') return;
+        comp.sentences.forEach((s) => {
+          if (a.anchor.start < s.end && a.anchor.end > s.start) {
+            const sev = a.severity || 'minor';
+            if (!map[s.id] || rank[sev] > rank[map[s.id]]) map[s.id] = sev;
+          }
         });
       });
       return map;
@@ -1087,7 +1109,7 @@
       const s = comp.sentences.find((x) => String(x.id) === String(sid)); if (!s) return [];
       const anns = docId === active ? displayAnns : annotations;
       const A = window.PRAuth;
-      return anns.filter((a) => a.anchor && a.anchor.file === docId && !a._orphan && a.status !== 'resolved' && a.status !== 'done' && a.anchor.start < s.end && a.anchor.end > s.start)
+      return anns.filter((a) => a.kind !== 'review' && a.anchor && a.anchor.file === docId && !a._orphan && a.status !== 'resolved' && a.status !== 'done' && a.anchor.start < s.end && a.anchor.end > s.start)
         .map((a) => { const au = A && A.byId(a.authorId); return { kind: a.kind, body: a.body, due: a.due, author: au ? au.name : 'Valaki', color: (au && au.color) ? au.color : '#8a8f98', initials: (au && A.initials) ? A.initials(au.name) : '•' }; });
     }, [getCompiled, displayAnns, annotations, active]);
 
@@ -1140,6 +1162,27 @@
     const onEditAnn = (ann, d) => { window.PRStore.updateAnnotation(projectId, ann.id, { body: d.body, mentions: d.mentions || [], attachments: d.attachments || [], assignee: d.assignee || null, due: d.due || null, editedAt: Date.now() }); refreshCollab(); };
     const onDeleteAnn = (ann) => { window.PRStore.deleteAnnotation(projectId, ann.id); refreshCollab(); };
     const onJumpAnn = (ann) => { const a = ann.anchor; if (a.file !== active) setActive(a.file); setSelectReq({ start: a.start, end: a.end, nonce: Date.now() }); seekTo(idxRef.current); };
+
+    /* ---- AI review import (workflow findings → anchored review notes) ---- */
+    const reviewInput = useRef(null);
+    const reviewAnns = useMemo(() => displayAnns.filter((a) => a.kind === 'review'), [displayAnns]);
+    const onImportReview = () => { if (reviewInput.current) reviewInput.current.click(); };
+    const onReviewFile = (e) => {
+      const f = e.target.files && e.target.files[0]; e.target.value = '';
+      if (!f || !window.PRStore || !window.PRStore.importReview) return;
+      const r = new FileReader();
+      r.onload = () => {
+        try {
+          const data = JSON.parse(String(r.result));
+          const findings = Array.isArray(data) ? data : (data.findings || []);
+          const res = window.PRStore.importReview(projectId, findings, { actorId: me.id });
+          refreshCollab(); setReviewFocus(null); setDrawer({ open: true, tab: 'review' });
+          alert('AI review imported: ' + res.imported + ' note' + (res.imported === 1 ? '' : 's') + ' anchored to the text' + (res.unanchored ? ' (' + res.unanchored + ' could not be located)' : '') + '.');
+        } catch (err) { alert('Could not read the review file (expected JSON with a "findings" array): ' + (err && err.message)); }
+      };
+      r.readAsText(f);
+    };
+    const onClearReview = () => { if (window.PRStore && window.PRStore.clearReview && window.confirm('Remove all AI review notes from this project?')) { window.PRStore.clearReview(projectId); refreshCollab(); } };
     const onSaveVersion = (label) => { window.PRStore.addVersion(projectId, label, me.id, true); refreshCollab(); };
     const onRestore = (v) => { const p = window.PRStore.restoreVersion(projectId, v.id); if (p) { setFiles(p.files); setOrder(p.order); if (!p.files[active]) setActive(p.active); } setDiffVersion(null); refreshCollab(); };
     const toggleDrawer = (tab) => setDrawer((d) => d.open && d.tab === tab ? { open: false, tab: tab } : { open: true, tab: tab });
@@ -1261,6 +1304,7 @@
       comment: '<svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2.5 3.5h11v7H8l-3 2.5V10.5h-2.5z" stroke-linejoin="round"/></svg>',
       todo: '<svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M3 8.5l3 3 6.5-7.5" stroke-linecap="round" stroke-linejoin="round"/></svg>'
     };
+    const REVIEW_IC = '<svg viewBox="0 0 16 16" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M7 2.5l1.2 2.6 2.8.3-2.1 1.9.6 2.8L7 11.3 4.5 12.6l.6-2.8L3 7.9l2.8-.3z" stroke-linejoin="round"/></svg>';
     useLayoutEffect(() => {
       const A = window.PRAuth;
       const roots = Array.from(document.querySelectorAll('.preview-scroll'));
@@ -1276,6 +1320,7 @@
         const anns = docId === active ? displayAnns : annotations;
         const bySent = {};
         anns.forEach((a) => {
+          if (a.kind === 'review') return;
           if (!a.anchor || a.anchor.file !== docId || a.status === 'resolved' || a.status === 'done' || a._orphan) return;
           comp.sentences.forEach((s) => {
             if (a.anchor.start < s.end && a.anchor.end > s.start) {
@@ -1321,6 +1366,37 @@
       });
     }, [voicedKeys, voice.engine, voice.elevenVoice, voice.model, voice.stability, voice.similarity, compiled, otherCompiled, active, layout, soloPaneId]);
 
+    // AI-review markers on the preview: a ✦ tag per sentence carrying review notes (severity-coloured)
+    useLayoutEffect(() => {
+      const roots = Array.from(document.querySelectorAll('.preview-scroll'));
+      roots.forEach((root) => root.querySelectorAll('.sent.has-review').forEach((el) => {
+        el.classList.remove('has-review', 'review-major', 'review-minor', 'review-nit'); el.removeAttribute('title');
+        const t = el.querySelector(':scope > .review-tag'); if (t) t.remove();
+      }));
+      const rank = { major: 3, minor: 2, nit: 1 };
+      roots.forEach((root) => {
+        const docId = root.getAttribute('data-doc'); if (!docId || docId[0] === '@') return;
+        const comp = getCompiled(docId); if (!comp) return;
+        const anns = docId === active ? displayAnns : annotations;
+        const bySent = {};
+        anns.forEach((a) => {
+          if (a.kind !== 'review' || !a.anchor || a.anchor.file !== docId || a._orphan || a.status === 'resolved') return;
+          comp.sentences.forEach((s) => { if (a.anchor.start < s.end && a.anchor.end > s.start) (bySent[s.id] = bySent[s.id] || []).push(a); });
+        });
+        Object.keys(bySent).forEach((sid) => {
+          const el = root.querySelector('.sent[data-sid="' + sid + '"]'); if (!el) return;
+          const list = bySent[sid]; let worst = 'nit'; list.forEach((a) => { if (rank[a.severity || 'minor'] > rank[worst]) worst = a.severity || 'minor'; });
+          el.classList.add('has-review', 'review-' + worst);
+          el.title = list.map((a) => '[' + (a.category || '') + ' · ' + (a.severity || '') + '] ' + (a.comment || '')).join('\n\n').slice(0, 500);
+          const tag = document.createElement('span'); tag.className = 'review-tag review-' + worst; tag.contentEditable = 'false';
+          tag.innerHTML = REVIEW_IC + (list.length > 1 ? '<i class="rt-n">' + list.length + '</i>' : '');
+          tag.addEventListener('mousedown', (e) => { e.preventDefault(); e.stopPropagation(); });
+          tag.addEventListener('click', (e) => { e.stopPropagation(); if (docId !== active && isCurProj(docId)) setActive(docId); setReviewFocus(list[0].id); setDrawer({ open: true, tab: 'review' }); });
+          el.appendChild(tag);
+        });
+      });
+    }, [displayAnns, annotations, compiled, otherCompiled, active, layout, soloPaneId]);
+
     const sentence = compiled.sentences[idx];
     const total = compiled.sentences.length;
     const readLine = source && sentence ? source.slice(0, sentence.start).split('\n').length - 1 : -1;
@@ -1329,6 +1405,7 @@
     const collabMembers = [window.PRAuth && window.PRAuth.byId(projMeta.ownerId)].concat(projMeta.members.map((m) => window.PRAuth && window.PRAuth.byId(m.userId))).filter(Boolean);
     const openComments = annotations.filter((a) => a.kind === 'comment' && a.status === 'open').length;
     const openTodos = annotations.filter((a) => a.kind === 'todo' && a.status !== 'done').length;
+    const openReview = annotations.filter((a) => a.kind === 'review' && a.status !== 'resolved').length;
     const projForShare = Object.assign({ id: projectId, title: init.title }, projMeta);
 
     const themeVars = {
@@ -1363,6 +1440,7 @@
               <button className={'ct' + (drawer.open && drawer.tab === 'history' ? ' on' : '')} title="Version history" onClick={() => toggleDrawer('history')}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M8 4v4l3 1.5" strokeLinecap="round" /><path d="M2.5 8a5.5 5.5 0 105.5-5.5A5.5 5.5 0 003.2 5" /><path d="M2.5 2.5V5H5" strokeLinecap="round" strokeLinejoin="round" /></svg></button>
               <button className={'ct' + (drawer.open && drawer.tab === 'activity' ? ' on' : '')} title="Activity" onClick={() => toggleDrawer('activity')}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M2 8h3l1.5 4 3-8L13.5 8H14" strokeLinecap="round" strokeLinejoin="round" /></svg></button>
               <button className={'ct' + (drawer.open && drawer.tab === 'kpi' ? ' on' : '')} title="KPIs & format compliance" onClick={() => toggleDrawer('kpi')}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M2 14V8M6 14V4M10 14v-3M14 14V6" strokeLinecap="round" /></svg></button>
+              <button className={'ct' + (drawer.open && drawer.tab === 'review' ? ' on' : '')} title="AI review" onClick={() => toggleDrawer('review')}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M8 1.7l1.7 3.7 4 .4-3 2.7.9 4L8 12.9 4.4 14.5l.9-4-3-2.7 4-.4z" strokeLinejoin="round" /></svg>{openReview ? <i className="ct-badge">{openReview}</i> : null}</button>
             </div>
             {isAdmin && <a className="btn btn-icon" href="Admin.html" title="Admin">
               <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"><path d="M8 1.8l5 1.9v3.6c0 3-2.1 5.2-5 6.1-2.9-.9-5-3.1-5-6.1V3.7z" /><path d="M5.8 8l1.6 1.6L10.4 6.5" /></svg>
@@ -1371,6 +1449,7 @@
               <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4"><circle cx="4" cy="8" r="2" /><circle cx="12" cy="4" r="2" /><circle cx="12" cy="12" r="2" /><path d="M5.8 7l4.4-2.2M5.8 9l4.4 2.2" /></svg>Share
             </button>
             <input ref={fileInput} type="file" multiple accept=".tex,.bib,.bbl,.bst,.cls,.sty,.txt,.md,.markdown,.pdf,application/pdf,image/*" style={{ display: 'none' }} onChange={onUpload} />
+            <input ref={reviewInput} type="file" accept=".json,application/json" style={{ display: 'none' }} onChange={onReviewFile} />
             <input ref={dirInput} type="file" multiple style={{ display: 'none' }} onChange={onUploadFolder} />
             <button className="btn btn-icon" title="Upload files" onClick={() => fileInput.current.click()}>
               <svg viewBox="0 0 16 16" width="15" height="15"><path d="M8 2v8M8 2L5 5M8 2l3 3M3 11v2a1 1 0 001 1h8a1 1 0 001-1v-2" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
@@ -1460,7 +1539,7 @@
               monoSize: t.monoSize, canEdit, canComment, bibKeys,
               writeMode, setWrite: setWriteMode, onPreviewEdit, onBlockTransform, onInsertBlock, onTableEdit, onInsertImage, onInsertImageBlob,
               isCurProj, docExists, readOnlyDoc, getSource, getCompiled, docLabel, docColor,
-              getCompiledPdf, requestCompile, onCompileExact, annoMarks: annoMarksFor, annoSids: annoSidsFor, voicedSids: voicedSidsFor,
+              getCompiledPdf, requestCompile, onCompileExact, annoMarks: annoMarksFor, annoSids: annoSidsFor, voicedSids: voicedSidsFor, reviewSids: reviewSidsFor,
               canClose: window.WS.allPanes(layout).length > 1,
               onFocus: wsOnFocus, onAdd: wsOnAdd, onSplit: wsOnAdd, onClose: wsOnClose, onSolo: wsOnSolo, onSetRatio: wsOnSetRatio,
               dragId, onDragStart: (id) => setDragId(id), onDragEnd: () => setDragId(null), onMovePane: wsOnMovePane,
@@ -1479,7 +1558,8 @@
             versions={versions} onCompare={(v) => setDiffVersion(v)} onRestore={onRestore} onSaveVersion={onSaveVersion}
             activity={projMeta.activity}
             metrics={kpiMetrics} journalMeta={projMeta.journalMeta} journal={projMeta.journal} templateId={projMeta.templateId}
-            submission={projMeta.submission} onSetStatus={setSubmissionStatus} tts={projMeta.tts} engine={voice.engine} model={voice.model} />}
+            submission={projMeta.submission} onSetStatus={setSubmissionStatus} tts={projMeta.tts} engine={voice.engine} model={voice.model}
+            review={reviewAnns} reviewFocus={reviewFocus} onImportReview={onImportReview} onClearReview={onClearReview} canImport={isCurProj(active)} />}
           <input ref={pdfInput} type="file" accept="application/pdf,.pdf" style={{ display: 'none' }} onChange={onPdfPicked} />
           <input ref={imgInsertInput} type="file" accept="image/png,image/jpeg,image/gif,image/svg+xml,.png,.jpg,.jpeg,.gif,.svg" style={{ display: 'none' }} onChange={onInsertImagePicked} />
         </div>

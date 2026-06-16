@@ -163,6 +163,40 @@
   function readJSON(k, d) { try { return JSON.parse(localStorage.getItem(k)) || d; } catch (e) { return d; } }
   function writeJSON(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { } }
 
+  /* ---- AI-review import helpers (mirror store.js) ---- */
+  function baseName(x) { return (x || '').split('/').pop(); }
+  function locateQuote(content, quote) {
+    if (!content || !quote) return -1;
+    var i = content.indexOf(quote); if (i >= 0) return i;
+    var nq = quote.replace(/\s+/g, ' ').trim();
+    try { var esc = nq.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+'); var m = new RegExp(esc).exec(content); if (m) return m.index; } catch (e) { }
+    return -1;
+  }
+  function reviewTargetFile(p, fname) {
+    var files = p.files || {}, b = baseName(fname), keys = Object.keys(files);
+    var hit = keys.filter(function (k) { return files[k] && files[k].type === 'tex' && baseName(k) === b; })[0];
+    if (hit) return hit;
+    hit = keys.filter(function (k) { return files[k] && files[k].type === 'tex' && /\\documentclass/.test(files[k].content || ''); })[0];
+    return hit || p.active;
+  }
+  function importReviewInto(p, findings) {
+    var files = p.files || {}, imported = 0, unanchored = 0, now = Date.now();
+    (findings || []).forEach(function (f, idx) {
+      if (!f || !f.comment) return;
+      var path = reviewTargetFile(p, f.file), content = (files[path] && files[path].content) || '', q = f.quote || '';
+      var at = locateQuote(content, q);
+      var ann = {
+        id: sid(), kind: 'review', category: f.category || 'style', severity: f.severity || 'minor',
+        comment: f.comment, body: f.comment, suggestion: f.suggestion || '', confidence: f.confidence || 'medium',
+        authorId: 'ai-review', createdAt: now + idx, status: 'open', replies: [],
+        anchor: { file: path, start: at >= 0 ? at : 0, end: at >= 0 ? at + q.length : 0, quote: q }
+      };
+      if (at >= 0) imported++; else { unanchored++; ann._unanchored = true; }
+      p.annotations.push(ann);
+    });
+    return { imported: imported, unanchored: unanchored, total: (findings || []).length };
+  }
+
   var Store = {
     PLAN: PLAN,
     subscribe: subscribe,
@@ -252,6 +286,16 @@
     updateAnnotation: function (id, annId, patch) { var p = this.get(id); if (!p) return; var a = p.annotations.filter(function (x) { return x.id === annId; })[0]; if (!a) return; Object.assign(a, patch); this.save(p); },
     replyAnnotation: function (id, annId, authorId, body, extra) { var p = this.get(id); if (!p) return; var a = p.annotations.filter(function (x) { return x.id === annId; })[0]; if (!a) return; extra = extra || {}; a.replies.push({ id: sid(), authorId: authorId, body: body, at: Date.now(), mentions: extra.mentions || [], attachments: extra.attachments || [] }); this.save(p); },
     deleteAnnotation: function (id, annId) { var p = this.get(id); if (!p) return; p.annotations = p.annotations.filter(function (x) { return x.id !== annId; }); this.save(p); },
+    listReview: function (id) { var p = this.get(id); return (p && p.annotations || []).filter(function (a) { return a.kind === 'review'; }); },
+    clearReview: function (id) { var p = this.get(id); if (!p) return; p.annotations = (p.annotations || []).filter(function (a) { return a.kind !== 'review'; }); this.save(p); },
+    importReview: function (id, findings, opts) {
+      var p = this.get(id); if (!p) return { imported: 0, unanchored: 0, total: 0 };
+      opts = opts || {}; p.annotations = p.annotations || [];
+      if (!opts.append) p.annotations = p.annotations.filter(function (a) { return a.kind !== 'review'; });
+      var r = importReviewInto(p, findings); this.save(p);
+      this.logActivity(id, opts.actorId || me.id, 'imported AI review', r.imported + ' notes');
+      return r;
+    },
 
     /* usage / metering (local per user for now; server metering arrives with voice) */
     month: function () { var d = new Date(); return d.getFullYear() + '-' + (d.getMonth() + 1); },

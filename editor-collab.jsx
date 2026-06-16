@@ -268,7 +268,8 @@
   }
 
   function RightDrawer(p) {
-    const tabs = [['comments', 'Comments'], ['todos', 'To-dos'], ['history', 'History'], ['activity', 'Activity'], ['kpi', 'KPIs']];
+    const tabs = [['comments', 'Comments'], ['todos', 'To-dos'], ['review', 'Review'], ['history', 'History'], ['activity', 'Activity'], ['kpi', 'KPIs']];
+    const reviewOpen = (p.review || []).filter((a) => a.status !== 'resolved').length;
     const comments = p.annotations.filter((a) => a.kind === 'comment');
     const todos = p.annotations.filter((a) => a.kind === 'todo');
     const openCount = p.annotations.filter((a) => a.status === 'open' && a.kind === 'comment').length;
@@ -283,7 +284,7 @@
     }
     return <aside className="drawer">
       <div className="drawer-tabs">
-        {tabs.map(([k, l]) => <button key={k} className={'dtab' + (p.tab === k ? ' on' : '')} onClick={() => p.setTab(k)}>{l}{k === 'comments' && openCount ? <span className="badge">{openCount}</span> : null}{k === 'todos' && todoOpen ? <span className="badge">{todoOpen}</span> : null}</button>)}
+        {tabs.map(([k, l]) => <button key={k} className={'dtab' + (p.tab === k ? ' on' : '')} onClick={() => p.setTab(k)}>{l}{k === 'comments' && openCount ? <span className="badge">{openCount}</span> : null}{k === 'todos' && todoOpen ? <span className="badge">{todoOpen}</span> : null}{k === 'review' && reviewOpen ? <span className="badge">{reviewOpen}</span> : null}</button>)}
         <button className="drawer-x" onClick={p.onClose} title="Close">✕</button>
       </div>
       {(p.tab === 'comments' || p.tab === 'todos') && p.docName && <div className="drawer-doc"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M4 2.5h5l3 3V13a.5.5 0 01-.5.5h-7A.5.5 0 014 13z" strokeLinejoin="round" /></svg>Active document <b>{p.docName}</b><span className="dd-hint">· each note is tagged with its file</span></div>}
@@ -316,12 +317,59 @@
           {(p.activity || []).map((a) => { const u = Auth.byId(a.actorId); return <div className="act-d" key={a.id}><Avatar user={u} size={24} /><div><b>{u ? u.name.split(' ')[0] : a.actorId}</b> {a.verb} {a.target}<div className="act-t">{rel(a.at)} ago</div></div></div>; })}
         </>}
         {p.tab === 'kpi' && <KpiPanel metrics={p.metrics} journalMeta={p.journalMeta} journal={p.journal} templateId={p.templateId} submission={p.submission} onSetStatus={p.onSetStatus} canEdit={p.canEdit} tts={p.tts} engine={p.engine} model={p.model} />}
+        {p.tab === 'review' && <ReviewPanel review={p.review} focus={p.reviewFocus} onJump={p.onJump} onResolve={p.onResolve} onDelete={p.onDelete} onImport={p.onImportReview} onClear={p.onClearReview} canImport={p.canImport} />}
       </div>
       <Lightbox />
     </aside>;
   }
 
   /* ---- KPI / format-compliance panel (Tier A auto-tracked + Tier B reference + Tier C status) ---- */
+  /* ---- AI Review panel: workflow findings as navigable, anchored review notes ---- */
+  var REV_SEV = { major: ['#dc2626', '#fef2f2'], minor: ['#b4530f', '#fdecdf'], nit: ['#64748b', '#eef2f7'] };
+  function ReviewPanel(p) {
+    const review = p.review || [];
+    const open = review.filter((a) => a.status !== 'resolved');
+    const resolved = review.filter((a) => a.status === 'resolved');
+    const rank = { major: 0, minor: 1, nit: 2 };
+    const sorted = open.slice().sort((a, b) => (rank[a.severity || 'minor'] - rank[b.severity || 'minor']));
+    const counts = { major: open.filter((a) => a.severity === 'major').length, minor: open.filter((a) => a.severity === 'minor').length, nit: open.filter((a) => a.severity === 'nit').length };
+    const focusRef = useRef(null);
+    useEffect(() => { if (p.focus && focusRef.current) { try { focusRef.current.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) { } } }, [p.focus]);
+    function item(a, dim) {
+      const c = REV_SEV[a.severity || 'minor'] || REV_SEV.minor;
+      const unanchored = !a.anchor || a.anchor.start === a.anchor.end;
+      return <div key={a.id} ref={a.id === p.focus ? focusRef : null} className={'rev-item ' + (a.severity || 'minor') + (dim ? ' done' : '') + (a.id === p.focus ? ' focus' : '')}>
+        <div className="rev-head">
+          <span className="rev-sev" style={{ color: c[0], background: c[1] }}>{a.severity || 'minor'}</span>
+          <span className="rev-cat">{a.category || 'style'}</span>
+          {unanchored ? <span className="rev-cat" title="Could not be located in the current text">unanchored</span> : null}
+          <span className="rev-grow" />
+          <button className="link" onClick={() => p.onJump(a)} disabled={unanchored}>Jump</button>
+        </div>
+        <div className="rev-body">{a.comment}</div>
+        {a.suggestion ? <div className="rev-sug"><b>Javaslat:</b> {a.suggestion}</div> : null}
+        {a.anchor && a.anchor.quote ? <div className="rev-quote">“{a.anchor.quote.length > 130 ? a.anchor.quote.slice(0, 130) + '…' : a.anchor.quote}”</div> : null}
+        <div className="rev-acts">
+          <button className="link" onClick={() => p.onResolve(a)}>{a.status === 'resolved' ? 'Reopen' : 'Mark resolved'}</button>
+          <button className="link danger" onClick={() => p.onDelete(a)}>Delete</button>
+        </div>
+      </div>;
+    }
+    return <div className="review">
+      <div className="rev-bar">
+        <div className="rev-summary">{open.length} open · <b style={{ color: '#dc2626' }}>{counts.major}</b> major · <b style={{ color: '#b4530f' }}>{counts.minor}</b> minor · {counts.nit} nit{resolved.length ? ' · ' + resolved.length + ' resolved' : ''}</div>
+        <div className="rev-bar-acts">
+          <button className="vp-btn primary" onClick={p.onImport} disabled={!p.canImport} title="Import a review .json produced by the review workflow">Import…</button>
+          {review.length ? <button className="link danger" onClick={p.onClear}>Clear</button> : null}
+        </div>
+      </div>
+      {review.length === 0 && <div className="empty-d">No AI review yet. Run the review workflow on this thesis, then <b>Import…</b> the resulting <code>.review.json</code>. Each note anchors to the sentence it refers to, shows up as a ✦ marker in the Preview and the compiled PDF, and is listed here by severity.</div>}
+      {sorted.map((a) => item(a, false))}
+      {resolved.length ? <div className="rev-resolved-h">Resolved ({resolved.length})</div> : null}
+      {resolved.map((a) => item(a, true))}
+    </div>;
+  }
+
   var KPI_STATUS = { ok: ['#1c7a47', '#e6f3ec', 'On track'], warn: ['#b4530f', '#fdecdf', 'Near limit'], over: ['#dc2626', '#fef2f2', 'Over / missing'], info: ['#475569', '#eef2f7', ''], na: ['#94a3b8', '#f1f5f9', 'Compile to measure'], missing: ['#b4530f', '#fdecdf', 'Not found'] };
   var STATUSES = ['drafting', 'internal-review', 'submitted', 'under-review', 'major-revision', 'minor-revision', 'accepted', 'rejected', 'published'];
   function KpiPanel(p) {

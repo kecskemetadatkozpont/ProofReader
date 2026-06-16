@@ -560,6 +560,8 @@
     const annoRef = useRef(annoMap); annoRef.current = annoMap;
     const voicedMap = ctx.voicedSids ? ctx.voicedSids(docId) : {};
     const voicedRef = useRef(voicedMap); voicedRef.current = voicedMap;
+    const reviewMap = ctx.reviewSids ? ctx.reviewSids(docId) : {};
+    const reviewRef = useRef(reviewMap); reviewRef.current = reviewMap;
 
     function applyHighlight(root) {
       root = root || (ref.current);
@@ -580,6 +582,15 @@
         const k = map[s.dataset.sid];
         if (k) s.classList.add(k === 'both' ? 'has-both' : k === 'todo' ? 'has-todo' : 'has-comment');
       });
+    }
+    // AI-review markers on the compiled PDF (severity-tinted sentence + ✦ on the last span)
+    function applyReview(root) {
+      root = root || (ref.current); if (!root) return;
+      const map = reviewRef.current || {};
+      root.querySelectorAll('.ct-textlayer > span.has-review, .ct-textlayer > span.review-end').forEach((s) => { s.classList.remove('has-review', 'review-major', 'review-minor', 'review-nit', 'review-end'); s.removeAttribute('title'); });
+      const bySid = {};
+      root.querySelectorAll('.ct-textlayer > span.sent').forEach((s) => { const sev = map[s.dataset.sid]; if (sev) { s.classList.add('has-review', 'review-' + sev); (bySid[s.dataset.sid] = bySid[s.dataset.sid] || []).push(s); } });
+      Object.keys(bySid).forEach((id) => { const arr = bySid[id]; const last = arr[arr.length - 1]; last.classList.add('review-end'); last.title = 'AI review note (' + map[id] + ') — open the Review panel'; });
     }
     // mark sentences whose ElevenLabs audio is already generated; ♪ goes on the LAST span per sentence
     function applyVoiced(root) {
@@ -662,7 +673,7 @@
             await lib.renderTextLayer({ textContent: tc, container: tl, viewport: cssVp, textDivs: textDivs }).promise;
             const sids = st.sids[n] || [];
             textDivs.forEach((sp, i) => { const sid = sids[i]; if (sid != null) { sp.classList.add('sent'); sp.dataset.sid = sid; } });
-            applyHighlight(root); applyAnno(root); applyVoiced(root);
+            applyHighlight(root); applyAnno(root); applyVoiced(root); applyReview(root);
           };
           st.renderPage = renderPage;
           const io = new IntersectionObserver((ents) => { ents.forEach((e) => { if (e.isIntersecting) renderPage(+e.target.dataset.page).catch(() => { }); }); }, { root: root, rootMargin: '800px 0px' });
@@ -679,6 +690,8 @@
     useEffect(() => { applyAnno(); }, [JSON.stringify(annoMap), state]);
     // re-apply ♪ voiced markers when the cached-audio set or voice changes
     useEffect(() => { applyVoiced(); }, [JSON.stringify(voicedMap), state]);
+    // re-apply AI-review markers when the review set changes
+    useEffect(() => { applyReview(); }, [JSON.stringify(reviewMap), state]);
 
     // register this pane's scroll element so comment/todo selection (ctx.onPreviewMouseUp) works here too
     useEffect(() => {

@@ -264,6 +264,13 @@
     /* ♪ marks sentences already voiced with ElevenLabs (free to replay) — faint tint + a note on the last span */
     .ct-textlayer > span.sent.voiced { background: color-mix(in srgb, var(--accent) 9%, transparent); }
     .ct-textlayer > span.sent.voiced-end::after { content: '\266A'; color: var(--accent); opacity: .9; font-weight: 700; margin-left: 1px; pointer-events: none; }
+    /* AI-review markers on the compiled PDF */
+    .ct-textlayer > span.sent.review-major { background: color-mix(in srgb, #dc2626 16%, transparent); }
+    .ct-textlayer > span.sent.review-minor { background: color-mix(in srgb, #b4530f 15%, transparent); }
+    .ct-textlayer > span.sent.review-nit { background: color-mix(in srgb, #64748b 14%, transparent); }
+    .ct-textlayer > span.sent.review-end::after { content: '\2726'; color: #dc2626; font-weight: 700; margin-left: 1px; pointer-events: none; }
+    .ct-textlayer > span.sent.review-minor.review-end::after { color: #b4530f; }
+    .ct-textlayer > span.sent.review-nit.review-end::after { color: #64748b; }
     .img-pane { background: #2a2530; display: grid; place-items: center; overflow: auto; padding: 14px; }
     .img-pane img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 3px; box-shadow: 0 4px 18px rgba(0,0,0,.4); }
     .pane-missing { display: flex; flex-direction: column; gap: 8px; align-items: center; justify-content: center; color: var(--muted); font-size: 13px; text-align: center; padding: 20px; }
@@ -403,6 +410,11 @@
     /* ♪ marks sentences whose ElevenLabs audio is already generated (free to replay, no extra credit) */
     .sent.voiced::after { content: '\266A'; font-size: .72em; line-height: 0; color: var(--accent); opacity: .6; margin-left: 2px; vertical-align: super; font-weight: 700; user-select: none; pointer-events: none; }
     .sent.voiced:hover::after { opacity: 1; }
+    /* AI-review markers (severity-tinted sentence + ✦ tag that opens the Review panel) */
+    .sent.has-review { background: color-mix(in srgb, var(--rev, #6b7280) 12%, transparent); box-shadow: inset 0 -2px 0 0 color-mix(in srgb, var(--rev, #6b7280) 55%, transparent); border-radius: 3px; }
+    .sent.review-major { --rev: #dc2626; } .sent.review-minor { --rev: #b4530f; } .sent.review-nit { --rev: #64748b; }
+    .review-tag { display: inline-flex; align-items: center; gap: 1px; margin-left: 3px; padding: 0 3px; height: 14px; border-radius: 7px; background: var(--rev, #6b7280); color: #fff; vertical-align: middle; cursor: pointer; user-select: none; }
+    .review-tag svg { width: 9px; height: 9px; } .review-tag .rt-n { font-size: 8.5px; font-weight: 800; font-style: normal; line-height: 1; }
 
     /* write mode (WYSIWYG editing in the preview) */
     .wm-seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; margin-right: 4px; flex: none; }
@@ -578,7 +590,27 @@
     .drawer-body { flex: 1; min-height: 0; overflow: auto; padding: 12px; }
     .drawer-head { display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: var(--muted); margin-bottom: 10px; }
     .empty-d { color: var(--muted); font-size: 12.5px; line-height: 1.5; padding: 18px 6px; text-align: center; }
+    .empty-d code { background: var(--app-bg); padding: 1px 4px; border-radius: 4px; font-size: 11px; }
     .link { border: 0; background: transparent; color: var(--accent); font-size: 12.5px; font-weight: 600; cursor: pointer; }
+    .link.danger { color: #dc2626; } .link[disabled] { color: var(--muted); opacity: .5; cursor: default; }
+    /* AI Review panel */
+    .review { display: flex; flex-direction: column; gap: 8px; }
+    .rev-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+    .rev-summary { font-size: 11.5px; color: var(--muted); flex: 1; min-width: 140px; }
+    .rev-bar-acts { display: flex; align-items: center; gap: 8px; }
+    .rev-item { border: 1px solid var(--line); border-left: 3px solid var(--rev, #b4530f); border-radius: 8px; padding: 9px 11px; background: var(--pane); }
+    .rev-item.focus { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent); border-color: var(--accent); }
+    .rev-item.done { opacity: .55; } .rev-item.done .rev-body { text-decoration: line-through; }
+    .rev-head { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; }
+    .rev-sev { font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .03em; padding: 1px 6px; border-radius: 10px; }
+    .rev-cat { font-size: 10px; font-weight: 600; color: var(--muted); background: var(--app-bg); padding: 1px 6px; border-radius: 10px; }
+    .rev-grow { flex: 1; }
+    .rev-body { font-size: 13px; line-height: 1.45; color: var(--ink); }
+    .rev-sug { font-size: 12px; line-height: 1.4; color: var(--muted); margin-top: 5px; }
+    .rev-quote { font-size: 11px; line-height: 1.4; color: var(--muted); font-style: italic; margin-top: 6px; border-left: 2px solid var(--line); padding-left: 7px; }
+    .rev-acts { display: flex; gap: 12px; margin-top: 7px; }
+    .rev-resolved-h { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 8px 2px 2px; }
+    .rev-item.major { --rev: #dc2626; } .rev-item.minor { --rev: #b4530f; } .rev-item.nit { --rev: #64748b; }
     .solid { border: 0; background: var(--accent); color: #fff; font-size: 12.5px; font-weight: 600; padding: 7px 12px; border-radius: 8px; cursor: pointer; }
     .solid:hover { background: var(--accent-d); }
 
