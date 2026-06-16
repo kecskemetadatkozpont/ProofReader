@@ -117,6 +117,9 @@
       });
     },
 
+    // Pull the account's full voice list (the ElevenLabs "My Voices" library + premade).
+    // Each result carries its category so the UI can group the user's own voices
+    // (cloned / generated / professional / cloned-from-library) under "My Voices".
     listAccountVoices: function () {
       var key = this.getKey();
       if (!key) return Promise.reject(new Error('no-key'));
@@ -124,7 +127,10 @@
         .then(function (r) { if (!r.ok) throw new Error('Could not load voices (' + r.status + ')'); return r.json(); })
         .then(function (j) {
           return (j.voices || []).map(function (v) {
-            return { id: v.voice_id, name: v.name + (v.category && v.category !== 'premade' ? ' · ' + v.category : '') };
+            var cat = v.category || 'premade';
+            var labels = v.labels || {};
+            var desc = [labels.accent, labels.gender, labels.description, labels.age].filter(Boolean).join(', ');
+            return { id: v.voice_id, name: v.name, category: cat, mine: cat !== 'premade', desc: desc };
           });
         });
     },

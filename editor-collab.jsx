@@ -393,12 +393,14 @@
       if (!E || !E.hasKey()) return;
       setStatus({ type: 'busy', msg: 'Loading your voices…' });
       E.listAccountVoices().then((vs) => {
+        const stock = (E.voices || []).map((v) => ({ id: v.id, name: v.name, category: 'premade', mine: false }));
         const seen = {}, merged = [];
-        vs.concat(E.voices).forEach((v) => { if (!seen[v.id]) { seen[v.id] = 1; merged.push(v); } });
+        vs.concat(stock).forEach((v) => { if (!seen[v.id]) { seen[v.id] = 1; merged.push(v); } });
         setVoiceList(merged);
-        // if the current selection isn't one this account can use, switch to the first available
-        if (vs.length && !vs.some((v) => v.id === p.elevenVoice)) p.set({ elevenVoice: vs[0].id });
-        setStatus({ type: 'ok', msg: vs.length + ' voice' + (vs.length === 1 ? '' : 's') + ' available on your plan.' });
+        const mineN = vs.filter((v) => v.mine).length;
+        // if the current selection isn't one this account can use, prefer one of the user's own voices
+        if (vs.length && !vs.some((v) => v.id === p.elevenVoice)) p.set({ elevenVoice: (vs.find((v) => v.mine) || vs[0]).id });
+        setStatus({ type: 'ok', msg: mineN ? (mineN + ' of your voices · ' + vs.length + ' available') : ('No custom voices yet · ' + vs.length + ' premade available') });
       }).catch((e) => { if (!auto) setStatus({ type: 'err', msg: (e && e.message) || 'Could not load voices.' }); else setStatus(null); });
     };
     const testVoice = () => {
@@ -426,10 +428,16 @@
             </div>
           : <div className="vp-conn"><span className="vp-dot" />Connected · stored in this browser</div>}
 
-        <div className="vp-label">Voice{connected ? <button className="vp-link" onClick={loadVoices}>load mine</button> : null}</div>
+        <div className="vp-label">Voice{connected ? <button className="vp-link" onClick={() => loadVoices(false)}>load My Voices</button> : null}</div>
         <select className="vp-sel" value={p.elevenVoice} onChange={(e) => p.set({ elevenVoice: e.target.value })}>
-          {voiceList.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+          {voiceList.some((v) => v.mine) && <optgroup label="My Voices">
+            {voiceList.filter((v) => v.mine).map((v) => <option key={v.id} value={v.id}>{v.name}{v.category && v.category !== 'premade' ? ' · ' + v.category : ''}</option>)}
+          </optgroup>}
+          <optgroup label="Premade">
+            {voiceList.filter((v) => !v.mine).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+          </optgroup>
         </select>
+        {connected && voiceList.length > 0 && !voiceList.some((v) => v.mine) && <div className="vp-note" style={{ marginTop: 6 }}>No custom voices on this account yet. Create or clone a voice in ElevenLabs → <b>Voices / My Voices</b>, then click <b>load My Voices</b>.</div>}
 
         <div className="vp-label">Model</div>
         <select className="vp-sel" value={p.model} onChange={(e) => p.set({ model: e.target.value })}>
