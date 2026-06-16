@@ -201,6 +201,9 @@
     const [elevenErr, setElevenErr] = useState(null);
     const [voicedKeys, setVoicedKeys] = useState({}); // cache keys with already-generated audio (free to replay)
     const [reviewFocus, setReviewFocus] = useState(null); // review annotation id to focus in the Review drawer
+    const [showVoiced, setShowVoiced] = useState(pf0.showVoiced !== false); // ♪ voiced-highlight layer toggle
+    const [showReview, setShowReview] = useState(pf0.showReview !== false); // ✦ review-marker layer toggle
+    useEffect(() => { if (window.PRStore) window.PRStore.setPrefs({ showVoiced, showReview }); }, [showVoiced, showReview]);
     const refreshVoiced = useCallback(() => { if (window.PREleven && window.PREleven.cachedKeys) window.PREleven.cachedKeys().then(setVoicedKeys).catch(() => {}); }, []);
     useEffect(() => { refreshVoiced(); const h = () => refreshVoiced(); window.addEventListener('pr-tts', h); return () => window.removeEventListener('pr-tts', h); }, [refreshVoiced]);
 
@@ -1074,7 +1077,7 @@
 
     // sentence-id → worst review severity, for the AI-review marker layer (mirrors annoSidsFor)
     const reviewSidsFor = useCallback((docId) => {
-      if (!docId || docId[0] === '@') return {};
+      if (!docId || docId[0] === '@' || !showReview) return {};
       const comp = getCompiled(docId); if (!comp) return {};
       const anns = docId === active ? displayAnns : annotations;
       const rank = { major: 3, minor: 2, nit: 1 };
@@ -1089,11 +1092,11 @@
         });
       });
       return map;
-    }, [displayAnns, annotations, active, getCompiled]);
+    }, [displayAnns, annotations, active, getCompiled, showReview]);
 
     // map of sentence ids whose ElevenLabs audio is already generated (♪ — free to replay), per doc
     const voicedSidsFor = useCallback((docId) => {
-      if (!docId || docId[0] === '@') return {};
+      if (!docId || docId[0] === '@' || !showVoiced) return {};
       const E = window.PREleven;
       if (voice.engine !== 'eleven' || !E || !E.keyFor) return {};
       const comp = getCompiled(docId); if (!comp) return {};
@@ -1101,7 +1104,7 @@
       const map = {};
       comp.sentences.forEach((s) => { if (s.text && voicedKeys[E.keyFor(s.text, cfg)]) map[s.id] = 1; });
       return map;
-    }, [voicedKeys, voice.engine, voice.elevenVoice, voice.model, voice.stability, voice.similarity, getCompiled]);
+    }, [voicedKeys, voice.engine, voice.elevenVoice, voice.model, voice.stability, voice.similarity, getCompiled, showVoiced]);
 
     // annotations on a given sentence (for the hover card): body, author, kind, due
     const annoForSentence = useCallback((docId, sid) => {
@@ -1353,7 +1356,7 @@
       const roots = Array.from(document.querySelectorAll('.preview-scroll'));
       roots.forEach((root) => root.querySelectorAll('.sent.voiced').forEach((el) => { el.classList.remove('voiced'); el.removeAttribute('title'); }));
       const E = window.PREleven;
-      if (voice.engine !== 'eleven' || !E || !E.keyFor) return;
+      if (!showVoiced || voice.engine !== 'eleven' || !E || !E.keyFor) return;
       const cfg = { elevenVoice: voice.elevenVoice, model: voice.model, stability: voice.stability, similarity: voice.similarity };
       roots.forEach((root) => {
         const docId = root.getAttribute('data-doc'); if (!docId || docId[0] === '@') return;
@@ -1364,7 +1367,7 @@
           if (el) { el.classList.add('voiced'); el.title = 'Voiced with ElevenLabs — replays free, no extra credits'; }
         });
       });
-    }, [voicedKeys, voice.engine, voice.elevenVoice, voice.model, voice.stability, voice.similarity, compiled, otherCompiled, active, layout, soloPaneId]);
+    }, [voicedKeys, voice.engine, voice.elevenVoice, voice.model, voice.stability, voice.similarity, compiled, otherCompiled, active, layout, soloPaneId, showVoiced]);
 
     // AI-review markers on the preview: a ✦ tag per sentence carrying review notes (severity-coloured)
     useLayoutEffect(() => {
@@ -1373,6 +1376,7 @@
         el.classList.remove('has-review', 'review-major', 'review-minor', 'review-nit'); el.removeAttribute('title');
         const t = el.querySelector(':scope > .review-tag'); if (t) t.remove();
       }));
+      if (!showReview) return;
       const rank = { major: 3, minor: 2, nit: 1 };
       roots.forEach((root) => {
         const docId = root.getAttribute('data-doc'); if (!docId || docId[0] === '@') return;
@@ -1395,7 +1399,7 @@
           el.appendChild(tag);
         });
       });
-    }, [displayAnns, annotations, compiled, otherCompiled, active, layout, soloPaneId]);
+    }, [displayAnns, annotations, compiled, otherCompiled, active, layout, soloPaneId, showReview]);
 
     const sentence = compiled.sentences[idx];
     const total = compiled.sentences.length;
@@ -1568,6 +1572,8 @@
           onPlay={play} onStop={stop} onPrev={() => step(-1)} onNext={() => step(1)} onSeek={seekTo}
           rate={rate} setRate={setRate} voices={voices} voiceURI={voiceURI} setVoiceURI={setVoiceURI}
           onVoice={() => setVoiceOpen((v) => !v)} engine={voice.engine} busy={elevenBusy} err={elevenErr}
+          showVoiced={showVoiced} onToggleVoiced={() => setShowVoiced((v) => !v)}
+          showReview={showReview} onToggleReview={() => setShowReview((v) => !v)} hasReview={reviewAnns.length > 0}
           onBookmark={saveReading} saved={savedFlash} />
 
         {shareOpen && <Collab.ShareModal project={projForShare} me={me} onClose={() => setShareOpen(false)} onChange={refreshCollab} />}
@@ -1789,6 +1795,8 @@
         </div>
 
         <div className="tp-right">
+          <button className={'tp-toggle' + (props.showVoiced ? ' on' : ' off')} title={props.showVoiced ? 'Hide ♪ voiced-sentence highlights' : 'Show ♪ voiced-sentence highlights'} onClick={(e) => { e.stopPropagation(); props.onToggleVoiced && props.onToggleVoiced(); }}><span className="tp-glyph">♪</span></button>
+          {props.hasReview ? <button className={'tp-toggle' + (props.showReview ? ' on' : ' off')} title={props.showReview ? 'Hide AI review markers' : 'Show AI review markers'} onClick={(e) => { e.stopPropagation(); props.onToggleReview && props.onToggleReview(); }}><span className="tp-glyph">✦</span></button> : null}
           <button className={'tp-gear' + (props.engine === 'eleven' ? ' on' : '')} title="Voice engine" onClick={(e) => { e.stopPropagation(); props.onVoice && props.onVoice(); }}>
             <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="10" cy="10" r="2.6" /><path d="M10 2.5v2M10 15.5v2M2.5 10h2M15.5 10h2M4.7 4.7l1.4 1.4M13.9 13.9l1.4 1.4M4.7 15.3l1.4-1.4M13.9 6.1l1.4-1.4" strokeLinecap="round" /></svg>
             {props.engine === 'eleven' ? <span className="gear-tag">EL</span> : null}
