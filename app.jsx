@@ -323,11 +323,25 @@
       clearTimeout(pdfCompileTimers.current[docId]);
       const run = async () => {
         if (window.AloudTeX.isBusy && window.AloudTeX.isBusy()) { pdfCompileTimers.current[docId] = setTimeout(run, 700); return; }
+        let input;
+        try { input = await assembleTexFiles(docId); }
+        catch (e) { setPdfCompiled((s) => ({ ...s, [docId]: { ...(s[docId] || {}), busy: false, err: String((e && e.message) || e), mode: 'browser', ts: Date.now() } })); return; }
+        const C = window.PRPdfCache;
+        const hash = C ? C.hashOf(input, 'browser') : null;
+        const cur = pdfCompiledRef.current[docId];
+        // (1) content unchanged since the last browser compile → keep the current PDF, skip recompiling
+        if (!force && hash && cur && cur.hash === hash && cur.pdf) { if (cur.busy) setPdfCompiled((s) => ({ ...s, [docId]: { ...(s[docId] || {}), busy: false } })); return; }
         setPdfCompiled((s) => ({ ...s, [docId]: { ...(s[docId] || {}), busy: true, err: null } }));
+        // (2) persistent cache hit → load the stored PDF instantly, no compile (but never replace a
+        // current exact-mode "Pontos PDF" with a cached browser PDF unless the user forced it)
+        if (!force && hash && C && !(cur && cur.mode === 'exact')) {
+          try { const cached = await C.get(hash); if (cached && cached.pdf) { setPdfCompiled((s) => ({ ...s, [docId]: { busy: false, pdf: cached.pdf, pages: cached.pages, status: 0, mode: 'browser', err: null, hash: hash, cached: true, ts: Date.now() } })); return; } } catch (e) { }
+        }
+        // (3) compile, then remember the result by content hash
         try {
-          const input = await assembleTexFiles(docId);
           const r = await window.AloudTeX.compile({ mainFile: input.mainFile, files: input.files, passes: 3 });
-          setPdfCompiled((s) => ({ ...s, [docId]: { busy: false, pdf: r.ok ? r.pdf : ((s[docId] || {}).pdf || null), log: r.log, pages: r.pages, status: r.status, mode: 'browser', err: r.ok ? null : (r.reason || ('Fordítás nem sikerült (status ' + r.status + ')')), ms: r.ms, ts: Date.now() } }));
+          if (r.ok && hash && C) { try { C.put(hash, { pdf: r.pdf, pages: r.pages, ts: Date.now() }); } catch (e) { } }
+          setPdfCompiled((s) => ({ ...s, [docId]: { busy: false, pdf: r.ok ? r.pdf : ((s[docId] || {}).pdf || null), log: r.log, pages: r.pages, status: r.status, mode: 'browser', err: r.ok ? null : (r.reason || ('Fordítás nem sikerült (status ' + r.status + ')')), ms: r.ms, hash: r.ok ? hash : ((s[docId] || {}).hash), ts: Date.now() } }));
         } catch (e) {
           setPdfCompiled((s) => ({ ...s, [docId]: { ...(s[docId] || {}), busy: false, err: String((e && e.message) || e), mode: 'browser', ts: Date.now() } }));
         }
@@ -1164,7 +1178,52 @@
     const onToggleTodo = (ann) => { window.PRStore.updateAnnotation(projectId, ann.id, { status: ann.status === 'done' ? 'open' : 'done' }); refreshCollab(); };
     const onEditAnn = (ann, d) => { window.PRStore.updateAnnotation(projectId, ann.id, { body: d.body, mentions: d.mentions || [], attachments: d.attachments || [], assignee: d.assignee || null, due: d.due || null, editedAt: Date.now() }); refreshCollab(); };
     const onDeleteAnn = (ann) => { window.PRStore.deleteAnnotation(projectId, ann.id); refreshCollab(); };
-    const onJumpAnn = (ann) => { const a = ann.anchor; if (a.file !== active) setActive(a.file); setSelectReq({ start: a.start, end: a.end, nonce: Date.now() }); seekTo(idxRef.current); };
+    // Jump from a comment/to-do/review note → move BOTH the code view (select + scroll the flagged
+    // span) AND the preview (scroll to that sentence); previously it only touched the code.
+    const onJumpAnn = (ann) => {
+      const a = ann && ann.anchor; if (!a) return;
+      if (a.file !== active) {
+        // cross-file: index against the TARGET file's own sentences (not the stale active list), then
+        // let the [active] effect place it — mirrors onPreviewClick's cross-file path.
+        try {
+          const comp = window.LatexEngine.process(getSource(a.file), files); const sents = comp.sentences || [];
+          let k = -1; for (let i = 0; i < sents.length; i++) { if (a.start >= sents[i].start && a.start <= sents[i].end) { k = i; break; } if (sents[i].start > a.start) { k = Math.max(0, i - 1); break; } }
+          idxByDoc.current[a.file] = Math.max(0, k < 0 ? sents.length - 1 : k);
+        } catch (e) { }
+        setActive(a.file); setSelectReq({ start: a.start, end: a.end, nonce: Date.now() }); return;
+      }
+      setSelectReq({ start: a.start, end: a.end, nonce: Date.now() });
+      const k = sentAt(a.start);
+      if (k >= 0) { seekTo(k); const s = sentsRef.current[k]; if (s) requestAnimationFrame(() => scrollPreviewTo(s.id)); }
+    };
+    // does offset `pos` fall inside a verbatim-like environment? (a % comment there becomes literal text)
+    const inVerbatim = (src, pos) => {
+      const head = src.slice(0, pos); let depth = 0, m;
+      const re = /\\(begin|end)\{(verbatim|verbatim\*|lstlisting|lstlisting\*|minted|Verbatim|alltt|comment)\}/g;
+      while ((m = re.exec(head))) { if (m[1] === 'begin') depth++; else if (depth > 0) depth--; }
+      return depth > 0;
+    };
+    // Apply a review suggestion to the source: a concrete `replacement` swaps the flagged span; otherwise
+    // the prose suggestion is inserted as a LaTeX comment above the flagged line (undoable). Refuses to
+    // touch a drifted/unanchored note, an ambiguous (non-unique) quote, or text inside a verbatim block.
+    const onApplyReview = (ann) => {
+      const a = ann && ann.anchor;
+      if (!a || ann._orphan || a.file !== active || a.start === a.end) { onJumpAnn(ann); return; }
+      const src = source; let nv, caret;
+      // the stored offsets must still point exactly at the quote, and the quote must be unambiguous
+      if (a.quote && (src.slice(a.start, a.end) !== a.quote || src.indexOf(a.quote) !== src.lastIndexOf(a.quote))) { onJumpAnn(ann); return; }
+      if (ann.replacement != null && ann.replacement !== '') {
+        nv = src.slice(0, a.start) + ann.replacement + src.slice(a.end); caret = a.start + ann.replacement.length;
+      } else if (ann.suggestion) {
+        const ls = src.lastIndexOf('\n', Math.max(0, a.start - 1)) + 1;
+        if (inVerbatim(src, ls)) { onJumpAnn(ann); return; } // don't inject a comment into verbatim/listing
+        const note = '% [AI review · ' + (ann.category || 'note') + '] ' + String(ann.suggestion).replace(/\s+/g, ' ').trim() + '\n';
+        nv = src.slice(0, ls) + note + src.slice(ls); caret = ls;
+      } else { onJumpAnn(ann); return; }
+      handleEdit(nv);
+      setSelectReq({ start: caret, end: caret, nonce: Date.now() });
+      if (window.PRStore) { window.PRStore.updateAnnotation(projectId, ann.id, { status: 'resolved', appliedAt: Date.now() }); refreshCollab(); }
+    };
 
     /* ---- AI review import (workflow findings → anchored review notes) ---- */
     const reviewInput = useRef(null);
@@ -1497,7 +1556,8 @@
             }} onToggle={toggleExpand} onSetDir={setCurrentDir}
             onNewFile={addFile} onNewFolder={addFolder} onUploadClick={() => fileInput.current.click()} onUploadFolderClick={() => dirInput.current.click()}
             onCommitRename={commitRename} onCancelRename={() => setRenaming(null)} onStartRename={(type, path) => setRenaming({ type, path })}
-            onDeleteFile={deleteFile} onDeleteFolder={deleteFolder} onMove={moveItem} />
+            onDeleteFile={deleteFile} onDeleteFolder={deleteFolder} onMove={moveItem}
+            onSetNote={(path, note) => setFiles((f) => f[path] ? { ...f, [path]: { ...f[path], note: note } } : f)} />
 
           <div className="ws-area">
             <div className="ws-toolbar">
@@ -1563,7 +1623,7 @@
             activity={projMeta.activity}
             metrics={kpiMetrics} journalMeta={projMeta.journalMeta} journal={projMeta.journal} templateId={projMeta.templateId}
             submission={projMeta.submission} onSetStatus={setSubmissionStatus} tts={projMeta.tts} engine={voice.engine} model={voice.model}
-            review={reviewAnns} reviewFocus={reviewFocus} onImportReview={onImportReview} onClearReview={onClearReview} canImport={isCurProj(active)} />}
+            review={reviewAnns} reviewFocus={reviewFocus} onImportReview={onImportReview} onClearReview={onClearReview} onApplyReview={onApplyReview} canImport={isCurProj(active)} />}
           <input ref={pdfInput} type="file" accept="application/pdf,.pdf" style={{ display: 'none' }} onChange={onPdfPicked} />
           <input ref={imgInsertInput} type="file" accept="image/png,image/jpeg,image/gif,image/svg+xml,.png,.jpg,.jpeg,.gif,.svg" style={{ display: 'none' }} onChange={onInsertImagePicked} />
         </div>
@@ -1637,6 +1697,8 @@
 
   function FilePanel(props) {
     const [dragOver, setDragOver] = useState(null);
+    const [notePath, setNotePath] = useState(null); // file whose note editor is open
+    const noteIco = <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="8" cy="8" r="6" /><path d="M8 7.2v3.4" strokeLinecap="round" /><circle cx="8" cy="5.2" r=".5" fill="currentColor" /></svg>;
     const ico = (type) => {
       if (type === 'pdf') return <svg viewBox="0 0 16 16"><path d="M3.5 2.5h6l3 3V13a.5.5 0 01-.5.5h-8A.5.5 0 013 13V3a.5.5 0 01.5-.5z" fill="none" stroke="currentColor" strokeWidth="1.2" /><text x="8" y="11.5" fontSize="4" textAnchor="middle" fill="currentColor" fontFamily="sans-serif" fontWeight="700">PDF</text></svg>;
       if (type === 'image') return <svg viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.2" /><circle cx="5.5" cy="6" r="1.2" fill="currentColor" /><path d="M2 12l3.5-3 2.5 2 3-3.5 3 4.5" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" /></svg>;
@@ -1682,7 +1744,8 @@
       const f = props.files[path];
       const isRen = renaming && renaming.type === 'file' && renaming.path === path;
       return (
-        <div key={'f:' + path} className={'tree-row file' + (props.active === path ? ' active' : '')}
+        <React.Fragment key={'f:' + path}>
+        <div className={'tree-row file' + (props.active === path ? ' active' : '')}
           style={{ paddingLeft: 8 + depth * 14 }} draggable
           onDragStart={(e) => { e.dataTransfer.setData('text/plain', path); e.dataTransfer.effectAllowed = 'move'; }}
           onClick={() => { props.onSetDir(dn(path)); props.onOpen(path); }}>
@@ -1690,10 +1753,19 @@
           <span className="fp-ico">{ico(f.type)}</span>
           {isRen ? <RenameInput value={bn(path)} onCommit={props.onCommitRename} onCancel={props.onCancelRename} />
             : <span className="fp-name" onDoubleClick={(e) => { e.stopPropagation(); props.onStartRename('file', path); }}>{bn(path)}</span>}
+          {f.note ? <span className="fp-note-dot" title={f.note} /> : null}
           <span className="row-actions" onClick={(e) => e.stopPropagation()}>
+            <button className={'fnote' + (f.note ? ' has' : '')} title={f.note ? 'Edit file note' : 'Add a note (what this file is / why it was added)'} onClick={() => setNotePath(notePath === path ? null : path)}>{noteIco}</button>
             <button className="del" title="Delete file" onClick={() => props.onDeleteFile(path)}>{trash}</button>
           </span>
         </div>
+        {notePath === path && <div className="fp-note-edit" style={{ paddingLeft: 8 + (depth + 1) * 14 }} onClick={(e) => e.stopPropagation()}>
+          <textarea autoFocus defaultValue={f.note || ''} placeholder="What is this file? Why was it added? (visible to collaborators & agents)"
+            onBlur={(e) => { props.onSetNote(path, e.target.value.trim()); setNotePath(null); }}
+            onKeyDown={(e) => { if (e.key === 'Escape') setNotePath(null); if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { props.onSetNote(path, e.target.value.trim()); setNotePath(null); } }} />
+          <div className="fp-note-hint">Esc to cancel · ⌘/Ctrl+Enter to save</div>
+        </div>}
+      </React.Fragment>
       );
     }
 

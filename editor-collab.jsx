@@ -317,7 +317,7 @@
           {(p.activity || []).map((a) => { const u = Auth.byId(a.actorId); return <div className="act-d" key={a.id}><Avatar user={u} size={24} /><div><b>{u ? u.name.split(' ')[0] : a.actorId}</b> {a.verb} {a.target}<div className="act-t">{rel(a.at)} ago</div></div></div>; })}
         </>}
         {p.tab === 'kpi' && <KpiPanel metrics={p.metrics} journalMeta={p.journalMeta} journal={p.journal} templateId={p.templateId} submission={p.submission} onSetStatus={p.onSetStatus} canEdit={p.canEdit} tts={p.tts} engine={p.engine} model={p.model} />}
-        {p.tab === 'review' && <ReviewPanel review={p.review} focus={p.reviewFocus} onJump={p.onJump} onResolve={p.onResolve} onDelete={p.onDelete} onImport={p.onImportReview} onClear={p.onClearReview} canImport={p.canImport} />}
+        {p.tab === 'review' && <ReviewPanel review={p.review} focus={p.reviewFocus} onJump={p.onJump} onResolve={p.onResolve} onDelete={p.onDelete} onApply={p.onApplyReview} onImport={p.onImportReview} onClear={p.onClearReview} canImport={p.canImport} />}
       </div>
       <Lightbox />
     </aside>;
@@ -337,7 +337,7 @@
     useEffect(() => { if (p.focus && focusRef.current) { try { focusRef.current.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) { } } }, [p.focus]);
     function item(a, dim) {
       const c = REV_SEV[a.severity || 'minor'] || REV_SEV.minor;
-      const unanchored = !a.anchor || a.anchor.start === a.anchor.end;
+      const unanchored = !a.anchor || a.anchor.start === a.anchor.end || a._orphan;
       return <div key={a.id} ref={a.id === p.focus ? focusRef : null} className={'rev-item ' + (a.severity || 'minor') + (dim ? ' done' : '') + (a.id === p.focus ? ' focus' : '')}>
         <div className="rev-head">
           <span className="rev-sev" style={{ color: c[0], background: c[1] }}>{a.severity || 'minor'}</span>
@@ -350,6 +350,8 @@
         {a.suggestion ? <div className="rev-sug"><b>Javaslat:</b> {a.suggestion}</div> : null}
         {a.anchor && a.anchor.quote ? <div className="rev-quote">“{a.anchor.quote.length > 130 ? a.anchor.quote.slice(0, 130) + '…' : a.anchor.quote}”</div> : null}
         <div className="rev-acts">
+          {!unanchored && (a.suggestion || a.replacement) ? <button className="link" title="Insert the suggestion as a LaTeX comment above the flagged line (or apply a concrete fix), then mark it resolved — undoable" onClick={() => p.onApply && p.onApply(a)}>Apply</button> : null}
+          {a.suggestion ? <button className="link" onClick={() => { try { navigator.clipboard && navigator.clipboard.writeText(a.suggestion); } catch (e) { } }}>Copy</button> : null}
           <button className="link" onClick={() => p.onResolve(a)}>{a.status === 'resolved' ? 'Reopen' : 'Mark resolved'}</button>
           <button className="link danger" onClick={() => p.onDelete(a)}>Delete</button>
         </div>

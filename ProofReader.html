@@ -127,6 +127,12 @@
     .row-actions button { width: 21px; height: 21px; border: 0; background: transparent; color: var(--muted); border-radius: 5px; display: grid; place-items: center; }
     .row-actions button:hover { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
     .row-actions button.del:hover { color: #dc2626; background: #fee2e2; }
+    .row-actions button.fnote.has { color: var(--accent); }
+    /* per-file note (what it is / why it was added) */
+    .fp-note-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); flex: none; margin: 0 2px; }
+    .fp-note-edit { padding: 4px 10px 8px; }
+    .fp-note-edit textarea { width: 100%; min-height: 46px; resize: vertical; font: inherit; font-size: 11.5px; line-height: 1.4; border: 1px solid var(--accent); border-radius: 7px; padding: 6px 8px; outline: none; background: var(--pane); color: var(--ink); }
+    .fp-note-hint { font-size: 9.5px; color: var(--muted); margin-top: 3px; }
     .row-actions svg { width: 13px; height: 13px; }
     .tree-rename { flex: 1; min-width: 0; font: inherit; font-size: 13px; border: 1px solid var(--accent); border-radius: 5px; padding: 2px 5px; outline: none;
       background: var(--pane); color: var(--ink); }
@@ -836,6 +842,7 @@
   <script src="sample.js"></script>
   <script src="templates.js"></script>
   <script src="metrics.js"></script>
+  <script src="pdf-cache.js"></script>
   <script src="auth.js"></script>
   <script src="store.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>

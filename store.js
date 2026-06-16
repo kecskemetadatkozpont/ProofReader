@@ -123,7 +123,7 @@
       var at = locateQuote(content, q);
       var ann = {
         id: mkid(), kind: 'review', category: f.category || 'style', severity: f.severity || 'minor',
-        comment: f.comment, body: f.comment, suggestion: f.suggestion || '', confidence: f.confidence || 'medium',
+        comment: f.comment, body: f.comment, suggestion: f.suggestion || '', replacement: f.replacement || '', confidence: f.confidence || 'medium',
         authorId: 'ai-review', createdAt: now + idx, status: 'open', replies: [],
         anchor: { file: path, start: at >= 0 ? at : 0, end: at >= 0 ? at + q.length : 0, quote: q }
       };
@@ -223,7 +223,7 @@
     /* ---- versions (text files only — images aren't versioned, to keep storage small) ---- */
     addVersion: function (id, label, authorId, named) {
       var p = this.get(id); if (!p) return null;
-      var snap = {}; Object.keys(p.files).forEach(function (k) { var f = p.files[k]; if (f && f.content != null && f.dataURL == null) snap[k] = { type: f.type, content: f.content }; });
+      var snap = {}; Object.keys(p.files).forEach(function (k) { var f = p.files[k]; if (f && f.content != null && f.dataURL == null) { snap[k] = { type: f.type, content: f.content }; if (f.note != null) snap[k].note = f.note; } });
       var last = p.versions[0];
       if (last && !named && JSON.stringify(last.files) === JSON.stringify(snap)) return null; // no change
       var v = { id: uid(), label: label, authorId: authorId, createdAt: Date.now(), files: snap, named: !!named };
@@ -242,7 +242,7 @@
       p = this.get(id);
       var restored = {};
       Object.keys(p.files).forEach(function (k) { if (p.files[k] && p.files[k].dataURL != null) restored[k] = p.files[k]; });
-      Object.keys(v.files).forEach(function (k) { restored[k] = clone(v.files[k]); });
+      Object.keys(v.files).forEach(function (k) { restored[k] = clone(v.files[k]); if (restored[k].note == null && p.files[k] && p.files[k].note != null) restored[k].note = p.files[k].note; });
       p.files = restored;
       p.order = (p.order || []).filter(function (k) { return restored[k]; });
       Object.keys(restored).forEach(function (k) { if (p.order.indexOf(k) < 0) p.order.push(k); });
