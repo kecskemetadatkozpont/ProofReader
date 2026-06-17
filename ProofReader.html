@@ -103,6 +103,18 @@
     .fp-ico svg { width: 16px; height: 16px; display: block; opacity: .85; }
     .fp-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .fp-foot { padding: 11px 14px; font-size: 11px; color: var(--muted); border-top: 1px solid var(--line); line-height: 1.5; }
+    /* document outline / TOC navigator (click an item → jump in both code + preview) */
+    .fp-outline { flex: none; max-height: 42%; display: flex; flex-direction: column; border-top: 1px solid var(--line); }
+    .fp-out-head { flex: none; display: flex; align-items: center; gap: 4px; width: 100%; border: 0; background: transparent; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; padding: 8px 12px 4px; cursor: pointer; }
+    .fp-out-n { margin-left: auto; font-style: normal; font-weight: 600; font-size: 10px; color: var(--muted); background: var(--app-bg); border-radius: 9px; padding: 0 6px; }
+    .fp-out-list { overflow: auto; padding: 0 6px 6px; }
+    .fp-out-i { display: flex; align-items: center; gap: 6px; width: 100%; text-align: left; border: 0; background: transparent; color: var(--ink); font-size: 12px; line-height: 1.3; padding: 4px 8px; border-radius: 6px; cursor: pointer; }
+    .fp-out-i:hover { background: color-mix(in srgb, var(--accent) 9%, transparent); color: var(--accent); }
+    .fp-out-i.k-chapter, .fp-out-i.k-part { font-weight: 700; }
+    .fp-out-i.k-subsubsection { color: var(--muted); }
+    .fp-out-i.k-figure, .fp-out-i.k-table { color: var(--muted); }
+    .fp-out-tag { font-size: 8.5px; font-weight: 800; padding: 1px 4px; border-radius: 8px; background: var(--app-bg); color: var(--muted); flex: none; }
+    .fp-out-t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .fp-foot code { background: color-mix(in srgb, var(--app-bg) 70%, transparent); padding: 1px 4px; border-radius: 4px; font-size: 10.5px; }
     .fp-actions { display: flex; gap: 3px; }
     .fp-actions button { width: 24px; height: 24px; border-radius: 6px; border: 1px solid transparent; background: transparent; color: var(--muted); display: grid; place-items: center; }
@@ -620,6 +632,25 @@
     .rev-acts { display: flex; gap: 12px; margin-top: 7px; }
     .rev-resolved-h { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 8px 2px 2px; }
     .rev-item.major { --rev: #dc2626; } .rev-item.minor { --rev: #b4530f; } .rev-item.nit { --rev: #64748b; }
+    .ct-badge.warn { background: #b4530f; } .dtab .badge.warn { background: #b4530f; }
+    /* Number consistency panel */
+    .numbers { display: flex; flex-direction: column; gap: 8px; }
+    .num-bar { font-size: 11.5px; color: var(--muted); line-height: 1.5; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+    .num-item { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+    .num-item.conflict { border-left: 3px solid #b4530f; background: color-mix(in srgb, #b4530f 5%, var(--pane)); }
+    .num-head { display: flex; align-items: center; gap: 8px; }
+    .num-head b { font-size: 13px; }
+    .num-flag { font-size: 10.5px; font-weight: 700; color: #b4530f; background: #fdecdf; padding: 1px 7px; border-radius: 10px; margin-left: auto; }
+    .num-ok { font-size: 10.5px; color: var(--muted); margin-left: auto; }
+    .num-vals { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+    .num-val { font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; border: 1px solid var(--line); background: var(--pane); color: var(--ink); border-radius: 7px; padding: 2px 8px; cursor: pointer; }
+    .num-val:hover { border-color: var(--accent); color: var(--accent); }
+    .num-x { font-style: normal; font-size: 9.5px; color: var(--muted); margin-left: 3px; }
+    .num-occ { display: flex; flex-direction: column; gap: 2px; margin-top: 7px; }
+    .num-occ-i { text-align: left; border: 0; background: transparent; color: var(--muted); font-size: 11px; line-height: 1.4; padding: 2px 4px; border-radius: 5px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .num-occ-i:hover { background: color-mix(in srgb, var(--accent) 9%, transparent); color: var(--accent); }
+    .num-occ-i b { color: var(--ink); }
+    .num-sec { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 6px 2px 0; }
     .solid { border: 0; background: var(--accent); color: #fff; font-size: 12.5px; font-weight: 600; padding: 7px 12px; border-radius: 8px; cursor: pointer; }
     .solid:hover { background: var(--accent-d); }
 
@@ -843,6 +874,7 @@
   <script src="templates.js"></script>
   <script src="metrics.js"></script>
   <script src="pdf-cache.js"></script>
+  <script src="consistency.js"></script>
   <script src="auth.js"></script>
   <script src="store.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>

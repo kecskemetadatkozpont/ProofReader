@@ -268,8 +268,9 @@
   }
 
   function RightDrawer(p) {
-    const tabs = [['comments', 'Comments'], ['todos', 'To-dos'], ['review', 'Review'], ['history', 'History'], ['activity', 'Activity'], ['kpi', 'KPIs']];
+    const tabs = [['comments', 'Comments'], ['todos', 'To-dos'], ['review', 'Review'], ['numbers', 'Numbers'], ['history', 'History'], ['activity', 'Activity'], ['kpi', 'KPIs']];
     const reviewOpen = (p.review || []).filter((a) => a.status !== 'resolved').length;
+    const numConflicts = (p.consistency || []).filter((g) => g.distinct > 1).length;
     const comments = p.annotations.filter((a) => a.kind === 'comment');
     const todos = p.annotations.filter((a) => a.kind === 'todo');
     const openCount = p.annotations.filter((a) => a.status === 'open' && a.kind === 'comment').length;
@@ -284,7 +285,7 @@
     }
     return <aside className="drawer">
       <div className="drawer-tabs">
-        {tabs.map(([k, l]) => <button key={k} className={'dtab' + (p.tab === k ? ' on' : '')} onClick={() => p.setTab(k)}>{l}{k === 'comments' && openCount ? <span className="badge">{openCount}</span> : null}{k === 'todos' && todoOpen ? <span className="badge">{todoOpen}</span> : null}{k === 'review' && reviewOpen ? <span className="badge">{reviewOpen}</span> : null}</button>)}
+        {tabs.map(([k, l]) => <button key={k} className={'dtab' + (p.tab === k ? ' on' : '')} onClick={() => p.setTab(k)}>{l}{k === 'comments' && openCount ? <span className="badge">{openCount}</span> : null}{k === 'todos' && todoOpen ? <span className="badge">{todoOpen}</span> : null}{k === 'review' && reviewOpen ? <span className="badge">{reviewOpen}</span> : null}{k === 'numbers' && numConflicts ? <span className="badge warn">{numConflicts}</span> : null}</button>)}
         <button className="drawer-x" onClick={p.onClose} title="Close">✕</button>
       </div>
       {(p.tab === 'comments' || p.tab === 'todos') && p.docName && <div className="drawer-doc"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M4 2.5h5l3 3V13a.5.5 0 01-.5.5h-7A.5.5 0 014 13z" strokeLinejoin="round" /></svg>Active document <b>{p.docName}</b><span className="dd-hint">· each note is tagged with its file</span></div>}
@@ -318,6 +319,7 @@
         </>}
         {p.tab === 'kpi' && <KpiPanel metrics={p.metrics} journalMeta={p.journalMeta} journal={p.journal} templateId={p.templateId} submission={p.submission} onSetStatus={p.onSetStatus} canEdit={p.canEdit} tts={p.tts} engine={p.engine} model={p.model} />}
         {p.tab === 'review' && <ReviewPanel review={p.review} focus={p.reviewFocus} onJump={p.onJump} onResolve={p.onResolve} onDelete={p.onDelete} onApply={p.onApplyReview} onImport={p.onImportReview} onClear={p.onClearReview} canImport={p.canImport} />}
+        {p.tab === 'numbers' && <ConsistencyPanel groups={p.consistency} onGoto={p.onGotoOff} />}
       </div>
       <Lightbox />
     </aside>;
@@ -369,6 +371,26 @@
       {sorted.map((a) => item(a, false))}
       {resolved.length ? <div className="rev-resolved-h">Resolved ({resolved.length})</div> : null}
       {resolved.map((a) => item(a, true))}
+    </div>;
+  }
+
+  /* ---- Number consistency panel: metric-like values grouped by label; conflicts (>1 value) first ---- */
+  function ConsistencyPanel(p) {
+    const groups = p.groups || [];
+    const conflicts = groups.filter((g) => g.distinct > 1);
+    const single = groups.filter((g) => g.distinct === 1);
+    const vals = (g) => g.values.map((v, i) => <button key={i} className="num-val" title={'line ' + (v.occ[0] && v.occ[0].line) + (v.count > 1 ? ' · ' + v.count + '×' : '')} onClick={() => v.occ[0] && p.onGoto(v.occ[0].off)}>{v.raw}{v.count > 1 ? <i className="num-x">×{v.count}</i> : null}</button>);
+    const group = (g, conflict) => <div key={g.label + (g.pct ? '%' : '')} className={'num-item' + (conflict ? ' conflict' : '')}>
+      <div className="num-head"><b>{g.label}</b>{conflict ? <span className="num-flag">{g.distinct} values · spread {g.spread.toFixed(3)}</span> : <span className="num-ok">{g.total}×</span>}</div>
+      <div className="num-vals">{vals(g)}</div>
+      {conflict && g.values.length <= 6 && <div className="num-occ">{g.values.reduce((acc, v) => acc.concat(v.occ.slice(0, 2).map((o, j) => <button key={v.raw + j} className="num-occ-i" onClick={() => p.onGoto(o.off)}>L{o.line} · <b>{v.raw}</b> · …{o.snippet}…</button>)), [])}</div>}
+    </div>;
+    return <div className="numbers">
+      {groups.length === 0 && <div className="empty-d">No metric-like numbers detected here yet. This scans the active document for the same metric (AUROC, FPR95, ρ, method names, …) appearing with different values — a common thesis integrity defect — so you can cross-check text against tables.</div>}
+      {groups.length > 0 && <div className="num-bar"><b style={{ color: conflicts.length ? '#b4530f' : '#1c7a47' }}>{conflicts.length}</b> metric{conflicts.length === 1 ? '' : 's'} appear with more than one value{single.length ? ' · ' + single.length + ' single-valued' : ''}. Heuristic — verify whether any should be identical (e.g. text vs. tables).</div>}
+      {conflicts.map((g) => group(g, true))}
+      {single.length ? <div className="num-sec">Single-valued ({single.length})</div> : null}
+      {single.map((g) => group(g, false))}
     </div>;
   }
 

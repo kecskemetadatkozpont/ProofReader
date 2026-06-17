@@ -621,21 +621,28 @@
     }, [seekTo, sentAt, scrollPreviewTo]);
 
     // jump the source caret + reading + preview to a source offset (used by the command palette / outline)
+    // forward-preferring resolution: when off lands in a gap (e.g. a \section{} heading, which is not a
+    // body sentence), target the FIRST sentence after it — the section's content — not the tail of the
+    // previous section. When off is inside a sentence (consistency-occurrence jumps), the container wins.
     const gotoOffset = useCallback((off) => {
       if (files[active] && files[active].type === 'tex') setSelectReq({ start: off, end: off, nonce: Date.now() });
-      const k = sentAt(off); if (k >= 0) { seekTo(k); const s = sentsRef.current[k]; if (s) requestAnimationFrame(() => scrollPreviewTo(s.id)); }
-    }, [active, files, sentAt, seekTo, scrollPreviewTo]);
+      const sents = sentsRef.current; if (!sents.length) return;
+      let k = -1;
+      for (let i = 0; i < sents.length; i++) { if (off >= sents[i].start && off <= sents[i].end) { k = i; break; } if (sents[i].start > off) { k = i; break; } }
+      if (k < 0) k = sents.length - 1;
+      seekTo(k); const s = sents[k]; if (s) requestAnimationFrame(() => scrollPreviewTo(s.id));
+    }, [active, files, seekTo, scrollPreviewTo]);
 
-    // document outline (sections + figures/tables) parsed from the active source
+    // document outline (chapters/sections + figures/tables) parsed from the active source
     const outline = useMemo(() => {
       const v = source || '', items = [];
-      let m, re = /\\(section|subsection|subsubsection)\*?\s*\{/g;
+      let m, re = /\\(part|chapter|section|subsection|subsubsection)\*?\s*\{/g;
       while ((m = re.exec(v))) {
         let i = m.index + m[0].length, depth = 1, title = '';
         for (; i < v.length && depth > 0; i++) { const c = v[i]; if (c === '{') depth++; else if (c === '}') { depth--; if (!depth) break; } if (depth > 0) title += c; }
         items.push({ kind: m[1], title: title.replace(/\\[a-zA-Z]+/g, '').replace(/[{}]/g, '').trim() || '(untitled)', off: m.index });
       }
-      let re2 = /\\begin\{(figure|table)\}/g;
+      let re2 = /\\begin\{(figure|table)\*?\}/g;
       while ((m = re2.exec(v))) {
         const seg = v.slice(m.index, m.index + 500);
         const cap = (seg.match(/\\caption\{([^}]*)\}/) || [])[1];
@@ -644,6 +651,10 @@
       }
       return items.sort((a, b) => a.off - b.off);
     }, [source]);
+
+    // number/claims consistency: metric-like labels that appear with >1 distinct value (audit candidates)
+    const consistency = useMemo(() => { try { return window.PRConsistency ? window.PRConsistency.scan(source) : []; } catch (e) { return []; } }, [source]);
+    const consistencyConflicts = useMemo(() => consistency.filter((g) => g.distinct > 1).length, [consistency]);
 
     /* ---- preview highlight + scroll (across every preview pane bound to the active document) ---- */
     useLayoutEffect(() => {
@@ -1504,6 +1515,7 @@
               <button className={'ct' + (drawer.open && drawer.tab === 'activity' ? ' on' : '')} title="Activity" onClick={() => toggleDrawer('activity')}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M2 8h3l1.5 4 3-8L13.5 8H14" strokeLinecap="round" strokeLinejoin="round" /></svg></button>
               <button className={'ct' + (drawer.open && drawer.tab === 'kpi' ? ' on' : '')} title="KPIs & format compliance" onClick={() => toggleDrawer('kpi')}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M2 14V8M6 14V4M10 14v-3M14 14V6" strokeLinecap="round" /></svg></button>
               <button className={'ct' + (drawer.open && drawer.tab === 'review' ? ' on' : '')} title="AI review" onClick={() => toggleDrawer('review')}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M8 1.7l1.7 3.7 4 .4-3 2.7.9 4L8 12.9 4.4 14.5l.9-4-3-2.7 4-.4z" strokeLinejoin="round" /></svg>{openReview ? <i className="ct-badge">{openReview}</i> : null}</button>
+              <button className={'ct' + (drawer.open && drawer.tab === 'numbers' ? ' on' : '')} title="Number consistency" onClick={() => toggleDrawer('numbers')}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M3 5h3M3 8h6M3 11h4" strokeLinecap="round" /><path d="M11.5 4v8M9.7 5.6L11.5 4l1.8 1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>{consistencyConflicts ? <i className="ct-badge warn">{consistencyConflicts}</i> : null}</button>
             </div>
             {isAdmin && <a className="btn btn-icon" href="Admin.html" title="Admin">
               <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"><path d="M8 1.8l5 1.9v3.6c0 3-2.1 5.2-5 6.1-2.9-.9-5-3.1-5-6.1V3.7z" /><path d="M5.8 8l1.6 1.6L10.4 6.5" /></svg>
@@ -1537,6 +1549,7 @@
 
         <div className="workspace">
           <FilePanel files={files} order={order} folders={folders} active={active}
+            outline={outline} onGoto={gotoOffset}
             expanded={expanded} currentDir={currentDir} renaming={renaming}
             onOpen={(p) => {
               const f = files[p];
@@ -1623,7 +1636,8 @@
             activity={projMeta.activity}
             metrics={kpiMetrics} journalMeta={projMeta.journalMeta} journal={projMeta.journal} templateId={projMeta.templateId}
             submission={projMeta.submission} onSetStatus={setSubmissionStatus} tts={projMeta.tts} engine={voice.engine} model={voice.model}
-            review={reviewAnns} reviewFocus={reviewFocus} onImportReview={onImportReview} onClearReview={onClearReview} onApplyReview={onApplyReview} canImport={isCurProj(active)} />}
+            review={reviewAnns} reviewFocus={reviewFocus} onImportReview={onImportReview} onClearReview={onClearReview} onApplyReview={onApplyReview} canImport={isCurProj(active)}
+            consistency={consistency} onGotoOff={gotoOffset} />}
           <input ref={pdfInput} type="file" accept="application/pdf,.pdf" style={{ display: 'none' }} onChange={onPdfPicked} />
           <input ref={imgInsertInput} type="file" accept="image/png,image/jpeg,image/gif,image/svg+xml,.png,.jpg,.jpeg,.gif,.svg" style={{ display: 'none' }} onChange={onInsertImagePicked} />
         </div>
@@ -1698,6 +1712,8 @@
   function FilePanel(props) {
     const [dragOver, setDragOver] = useState(null);
     const [notePath, setNotePath] = useState(null); // file whose note editor is open
+    const [outlineOpen, setOutlineOpen] = useState(true);
+    const OUT_LEVEL = { part: 0, chapter: 0, section: 1, subsection: 2, subsubsection: 3, figure: 2, table: 2 };
     const noteIco = <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="8" cy="8" r="6" /><path d="M8 7.2v3.4" strokeLinecap="round" /><circle cx="8" cy="5.2" r=".5" fill="currentColor" /></svg>;
     const ico = (type) => {
       if (type === 'pdf') return <svg viewBox="0 0 16 16"><path d="M3.5 2.5h6l3 3V13a.5.5 0 01-.5.5h-8A.5.5 0 013 13V3a.5.5 0 01.5-.5z" fill="none" stroke="currentColor" strokeWidth="1.2" /><text x="8" y="11.5" fontSize="4" textAnchor="middle" fill="currentColor" fontFamily="sans-serif" fontWeight="700">PDF</text></svg>;
@@ -1794,7 +1810,19 @@
           {subfolders('').map((f) => renderFolder(f, 0))}
           {filesIn('').map((p) => renderFile(p, 0))}
         </div>
-        <div className="fp-foot">Drag files into folders · double-click to rename</div>
+        {props.outline && props.outline.length > 0 && <div className="fp-outline">
+          <button className="fp-out-head" onClick={() => setOutlineOpen((o) => !o)}>
+            <span className={'chev' + (outlineOpen ? ' open' : '')}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M6 4l4 4-4 4" /></svg></span>
+            Outline<i className="fp-out-n">{props.outline.length}</i>
+          </button>
+          {outlineOpen && <div className="fp-out-list">
+            {props.outline.map((o, i) => <button key={i} className={'fp-out-i k-' + o.kind} style={{ paddingLeft: 10 + (OUT_LEVEL[o.kind] || 0) * 12 }} title={o.title} onClick={() => props.onGoto && props.onGoto(o.off)}>
+              {(o.kind === 'figure' || o.kind === 'table') ? <span className="fp-out-tag">{o.kind === 'figure' ? 'Fig' : 'Tab'}</span> : null}
+              <span className="fp-out-t">{o.title}</span>
+            </button>)}
+          </div>}
+        </div>}
+        <div className="fp-foot">Drag files into folders · double-click to rename · click an outline item to jump</div>
       </aside>
     );
   }
