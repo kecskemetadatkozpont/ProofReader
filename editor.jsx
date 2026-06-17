@@ -207,10 +207,14 @@
         const items = keys.filter((k) => k.toLowerCase().indexOf(partial.toLowerCase()) >= 0).map((k) => ({ label: k, insert: k, kind: 'ref' }));
         return openAC(items, from, caret, 'ref');
       }
-      if ((m = /\\cite[a-z]*\{([^}\n]*)$/.exec(before))) {
-        const partial = m[1], from = caret - partial.length;
+      if ((m = /\\(?:cite[a-z]*|autocite[a-z]*|textcite|parencite|footcite|smartcite|fullcite|nocite)\*?(?:\[[^\]\n]*\])*\{([^}\n]*)$/.exec(before))) {
+        // multi-key \cite{a,b — complete only the token after the last comma, leaving earlier keys intact
+        const partial = m[1], tail = partial.split(',').pop().replace(/^\s+/, ''), from = caret - tail.length, q = tail.trim().toLowerCase();
+        const meta = props.bibMeta || {};
         const keys = uniq((props.bibKeys || []).concat(collectKeys(v, /\\bibitem\{([^}\n]+)\}/g)));
-        const items = keys.filter((k) => k.toLowerCase().indexOf(partial.toLowerCase()) >= 0).map((k) => ({ label: k, insert: k, kind: 'cite' }));
+        const items = keys.filter((k) => k.toLowerCase().indexOf(q) >= 0)
+          .sort((a, b) => (a.toLowerCase().indexOf(q)) - (b.toLowerCase().indexOf(q)) || a.localeCompare(b))
+          .map((k) => ({ label: k, insert: k, kind: 'cite', hint: meta[k] || undefined }));
         return openAC(items, from, caret, 'cite');
       }
       if ((m = /\\(begin|end)\{([a-zA-Z*]*)$/.exec(before))) {

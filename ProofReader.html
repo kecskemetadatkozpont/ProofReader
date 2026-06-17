@@ -602,7 +602,9 @@
 
     /* drawer */
     .drawer { width: 330px; flex: none; background: var(--pane); border-left: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
-    .drawer-tabs { display: flex; align-items: center; gap: 2px; padding: 7px 8px; border-bottom: 1px solid var(--line); }
+    .drawer-tabs { display: flex; align-items: center; gap: 2px; padding: 7px 8px; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: thin; }
+    .drawer-tabs .dtab { flex: none; }
+    .drawer-tabs .drawer-x { flex: none; position: sticky; right: 0; }
     .dtab { position: relative; border: 0; background: transparent; color: var(--muted); font-size: 12.5px; font-weight: 600; padding: 6px 9px; border-radius: 7px; }
     .dtab.on { background: color-mix(in srgb, var(--accent) 11%, transparent); color: var(--accent); } .dtab:hover { color: var(--ink); }
     .dtab .badge { margin-left: 5px; background: var(--accent); color: #fff; font-size: 9.5px; padding: 1px 5px; border-radius: 8px; }
@@ -651,7 +653,25 @@
     .num-occ-i:hover { background: color-mix(in srgb, var(--accent) 9%, transparent); color: var(--accent); }
     .num-occ-i b { color: var(--ink); }
     .num-sec { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 6px 2px 0; }
+    .num-sec.err { color: #dc2626; }
+    .num-sec-x { font-weight: 400; text-transform: none; letter-spacing: 0; opacity: .8; }
+    /* References / citation manager panel */
+    .ref-doi { border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; display: flex; flex-direction: column; gap: 6px; }
+    .ref-doi-row { display: flex; gap: 6px; }
+    .ref-doi-row input { flex: 1; min-width: 0; font-size: 12.5px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 7px; background: var(--app-bg); color: var(--ink); font-family: 'JetBrains Mono', ui-monospace, monospace; }
+    .ref-doi-row input:focus { outline: none; border-color: var(--accent); }
+    .ref-doi-hint { font-size: 10.5px; color: var(--muted); line-height: 1.45; }
+    .ref-doi-hint code { background: color-mix(in srgb, var(--app-bg) 70%, transparent); padding: 0 4px; border-radius: 4px; }
+    .ref-msg { font-size: 11.5px; line-height: 1.4; padding: 5px 8px; border-radius: 6px; }
+    .ref-msg.ok { color: #1c7a47; background: #e6f3ec; } .ref-msg.err { color: #dc2626; background: #fef2f2; }
+    .ref-keys { display: flex; flex-wrap: wrap; gap: 4px; margin: 5px 2px 2px; }
+    .ref-key { font-size: 11px; font-family: 'JetBrains Mono', ui-monospace, monospace; color: var(--muted); border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; }
+    .ref-uncited { display: block; width: 100%; text-align: left; border: 0; background: transparent; color: var(--ink); font-size: 12px; line-height: 1.4; padding: 3px 6px; border-radius: 6px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .ref-uncited:hover { background: color-mix(in srgb, var(--accent) 9%, transparent); }
+    .ref-uncited b { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; }
+    .ref-uncited-t { color: var(--muted); }
     .solid { border: 0; background: var(--accent); color: #fff; font-size: 12.5px; font-weight: 600; padding: 7px 12px; border-radius: 8px; cursor: pointer; }
+    .solid:disabled { opacity: .5; cursor: default; }
     .solid:hover { background: var(--accent-d); }
 
     .compose { border: 1px solid var(--line); border-radius: 10px; padding: 9px; margin-bottom: 12px; background: var(--app-bg); }
@@ -875,6 +895,7 @@
   <script src="metrics.js"></script>
   <script src="pdf-cache.js"></script>
   <script src="consistency.js"></script>
+  <script src="refs.js"></script>
   <script src="auth.js"></script>
   <script src="store.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -885,6 +906,7 @@
   <script src="universities.js"></script>
   <script src="onboarding.js"></script>
   <script src="eleven.js"></script>
+  <script src="doi.js"></script>
   <script src="diff.js"></script>
   <!-- Hybrid Version B: real TeX compile (in-browser SwiftLaTeX + TeXlyre packages; external API for exact) -->
   <script src="vendor/swiftlatex/PdfTeXEngine.js"></script>

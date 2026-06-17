@@ -268,9 +268,10 @@
   }
 
   function RightDrawer(p) {
-    const tabs = [['comments', 'Comments'], ['todos', 'To-dos'], ['review', 'Review'], ['numbers', 'Numbers'], ['history', 'History'], ['activity', 'Activity'], ['kpi', 'KPIs']];
+    const tabs = [['comments', 'Comments'], ['todos', 'To-dos'], ['review', 'Review'], ['numbers', 'Numbers'], ['refs', 'References'], ['history', 'History'], ['activity', 'Activity'], ['kpi', 'KPIs']];
     const reviewOpen = (p.review || []).filter((a) => a.status !== 'resolved').length;
     const numConflicts = (p.consistency || []).filter((g) => g.distinct > 1).length;
+    const refIssues = (window.PRRefs && p.refs) ? window.PRRefs.issueCount(p.refs) : 0;
     const comments = p.annotations.filter((a) => a.kind === 'comment');
     const todos = p.annotations.filter((a) => a.kind === 'todo');
     const openCount = p.annotations.filter((a) => a.status === 'open' && a.kind === 'comment').length;
@@ -285,7 +286,7 @@
     }
     return <aside className="drawer">
       <div className="drawer-tabs">
-        {tabs.map(([k, l]) => <button key={k} className={'dtab' + (p.tab === k ? ' on' : '')} onClick={() => p.setTab(k)}>{l}{k === 'comments' && openCount ? <span className="badge">{openCount}</span> : null}{k === 'todos' && todoOpen ? <span className="badge">{todoOpen}</span> : null}{k === 'review' && reviewOpen ? <span className="badge">{reviewOpen}</span> : null}{k === 'numbers' && numConflicts ? <span className="badge warn">{numConflicts}</span> : null}</button>)}
+        {tabs.map(([k, l]) => <button key={k} className={'dtab' + (p.tab === k ? ' on' : '')} onClick={() => p.setTab(k)}>{l}{k === 'comments' && openCount ? <span className="badge">{openCount}</span> : null}{k === 'todos' && todoOpen ? <span className="badge">{todoOpen}</span> : null}{k === 'review' && reviewOpen ? <span className="badge">{reviewOpen}</span> : null}{k === 'numbers' && numConflicts ? <span className="badge warn">{numConflicts}</span> : null}{k === 'refs' && refIssues ? <span className="badge warn">{refIssues}</span> : null}</button>)}
         <button className="drawer-x" onClick={p.onClose} title="Close">✕</button>
       </div>
       {(p.tab === 'comments' || p.tab === 'todos') && p.docName && <div className="drawer-doc"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M4 2.5h5l3 3V13a.5.5 0 01-.5.5h-7A.5.5 0 014 13z" strokeLinejoin="round" /></svg>Active document <b>{p.docName}</b><span className="dd-hint">· each note is tagged with its file</span></div>}
@@ -320,6 +321,7 @@
         {p.tab === 'kpi' && <KpiPanel metrics={p.metrics} journalMeta={p.journalMeta} journal={p.journal} templateId={p.templateId} submission={p.submission} onSetStatus={p.onSetStatus} canEdit={p.canEdit} tts={p.tts} engine={p.engine} model={p.model} />}
         {p.tab === 'review' && <ReviewPanel review={p.review} focus={p.reviewFocus} onJump={p.onJump} onResolve={p.onResolve} onDelete={p.onDelete} onApply={p.onApplyReview} onImport={p.onImportReview} onClear={p.onClearReview} canImport={p.canImport} />}
         {p.tab === 'numbers' && <ConsistencyPanel groups={p.consistency} onGoto={p.onGotoOff} />}
+        {p.tab === 'refs' && <ReferencesPanel refs={p.refs} onGoto={p.onGotoRef} onAddDoi={p.onAddDoi} bibPaths={p.bibPaths} canEdit={p.canEdit} docName={p.docName} />}
       </div>
       <Lightbox />
     </aside>;
@@ -391,6 +393,69 @@
       {conflicts.map((g) => group(g, true))}
       {single.length ? <div className="num-sec">Single-valued ({single.length})</div> : null}
       {single.map((g) => group(g, false))}
+    </div>;
+  }
+
+  /* ---- References / citation manager: cross-checks \cite vs .bib vs .bbl; DOI→BibTeX lookup ---- */
+  function ReferencesPanel(p) {
+    const r = p.refs;
+    const [doi, setDoi] = useState('');
+    const [busy, setBusy] = useState(false);
+    const [msg, setMsg] = useState(null);                                                  // { ok, text }
+    function addDoi() {
+      const v = doi.trim(); if (!v || busy || !p.onAddDoi) return;
+      setBusy(true); setMsg(null);
+      p.onAddDoi(v).then((res) => {
+        setBusy(false); setDoi('');
+        setMsg({ ok: true, text: 'Added @' + res.key + (res.renamed ? ' (key disambiguated)' : '') + ' → ' + res.path + (res.title ? ' · ' + res.title.slice(0, 48) : '') });
+      }, (e) => { setBusy(false); setMsg({ ok: false, text: (e && e.message) || 'Lookup failed.' }); });
+    }
+    const occBtn = (o, label) => <button key={(o.file || '') + o.off + label} className="num-occ-i" title={(o.file || '') + ' · line ' + o.line} onClick={() => p.onGoto && p.onGoto(o.file, o.off)}>L{o.line} · <b>{label}</b>{o.snippet ? <span> · {o.file}</span> : null}</button>;
+    const item = (cls, head, sub, occ) => <div className={'num-item' + (cls ? ' ' + cls : '')} key={head}>
+      <div className="num-head"><b>{head}</b>{sub ? <span className="num-flag">{sub}</span> : null}</div>
+      {occ && occ.length ? <div className="num-occ">{occ}</div> : null}
+    </div>;
+    if (!r) return <div className="numbers"><div className="empty-d">Reference scanner unavailable.</div></div>;
+    const undef = r.undefinedCites || [], uncited = r.uncited || [], dupKeys = r.dupKeys || [], dupDois = r.dupDois || [], bbl = r.bblStale || {};
+    const errors = undef.length + dupKeys.length + dupDois.length + ((bbl.bblNotInBib || []).length);
+    const warns = uncited.length + ((bbl.citedNotInBbl || []).length) + ((bbl.bblNotCited || []).length);
+    const s = r.stats || {};
+    return <div className="numbers refs">
+      {p.canEdit !== false && <div className="ref-doi">
+        <div className="ref-doi-row">
+          <input placeholder="Add by DOI  (10.1109/…)" value={doi} disabled={busy}
+            onChange={(e) => setDoi(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') addDoi(); }} />
+          <button className="solid" onClick={addDoi} disabled={busy || !doi.trim()}>{busy ? '…' : 'Fetch'}</button>
+        </div>
+        {msg && <div className={'ref-msg' + (msg.ok ? ' ok' : ' err')}>{msg.text}</div>}
+        <div className="ref-doi-hint">Fetches metadata from Crossref and appends a BibTeX entry to {p.bibPaths && p.bibPaths.length ? <code>{p.bibPaths[0]}</code> : <code>references.bib</code>} (cached locally).</div>
+      </div>}
+      <div className="num-bar"><b style={{ color: errors ? '#dc2626' : (warns ? '#b4530f' : '#1c7a47') }}>{errors}</b> error{errors === 1 ? '' : 's'} · <b style={{ color: warns ? '#b4530f' : '#1c7a47' }}>{warns}</b> warning{warns === 1 ? '' : 's'} across {s.citedDistinct || 0} cited keys / {s.entries || 0} .bib entries{s.bblPresent ? ' / ' + (s.bblItems || 0) + ' .bbl items' : ''}. Click a row to jump.</div>
+
+      {undef.length > 0 && <><div className="num-sec err">Undefined citations ({undef.length})</div>
+        {undef.map((u) => item('conflict', '\\cite{' + u.key + '}', u.count > 1 ? u.count + ' uses · no .bib entry' : 'no .bib entry', u.occ.map((o) => occBtn(o, u.key))))}</>}
+
+      {dupKeys.length > 0 && <><div className="num-sec err">Duplicate bib keys ({dupKeys.length})</div>
+        {dupKeys.map((d) => item('conflict', '@…{' + d.key + '}', d.count + ' entries (last wins)', d.occ.map((o) => occBtn(o, '@' + (o.snippet || 'entry') + '{' + d.key + '}'))))}</>}
+
+      {dupDois.length > 0 && <><div className="num-sec err">Duplicate DOIs ({dupDois.length})</div>
+        {dupDois.map((d) => item('conflict', d.doi, d.keys.length + ' entries · same paper?', d.occ.map((o) => occBtn(o, o.snippet))))}</>}
+
+      {(bbl.bblNotInBib || []).length > 0 && <><div className="num-sec err">.bbl entries with no .bib source ({bbl.bblNotInBib.length})</div>
+        <div className="ref-keys">{bbl.bblNotInBib.map((k) => <span key={k} className="ref-key">{k}</span>)}</div></>}
+
+      {(bbl.citedNotInBbl || []).length > 0 && <><div className="num-sec">Cited but missing from .bbl — recompile ({bbl.citedNotInBbl.length})</div>
+        <div className="ref-keys">{bbl.citedNotInBbl.map((k) => <span key={k} className="ref-key">{k}</span>)}</div></>}
+
+      {(bbl.bblNotCited || []).length > 0 && <><div className="num-sec">Stale .bbl entries — no longer cited ({bbl.bblNotCited.length})</div>
+        <div className="ref-keys">{bbl.bblNotCited.slice(0, 40).map((k) => <span key={k} className="ref-key">{k}</span>)}{bbl.bblNotCited.length > 40 ? <span className="ref-key">+{bbl.bblNotCited.length - 40}</span> : null}</div></>}
+
+      {uncited.length > 0 && <><div className="num-sec">Uncited entries ({uncited.length})<span className="num-sec-x"> · in .bib, never \cite'd (bibtex omits these)</span></div>
+        {uncited.map((u) => <button key={u.file + u.off} className="ref-uncited" title={u.file + ' · line ' + u.line} onClick={() => p.onGoto && p.onGoto(u.file, u.off)}>
+          <b>{u.key}</b>{u.title ? <span className="ref-uncited-t"> {u.author ? u.author + ', ' : ''}{u.title.slice(0, 60)}{u.year ? ' (' + u.year + ')' : ''}</span> : null}
+        </button>)}</>}
+
+      {errors === 0 && warns === 0 && <div className="empty-d">No citation issues detected. This cross-checks every <code>\cite</code> against your <code>.bib</code> entries and the compiled <code>.bbl</code> across the whole project — surfacing undefined cites, uncited or duplicate entries, duplicate DOIs and a stale bibliography. Heuristic; verify before acting.</div>}
     </div>;
   }
 

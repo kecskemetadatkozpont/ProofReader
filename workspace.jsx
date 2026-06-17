@@ -90,7 +90,7 @@
         onJump={(off) => ctx.onJump(pane, off)}
         onSelectRange={(s, e) => ctx.onSourceSel(pane, s, e)}
         selectReq={active ? ctx.selectReq : null}
-        bibKeys={ctx.bibKeys}
+        bibKeys={ctx.bibKeys} bibMeta={ctx.bibMeta}
         annoMarks={ctx.annoMarks ? ctx.annoMarks(pane.docId) : null}
         fontSize={ctx.monoSize} lineHeight={Math.round(ctx.monoSize * 1.6)} />;
     }

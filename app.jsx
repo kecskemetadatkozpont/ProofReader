@@ -633,6 +633,65 @@
       seekTo(k); const s = sents[k]; if (s) requestAnimationFrame(() => scrollPreviewTo(s.id));
     }, [active, files, seekTo, scrollPreviewTo]);
 
+    // open a document in the editor: rebind the source/preview/compiled panes that currently follow the
+    // active doc to the new one, then make it active (same logic the FilePanel uses on click).
+    const openDoc = useCallback((p) => {
+      if (!p || !docExists(p) || p === active) return;
+      const old = active, W = window.WS;
+      setLayout((lay) => {
+        const SK = { source: 1, preview: 1, compiled: 1 };
+        const followers = W.allPanes(lay).filter((pane) => SK[pane.kind] && pane.docId === old);
+        let r = lay;
+        if (followers.length) followers.forEach((pane) => { r = W.patchPane(r, pane.id, { docId: p }); });
+        else { const fp = W.allPanes(lay).find((pane) => SK[pane.kind]); if (fp) r = W.patchPane(r, fp.id, { docId: p }); }
+        return r;
+      });
+      setActive(p);
+    }, [active, docExists]);
+
+    // jump to a (file, offset) — like gotoOffset but cross-file aware (a reference hit may live in another
+    // .tex chapter or in a .bib/.bbl that isn't the open doc). Rebinds the editor pane then selects.
+    const gotoRef = useCallback((file, off) => {
+      if (!file || !files[file]) return;
+      if (file === active) {
+        if (files[active].type === 'tex') return gotoOffset(off);
+        setSelectReq({ start: off, end: off, nonce: Date.now() }); return;                // active .bib/.bbl: select in code only
+      }
+      if (files[file].type === 'tex') {
+        try {
+          const comp = window.LatexEngine.process(getSource(file), files); const sents = comp.sentences || [];
+          let k = -1; for (let i = 0; i < sents.length; i++) { if (off >= sents[i].start && off <= sents[i].end) { k = i; break; } if (sents[i].start > off) { k = i; break; } }
+          idxByDoc.current[file] = Math.max(0, k < 0 ? sents.length - 1 : k);
+        } catch (e) { }
+      }
+      openDoc(file); setSelectReq({ start: off, end: off, nonce: Date.now() });
+    }, [active, files, gotoOffset, getSource, openDoc]);
+
+    // DOI → BibTeX: fetch via Crossref (cached), dedup the key against existing .bib content, append to the
+    // chosen (or first / new) .bib file. Returns {key,path,title,year}. Throws an actionable Error on failure.
+    const onAddDoi = useCallback((rawDoi) => {
+      if (!canEdit) return Promise.reject(new Error('You have read-only access to this project.'));
+      if (!window.PRDoi) return Promise.reject(new Error('DOI lookup is unavailable.'));
+      const esc = (k) => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const suf = (n) => { let s = ''; n--; do { s = String.fromCharCode(97 + (n % 26)) + s; n = Math.floor(n / 26) - 1; } while (n >= 0); return s; }; // a..z, aa, ab… (never a non-letter)
+      return window.PRDoi.get(rawDoi).then((res) => {
+        // dedup against the freshest committed files (read from the store, which the autosave keeps current)
+        // rather than this callback's closure, so a concurrent edit during the fetch can't cause a duplicate
+        // @key. Disambiguate with an alphabetic suffix that always stays in [a-z].
+        let cur = {}; try { cur = (window.PRStore.get(projectId) || {}).files || {}; } catch (e) { }
+        const bibOf = (mp) => Object.keys(mp).filter((p) => mp[p] && mp[p].type === 'bib');
+        const allBib = bibOf(cur).map((p) => cur[p].content || '').join('\n');
+        const base = res.key || 'ref'; let k = base, n = 0;
+        while (new RegExp('@\\w+\\s*\\{\\s*' + esc(k) + '\\s*,').test(allBib)) { n++; k = base + suf(n); }
+        let entry = res.bibtex; if (k !== base) entry = entry.replace('{' + base + ',', '{' + k + ',');
+        const path = bibOf(cur)[0] || 'references.bib';
+        setFiles((f) => { const tgt = f[path] || { type: 'bib', content: '' }; const ex = tgt.content || ''; const sep = ex ? (/\n\s*$/.test(ex) ? '\n' : '\n\n') : ''; return { ...f, [path]: { ...tgt, type: 'bib', content: ex + sep + entry } }; });
+        setOrder((o) => o.includes(path) ? o : [...o, path]);
+        try { window.PRStore.logActivity && window.PRStore.logActivity(projectId, me.id, 'added reference', k); } catch (e) { }
+        return { key: k, path, title: res.title, year: res.year, renamed: k !== base };
+      });
+    }, [canEdit, projectId, me]);
+
     // document outline (chapters/sections + figures/tables) parsed from the active source
     const outline = useMemo(() => {
       const v = source || '', items = [];
@@ -655,6 +714,17 @@
     // number/claims consistency: metric-like labels that appear with >1 distinct value (audit candidates)
     const consistency = useMemo(() => { try { return window.PRConsistency ? window.PRConsistency.scan(source) : []; } catch (e) { return []; } }, [source]);
     const consistencyConflicts = useMemo(() => consistency.filter((g) => g.distinct > 1).length, [consistency]);
+
+    // reference / citation manager: cross-checks \cite usage vs .bib entries vs .bbl (whole project, all files)
+    const refs = useMemo(() => { try { return window.PRRefs ? window.PRRefs.scan(files) : null; } catch (e) { return null; } }, [files]);
+    const refsIssues = useMemo(() => { try { return window.PRRefs ? window.PRRefs.issueCount(refs) : 0; } catch (e) { return 0; } }, [refs]);
+    // .bib-only derivations for autocomplete (keys + "Title (Year)" hints): keyed on a signature of just the
+    // .bib files so editing prose in a .tex does NOT re-run them or churn the editor's props every keystroke.
+    const bibSig = useMemo(() => Object.keys(files).filter((p) => files[p] && files[p].type === 'bib').sort().map((p) => p + '␟' + (files[p].content || '')).join('␞'), [files]);
+    const bibEntries = useMemo(() => { try { return window.PRRefs ? window.PRRefs.entries(files) : []; } catch (e) { return []; } }, [bibSig]); // eslint-disable-line react-hooks/exhaustive-deps
+    const bibKeys = useMemo(() => bibEntries.map((e) => e.key), [bibEntries]);
+    const bibMeta = useMemo(() => { const m = {}; bibEntries.forEach((e) => { if (!m[e.key] && (e.title || e.year)) m[e.key] = (e.title ? e.title.slice(0, 52) : '') + (e.year ? '  (' + e.year + ')' : ''); }); return m; }, [bibEntries]);
+    const bibPaths = useMemo(() => Object.keys(files).filter((p) => files[p] && files[p].type === 'bib'), [bibSig]); // eslint-disable-line react-hooks/exhaustive-deps
 
     /* ---- preview highlight + scroll (across every preview pane bound to the active document) ---- */
     useLayoutEffect(() => {
@@ -1055,12 +1125,8 @@
       });
     };
 
-    // bib keys (for \cite autocomplete) parsed from every .bib file in the project
-    const bibKeys = useMemo(() => {
-      const keys = [];
-      Object.keys(files).forEach((p) => { const f = files[p]; if (f && f.type === 'bib' && f.content) { let m; const re = /@\w+\s*\{\s*([^,\s}]+)/g; while ((m = re.exec(f.content))) keys.push(m[1]); } });
-      return keys;
-    }, [files]);
+    // bibKeys for \cite autocomplete is derived above from bibEntries (single-sourced through the PRRefs
+    // parser, so offered keys and "Title (Year)" hints can never drift apart).
     const displayAnns = useMemo(() => annotations.map((a) => {
       if (!a.anchor || a.anchor.file !== active) return a;
       const cur = source.slice(a.anchor.start, a.anchor.end);
@@ -1516,6 +1582,7 @@
               <button className={'ct' + (drawer.open && drawer.tab === 'kpi' ? ' on' : '')} title="KPIs & format compliance" onClick={() => toggleDrawer('kpi')}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M2 14V8M6 14V4M10 14v-3M14 14V6" strokeLinecap="round" /></svg></button>
               <button className={'ct' + (drawer.open && drawer.tab === 'review' ? ' on' : '')} title="AI review" onClick={() => toggleDrawer('review')}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M8 1.7l1.7 3.7 4 .4-3 2.7.9 4L8 12.9 4.4 14.5l.9-4-3-2.7 4-.4z" strokeLinejoin="round" /></svg>{openReview ? <i className="ct-badge">{openReview}</i> : null}</button>
               <button className={'ct' + (drawer.open && drawer.tab === 'numbers' ? ' on' : '')} title="Number consistency" onClick={() => toggleDrawer('numbers')}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M3 5h3M3 8h6M3 11h4" strokeLinecap="round" /><path d="M11.5 4v8M9.7 5.6L11.5 4l1.8 1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>{consistencyConflicts ? <i className="ct-badge warn">{consistencyConflicts}</i> : null}</button>
+              <button className={'ct' + (drawer.open && drawer.tab === 'refs' ? ' on' : '')} title="References & citations" onClick={() => toggleDrawer('refs')}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M4 2.5h6l2.5 2.5V13.5H4z" strokeLinejoin="round" /><path d="M6.2 6h4M6.2 8.3h4M6.2 10.6h2.6" strokeLinecap="round" /></svg>{refsIssues ? <i className="ct-badge warn">{refsIssues}</i> : null}</button>
             </div>
             {isAdmin && <a className="btn btn-icon" href="Admin.html" title="Admin">
               <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"><path d="M8 1.8l5 1.9v3.6c0 3-2.1 5.2-5 6.1-2.9-.9-5-3.1-5-6.1V3.7z" /><path d="M5.8 8l1.6 1.6L10.4 6.5" /></svg>
@@ -1613,7 +1680,7 @@
 
             <window.Workspace.Workspace ctx={{
               layout, focusedPaneId, soloPaneId, activeDocId: active, status, sentence, selectReq, readLine,
-              monoSize: t.monoSize, canEdit, canComment, bibKeys,
+              monoSize: t.monoSize, canEdit, canComment, bibKeys, bibMeta,
               writeMode, setWrite: setWriteMode, onPreviewEdit, onBlockTransform, onInsertBlock, onTableEdit, onInsertImage, onInsertImageBlob,
               isCurProj, docExists, readOnlyDoc, getSource, getCompiled, docLabel, docColor,
               getCompiledPdf, requestCompile, onCompileExact, annoMarks: annoMarksFor, annoSids: annoSidsFor, voicedSids: voicedSidsFor, reviewSids: reviewSidsFor,
@@ -1637,7 +1704,8 @@
             metrics={kpiMetrics} journalMeta={projMeta.journalMeta} journal={projMeta.journal} templateId={projMeta.templateId}
             submission={projMeta.submission} onSetStatus={setSubmissionStatus} tts={projMeta.tts} engine={voice.engine} model={voice.model}
             review={reviewAnns} reviewFocus={reviewFocus} onImportReview={onImportReview} onClearReview={onClearReview} onApplyReview={onApplyReview} canImport={isCurProj(active)}
-            consistency={consistency} onGotoOff={gotoOffset} />}
+            consistency={consistency} onGotoOff={gotoOffset}
+            refs={refs} onGotoRef={gotoRef} onAddDoi={onAddDoi} bibPaths={bibPaths} />}
           <input ref={pdfInput} type="file" accept="application/pdf,.pdf" style={{ display: 'none' }} onChange={onPdfPicked} />
           <input ref={imgInsertInput} type="file" accept="image/png,image/jpeg,image/gif,image/svg+xml,.png,.jpg,.jpeg,.gif,.svg" style={{ display: 'none' }} onChange={onInsertImagePicked} />
         </div>
