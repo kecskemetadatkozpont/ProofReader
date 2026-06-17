@@ -268,9 +268,10 @@
   }
 
   function RightDrawer(p) {
-    const tabs = [['comments', 'Comments'], ['todos', 'To-dos'], ['review', 'Review'], ['numbers', 'Numbers'], ['refs', 'References'], ['history', 'History'], ['activity', 'Activity'], ['kpi', 'KPIs']];
+    const tabs = [['comments', 'Comments'], ['todos', 'To-dos'], ['review', 'Review'], ['numbers', 'Numbers'], ['refs', 'References'], ['spelling', 'Spelling'], ['history', 'History'], ['activity', 'Activity'], ['kpi', 'KPIs']];
     const reviewOpen = (p.review || []).filter((a) => a.status !== 'resolved').length;
     const numConflicts = (p.consistency || []).filter((g) => g.distinct > 1).length;
+    const spellOpen = p.spellOn && p.spell ? p.spell.misspelled.length : 0;
     const refIssues = (window.PRRefs && p.refs) ? window.PRRefs.issueCount(p.refs) : 0;
     const comments = p.annotations.filter((a) => a.kind === 'comment');
     const todos = p.annotations.filter((a) => a.kind === 'todo');
@@ -286,7 +287,7 @@
     }
     return <aside className="drawer">
       <div className="drawer-tabs">
-        {tabs.map(([k, l]) => <button key={k} className={'dtab' + (p.tab === k ? ' on' : '')} onClick={() => p.setTab(k)}>{l}{k === 'comments' && openCount ? <span className="badge">{openCount}</span> : null}{k === 'todos' && todoOpen ? <span className="badge">{todoOpen}</span> : null}{k === 'review' && reviewOpen ? <span className="badge">{reviewOpen}</span> : null}{k === 'numbers' && numConflicts ? <span className="badge warn">{numConflicts}</span> : null}{k === 'refs' && refIssues ? <span className="badge warn">{refIssues}</span> : null}</button>)}
+        {tabs.map(([k, l]) => <button key={k} className={'dtab' + (p.tab === k ? ' on' : '')} onClick={() => p.setTab(k)}>{l}{k === 'comments' && openCount ? <span className="badge">{openCount}</span> : null}{k === 'todos' && todoOpen ? <span className="badge">{todoOpen}</span> : null}{k === 'review' && reviewOpen ? <span className="badge">{reviewOpen}</span> : null}{k === 'numbers' && numConflicts ? <span className="badge warn">{numConflicts}</span> : null}{k === 'refs' && refIssues ? <span className="badge warn">{refIssues}</span> : null}{k === 'spelling' && spellOpen ? <span className="badge warn">{spellOpen}</span> : null}</button>)}
         <button className="drawer-x" onClick={p.onClose} title="Close">✕</button>
       </div>
       {(p.tab === 'comments' || p.tab === 'todos') && p.docName && <div className="drawer-doc"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M4 2.5h5l3 3V13a.5.5 0 01-.5.5h-7A.5.5 0 014 13z" strokeLinejoin="round" /></svg>Active document <b>{p.docName}</b><span className="dd-hint">· each note is tagged with its file</span></div>}
@@ -322,6 +323,7 @@
         {p.tab === 'review' && <ReviewPanel review={p.review} focus={p.reviewFocus} onJump={p.onJump} onResolve={p.onResolve} onDelete={p.onDelete} onApply={p.onApplyReview} onImport={p.onImportReview} onClear={p.onClearReview} canImport={p.canImport} />}
         {p.tab === 'numbers' && <ConsistencyPanel groups={p.consistency} onGoto={p.onGotoOff} />}
         {p.tab === 'refs' && <ReferencesPanel refs={p.refs} onGoto={p.onGotoRef} onAddDoi={p.onAddDoi} bibPaths={p.bibPaths} canEdit={p.canEdit} docName={p.docName} />}
+        {p.tab === 'spelling' && <SpellPanel on={p.spellOn} onToggle={p.onToggleSpell} result={p.spell} busy={p.spellBusy} err={p.spellErr} lang={p.spellLang} langPref={p.spellLangPref} langs={p.spellLangs} onSetLang={p.onSetSpellLang} personal={p.spellPersonal} onGoto={p.onSpellGoto} onSuggest={p.onSpellSuggest} onReplaceAll={p.onSpellReplaceAll} onAddDict={p.onSpellAddDict} onIgnore={p.onSpellIgnore} onUndoDict={p.onSpellUndoDict} onRetry={p.onSpellRetry} canEdit={p.canEdit} />}
       </div>
       <Lightbox />
     </aside>;
@@ -456,6 +458,61 @@
         </button>)}</>}
 
       {errors === 0 && warns === 0 && <div className="empty-d">No citation issues detected. This cross-checks every <code>\cite</code> against your <code>.bib</code> entries and the compiled <code>.bbl</code> across the whole project — surfacing undefined cites, uncited or duplicate entries, duplicate DOIs and a stale bibliography. Heuristic; verify before acting.</div>}
+    </div>;
+  }
+
+  /* ---- Spell-check panel: Hunspell (HU/EN) misspellings with suggestions, add-to-dictionary, jump ---- */
+  function SpellPanel(p) {
+    const [open, setOpen] = useState(null);     // expanded word
+    const [sugg, setSugg] = useState({});       // word → suggestions[]
+    const [loading, setLoading] = useState(null);
+    const [removed, setRemoved] = useState({}); // optimistic: words just added/ignored, hidden until the re-scan lands
+    useEffect(() => { setSugg({}); setOpen(null); setRemoved({}); }, [p.result]); // fresh scan → drop stale suggestion cache + optimistic hides
+    const clearLoad = (w) => setLoading((c) => (c === w ? null : c));
+    const r = p.result;
+    const expand = (w) => {
+      if (open === w) { setOpen(null); return; }
+      setOpen(w);
+      if (sugg[w] === undefined && p.onSuggest) { setLoading(w); p.onSuggest(w).then((s) => { setSugg((m) => Object.assign({}, m, { [w]: s || [] })); clearLoad(w); }).catch(() => { setSugg((m) => Object.assign({}, m, { [w]: [] })); clearLoad(w); }); }
+    };
+    const hide = (w, fn) => { fn(w); setRemoved((m) => Object.assign({}, m, { [w]: 1 })); };
+    const langName = (p.langs && p.langs[p.lang]) || (p.lang || '').toUpperCase();
+    return <div className="numbers spell">
+      <div className="sp-head">
+        <label className="sp-switch"><input type="checkbox" checked={!!p.on} onChange={p.onToggle} /> <span>Spell check</span></label>
+        <select className="sp-lang" value={p.langPref || ''} onChange={(e) => p.onSetLang(e.target.value)} title="Dictionary language" disabled={!p.on}>
+          <option value="">Auto ({langName})</option>
+          {Object.keys(p.langs || {}).map((k) => <option key={k} value={k}>{p.langs[k]}</option>)}
+        </select>
+      </div>
+      {!p.on && <div className="empty-d">Spell check is off. Turn it on to flag misspelled words in the active document (Hungarian + English, LaTeX-aware — commands, math and citation keys are skipped). The dictionary (≈4 MB for Hungarian) downloads once and is cached in your browser.</div>}
+      {p.on && p.err && <div className="num-bar" style={{ color: '#dc2626' }}>Could not run the checker: {p.err}{p.onRetry ? <button className="sp-retry" onClick={p.onRetry}>Retry</button> : null}</div>}
+      {p.on && !p.err && p.busy && <div className="num-bar">Checking <b>{langName}</b>…</div>}
+      {p.on && !p.err && !p.busy && r && (() => { const visible = r.misspelled.filter((m) => !removed[m.word]); return <>
+        <div className="num-bar"><b style={{ color: visible.length ? '#b4530f' : '#1c7a47' }}>{visible.length}</b> word{visible.length === 1 ? '' : 's'} to review · {r.distinct} distinct in {r.total} · <b>{langName}</b>. Click a word for suggestions; “Add” teaches your personal dictionary.</div>
+        {visible.map((m) => <div key={m.word} className={'sp-item' + (open === m.word ? ' open' : '')}>
+          <div className="sp-row">
+            <button className="sp-word" title="Jump to first occurrence" onClick={() => m.first && p.onGoto(m.first.start)}>{m.word}</button>
+            {m.count > 1 ? <i className="sp-x">{m.count}×</i> : null}
+            <button className="sp-more" onClick={() => expand(m.word)}>{open === m.word ? 'Hide' : 'Fix…'}</button>
+          </div>
+          {open === m.word && <div className="sp-detail">
+            {loading === m.word && <div className="sp-note">Finding suggestions…</div>}
+            {loading !== m.word && (sugg[m.word] || []).length > 0 && <div className="sp-sugs">{sugg[m.word].map((s, i) => <button key={i} className="sp-sug" disabled={!p.canEdit} title={p.canEdit ? 'Replace all occurrences' : 'Read-only'} onClick={() => p.onReplaceAll(m.word, s)}>{s}</button>)}</div>}
+            {loading !== m.word && (sugg[m.word] || []).length === 0 && <div className="sp-note">No suggestions.</div>}
+            <div className="sp-acts">
+              <button onClick={() => hide(m.word, p.onAddDict)}>+ Add to dictionary</button>
+              <button onClick={() => hide(m.word, p.onIgnore)}>Ignore</button>
+              {m.offsets.length > 1 && <span className="sp-occs">{m.offsets.slice(0, 12).map((o, i) => <button key={i} className="sp-occ" title={'Occurrence ' + (i + 1)} onClick={() => p.onGoto(o.start)}>·{i + 1}</button>)}</span>}
+            </div>
+          </div>}
+        </div>)}
+        {visible.length === 0 && <div className="empty-d">No misspellings found in this document. 🎉</div>}
+      </>; })()}
+      {p.on && (p.personal || []).length > 0 && <div className="sp-dict">
+        <div className="num-sec">Personal dictionary ({p.personal.length})</div>
+        <div className="sp-dict-list">{p.personal.map((w) => <button key={w} className="sp-dword" title="Remove from dictionary" onClick={() => p.onUndoDict(w)}>{w} ✕</button>)}</div>
+      </div>}
     </div>;
   }
 

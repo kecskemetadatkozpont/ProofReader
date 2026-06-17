@@ -18,12 +18,20 @@
   function highlight(src, marks) {
     marks = (marks || []).filter((m) => m && m.e > m.s).sort((a, b) => a.s - b.s);
     const n = src.length; let i = 0; let out = '';
+    // monotonic pointer over the sorted marks: emit() is always called with non-decreasing `s`, so once a
+    // mark ends before the current position it is behind us forever. Keeps highlight O(runs+marks) instead of
+    // O(runs×marks) — needed because spell-check can contribute thousands of marks. (mk0 may slightly over-
+    // include for overlapping marks; spell/find/anno marks don't overlap, so output is unchanged.)
+    let mk0 = 0;
     function span(t, cls) { return t ? (cls ? '<span class="' + cls + '">' + esc(t) + '</span>' : esc(t)) : ''; }
     function emit(s, e, cls) {
       if (s >= e) return;
       let p = s;
-      for (const mk of marks) {
-        if (mk.e <= p || mk.s >= e) continue;
+      while (mk0 < marks.length && marks[mk0].e <= p) mk0++;
+      for (let k = mk0; k < marks.length; k++) {
+        const mk = marks[k];
+        if (mk.s >= e) break;
+        if (mk.e <= p) continue;
         if (mk.s > p) { out += span(src.slice(p, mk.s), cls); p = mk.s; }
         const b = Math.min(e, mk.e);
         out += '<mark class="' + mk.cls + '">' + span(src.slice(p, b), cls) + '</mark>';
@@ -425,6 +433,8 @@
     }
     // subtle comment/to-do underlay (highlight() sorts; overlaps resolve gracefully)
     if (props.annoMarks && props.annoMarks.length) marks = marks.concat(props.annoMarks);
+    // spell-check squiggles (red wavy underline under misspelled words)
+    if (props.spellMarks && props.spellMarks.length) marks = marks.concat(props.spellMarks);
 
     const fontStyle = { fontSize: props.fontSize + 'px', lineHeight: props.lineHeight + 'px' };
 

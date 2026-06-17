@@ -203,7 +203,14 @@
     const [reviewFocus, setReviewFocus] = useState(null); // review annotation id to focus in the Review drawer
     const [showVoiced, setShowVoiced] = useState(pf0.showVoiced !== false); // ♪ voiced-highlight layer toggle
     const [showReview, setShowReview] = useState(pf0.showReview !== false); // ✦ review-marker layer toggle
-    useEffect(() => { if (window.PRStore) window.PRStore.setPrefs({ showVoiced, showReview }); }, [showVoiced, showReview]);
+    const [spellOn, setSpellOn] = useState(!!pf0.spellOn);                  // spell-check (off by default — downloads a dictionary)
+    const [spellLangPref, setSpellLangPref] = useState(pf0.spellLang || ''); // '' = auto-detect per document
+    useEffect(() => { if (window.PRStore) window.PRStore.setPrefs({ showVoiced, showReview, spellOn, spellLang: spellLangPref }); }, [showVoiced, showReview, spellOn, spellLangPref]);
+    const [spellResult, setSpellResult] = useState(null);
+    const [spellBusy, setSpellBusy] = useState(false);
+    const [spellErr, setSpellErr] = useState(null);
+    const [spellPersonal, setSpellPersonal] = useState(() => { try { return (window.PRStore && window.PRStore.prefs().spellDict) || []; } catch (e) { return []; } });
+    const [spellIgnore, setSpellIgnore] = useState([]); // session-only "ignore once"
     const refreshVoiced = useCallback(() => { if (window.PREleven && window.PREleven.cachedKeys) window.PREleven.cachedKeys().then(setVoicedKeys).catch(() => {}); }, []);
     useEffect(() => { refreshVoiced(); const h = () => refreshVoiced(); window.addEventListener('pr-tts', h); return () => window.removeEventListener('pr-tts', h); }, [refreshVoiced]);
 
@@ -714,6 +721,56 @@
     // number/claims consistency: metric-like labels that appear with >1 distinct value (audit candidates)
     const consistency = useMemo(() => { try { return window.PRConsistency ? window.PRConsistency.scan(source) : []; } catch (e) { return []; } }, [source]);
     const consistencyConflicts = useMemo(() => consistency.filter((g) => g.distinct > 1).length, [consistency]);
+
+    /* ---- spell check (Hunspell WASM in a worker; HU+EN, LaTeX-aware) ---- */
+    // detectLang only runs while spell-check is on (it's off by default) — saves a regex sweep per keystroke.
+    const spellLang = useMemo(() => spellLangPref || ((spellOn && window.PRSpell) ? window.PRSpell.detectLang(source) : 'en'), [spellLangPref, source, spellOn]);
+    const spellAvailable = !!window.PRSpell;
+    const [spellRetry, setSpellRetry] = useState(0);
+    useEffect(() => { setSpellResult(null); }, [active]); // drop another doc's misspellings instantly on switch (don't paint them while the new scan is pending)
+    // re-scan the active doc (debounced) whenever it, the language, or the dictionaries change
+    useEffect(() => {
+      if (!spellOn || !window.PRSpell || !(files[active] && files[active].type === 'tex')) { setSpellResult(null); setSpellErr(null); setSpellBusy(false); return; }
+      let dead = false; setSpellBusy(true); const doc = active;
+      const h = setTimeout(() => {
+        window.PRSpell.scan(source, spellLang, { personal: spellPersonal, ignore: spellIgnore })
+          .then((r) => { if (!dead) { r.doc = doc; setSpellResult(r); setSpellErr(null); setSpellBusy(false); } })
+          .catch((e) => { if (!dead) { setSpellErr(String((e && e.message) || e)); setSpellResult(null); setSpellBusy(false); } });
+      }, 650);
+      return () => { dead = true; clearTimeout(h); };
+    }, [spellOn, source, active, spellLang, spellPersonal, spellIgnore, spellRetry]);
+    const spellCount = (spellResult && spellResult.misspelled.length) || 0;
+    // squiggle marks for the active doc (capped per word so a 99× proper noun doesn't flood the layer).
+    // gated on spellResult.doc so a stale scan for a different document can never paint onto this one.
+    const spellMarksFor = useCallback((docId) => {
+      if (!spellOn || !spellResult || docId !== active || spellResult.doc !== active) return null;
+      const out = [];
+      spellResult.misspelled.forEach((m) => m.offsets.slice(0, 8).forEach((o) => out.push({ s: o.start, e: o.end, cls: 'sp-err' })));
+      return out;
+    }, [spellOn, spellResult, active]);
+    const onSpellSuggest = useCallback((word) => (window.PRSpell ? window.PRSpell.suggest(spellLang, word) : Promise.resolve([])), [spellLang]);
+    const onSpellAddDict = useCallback((word) => {
+      if (!word) return; const lw = String(word);
+      setSpellPersonal((p) => { if (p.indexOf(lw) >= 0) return p; const np = p.concat([lw]); try { window.PRStore.setPrefs({ spellDict: np }); } catch (e) { } return np; });
+    }, []);
+    const onSpellIgnore = useCallback((word) => { if (word) setSpellIgnore((g) => g.indexOf(word) >= 0 ? g : g.concat([word])); }, []);
+    const onSpellUndoDict = useCallback((word) => {
+      setSpellPersonal((p) => { const np = p.filter((w) => w !== word); try { window.PRStore.setPrefs({ spellDict: np }); } catch (e) { } return np; });
+    }, []);
+    // replace every detected occurrence of a misspelled word with a chosen suggestion. Applies only at the
+    // offsets the scan found (and re-verifies the slice), so it never touches a same-looking token in a command.
+    const onSpellReplaceAll = useCallback((word, replacement) => {
+      if (!canEdit || replacement == null || !spellResult) return;
+      const m = spellResult.misspelled.find((x) => x.word === word); if (!m) return;
+      setFiles((f) => {
+        const cur = f[active]; if (!cur || typeof cur.content !== 'string') return f;
+        let nv = cur.content;
+        m.offsets.slice().sort((a, b) => b.start - a.start).forEach((o) => { if (nv.slice(o.start, o.end) === word) nv = nv.slice(0, o.start) + replacement + nv.slice(o.end); });
+        if (nv === cur.content) return f;
+        editedRef.current = true;
+        return { ...f, [active]: { ...cur, content: nv } };
+      });
+    }, [canEdit, active, spellResult]);
 
     // reference / citation manager: cross-checks \cite usage vs .bib entries vs .bbl (whole project, all files)
     const refs = useMemo(() => { try { return window.PRRefs ? window.PRRefs.scan(files) : null; } catch (e) { return null; } }, [files]);
@@ -1582,6 +1639,7 @@
               <button className={'ct' + (drawer.open && drawer.tab === 'kpi' ? ' on' : '')} title="KPIs & format compliance" onClick={() => toggleDrawer('kpi')}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M2 14V8M6 14V4M10 14v-3M14 14V6" strokeLinecap="round" /></svg></button>
               <button className={'ct' + (drawer.open && drawer.tab === 'review' ? ' on' : '')} title="AI review" onClick={() => toggleDrawer('review')}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M8 1.7l1.7 3.7 4 .4-3 2.7.9 4L8 12.9 4.4 14.5l.9-4-3-2.7 4-.4z" strokeLinejoin="round" /></svg>{openReview ? <i className="ct-badge">{openReview}</i> : null}</button>
               <button className={'ct' + (drawer.open && drawer.tab === 'numbers' ? ' on' : '')} title="Number consistency" onClick={() => toggleDrawer('numbers')}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M3 5h3M3 8h6M3 11h4" strokeLinecap="round" /><path d="M11.5 4v8M9.7 5.6L11.5 4l1.8 1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>{consistencyConflicts ? <i className="ct-badge warn">{consistencyConflicts}</i> : null}</button>
+              {spellAvailable && <button className={'ct' + (drawer.open && drawer.tab === 'spelling' ? ' on' : '')} title="Spell check (HU/EN)" onClick={() => { const opening = !(drawer.open && drawer.tab === 'spelling'); toggleDrawer('spelling'); if (opening && !spellOn) setSpellOn(true); }}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M2 12l2.6-7 2.6 7M3 9.5h3.2" strokeLinecap="round" strokeLinejoin="round" /><path d="M9.5 12l2-3 2 3M10 10.6h3" strokeLinecap="round" strokeLinejoin="round" /></svg>{spellOn && spellCount ? <i className="ct-badge warn">{spellCount}</i> : null}</button>}
               <button className={'ct' + (drawer.open && drawer.tab === 'refs' ? ' on' : '')} title="References & citations" onClick={() => toggleDrawer('refs')}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M4 2.5h6l2.5 2.5V13.5H4z" strokeLinejoin="round" /><path d="M6.2 6h4M6.2 8.3h4M6.2 10.6h2.6" strokeLinecap="round" /></svg>{refsIssues ? <i className="ct-badge warn">{refsIssues}</i> : null}</button>
             </div>
             {isAdmin && <a className="btn btn-icon" href="Admin.html" title="Admin">
@@ -1683,7 +1741,7 @@
               monoSize: t.monoSize, canEdit, canComment, bibKeys, bibMeta,
               writeMode, setWrite: setWriteMode, onPreviewEdit, onBlockTransform, onInsertBlock, onTableEdit, onInsertImage, onInsertImageBlob,
               isCurProj, docExists, readOnlyDoc, getSource, getCompiled, docLabel, docColor,
-              getCompiledPdf, requestCompile, onCompileExact, annoMarks: annoMarksFor, annoSids: annoSidsFor, voicedSids: voicedSidsFor, reviewSids: reviewSidsFor,
+              getCompiledPdf, requestCompile, onCompileExact, annoMarks: annoMarksFor, spellMarks: spellMarksFor, annoSids: annoSidsFor, voicedSids: voicedSidsFor, reviewSids: reviewSidsFor,
               canClose: window.WS.allPanes(layout).length > 1,
               onFocus: wsOnFocus, onAdd: wsOnAdd, onSplit: wsOnAdd, onClose: wsOnClose, onSolo: wsOnSolo, onSetRatio: wsOnSetRatio,
               dragId, onDragStart: (id) => setDragId(id), onDragEnd: () => setDragId(null), onMovePane: wsOnMovePane,
@@ -1705,7 +1763,11 @@
             submission={projMeta.submission} onSetStatus={setSubmissionStatus} tts={projMeta.tts} engine={voice.engine} model={voice.model}
             review={reviewAnns} reviewFocus={reviewFocus} onImportReview={onImportReview} onClearReview={onClearReview} onApplyReview={onApplyReview} canImport={isCurProj(active)}
             consistency={consistency} onGotoOff={gotoOffset}
-            refs={refs} onGotoRef={gotoRef} onAddDoi={onAddDoi} bibPaths={bibPaths} />}
+            refs={refs} onGotoRef={gotoRef} onAddDoi={onAddDoi} bibPaths={bibPaths}
+            spellOn={spellOn} onToggleSpell={() => setSpellOn((s) => !s)} spell={spellResult} spellBusy={spellBusy} spellErr={spellErr}
+            spellLang={spellLang} spellLangPref={spellLangPref} onSetSpellLang={setSpellLangPref} spellLangs={window.PRSpell ? window.PRSpell.langs : {}}
+            spellPersonal={spellPersonal} onSpellGoto={gotoOffset} onSpellSuggest={onSpellSuggest} onSpellReplaceAll={onSpellReplaceAll}
+            onSpellAddDict={onSpellAddDict} onSpellIgnore={onSpellIgnore} onSpellUndoDict={onSpellUndoDict} onSpellRetry={() => setSpellRetry((n) => n + 1)} />}
           <input ref={pdfInput} type="file" accept="application/pdf,.pdf" style={{ display: 'none' }} onChange={onPdfPicked} />
           <input ref={imgInsertInput} type="file" accept="image/png,image/jpeg,image/gif,image/svg+xml,.png,.jpg,.jpeg,.gif,.svg" style={{ display: 'none' }} onChange={onInsertImagePicked} />
         </div>

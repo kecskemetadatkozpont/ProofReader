@@ -92,6 +92,7 @@
         selectReq={active ? ctx.selectReq : null}
         bibKeys={ctx.bibKeys} bibMeta={ctx.bibMeta}
         annoMarks={ctx.annoMarks ? ctx.annoMarks(pane.docId) : null}
+        spellMarks={ctx.spellMarks ? ctx.spellMarks(pane.docId) : null}
         fontSize={ctx.monoSize} lineHeight={Math.round(ctx.monoSize * 1.6)} />;
     }
     if (pane.kind === 'preview') {
