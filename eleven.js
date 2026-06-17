@@ -57,8 +57,23 @@
     for (i = 0; i < s.length; i++) { c = s.charCodeAt(i); h = ((h << 5) - h) + c; h |= 0; }
     return (h >>> 0).toString(36);
   }
+  /* ---- pronunciation dictionary: spoken-form substitutions applied just before synthesis ---- */
+  // A user list of { from, to } (e.g. "LiDAR"->"lie-dar", "OOD"->"oh oh dee"). Applied centrally so the
+  // cache key, cloud key, the synthesized text and the "is voiced" highlight all stay consistent. An empty
+  // list means spoken(text) === text (byte-identical to the previous behaviour - a true no-op when unused).
+  var pron = [];
+  function escRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+  function spoken(text) {
+    if (!pron.length || !text) return text;
+    var t = text;
+    for (var i = 0; i < pron.length; i++) {
+      var e = pron[i]; if (!e || !e.from) continue;
+      try { t = t.replace(new RegExp('(^|[^\\p{L}\\p{N}])(' + escRe(e.from) + ')(?![\\p{L}\\p{N}])', 'giu'), function (m, pre) { return pre + (e.to || ''); }); } catch (_) { }
+    }
+    return t;
+  }
   function cfgKey(text, cfg) {
-    return hash([text, cfg.elevenVoice, cfg.model, cfg.stability, cfg.similarity].join('\u0001'));
+    return hash([spoken(text), cfg.elevenVoice, cfg.model, cfg.stability, cfg.similarity].join('\u0001'));
   }
   function settings(cfg) {
     return {
@@ -127,7 +142,7 @@
   var CLOUD_BUCKET = 'tts-cache', _cloudOff = false;
   function sbClient() { var BE = window.PR_BACKEND; return (BE && BE.mode === 'cloud' && BE.sb) ? BE.sb : null; }
   function cloudKey(text, cfg) {
-    var s = [text, cfg.elevenVoice, cfg.model, cfg.stability, cfg.similarity].join('');
+    var s = [spoken(text), cfg.elevenVoice, cfg.model, cfg.stability, cfg.similarity].join('');
     try {
       if (window.crypto && crypto.subtle && window.TextEncoder) {
         return crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)).then(function (buf) {
@@ -204,6 +219,32 @@
 
     cached: function (text, cfg) { return !!cache[cfgKey(text, cfg)]; },
     keyFor: function (text, cfg) { return cfgKey(text, cfg); },
+    // pronunciation dictionary — list of { from, to }; applied to every text before keying/synthesis
+    setPron: function (list) { pron = (list || []).filter(function (e) { return e && e.from; }); },
+    spoken: spoken,
+    // Resolve the raw MP3 Blob for a sentence (for narration export).
+    // noSynth=true ⇒ NEVER synthesize/charge: return the cached blob (memory or IndexedDB) or null. Used by
+    // "Download voiced" so it is provably free even if an IndexedDB entry was evicted since the snapshot.
+    getBlob: function (text, cfg, userId, projectId, noSynth) {
+      var k = cfgKey(text, cfg);
+      if (cache[k] && cache[k].blob) return Promise.resolve(cache[k].blob);
+      if (noSynth) return idbGet(k).then(function (b) { if (b && !cache[k]) cache[k] = { url: URL.createObjectURL(b), blob: b }; return b || null; });
+      return this.getAudio(text, cfg, userId, projectId).then(function () { return (cache[k] && cache[k].blob) || idbGet(k); }); // re-read IDB if evicted from memory between finalize and here
+    },
+    // Concatenate per-sentence MP3 clips into one downloadable file. Strips any leading ID3v2 tag from each
+    // clip so mid-stream metadata doesn't confuse players (frame-level joins are left as-is — CBR clips play
+    // back fine; a tiny boundary artifact is acceptable for a v1 audiobook).
+    concatMp3: function (blobs) {
+      function stripId3(u8) {
+        if (u8.length > 10 && u8[0] === 0x49 && u8[1] === 0x44 && u8[2] === 0x33) { // "ID3"
+          var size = ((u8[6] & 0x7f) << 21) | ((u8[7] & 0x7f) << 14) | ((u8[8] & 0x7f) << 7) | (u8[9] & 0x7f);
+          var end = 10 + size; if (end > 0 && end < u8.length) return u8.subarray(end);
+        }
+        return u8;
+      }
+      return Promise.all((blobs || []).map(function (b) { return b.arrayBuffer ? b.arrayBuffer() : new Response(b).arrayBuffer(); }))
+        .then(function (bufs) { return new Blob(bufs.map(function (buf) { return stripId3(new Uint8Array(buf)); }), { type: 'audio/mpeg' }); });
+    },
     // Set of cache keys with already-generated audio (memory + IndexedDB) — used to flag
     // which sentences will replay for free (no extra ElevenLabs credit).
     cachedKeys: function () {
@@ -245,9 +286,9 @@
           if (cb) { idbPut(k, cb); return finalize(cb); }               // shared cloud hit (free)
           var key = self.getKey();
           if (!key) throw new Error('no-key');
-          return self._synth(text, cfg, key).then(function (blob) {     // real synthesis (charged once)
+          return self._synth(spoken(text), cfg, key).then(function (blob) {     // real synthesis (charged once)
             idbPut(k, blob); cloudPut(text, cfg, blob);
-            meter(userId, projectId, text, cfg);
+            meter(userId, projectId, spoken(text), cfg);
             return finalize(blob);
           });
         });

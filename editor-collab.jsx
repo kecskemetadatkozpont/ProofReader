@@ -666,6 +666,49 @@
         {acct && typeof acct.used === 'number' ? <div className="vp-status">ElevenLabs account: {acct.used.toLocaleString()} / {(acct.limit || 0).toLocaleString()} characters used this period.</div> : null}
         <div className="vp-note">Your key stays in this browser and calls ElevenLabs directly. On the free plan only your account's default voices work via the API — Voice Library voices need a paid plan (Starter, $5/mo). Each sentence's audio is saved (in this browser, and — on a shared cloud project — for collaborators too), so re-listening never re-charges; only new sentences are billed. The per-thesis charge is tracked in the KPIs panel.</div>
       </> : <div className="vp-note">Uses your browser's built-in speech — free and offline. Pick a specific browser voice in the transport bar.</div>}
+
+      <div className="vp-sep" />
+      <div className="vp-label">Pronunciation dictionary</div>
+      <PronEditor list={p.pron || []} onSet={p.onSetPron} />
+
+      {p.engine === 'eleven' && <>
+        <div className="vp-sep" />
+        <div className="vp-label">Download narration</div>
+        <NarrationExport stats={p.narrationStats} narr={p.narr} onDownload={p.onDownloadNarration} onCancel={p.onCancelNarration} />
+      </>}
+    </div>;
+  }
+
+  /* ---- pronunciation dictionary editor: how specific words should be SPOKEN ---- */
+  function PronEditor(p) {
+    const [from, setFrom] = useState(''); const [to, setTo] = useState('');
+    const list = p.list || [];
+    const add = () => { const f = from.trim(); if (!f) return; p.onSet(list.filter((e) => e.from.toLowerCase() !== f.toLowerCase()).concat([{ from: f, to: to.trim() }])); setFrom(''); setTo(''); };
+    const remove = (f) => p.onSet(list.filter((e) => e.from !== f));
+    return <div className="pron">
+      {list.length > 0 && <div className="pron-list">{list.map((e) => <div key={e.from} className="pron-row"><b>{e.from}</b><span className="pron-arrow">→</span><i>{e.to || '∅'}</i><button className="pron-x" title="Remove" onClick={() => remove(e.from)}>✕</button></div>)}</div>}
+      <div className="pron-add">
+        <input className="vp-input" placeholder="word — e.g. LiDAR" value={from} onChange={(e) => setFrom(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') add(); }} />
+        <input className="vp-input" placeholder="say — e.g. lie-dar" value={to} onChange={(e) => setTo(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') add(); }} />
+        <button className="vp-btn" onClick={add}>Add</button>
+      </div>
+      <div className="vp-note" style={{ marginTop: 6 }}>Whole-word, case-insensitive overrides applied before the voice synthesizes — acronyms (OOD → “oh oh dee”), names, units. Changing it re-voices only the affected sentences. Stored for your account.</div>
+    </div>;
+  }
+
+  /* ---- narration (audiobook) export: concatenate the document's per-sentence MP3 clips ---- */
+  function NarrationExport(p) {
+    const s = (p.stats && p.stats()) || { total: 0, cached: 0, missing: 0 };
+    const n = p.narr;
+    return <div className="narr">
+      <div className="vp-note" style={{ marginTop: 0 }}>{s.total} sentence{s.total === 1 ? '' : 's'} · <b>{s.cached}</b> already voiced (free){s.missing ? ' · ' + s.missing + ' need synthesis (uses credits)' : ''}.</div>
+      {n && n.busy ? <div className="vp-status busy">Exporting… {n.done}/{n.total}{n.fails ? ' · ' + n.fails + ' failed' : ''} <button className="vp-link" onClick={p.onCancel}>cancel</button></div> : null}
+      {n && n.doneFlag ? <div className="vp-status ok">Saved {n.total} clip{n.total === 1 ? '' : 's'} as a single MP3.{n.fails ? ' (' + n.fails + ' could not be voiced)' : ''}</div> : null}
+      {n && n.err ? <div className="vp-status err">{n.err}</div> : null}
+      <div className="vp-actions" style={{ gap: 8 }}>
+        <button className="vp-btn" disabled={!s.cached || (n && n.busy)} onClick={() => p.onDownload(false)}>Download voiced ({s.cached})</button>
+        <button className="vp-btn primary" disabled={!s.total || (n && n.busy)} onClick={() => p.onDownload(true)}>Synthesize all &amp; download</button>
+      </div>
     </div>;
   }
 

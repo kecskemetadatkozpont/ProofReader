@@ -211,6 +211,54 @@
     const [spellErr, setSpellErr] = useState(null);
     const [spellPersonal, setSpellPersonal] = useState(() => { try { return (window.PRStore && window.PRStore.prefs().spellDict) || []; } catch (e) { return []; } });
     const [spellIgnore, setSpellIgnore] = useState([]); // session-only "ignore once"
+    const [pronDict, setPronDict] = useState(() => { try { return (window.PRStore && window.PRStore.prefs().ttsDict) || []; } catch (e) { return []; } }); // pronunciation overrides for TTS
+    // install the dictionary into the TTS engine synchronously (during render, before any play/keyFor handler
+    // can fire this cycle) — a post-render effect would leave a first-paint window keyed against un-pronounced text.
+    if (window.PREleven && window.PREleven.setPron) window.PREleven.setPron(pronDict);
+    const setPronAndSave = useCallback((list) => { setPronDict(list); try { window.PRStore.setPrefs({ ttsDict: list }); } catch (e) { } }, []);
+    // narration (audiobook) export — concatenate the per-sentence MP3 clips of the active doc into one file
+    const [narr, setNarr] = useState(null); // { busy, done, total, fails } | { err } | { doneFlag }
+    const narrCancelRef = useRef(false);
+    useEffect(() => { setNarr(null); }, [active]); // clear a stale "Saved"/error message when the document changes
+    const narrationStats = useCallback(() => {
+      const sents = (sentsRef.current || []).filter((s) => s && s.text);
+      const cfg = voiceCfgRef.current || {};
+      let cached = 0; const E = window.PREleven;
+      if (E) sents.forEach((s) => { if (voicedKeys[E.keyFor(s.text, cfg)]) cached++; });
+      return { total: sents.length, cached: cached, missing: sents.length - cached };
+    }, [voicedKeys]);
+    const cancelNarration = useCallback(() => { narrCancelRef.current = true; }, []);
+    const downloadNarration = useCallback((synthMissing) => {
+      const E = window.PREleven; if (!E) return;
+      const cfg = voiceCfgRef.current || {};
+      if (cfg.engine !== 'eleven') { setNarr({ err: 'Switch the voice engine to ElevenLabs to export narration audio.' }); return; }
+      if (!E.hasKey()) { setNarr({ err: 'Add your ElevenLabs API key in Voice settings first.' }); return; }
+      // drop sentences that have no speakable text (e.g. a pronunciation entry mapping the whole sentence to "")
+      const sents = (sentsRef.current || []).filter((s) => s && s.text && (!E.spoken || E.spoken(s.text).trim()));
+      const items = synthMissing ? sents : sents.filter((s) => voicedKeys[E.keyFor(s.text, cfg)]);
+      if (!items.length) { setNarr({ err: synthMissing ? 'Nothing to narrate — compile the document first.' : 'No audio cached yet. Read the document aloud once, or synthesize the rest.' }); return; }
+      narrCancelRef.current = false;
+      setNarr({ busy: true, done: 0, total: items.length, fails: 0 });
+      const blobs = []; let fails = 0, chain = Promise.resolve();
+      items.forEach((s, i) => {
+        chain = chain.then(() => {
+          if (narrCancelRef.current) return null;
+          // noSynth on the "voiced only" path so it can never trigger a paid synthesis; tolerate per-item
+          // failures so one bad sentence doesn't discard the clips already produced (and already charged).
+          return E.getBlob(s.text, cfg, meRef.current.id, projectId, !synthMissing).then((b) => { if (b) blobs.push(b); else fails++; }, () => { fails++; });
+        }).then(() => { if (!narrCancelRef.current) setNarr({ busy: true, done: i + 1, total: items.length, fails: fails }); });
+      });
+      chain.then(() => {
+        if (narrCancelRef.current) { setNarr(null); return; }
+        if (!blobs.length) { setNarr({ err: 'No audio could be produced — try “synthesize”, or check your API key.' }); return; }
+        return E.concatMp3(blobs).then((file) => {
+          const url = URL.createObjectURL(file);
+          const a = document.createElement('a'); a.href = url; a.download = (active.split('/').pop() || 'narration').replace(/\.[^.]+$/, '') + '.mp3';
+          document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 5000);
+          setNarr({ doneFlag: true, total: blobs.length, fails: fails });
+        });
+      }).catch((e) => { if (!narrCancelRef.current) setNarr({ err: (e && e.message) || 'Export failed.' }); });
+    }, [active, projectId, voicedKeys]);
     const refreshVoiced = useCallback(() => { if (window.PREleven && window.PREleven.cachedKeys) window.PREleven.cachedKeys().then(setVoicedKeys).catch(() => {}); }, []);
     useEffect(() => { refreshVoiced(); const h = () => refreshVoiced(); window.addEventListener('pr-tts', h); return () => window.removeEventListener('pr-tts', h); }, [refreshVoiced]);
 
@@ -532,7 +580,7 @@
 
       /* Browser speech-synthesis path. */
       const synth = window.speechSynthesis; if (!synth) return;
-      const u = new SpeechSynthesisUtterance(sents[i].text);
+      const u = new SpeechSynthesisUtterance(window.PREleven && window.PREleven.spoken ? window.PREleven.spoken(sents[i].text) : sents[i].text);
       u.rate = rateRef.current; u.pitch = 1;
       if (voiceRef.current) { const v = synth.getVoices().find((x) => x.voiceURI === voiceRef.current); if (v) { u.voice = v; u.lang = v.lang; } }
       u.onend = () => { if (seqRef.current !== mySeq || statusRef.current !== 'playing') return; speakIndex(idxRef.current + 1); };
@@ -1785,7 +1833,8 @@
         {resume != null && !editPaused && <Collab.ResumePill n={resume} onResume={() => { seekTo(resume - 1); setResume(null); }} onDismiss={() => setResume(null)} />}
         {editPaused && <Collab.ResumePill label={'Paused while you edit — resume from sentence ' + (idx + 1)} onResume={() => { setEditPaused(false); play(); }} onDismiss={() => setEditPaused(false)} />}
         {storageWarn && <div className="storage-toast"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M8 5v4" strokeLinecap="round" /><circle cx="8" cy="11.5" r=".6" fill="currentColor" /><path d="M8 2l6 11H2z" strokeLinejoin="round" /></svg><div><b>Storage is full</b><span>Your latest change may not have saved. Delete old versions or large attachments to free space.</span></div><button onClick={() => setStorageWarn(false)}>✕</button></div>}
-        {voiceOpen && <Collab.VoiceSettings engine={voice.engine} elevenVoice={voice.elevenVoice} model={voice.model} stability={voice.stability} similarity={voice.similarity} set={(patch) => setVoice((v) => Object.assign({}, v, patch))} />}
+        {voiceOpen && <Collab.VoiceSettings engine={voice.engine} elevenVoice={voice.elevenVoice} model={voice.model} stability={voice.stability} similarity={voice.similarity} set={(patch) => setVoice((v) => Object.assign({}, v, patch))}
+          pron={pronDict} onSetPron={setPronAndSave} narr={narr} narrationStats={narrationStats} onDownloadNarration={downloadNarration} onCancelNarration={cancelNarration} />}
         {annoPop && <Collab.AnnoPopover pop={annoPop} onEnter={() => clearTimeout(annoPopTimer.current)} onLeave={() => setAnnoPop(null)} />}
 
         {uploads.length > 0 && <UploadModal items={uploads} onClose={() => setUploads([])} />}
