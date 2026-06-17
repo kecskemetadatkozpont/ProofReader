@@ -319,7 +319,7 @@
           {(!p.activity || !p.activity.length) && <div className="empty-d">Edits, comments and shares show up here.</div>}
           {(p.activity || []).map((a) => { const u = Auth.byId(a.actorId); return <div className="act-d" key={a.id}><Avatar user={u} size={24} /><div><b>{u ? u.name.split(' ')[0] : a.actorId}</b> {a.verb} {a.target}<div className="act-t">{rel(a.at)} ago</div></div></div>; })}
         </>}
-        {p.tab === 'kpi' && <KpiPanel metrics={p.metrics} journalMeta={p.journalMeta} journal={p.journal} templateId={p.templateId} submission={p.submission} onSetStatus={p.onSetStatus} canEdit={p.canEdit} tts={p.tts} engine={p.engine} model={p.model} />}
+        {p.tab === 'kpi' && <KpiPanel metrics={p.metrics} journalMeta={p.journalMeta} journal={p.journal} templateId={p.templateId} submission={p.submission} onSetStatus={p.onSetStatus} canEdit={p.canEdit} tts={p.tts} engine={p.engine} model={p.model} readiness={p.readiness} coverTitle={p.coverTitle} coverAuthor={p.coverAuthor} />}
         {p.tab === 'review' && <ReviewPanel review={p.review} focus={p.reviewFocus} onJump={p.onJump} onResolve={p.onResolve} onDelete={p.onDelete} onApply={p.onApplyReview} onImport={p.onImportReview} onClear={p.onClearReview} canImport={p.canImport} />}
         {p.tab === 'numbers' && <ConsistencyPanel groups={p.consistency} onGoto={p.onGotoOff} />}
         {p.tab === 'refs' && <ReferencesPanel refs={p.refs} onGoto={p.onGotoRef} onAddDoi={p.onAddDoi} bibPaths={p.bibPaths} canEdit={p.canEdit} docName={p.docName} />}
@@ -518,8 +518,20 @@
 
   var KPI_STATUS = { ok: ['#1c7a47', '#e6f3ec', 'On track'], warn: ['#b4530f', '#fdecdf', 'Near limit'], over: ['#dc2626', '#fef2f2', 'Over / missing'], info: ['#475569', '#eef2f7', ''], na: ['#94a3b8', '#f1f5f9', 'Compile to measure'], missing: ['#b4530f', '#fdecdf', 'Not found'] };
   var STATUSES = ['drafting', 'internal-review', 'submitted', 'under-review', 'major-revision', 'minor-revision', 'accepted', 'rejected', 'published'];
+  var R_ICON = { ok: ['✓', '#1c7a47'], warn: ['~', '#b4530f'], fail: ['✕', '#dc2626'], skip: ['·', '#94a3b8'] };
   function KpiPanel(p) {
-    var m = p.metrics, jm = p.journalMeta, sub = p.submission || {};
+    var m = p.metrics, jm = p.journalMeta, sub = p.submission || {}, rd = p.readiness;
+    var [cover, setCover] = useState(null); // null = closed; else the editable cover-letter text
+    var [copied, setCopied] = useState(false);
+    function genCover() {
+      var j = p.journal || (jm && jm.name) || 'your journal';
+      var title = p.coverTitle || '[Manuscript title]';
+      var q = jm && jm.quartile ? ' (' + jm.quartile + ')' : '';
+      setCover('Dear Editor,\n\nI am pleased to submit our manuscript, "' + title + '", for consideration for publication in ' + j + '.\n\n[In one short paragraph: the problem you address, your key contribution and result, and why it fits the scope of ' + j + '.]\n\nThis manuscript is original, has not been published previously, and is not under consideration for publication elsewhere. All authors have read and approved the manuscript and agree to its submission to ' + j + '. We declare no competing interests.\n\nWe believe this work will be of interest to the readership of ' + j + q + ', and we look forward to your response.\n\nSincerely,\n' + (p.coverAuthor || '[Your name]'));
+      setCopied(false);
+    }
+    function copyCover() { if (!navigator.clipboard) return; navigator.clipboard.writeText(cover || '').then(function () { setCopied(true); setTimeout(function () { setCopied(false); }, 1800); }, function () { }); }
+    function dlCover() { var b = new Blob([cover || ''], { type: 'text/plain' }); var u = URL.createObjectURL(b); var a = document.createElement('a'); a.href = u; a.download = 'cover-letter.txt'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function () { URL.revokeObjectURL(u); }, 3000); }
     function badge(st) { var c = KPI_STATUS[st] || KPI_STATUS.info; return <span className="kpi-badge" style={{ color: c[0], background: c[1] }}>{st === 'ok' ? '✓' : st === 'over' ? '!' : st === 'warn' ? '~' : st === 'missing' ? '?' : '·'}</span>; }
     function pct(v, lim) { if (v == null || !lim) return 0; return Math.min(100, Math.round(v / lim * 100)); }
     var stat = [];
@@ -529,6 +541,23 @@
         ['Keywords', m.keywords != null ? m.keywords : '—'], ['Reading', m.readingMin + ' min']];
     }
     return <div className="kpi">
+      {rd && rd.items.length > 0 && <div className="rd">
+        <div className={'rd-verdict ' + rd.verdict}>{rd.verdict === 'ok' ? '✓ Ready to submit' : rd.verdict === 'warn' ? '~ Almost ready' : '✕ Not ready'}<i>{rd.fails ? rd.fails + ' blocking · ' : ''}{rd.warns ? rd.warns + ' to review' : (rd.fails ? '' : 'all checks pass')}</i></div>
+        {rd.items.map((it) => { var ic = R_ICON[it.status] || R_ICON.skip; return <div className="rd-row" key={it.key}>
+          <span className="rd-ic" style={{ color: ic[1] }}>{ic[0]}</span>
+          <span className="rd-label">{it.label}</span>
+          <span className="rd-detail">{it.detail}</span>
+        </div>; })}
+        <button className="rd-cover" onClick={genCover}>✎ Draft cover letter</button>
+        {cover != null && <div className="rd-cl">
+          <textarea className="rd-cl-txt" value={cover} onChange={(e) => setCover(e.target.value)} spellCheck={false} />
+          <div className="rd-cl-acts">
+            <button className="vp-btn" onClick={copyCover}>{copied ? 'Copied ✓' : 'Copy'}</button>
+            <button className="vp-btn" onClick={dlCover}>Download .txt</button>
+            <button className="vp-btn" onClick={() => setCover(null)}>Close</button>
+          </div>
+        </div>}
+      </div>}
       {!m && <div className="empty-d">Open a .tex document to see live manuscript metrics.</div>}
       {m && <>
         <div className="kpi-h">Format compliance {p.templateId && <span className="kpi-sub">· {p.templateId}</span>}</div>

@@ -1652,6 +1652,24 @@
     const openTodos = annotations.filter((a) => a.kind === 'todo' && a.status !== 'done').length;
     const openReview = annotations.filter((a) => a.kind === 'review' && a.status !== 'resolved').length;
     const projForShare = Object.assign({ id: projectId, title: init.title }, projMeta);
+    // submission-readiness gate — aggregates every check the editor performs into one pre-submission verdict
+    const readiness = (() => {
+      const items = [], m = kpiMetrics;
+      if (m && m.checks && m.checks.length) {
+        const over = m.checks.filter((c) => c.status === 'over' || c.status === 'missing');
+        const warn = m.checks.filter((c) => c.status === 'warn');
+        const na = m.checks.filter((c) => c.status === 'na'); // not yet measurable (e.g. page count before a compile) — don't claim compliance
+        items.push({ key: 'format', label: 'Format & limits', status: over.length ? 'fail' : (warn.length || na.length) ? 'warn' : 'ok', detail: over.length ? over.length + ' over/missing — ' + over.map((c) => c.label).join(', ') : na.length ? na.length + ' not measured yet — compile to check' : warn.length ? warn.length + ' near a limit' : 'all within limits' });
+      }
+      let refErr = 0; try { refErr = window.PRRefs ? window.PRRefs.errorCount(refs) : 0; } catch (e) { }
+      items.push({ key: 'cites', label: 'Citations & bibliography', status: refErr ? 'fail' : refsIssues ? 'warn' : 'ok', detail: refErr ? refErr + ' hard error(s) — undefined cites / duplicate keys or DOIs' : refsIssues ? refsIssues + ' issue(s) to review' : 'no issues' });
+      items.push({ key: 'numbers', label: 'Number consistency', status: consistencyConflicts ? 'warn' : 'ok', detail: consistencyConflicts ? consistencyConflicts + ' metric(s) reported with more than one value' : 'no conflicts' });
+      items.push({ key: 'spell', label: 'Spelling', status: !spellOn ? 'skip' : spellCount > 25 ? 'warn' : 'ok', detail: !spellOn ? 'not run — enable spell check' : spellCount ? spellCount + ' word(s) flagged (curate the dictionary)' : 'clean' });
+      items.push({ key: 'notes', label: 'Open comments & to-dos', status: (openComments + openTodos) ? 'warn' : 'ok', detail: (openComments + openTodos) ? openComments + ' comment(s), ' + openTodos + ' to-do(s) still open' : 'all resolved' });
+      items.push({ key: 'review', label: 'AI review', status: openReview ? 'warn' : 'ok', detail: openReview ? openReview + ' unresolved finding(s)' : (reviewAnns.length ? 'all resolved' : 'no review imported') });
+      const fails = items.filter((i) => i.status === 'fail').length, warns = items.filter((i) => i.status === 'warn').length;
+      return { items: items, fails: fails, warns: warns, verdict: fails ? 'fail' : warns ? 'warn' : 'ok' };
+    })();
 
     const themeVars = {
       paper: { bg: '#eceef1', pane: '#ffffff', paperBg: '#ffffff', ink: '#1d2430' },
@@ -1808,6 +1826,7 @@
             versions={versions} onCompare={(v) => setDiffVersion(v)} onRestore={onRestore} onSaveVersion={onSaveVersion}
             activity={projMeta.activity}
             metrics={kpiMetrics} journalMeta={projMeta.journalMeta} journal={projMeta.journal} templateId={projMeta.templateId}
+            readiness={readiness} coverTitle={init.title} coverAuthor={me.name}
             submission={projMeta.submission} onSetStatus={setSubmissionStatus} tts={projMeta.tts} engine={voice.engine} model={voice.model}
             review={reviewAnns} reviewFocus={reviewFocus} onImportReview={onImportReview} onClearReview={onClearReview} onApplyReview={onApplyReview} canImport={isCurProj(active)}
             consistency={consistency} onGotoOff={gotoOffset}
