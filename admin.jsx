@@ -158,6 +158,8 @@
     var selS = useState(null), selUser = selS[0], setSelUser = selS[1];
     var pvS = useState(null), preview = pvS[0], setPreview = pvS[1];
     var errS = useState(''), errMsg = errS[0], setErr = errS[1];
+    var exS = useState(null), expanded = exS[0], setExpanded = exS[1];
+    var pcS = useState({}), pubsCache = pcS[0], setPubsCache = pcS[1];
 
     useEffect(function () { boot(); }, []);
     function boot() {
@@ -175,7 +177,7 @@
     }
     function loadData() {
       Promise.all([
-        sb.from('profiles').select('*'),
+        sb.from('profiles').select('*, publications(count)'),
         sb.from('projects').select('id,owner_id,title,data,created_at,updated_at,deleted_at'),
         sb.from('usage_meters').select('*')
       ]).then(function (res) {
@@ -201,6 +203,17 @@
         if (r && r.error) { alert('Update failed: ' + r.error.message); loadData(); }
       });
     }
+    function loadPubs(uid) {
+      if (pubsCache[uid] !== undefined) return;
+      sb.from('publications').select('mtid,title,year,doi,citations').eq('researcher_id', uid).order('year', { ascending: false })
+        .then(function (r) { setPubsCache(function (m) { var n = Object.assign({}, m); n[uid] = (r && r.data) || []; return n; }); },
+              function () { setPubsCache(function (m) { var n = Object.assign({}, m); n[uid] = []; return n; }); });
+    }
+    function toggleExpand(uid) { if (expanded === uid) { setExpanded(null); return; } setExpanded(uid); loadPubs(uid); }
+    function viewAs(u) {
+      try { localStorage.setItem('pr-admin-view', JSON.stringify({ id: u.id, name: u.name, email: u.email, affiliation: u.affiliation, mtmt_id: u.mtmt_id, orcid: u.orcid, plan: u.plan || 'pro', role: u.role, color: u.color, avatar_url: u.avatar_url })); } catch (e) { }
+      window.open('Profile.html?adminView=1', '_blank');
+    }
     function signOut() { sb.auth.signOut().then(function () { location.reload(); }); }
 
     /* phases */
@@ -221,10 +234,19 @@
 
     function userRow(u, withApprove) {
       var ag = aggFor(u.id);
-      return h('tr', { key: u.id, className: 'clickable', onClick: function () { setSelUser(u); } },
-        h('td', null, h('div', { className: 'u' }, h(Avatar, { u: u }), h('div', null, h('b', null, u.name || '—'), h('span', null, u.email)))),
+      var pubCount = (u.publications && u.publications[0] && u.publications[0].count) || 0;
+      var isResearcher = u.is_researcher || pubCount > 0;
+      var isExp = expanded === u.id;
+      var main = h('tr', { key: u.id, className: 'clickable', onClick: function () { setSelUser(u); } },
+        h('td', null, h('div', { className: 'u' }, h(Avatar, { u: u }), h('div', null,
+          h('b', null, u.name || '—'),
+          h('span', null, u.email),
+          isResearcher ? h('span', { onClick: function (e) { e.stopPropagation(); toggleExpand(u.id); }, style: { display: 'block', marginTop: 3, fontSize: 11.5, color: '#6366f1', cursor: 'pointer', fontWeight: 600 } },
+            (u.mtmt_id ? 'MTMT ' + u.mtmt_id + ' · ' : '') + pubCount + ' publication' + (pubCount === 1 ? '' : 's') + ' ' + (isExp ? '▴ hide' : '▾ show')) : null
+        ))),
         h('td', null, u.affiliation || h('span', { style: { color: '#b9bfca' } }, '—')),
-        h('td', null, h(Badge, { s: u.status }), u.role === 'admin' && h('span', { className: 'badge b-admin' }, 'admin')),
+        h('td', null, h(Badge, { s: u.status }), u.role === 'admin' && h('span', { className: 'badge b-admin' }, 'admin'),
+          u.is_researcher && h('span', { className: 'badge', style: { background: '#ccfbf1', color: '#0f766e' } }, 'researcher')),
         h('td', null, ag.projects.length),
         h('td', null, fmtBytes(ag.storage)),
         h('td', null, credits(ag.chars), h('span', { style: { color: '#8a92a0', fontSize: 11 } }, ' (' + (ag.chars || 0).toLocaleString() + ' ch)')),
@@ -234,9 +256,25 @@
           withApprove && h('button', { className: 'btn dng', onClick: function () { setStatus(u.id, 'rejected'); } }, 'Reject'),
           !withApprove && u.status === 'approved' && u.role !== 'admin' && h('button', { className: 'btn', onClick: function () { setStatus(u.id, 'suspended'); } }, 'Suspend'),
           !withApprove && (u.status === 'suspended' || u.status === 'rejected') && h('button', { className: 'btn ok', onClick: function () { setStatus(u.id, 'approved'); } }, 'Reactivate'),
+          h('button', { className: 'btn pri', onClick: function (e) { e.stopPropagation(); viewAs(u); } }, 'View as'),
           h('button', { className: 'btn', onClick: function () { setSelUser(u); } }, 'Details')
         ))
       );
+      if (!isExp) return main;
+      var pubs = pubsCache[u.id];
+      var exp = h('tr', { key: u.id + '-x' }, h('td', { colSpan: 8, style: { background: '#fafbfc' } },
+        pubs === undefined ? h('div', { style: { padding: '10px 12px', color: '#8a92a0', fontSize: 13 } }, 'Loading publications…')
+          : pubs.length === 0 ? h('div', { style: { padding: '10px 12px', color: '#8a92a0', fontSize: 13 } }, 'No publications in the database for this user.')
+            : h('div', { className: 'pub-rows' }, pubs.map(function (p) {
+              return h('div', { className: 'pub-row', key: p.mtid },
+                h('span', { className: 'py' }, p.year || '—'),
+                h('span', { className: 'pt' }, p.title || '(untitled)'),
+                p.doi ? h('a', { className: 'ext', href: 'https://doi.org/' + p.doi, target: '_blank' }, 'DOI') : null,
+                p.citations ? h('span', { className: 'pc' }, p.citations + ' cit.') : null
+              );
+            }))
+      ));
+      return [main, exp];
     }
 
     var tableHead = h('tr', null, ['User', 'Affiliation', 'Status', 'Projects', 'Storage', 'Credits', 'Last active', 'Actions'].map(function (t) { return h('th', { key: t }, t); }));
@@ -263,14 +301,13 @@
           h('div', { className: 'panel' }, h('table', null, h('thead', null, tableHead), h('tbody', null, pending.map(function (u) { return userRow(u, true); }))))
         ),
 
-        h('div', { className: 'sec-h' }, h('h2', null, 'All users')),
+        h('div', { className: 'sec-h' }, h('h2', null, 'All users'), h('span', { className: 'count' }, profiles.length + ' users · ' + profiles.filter(function (u) { return u.is_researcher; }).length + ' researchers (expand a row for their publications)')),
         h('div', { className: 'panel' },
           profiles.length === 0
             ? h('div', { className: 'empty' }, 'No users yet.')
             : h('table', null, h('thead', null, tableHead), h('tbody', null, sorted.map(function (u) { return userRow(u, false); })))
         )
       ),
-      h(Researchers),
       h(UserDrawer, { user: selUser, agg: selUser ? aggFor(selUser.id) : { projects: [], storage: 0, chars: 0, requests: 0 }, onClose: function () { setSelUser(null); }, onPreview: function (p) { setPreview(p); }, onAction: setStatus }),
       preview && h(ProjectPreview, { project: preview, onClose: function () { setPreview(null); } })
     );

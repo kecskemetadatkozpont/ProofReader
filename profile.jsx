@@ -209,7 +209,7 @@ function DataSync(props) {
 }
 
 function Publications(props) {
-  var me = props.me;
+  var me = props.me, preview = props.preview;
   var rec = (window.PRPubs && window.PRPubs.forUser(me)) || null;
   var pubs = (rec && rec.publications) || [];
   var [counts, setCounts] = useState({});
@@ -220,7 +220,7 @@ function Publications(props) {
   var inputRef = useRef(null);
   var PF = window.PRPubFiles;
   var keyOf = function (p) { return me.email + ':' + p.mtid; };
-  useEffect(function () { if (PF && pubs.length) PF.counts(pubs.map(keyOf)).then(setCounts); }, []); // eslint-disable-line
+  useEffect(function () { if (!preview && PF && pubs.length) PF.counts(pubs.map(keyOf)).then(setCounts); }, []); // eslint-disable-line
   function loadFiles(k) { if (PF) PF.list(k).then(function (fs) { setFiles(function (m) { var n = Object.assign({}, m); n[k] = fs; return n; }); }); }
   function toggle(k) { if (open === k) { setOpen(null); return; } setOpen(k); if (files[k] === undefined) loadFiles(k); }
   function pick(k) { if (inputRef.current) { inputRef.current.value = ''; inputRef.current.dataset.k = k; inputRef.current.click(); } } // target stashed on the input, not a shared ref
@@ -250,7 +250,7 @@ function Publications(props) {
         <div><b>{totalCites}</b><span>citations (MTMT)</span></div>
         <div><b>{pubs.filter(function (p) { return p.doi; }).length}</b><span>with a DOI</span></div>
       </div>
-      <div className="pf-note">Imported from <a href={'https://m2.mtmt.hu/gui2/?mode=browse&params=author;' + rec.mtmtId} target="_blank" rel="noopener">MTMT</a> (as of 19 June 2026){rec.orcid ? <span> · ORCID <a href={'https://orcid.org/' + rec.orcid} target="_blank" rel="noopener">{rec.orcid}</a></span> : null}. Citation counts are a snapshot. Attach the PDF or data files for each item below — {(window.PRPubFiles && window.PRPubFiles.cloud) ? 'they are stored securely in your cloud account (Supabase Storage), available on any device.' : 'they are stored in this browser.'}</div>
+      <div className="pf-note">Imported from <a href={'https://m2.mtmt.hu/gui2/?mode=browse&params=author;' + rec.mtmtId} target="_blank" rel="noopener">MTMT</a> (as of 19 June 2026){rec.orcid ? <span> · ORCID <a href={'https://orcid.org/' + rec.orcid} target="_blank" rel="noopener">{rec.orcid}</a></span> : null}. Citation counts are a snapshot. {preview ? 'Attached files are private to the researcher and not shown in admin preview.' : <span>Attach the PDF or data files for each item below — {(window.PRPubFiles && window.PRPubFiles.cloud) ? 'they are stored securely in your cloud account (Supabase Storage), available on any device.' : 'they are stored in this browser.'}</span>}</div>
     </div>
     {err ? <div className="pf-note err" style={{ margin: '0 0 10px' }}>{err}</div> : null}
     {years.map(function (y) { return <div key={y}>
@@ -270,8 +270,8 @@ function Publications(props) {
               <a className="pf-tag link" href={'https://m2.mtmt.hu/gui2/?mode=browse&params=publication;' + p.mtid} target="_blank" rel="noopener">MTMT</a>
             </div>
           </div>
-          <button className="pf-pub-files" onClick={function () { toggle(k); }}>{n ? n + ' file' + (n === 1 ? '' : 's') : 'Attach'} {open === k ? '▴' : '▾'}</button>
-          {open === k ? <div className="pf-pub-drop">
+          {!preview ? <button className="pf-pub-files" onClick={function () { toggle(k); }}>{n ? n + ' file' + (n === 1 ? '' : 's') : 'Attach'} {open === k ? '▴' : '▾'}</button> : null}
+          {!preview && open === k ? <div className="pf-pub-drop">
             {(files[k] || []).map(function (m) { return <div className="pf-file" key={m.id}>
               <span className="pf-file-n" title={m.name}>{m.name}</span>
               <span className="pf-file-s">{fmtBytes(m.size)}</span>
@@ -365,8 +365,21 @@ function ChangePassword(props) {
   </div>;
 }
 
+// Admin "view as": when opened from the Admin page with ?adminView=1 and a stored target (and a
+// real cloud session), preview that user's profile read-only. Only public/admin-readable data is
+// shown (profile + publications); private data stays RLS-gated to the real session.
+function adminTargetUser() {
+  try {
+    if (!/[?&]adminView=1/.test(location.search)) return null;
+    if (!(window.PR_BACKEND && window.PR_BACKEND.user)) return null;
+    var t = JSON.parse(localStorage.getItem('pr-admin-view') || 'null');
+    return t && t.email ? t : null;
+  } catch (e) { return null; }
+}
+
 function App() {
-  var [me, setMe] = useState(function () { return Auth.current(); });
+  var preview = adminTargetUser();
+  var [me, setMe] = useState(function () { return preview || Auth.current(); });
   var [route, setRoute] = useState(function () { return ((location.hash || '#overview').replace('#', '').split('?')[0]) || 'overview'; });
   var [, force] = useState(0);
   var refresh = useCallback(function () { force(function (x) { return x + 1; }); }, []);
@@ -383,27 +396,33 @@ function App() {
   var usage = Store.usage(me.id);
   var go = function (r) { location.hash = r; setRoute(r); };
   var myPubs = (window.PRPubs && window.PRPubs.forUser(me)) || null;
+  // in preview only Overview + Publications are faithful to the target (the rest is session-bound)
   var RAIL = [['overview', 'Overview']];
   if (myPubs) RAIL.push(['publications', 'My publications']);
-  RAIL = RAIL.concat([['usage', 'Usage & cost'], ['settings', 'Settings'], ['data', 'Data & sync']]);
+  if (!preview) RAIL = RAIL.concat([['usage', 'Usage & cost'], ['settings', 'Settings'], ['data', 'Data & sync']]);
+  var allowed = RAIL.map(function (r) { return r[0]; });
+  var curRoute = allowed.indexOf(route) >= 0 ? route : 'overview';
 
   return <div className="pf">
+    {preview ? <div style={{ background: '#fef3c7', color: '#92400e', padding: '9px 16px', fontSize: 13, textAlign: 'center', fontWeight: 600 }}>
+      👁 Admin preview — viewing <b>{me.name}</b>’s profile read-only. <a href="Admin.html" style={{ color: '#92400e' }}>← Back to admin</a>
+    </div> : null}
     <Header me={me} setMe={setMe} mode={mode} usage={usage} />
     <div className="pf-body">
       <nav className="pf-rail" aria-label="Profile sections">
         {RAIL.map(function (it) {
           var id = it[0];
-          return <button key={id} className={'pf-nav' + (route === id ? ' on' : '')} aria-current={route === id ? 'page' : undefined} onClick={function () { go(id); }}>
+          return <button key={id} className={'pf-nav' + (curRoute === id ? ' on' : '')} aria-current={curRoute === id ? 'page' : undefined} onClick={function () { go(id); }}>
             {IC[id]}<span>{it[1]}</span>{id === 'usage' && over80(usage) ? <i className="pf-dot" title="Near a limit" /> : null}{id === 'publications' && myPubs ? <i className="pf-count">{myPubs.pubCount}</i> : null}
           </button>;
         })}
         <div className="pf-soon">More areas coming soon</div>
       </nav>
       <main className="pf-main">
-        {route === 'publications' ? <Publications me={me} />
-          : route === 'usage' ? <UsageCost me={me} usage={usage} />
-            : route === 'settings' ? <Settings me={me} />
-              : route === 'data' ? <DataSync me={me} mode={mode} onChanged={refresh} />
+        {curRoute === 'publications' ? <Publications me={me} preview={preview} />
+          : curRoute === 'usage' ? <UsageCost me={me} usage={usage} />
+            : curRoute === 'settings' ? <Settings me={me} />
+              : curRoute === 'data' ? <DataSync me={me} mode={mode} onChanged={refresh} />
                 : <Overview me={me} usage={usage} go={go} />}
       </main>
     </div>
