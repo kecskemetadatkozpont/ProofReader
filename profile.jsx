@@ -217,6 +217,7 @@ function Publications(props) {
   var [files, setFiles] = useState({});     // pubKey -> [meta]
   var [busy, setBusy] = useState(null);     // pubKey currently uploading
   var [err, setErr] = useState(null);
+  var [viewer, setViewer] = useState(null); // {url, name} for the built-in PDF viewer
   var inputRef = useRef(null);
   var PF = window.PRPubFiles;
   var keyOf = function (p) { return me.email + ':' + p.mtid; };
@@ -227,9 +228,10 @@ function Publications(props) {
   function onFile(e) {
     var k = e.target.dataset.k, f = e.target.files && e.target.files[0]; if (!k || !f || !PF) return;
     setErr(null); setBusy(k);
-    PF.add(k, f).then(function () { setBusy(null); loadFiles(k); PF.counts(pubs.map(keyOf)).then(setCounts); }, function (er) { setBusy(null); setErr((er && er.message) || 'Upload failed.'); });
+    PF.add(k, f).then(function () { setBusy(null); setOpen(k); loadFiles(k); PF.counts(pubs.map(keyOf)).then(setCounts); }, function (er) { setBusy(null); setErr((er && er.message) || 'Upload failed.'); });
   }
-  function view(id) { if (PF) PF.getBlob(id).then(function (b) { if (b) { var u = URL.createObjectURL(b); window.open(u, '_blank'); setTimeout(function () { URL.revokeObjectURL(u); }, 60000); } }); }
+  function view(m) { if (PF) PF.getBlob(m.id).then(function (b) { if (b) { var u = URL.createObjectURL(b); setViewer({ url: u, name: m.name, type: m.type }); } }); }
+  function closeViewer() { if (viewer) { try { URL.revokeObjectURL(viewer.url); } catch (e) { } } setViewer(null); }
   function download(m) { if (PF) PF.getBlob(m.id).then(function (b) { if (b) { var u = URL.createObjectURL(b); var a = document.createElement('a'); a.href = u; a.download = m.name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function () { URL.revokeObjectURL(u); }, 5000); } }); }
   function del(id, k) { if (PF) PF.remove(id).then(function () { loadFiles(k); PF.counts(pubs.map(keyOf)).then(setCounts); }); }
 
@@ -270,21 +272,46 @@ function Publications(props) {
               <a className="pf-tag link" href={'https://m2.mtmt.hu/gui2/?mode=browse&params=publication;' + p.mtid} target="_blank" rel="noopener">MTMT</a>
             </div>
           </div>
-          {!preview ? <button className="pf-pub-files" onClick={function () { toggle(k); }}>{n ? n + ' file' + (n === 1 ? '' : 's') : 'Attach'} {open === k ? '▴' : '▾'}</button> : null}
+          {!preview ? (n
+            ? <button className="pf-pub-files" onClick={function () { toggle(k); }}>📄 {n} file{n === 1 ? '' : 's'} {open === k ? '▴' : '▾'}</button>
+            : <button className="pf-pub-files up" disabled={busy === k} onClick={function () { pick(k); }}>{busy === k ? 'Uploading…' : '⬆ Upload PDF'}</button>) : null}
           {!preview && open === k ? <div className="pf-pub-drop">
             {(files[k] || []).map(function (m) { return <div className="pf-file" key={m.id}>
               <span className="pf-file-n" title={m.name}>{m.name}</span>
               <span className="pf-file-s">{fmtBytes(m.size)}</span>
-              <button onClick={function () { view(m.id); }}>View</button>
+              <button onClick={function () { view(m); }}>View</button>
               <button onClick={function () { download(m); }}>Download</button>
               <button className="pf-file-x" onClick={function () { del(m.id, k); }}>✕</button>
             </div>; })}
-            {files[k] && files[k].length === 0 ? <div className="pf-note" style={{ margin: '2px 0 8px' }}>No files attached yet.</div> : null}
-            <button className="btn-ghost" disabled={busy === k} onClick={function () { pick(k); }}>{busy === k ? 'Uploading…' : '+ Attach PDF / data file'}</button>
+            <button className="btn-ghost" disabled={busy === k} onClick={function () { pick(k); }}>{busy === k ? 'Uploading…' : '+ Add another file'}</button>
           </div> : null}
         </div>;
       })}
     </div>; })}
+    {viewer ? <PdfViewer file={viewer} onClose={closeViewer} /> : null}
+  </div>;
+}
+
+function PdfViewer(props) {
+  var f = props.file; if (!f) return null;
+  var isPdf = /pdf/i.test(f.type || '') || /\.pdf$/i.test(f.name || '');
+  useEffect(function () {
+    var onKey = function (e) { if (e.key === 'Escape') props.onClose(); };
+    window.addEventListener('keydown', onKey); return function () { window.removeEventListener('keydown', onKey); };
+  }, []);
+  return <div className="pf-viewer" onMouseDown={props.onClose}>
+    <div className="pf-viewer-box" onMouseDown={function (e) { e.stopPropagation(); }}>
+      <div className="pf-viewer-bar">
+        <span className="pf-viewer-name" title={f.name}>{f.name}</span>
+        <a className="btn-ghost" href={f.url} download={f.name}>Download</a>
+        <button className="btn-ghost" onClick={props.onClose}>✕ Close</button>
+      </div>
+      {isPdf
+        ? <iframe className="pf-viewer-frame" src={f.url} title={f.name} />
+        : /^image\//i.test(f.type || '')
+          ? <div className="pf-viewer-img"><img src={f.url} alt={f.name} /></div>
+          : <div className="pf-viewer-other">This file type can’t be previewed inline. <a href={f.url} download={f.name}>Download it</a> to open.</div>}
+    </div>
   </div>;
 }
 
