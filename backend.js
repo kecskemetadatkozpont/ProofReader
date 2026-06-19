@@ -205,6 +205,11 @@
       + '.pr-card p{font-size:13.5px;color:#5b6473;margin:0 0 24px;line-height:1.5}'
       + '.pr-g{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;height:46px;border:1px solid #dadce0;border-radius:11px;background:#fff;color:#1d2430;font-size:14.5px;font-weight:600;cursor:pointer}'
       + '.pr-g:hover{background:#f7f8fc;border-color:#c7cad1}'
+      + '.pr-in{width:100%;height:44px;border:1px solid #dadce0;border-radius:11px;padding:0 13px;font-size:14px;margin-bottom:10px;box-sizing:border-box;font-family:inherit;color:#1d2430}'
+      + '.pr-in:focus{outline:none;border-color:#6366f1;box-shadow:0 0 0 3px rgba(99,102,241,.15)}'
+      + '.pr-primary{width:100%;height:46px;border:0;border-radius:11px;background:linear-gradient(135deg,#6366f1,#7c3aed);color:#fff;font-size:14.5px;font-weight:600;cursor:pointer}'
+      + '.pr-primary:hover{filter:brightness(1.05)}.pr-primary:disabled{opacity:.6;cursor:default}'
+      + '.pr-or{display:flex;align-items:center;gap:10px;margin:18px 0;color:#9aa1ac;font-size:11.5px;text-transform:uppercase;letter-spacing:.5px}.pr-or:before,.pr-or:after{content:"";flex:1;border-top:1px solid #eceef1}'
       + '.pr-demo{margin-top:14px;border:0;background:transparent;color:#6b7280;font-size:12.5px;font-weight:600;cursor:pointer}'
       + '.pr-demo:hover{color:#4f46e5}'
       + '.pr-sep{margin:22px 0 4px;border-top:1px solid #eceef1}'
@@ -226,19 +231,41 @@
 
   /* ---- sign-in overlay ---- */
   function removeOverlay() { var el = document.getElementById('pr-signin'); if (el) el.remove(); }
+  function setOverlayErr(msg) {
+    var card = document.querySelector('#pr-signin .pr-card'); if (!card) return;
+    var ex = card.querySelector('.pr-err');
+    if (!ex) { ex = document.createElement('div'); ex.className = 'pr-err'; var anchor = card.querySelector('#pr-pwform') || card.querySelector('.pr-g'); card.insertBefore(ex, anchor); }
+    ex.textContent = msg;
+  }
   function showOverlay(errMsg) {
     removeSplash();
-    if (document.getElementById('pr-signin')) { if (errMsg) { var ex = document.querySelector('#pr-signin .pr-err'); if (ex) ex.textContent = errMsg; } return; }
+    if (document.getElementById('pr-signin')) { if (errMsg) setOverlayErr(errMsg); return; }
     injectCss();
     var d = document.createElement('div'); d.id = 'pr-signin';
     d.innerHTML = '<div class="pr-card"><div class="pr-mk"><span></span></div>'
-      + '<h1>Sign in to Publify</h1><p>Your projects sync to the cloud and stay safe across devices.</p>'
+      + '<h1>Sign in to Publify</h1><p>Sign in with your email and password, or your Google account. Your work syncs to the cloud.</p>'
       + (errMsg ? '<div class="pr-err">' + errMsg + '</div>' : '')
+      + '<form id="pr-pwform" autocomplete="on">'
+      + '<input class="pr-in" id="pr-email" type="email" autocomplete="username" placeholder="name@institution.hu" aria-label="Email" />'
+      + '<input class="pr-in" id="pr-pw" type="password" autocomplete="current-password" placeholder="Password" aria-label="Password" />'
+      + '<button class="pr-primary" id="pr-pwbtn" type="submit">Sign in</button>'
+      + '</form>'
+      + '<div class="pr-or">or</div>'
       + '<button class="pr-g" id="pr-google">' + GBTN + 'Continue with Google</button>'
       + '<div class="pr-sep"></div>'
       + '<button class="pr-demo" id="pr-demo">Continue in demo mode (this browser only)</button>'
-      + '<div class="pr-note">Demo mode keeps everything in this browser, like before. Sign in to save to the cloud.</div></div>';
+      + '<div class="pr-note">Researchers: use the institutional email and password you were given. Demo mode keeps everything in this browser.</div></div>';
     (document.body || document.documentElement).appendChild(d);
+    document.getElementById('pr-pwform').onsubmit = function (e) {
+      e.preventDefault();
+      var em = (document.getElementById('pr-email').value || '').trim(), pw = document.getElementById('pr-pw').value || '';
+      if (!em || !pw) { setOverlayErr('Enter your email and password.'); return; }
+      var btn = document.getElementById('pr-pwbtn'); btn.disabled = true; btn.textContent = 'Signing in…';
+      sb.auth.signInWithPassword({ email: em, password: pw }).then(function (res) {
+        if (res && res.error) { btn.disabled = false; btn.textContent = 'Sign in'; setOverlayErr(/invalid|credential/i.test(res.error.message || '') ? 'Incorrect email or password.' : res.error.message); return; }
+        // SIGNED_IN fires → onAuthStateChange reboots into cloud mode; keep the button disabled.
+      }, function (er) { btn.disabled = false; btn.textContent = 'Sign in'; setOverlayErr((er && er.message) || 'Sign-in failed.'); });
+    };
     document.getElementById('pr-google').onclick = function () { this.textContent = 'Redirecting…'; signInWithGoogle(); };
     document.getElementById('pr-demo').onclick = chooseDemo;
   }
