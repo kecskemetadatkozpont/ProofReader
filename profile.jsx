@@ -288,29 +288,143 @@ function Publications(props) {
         </div>;
       })}
     </div>; })}
-    {viewer ? <PdfViewer file={viewer} onClose={closeViewer} /> : null}
+    {viewer ? <PdfViewer file={viewer} me={me} onClose={closeViewer} /> : null}
   </div>;
 }
 
+/* ---- read-aloud: lazy-loaded PDF.js text extraction + a sentence player over PREleven
+   (ElevenLabs, cached + metered) with a free browser-TTS fallback. ---- */
+function ensurePdfJs() {
+  if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+  if (window._pdfjsLoading) return window._pdfjsLoading;
+  window._pdfjsLoading = new Promise(function (res, rej) {
+    var s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js';
+    s.onload = function () { try { window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js'; } catch (e) { } res(window.pdfjsLib); };
+    s.onerror = function () { window._pdfjsLoading = null; rej(new Error('Could not load the PDF reader.')); };
+    document.head.appendChild(s);
+  });
+  return window._pdfjsLoading;
+}
+function extractPdfText(url) {
+  return ensurePdfJs().then(function (lib) {
+    return fetch(url).then(function (r) { return r.arrayBuffer(); }).then(function (ab) { return lib.getDocument({ data: new Uint8Array(ab) }).promise; });
+  }).then(function (pdf) {
+    var text = '', chain = Promise.resolve();
+    for (var i = 1; i <= pdf.numPages; i++) (function (n) {
+      chain = chain.then(function () { return pdf.getPage(n); }).then(function (pg) { return pg.getTextContent(); })
+        .then(function (tc) { text += tc.items.map(function (it) { return it.str; }).join(' ') + '\n'; });
+    })(i);
+    return chain.then(function () { return text; });
+  });
+}
+function splitSentences(text) {
+  var clean = String(text || '').replace(/-\s*\n\s*/g, '').replace(/\s+/g, ' ').trim();
+  if (!clean) return [];
+  var raw = clean.match(/[^.!?]*[.!?]+|\S[^.!?]*$/g) || [clean];
+  var out = [];
+  raw.forEach(function (s) {
+    s = s.trim(); if (s.length < 2) return;
+    while (s.length > 320) { var cut = s.lastIndexOf(' ', 320); if (cut < 80) cut = 320; out.push(s.slice(0, cut).trim()); s = s.slice(cut).trim(); }
+    if (s) out.push(s);
+  });
+  return out;
+}
+function voiceCfg() {
+  var p = (Store.prefs && Store.prefs()) || {};
+  return { engine: p.engine, elevenVoice: p.elevenVoice || (E && E.voices && E.voices[0] && E.voices[0].id), model: p.model, stability: p.stability, similarity: p.similarity, rate: p.rate || 1, voiceURI: p.voiceURI };
+}
+function elevenOn(c) { return c.engine !== 'browser' && E && E.hasKey(); }
+
 function PdfViewer(props) {
-  var f = props.file; if (!f) return null;
-  var isPdf = /pdf/i.test(f.type || '') || /\.pdf$/i.test(f.name || '');
+  var f = props.file;
+  var meId = (props.me && props.me.id) || ((Auth.current && Auth.current()) || {}).id;
+  var [phase, setPhase] = useState('idle');      // idle | loading | ready | error
+  var [sents, setSents] = useState([]);
+  var [idx, setIdx] = useState(0);
+  var [playing, setPlaying] = useState(false);
+  var [err, setErr] = useState('');
+  var audioRef = useRef(null), stopRef = useRef(false), idxRef = useRef(0);
+  idxRef.current = idx;
+  var cfg = voiceCfg();
+  var isPdf = /pdf/i.test((f && f.type) || '') || /\.pdf$/i.test((f && f.name) || '');
+
+  function stopAudio() {
+    try { if (audioRef.current && audioRef.current.pause) audioRef.current.pause(); } catch (e) { }
+    try { if (window.speechSynthesis) window.speechSynthesis.cancel(); } catch (e) { }
+    audioRef.current = null;
+  }
+  useEffect(function () { return function () { stopRef.current = true; stopAudio(); }; }, []);
   useEffect(function () {
-    var onKey = function (e) { if (e.key === 'Escape') props.onClose(); };
+    var onKey = function (e) { if (e.key === 'Escape') { stopRef.current = true; stopAudio(); props.onClose(); } };
     window.addEventListener('keydown', onKey); return function () { window.removeEventListener('keydown', onKey); };
   }, []);
+
+  function speakAt(i, list) {
+    if (stopRef.current || i < 0 || i >= list.length) { setPlaying(false); if (i >= list.length) setIdx(0); return; }
+    setIdx(i); idxRef.current = i; setPlaying(true);
+    var text = list[i], c = voiceCfg();
+    if (elevenOn(c)) {
+      try { E.prefetch(list.slice(i + 1, i + 3).map(function (t) { return { text: t }; }), c, meId); } catch (e) { }
+      E.getAudio(text, c, meId).then(function (url) {
+        if (stopRef.current || idxRef.current !== i) return;
+        var a = new Audio(url); audioRef.current = a; try { a.playbackRate = c.rate || 1; } catch (e) { }
+        a.onended = function () { if (!stopRef.current && idxRef.current === i) speakAt(i + 1, list); };
+        a.play().catch(function () { });
+      }, function () { if (!stopRef.current && idxRef.current === i) speakAt(i + 1, list); });
+    } else {
+      try { window.speechSynthesis.cancel(); } catch (e) { }
+      var u = new SpeechSynthesisUtterance(text); u.rate = c.rate || 1;
+      try { if (c.voiceURI) { var v = (window.speechSynthesis.getVoices() || []).filter(function (x) { return x.voiceURI === c.voiceURI; })[0]; if (v) u.voice = v; } } catch (e) { }
+      u.onend = function () { if (!stopRef.current && idxRef.current === i) speakAt(i + 1, list); };
+      audioRef.current = { pause: function () { try { window.speechSynthesis.pause(); } catch (e) { } }, play: function () { try { window.speechSynthesis.resume(); } catch (e) { } } };
+      try { window.speechSynthesis.speak(u); } catch (e) { }
+    }
+  }
+  function start() {
+    if (phase === 'ready') { stopRef.current = false; speakAt(idx, sents); return; }
+    setPhase('loading'); setErr('');
+    extractPdfText(f.url).then(function (text) {
+      var list = splitSentences(text);
+      if (!list.length) { setPhase('error'); setErr('No readable text found — this may be a scanned PDF.'); return; }
+      setSents(list); setPhase('ready'); stopRef.current = false; speakAt(0, list);
+    }, function (e) { setPhase('error'); setErr((e && e.message) || 'Could not read this PDF.'); });
+  }
+  function togglePlay() {
+    if (playing) { setPlaying(false); try { if (audioRef.current && audioRef.current.pause) audioRef.current.pause(); } catch (e) { } return; }
+    if (phase !== 'ready') { start(); return; }
+    setPlaying(true);
+    if (audioRef.current && audioRef.current.play) audioRef.current.play(); else { stopRef.current = false; speakAt(idx, sents); }
+  }
+  function stopAll() { stopRef.current = true; stopAudio(); setPlaying(false); setIdx(0); }
+  function jump(d) { stopRef.current = false; stopAudio(); speakAt(Math.max(0, Math.min(sents.length - 1, idx + d)), sents); }
+
   return <div className="pf-viewer" onMouseDown={props.onClose}>
     <div className="pf-viewer-box" onMouseDown={function (e) { e.stopPropagation(); }}>
       <div className="pf-viewer-bar">
         <span className="pf-viewer-name" title={f.name}>{f.name}</span>
         <a className="btn-ghost" href={f.url} download={f.name}>Download</a>
-        <button className="btn-ghost" onClick={props.onClose}>✕ Close</button>
+        <button className="btn-ghost" onClick={function () { stopRef.current = true; stopAudio(); props.onClose(); }}>✕ Close</button>
       </div>
       {isPdf
         ? <iframe className="pf-viewer-frame" src={f.url} title={f.name} />
         : /^image\//i.test(f.type || '')
           ? <div className="pf-viewer-img"><img src={f.url} alt={f.name} /></div>
           : <div className="pf-viewer-other">This file type can’t be previewed inline. <a href={f.url} download={f.name}>Download it</a> to open.</div>}
+      {isPdf ? <div className="pf-ra">
+        <div className="pf-ra-row">
+          <button className="pf-ra-btn play" onClick={togglePlay} disabled={phase === 'loading'} title={playing ? 'Pause' : 'Read aloud'}>{phase === 'loading' ? '…' : playing ? '⏸' : '▶'}</button>
+          {phase === 'ready' ? [
+            <button key="p" className="pf-ra-btn" onClick={function () { jump(-1); }} title="Previous sentence">⏮</button>,
+            <button key="n" className="pf-ra-btn" onClick={function () { jump(1); }} title="Next sentence">⏭</button>,
+            <button key="s" className="pf-ra-btn" onClick={stopAll} title="Stop">⏹</button>,
+            <div key="pr" className="pf-ra-prog"><i style={{ width: (sents.length ? ((idx + 1) / sents.length * 100) : 0) + '%' }} /></div>,
+            <span key="m" className="pf-ra-meta">{(idx + 1) + '/' + sents.length} · {elevenOn(cfg) ? 'ElevenLabs' : 'Browser voice'}{elevenOn(cfg) && E && E.cached && E.cached(sents[idx], cfg) ? <span className="pf-ra-cached"> · cached</span> : null}</span>
+          ] : phase === 'idle' ? <span className="pf-ra-meta">▶ Read this PDF aloud{elevenOn(cfg) ? ' with ElevenLabs' : ' (browser voice — add an ElevenLabs key in the editor for premium audio)'}.</span>
+            : phase === 'loading' ? <span className="pf-ra-meta">Extracting text…</span> : null}
+        </div>
+        {phase === 'error' ? <div className="pf-ra-err">{err}</div> : phase === 'ready' ? <div className="pf-ra-cur">{sents[idx]}</div> : null}
+      </div> : null}
     </div>
   </div>;
 }
