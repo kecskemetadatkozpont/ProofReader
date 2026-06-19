@@ -30,17 +30,17 @@ window.PRPasswords = {
   "iters": 150000,
   "hash": "oUjaApE9tSP47qMsFIJzUA1JP0efc4xuWUqY9jdylKA="
  },
- "weltsch.zoltan@sze.hu": {
+ "weltsch.zoltan@nje.hu": {
   "salt": "1gMZnQuLDFWEd3TyhXQeFg==",
   "iters": 150000,
   "hash": "hb4J+o0Uajdjujre5knfTV80S39TN0wOS8ozC+J3p/k="
  },
- "nagy.zoltan@sze.hu": {
+ "nagy.zoltan@nje.hu": {
   "salt": "GrdaX5RMVN3ADgpAqnODew==",
   "iters": 150000,
   "hash": "afLdND9V3qaTSNWF5W7PBnH0Ub65HMuwGy+37+9xia4="
  },
- "fulop.tamas@sze.hu": {
+ "fulop.tamas@nje.hu": {
   "salt": "ThdikTyp7bqCY1bpL23EcQ==",
   "iters": 150000,
   "hash": "K7MUyWrX0rQxZIuvXwOwktuRv669K4ov2PXcWXhcpZQ="
