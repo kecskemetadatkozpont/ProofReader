@@ -19,7 +19,7 @@
     { id: 'u_jagicza', name: 'Jagicza Márton', email: 'jagicza.marton@ga.sze.hu', color: '#ca8a04', plan: 'pro' },
     { id: 'u_cseke', name: 'Cseke Tibor', email: 'cseke.tibor@sze.hu', color: '#059669', plan: 'pro' },
     { id: 'u_sutheo', name: 'Sütheő Gergő', email: 'sutheo.gergo@ga.sze.hu', color: '#dc2626', plan: 'pro' },
-    { id: 'u_weltsch', name: 'Weltsch Zoltán', email: 'weltsch.zoltan@nje.hu', color: '#ea580c', plan: 'pro' },
+    { id: 'u_weltsch', name: 'Weltsch Zoltán', email: 'weltsch.zoltan@sze.hu', color: '#ea580c', plan: 'pro' },
     { id: 'u_nagyz', name: 'Nagy Zoltán', email: 'nagy.zoltan@nje.hu', color: '#0d9488', plan: 'pro' },
     { id: 'u_fulop', name: 'Fülöp Tamás', email: 'fulop.tamas@nje.hu', color: '#4d7c0f', plan: 'pro' }
   ];

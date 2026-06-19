@@ -30,7 +30,7 @@ window.PRPasswords = {
   "iters": 150000,
   "hash": "oUjaApE9tSP47qMsFIJzUA1JP0efc4xuWUqY9jdylKA="
  },
- "weltsch.zoltan@nje.hu": {
+ "weltsch.zoltan@sze.hu": {
   "salt": "1gMZnQuLDFWEd3TyhXQeFg==",
   "iters": 150000,
   "hash": "hb4J+o0Uajdjujre5knfTV80S39TN0wOS8ozC+J3p/k="
