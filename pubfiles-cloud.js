@@ -9,13 +9,22 @@
   var BE = window.PR_BACKEND;
   if (!BE || BE.mode !== 'cloud' || !BE.sb || !BE.user) return;     // demo / signed-out → keep IndexedDB
   var sb = BE.sb, me = BE.user, BUCKET = 'publication-files';
+  // admin "View as": operate on the PREVIEWED user's files (their id), not the admin's. RLS still
+  // gates writes — only an admin session may upload into another user's folder (migration-06).
+  var ownerId = me.id;
+  try {
+    if (/[?&]adminView=1/.test(location.search)) {
+      var t = JSON.parse(localStorage.getItem('pr-admin-view') || 'null');
+      if (t && t.id) ownerId = t.id;
+    }
+  } catch (e) { }
   var pubIdCache = {};                                              // mtid -> Promise<pubId|null>
 
   function mtidOf(pubKey) { var k = String(pubKey || ''); return k.slice(k.lastIndexOf(':') + 1); }
   function pubId(mtid) {
     if (!mtid) return Promise.resolve(null);
     if (pubIdCache[mtid]) return pubIdCache[mtid];
-    pubIdCache[mtid] = sb.from('publications').select('id').eq('researcher_id', me.id).eq('mtid', mtid).maybeSingle()
+    pubIdCache[mtid] = sb.from('publications').select('id').eq('researcher_id', ownerId).eq('mtid', mtid).maybeSingle()
       .then(function (r) { return (r && r.data && r.data.id) || null; }).catch(function () { return null; });
     return pubIdCache[mtid];
   }
@@ -26,10 +35,10 @@
     if (!file) return Promise.reject(new Error('No file'));
     return pubId(mtidOf(pubKey)).then(function (pid) {
       if (!pid) throw new Error('This publication is not linked to your cloud account.');
-      var fid = newId(), path = me.id + '/' + pid + '/' + fid;
+      var fid = newId(), path = ownerId + '/' + pid + '/' + fid;
       return sb.storage.from(BUCKET).upload(path, file, { contentType: file.type || 'application/octet-stream', upsert: false }).then(function (up) {
         if (up && up.error) throw new Error(up.error.message || 'Upload failed.');
-        return sb.from('publication_files').insert({ id: fid, publication_id: pid, owner_id: me.id, name: file.name || 'file', mime: file.type || '', size: file.size || 0, storage_path: path })
+        return sb.from('publication_files').insert({ id: fid, publication_id: pid, owner_id: ownerId, name: file.name || 'file', mime: file.type || '', size: file.size || 0, storage_path: path })
           .select('id,name,mime,size,storage_path,created_at').maybeSingle();
       }).then(function (r) {
         if (r && r.error) { try { sb.storage.from(BUCKET).remove([path]); } catch (e) {} throw new Error(r.error.message || 'Could not save the file.'); }
@@ -46,7 +55,7 @@
   }
   function counts(pubKeys) {
     var want = {}; (pubKeys || []).forEach(function (k) { want[k] = 0; });
-    return sb.from('publication_files').select('publications(mtid)').eq('owner_id', me.id).then(function (r) {
+    return sb.from('publication_files').select('publications(mtid)').eq('owner_id', ownerId).then(function (r) {
       var tally = {};
       (r && r.data ? r.data : []).forEach(function (row) { var m = row.publications && row.publications.mtid; if (m != null) tally[String(m)] = (tally[String(m)] || 0) + 1; });
       Object.keys(want).forEach(function (k) { want[k] = tally[mtidOf(k)] || 0; });

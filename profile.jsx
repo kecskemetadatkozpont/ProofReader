@@ -221,7 +221,7 @@ function Publications(props) {
   var inputRef = useRef(null);
   var PF = window.PRPubFiles;
   var keyOf = function (p) { return me.email + ':' + p.mtid; };
-  useEffect(function () { if (!preview && PF && pubs.length) PF.counts(pubs.map(keyOf)).then(setCounts); }, []); // eslint-disable-line
+  useEffect(function () { if (PF && pubs.length) PF.counts(pubs.map(keyOf)).then(setCounts); }, []); // eslint-disable-line
   function loadFiles(k) { if (PF) PF.list(k).then(function (fs) { setFiles(function (m) { var n = Object.assign({}, m); n[k] = fs; return n; }); }); }
   function toggle(k) { if (open === k) { setOpen(null); return; } setOpen(k); if (files[k] === undefined) loadFiles(k); }
   function pick(k) { if (inputRef.current) { inputRef.current.value = ''; inputRef.current.dataset.k = k; inputRef.current.click(); } } // target stashed on the input, not a shared ref
@@ -252,7 +252,7 @@ function Publications(props) {
         <div><b>{totalCites}</b><span>citations (MTMT)</span></div>
         <div><b>{pubs.filter(function (p) { return p.doi; }).length}</b><span>with a DOI</span></div>
       </div>
-      <div className="pf-note">Imported from <a href={'https://m2.mtmt.hu/gui2/?mode=browse&params=author;' + rec.mtmtId} target="_blank" rel="noopener">MTMT</a> (as of 19 June 2026){rec.orcid ? <span> · ORCID <a href={'https://orcid.org/' + rec.orcid} target="_blank" rel="noopener">{rec.orcid}</a></span> : null}. Citation counts are a snapshot. {preview ? 'Attached files are private to the researcher and not shown in admin preview.' : <span>Attach the PDF or data files for each item below — {(window.PRPubFiles && window.PRPubFiles.cloud) ? 'they are stored securely in your cloud account (Supabase Storage), available on any device.' : 'they are stored in this browser.'}</span>}</div>
+      <div className="pf-note">Imported from <a href={'https://m2.mtmt.hu/gui2/?mode=browse&params=author;' + rec.mtmtId} target="_blank" rel="noopener">MTMT</a> (as of 19 June 2026){rec.orcid ? <span> · ORCID <a href={'https://orcid.org/' + rec.orcid} target="_blank" rel="noopener">{rec.orcid}</a></span> : null}. Citation counts are a snapshot. {preview ? <span><b>Admin:</b> you can upload or manage PDFs on behalf of {me.name} — files are stored in their account.</span> : <span>Attach the PDF or data files for each item below — {(window.PRPubFiles && window.PRPubFiles.cloud) ? 'they are stored securely in your cloud account (Supabase Storage), available on any device.' : 'they are stored in this browser.'}</span>}</div>
     </div>
     {err ? <div className="pf-note err" style={{ margin: '0 0 10px' }}>{err}</div> : null}
     {years.map(function (y) { return <div key={y}>
@@ -272,10 +272,10 @@ function Publications(props) {
               <a className="pf-tag link" href={'https://m2.mtmt.hu/gui2/?mode=browse&params=publication;' + p.mtid} target="_blank" rel="noopener">MTMT</a>
             </div>
           </div>
-          {!preview ? (n
+          {n
             ? <button className="pf-pub-files" onClick={function () { toggle(k); }}>📄 {n} file{n === 1 ? '' : 's'} {open === k ? '▴' : '▾'}</button>
-            : <button className="pf-pub-files up" disabled={busy === k} onClick={function () { pick(k); }}>{busy === k ? 'Uploading…' : '⬆ Upload PDF'}</button>) : null}
-          {!preview && open === k ? <div className="pf-pub-drop">
+            : <button className="pf-pub-files up" disabled={busy === k} onClick={function () { pick(k); }}>{busy === k ? 'Uploading…' : '⬆ Upload PDF'}</button>}
+          {open === k ? <div className="pf-pub-drop">
             {(files[k] || []).map(function (m) { return <div className="pf-file" key={m.id}>
               <span className="pf-file-n" title={m.name}>{m.name}</span>
               <span className="pf-file-s">{fmtBytes(m.size)}</span>
