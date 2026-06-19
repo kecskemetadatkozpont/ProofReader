@@ -103,18 +103,27 @@ create policy prefs_owner on prefs for all to authenticated
   with check (user_id = auth.uid());
 
 -- ---- 6. Storage bucket for publication files -------------------------------
-insert into storage.buckets (id, name, public)
-values ('publication-files', 'publication-files', false)
-on conflict (id) do nothing;
+-- Wrapped in an exception-safe block: on a project where the SQL role may not own
+-- storage.objects, the bucket/policies are skipped WITHOUT rolling back the tables
+-- above (they can also be created later from the Storage UI). Path convention:
+-- "<owner_id>/<publication_id>/<file_id>" — first segment is the owner.
+do $$
+begin
+  insert into storage.buckets (id, name, public)
+  values ('publication-files', 'publication-files', false)
+  on conflict (id) do nothing;
 
--- object path convention: "<owner_id>/<publication_id>/<file_id>" — first segment is the owner.
-drop policy if exists pubfiles_obj_rw on storage.objects;
-create policy pubfiles_obj_rw on storage.objects for all to authenticated
-  using  (bucket_id = 'publication-files' and (storage.foldername(name))[1] = auth.uid()::text)
-  with check (bucket_id = 'publication-files' and (storage.foldername(name))[1] = auth.uid()::text);
-drop policy if exists pubfiles_obj_admin_read on storage.objects;
-create policy pubfiles_obj_admin_read on storage.objects for select to authenticated
-  using (bucket_id = 'publication-files' and is_admin());
+  drop policy if exists pubfiles_obj_rw on storage.objects;
+  create policy pubfiles_obj_rw on storage.objects for all to authenticated
+    using  (bucket_id = 'publication-files' and (storage.foldername(name))[1] = auth.uid()::text)
+    with check (bucket_id = 'publication-files' and (storage.foldername(name))[1] = auth.uid()::text);
+
+  drop policy if exists pubfiles_obj_admin_read on storage.objects;
+  create policy pubfiles_obj_admin_read on storage.objects for select to authenticated
+    using (bucket_id = 'publication-files' and is_admin());
+exception when others then
+  raise notice 'Storage bucket/policies skipped (%) — create them from the Storage UI if needed.', sqlerrm;
+end $$;
 
 -- ============================================================================
 --  After this runs: seed the 9 researchers + 448 publications and create their
