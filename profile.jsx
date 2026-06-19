@@ -26,6 +26,7 @@ const IC = {
   usage: <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M2 14V8M6 14V4M10 14v-3M14 14V6" strokeLinecap="round" /></svg>,
   settings: <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><circle cx="8" cy="8" r="2.2" /><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.5 3.5l1.4 1.4M11.1 11.1l1.4 1.4M12.5 3.5l-1.4 1.4M4.9 11.1l-1.4 1.4" strokeLinecap="round" /></svg>,
   data: <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><ellipse cx="8" cy="3.5" rx="5.5" ry="2" /><path d="M2.5 3.5v9c0 1.1 2.5 2 5.5 2s5.5-.9 5.5-2v-9M2.5 8c0 1.1 2.5 2 5.5 2s5.5-.9 5.5-2" /></svg>,
+  publications: <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M4 2.5h6l2.5 2.5V13a.5.5 0 01-.5.5H4a.5.5 0 01-.5-.5V3a.5.5 0 01.5-.5z" strokeLinejoin="round" /><path d="M5.8 6.5h4.4M5.8 8.7h4.4M5.8 10.9h2.6" strokeLinecap="round" /></svg>,
 };
 
 function Avatar(props) {
@@ -206,6 +207,86 @@ function DataSync(props) {
   </div>;
 }
 
+function Publications(props) {
+  var me = props.me;
+  var rec = (window.PRPubs && window.PRPubs.forUser(me)) || null;
+  var pubs = (rec && rec.publications) || [];
+  var [counts, setCounts] = useState({});
+  var [open, setOpen] = useState(null);     // expanded pubKey
+  var [files, setFiles] = useState({});     // pubKey -> [meta]
+  var [busy, setBusy] = useState(null);     // pubKey currently uploading
+  var [err, setErr] = useState(null);
+  var inputRef = useRef(null);
+  var PF = window.PRPubFiles;
+  var keyOf = function (p) { return me.email + ':' + p.mtid; };
+  useEffect(function () { if (PF && pubs.length) PF.counts(pubs.map(keyOf)).then(setCounts); }, []); // eslint-disable-line
+  function loadFiles(k) { if (PF) PF.list(k).then(function (fs) { setFiles(function (m) { var n = Object.assign({}, m); n[k] = fs; return n; }); }); }
+  function toggle(k) { if (open === k) { setOpen(null); return; } setOpen(k); if (files[k] === undefined) loadFiles(k); }
+  function pick(k) { if (inputRef.current) { inputRef.current.value = ''; inputRef.current.dataset.k = k; inputRef.current.click(); } } // target stashed on the input, not a shared ref
+  function onFile(e) {
+    var k = e.target.dataset.k, f = e.target.files && e.target.files[0]; if (!k || !f || !PF) return;
+    setErr(null); setBusy(k);
+    PF.add(k, f).then(function () { setBusy(null); loadFiles(k); PF.counts(pubs.map(keyOf)).then(setCounts); }, function (er) { setBusy(null); setErr((er && er.message) || 'Upload failed.'); });
+  }
+  function view(id) { if (PF) PF.getBlob(id).then(function (b) { if (b) { var u = URL.createObjectURL(b); window.open(u, '_blank'); setTimeout(function () { URL.revokeObjectURL(u); }, 60000); } }); }
+  function download(m) { if (PF) PF.getBlob(m.id).then(function (b) { if (b) { var u = URL.createObjectURL(b); var a = document.createElement('a'); a.href = u; a.download = m.name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function () { URL.revokeObjectURL(u); }, 5000); } }); }
+  function del(id, k) { if (PF) PF.remove(id).then(function () { loadFiles(k); PF.counts(pubs.map(keyOf)).then(setCounts); }); }
+
+  if (!rec) return <div><h2 className="pf-h">My publications</h2><div className="pf-empty">No publication record is linked to this profile yet. Publication lists are imported from MTMT for participating researchers.</div></div>;
+
+  var totalCites = pubs.reduce(function (a, p) { return a + (p.citations || 0); }, 0);
+  // group by year desc
+  var years = [], byYear = {};
+  pubs.forEach(function (p) { var y = p.year || 0; if (!byYear[y]) { byYear[y] = []; years.push(y); } byYear[y].push(p); });
+  years.sort(function (a, b) { return b - a; });
+
+  return <div>
+    <h2 className="pf-h">My publications</h2>
+    <input ref={inputRef} type="file" accept="application/pdf,.pdf,.doc,.docx,.txt,.csv,.xlsx,.zip,.tex,.bib,image/*" style={{ display: 'none' }} onChange={onFile} />
+    <div className="pf-panel">
+      <div className="pf-pub-sum">
+        <div><b>{pubs.length}</b><span>publications</span></div>
+        <div><b>{totalCites}</b><span>citations (MTMT)</span></div>
+        <div><b>{pubs.filter(function (p) { return p.doi; }).length}</b><span>with a DOI</span></div>
+      </div>
+      <div className="pf-note">Imported from <a href={'https://m2.mtmt.hu/gui2/?mode=browse&params=author;' + rec.mtmtId} target="_blank" rel="noopener">MTMT</a> (as of 19 June 2026){rec.orcid ? <span> · ORCID <a href={'https://orcid.org/' + rec.orcid} target="_blank" rel="noopener">{rec.orcid}</a></span> : null}. Citation counts are a snapshot. Attach the PDF or data files for each item below — they are stored in this browser.</div>
+    </div>
+    {err ? <div className="pf-note err" style={{ margin: '0 0 10px' }}>{err}</div> : null}
+    {years.map(function (y) { return <div key={y}>
+      <h3 className="pf-h3">{y || 'Undated'}</h3>
+      {byYear[y].map(function (p) {
+        var k = keyOf(p), n = counts[k] || 0;
+        return <div className={'pf-pub' + (open === k ? ' open' : '')} key={p.mtid}>
+          <div className="pf-pub-main">
+            <div className="pf-pub-t">{p.title || '(untitled)'}</div>
+            <div className="pf-pub-cite">{p.citation || (p.firstAuthor + ' (' + (p.year || '') + ')')}</div>
+            <div className="pf-pub-meta">
+              {p.typeHu ? <span className="pf-tag">{p.typeHu}</span> : null}
+              {p.journal ? <span className="pf-pub-j">{p.journal}</span> : null}
+              {p.citations ? <span className="pf-tag cit">{p.citations} cit.</span> : null}
+              {p.oaType && p.oaType !== 'NONE' ? <span className="pf-tag oa">Open access</span> : null}
+              {p.doi ? <a className="pf-tag link" href={'https://doi.org/' + p.doi} target="_blank" rel="noopener">DOI</a> : null}
+              <a className="pf-tag link" href={'https://m2.mtmt.hu/gui2/?mode=browse&params=publication;' + p.mtid} target="_blank" rel="noopener">MTMT</a>
+            </div>
+          </div>
+          <button className="pf-pub-files" onClick={function () { toggle(k); }}>{n ? n + ' file' + (n === 1 ? '' : 's') : 'Attach'} {open === k ? '▴' : '▾'}</button>
+          {open === k ? <div className="pf-pub-drop">
+            {(files[k] || []).map(function (m) { return <div className="pf-file" key={m.id}>
+              <span className="pf-file-n" title={m.name}>{m.name}</span>
+              <span className="pf-file-s">{fmtBytes(m.size)}</span>
+              <button onClick={function () { view(m.id); }}>View</button>
+              <button onClick={function () { download(m); }}>Download</button>
+              <button className="pf-file-x" onClick={function () { del(m.id, k); }}>✕</button>
+            </div>; })}
+            {files[k] && files[k].length === 0 ? <div className="pf-note" style={{ margin: '2px 0 8px' }}>No files attached yet.</div> : null}
+            <button className="btn-ghost" disabled={busy === k} onClick={function () { pick(k); }}>{busy === k ? 'Uploading…' : '+ Attach PDF / data file'}</button>
+          </div> : null}
+        </div>;
+      })}
+    </div>; })}
+  </div>;
+}
+
 function App() {
   var [me, setMe] = useState(function () { return Auth.current(); });
   var [route, setRoute] = useState(function () { return ((location.hash || '#overview').replace('#', '').split('?')[0]) || 'overview'; });
@@ -223,7 +304,10 @@ function App() {
   }
   var usage = Store.usage(me.id);
   var go = function (r) { location.hash = r; setRoute(r); };
-  var RAIL = [['overview', 'Overview'], ['usage', 'Usage & cost'], ['settings', 'Settings'], ['data', 'Data & sync']];
+  var myPubs = (window.PRPubs && window.PRPubs.forUser(me)) || null;
+  var RAIL = [['overview', 'Overview']];
+  if (myPubs) RAIL.push(['publications', 'My publications']);
+  RAIL = RAIL.concat([['usage', 'Usage & cost'], ['settings', 'Settings'], ['data', 'Data & sync']]);
 
   return <div className="pf">
     <Header me={me} setMe={setMe} mode={mode} usage={usage} />
@@ -232,16 +316,17 @@ function App() {
         {RAIL.map(function (it) {
           var id = it[0];
           return <button key={id} className={'pf-nav' + (route === id ? ' on' : '')} aria-current={route === id ? 'page' : undefined} onClick={function () { go(id); }}>
-            {IC[id]}<span>{it[1]}</span>{id === 'usage' && over80(usage) ? <i className="pf-dot" title="Near a limit" /> : null}
+            {IC[id]}<span>{it[1]}</span>{id === 'usage' && over80(usage) ? <i className="pf-dot" title="Near a limit" /> : null}{id === 'publications' && myPubs ? <i className="pf-count">{myPubs.pubCount}</i> : null}
           </button>;
         })}
         <div className="pf-soon">More areas coming soon</div>
       </nav>
       <main className="pf-main">
-        {route === 'usage' ? <UsageCost me={me} usage={usage} />
-          : route === 'settings' ? <Settings me={me} />
-            : route === 'data' ? <DataSync me={me} mode={mode} onChanged={refresh} />
-              : <Overview me={me} usage={usage} go={go} />}
+        {route === 'publications' ? <Publications me={me} />
+          : route === 'usage' ? <UsageCost me={me} usage={usage} />
+            : route === 'settings' ? <Settings me={me} />
+              : route === 'data' ? <DataSync me={me} mode={mode} onChanged={refresh} />
+                : <Overview me={me} usage={usage} go={go} />}
       </main>
     </div>
   </div>;

@@ -108,6 +108,30 @@
     .pf-table td:first-child { font-weight: 600; }
     .pf-data-acts { display: flex; gap: 8px; flex-wrap: wrap; }
     .pf-empty { font-size: 13px; color: var(--muted); padding: 16px; background: var(--pane); border: 1px dashed var(--line); border-radius: 11px; }
+    /* My publications */
+    .pf-count { margin-left: auto; font-style: normal; font-size: 10px; font-weight: 700; color: var(--muted); background: var(--app-bg); border-radius: 9px; padding: 0 6px; }
+    .pf-nav.on .pf-count { color: var(--accent); }
+    .pf-pub-sum { display: flex; gap: 26px; }
+    .pf-pub-sum b { font-size: 22px; display: block; } .pf-pub-sum span { font-size: 11.5px; color: var(--muted); }
+    .pf-pub { background: var(--pane); border: 1px solid var(--line); border-radius: 11px; padding: 13px 15px; margin-bottom: 9px; display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start; }
+    .pf-pub.open { border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
+    .pf-pub-main { min-width: 0; flex: 1; }
+    .pf-pub-t { font-size: 14px; font-weight: 600; line-height: 1.35; }
+    .pf-pub-cite { font-size: 11.5px; color: var(--muted); margin-top: 3px; line-height: 1.4; }
+    .pf-pub-meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; }
+    .pf-pub-j { font-size: 11px; color: var(--muted); font-style: italic; }
+    .pf-tag { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 20px; background: var(--app-bg); color: var(--muted); }
+    .pf-tag.cit { background: #eef2ff; color: var(--accent); } .pf-tag.oa { background: #e6f3ec; color: #1c7a47; }
+    a.pf-tag.link { color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, transparent); }
+    a.pf-tag.link:hover { text-decoration: none; background: color-mix(in srgb, var(--accent) 16%, transparent); }
+    .pf-pub-files { flex: none; align-self: flex-start; border: 1px solid var(--line); background: var(--pane); color: var(--accent); font-size: 12px; font-weight: 600; border-radius: 8px; padding: 5px 10px; white-space: nowrap; }
+    .pf-pub-files:hover { border-color: var(--accent); }
+    .pf-pub-drop { flex-basis: 100%; width: 100%; margin-top: 4px; padding-top: 10px; border-top: 1px solid var(--line); }
+    .pf-file { display: flex; align-items: center; gap: 10px; font-size: 12px; padding: 5px 0; }
+    .pf-file-n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+    .pf-file-s { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+    .pf-file button { border: 0; background: transparent; color: var(--accent); font-size: 11.5px; font-weight: 600; padding: 2px 4px; }
+    .pf-file button.pf-file-x { color: var(--muted); } .pf-file button.pf-file-x:hover { color: #dc2626; }
 
     @media (max-width: 760px) {
       .pf-body { flex-direction: column; }
@@ -135,6 +159,8 @@
   <script src="universities.js"></script>
   <script src="onboarding.js"></script>
   <script src="eleven.js"></script>
+  <script src="publications.js"></script>
+  <script src="pubfiles.js"></script>
 
   <script type="text/babel" src="profile.jsx"></script>
 

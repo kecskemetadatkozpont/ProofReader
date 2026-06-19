@@ -11,7 +11,14 @@
     { id: 'u_anna', name: 'Anna Kovács', email: 'anna@lab.edu', color: '#4f46e5', plan: 'pro' },
     { id: 'u_bela', name: 'Béla Nagy', email: 'bela@lab.edu', color: '#0e9f6e', plan: 'free' },
     { id: 'u_cili', name: 'Cili Tóth', email: 'cili@lab.edu', color: '#d9760b', plan: 'free' },
-    { id: 'u_dani', name: 'Dani Szabó', email: 'dani@lab.edu', color: '#db2777', plan: 'pro' }
+    { id: 'u_dani', name: 'Dani Szabó', email: 'dani@lab.edu', color: '#db2777', plan: 'pro' },
+    // SZE colleagues — profiles with MTMT publications (see publications.js); emails are their institutional addresses
+    { id: 'u_csikos', name: 'Csikós Fanni', email: 'csikos.fanni@sze.hu', color: '#0891b2', plan: 'pro' },
+    { id: 'u_pekk', name: 'Pekk Letícia', email: 'pekk.leticia@ga.sze.hu', color: '#7c3aed', plan: 'pro' },
+    { id: 'u_ihasz', name: 'Ihász Máté', email: 'ihasz.mate@sze.hu', color: '#be185d', plan: 'pro' },
+    { id: 'u_jagicza', name: 'Jagicza Márton', email: 'jagicza.marton@ga.sze.hu', color: '#ca8a04', plan: 'pro' },
+    { id: 'u_cseke', name: 'Cseke Tibor', email: 'cseke.tibor@sze.hu', color: '#059669', plan: 'pro' },
+    { id: 'u_sutheo', name: 'Sütheő Gergő', email: 'sutheo.gergo@ga.sze.hu', color: '#dc2626', plan: 'pro' }
   ];
 
   function read(k, d) { try { return JSON.parse(localStorage.getItem(k)) || d; } catch (e) { return d; } }
