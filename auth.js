@@ -34,6 +34,35 @@
   function current() { var a = read(AUTH, null); return a && a.userId ? byId(a.userId) : null; }
   function signIn(id) { write(AUTH, { userId: id, at: Date.now() }); }
   function signOut() { write(AUTH, { userId: null }); }
+
+  /* ---- password auth (the colleague profiles; PBKDF2-SHA256). Client-side prototype: hashes only.
+     A changed password is kept in localStorage (proofreader:pw:<email>) and overrides the bundled
+     initial hash from passwords.js — so it is per-browser, not synced across devices. ---- */
+  function b64ToBytes(s) { var bin = atob(s), a = new Uint8Array(bin.length); for (var i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i); return a; }
+  function bytesToB64(a) { var s = ''; for (var i = 0; i < a.length; i++) s += String.fromCharCode(a[i]); return btoa(s); }
+  function derive(pw, saltBytes, iters) {
+    var subtle = window.crypto && window.crypto.subtle;
+    if (!subtle) return Promise.reject(new Error('Secure crypto is unavailable in this browser.'));
+    return subtle.importKey('raw', new TextEncoder().encode(pw), 'PBKDF2', false, ['deriveBits'])
+      .then(function (key) { return subtle.deriveBits({ name: 'PBKDF2', salt: saltBytes, iterations: iters, hash: 'SHA-256' }, key, 256); })
+      .then(function (bits) { return bytesToB64(new Uint8Array(bits)); });
+  }
+  function emailOf(x) { if (!x) return ''; if (String(x).indexOf('@') >= 0) return String(x).toLowerCase(); var u = byId(x); return u ? String(u.email).toLowerCase() : ''; }
+  function pwRecord(email) { email = String(email || '').toLowerCase(); var ov = read('proofreader:pw:' + email, null); if (ov && ov.hash) return ov; var b = window.PRPasswords && window.PRPasswords[email]; return b || null; }
+  function isProtected(x) { return !!pwRecord(emailOf(x)); }
+  function verifyPassword(email, pw) { var rec = pwRecord(email); if (!rec) return Promise.resolve(false); return derive(pw || '', b64ToBytes(rec.salt), rec.iters || 150000).then(function (h) { return h === rec.hash; }); }
+  function setPassword(email, pw) {
+    email = String(email || '').toLowerCase();
+    if (!pw || String(pw).length < 6) return Promise.reject(new Error('Choose a password of at least 6 characters.'));
+    var salt = new Uint8Array(16); window.crypto.getRandomValues(salt); var iters = 150000;
+    return derive(pw, salt, iters).then(function (h) { write('proofreader:pw:' + email, { salt: bytesToB64(salt), iters: iters, hash: h }); return true; });
+  }
+  function signInWithPassword(email, pw) {
+    var u = byEmail(String(email || '').trim());
+    if (!u) return Promise.resolve(null);
+    return verifyPassword(u.email, pw).then(function (okv) { if (okv) { signIn(u.id); return u; } return null; });
+  }
+  function demoUsers() { return users().filter(function (u) { return !isProtected(u.email); }); } // passwordless pick lists
   function updateUser(id, patch) { var us = users(); for (var i = 0; i < us.length; i++) { if (us[i].id === id) { us[i] = Object.assign({}, us[i], patch); write(USERS, us); return us[i]; } } return null; }
   function initials(name) {
     return String(name || '?').trim().split(/\s+/).slice(0, 2).map(function (w) { return w[0]; }).join('').toUpperCase();
@@ -54,5 +83,6 @@
     };
   }
 
-  window.PRAuth = { users: users, byId: byId, byEmail: byEmail, current: current, signIn: signIn, signOut: signOut, updateUser: updateUser, initials: initials, startPresence: startPresence, SEED: SEED };
+  window.PRAuth = { users: users, byId: byId, byEmail: byEmail, current: current, signIn: signIn, signOut: signOut, updateUser: updateUser, initials: initials, startPresence: startPresence, SEED: SEED,
+    isProtected: isProtected, verifyPassword: verifyPassword, setPassword: setPassword, signInWithPassword: signInWithPassword, demoUsers: demoUsers };
 })();

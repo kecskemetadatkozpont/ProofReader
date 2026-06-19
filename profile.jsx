@@ -41,7 +41,7 @@ function Header(props) {
   var [name, setName] = useState(me.name);
   var [menu, setMenu] = useState(false);
   useEffect(function () { var c = function () { setMenu(false); }; window.addEventListener('click', c); return function () { window.removeEventListener('click', c); }; }, []);
-  var others = isDemo ? Auth.users().filter(function (u) { return u.id !== me.id; }) : [];
+  var others = isDemo ? (Auth.demoUsers ? Auth.demoUsers() : Auth.users()).filter(function (u) { return u.id !== me.id; }) : []; // password-protected colleagues aren't passwordless-switchable
   var TINTS = ['#4f46e5', '#0e9f6e', '#d9760b', '#db2777', '#0891b2', '#7c3aed', '#dc2626'];
   function saveName() { var n = name.trim(); if (n && isDemo) { Auth.updateUser(me.id, { name: n }); props.setMe(Auth.byId(me.id)); } setEditing(false); }
   function setTint(c) { if (isDemo) { Auth.updateUser(me.id, { color: c }); props.setMe(Auth.byId(me.id)); } }
@@ -67,7 +67,7 @@ function Header(props) {
           <button className="btn-ghost" onClick={function () { setMenu(function (m) { return !m; }); }}>Switch user ▾</button>
           {menu ? <div className="menu" style={{ right: 0, top: 42, minWidth: 200 }}>{others.map(function (u) { return <button key={u.id} className="mi" onClick={function () { Auth.signIn(u.id); location.reload(); }}><Avatar user={u} size={22} />{u.name}</button>; })}</div> : null}
         </div> : null}
-        <button className="btn-ghost danger" onClick={function () { Auth.signOut(); location.replace('Landing.html'); }}>Sign out</button>
+        <button className="btn-ghost danger" onClick={function () { var prot = Auth.isProtected && Auth.isProtected(me.email); Auth.signOut(); location.replace(prot ? 'Profile.html' : 'Landing.html'); }}>Sign out</button>
       </div>
     </div>
   </header>;
@@ -168,6 +168,7 @@ function Settings(props) {
       <div className="pf-kv"><span>Pronunciation overrides</span><b>{(p.ttsDict || []).length} entries</b></div>
       <a className="btn-ghost" href={editorLink}>Open the editor to change these →</a>
     </div>
+    {window.PRAuth && window.PRAuth.isProtected && window.PRAuth.isProtected(me.email) ? <ChangePassword email={me.email} /> : null}
   </div>;
 }
 
@@ -287,6 +288,55 @@ function Publications(props) {
   </div>;
 }
 
+function Login(props) {
+  var [email, setEmail] = useState(''), [pw, setPw] = useState(''), [err, setErr] = useState(null), [busy, setBusy] = useState(false);
+  function submit(e) {
+    if (e) e.preventDefault();
+    var em = email.trim(); if (!em || !pw) { setErr('Enter your email and password.'); return; }
+    if (!window.PRAuth || !window.PRAuth.signInWithPassword) { setErr('Sign-in is unavailable.'); return; }
+    setBusy(true); setErr(null);
+    window.PRAuth.signInWithPassword(em, pw).then(function (u) { setBusy(false); if (u) props.onSignIn(u); else setErr('Incorrect email or password.'); }, function (er) { setBusy(false); setErr((er && er.message) || 'Sign-in failed.'); });
+  }
+  return <div className="pf-login"><form className="pf-login-card" onSubmit={submit}>
+    <div className="pf-login-mark"><span /></div>
+    <h1>Sign in to your profile</h1>
+    <p>Researchers: sign in with your institutional email and the password you were given.</p>
+    <input className="pf-login-in" type="email" autoComplete="username" placeholder="name@sze.hu" autoFocus value={email} aria-label="Email" onChange={function (e) { setEmail(e.target.value); }} />
+    <input className="pf-login-in" type="password" autoComplete="current-password" placeholder="Password" value={pw} aria-label="Password" onChange={function (e) { setPw(e.target.value); }} />
+    {err ? <div className="pf-login-err">{err}</div> : null}
+    <button className="btn-primary" type="submit" disabled={busy} style={{ width: '100%', justifyContent: 'center' }}>{busy ? 'Signing in…' : 'Sign in'}</button>
+    <div className="pf-login-note">Forgot your password? Contact the administrator. · <a href="Projects.html">Back to Aloud</a></div>
+  </form></div>;
+}
+
+function ChangePassword(props) {
+  var [open, setOpen] = useState(false), [cur, setCur] = useState(''), [n1, setN1] = useState(''), [n2, setN2] = useState('');
+  var [msg, setMsg] = useState(null), [busy, setBusy] = useState(false);
+  function save(e) {
+    if (e) e.preventDefault();
+    if (n1.length < 6) { setMsg(['err', 'New password must be at least 6 characters.']); return; }
+    if (n1 !== n2) { setMsg(['err', 'The new passwords do not match.']); return; }
+    setBusy(true); setMsg(null);
+    window.PRAuth.verifyPassword(props.email, cur).then(function (okv) {
+      if (!okv) { setBusy(false); setMsg(['err', 'Your current password is incorrect.']); return; }
+      window.PRAuth.setPassword(props.email, n1).then(function () { setBusy(false); setCur(''); setN1(''); setN2(''); setOpen(false); setMsg(['ok', 'Password changed.']); }, function (er) { setBusy(false); setMsg(['err', (er && er.message) || 'Could not change password.']); });
+    }, function (er) { setBusy(false); setMsg(['err', (er && er.message) || 'Could not verify your password.']); });
+  }
+  return <div className="pf-panel">
+    <div className="pf-set-h">Password</div>
+    <div className="pf-kv"><span>Sign-in password</span><b>set</b></div>
+    {!open ? <button className="btn-ghost" onClick={function () { setOpen(true); setMsg(null); }}>Change password</button>
+      : <form className="pf-pw" onSubmit={save}>
+        <input className="pf-login-in" type="password" autoComplete="current-password" placeholder="Current password" value={cur} onChange={function (e) { setCur(e.target.value); }} aria-label="Current password" />
+        <input className="pf-login-in" type="password" autoComplete="new-password" placeholder="New password (min. 6)" value={n1} onChange={function (e) { setN1(e.target.value); }} aria-label="New password" />
+        <input className="pf-login-in" type="password" autoComplete="new-password" placeholder="Repeat new password" value={n2} onChange={function (e) { setN2(e.target.value); }} aria-label="Repeat new password" />
+        <div className="pf-pw-acts"><button className="btn-primary" type="submit" disabled={busy}>{busy ? 'Saving…' : 'Save'}</button><button className="btn-ghost" type="button" onClick={function () { setOpen(false); setMsg(null); }}>Cancel</button></div>
+      </form>}
+    {msg ? <div className={'pf-note ' + (msg[0] === 'ok' ? 'ok' : 'err')}>{msg[1]}</div> : null}
+    <div className="pf-note">Changing your password is saved in this browser only (the prototype has no server-side accounts), so set it again on another device.</div>
+  </div>;
+}
+
 function App() {
   var [me, setMe] = useState(function () { return Auth.current(); });
   var [route, setRoute] = useState(function () { return ((location.hash || '#overview').replace('#', '').split('?')[0]) || 'overview'; });
@@ -297,10 +347,10 @@ function App() {
 
   var mode = (window.PR_BACKEND && window.PR_BACKEND.mode) || 'demo';
   if (!me) {
-    // while the backend is still resolving a session (or showing its own sign-in card), let its overlay
-    // drive — don't bounce to Landing mid-OAuth. Only redirect when we're genuinely signed out.
+    // while the backend is still resolving a session (or showing its own sign-in card), let its overlay drive.
     if (mode === 'signin' || mode === 'pending') return null;
-    location.replace('Landing.html'); return null;
+    // otherwise show the researcher password login (sets me on success).
+    return <Login onSignIn={function (u) { setMe(u); }} />;
   }
   var usage = Store.usage(me.id);
   var go = function (r) { location.hash = r; setRoute(r); };

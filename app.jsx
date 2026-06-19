@@ -160,7 +160,7 @@
 
     /* ---- collaboration state ---- */
     const projectId = init.projectId;
-    const me = useMemo(() => (window.PRAuth && (window.PRAuth.current() || window.PRAuth.byId(init.ownerId) || window.PRAuth.users()[0])) || { id: 'u_anna', name: 'You', color: '#4f46e5' }, []);
+    const me = useMemo(() => (window.PRAuth && (window.PRAuth.current() || window.PRAuth.byId(init.ownerId) || (window.PRAuth.demoUsers ? window.PRAuth.demoUsers() : window.PRAuth.users())[0])) || { id: 'u_anna', name: 'You', color: '#4f46e5' }, []);
     const meRef = useRef(me); meRef.current = me;
     const [annotations, setAnnotations] = useState(() => projectId && window.PRStore ? window.PRStore.listAnnotations(projectId) : []);
     const [versions, setVersions] = useState(() => projectId && window.PRStore ? window.PRStore.listVersions(projectId) : []);
@@ -1731,7 +1731,7 @@
                 <a className="mi" href="Profile.html"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><circle cx="8" cy="5.5" r="2.5" /><path d="M3.5 13.5c0-2.5 2-4 4.5-4s4.5 1.5 4.5 4" strokeLinecap="round" /></svg>Open profile</a>
                 <a className="mi" href="Projects.html"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M10 3L5 8l5 5" strokeLinecap="round" strokeLinejoin="round" /></svg>Back to projects</a>
                 <div className="sub">Switch account</div>
-                {window.PRAuth.users().filter((u) => u.id !== me.id).map((u) => <button key={u.id} className="mi" onClick={() => { window.PRAuth.signIn(u.id); location.reload(); }}><Collab.Avatar user={u} size={20} />{u.name}</button>)}
+                {(window.PRAuth.demoUsers ? window.PRAuth.demoUsers() : window.PRAuth.users()).filter((u) => u.id !== me.id).map((u) => <button key={u.id} className="mi" onClick={() => { window.PRAuth.signIn(u.id); location.reload(); }}><Collab.Avatar user={u} size={20} />{u.name}</button>)}
                 <div className="divider" />
                 <button className="mi danger" onClick={() => { window.PRAuth.signOut(); location.href = 'Projects.html'; }}>Sign out</button>
               </div>}

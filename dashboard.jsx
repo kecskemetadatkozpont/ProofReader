@@ -46,7 +46,7 @@ function SignIn({ onSignIn }) {
           : <>
               <div className="field-label" style={{ textAlign: 'left' }}>Choose a demo account</div>
               <div className="demo-users">
-                {Auth.users().map((u) => (
+                {(Auth.demoUsers ? Auth.demoUsers() : Auth.users()).map((u) => (
                   <button key={u.id} className="demo-user" onClick={() => onSignIn(u.id)}>
                     <Avatar user={u} size={34} />
                     <span><span className="du-name">{u.name}</span><br /><span className="du-mail">{u.email}</span></span>
@@ -55,7 +55,7 @@ function SignIn({ onSignIn }) {
                 ))}
               </div>
             </>}
-        <div className="demo-note">Prototype: pick any account. Open two windows as different people to collaborate live.</div>
+        <div className="demo-note">Prototype: pick any account, or <a href="Profile.html">sign in to your researcher profile</a> with your email &amp; password.</div>
       </div>
     </div>
   );
@@ -279,7 +279,7 @@ function AccountMenu({ me, onClose, onUsage, onSwitch, onSignOut }) {
       <a className="mi" href="Profile.html"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><circle cx="8" cy="5.5" r="2.5" /><path d="M3.5 13.5c0-2.5 2-4 4.5-4s4.5 1.5 4.5 4" strokeLinecap="round" /></svg>Open profile</a>
       <button className="mi" onClick={onUsage}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M2 13h12M4 13V7M8 13V3M12 13V9" strokeLinecap="round" /></svg>Usage &amp; storage</button>
       <div className="sub">Switch account</div>
-      {Auth.users().filter((x) => x.id !== me.id).map((x) => (
+      {(Auth.demoUsers ? Auth.demoUsers() : Auth.users()).filter((x) => x.id !== me.id).map((x) => (
         <button key={x.id} className="mi" onClick={() => onSwitch(x.id)}><Avatar user={x} size={22} />{x.name}</button>
       ))}
       <div className="divider" />
