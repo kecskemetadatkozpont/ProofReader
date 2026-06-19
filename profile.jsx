@@ -180,7 +180,7 @@ function DataSync(props) {
   var ROWS = [
     ['Projects & files', isCloud ? 'Supabase (your account)' : 'This browser (localStorage)', isCloud ? 'yes — any device' : 'no', 'collaborators on shared projects'],
     ['Comments, to-dos, versions', isCloud ? 'Supabase' : 'This browser', isCloud ? 'yes' : 'no', 'collaborators'],
-    ['Settings (voice / spell / pronunciation)', 'This browser only', 'no', 'no — yours alone'],
+    ['Settings (voice / spell / pronunciation)', isCloud ? 'Supabase (your account)' : 'This browser only', isCloud ? 'yes — any device' : 'no', 'no — yours alone'],
     ['Usage & reading positions', 'This browser only', 'no', 'no'],
     ['ElevenLabs API key', 'This browser only', 'no', 'no — never sent to Publify'],
     ['Generated audio (MP3 cache)', 'This browser (IndexedDB)', 'no', 'shared cache on cloud projects'],
@@ -188,7 +188,7 @@ function DataSync(props) {
   return <div>
     <h2 className="pf-h">Data &amp; sync</h2>
     <div className="pf-note bnr">{isCloud
-      ? 'You are signed in to your account (cloud) — your profile, publications and projects sync to Supabase. Your settings, usage, reading positions, ElevenLabs key and audio cache still live only in THIS browser, even in cloud mode.'
+      ? 'You are signed in to your account (cloud) — your profile, publications, projects, publication files and settings sync to Supabase. Your usage, reading positions, ElevenLabs key and audio cache still live only in THIS browser.'
       : 'Demo mode — everything lives in this browser and is shared by all seeded users signed in here. Nothing leaves the machine.'}</div>
     <div className="pf-panel" style={{ padding: 0, overflowX: 'auto' }}>
       <table className="pf-table">

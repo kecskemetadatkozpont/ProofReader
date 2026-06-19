@@ -148,6 +148,21 @@
   window.addEventListener('focus', function () { hydrate(); });
   document.addEventListener('visibilitychange', function () { if (!document.hidden) hydrate(); });
 
+  /* ---- prefs sync: the Supabase `prefs` row is the cross-device truth; mirror it into the local
+     cache so prefs() stays synchronous, and push local changes back (debounced). ---- */
+  var prefsTimer = null;
+  function pushPrefs(data) { try { sb.from('prefs').upsert({ user_id: me.id, data: data || {}, updated_at: nowISO() }, { onConflict: 'user_id' }).then(function () { }, function () { }); } catch (e) { } }
+  function queuePushPrefs() { if (prefsTimer) clearTimeout(prefsTimer); prefsTimer = setTimeout(function () { pushPrefs(readJSON(PREFS, {})); }, 600); }
+  (function loadPrefs() {
+    try {
+      sb.from('prefs').select('data').eq('user_id', me.id).maybeSingle().then(function (r) {
+        var remote = r && r.data && r.data.data;
+        if (remote && Object.keys(remote).length) { writeJSON(PREFS, Object.assign(readJSON(PREFS, {}), remote)); notify(); }
+        else { var local = readJSON(PREFS, {}); if (Object.keys(local).length) pushPrefs(local); }   // migrate any existing local prefs up
+      }, function () { });
+    } catch (e) { }
+  })();
+
   /* ---- helpers reused by the app ---- */
   function countSentences(project) { try { var f = project.files[project.active]; if (!f || f.type !== 'tex' || !window.LatexEngine) return null; return window.LatexEngine.process(f.content, project.files).sentences.length; } catch (e) { return null; } }
   function titleGuess(project) { var f = project.files[project.active]; if (f && f.type === 'tex') { var m = /\\title\{([\s\S]*?)\}/.exec(f.content); if (m) { var t = m[1].replace(/\\\\/g, ' ').replace(/\\[a-zA-Z]+\{?|[{}~]/g, '').replace(/\s+/g, ' ').trim(); if (t) return t; } } return project.title; }
@@ -317,9 +332,9 @@
     getReading: function (userId, projectId) { var r = readJSON(READING, {}); return r[userId + ':' + projectId] || null; },
     setReading: function (userId, projectId, i) { var r = readJSON(READING, {}); r[userId + ':' + projectId] = { idx: i, at: Date.now() }; writeJSON(READING, r); },
 
-    /* prefs */
+    /* prefs — local cache mirrors the Supabase `prefs` row; setPrefs writes both (debounced push) */
     prefs: function () { return readJSON(PREFS, {}); },
-    setPrefs: function (p) { writeJSON(PREFS, Object.assign(this.prefs(), p)); },
+    setPrefs: function (p) { writeJSON(PREFS, Object.assign(this.prefs(), p)); queuePushPrefs(); },
 
     countSentences: countSentences, titleGuess: titleGuess, bytesOf: bytesOf,
     seedIfEmpty: function () {
