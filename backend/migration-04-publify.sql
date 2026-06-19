@@ -6,6 +6,22 @@
 --  Idempotent (create ... if not exists / drop policy if exists).
 -- ============================================================================
 
+-- ---- 0. self-contained prerequisites (in case migration-03 was not applied) -
+-- columns the researcher seed writes (idempotent; no-op if migration-03 already added them)
+alter table profiles add column if not exists role           text not null default 'user';
+alter table profiles add column if not exists status         text not null default 'incomplete';
+alter table profiles add column if not exists affiliation    text;
+alter table profiles add column if not exists mtmt_id        text;
+alter table profiles add column if not exists orcid          text;
+alter table profiles add column if not exists position       text;
+alter table profiles add column if not exists last_active_at timestamptz;
+
+-- admin predicate used by the RLS policies below (matches migration-03's definition)
+create or replace function public.is_admin() returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (select 1 from public.profiles where id = auth.uid() and role = 'admin');
+$$;
+
 -- ---- 1. profiles: flag researcher accounts ---------------------------------
 alter table profiles add column if not exists is_researcher boolean not null default false;
 
