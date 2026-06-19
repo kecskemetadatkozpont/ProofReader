@@ -89,7 +89,7 @@
     var html = ''
       + '<div class="mk"><span></span></div>'
       + '<h1>Welcome to Publify</h1>'
-      + '<p class="sub">Publify is free for academic research. Tell us where you work so an administrator can approve your account.</p>'
+      + '<p class="sub">' + (me.affiliation ? 'We’ve pre-filled the details we have for you — please review them and submit for approval.' : 'Publify is free for academic research. Tell us where you work so an administrator can approve your account.') + '</p>'
       + whoBlock()
       + '<div class="field">'
       + '  <label for="ob-aff">University / institution</label>'
@@ -112,6 +112,13 @@
       + '<button class="ghost" id="pr-ob-signout">Sign out</button>';
     mount(html);
     signOutBtn();
+    // pre-fill from data we already have (e.g. seeded researchers) so they confirm, not re-type —
+    // and so submitting doesn't blank an already-known MTMT id / ORCID.
+    try {
+      if (me.affiliation) document.getElementById('ob-aff').value = me.affiliation;
+      if (me.mtmt_id) document.getElementById('ob-mtmt').value = me.mtmt_id;
+      if (me.orcid) document.getElementById('ob-orcid').value = me.orcid;
+    } catch (e) { }
 
     var aff = document.getElementById('ob-aff'), menu = document.getElementById('ob-menu');
     var affErr = document.getElementById('ob-aff-err');
@@ -217,10 +224,11 @@
   }
 
   function check() {
-    sb.from('profiles').select('status,role,affiliation').eq('id', me.id).maybeSingle().then(function (r) {
+    sb.from('profiles').select('status,role,affiliation,mtmt_id,orcid').eq('id', me.id).maybeSingle().then(function (r) {
       var d = (r && r.data) || {};
       var status = d.status || 'incomplete';
       me.status = status; me.role = d.role || 'user'; me.affiliation = d.affiliation || '';
+      me.mtmt_id = d.mtmt_id || ''; me.orcid = d.orcid || '';
       route(status, me.role, me.affiliation);
     }, function () {
       // network hiccup: don't lock the user out hard — show onboarding which will retry on submit
@@ -232,7 +240,9 @@
   if (document.body) splash(); else document.addEventListener('DOMContentLoaded', splash);
   // also react to the profile event backend.js dispatches (keeps in sync)
   window.addEventListener('pr-profile', function (e) {
-    var d = e.detail || {}; if (d.status) route(d.status, d.role, d.affiliation);
+    var d = e.detail || {};
+    if (d.status === 'approved') { route('approved'); return; }   // unmount fast, no onboarding flash
+    if (d.status) check();   // re-fetch the full profile (incl. mtmt_id/orcid) so the form pre-fills correctly
   });
   // run the check (small delay lets supabase session settle)
   setTimeout(check, 60);
