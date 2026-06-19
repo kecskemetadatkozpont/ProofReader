@@ -168,7 +168,7 @@ function Settings(props) {
       <div className="pf-kv"><span>Pronunciation overrides</span><b>{(p.ttsDict || []).length} entries</b></div>
       <a className="btn-ghost" href={editorLink}>Open the editor to change these →</a>
     </div>
-    {window.PRAuth && window.PRAuth.isProtected && window.PRAuth.isProtected(me.email) ? <ChangePassword email={me.email} /> : null}
+    {(((window.PR_BACKEND && window.PR_BACKEND.mode) === 'cloud') || (window.PRAuth && window.PRAuth.isProtected && window.PRAuth.isProtected(me.email))) ? <ChangePassword email={me.email} /> : null}
   </div>;
 }
 
@@ -188,7 +188,7 @@ function DataSync(props) {
   return <div>
     <h2 className="pf-h">Data &amp; sync</h2>
     <div className="pf-note bnr">{isCloud
-      ? 'You are signed in with Google (cloud) — your projects sync to your account. But your settings, usage, reading positions, ElevenLabs key and audio cache live only in THIS browser, even in cloud mode.'
+      ? 'You are signed in to your account (cloud) — your profile, publications and projects sync to Supabase. Your settings, usage, reading positions, ElevenLabs key and audio cache still live only in THIS browser, even in cloud mode.'
       : 'Demo mode — everything lives in this browser and is shared by all seeded users signed in here. Nothing leaves the machine.'}</div>
     <div className="pf-panel" style={{ padding: 0, overflowX: 'auto' }}>
       <table className="pf-table">
@@ -293,8 +293,19 @@ function Login(props) {
   function submit(e) {
     if (e) e.preventDefault();
     var em = email.trim(); if (!em || !pw) { setErr('Enter your email and password.'); return; }
-    if (!window.PRAuth || !window.PRAuth.signInWithPassword) { setErr('Sign-in is unavailable.'); return; }
     setBusy(true); setErr(null);
+    var BE = window.PR_BACKEND;
+    if (BE && BE.sb && BE.sb.auth && BE.sb.auth.signInWithPassword) {
+      // real Supabase Auth — on success backend.js sees SIGNED_IN and reboots the page into cloud mode
+      BE.sb.auth.signInWithPassword({ email: em, password: pw }).then(function (res) {
+        if (res && res.error) { setBusy(false); setErr(/invalid|credential/i.test(res.error.message || '') ? 'Incorrect email or password.' : res.error.message); return; }
+        if (res && res.data && res.data.session) return;     // keep "Signing in…": the backend reloads us into cloud mode
+        setBusy(false); setErr('Incorrect email or password.');
+      }, function (er) { setBusy(false); setErr((er && er.message) || 'Sign-in failed.'); });
+      return;
+    }
+    // fallback: client-side mock (demo / backend unavailable)
+    if (!window.PRAuth || !window.PRAuth.signInWithPassword) { setBusy(false); setErr('Sign-in is unavailable.'); return; }
     window.PRAuth.signInWithPassword(em, pw).then(function (u) { setBusy(false); if (u) props.onSignIn(u); else setErr('Incorrect email or password.'); }, function (er) { setBusy(false); setErr((er && er.message) || 'Sign-in failed.'); });
   }
   return <div className="pf-login"><form className="pf-login-card" onSubmit={submit}>
@@ -310,16 +321,31 @@ function Login(props) {
 }
 
 function ChangePassword(props) {
+  var isCloud = (window.PR_BACKEND && window.PR_BACKEND.mode) === 'cloud';
   var [open, setOpen] = useState(false), [cur, setCur] = useState(''), [n1, setN1] = useState(''), [n2, setN2] = useState('');
   var [msg, setMsg] = useState(null), [busy, setBusy] = useState(false);
+  function done() { setBusy(false); setCur(''); setN1(''); setN2(''); setOpen(false); setMsg(['ok', 'Password changed.']); }
   function save(e) {
     if (e) e.preventDefault();
     if (n1.length < 6) { setMsg(['err', 'New password must be at least 6 characters.']); return; }
     if (n1 !== n2) { setMsg(['err', 'The new passwords do not match.']); return; }
     setBusy(true); setMsg(null);
+    if (isCloud && window.PR_BACKEND.sb) {
+      // verify the current password by re-authenticating, then update it on the account (syncs to every device)
+      var sb = window.PR_BACKEND.sb;
+      sb.auth.signInWithPassword({ email: props.email, password: cur }).then(function (res) {
+        if (res && res.error) { setBusy(false); setMsg(['err', 'Your current password is incorrect.']); return; }
+        sb.auth.updateUser({ password: n1 }).then(function (r2) {
+          if (r2 && r2.error) { setBusy(false); setMsg(['err', r2.error.message || 'Could not change password.']); return; }
+          done();
+        }, function (er) { setBusy(false); setMsg(['err', (er && er.message) || 'Could not change password.']); });
+      }, function (er) { setBusy(false); setMsg(['err', (er && er.message) || 'Could not verify your password.']); });
+      return;
+    }
+    // fallback: client-side mock (demo / no account)
     window.PRAuth.verifyPassword(props.email, cur).then(function (okv) {
       if (!okv) { setBusy(false); setMsg(['err', 'Your current password is incorrect.']); return; }
-      window.PRAuth.setPassword(props.email, n1).then(function () { setBusy(false); setCur(''); setN1(''); setN2(''); setOpen(false); setMsg(['ok', 'Password changed.']); }, function (er) { setBusy(false); setMsg(['err', (er && er.message) || 'Could not change password.']); });
+      window.PRAuth.setPassword(props.email, n1).then(done, function (er) { setBusy(false); setMsg(['err', (er && er.message) || 'Could not change password.']); });
     }, function (er) { setBusy(false); setMsg(['err', (er && er.message) || 'Could not verify your password.']); });
   }
   return <div className="pf-panel">
@@ -333,7 +359,9 @@ function ChangePassword(props) {
         <div className="pf-pw-acts"><button className="btn-primary" type="submit" disabled={busy}>{busy ? 'Saving…' : 'Save'}</button><button className="btn-ghost" type="button" onClick={function () { setOpen(false); setMsg(null); }}>Cancel</button></div>
       </form>}
     {msg ? <div className={'pf-note ' + (msg[0] === 'ok' ? 'ok' : 'err')}>{msg[1]}</div> : null}
-    <div className="pf-note">Changing your password is saved in this browser only (the prototype has no server-side accounts), so set it again on another device.</div>
+    <div className="pf-note">{isCloud
+      ? 'Your password is stored securely on your account (Supabase Auth) and works on every device.'
+      : 'Changing your password is saved in this browser only (demo mode has no server-side account), so set it again on another device.'}</div>
   </div>;
 }
 
