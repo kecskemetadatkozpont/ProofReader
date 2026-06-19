@@ -24,6 +24,50 @@
   }
   function Badge(props) { var s = props.s || 'incomplete'; return h('span', { className: 'badge b-' + s }, s); }
 
+  /* ---------- researchers (MTMT-sourced profiles, bundled in publications.js) ---------- */
+  function Researchers() {
+    var oS = useState(null), open = oS[0], setOpen = oS[1];
+    if (!window.PRPubs || !window.PRPubs.data) return null;
+    var data = window.PRPubs.data;
+    var list = Object.keys(data).map(function (email) {
+      var r = data[email]; var pubs = r.publications || [];
+      return { email: email, name: r.name, mtmtId: r.mtmtId, orcid: r.orcid, pubCount: r.pubCount || pubs.length,
+        cites: pubs.reduce(function (a, p) { return a + (p.citations || 0); }, 0), withDoi: pubs.filter(function (p) { return p.doi; }).length, pubs: pubs };
+    });
+    if (!list.length) return null;
+    list.sort(function (a, b) { return b.pubCount - a.pubCount; });
+    var totalPubs = list.reduce(function (s, r) { return s + r.pubCount; }, 0);
+    function openProfile(email) { try { var u = window.PRAuth && window.PRAuth.byEmail(email); if (u) window.PRAuth.signIn(u.id); } catch (e) { } location.href = 'Profile.html'; }
+    var head = h('tr', null, ['Researcher', 'Email', 'MTMT', 'ORCID', 'Publications', 'Citations', ''].map(function (t) { return h('th', { key: t }, t); }));
+    return h('div', { className: 'wrap', style: { paddingTop: 0 } },
+      h('div', { className: 'sec-h' }, h('h2', null, 'Researchers (MTMT publications)'), h('span', { className: 'count' }, list.length + ' profiles · ' + totalPubs + ' publications')),
+      h('div', { className: 'panel' },
+        h('table', null, h('thead', null, head), h('tbody', null, list.map(function (r) {
+          var rows = [h('tr', { key: r.email, className: 'clickable', onClick: function () { setOpen(open === r.email ? null : r.email); } },
+            h('td', null, h('div', { className: 'u' }, h(Avatar, { u: { name: r.name, id: r.email } }), h('div', null, h('b', null, r.name), h('span', null, (open === r.email ? '▴ hide' : '▾ show') + ' publications')))),
+            h('td', null, r.email),
+            h('td', { className: 'mono' }, h('a', { className: 'ext', href: 'https://m2.mtmt.hu/gui2/?mode=browse&params=author;' + r.mtmtId, target: '_blank', onClick: function (e) { e.stopPropagation(); } }, r.mtmtId)),
+            h('td', null, r.orcid ? h('a', { className: 'ext', href: 'https://orcid.org/' + r.orcid, target: '_blank', onClick: function (e) { e.stopPropagation(); } }, r.orcid) : '—'),
+            h('td', null, r.pubCount, h('span', { style: { color: '#8a92a0', fontSize: 11 } }, ' (' + r.withDoi + ' DOI)')),
+            h('td', null, r.cites),
+            h('td', { onClick: function (e) { e.stopPropagation(); } }, h('button', { className: 'btn', onClick: function () { openProfile(r.email); } }, 'Open profile'))
+          )];
+          if (open === r.email) rows.push(h('tr', { key: r.email + '-x' }, h('td', { colSpan: 7, style: { background: '#fafbfc' } },
+            h('div', { className: 'pub-rows' }, r.pubs.map(function (p) {
+              return h('div', { className: 'pub-row', key: p.mtid },
+                h('span', { className: 'py' }, p.year || '—'),
+                h('span', { className: 'pt' }, p.title || '(untitled)'),
+                p.doi ? h('a', { className: 'ext', href: 'https://doi.org/' + p.doi, target: '_blank' }, 'DOI') : null,
+                p.citations ? h('span', { className: 'pc' }, p.citations + ' cit.') : null
+              );
+            }))
+          )));
+          return rows;
+        })))
+      )
+    );
+  }
+
   /* ---------- project preview ---------- */
   function ProjectPreview(props) {
     var project = props.project, onClose = props.onClose;
@@ -161,8 +205,8 @@
 
     /* phases */
     if (phase === 'loading') return h('div', { className: 'center-msg spin' }, h('div', { className: 'mk' }, h('span')), h('h1', null, 'Loading admin…'));
-    if (phase === 'signin') return h('div', { className: 'center-msg' }, h('div', { className: 'mk' }, h('span')), h('h1', null, 'Admin sign-in'), h('p', null, 'Sign in with the administrator Google account to manage Aloud.'), h('button', { className: 'btn pri', onClick: function () { sb.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: location.href.split('#')[0].split('?')[0] } }); } }, 'Continue with Google'));
-    if (phase === 'denied') return h('div', { className: 'center-msg' }, h('div', { className: 'mk' }, h('span')), h('h1', null, 'Access denied'), h('p', null, 'This area is for administrators only.' + (me && me.email ? ' Signed in as ' + me.email + '.' : '')), h('div', { style: { display: 'flex', gap: 10 } }, h('a', { className: 'btn', href: 'ProofReader.html' }, 'Back to Aloud'), h('button', { className: 'btn', onClick: signOut }, 'Sign out')));
+    if (phase === 'signin') return h(React.Fragment, null, h('div', { className: 'center-msg' }, h('div', { className: 'mk' }, h('span')), h('h1', null, 'Admin sign-in'), h('p', null, 'Sign in with the administrator Google account to manage users. The researcher profiles below are available without sign-in.'), h('button', { className: 'btn pri', onClick: function () { sb.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: location.href.split('#')[0].split('?')[0] } }); } }, 'Continue with Google')), h(Researchers));
+    if (phase === 'denied') return h(React.Fragment, null, h('div', { className: 'center-msg' }, h('div', { className: 'mk' }, h('span')), h('h1', null, 'Access denied'), h('p', null, 'Full user management is for administrators only.' + (me && me.email ? ' Signed in as ' + me.email + '.' : '')), h('div', { style: { display: 'flex', gap: 10 } }, h('a', { className: 'btn', href: 'ProofReader.html' }, 'Back to Aloud'), h('button', { className: 'btn', onClick: signOut }, 'Sign out'))), h(Researchers));
     if (phase === 'error') return h('div', { className: 'center-msg' }, h('div', { className: 'mk' }, h('span')), h('h1', null, 'Something went wrong'), h('p', null, errMsg || 'Could not load admin data.'), h('button', { className: 'btn pri', onClick: function () { setPhase('loading'); boot(); } }, 'Retry'));
 
     /* ready */
@@ -226,6 +270,7 @@
             : h('table', null, h('thead', null, tableHead), h('tbody', null, sorted.map(function (u) { return userRow(u, false); })))
         )
       ),
+      h(Researchers),
       h(UserDrawer, { user: selUser, agg: selUser ? aggFor(selUser.id) : { projects: [], storage: 0, chars: 0, requests: 0 }, onClose: function () { setSelUser(null); }, onPreview: function (p) { setPreview(p); }, onAction: setStatus }),
       preview && h(ProjectPreview, { project: preview, onClose: function () { setPreview(null); } })
     );
