@@ -206,7 +206,7 @@
     /* phases */
     if (phase === 'loading') return h('div', { className: 'center-msg spin' }, h('div', { className: 'mk' }, h('span')), h('h1', null, 'Loading admin…'));
     if (phase === 'signin') return h(React.Fragment, null, h('div', { className: 'center-msg' }, h('div', { className: 'mk' }, h('span')), h('h1', null, 'Admin sign-in'), h('p', null, 'Sign in with the administrator Google account to manage users. The researcher profiles below are available without sign-in.'), h('button', { className: 'btn pri', onClick: function () { sb.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: location.href.split('#')[0].split('?')[0] } }); } }, 'Continue with Google')), h(Researchers));
-    if (phase === 'denied') return h(React.Fragment, null, h('div', { className: 'center-msg' }, h('div', { className: 'mk' }, h('span')), h('h1', null, 'Access denied'), h('p', null, 'Full user management is for administrators only.' + (me && me.email ? ' Signed in as ' + me.email + '.' : '')), h('div', { style: { display: 'flex', gap: 10 } }, h('a', { className: 'btn', href: 'ProofReader.html' }, 'Back to Aloud'), h('button', { className: 'btn', onClick: signOut }, 'Sign out'))), h(Researchers));
+    if (phase === 'denied') return h(React.Fragment, null, h('div', { className: 'center-msg' }, h('div', { className: 'mk' }, h('span')), h('h1', null, 'Access denied'), h('p', null, 'Full user management is for administrators only.' + (me && me.email ? ' Signed in as ' + me.email + '.' : '')), h('div', { style: { display: 'flex', gap: 10 } }, h('a', { className: 'btn', href: 'ProofReader.html' }, 'Back to Publify'), h('button', { className: 'btn', onClick: signOut }, 'Sign out'))), h(Researchers));
     if (phase === 'error') return h('div', { className: 'center-msg' }, h('div', { className: 'mk' }, h('span')), h('h1', null, 'Something went wrong'), h('p', null, errMsg || 'Could not load admin data.'), h('button', { className: 'btn pri', onClick: function () { setPhase('loading'); boot(); } }, 'Retry'));
 
     /* ready */
@@ -243,7 +243,7 @@
 
     return h(React.Fragment, null,
       h('div', { className: 'topbar' },
-        h('div', { className: 'brand' }, h('span', { className: 'mk' }, h('span')), 'Aloud', h('span', { className: 'tag' }, 'ADMIN')),
+        h('div', { className: 'brand' }, h('span', { className: 'mk' }, h('span')), 'Publify', h('span', { className: 'tag' }, 'ADMIN')),
         h('div', { className: 'sp' }),
         h('a', { className: 'back', href: 'ProofReader.html' }, '← Back to app'),
         me && h('div', { className: 'me' }, h(Avatar, { u: me, size: 28 }), h('span', { className: 'nm' }, me.name || me.email)),

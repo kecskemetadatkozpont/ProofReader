@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Aloud</title>
+  <title>Publify</title>
   <meta http-equiv="refresh" content="0; url=Landing.html" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&display=swap" rel="stylesheet" />
@@ -12,9 +12,8 @@
     body { background: #eceef1; color: #1d2430; font-family: 'IBM Plex Sans', system-ui, sans-serif;
       display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; }
     .mk { width: 56px; height: 56px; border-radius: 16px; display: grid; place-items: center;
-      background: linear-gradient(135deg, #6366f1, #8b5cf6); box-shadow: 0 6px 18px rgba(79,70,229,.4); }
-    .mk span { width: 24px; height: 24px; border-radius: 50%; border: 3.5px solid #fff; border-right-color: transparent;
-      transform: rotate(-20deg); animation: spin .9s linear infinite; }
+      background: linear-gradient(135deg, #6366f1, #d946ef); box-shadow: 0 6px 18px rgba(79,70,229,.4); }
+    .mk span { width: 24px; height: 24px; border: 0; border-top: 2.8px solid #fff; border-left: 2.8px solid #fff; border-radius: 2px 0 0 0; transform: rotate(45deg); animation: spin .9s linear infinite; }
     @keyframes spin { to { transform: rotate(340deg); } }
     .t { font-size: 18px; font-weight: 700; letter-spacing: -.3px; }
     .s { font-size: 13px; color: #5b6473; }
@@ -23,8 +22,8 @@
 </head>
 <body>
   <div class="mk"><span></span></div>
-  <div class="t">Aloud</div>
-  <div class="s">Loading… if nothing happens, <a href="Landing.html">open Aloud</a>.</div>
+  <div class="t">Publify</div>
+  <div class="s">Loading… if nothing happens, <a href="Landing.html">open Publify</a>.</div>
   <script>location.replace('Landing.html');</script>
   <!-- build/version tracking -->
   <script src="build.js"></script>

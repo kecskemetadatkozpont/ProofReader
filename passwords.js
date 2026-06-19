@@ -1,6 +1,4 @@
-/* Aloud — initial password hashes (PBKDF2-SHA256, 150k iters) for the colleague profiles.
- * Only salted hashes are stored here; plaintext was delivered out-of-band. A colleague's CHANGED
- * password is kept in localStorage (proofreader:pw:<email>) and overrides this initial one. window.PRPasswords. */
+/* Publify — initial password hashes (PBKDF2-SHA256, 150k iters) for the colleague profiles. Hashes only; plaintext delivered out-of-band. A changed password lives in localStorage (proofreader:pw:<email>). window.PRPasswords. */
 window.PRPasswords = {
  "csikos.fanni@sze.hu": {
   "salt": "VgXuHh73SNfZDioszVPWVA==",
@@ -31,5 +29,20 @@ window.PRPasswords = {
   "salt": "OiWA0Joo4AnJ92xpKpljPQ==",
   "iters": 150000,
   "hash": "oUjaApE9tSP47qMsFIJzUA1JP0efc4xuWUqY9jdylKA="
+ },
+ "weltsch.zoltan@sze.hu": {
+  "salt": "1gMZnQuLDFWEd3TyhXQeFg==",
+  "iters": 150000,
+  "hash": "hb4J+o0Uajdjujre5knfTV80S39TN0wOS8ozC+J3p/k="
+ },
+ "nagy.zoltan@sze.hu": {
+  "salt": "GrdaX5RMVN3ADgpAqnODew==",
+  "iters": 150000,
+  "hash": "afLdND9V3qaTSNWF5W7PBnH0Ub65HMuwGy+37+9xia4="
+ },
+ "fulop.tamas@sze.hu": {
+  "salt": "ThdikTyp7bqCY1bpL23EcQ==",
+  "iters": 150000,
+  "hash": "K7MUyWrX0rQxZIuvXwOwktuRv669K4ov2PXcWXhcpZQ="
  }
 };

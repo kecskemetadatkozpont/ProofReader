@@ -1689,7 +1689,7 @@
               <svg viewBox="0 0 16 16" width="15" height="15"><path d="M10 3L5 8l5 5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
             </a>
             <div className="brand-mark"><span></span></div>
-            <div className="brand-text"><b>{init.title || 'Aloud'}</b><i>LaTeX read-aloud editor</i><span id="pr-ver-slot" className="pr-ver-slot"></span></div>
+            <div className="brand-text"><b>{init.title || 'Publify'}</b><i>researcher profiles &amp; publications</i><span id="pr-ver-slot" className="pr-ver-slot"></span></div>
           </div>
           <div className="topbar-center">
             <span className="file-chip"><svg viewBox="0 0 16 16" className="dot"><circle cx="8" cy="8" r="4" /></svg>{active ? bn(active) : 'No file open'}</span>

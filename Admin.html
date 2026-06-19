@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Aloud — Admin</title>
+  <title>Publify — Admin</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap" rel="stylesheet" />
@@ -21,8 +21,8 @@
 
     .topbar { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: 14px; height: 60px; padding: 0 24px; background: #fff; border-bottom: 1px solid var(--line); }
     .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 16px; }
-    .brand .mk { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: linear-gradient(135deg, #6366f1, #8b5cf6); }
-    .brand .mk span { width: 12px; height: 12px; border-radius: 50%; border: 2.4px solid #fff; border-right-color: transparent; transform: rotate(-20deg); }
+    .brand .mk { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: linear-gradient(135deg, #6366f1, #d946ef); }
+    .brand .mk span { width: 12px; height: 12px; border: 0; border-top: 2.8px solid #fff; border-left: 2.8px solid #fff; border-radius: 2px 0 0 0; transform: rotate(45deg); }
     .brand .tag { font-size: 11px; font-weight: 700; color: var(--be); background: #f1eaff; padding: 2px 8px; border-radius: 20px; letter-spacing: .04em; }
     .topbar .sp { flex: 1; }
     .topbar a.back { font-size: 13.5px; color: var(--muted); font-weight: 600; text-decoration: none; }
@@ -117,8 +117,8 @@
     .pv .src { padding: 20px; font-family: 'JetBrains Mono', monospace; font-size: 12px; white-space: pre-wrap; line-height: 1.7; color: #3a4250; overflow: auto; }
 
     .center-msg { min-height: 70vh; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 14px; text-align: center; padding: 30px; }
-    .center-msg .mk { width: 54px; height: 54px; border-radius: 15px; display: grid; place-items: center; background: linear-gradient(135deg, #6366f1, #8b5cf6); }
-    .center-msg .mk span { width: 22px; height: 22px; border-radius: 50%; border: 3.2px solid #fff; border-right-color: transparent; transform: rotate(-20deg); }
+    .center-msg .mk { width: 54px; height: 54px; border-radius: 15px; display: grid; place-items: center; background: linear-gradient(135deg, #6366f1, #d946ef); }
+    .center-msg .mk span { width: 22px; height: 22px; border: 0; border-top: 2.8px solid #fff; border-left: 2.8px solid #fff; border-radius: 2px 0 0 0; transform: rotate(45deg); }
     .center-msg.spin .mk span { animation: sp .9s linear infinite; }
     @keyframes sp { to { transform: rotate(340deg); } }
     .center-msg h1 { font-size: 20px; margin: 0; } .center-msg p { font-size: 14px; color: var(--muted); margin: 0; max-width: 30em; }

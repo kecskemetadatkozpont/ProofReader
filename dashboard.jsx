@@ -36,7 +36,7 @@ function SignIn({ onSignIn }) {
     <div className="signin">
       <div className="signin-card">
         <div className="brand-mark"><span></span></div>
-        <h1>Sign in to Aloud</h1>
+        <h1>Sign in to Publify</h1>
         <p>Listen to your manuscripts, collaborate, and proofread by ear.</p>
         {!pick
           ? <button className="google-btn" onClick={() => setPick(true)}>
@@ -403,7 +403,7 @@ function App() {
   return (
     <div>
       <header className="topbar">
-        <div className="brand"><div className="brand-mark"><span></span></div><div className="brand-text"><b>Aloud</b><i>LaTeX read-aloud editor</i><span id="pr-ver-slot" className="pr-ver-slot"></span></div></div>
+        <div className="brand"><div className="brand-mark"><span></span></div><div className="brand-text"><b>Publify</b><i>researcher profiles &amp; publications</i><span id="pr-ver-slot" className="pr-ver-slot"></span></div></div>
         <div className="top-right">
           {isAdmin && <a className="btn-ghost" href="Admin.html" title="Admin console"><svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"><path d="M8 1.8l5 1.9v3.6c0 3-2.1 5.2-5 6.1-2.9-.9-5-3.1-5-6.1V3.7z" /><path d="M5.8 8l1.6 1.6L10.4 6.5" /></svg>Admin</a>}
           <button className="btn-ghost" onClick={() => setModal('activity')}><svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.4"><circle cx="8" cy="8" r="6" /><path d="M8 5v3l2 1.5" strokeLinecap="round" /></svg>Activity</button>

@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Aloud — Hear your paper. Catch what your eyes miss.</title>
+  <title>Publify — Hear your paper. Catch what your eyes miss.</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&display=swap" rel="stylesheet" />
@@ -29,8 +29,8 @@
     .nav { position: sticky; top: 0; z-index: 50; background: rgba(255,255,255,.82); backdrop-filter: saturate(1.4) blur(12px); border-bottom: 1px solid var(--line); }
     .nav-in { display: flex; align-items: center; gap: 28px; height: 64px; }
     .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 17px; letter-spacing: -.02em; }
-    .brand .mk { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; background: linear-gradient(135deg, #6366f1, #8b5cf6); box-shadow: 0 3px 8px rgba(79,70,229,.35); }
-    .brand .mk span { width: 13px; height: 13px; border-radius: 50%; border: 2.6px solid #fff; border-right-color: transparent; transform: rotate(-20deg); }
+    .brand .mk { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; background: linear-gradient(135deg, #6366f1, #d946ef); box-shadow: 0 3px 8px rgba(79,70,229,.35); }
+    .brand .mk span { width: 13px; height: 13px; border: 0; border-top: 2.8px solid #fff; border-left: 2.8px solid #fff; border-radius: 2px 0 0 0; transform: rotate(45deg); }
     .nav-links { display: flex; gap: 24px; margin-left: 8px; }
     .nav-links a { font-size: 14px; color: var(--muted); font-weight: 500; }
     .nav-links a:hover { color: var(--ink); }
@@ -253,7 +253,7 @@
   <!-- NAV -->
   <header class="nav">
     <div class="wrap nav-in">
-      <a class="brand" href="#top"><span class="mk"><span></span></span>Aloud</a>
+      <a class="brand" href="#top"><span class="mk"><span></span></span>Publify</a>
       <nav class="nav-links">
         <a href="#features">Features</a>
         <a href="#how">How it works</a>
@@ -275,7 +275,7 @@
       <div class="hero-copy">
         <span class="eyebrow"><span class="dot"></span>Read-aloud LaTeX editor for researchers</span>
         <h1 class="hero-title">Hear your paper. Catch what your eyes miss.</h1>
-        <p class="hero-sub">Aloud is a browser-based LaTeX editor that reads your manuscript back to you, sentence by sentence — so typos, clumsy phrasing and missing words surface before your reviewers find them. Write, listen, collaborate, and track every change in one place.</p>
+        <p class="hero-sub">Publify is a browser-based LaTeX editor that reads your manuscript back to you, sentence by sentence — so typos, clumsy phrasing and missing words surface before your reviewers find them. Write, listen, collaborate, and track every change in one place.</p>
         <div class="hero-actions">
           <a class="btn btn-primary btn-lg" href="ProofReader.html">
             <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#fff" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.6 2.4 30.2 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.9 6.1C12.4 13.3 17.7 9.5 24 9.5z" opacity=".0"/></svg>
@@ -293,7 +293,7 @@
       <div class="mock" aria-hidden="true">
         <div class="mock-bar">
           <div class="mock-dots"><i></i><i></i><i></i></div>
-          <div class="mock-title">acoustic-review.tex — Aloud</div>
+          <div class="mock-title">acoustic-review.tex — Publify</div>
           <div class="mock-peers">
             <span class="av" style="background:#4f46e5">A</span>
             <span class="av" style="background:#0e9f6e">M</span>
@@ -354,16 +354,16 @@
   <section class="sec" id="features">
     <div class="wrap">
       <div class="sec-head">
-        <div class="sec-tag">Why Aloud</div>
+        <div class="sec-tag">Why Publify</div>
         <h2>Your ears notice what your eyes skim over</h2>
-        <p>You have read your introduction forty times. Aloud reads it back to you out loud, highlighting each sentence — the fastest way to catch the awkward clause you keep glossing over.</p>
+        <p>You have read your introduction forty times. Publify reads it back to you out loud, highlighting each sentence — the fastest way to catch the awkward clause you keep glossing over.</p>
       </div>
 
       <div class="frow">
         <div class="fr-copy">
           <span class="fr-kicker"><span class="ic"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 6v4h2l3 2.5v-9L5 6z"/><path d="M11 5.5a3.5 3.5 0 010 5" stroke-linecap="round"/></svg></span>Read-aloud narration</span>
           <h3>Press play and proofread with your ears</h3>
-          <p class="fr-body">Aloud speaks your document one sentence at a time and highlights exactly where it is. Click any sentence to jump there; edit while it reads and it pauses, then offers to resume. Natural-sounding AI voices are available, with a free browser voice by default.</p>
+          <p class="fr-body">Publify speaks your document one sentence at a time and highlights exactly where it is. Click any sentence to jump there; edit while it reads and it pauses, then offers to resume. Natural-sounding AI voices are available, with a free browser voice by default.</p>
           <ul class="fr-list">
             <li><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M13.5 4.5L6.5 12 3 8.5" stroke-linecap="round" stroke-linejoin="round"/></svg>Sentence-synced highlighting in the live preview</li>
             <li><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M13.5 4.5L6.5 12 3 8.5" stroke-linecap="round" stroke-linejoin="round"/></svg>Click-to-listen from any point; resume where you left off</li>
@@ -453,14 +453,14 @@
       <div class="sec-head">
         <div class="sec-tag">See it in action</div>
         <h2>Click a dense equation — hear it explained</h2>
-        <p>A preview of <b>Explain aloud</b>: tap any equation and Aloud breaks it down in plain language, then reads the explanation back to you. <span class="soon-inline">Coming soon</span></p>
+        <p>A preview of <b>Explain aloud</b>: tap any equation and Publify breaks it down in plain language, then reads the explanation back to you. <span class="soon-inline">Coming soon</span></p>
       </div>
 
       <div class="demo-stage">
         <div class="demo-win">
           <div class="mock-bar">
             <div class="mock-dots"><i></i><i></i><i></i></div>
-            <div class="mock-title">attention.tex — Aloud</div>
+            <div class="mock-title">attention.tex — Publify</div>
           </div>
           <div class="demo-doc">
             <h4>3.2 Scaled dot-product attention</h4>
@@ -567,7 +567,7 @@
         <div class="step">
           <div class="n"></div>
           <h4>Listen &amp; proofread</h4>
-          <p>Press play. Aloud reads each sentence and highlights it, while diagnostics flag anything that won't compile or reads wrong.</p>
+          <p>Press play. Publify reads each sentence and highlights it, while diagnostics flag anything that won't compile or reads wrong.</p>
         </div>
         <div class="step">
           <div class="n"></div>
@@ -582,9 +582,9 @@
   <section class="sec" id="workflow">
     <div class="wrap">
       <div class="sec-head">
-        <div class="sec-tag">Where Aloud is headed</div>
+        <div class="sec-tag">Where Publify is headed</div>
         <h2>From idea to published paper — in one place</h2>
-        <p>We're extending Aloud beyond the editor into the full research workflow — from picking your target journal to running the experiments behind your figures. <span class="soon-inline">In development</span></p>
+        <p>We're extending Publify beyond the editor into the full research workflow — from picking your target journal to running the experiments behind your figures. <span class="soon-inline">In development</span></p>
       </div>
 
       <!-- 1. Journal-aware project setup -->
@@ -592,7 +592,7 @@
         <div class="fr-copy">
           <span class="fr-kicker"><span class="ic"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 2.5h7l3 3V13a.5.5 0 01-.5.5h-9A.5.5 0 013 13z"/><path d="M6 6.5h4M6 9h4M6 11h2.5" stroke-linecap="round"/></svg></span>Journal-aware project setup <span class="soon-inline">Coming soon</span></span>
           <h3>Start from your target journal</h3>
-          <p class="fr-body">Choose where you want to publish. Aloud loads that journal's submission requirements — structure, length, reference style, figure specs — and guides your manuscript to match as you write.</p>
+          <p class="fr-body">Choose where you want to publish. Publify loads that journal's submission requirements — structure, length, reference style, figure specs — and guides your manuscript to match as you write.</p>
           <ul class="fr-list">
             <li><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M13.5 4.5L6.5 12 3 8.5" stroke-linecap="round" stroke-linejoin="round"/></svg>Pick from leading journals — or add your own</li>
             <li><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M13.5 4.5L6.5 12 3 8.5" stroke-linecap="round" stroke-linejoin="round"/></svg>A live checklist against the journal's guidelines</li>
@@ -624,7 +624,7 @@
         <div class="fr-copy">
           <span class="fr-kicker"><span class="ic"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14" stroke-linecap="round"/></svg></span>Research gap analysis <span class="soon-inline">Coming soon</span></span>
           <h3>Find the gap worth filling</h3>
-          <p class="fr-body">Enter your topic areas and Aloud maps the surrounding literature, surfacing under-explored gaps — then cross-checks them against what your target journal actually publishes, so you aim at the right opening.</p>
+          <p class="fr-body">Enter your topic areas and Publify maps the surrounding literature, surfacing under-explored gaps — then cross-checks them against what your target journal actually publishes, so you aim at the right opening.</p>
           <ul class="fr-list">
             <li><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M13.5 4.5L6.5 12 3 8.5" stroke-linecap="round" stroke-linejoin="round"/></svg>Topic-driven scan of the literature landscape</li>
             <li><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M13.5 4.5L6.5 12 3 8.5" stroke-linecap="round" stroke-linejoin="round"/></svg>Highlights under-explored gaps and saturated areas</li>
@@ -710,7 +710,7 @@
     <div class="wrap">
       <div class="free">
         <h2>Free for academic research groups</h2>
-        <p>Aloud is free for researchers and their teams. Sign in with your Google account, tell us your university affiliation, and start writing once your account is approved.</p>
+        <p>Publify is free for researchers and their teams. Sign in with your Google account, tell us your university affiliation, and start writing once your account is approved.</p>
         <a class="btn btn-primary btn-lg" href="ProofReader.html">Get started — free</a>
       </div>
     </div>
@@ -724,8 +724,8 @@
         <h2>Questions, answered</h2>
       </div>
       <div class="faq">
-        <div class="qa"><button>Is it really free?<span class="pm"></span></button><div class="ans"><p>Yes — Aloud is free for academic research groups. You sign in with Google and provide your university affiliation; an administrator approves new accounts before first use.</p></div></div>
-        <div class="qa"><button>Do I need to install LaTeX?<span class="pm"></span></button><div class="ans"><p>No. Aloud runs entirely in your browser, including the live preview. There is no local toolchain to set up — open the editor and start writing.</p></div></div>
+        <div class="qa"><button>Is it really free?<span class="pm"></span></button><div class="ans"><p>Yes — Publify is free for academic research groups. You sign in with Google and provide your university affiliation; an administrator approves new accounts before first use.</p></div></div>
+        <div class="qa"><button>Do I need to install LaTeX?<span class="pm"></span></button><div class="ans"><p>No. Publify runs entirely in your browser, including the live preview. There is no local toolchain to set up — open the editor and start writing.</p></div></div>
         <div class="qa"><button>Which voices are used for read-aloud?<span class="pm"></span></button><div class="ans"><p>A free built-in browser voice is the default. Natural-sounding AI voices are also available; they are metered and cached so the same sentence is never synthesized twice, keeping costs predictable.</p></div></div>
         <div class="qa"><button>Can I collaborate with co-authors?<span class="pm"></span></button><div class="ans"><p>Yes. Invite co-authors to a project and see their cursors live. Comments and to-dos anchor to specific passages, with editor, commenter and viewer roles.</p></div></div>
         <div class="qa"><button>Is my work safe?<span class="pm"></span></button><div class="ans"><p>Your projects sync to the cloud with automatic version history and per-account isolation, so a cleared browser or a single mistaken edit never loses your work.</p></div></div>
@@ -751,7 +751,7 @@
     <div class="wrap">
       <div class="foot-grid">
         <div class="foot-brand">
-          <a class="brand" href="#top"><span class="mk"><span></span></span>Aloud</a>
+          <a class="brand" href="#top"><span class="mk"><span></span></span>Publify</a>
           <p>The read-aloud LaTeX editor for researchers. Write, listen, collaborate and track — all in your browser.</p>
         </div>
         <div class="foot-col">
@@ -775,7 +775,7 @@
         </div>
       </div>
       <div class="foot-base">
-        <span>© 2026 Aloud. Free for academic research.</span>
+        <span>© 2026 Publify. Free for academic research.</span>
         <span>Made for researchers who read out loud.</span>
       </div>
     </div>

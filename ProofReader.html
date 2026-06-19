@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Aloud — LaTeX read-aloud editor</title>
+  <title>Publify — researcher profiles & publications</title>
 
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -67,10 +67,9 @@
     .back-btn:hover { color: var(--accent); border-color: var(--accent); }
     .brand-mark {
       width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center;
-      background: linear-gradient(135deg, #6366f1, #8b5cf6); box-shadow: 0 2px 6px rgba(79, 70, 229, .35);
+      background: linear-gradient(135deg, #6366f1, #d946ef); box-shadow: 0 2px 6px rgba(79, 70, 229, .35);
     }
-    .brand-mark span { width: 13px; height: 13px; border-radius: 50%; border: 2.5px solid #fff;
-      border-right-color: transparent; transform: rotate(-20deg); }
+    .brand-mark span { width: 13px; height: 13px; border: 0; border-top: 2.8px solid #fff; border-left: 2.8px solid #fff; border-radius: 2px 0 0 0; transform: rotate(45deg); }
     .brand-text { display: flex; flex-direction: column; line-height: 1.15; min-width: 0; }
     .brand-text b { font-size: 14px; font-weight: 700; letter-spacing: -.2px; max-width: 240px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .brand-text i { font-size: 11px; color: var(--muted); font-style: normal; }
@@ -567,8 +566,8 @@
     #pr-boot { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
       background: var(--app-bg); z-index: 999; }
     #pr-boot .boot-mark { width: 56px; height: 56px; border-radius: 16px; display: grid; place-items: center;
-      background: linear-gradient(135deg, #6366f1, #8b5cf6); box-shadow: 0 6px 18px rgba(79,70,229,.4); }
-    #pr-boot .boot-mark span { width: 24px; height: 24px; border-radius: 50%; border: 3.5px solid #fff; border-right-color: transparent; transform: rotate(-20deg);
+      background: linear-gradient(135deg, #6366f1, #d946ef); box-shadow: 0 6px 18px rgba(79,70,229,.4); }
+    #pr-boot .boot-mark span { width: 24px; height: 24px; border: 0; border-top: 2.8px solid #fff; border-left: 2.8px solid #fff; border-radius: 2px 0 0 0; transform: rotate(45deg);
       animation: bootspin 0.9s linear infinite; }
     @keyframes bootspin { to { transform: rotate(340deg); } }
     #pr-boot .boot-title { font-size: 19px; font-weight: 700; letter-spacing: -.3px; color: var(--ink, #1d2430); }
@@ -923,7 +922,7 @@
   <div id="root">
     <div id="pr-boot">
       <div class="boot-mark"><span></span></div>
-      <div class="boot-title">Aloud</div>
+      <div class="boot-title">Publify</div>
       <div class="boot-sub">Loading your project…</div>
       <div class="boot-bar"><i></i></div>
     </div>

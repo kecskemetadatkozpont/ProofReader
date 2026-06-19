@@ -18,7 +18,10 @@
     { id: 'u_ihasz', name: 'Ihász Máté', email: 'ihasz.mate@sze.hu', color: '#be185d', plan: 'pro' },
     { id: 'u_jagicza', name: 'Jagicza Márton', email: 'jagicza.marton@ga.sze.hu', color: '#ca8a04', plan: 'pro' },
     { id: 'u_cseke', name: 'Cseke Tibor', email: 'cseke.tibor@sze.hu', color: '#059669', plan: 'pro' },
-    { id: 'u_sutheo', name: 'Sütheő Gergő', email: 'sutheo.gergo@ga.sze.hu', color: '#dc2626', plan: 'pro' }
+    { id: 'u_sutheo', name: 'Sütheő Gergő', email: 'sutheo.gergo@ga.sze.hu', color: '#dc2626', plan: 'pro' },
+    { id: 'u_weltsch', name: 'Weltsch Zoltán', email: 'weltsch.zoltan@sze.hu', color: '#ea580c', plan: 'pro' },
+    { id: 'u_nagyz', name: 'Nagy Zoltán', email: 'nagy.zoltan@sze.hu', color: '#0d9488', plan: 'pro' },
+    { id: 'u_fulop', name: 'Fülöp Tamás', email: 'fulop.tamas@sze.hu', color: '#4d7c0f', plan: 'pro' }
   ];
 
   function read(k, d) { try { return JSON.parse(localStorage.getItem(k)) || d; } catch (e) { return d; } }

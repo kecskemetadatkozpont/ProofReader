@@ -25,8 +25,8 @@
       '#pr-ob{position:fixed;inset:0;z-index:1200;display:flex;align-items:center;justify-content:center;padding:24px;'
       + 'background:radial-gradient(120% 120% at 50% -10%,#f1f0fe 0%,#eceef1 60%);font-family:"IBM Plex Sans",system-ui,sans-serif;overflow:auto}'
       + '#pr-ob .card{width:480px;max-width:100%;background:#fff;border-radius:18px;box-shadow:0 24px 64px rgba(20,24,40,.2);padding:34px 34px 28px;margin:auto}'
-      + '#pr-ob .mk{width:50px;height:50px;border-radius:14px;display:grid;place-items:center;background:linear-gradient(135deg,#6366f1,#8b5cf6);box-shadow:0 6px 16px rgba(79,70,229,.4);margin-bottom:18px}'
-      + '#pr-ob .mk span{width:21px;height:21px;border-radius:50%;border:3.2px solid #fff;border-right-color:transparent;transform:rotate(-20deg)}'
+      + '#pr-ob .mk{width:50px;height:50px;border-radius:14px;display:grid;place-items:center;background:linear-gradient(135deg,#6366f1,#d946ef);box-shadow:0 6px 16px rgba(79,70,229,.4);margin-bottom:18px}'
+      + '#pr-ob .mk span{width:17px;height:17px;border:0;border-top:3.2px solid #fff;border-left:3.2px solid #fff;border-radius:3px 0 0 0;transform:rotate(45deg);margin-top:4px}'
       + '#pr-ob h1{font-size:22px;margin:0 0 6px;letter-spacing:-.3px;color:#1a2030}'
       + '#pr-ob p.sub{font-size:14px;color:#5b6473;margin:0 0 22px;line-height:1.55}'
       + '#pr-ob .who{display:flex;align-items:center;gap:11px;background:#f5f6f9;border:1px solid #e6e8ee;border-radius:12px;padding:10px 13px;margin-bottom:20px}'
@@ -88,8 +88,8 @@
   function form() {
     var html = ''
       + '<div class="mk"><span></span></div>'
-      + '<h1>Welcome to Aloud</h1>'
-      + '<p class="sub">Aloud is free for academic research. Tell us where you work so an administrator can approve your account.</p>'
+      + '<h1>Welcome to Publify</h1>'
+      + '<p class="sub">Publify is free for academic research. Tell us where you work so an administrator can approve your account.</p>'
       + whoBlock()
       + '<div class="field">'
       + '  <label for="ob-aff">University / institution</label>'
@@ -187,12 +187,12 @@
   function rejected() {
     statusScreen({ tag: 'Not approved', fg: '#b42318', bg: '#fdeef0', icon: icX,
       title: 'Your account wasn\u2019t approved',
-      body: 'An administrator did not approve this account for Aloud. If you think this is a mistake, please contact your administrator.' });
+      body: 'An administrator did not approve this account for Publify. If you think this is a mistake, please contact your administrator.' });
   }
   function suspended() {
     statusScreen({ tag: 'Suspended', fg: '#5b6473', bg: '#eef0f3', icon: icPause,
       title: 'Your account is suspended',
-      body: 'Access to Aloud has been paused for this account. Please contact your administrator to restore it.' });
+      body: 'Access to Publify has been paused for this account. Please contact your administrator to restore it.' });
   }
 
   /* ---------- admin launcher (approved admins) ---------- */

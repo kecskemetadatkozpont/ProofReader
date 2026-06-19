@@ -196,8 +196,10 @@
     if (document.getElementById('pr-auth-css')) return;
     var css = '#pr-signin,#pr-splash{position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;background:radial-gradient(120% 120% at 50% 0%,#f4f5fb 0%,#eceef1 60%);font-family:"IBM Plex Sans",system-ui,sans-serif}'
       + '.pr-card{width:380px;max-width:calc(100% - 32px);background:#fff;border-radius:18px;box-shadow:0 20px 60px rgba(20,24,40,.18);padding:38px 34px;text-align:center}'
-      + '.pr-mk{width:54px;height:54px;border-radius:15px;margin:0 auto 16px;display:grid;place-items:center;background:linear-gradient(135deg,#6366f1,#8b5cf6);box-shadow:0 6px 16px rgba(79,70,229,.4)}'
-      + '.pr-mk span{width:23px;height:23px;border-radius:50%;border:3.5px solid #fff;border-right-color:transparent;transform:rotate(-20deg)}'
+      + '.pr-mk{width:54px;height:54px;border-radius:15px;margin:0 auto 16px;display:grid;place-items:center;background:linear-gradient(135deg,#6366f1,#d946ef);box-shadow:0 6px 16px rgba(79,70,229,.4)}'
+      + '.pr-mk span{width:18px;height:18px;border:0;border-top:3.5px solid #fff;border-left:3.5px solid #fff;border-radius:3px 0 0 0;transform:rotate(45deg)}'
+      + '.pr-mk:not(.spin) span{margin-top:4px}'
+      + '.pr-mk.spin span{width:23px;height:23px;border:3.5px solid #fff;border-right-color:transparent;border-radius:50%;border-top-color:#fff;border-left-color:#fff;transform:rotate(-20deg)}'
       + '.pr-mk.spin span{animation:pr-spin .8s linear infinite}@keyframes pr-spin{to{transform:rotate(340deg)}}'
       + '.pr-card h1{font-size:21px;margin:0 0 4px;letter-spacing:-.3px;color:#1d2430}'
       + '.pr-card p{font-size:13.5px;color:#5b6473;margin:0 0 24px;line-height:1.5}'
@@ -230,7 +232,7 @@
     injectCss();
     var d = document.createElement('div'); d.id = 'pr-signin';
     d.innerHTML = '<div class="pr-card"><div class="pr-mk"><span></span></div>'
-      + '<h1>Sign in to Aloud</h1><p>Your projects sync to the cloud and stay safe across devices.</p>'
+      + '<h1>Sign in to Publify</h1><p>Your projects sync to the cloud and stay safe across devices.</p>'
       + (errMsg ? '<div class="pr-err">' + errMsg + '</div>' : '')
       + '<button class="pr-g" id="pr-google">' + GBTN + 'Continue with Google</button>'
       + '<div class="pr-sep"></div>'

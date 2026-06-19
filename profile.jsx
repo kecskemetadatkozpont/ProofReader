@@ -182,7 +182,7 @@ function DataSync(props) {
     ['Comments, to-dos, versions', isCloud ? 'Supabase' : 'This browser', isCloud ? 'yes' : 'no', 'collaborators'],
     ['Settings (voice / spell / pronunciation)', 'This browser only', 'no', 'no — yours alone'],
     ['Usage & reading positions', 'This browser only', 'no', 'no'],
-    ['ElevenLabs API key', 'This browser only', 'no', 'no — never sent to Aloud'],
+    ['ElevenLabs API key', 'This browser only', 'no', 'no — never sent to Publify'],
     ['Generated audio (MP3 cache)', 'This browser (IndexedDB)', 'no', 'shared cache on cloud projects'],
   ];
   return <div>
@@ -305,7 +305,7 @@ function Login(props) {
     <input className="pf-login-in" type="password" autoComplete="current-password" placeholder="Password" value={pw} aria-label="Password" onChange={function (e) { setPw(e.target.value); }} />
     {err ? <div className="pf-login-err">{err}</div> : null}
     <button className="btn-primary" type="submit" disabled={busy} style={{ width: '100%', justifyContent: 'center' }}>{busy ? 'Signing in…' : 'Sign in'}</button>
-    <div className="pf-login-note">Forgot your password? Contact the administrator. · <a href="Projects.html">Back to Aloud</a></div>
+    <div className="pf-login-note">Forgot your password? Contact the administrator. · <a href="Projects.html">Back to Publify</a></div>
   </form></div>;
 }
 
