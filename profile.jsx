@@ -250,7 +250,7 @@ function Publications(props) {
         <div><b>{totalCites}</b><span>citations (MTMT)</span></div>
         <div><b>{pubs.filter(function (p) { return p.doi; }).length}</b><span>with a DOI</span></div>
       </div>
-      <div className="pf-note">Imported from <a href={'https://m2.mtmt.hu/gui2/?mode=browse&params=author;' + rec.mtmtId} target="_blank" rel="noopener">MTMT</a> (as of 19 June 2026){rec.orcid ? <span> · ORCID <a href={'https://orcid.org/' + rec.orcid} target="_blank" rel="noopener">{rec.orcid}</a></span> : null}. Citation counts are a snapshot. Attach the PDF or data files for each item below — they are stored in this browser.</div>
+      <div className="pf-note">Imported from <a href={'https://m2.mtmt.hu/gui2/?mode=browse&params=author;' + rec.mtmtId} target="_blank" rel="noopener">MTMT</a> (as of 19 June 2026){rec.orcid ? <span> · ORCID <a href={'https://orcid.org/' + rec.orcid} target="_blank" rel="noopener">{rec.orcid}</a></span> : null}. Citation counts are a snapshot. Attach the PDF or data files for each item below — {(window.PRPubFiles && window.PRPubFiles.cloud) ? 'they are stored securely in your cloud account (Supabase Storage), available on any device.' : 'they are stored in this browser.'}</div>
     </div>
     {err ? <div className="pf-note err" style={{ margin: '0 0 10px' }}>{err}</div> : null}
     {years.map(function (y) { return <div key={y}>
