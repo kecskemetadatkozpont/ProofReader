@@ -1726,8 +1726,9 @@
             <div className="acct-mini">
               <button className="acct-btn" onClick={(e) => { e.stopPropagation(); setAcctOpen((v) => !v); }}><Collab.Avatar user={me} size={30} /></button>
               {acctOpen && <div className="menu acct-menu" onClick={(e) => e.stopPropagation()}>
-                <div className="mhead"><Collab.Avatar user={me} size={36} /><div><b>{me.name}</b><small>{me.email}</small></div></div>
+                <a className="mhead" href="Profile.html" style={{ textDecoration: 'none', color: 'inherit' }}><Collab.Avatar user={me} size={36} /><div><b>{me.name}</b><small>{me.email}</small></div></a>
                 <div className="divider" />
+                <a className="mi" href="Profile.html"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><circle cx="8" cy="5.5" r="2.5" /><path d="M3.5 13.5c0-2.5 2-4 4.5-4s4.5 1.5 4.5 4" strokeLinecap="round" /></svg>Open profile</a>
                 <a className="mi" href="Projects.html"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M10 3L5 8l5 5" strokeLinecap="round" strokeLinejoin="round" /></svg>Back to projects</a>
                 <div className="sub">Switch account</div>
                 {window.PRAuth.users().filter((u) => u.id !== me.id).map((u) => <button key={u.id} className="mi" onClick={() => { window.PRAuth.signIn(u.id); location.reload(); }}><Collab.Avatar user={u} size={20} />{u.name}</button>)}

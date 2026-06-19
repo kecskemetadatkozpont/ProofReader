@@ -274,8 +274,9 @@ function AccountMenu({ me, onClose, onUsage, onSwitch, onSignOut }) {
   const u = Store.usage(me.id);
   return (
     <div className="menu" onClick={(e) => e.stopPropagation()}>
-      <div className="mhead"><Avatar user={me} size={38} /><div><b>{me.name}</b><small>{me.email}</small></div><span className="plan-pill">{u.planLabel}</span></div>
+      <a className="mhead mhead-link" href="Profile.html" title="Open your profile"><Avatar user={me} size={38} /><div><b>{me.name}</b><small>{me.email}</small></div><span className="plan-pill">{u.planLabel}</span></a>
       <div className="divider" />
+      <a className="mi" href="Profile.html"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><circle cx="8" cy="5.5" r="2.5" /><path d="M3.5 13.5c0-2.5 2-4 4.5-4s4.5 1.5 4.5 4" strokeLinecap="round" /></svg>Open profile</a>
       <button className="mi" onClick={onUsage}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M2 13h12M4 13V7M8 13V3M12 13V9" strokeLinecap="round" /></svg>Usage &amp; storage</button>
       <div className="sub">Switch account</div>
       {Auth.users().filter((x) => x.id !== me.id).map((x) => (

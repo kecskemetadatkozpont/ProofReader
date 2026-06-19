@@ -51,6 +51,8 @@
   function subscribe(cb) { subs.push(cb); return function () { subs = subs.filter(function (x) { return x !== cb; }); }; }
 
   function curId() { var u = window.PRAuth && window.PRAuth.current(); return u ? u.id : 'u_anna'; }
+  // for per-user prefs: a signed-out session gets its OWN namespace ('__anon'), not a real user's blob
+  function prefUid() { var u = window.PRAuth && window.PRAuth.current(); return u ? u.id : '__anon'; }
 
   function normalize(p) {
     if (!p) return p;
@@ -316,9 +318,15 @@
     getReading: function (userId, projectId) { var r = read(READING, {}) || {}; return r[userId + ':' + projectId] || null; },
     setReading: function (userId, projectId, idx) { var r = read(READING, {}) || {}; r[userId + ':' + projectId] = { idx: idx, at: Date.now() }; try { localStorage.setItem(READING, JSON.stringify(r)); } catch (e) { } },
 
-    /* ---- prefs ---- */
-    prefs: function () { return read(PREFS, {}) || {}; },
-    setPrefs: function (p) { try { localStorage.setItem(PREFS, JSON.stringify(Object.assign(this.prefs(), p))); } catch (e) { } },
+    /* ---- prefs (per-user-in-this-browser, so the 4 seeded demo users don't share one voice/spell/pron blob;
+       first read for a user inherits the legacy shared blob so no existing settings are lost on upgrade) ---- */
+    prefs: function () {
+      var k = PREFS + ':' + prefUid();
+      var v = read(k, null);
+      if (v == null) { var legacy = read(PREFS, null); v = legacy || {}; if (legacy) { try { localStorage.setItem(k, JSON.stringify(legacy)); } catch (e) { } } }
+      return v || {};
+    },
+    setPrefs: function (p) { try { localStorage.setItem(PREFS + ':' + prefUid(), JSON.stringify(Object.assign(this.prefs(), p))); } catch (e) { } },
 
     countSentences: countSentences, titleGuess: titleGuess, bytesOf: bytesOf,
     seedIfEmpty: function () {

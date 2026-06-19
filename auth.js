@@ -27,6 +27,7 @@
   function current() { var a = read(AUTH, null); return a && a.userId ? byId(a.userId) : null; }
   function signIn(id) { write(AUTH, { userId: id, at: Date.now() }); }
   function signOut() { write(AUTH, { userId: null }); }
+  function updateUser(id, patch) { var us = users(); for (var i = 0; i < us.length; i++) { if (us[i].id === id) { us[i] = Object.assign({}, us[i], patch); write(USERS, us); return us[i]; } } return null; }
   function initials(name) {
     return String(name || '?').trim().split(/\s+/).slice(0, 2).map(function (w) { return w[0]; }).join('').toUpperCase();
   }
@@ -46,5 +47,5 @@
     };
   }
 
-  window.PRAuth = { users: users, byId: byId, byEmail: byEmail, current: current, signIn: signIn, signOut: signOut, initials: initials, startPresence: startPresence, SEED: SEED };
+  window.PRAuth = { users: users, byId: byId, byEmail: byEmail, current: current, signIn: signIn, signOut: signOut, updateUser: updateUser, initials: initials, startPresence: startPresence, SEED: SEED };
 })();

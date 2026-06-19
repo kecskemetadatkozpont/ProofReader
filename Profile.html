@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Aloud — Profile</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+  <style>
+    :root {
+      --accent: #4f46e5; --accent-d: #4338ca; --line: #e4e7ec; --muted: #6b7280;
+      --bg: #eceef1; --pane: #ffffff; --app-bg: #f5f6f8; --ink: #1d2430;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body { font-family: 'IBM Plex Sans', system-ui, sans-serif; background: var(--bg); color: var(--ink); -webkit-font-smoothing: antialiased; }
+    a { color: var(--accent); text-decoration: none; } a:hover { text-decoration: underline; }
+    button { font-family: inherit; cursor: pointer; }
+
+    .btn-primary { display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 17px; border: 0; white-space: nowrap;
+      background: var(--accent); color: #fff; border-radius: 9px; font-size: 13.5px; font-weight: 600; box-shadow: 0 2px 8px rgba(79,70,229,.32); }
+    .btn-primary:hover { background: var(--accent-d); text-decoration: none; }
+    .btn-ghost { display: inline-flex; align-items: center; gap: 7px; height: 36px; padding: 0 14px; border: 1px solid var(--line);
+      background: var(--pane); color: var(--ink); border-radius: 8px; font-size: 13px; font-weight: 600; white-space: nowrap; }
+    .btn-ghost:hover { color: var(--accent); border-color: var(--accent); text-decoration: none; }
+    .btn-ghost.danger:hover { color: #dc2626; border-color: #dc2626; }
+    .avatar { border-radius: 50%; color: #fff; font-weight: 700; display: grid; place-items: center; flex: none; user-select: none; }
+    .plan-pill { font-size: 10.5px; font-weight: 700; padding: 3px 9px; border-radius: 20px; background: #e8e7fb; color: var(--accent); text-transform: capitalize; }
+    .acct { position: relative; }
+    .menu { position: absolute; background: var(--pane); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 14px 38px rgba(20,24,40,.2); z-index: 40; padding: 6px; }
+    .menu button.mi { display: flex; align-items: center; gap: 9px; width: 100%; text-align: left; border: 0; background: transparent; color: var(--ink); font-size: 13px; padding: 9px 10px; border-radius: 7px; }
+    .menu button.mi:hover { background: color-mix(in srgb, var(--accent) 9%, transparent); }
+
+    /* ---- profile hub ---- */
+    .pf { min-height: 100vh; display: flex; flex-direction: column; }
+    .pf-head { background: var(--pane); border-bottom: 1px solid var(--line); padding: 14px 28px 20px; }
+    .pf-head-top { margin-bottom: 12px; }
+    .pf-back { font-size: 13px; font-weight: 600; color: var(--muted); }
+    .pf-ver { margin-left: 12px; font-size: 11px; color: var(--muted); }
+    .pf-table { min-width: 480px; }
+    .pf-id { display: flex; align-items: center; gap: 18px; max-width: 1100px; margin: 0 auto; width: 100%; }
+    .pf-id-main { min-width: 0; }
+    .pf-id-main h1 { font-size: 22px; margin: 0 0 2px; display: flex; align-items: center; gap: 8px; }
+    .pf-edit { border: 0; background: transparent; color: var(--muted); font-size: 14px; padding: 2px 5px; border-radius: 6px; }
+    .pf-edit:hover { color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+    .pf-name-edit { display: flex; gap: 7px; align-items: center; margin-bottom: 3px; }
+    .pf-name-edit input { height: 34px; border: 1px solid var(--line); border-radius: 8px; padding: 0 10px; font: inherit; font-size: 18px; font-weight: 600; }
+    .pf-email { font-size: 13.5px; color: var(--muted); }
+    .pf-chips { display: flex; align-items: center; gap: 9px; margin-top: 8px; flex-wrap: wrap; }
+    .pf-mode { font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 20px; }
+    .pf-mode.cloud { background: #e6f3ec; color: #1c7a47; }
+    .pf-mode.demo { background: #fdecdf; color: #b4530f; }
+    .pf-tints { display: flex; gap: 5px; margin-top: 10px; }
+    .pf-tint { width: 18px; height: 18px; border-radius: 50%; border: 2px solid transparent; padding: 0; }
+    .pf-tint.on { border-color: var(--ink); box-shadow: 0 0 0 2px var(--pane) inset; }
+    .pf-head-actions { display: flex; align-items: center; gap: 10px; margin-left: auto; flex: none; }
+
+    .pf-body { flex: 1; display: flex; max-width: 1100px; width: 100%; margin: 0 auto; }
+    .pf-rail { flex: none; width: 210px; padding: 18px 12px; border-right: 1px solid var(--line); display: flex; flex-direction: column; gap: 2px; }
+    .pf-nav { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; border: 0; background: transparent; color: var(--ink); font-size: 13.5px; font-weight: 600; padding: 9px 11px; border-radius: 9px; }
+    .pf-nav svg { width: 16px; height: 16px; opacity: .8; flex: none; }
+    .pf-nav:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+    .pf-nav.on { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); }
+    .pf-dot { width: 7px; height: 7px; border-radius: 50%; background: #dc2626; margin-left: auto; }
+    .pf-soon { margin-top: auto; font-size: 11px; color: var(--muted); padding: 10px 11px; opacity: .7; }
+
+    .pf-main { flex: 1; min-width: 0; padding: 22px 28px 60px; }
+    .pf-h { font-size: 19px; margin: 4px 0 16px; }
+    .pf-h3 { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 24px 0 10px; }
+    .pf-flags { display: flex; flex-direction: column; gap: 8px; margin-bottom: 18px; }
+    .pf-flag { display: flex; align-items: center; gap: 10px; padding: 10px 13px; background: #fdecdf; border: 1px solid #f3d3b6; border-radius: 9px; font-size: 13px; }
+    .pf-flag span { color: #92400e; } .pf-flag button { margin-left: auto; border: 0; background: transparent; color: #b4530f; font-weight: 700; font-size: 12.5px; }
+    .pf-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+    .pf-stat { background: var(--pane); border: 1px solid var(--line); border-radius: 11px; padding: 14px; }
+    .pf-stat b { font-size: 21px; display: block; } .pf-stat span { font-size: 11.5px; color: var(--muted); }
+    .pf-cards { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+    .pf-card { display: block; background: var(--pane); border: 1px solid var(--line); border-radius: 11px; padding: 14px 15px; color: inherit; }
+    .pf-card:hover { border-color: var(--accent); text-decoration: none; box-shadow: 0 4px 14px rgba(20,24,40,.06); }
+    .pf-card-t { font-size: 14.5px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+    .pf-shared { font-size: 9.5px; font-weight: 700; text-transform: uppercase; color: var(--muted); background: var(--app-bg); padding: 1px 6px; border-radius: 8px; }
+    .pf-card-m { font-size: 12px; color: var(--muted); margin-top: 5px; }
+    .pf-actions { margin-top: 18px; }
+    .pf-panel { background: var(--pane); border: 1px solid var(--line); border-radius: 11px; padding: 15px 16px; margin-bottom: 12px; }
+    .pf-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font-size: 13.5px; }
+    .pf-row span { color: var(--muted); } .pf-row b { font-variant-numeric: tabular-nums; }
+    .pf-est { font-style: normal; font-size: 10.5px; color: #b4530f; background: #fdecdf; padding: 1px 6px; border-radius: 8px; margin-left: 6px; }
+    .pf-bar { height: 6px; background: #e1e4ea; border-radius: 3px; overflow: hidden; margin-top: 7px; }
+    .pf-bar i { display: block; height: 100%; }
+    .pf-note { font-size: 11.5px; color: var(--muted); line-height: 1.5; margin-top: 9px; }
+    .pf-note.err { color: #dc2626; } .pf-note.ok { color: #16a34a; }
+    .pf-note.bnr { background: var(--app-bg); padding: 10px 12px; border-radius: 9px; margin: 0 0 14px; }
+    .pf-set-h { font-size: 13.5px; font-weight: 700; margin-bottom: 9px; }
+    .pf-kv { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; padding: 5px 0; border-bottom: 1px solid var(--line); }
+    .pf-kv:last-of-type { border-bottom: 0; margin-bottom: 8px; }
+    .pf-kv span { color: var(--muted); }
+    .pf-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+    .pf-table th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); padding: 10px 13px; border-bottom: 1px solid var(--line); background: var(--app-bg); }
+    .pf-table td { padding: 10px 13px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    .pf-table tr:last-child td { border-bottom: 0; }
+    .pf-table td:first-child { font-weight: 600; }
+    .pf-data-acts { display: flex; gap: 8px; flex-wrap: wrap; }
+    .pf-empty { font-size: 13px; color: var(--muted); padding: 16px; background: var(--pane); border: 1px dashed var(--line); border-radius: 11px; }
+
+    @media (max-width: 760px) {
+      .pf-body { flex-direction: column; }
+      .pf-rail { width: 100%; flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--line); }
+      .pf-nav span { display: none; } .pf-nav { padding: 9px 12px; } .pf-soon { display: none; }
+      .pf-stats { grid-template-columns: repeat(2, 1fr); } .pf-cards { grid-template-columns: 1fr; }
+      .pf-id { flex-wrap: wrap; } .pf-head-actions { margin-left: 0; width: 100%; }
+    }
+  </style>
+</head>
+
+<body>
+  <div id="root"></div>
+
+  <script src="engine.js"></script>
+  <script src="sample.js"></script>
+  <script src="templates.js"></script>
+  <script src="metrics.js"></script>
+  <script src="auth.js"></script>
+  <script src="store.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="backend/config.js"></script>
+  <script src="backend.js"></script>
+  <script src="store-cloud.js"></script>
+  <script src="universities.js"></script>
+  <script src="onboarding.js"></script>
+  <script src="eleven.js"></script>
+
+  <script type="text/babel" src="profile.jsx"></script>
+
+  <script src="build.js"></script>
+  <script src="version-badge.js"></script>
+</body>
+
+</html>

@@ -339,6 +339,13 @@
 
     clearCache: function () {
       Object.keys(cache).forEach(function (k) { try { URL.revokeObjectURL(cache[k].url); } catch (e) { } delete cache[k]; });
+      // also drop the persistent IndexedDB audio store, so "clear audio cache" actually frees space + forgets audio
+      return openDB().then(function (db) {
+        if (!db) return false;
+        return new Promise(function (res) {
+          try { var tx = db.transaction(IDB_STORE, 'readwrite'); tx.objectStore(IDB_STORE).clear(); tx.oncomplete = function () { res(true); }; tx.onerror = tx.onabort = function () { res(false); }; } catch (e) { res(false); }
+        });
+      }).catch(function () { return false; });
     }
   };
 
