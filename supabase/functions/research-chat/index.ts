@@ -39,12 +39,21 @@ Deno.serve(async (req) => {
     const { data: chat } = await sb.from('research_chats').select('id,project_id').eq('id', chat_id).maybeSingle();
     if (!chat) return json({ error: 'chat not found or no access' }, 404);
     const { data: proj } = await sb.from('research_projects').select('title,field,goal,keywords').eq('id', chat.project_id).maybeSingle();
-    const { data: history } = await sb.from('research_messages').select('role,content').eq('chat_id', chat_id).order('created_at', { ascending: true });
+    const { data: history } = await sb.from('research_messages').select('role,content,attachments').eq('chat_id', chat_id).order('created_at', { ascending: true });
 
     const ctx = proj ? `\n\nCurrent project — Title: ${proj.title}; Field: ${proj.field ?? '—'}; Goal: ${proj.goal ?? '—'}; Keywords: ${(proj.keywords ?? []).join(', ')}` : '';
-    let messages = (history || []).filter((m) => m.content).map((m) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content }));
-    if (messages.length > HISTORY) messages = messages.slice(-HISTORY);            // cap input tokens
-    if (!messages.length) return json({ error: 'no messages to respond to' }, 400);
+    let rows: any[] = (history || []).filter((m: any) => m.content);
+    if (rows.length > HISTORY) rows = rows.slice(-HISTORY);                          // cap input tokens
+    if (!rows.length) return json({ error: 'no messages to respond to' }, 400);
+    let lastUserIdx = -1;
+    for (let i = rows.length - 1; i >= 0; i--) { if (rows[i].role !== 'assistant') { lastUserIdx = i; break; } }
+    const messages: any[] = [];
+    for (let i = 0; i < rows.length; i++) {
+      const m: any = rows[i], role = m.role === 'assistant' ? 'assistant' : 'user';
+      // attachments only on the most recent user turn (keeps cost bounded)
+      if (i === lastUserIdx && Array.isArray(m.attachments) && m.attachments.length) messages.push({ role, content: await buildBlocks(sb, m) });
+      else messages.push({ role, content: m.content });
+    }
 
     const SYSTEM = useMcp
       ? `You are a research-ideation partner inside a PhD platform. Use the Consensus tools to ground every non-trivial claim in peer-reviewed evidence, and cite the papers. Propose specific, falsifiable research questions and say briefly why each is a gap. Be concise.`
@@ -84,3 +93,39 @@ Deno.serve(async (req) => {
     return json({ error: String(e) }, 500);
   }
 });
+
+function toB64(buf: ArrayBuffer): string {
+  const bytes = new Uint8Array(buf); let bin = ''; const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) bin += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunk)));
+  return btoa(bin);
+}
+
+// Expand a user message's attachments into Claude content blocks (text + PDF document).
+async function buildBlocks(sb: any, m: any): Promise<any[]> {
+  const blocks: any[] = [{ type: 'text', text: m.content }];
+  let n = 0;
+  for (const a of m.attachments) {
+    if (n >= 5) break;
+    try {
+      if (a.kind === 'source' && a.source_id) {
+        const { data: s } = await sb.from('research_sources').select('title,abstract,year,venue').eq('id', a.source_id).maybeSingle();
+        if (s) { blocks.push({ type: 'text', text: `[Attached source: ${s.title} (${s.year ?? ''}${s.venue ? ', ' + s.venue : ''})]\n${(s.abstract ?? '').slice(0, 6000)}` }); n++; }
+      } else if (a.kind === 'file' && a.bucket && a.path) {
+        const { data: blob } = await sb.storage.from(a.bucket).download(a.path);   // caller's JWT → RLS-gated
+        if (!blob) continue;
+        const buf = await blob.arrayBuffer();
+        const mime = a.mime || '';
+        if (mime.includes('pdf')) {
+          if (buf.byteLength <= 8_000_000) { blocks.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: toB64(buf) } }); n++; }
+          else blocks.push({ type: 'text', text: `[Attached "${a.name}" skipped — PDF over 8 MB]` });
+        } else if (mime.startsWith('text') || /\.(csv|txt|md|json)$/i.test(a.name || '')) {
+          const txt = new TextDecoder().decode(new Uint8Array(buf));
+          blocks.push({ type: 'text', text: `[Attached file: ${a.name}]\n${txt.slice(0, 20000)}` }); n++;
+        } else {
+          blocks.push({ type: 'text', text: `[Attached "${a.name}" (${mime}) — type not readable inline]` });
+        }
+      }
+    } catch (_e) { /* skip unreadable attachment */ }
+  }
+  return blocks;
+}

@@ -160,6 +160,37 @@
     );
   }
 
+  // ---------- Attach to chat (library source / publication file / upload) ----------
+  function AttachModal(props) {
+    var fS = useState(null), files = fS[0], setFiles = fS[1];
+    var uS = useState(''), upMsg = uS[0], setUpMsg = uS[1];
+    useEffect(function () { sb.from('publication_files').select('id,name,mime,size,storage_path').eq('owner_id', props.authorId).order('created_at', { ascending: false }).then(function (r) { setFiles((r && r.data) || []); }); }, []);
+    function onUpload(e) {
+      var f = e.target.files && e.target.files[0]; if (!f) return;
+      setUpMsg('Uploading…');
+      var path = props.projectId + '/' + Date.now() + '_' + f.name.replace(/[^A-Za-z0-9._-]/g, '_');
+      sb.storage.from('research-data').upload(path, f).then(function (res) {
+        if (res.error) { setUpMsg('Upload failed: ' + res.error.message); return; }
+        props.onPick({ kind: 'file', bucket: 'research-data', path: path, name: f.name, mime: f.type || '', label: f.name }); props.onClose();
+      });
+    }
+    var srcs = props.sources || [];
+    var row = function (key, title, sub, pick) { return h('div', { className: 'src', key: key }, h('div', { style: { flex: 1, minWidth: 0 } }, h('b', { style: { fontSize: 13 } }, title), sub ? h('div', { style: { fontSize: 11.5, color: 'var(--muted)' } }, sub) : null), h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12, flex: 'none' }, onClick: pick }, 'Attach')); };
+    return h('div', { className: 'scrim', onClick: props.onClose },
+      h('div', { className: 'modal', onClick: function (e) { e.stopPropagation(); } },
+        h('div', { className: 'modal-h' }, h('b', null, 'Attach to the chat'), h('button', { className: 'x', onClick: props.onClose }, '×')),
+        h('div', { className: 'modal-b' },
+          h('div', { className: 'sec-t' }, 'Project library'),
+          srcs.length ? srcs.map(function (s) { return row('s' + s.id, s.title, [s.year, s.venue].filter(Boolean).join(' · '), function () { props.onPick({ kind: 'source', source_id: s.id, title: s.title, label: s.title }); props.onClose(); }); }) : h('div', { style: { fontSize: 12.5, color: 'var(--faint)' } }, 'No library sources yet — add some on the Literature tab.'),
+          h('div', { className: 'sec-t' }, 'My publication files'),
+          files === null ? h('div', { style: { fontSize: 12.5, color: 'var(--faint)' } }, 'Loading…') : (files.length ? files.map(function (f) { return row('f' + f.id, f.name, (f.mime || '') + (f.size ? ' · ' + fmtBytes(f.size) : ''), function () { props.onPick({ kind: 'file', bucket: 'publication-files', path: f.storage_path, name: f.name, mime: f.mime, label: f.name }); props.onClose(); }); }) : h('div', { style: { fontSize: 12.5, color: 'var(--faint)' } }, 'No files uploaded to your profile yet.')),
+          h('div', { className: 'sec-t' }, 'Upload a file'),
+          h('div', null, h('input', { type: 'file', onChange: onUpload }), upMsg ? h('span', { style: { marginLeft: 8, fontSize: 12 } }, upMsg) : null)
+        )
+      )
+    );
+  }
+
   // ---------- Chat with Publify (R5b) ----------
   function mdHtml(t) {
     var s = String(t == null ? '' : t);
@@ -175,6 +206,8 @@
     var bS = useState(false), busy = bS[0], setBusy = bS[1];
     var er = useState(''), err = er[0], setErr = er[1];
     var ty = useState(null), typing = ty[0], setTyping = ty[1];          // { id, len } of the message being typed out
+    var atS = useState([]), attach = atS[0], setAttach = atS[1];          // pending attachments for the next message
+    var pkS = useState(false), picker = pkS[0], setPicker = pkS[1];
     var firstLoad = useRef(true), animated = useRef({}), alive = useRef(true), scrollRef = useRef(null), taRef = useRef(null);
     useEffect(function () { return function () { alive.current = false; }; }, []);
     function startTyping(id, full) {
@@ -219,11 +252,14 @@
     function sendText(raw) {
       var txt = (raw || '').trim();
       if (!txt || busy) return;
-      setBusy(true); setErr(''); setInput('');
+      var atts = attach;
+      setBusy(true); setErr(''); setInput(''); setAttach([]);
       if (taRef.current) taRef.current.style.height = 'auto';
       ensureChat().then(function (cid) {
         if (!cid) { setBusy(false); setErr('Could not start a chat.'); return; }
-        sb.from('research_messages').insert({ chat_id: cid, role: 'user', content: txt }).then(function () {
+        var payload = { chat_id: cid, role: 'user', content: txt }; if (atts.length) payload.attachments = atts;   // omit the column when unused (works pre-migration-17)
+        sb.from('research_messages').insert(payload).then(function (ins) {
+          if (ins && ins.error) { setBusy(false); setErr(atts.length ? 'Attachments need migration-17 + a research-chat redeploy — ' + ins.error.message : ins.error.message); return; }
           loadMsgs(cid);
           sb.functions.invoke('research-chat', { body: { chat_id: cid } }).then(function (res) {
             setBusy(false);
@@ -262,10 +298,18 @@
         busy ? h('div', { className: 'bubble ai' }, h('div', { className: 'btxt', style: { color: 'var(--faint)' } }, 'Publify is thinking…')) : null
       ),
       err ? h('div', { style: { fontSize: 12.5, color: 'var(--warn)', margin: '6px 0 0' } }, err) : null,
-      props.canEdit ? h('div', { className: 'chat-input' },
-        h('textarea', { ref: taRef, value: input, rows: 1, placeholder: 'Message Publify…  (Enter to send · Shift+Enter newline)', disabled: busy, onChange: onTaInput, onKeyDown: onTaKey }),
-        h('button', { className: 'btn pri', disabled: busy, onClick: send }, 'Send')
-      ) : null
+      props.canEdit ? h('div', null,
+        attach.length ? h('div', { className: 'attach-chips' }, attach.map(function (a, i) {
+          return h('span', { className: 'attach-chip', key: i }, (a.kind === 'source' ? '📄 ' : '📎 ') + (a.label || a.name || a.title || 'attachment'),
+            h('button', { title: 'Remove', onClick: function () { setAttach(attach.filter(function (_, j) { return j !== i; })); } }, '×'));
+        })) : null,
+        h('div', { className: 'chat-input' },
+          h('button', { className: 'attach-btn', title: 'Attach a library source, publication or file', disabled: busy, onClick: function () { setPicker(true); } }, '📎'),
+          h('textarea', { ref: taRef, value: input, rows: 1, placeholder: 'Message Publify…  (Enter to send · Shift+Enter newline)', disabled: busy, onChange: onTaInput, onKeyDown: onTaKey }),
+          h('button', { className: 'btn pri', disabled: busy, onClick: send }, 'Send')
+        )
+      ) : null,
+      picker ? h(AttachModal, { projectId: props.projectId, authorId: props.authorId, sources: props.sources, onPick: function (a) { setAttach(function (p) { return p.concat([a]); }); }, onClose: function () { setPicker(false); } }) : null
     );
   }
 
@@ -639,7 +683,7 @@
     var openTasks = (props.tasks || []).filter(function (t) { return t.status !== 'done'; }).length;
     var TABS = [['overview', 'Overview', null], ['ideas', 'Ideas', (props.ideas || []).length], ['literature', 'Literature', (props.sources || []).length], ['data', 'Data', (props.datasets || []).length], ['compute', 'Compute', (props.jobs || []).length], ['writing', 'Writing', null], ['log', 'Log', (props.log || []).length], ['tasks', 'Tasks', openTasks]];
     var content;
-    if (tab === 'ideas') content = h('div', null, h(ChatPanel, { projectId: p.id, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged }), h(IdeasPanel, { projectId: p.id, ideas: props.ideas, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged }));
+    if (tab === 'ideas') content = h('div', null, h(ChatPanel, { projectId: p.id, canEdit: props.canEdit, authorId: props.authorId, sources: props.sources, onChanged: props.onChanged }), h(IdeasPanel, { projectId: p.id, ideas: props.ideas, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged }));
     else if (tab === 'literature') content = h(LiteraturePanel, { projectId: p.id, sources: props.sources, canEdit: props.canEdit, myEmail: props.myEmail, onChanged: props.onChanged });
     else if (tab === 'data') content = h(DataPanel, { projectId: p.id, datasets: props.datasets, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
     else if (tab === 'compute') content = h(ComputePanel, { projectId: p.id, jobs: props.jobs, datasets: props.datasets, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
