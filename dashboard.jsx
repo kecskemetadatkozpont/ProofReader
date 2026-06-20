@@ -380,8 +380,19 @@ function TrashCard({ project, ttl, onRestore, onPurge }) {
 }
 
 /* ---------------- app ---------------- */
+// Admin "view as": opened from Admin with ?adminView=1 + a stored target. Admins have read-all on the
+// projects table (admin_all_projects RLS), so we fetch the target's publications directly, read-only.
+function adminTargetUser() {
+  try {
+    if (!/[?&]adminView=1/.test(location.search)) return null;
+    const t = JSON.parse(localStorage.getItem('pr-admin-view') || 'null');
+    return t && t.id ? { id: t.id, name: t.name, email: t.email, color: t.color, plan: t.plan || 'pro', _preview: true } : null;
+  } catch (e) { return null; }
+}
+
 function App() {
-  const [me, setMe] = useState(() => Auth.current());
+  const [me, setMe] = useState(() => adminTargetUser() || Auth.current());
+  const preview = !!(me && me._preview);
   const [projects, setProjects] = useState([]);
   const [acctOpen, setAcctOpen] = useState(false);
   const [modal, setModal] = useState(null); // 'new' | 'usage' | 'activity'
@@ -390,11 +401,26 @@ function App() {
   const [isAdmin, setIsAdmin] = useState(() => !!(window.PR_BACKEND && window.PR_BACKEND.user && window.PR_BACKEND.user.role === 'admin'));
   const [, force] = useState(0);
 
-  const refresh = useCallback(() => { if (me) { Store.seedIfEmpty(); setProjects(Store.listFor(me.id)); } }, [me]);
+  const refresh = useCallback(() => {
+    if (!me) return;
+    if (me._preview) {
+      const sb = window.PR_BACKEND && window.PR_BACKEND.sb;
+      if (!sb) { setProjects([]); return; }
+      sb.from('projects').select('id,data,updated_at,deleted_at').eq('owner_id', me.id).is('deleted_at', null).order('updated_at', { ascending: false })
+        .then((r) => setProjects(((r && r.data) || []).map((row) => Object.assign({}, row.data || {}, {
+          id: row.id, title: (row.data && row.data.title) || 'Untitled publication', ownerId: me.id,
+          updated: row.updated_at ? Date.parse(row.updated_at) : 0, members: (row.data && row.data.members) || [], _shared: false, _preview: true
+        }))));
+      return;
+    }
+    Store.seedIfEmpty(); setProjects(Store.listFor(me.id));
+  }, [me]);
   useEffect(() => { refresh(); }, [me]);
   useEffect(() => Store.subscribe(refresh), [refresh]);
   useEffect(() => { const c = () => setAcctOpen(false); window.addEventListener('click', c); return () => window.removeEventListener('click', c); }, []);
   useEffect(() => { const h = (e) => setIsAdmin(!!(e.detail && e.detail.role === 'admin')); window.addEventListener('pr-profile', h); return () => window.removeEventListener('pr-profile', h); }, []);
+  // admin preview: wait for the admin's backend auth to attach, then load the target's publications
+  useEffect(() => { if (!preview) return; let n = 0; const iv = setInterval(() => { n++; if ((window.PR_BACKEND && window.PR_BACKEND.user) || n > 15) { clearInterval(iv); refresh(); } }, 500); return () => clearInterval(iv); }, [preview, refresh]);
 
   if (!me) return <SignIn onSignIn={(id) => { Auth.signIn(id); setMe(Auth.byId(id)); }} />;
 
@@ -412,9 +438,9 @@ function App() {
         <div className="brand"><div className="brand-mark"><span></span></div><div className="brand-text"><b>Publify</b><i>researcher profiles &amp; publications</i><span id="pr-ver-slot" className="pr-ver-slot"></span></div></div>
         <div className="top-right">
           {isAdmin && <a className="btn-ghost" href="Admin.html" title="Admin console"><svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"><path d="M8 1.8l5 1.9v3.6c0 3-2.1 5.2-5 6.1-2.9-.9-5-3.1-5-6.1V3.7z" /><path d="M5.8 8l1.6 1.6L10.4 6.5" /></svg>Admin</a>}
-          <button className="btn-ghost" onClick={() => setModal('activity')}><svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.4"><circle cx="8" cy="8" r="6" /><path d="M8 5v3l2 1.5" strokeLinecap="round" /></svg>Activity</button>
-          <button className="btn-ghost" onClick={() => setModal('usage')} title="Storage used"><svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"><ellipse cx="8" cy="4" rx="5" ry="2" /><path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4" /><path d="M3 8c0 1.1 2.2 2 5 2s5-.9 5-2" /></svg>Storage</button>
-          <button className="btn-primary" onClick={() => setModal('new')}><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M8 3v10M3 8h10" /></svg>New publication</button>
+          {!preview && <button className="btn-ghost" onClick={() => setModal('activity')}><svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.4"><circle cx="8" cy="8" r="6" /><path d="M8 5v3l2 1.5" strokeLinecap="round" /></svg>Activity</button>}
+          {!preview && <button className="btn-ghost" onClick={() => setModal('usage')} title="Storage used"><svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"><ellipse cx="8" cy="4" rx="5" ry="2" /><path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4" /><path d="M3 8c0 1.1 2.2 2 5 2s5-.9 5-2" /></svg>Storage</button>}
+          {!preview && <button className="btn-primary" onClick={() => setModal('new')}><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M8 3v10M3 8h10" /></svg>New publication</button>}
           <div className="acct">
             <button className="acct-btn" onClick={(e) => { e.stopPropagation(); setAcctOpen((v) => !v); }}><Avatar user={me} size={34} /></button>
             {acctOpen && <AccountMenu me={me} onUsage={() => { setAcctOpen(false); setModal('usage'); }}
@@ -425,8 +451,9 @@ function App() {
       </header>
 
       <div className="wrap">
+        {preview && <div className="usage-sub" style={{ background: 'var(--warn-bg)', color: 'var(--warn)', padding: '10px 14px', borderRadius: 10, margin: '0 0 14px', fontWeight: 600, fontSize: 13 }}>👁 Admin view — {me.name}’s publications (read-only). <a href="Profile.html?adminView=1" style={{ color: 'var(--warn)' }}>Profile</a> · <a href="Research.html?adminView=1" style={{ color: 'var(--warn)' }}>Research</a> · <a href="Admin.html" style={{ color: 'var(--warn)' }}>← Back to admin</a></div>}
         <div className="page-head">
-          <div><h1>Your publications</h1><p>Welcome back, {me.name.split(' ')[0]} · open one to edit and hear it read aloud</p></div>
+          <div><h1>{preview ? me.name + '’s publications' : 'Your publications'}</h1><p>{preview ? 'Read-only admin view of this researcher’s writing projects' : ('Welcome back, ' + me.name.split(' ')[0] + ' · open one to edit and hear it read aloud')}</p></div>
         </div>
         <div className="tabs">
           {[['all', 'All'], ['owned', 'Owned by me'], ['shared', 'Shared with me'], ['trash', 'Trash' + (trashed.length ? ' (' + trashed.length + ')' : '')]].map(([k, l]) => (
@@ -450,7 +477,7 @@ function App() {
           : shown.length === 0 && tab !== 'all'
             ? <div className="empty"><h2>Nothing here yet</h2><p>{tab === 'shared' ? 'Publications others share with you will appear here.' : 'Create a publication to get started.'}</p></div>
             : <div className="grid">
-                {tab !== 'shared' && <button className="card new-card" onClick={() => setModal('new')}><div className="plus"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M8 3v10M3 8h10" /></svg></div><span>New publication</span></button>}
+                {tab !== 'shared' && !preview && <button className="card new-card" onClick={() => setModal('new')}><div className="plus"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M8 3v10M3 8h10" /></svg></div><span>New publication</span></button>}
                 {shown.map((p) => (
                   <Card key={p.id} project={p} me={me} onOpen={() => open(p.id)}
                     onShare={() => setShareId(p.id)}

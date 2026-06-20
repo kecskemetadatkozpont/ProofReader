@@ -37,6 +37,18 @@
     return (window.PR_BACKEND && window.PR_BACKEND.user) || null;
   }
   function isAdmin() { return !!(window.PR_BACKEND && window.PR_BACKEND.user && window.PR_BACKEND.user.role === 'admin'); }
+  // admin "view as": opened from Admin with ?adminView=1 + a stored target. The bar then reflects the
+  // viewed user and keeps the param on every link so the admin stays in that user's context.
+  function adminView() {
+    try {
+      if (!/[?&]adminView=1/.test(location.search)) return null;
+      var t = JSON.parse(localStorage.getItem('pr-admin-view') || 'null');
+      return t && t.id ? t : null;
+    } catch (e) { return null; }
+  }
+  function viewUser() { return adminView() || curUser(); }
+  function withAv(href) { var av = adminView(); if (!av || href === 'Admin.html') return href; return href + (href.indexOf('?') < 0 ? '?' : '&') + 'adminView=1'; }
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
 
   var CSS = [
     'html { --pubnav-h: ' + BAR + 'px; }',
@@ -49,6 +61,7 @@
     '  font-family: "IBM Plex Sans", system-ui, sans-serif; box-sizing: border-box; }',
     '#pubnav .pn-left { display: flex; align-items: center; gap: 12px; min-width: 0; }',
     '#pubnav .pn-page { font-size: 13px; font-weight: 600; color: var(--muted, #5b6473); padding-left: 12px; border-left: 1px solid var(--line, #e6e8ee); white-space: nowrap; }',
+    '#pubnav .pn-as { font-size: 12px; font-weight: 700; color: var(--warn, #b45309); background: var(--warn-bg, #fdf6e3); border: 1px solid var(--warn, #b45309); border-radius: 999px; padding: 3px 10px; white-space: nowrap; }',
     '#pubnav .pn-brand { display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--ink, #1a2030); font-weight: 700; font-size: 15px; letter-spacing: -.2px; }',
     '#pubnav .pn-mk { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: linear-gradient(135deg, #6366f1, #d946ef); box-shadow: 0 3px 10px rgba(79,70,229,.34); }',
     '#pubnav .pn-mk i { width: 10px; height: 10px; border-top: 2.2px solid #fff; border-left: 2.2px solid #fff; border-radius: 2px 0 0 0; transform: rotate(45deg); margin-top: 2px; }',
@@ -83,6 +96,9 @@
     '.pnd-sw.on i { transform: translateX(20px); }',
     '.pnd-signout { width: 100%; margin-top: 4px; padding: 10px; border: 1px solid var(--line, #e6e8ee); background: transparent; border-radius: 10px; color: var(--muted, #5b6473); font-family: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer; }',
     '.pnd-signout:hover { color: var(--danger, #b42318); border-color: var(--danger, #b42318); }',
+    '.pnd-asbar { margin: 0 12px; padding: 9px 12px; border-radius: 10px; background: var(--warn-bg, #fdf6e3); color: var(--warn, #b45309); font-size: 12px; font-weight: 600; line-height: 1.4; }',
+    '.pnd-backadmin { display: block; width: 100%; padding: 10px; box-sizing: border-box; text-align: center; border: 1px solid var(--accent, #4f46e5); border-radius: 10px; color: var(--accent, #4f46e5); text-decoration: none; font-size: 13.5px; font-weight: 700; }',
+    '.pnd-backadmin:hover { background: var(--accent-tint, #eef0ff); }',
     // --- consolidation: the global bar owns branding + profile, so hide each page\'s duplicate chrome ---
     '.side-brand { display: none !important; }',                                          // Research / Doctoral School sidebar brand
     'html.pn-research .side .nav, html.pn-phd .side .nav { padding-top: 12px; }',
@@ -104,35 +120,40 @@
 
   function build() {
     if (document.getElementById('pubnav') || !document.body) return;
-    var u = curUser(), here = pageKey(), admin = isAdmin();
+    var here = pageKey(), av = adminView();
 
     if (here) document.documentElement.classList.add('pn-' + here);
+    if (av) document.documentElement.classList.add('pn-adminview');
     var bar = document.createElement('header'); bar.id = 'pubnav';
-    bar.innerHTML = '<div class="pn-left"><a class="pn-brand" href="Profile.html"><span class="pn-mk"><i></i></span>Publify</a>'
-      + (PAGE_NAME[here] ? '<span class="pn-page">' + PAGE_NAME[here] + '</span>' : '') + '</div>'
+    bar.innerHTML = '<div class="pn-left"><a class="pn-brand" href="' + withAv('Profile.html') + '"><span class="pn-mk"><i></i></span>Publify</a>'
+      + (PAGE_NAME[here] ? '<span class="pn-page">' + PAGE_NAME[here] + '</span>' : '')
+      + (av ? '<span class="pn-as">👁 ' + esc(av.name || av.email || '') + '</span>' : '') + '</div>'
       + '<button class="pn-prof" id="pn-prof" aria-label="Open menu"></button>';
 
     var scrim = document.createElement('div'); scrim.id = 'pn-scrim';
     var drawer = document.createElement('aside'); drawer.id = 'pn-drawer'; drawer.setAttribute('role', 'dialog'); drawer.setAttribute('aria-label', 'Navigation');
 
-    function avHtml(big) {
-      var col = (u && u.color) || '#4f46e5';
-      var st = u && u.avatar ? 'background-image:url(' + u.avatar + ')' : 'background:' + col;
-      return '<span class="pn-av" style="' + st + '">' + (u && u.avatar ? '' : initials(u && u.name, u && u.email)) + '</span>';
+    function avHtml(user) {
+      var col = (user && user.color) || '#4f46e5';
+      var img = user && (user.avatar || user.avatar_url);
+      var st = img ? 'background-image:url(' + img + ')' : 'background:' + col;
+      return '<span class="pn-av" style="' + st + '">' + (img ? '' : initials(user && user.name, user && user.email)) + '</span>';
     }
     function render() {
-      u = curUser(); admin = isAdmin();
-      document.getElementById('pn-prof').innerHTML = avHtml() + '<span class="pn-nm">' + ((u && u.name) || 'Menu') + '</span><span class="pn-cv">▾</span>';
+      av = adminView();
+      var du = av || curUser(), admin = isAdmin();
+      document.getElementById('pn-prof').innerHTML = avHtml(du) + '<span class="pn-nm">' + esc((du && du.name) || 'Menu') + '</span><span class="pn-cv">' + (av ? '👁' : '▾') + '</span>';
       var links = LINKS.filter(function (l) { return !l.adminOnly || admin; }).map(function (l) {
-        return '<a href="' + l.href + '"' + (l.key === here ? ' class="on"' : '') + '>' + (ICONS[l.key] || '') + l.label + '</a>';
+        return '<a href="' + withAv(l.href) + '"' + (l.key === here ? ' class="on"' : '') + '>' + (ICONS[l.key] || '') + esc(l.label) + '</a>';
       }).join('');
       var dark = window.PRTheme ? window.PRTheme.isDark() : document.documentElement.classList.contains('dark');
-      drawer.innerHTML = '<div class="pnd-head">' + avHtml(true)
-        + '<div style="min-width:0"><b>' + ((u && u.name) || 'Not signed in') + '</b><span>' + ((u && u.email) || '') + '</span></div>'
+      drawer.innerHTML = '<div class="pnd-head">' + avHtml(du)
+        + '<div style="min-width:0"><b>' + esc((du && du.name) || 'Not signed in') + '</b><span>' + esc((du && du.email) || '') + '</span></div>'
         + '<button class="pnd-x" id="pn-close" aria-label="Close">×</button></div>'
+        + (av ? '<div class="pnd-asbar">👁 Admin view — browsing this researcher’s workspace read-only</div>' : '')
         + '<nav class="pnd-nav">' + links + '</nav>'
         + '<div class="pnd-foot"><div class="pnd-theme">Dark mode<button class="pnd-sw' + (dark ? ' on' : '') + '" id="pn-theme" role="switch" aria-checked="' + dark + '"><i></i></button></div>'
-        + '<button class="pnd-signout" id="pn-signout">Sign out</button></div>';
+        + (av ? '<a class="pnd-backadmin" href="Admin.html">← Back to admin</a>' : '<button class="pnd-signout" id="pn-signout">Sign out</button>') + '</div>';
       wire();
     }
     function open() { scrim.classList.add('on'); drawer.classList.add('on'); }
