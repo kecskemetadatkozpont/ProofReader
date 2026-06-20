@@ -113,6 +113,28 @@
     .icon-x { border: 0; background: transparent; color: var(--faint); cursor: pointer; font-size: 14px; padding: 2px 4px; }
     .icon-x:hover { color: var(--danger); }
     .modal-foot { display: flex; gap: 10px; justify-content: flex-end; padding: 14px 20px; border-top: 1px solid var(--line); }
+    /* dashboard */
+    .kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(176px, 1fr)); gap: 13px; margin-bottom: 16px; }
+    .kpi { background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 15px 17px; }
+    .kpi .n { font-size: 26px; font-weight: 700; letter-spacing: -.5px; }
+    .kpi .l { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+    .kpi .s { font-size: 11px; color: var(--faint); margin-top: 4px; }
+    .kpi.alert { border-color: #f6c9c4; } .kpi.alert .n { color: var(--danger); }
+    .panels2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    @media (max-width: 900px) { .panels2 { grid-template-columns: 1fr; } }
+    .barrow { display: flex; align-items: center; gap: 10px; font-size: 12.5px; margin-bottom: 9px; }
+    .barrow .bl { width: 130px; flex: none; color: var(--muted); }
+    .barrow .bt { flex: 1; height: 10px; border-radius: 5px; background: var(--soft); overflow: hidden; }
+    .barrow .bt > i { display: block; height: 100%; }
+    .barrow .bv { width: 26px; text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+    .dl { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--soft); font-size: 13px; }
+    .dl:last-child { border-bottom: 0; }
+    .dl .dd { flex: 1; min-width: 0; } .dl .dd b { font-weight: 600; } .dl .dd span { display: block; font-size: 11.5px; color: var(--muted); }
+    .dl .when { font-size: 11.5px; font-weight: 700; white-space: nowrap; }
+    .topic-foot { display: flex; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--soft); }
+    .topic-foot button { font-size: 11.5px; font-weight: 600; border: 1px solid var(--line); background: #fff; border-radius: 7px; padding: 4px 9px; cursor: pointer; font-family: inherit; color: var(--muted); }
+    .topic-foot button:hover { border-color: var(--accent); color: var(--accent); }
+    .topic-foot button.del:hover { border-color: var(--danger); color: var(--danger); }
     @media (max-width: 760px) { .side { width: 64px; } .side-brand i, .side-brand b, .nav button span, .side-foot .who { display: none; } .main { padding: 18px; } }
   </style>
 </head>
