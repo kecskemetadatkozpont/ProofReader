@@ -272,20 +272,24 @@ function ActivityModal({ projects, onClose }) {
 
 function AccountMenu({ me, onClose, onUsage, onSwitch, onSignOut }) {
   const u = Store.usage(me.id);
+  const others = (Auth.demoUsers ? Auth.demoUsers() : Auth.users()).filter((x) => x.id !== me.id);
   return (
-    <div className="menu" onClick={(e) => e.stopPropagation()}>
-      <a className="mhead mhead-link" href="Profile.html" title="Open your profile"><Avatar user={me} size={38} /><div><b>{me.name}</b><small>{me.email}</small></div><span className="plan-pill">{u.planLabel}</span></a>
-      <div className="divider" />
-      <a className="mi" href="Profile.html"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><circle cx="8" cy="5.5" r="2.5" /><path d="M3.5 13.5c0-2.5 2-4 4.5-4s4.5 1.5 4.5 4" strokeLinecap="round" /></svg>Open profile</a>
-      <a className="mi" href="PhD.html"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M8 2L1.5 5 8 8l6.5-3L8 2z" strokeLinejoin="round" /><path d="M4.5 6.3v3.4c0 1 1.6 1.8 3.5 1.8s3.5-.8 3.5-1.8V6.3M14.5 5.2v3.3" strokeLinecap="round" /></svg>Doctoral School</a>
-      <button className="mi" onClick={onUsage}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M2 13h12M4 13V7M8 13V3M12 13V9" strokeLinecap="round" /></svg>Usage &amp; storage</button>
-      <div className="sub">Switch account</div>
-      {(Auth.demoUsers ? Auth.demoUsers() : Auth.users()).filter((x) => x.id !== me.id).map((x) => (
-        <button key={x.id} className="mi" onClick={() => onSwitch(x.id)}><Avatar user={x} size={22} />{x.name}</button>
-      ))}
-      <div className="divider" />
-      <button className="mi danger" onClick={onSignOut}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M6 14H3V2h3M10 11l3-3-3-3M13 8H6" strokeLinecap="round" strokeLinejoin="round" /></svg>Sign out</button>
-    </div>
+    <React.Fragment>
+      <div className="acct-scrim" onClick={onClose} />
+      <aside className="acct-drawer" onClick={(e) => e.stopPropagation()}>
+        <a className="adr-head" href="Profile.html" title="Open your profile"><Avatar user={me} size={42} /><div style={{ minWidth: 0, flex: 1 }}><b>{me.name}</b><small>{me.email}</small></div><span className="plan-pill">{u.planLabel}</span></a>
+        <div className="adr-nav">
+          <a className="adr-i" href="Profile.html"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><circle cx="8" cy="5.5" r="2.5" /><path d="M3.5 13.5c0-2.5 2-4 4.5-4s4.5 1.5 4.5 4" strokeLinecap="round" /></svg>Open profile</a>
+          <a className="adr-i" href="PhD.html"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M8 2L1.5 5 8 8l6.5-3L8 2z" strokeLinejoin="round" /><path d="M4.5 6.3v3.4c0 1 1.6 1.8 3.5 1.8s3.5-.8 3.5-1.8V6.3M14.5 5.2v3.3" strokeLinecap="round" /></svg>Doctoral School</a>
+          <button className="adr-i" onClick={onUsage}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M2 13h12M4 13V7M8 13V3M12 13V9" strokeLinecap="round" /></svg>Usage &amp; storage</button>
+        </div>
+        {others.length ? <React.Fragment>
+          <div className="adr-sub">Switch account</div>
+          <div className="adr-nav">{others.map((x) => <button key={x.id} className="adr-i" onClick={() => onSwitch(x.id)}><Avatar user={x} size={22} />{x.name}</button>)}</div>
+        </React.Fragment> : null}
+        <div className="adr-foot"><button className="adr-i danger" onClick={onSignOut}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M6 14H3V2h3M10 11l3-3-3-3M13 8H6" strokeLinecap="round" strokeLinejoin="round" /></svg>Sign out</button></div>
+      </aside>
+    </React.Fragment>
   );
 }
 

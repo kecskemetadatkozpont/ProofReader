@@ -1725,17 +1725,20 @@
             </button>
             <div className="acct-mini">
               <button className="acct-btn" onClick={(e) => { e.stopPropagation(); setAcctOpen((v) => !v); }}><Collab.Avatar user={me} size={30} /></button>
-              {acctOpen && <div className="menu acct-menu" onClick={(e) => e.stopPropagation()}>
-                <a className="mhead" href="Profile.html" style={{ textDecoration: 'none', color: 'inherit' }}><Collab.Avatar user={me} size={36} /><div><b>{me.name}</b><small>{me.email}</small></div></a>
-                <div className="divider" />
-                <a className="mi" href="Profile.html"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><circle cx="8" cy="5.5" r="2.5" /><path d="M3.5 13.5c0-2.5 2-4 4.5-4s4.5 1.5 4.5 4" strokeLinecap="round" /></svg>Open profile</a>
-                <a className="mi" href="PhD.html"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M8 2L1.5 5 8 8l6.5-3L8 2z" strokeLinejoin="round" /><path d="M4.5 6.3v3.4c0 1 1.6 1.8 3.5 1.8s3.5-.8 3.5-1.8V6.3M14.5 5.2v3.3" strokeLinecap="round" /></svg>Doctoral School</a>
-                <a className="mi" href="Projects.html"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M10 3L5 8l5 5" strokeLinecap="round" strokeLinejoin="round" /></svg>Back to projects</a>
-                <div className="sub">Switch account</div>
-                {(window.PRAuth.demoUsers ? window.PRAuth.demoUsers() : window.PRAuth.users()).filter((u) => u.id !== me.id).map((u) => <button key={u.id} className="mi" onClick={() => { window.PRAuth.signIn(u.id); location.reload(); }}><Collab.Avatar user={u} size={20} />{u.name}</button>)}
-                <div className="divider" />
-                <button className="mi danger" onClick={() => { window.PRAuth.signOut(); location.href = 'Projects.html'; }}>Sign out</button>
-              </div>}
+              {acctOpen && <React.Fragment>
+                <div className="acct-scrim" onClick={() => setAcctOpen(false)} />
+                <aside className="acct-drawer" onClick={(e) => e.stopPropagation()}>
+                  <a className="adr-head" href="Profile.html" title="Open your profile"><Collab.Avatar user={me} size={42} /><div style={{ minWidth: 0, flex: 1 }}><b>{me.name}</b><small>{me.email}</small></div></a>
+                  <div className="adr-nav">
+                    <a className="adr-i" href="Profile.html"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><circle cx="8" cy="5.5" r="2.5" /><path d="M3.5 13.5c0-2.5 2-4 4.5-4s4.5 1.5 4.5 4" strokeLinecap="round" /></svg>Open profile</a>
+                    <a className="adr-i" href="PhD.html"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M8 2L1.5 5 8 8l6.5-3L8 2z" strokeLinejoin="round" /><path d="M4.5 6.3v3.4c0 1 1.6 1.8 3.5 1.8s3.5-.8 3.5-1.8V6.3M14.5 5.2v3.3" strokeLinecap="round" /></svg>Doctoral School</a>
+                    <a className="adr-i" href="Projects.html"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M10 3L5 8l5 5" strokeLinecap="round" strokeLinejoin="round" /></svg>Back to projects</a>
+                  </div>
+                  <div className="adr-sub">Switch account</div>
+                  <div className="adr-nav">{(window.PRAuth.demoUsers ? window.PRAuth.demoUsers() : window.PRAuth.users()).filter((u) => u.id !== me.id).map((u) => <button key={u.id} className="adr-i" onClick={() => { window.PRAuth.signIn(u.id); location.reload(); }}><Collab.Avatar user={u} size={22} />{u.name}</button>)}</div>
+                  <div className="adr-foot"><button className="adr-i danger" onClick={() => { window.PRAuth.signOut(); location.href = 'Projects.html'; }}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M6 14H3V2h3M10 11l3-3-3-3M13 8H6" strokeLinecap="round" strokeLinejoin="round" /></svg>Sign out</button></div>
+                </aside>
+              </React.Fragment>}
             </div>
           </div>
         </header>
