@@ -32,16 +32,22 @@
     var parts = s.split(/\s+/).filter(Boolean);
     return ((parts[0] || '?')[0] + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase();
   }
+  // the live session is authoritative: PR_BACKEND.user (cloud/demo pages) or window.PRNavUser (pages
+  // without backend.js, e.g. Admin). PRAuth.current() is only a last resort — it can hold a stale demo
+  // identity (the Admin list's "open profile" calls PRAuth.signIn), which must NOT drive the bar.
   function curUser() {
+    var BE = window.PR_BACKEND;
+    if (BE && BE.user) return BE.user;
+    if (window.PRNavUser) return window.PRNavUser;
     try { if (window.PRAuth && PRAuth.current()) return PRAuth.current(); } catch (e) { }
-    return (window.PR_BACKEND && window.PR_BACKEND.user) || null;
+    return null;
   }
   // admin role, robust to the async profile load: prefer the live role, fall back to the cached
   // profile (written on a previous session — present whenever the admin came from the Admin page).
   function isAdmin() {
-    var BE = window.PR_BACKEND, u = BE && BE.user; if (!u) return false;
+    var BE = window.PR_BACKEND, u = (BE && BE.user) || window.PRNavUser; if (!u) return false;
     if (u.role) return u.role === 'admin';
-    var p = BE.profiles && BE.profiles[u.id];
+    var p = BE && BE.profiles && BE.profiles[u.id];
     return !!(p && p.role === 'admin');
   }
   // admin "view as": opened from Admin with ?adminView=1 + a stored target. Gated to admins — a

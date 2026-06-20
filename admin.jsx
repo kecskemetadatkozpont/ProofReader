@@ -170,7 +170,10 @@
         sb.from('profiles').select('role,name,email,avatar_url').eq('id', uid).maybeSingle().then(function (pr) {
           var prof = pr && pr.data;
           if (!prof || prof.role !== 'admin') { setMe(prof || { email: s.user.email }); setPhase('denied'); return; }
-          setMe(Object.assign({ id: uid }, prof));
+          var meObj = Object.assign({ id: uid }, prof);
+          window.PRNavUser = meObj;   // let the shared nav bar show the real admin (Admin.html has no PR_BACKEND)
+          try { window.dispatchEvent(new CustomEvent('pr-profile', { detail: { role: prof.role } })); } catch (e) { }
+          setMe(meObj);
           loadData();
         });
       });
