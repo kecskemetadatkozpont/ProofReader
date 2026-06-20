@@ -170,6 +170,7 @@
           me.plan = r.data.plan || 'free'; if (r.data.color) me.color = r.data.color;
           me.status = r.data.status || 'incomplete'; me.role = r.data.role || 'user'; me.affiliation = r.data.affiliation || '';
           PROFILES[me.id] = me; cacheProfiles();
+          if (me.role !== 'admin') { try { localStorage.removeItem('pr-admin-view'); } catch (e) { } }  // "view as" is admin-only
           if (window.PRStore && window.PRStore._notify) window.PRStore._notify();
           try { window.dispatchEvent(new CustomEvent('pr-profile', { detail: { status: me.status, role: me.role, affiliation: me.affiliation } })); } catch (e) { }
         }

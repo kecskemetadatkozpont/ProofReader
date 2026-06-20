@@ -36,12 +36,20 @@
     try { if (window.PRAuth && PRAuth.current()) return PRAuth.current(); } catch (e) { }
     return (window.PR_BACKEND && window.PR_BACKEND.user) || null;
   }
-  function isAdmin() { return !!(window.PR_BACKEND && window.PR_BACKEND.user && window.PR_BACKEND.user.role === 'admin'); }
-  // admin "view as": opened from Admin with ?adminView=1 + a stored target. The bar then reflects the
-  // viewed user and keeps the param on every link so the admin stays in that user's context.
+  // admin role, robust to the async profile load: prefer the live role, fall back to the cached
+  // profile (written on a previous session — present whenever the admin came from the Admin page).
+  function isAdmin() {
+    var BE = window.PR_BACKEND, u = BE && BE.user; if (!u) return false;
+    if (u.role) return u.role === 'admin';
+    var p = BE.profiles && BE.profiles[u.id];
+    return !!(p && p.role === 'admin');
+  }
+  // admin "view as": opened from Admin with ?adminView=1 + a stored target. Gated to admins — a
+  // non-admin who forges the localStorage gets nothing (and RLS blocks the data regardless).
   function adminView() {
     try {
       if (!/[?&]adminView=1/.test(location.search)) return null;
+      if (!isAdmin()) return null;
       var t = JSON.parse(localStorage.getItem('pr-admin-view') || 'null');
       return t && t.id ? t : null;
     } catch (e) { return null; }
@@ -120,15 +128,11 @@
 
   function build() {
     if (document.getElementById('pubnav') || !document.body) return;
-    var here = pageKey(), av = adminView();
+    var here = pageKey();
 
     if (here) document.documentElement.classList.add('pn-' + here);
-    if (av) document.documentElement.classList.add('pn-adminview');
     var bar = document.createElement('header'); bar.id = 'pubnav';
-    bar.innerHTML = '<div class="pn-left"><a class="pn-brand" href="' + withAv('Profile.html') + '"><span class="pn-mk"><i></i></span>Publify</a>'
-      + (PAGE_NAME[here] ? '<span class="pn-page">' + PAGE_NAME[here] + '</span>' : '')
-      + (av ? '<span class="pn-as">👁 ' + esc(av.name || av.email || '') + '</span>' : '') + '</div>'
-      + '<button class="pn-prof" id="pn-prof" aria-label="Open menu"></button>';
+    bar.innerHTML = '<div class="pn-left" id="pn-left"></div><button class="pn-prof" id="pn-prof" aria-label="Open menu"></button>';
 
     var scrim = document.createElement('div'); scrim.id = 'pn-scrim';
     var drawer = document.createElement('aside'); drawer.id = 'pn-drawer'; drawer.setAttribute('role', 'dialog'); drawer.setAttribute('aria-label', 'Navigation');
@@ -140,8 +144,12 @@
       return '<span class="pn-av" style="' + st + '">' + (img ? '' : initials(user && user.name, user && user.email)) + '</span>';
     }
     function render() {
-      av = adminView();
+      var av = adminView();
       var du = av || curUser(), admin = isAdmin();
+      document.documentElement.classList.toggle('pn-adminview', !!av);
+      document.getElementById('pn-left').innerHTML = '<a class="pn-brand" href="' + withAv('Profile.html') + '"><span class="pn-mk"><i></i></span>Publify</a>'
+        + (PAGE_NAME[here] ? '<span class="pn-page">' + PAGE_NAME[here] + '</span>' : '')
+        + (av ? '<span class="pn-as">👁 ' + esc(av.name || av.email || '') + '</span>' : '');
       document.getElementById('pn-prof').innerHTML = avHtml(du) + '<span class="pn-nm">' + esc((du && du.name) || 'Menu') + '</span><span class="pn-cv">' + (av ? '👁' : '▾') + '</span>';
       var links = LINKS.filter(function (l) { return !l.adminOnly || admin; }).map(function (l) {
         return '<a href="' + withAv(l.href) + '"' + (l.key === here ? ' class="on"' : '') + '>' + (ICONS[l.key] || '') + esc(l.label) + '</a>';

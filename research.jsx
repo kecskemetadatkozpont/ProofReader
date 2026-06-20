@@ -27,7 +27,8 @@
   function adminTargetUser() {
     try {
       if (!/[?&]adminView=1/.test(location.search)) return null;
-      if (!(BE && BE.user)) return null;
+      var u = BE && BE.user; if (!u) return null;
+      if (!(u.role === 'admin' || (BE.profiles && BE.profiles[u.id] && BE.profiles[u.id].role === 'admin'))) return null; // admin-only
       var t = JSON.parse(localStorage.getItem('pr-admin-view') || 'null');
       return t && t.id ? t : null;
     } catch (e) { return null; }

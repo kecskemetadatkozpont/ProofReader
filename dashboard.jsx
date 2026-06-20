@@ -385,6 +385,8 @@ function TrashCard({ project, ttl, onRestore, onPurge }) {
 function adminTargetUser() {
   try {
     if (!/[?&]adminView=1/.test(location.search)) return null;
+    const BE = window.PR_BACKEND, u = BE && BE.user; if (!u) return null;
+    if (!(u.role === 'admin' || (BE.profiles && BE.profiles[u.id] && BE.profiles[u.id].role === 'admin'))) return null; // admin-only
     const t = JSON.parse(localStorage.getItem('pr-admin-view') || 'null');
     return t && t.id ? { id: t.id, name: t.name, email: t.email, color: t.color, plan: t.plan || 'pro', _preview: true } : null;
   } catch (e) { return null; }
