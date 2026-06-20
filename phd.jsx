@@ -322,8 +322,45 @@
     );
   }
 
+  // ---------- My account (self-service role) ----------
+  function MyAccount(props) {
+    var me = props.me, myStudent = props.myStudent;
+    var sv = useState(''), msg = sv[0], setMsg = sv[1];
+    var sp = useState({ department: me.department || '', capacity_max: me.capacity_max || '', research_interests: (me.research_interests || []).join(', '), accepting_students: me.accepting_students !== false }), sup = sp[0], setSup = sp[1];
+    var rg = useState({ topic: '', enrollment_year: '', required_credits: 240 }), reg = rg[0], setReg = rg[1];
+    function flash(m) { setMsg(m); setTimeout(function () { setMsg(''); }, 2500); }
+    function setRoleFlag(field, val) { var p = {}; p[field] = val; sb.from('profiles').update(p).eq('id', me.id).then(function (r) { if (r && r.error) { alert(r.error.message); return; } flash('Saved.'); props.onChanged(); }); }
+    function saveSup() { sb.from('profiles').update({ department: sup.department.trim() || null, capacity_max: sup.capacity_max ? Number(sup.capacity_max) : null, research_interests: sup.research_interests ? sup.research_interests.split(',').map(function (x) { return x.trim(); }).filter(Boolean) : null, accepting_students: !!sup.accepting_students }).eq('id', me.id).then(function (r) { if (r && r.error) { alert(r.error.message); return; } flash('Supervisor profile saved.'); props.onChanged(); }); }
+    function registerStudent() { sb.from('phd_students').insert({ profile_id: me.id, name: me.name, email: (BE.user && BE.user.email) || null, topic: reg.topic.trim() || null, enrollment_year: reg.enrollment_year ? Number(reg.enrollment_year) : null, required_credits: Number(reg.required_credits) || 240, status: 'Aktív' }).then(function (r) { if (r && r.error) { alert(r.error.message); return; } flash('Registered.'); props.onChanged(); }); }
+    return h('div', null,
+      h('div', { className: 'panel' }, h('h3', null, 'My role'),
+        h('div', { className: 'toggle-row' }, h('div', { className: 'tl' }, h('b', null, 'PhD Supervisor'), h('span', null, 'Appear in the directory and accept students')), h('label', { className: 'switch' }, h('input', { type: 'checkbox', checked: !!me.is_supervisor, onChange: function (e) { setRoleFlag('is_supervisor', e.target.checked); } }), h('span', { className: 'sl' }))),
+        h('div', { className: 'toggle-row' }, h('div', { className: 'tl' }, h('b', null, 'PhD Student'), h('span', null, 'Track your progress and request a supervisor')), h('label', { className: 'switch' }, h('input', { type: 'checkbox', checked: !!me.is_student, onChange: function (e) { setRoleFlag('is_student', e.target.checked); } }), h('span', { className: 'sl' }))),
+        msg ? h('div', { className: 'saved', style: { marginTop: 10 } }, msg) : null
+      ),
+      me.is_supervisor ? h('div', { className: 'panel' }, h('h3', null, 'Supervisor profile'),
+        h('div', { className: 'field' }, h('label', null, 'Department / institution'), h('input', { value: sup.department, onChange: function (e) { setSup(Object.assign({}, sup, { department: e.target.value })); } })),
+        h('div', { className: 'field' }, h('label', null, 'Capacity (max students)'), h('input', { type: 'number', value: sup.capacity_max, onChange: function (e) { setSup(Object.assign({}, sup, { capacity_max: e.target.value })); } })),
+        h('div', { className: 'field' }, h('label', null, 'Research interests (comma-separated)'), h('input', { placeholder: 'IoT, Materials, …', value: sup.research_interests, onChange: function (e) { setSup(Object.assign({}, sup, { research_interests: e.target.value })); } })),
+        h('div', { className: 'toggle-row', style: { marginTop: 4 } }, h('div', { className: 'tl' }, h('b', null, 'Open to new requests'), h('span', null, 'Students can request you as a supervisor')), h('label', { className: 'switch' }, h('input', { type: 'checkbox', checked: !!sup.accepting_students, onChange: function (e) { setSup(Object.assign({}, sup, { accepting_students: e.target.checked })); } }), h('span', { className: 'sl' }))),
+        h('div', { className: 'save-row' }, h('button', { className: 'btn pri', onClick: saveSup }, 'Save'), msg ? h('span', { className: 'saved' }, msg) : null)
+      ) : null,
+      me.is_student ? (myStudent ? h('div', { className: 'panel' }, h('h3', null, 'Student record'),
+        h('div', { style: { fontSize: 13.5 } }, h('b', null, myStudent.topic || 'No topic set'), myStudent.enrollment_year ? h('span', { style: { color: 'var(--muted)' } }, ' · enrolled ' + myStudent.enrollment_year) : null),
+        h('div', { style: { fontSize: 12.5, color: 'var(--muted)', marginTop: 6 } }, 'Open “My progress” for your milestones & credits. Request a supervisor from the Supervisors directory.')
+      ) : h('div', { className: 'panel' }, h('h3', null, 'Register as a PhD student'),
+        h('div', { className: 'field' }, h('label', null, 'Research topic'), h('input', { value: reg.topic, onChange: function (e) { setReg(Object.assign({}, reg, { topic: e.target.value })); } })),
+        h('div', { style: { display: 'flex', gap: 12 } },
+          h('div', { className: 'field', style: { flex: 1 } }, h('label', null, 'Enrollment year'), h('input', { type: 'number', placeholder: '2025', value: reg.enrollment_year, onChange: function (e) { setReg(Object.assign({}, reg, { enrollment_year: e.target.value })); } })),
+          h('div', { className: 'field', style: { flex: 1 } }, h('label', null, 'Required credits'), h('input', { type: 'number', value: reg.required_credits, onChange: function (e) { setReg(Object.assign({}, reg, { required_credits: e.target.value })); } }))),
+        h('div', { className: 'save-row' }, h('button', { className: 'btn pri', onClick: registerStudent }, 'Register'))
+      )) : null
+    );
+  }
+
   var IC = {
     dashboard: h('svg', { viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5 }, h('rect', { x: 2, y: 2, width: 5, height: 5, rx: 1 }), h('rect', { x: 9, y: 2, width: 5, height: 5, rx: 1 }), h('rect', { x: 2, y: 9, width: 5, height: 5, rx: 1 }), h('rect', { x: 9, y: 9, width: 5, height: 5, rx: 1 })),
+    account: h('svg', { viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5 }, h('circle', { cx: 8, cy: 5, r: 2.6 }), h('path', { d: 'M3 13.5c0-2.6 2.2-4 5-4s5 1.4 5 4', strokeLinecap: 'round' })),
     students: h('svg', { viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5 }, h('circle', { cx: 8, cy: 5, r: 2.4 }), h('path', { d: 'M3 13.5c0-2.5 2.2-4 5-4s5 1.5 5 4', strokeLinecap: 'round' })),
     supervisors: h('svg', { viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5 }, h('circle', { cx: 5.5, cy: 5, r: 2 }), h('circle', { cx: 11, cy: 6, r: 1.6 }), h('path', { d: 'M1.5 13c0-2 1.8-3.2 4-3.2s4 1.2 4 3.2M9.5 12.5c.2-1.5 1.4-2.4 3-2.4s2 .7 2 1.6', strokeLinecap: 'round' })),
     topics: h('svg', { viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5 }, h('rect', { x: 2, y: 2.5, width: 12, height: 11, rx: 2 }), h('path', { d: 'M5 6h6M5 9h4', strokeLinecap: 'round' }))
@@ -341,9 +378,9 @@
       if (!BE || !BE.sb) { setPhase('nobackend'); return; }
       if (BE.mode === 'signin' || BE.mode === 'pending') { setPhase('signin'); return; }
       if (BE.mode !== 'cloud' || !BE.user) { setPhase('demo'); return; }
-      sb.from('profiles').select('role,is_supervisor,is_student,name').eq('id', BE.user.id).maybeSingle().then(function (r) {
+      sb.from('profiles').select('role,is_supervisor,is_student,name,department,capacity_max,research_interests,accepting_students').eq('id', BE.user.id).maybeSingle().then(function (r) {
         var p = (r && r.data) || {};
-        setMe({ id: BE.user.id, name: p.name || BE.user.name, role: p.role, is_supervisor: p.is_supervisor, is_student: p.is_student });
+        setMe({ id: BE.user.id, name: p.name || BE.user.name, role: p.role, is_supervisor: p.is_supervisor, is_student: p.is_student, department: p.department, capacity_max: p.capacity_max, research_interests: p.research_interests, accepting_students: p.accepting_students });
         loadData(function () { setPhase('ready'); });
       }, function () { setMe({ id: BE.user.id, name: BE.user.name }); setPhase('ready'); });
     }
@@ -371,21 +408,24 @@
     var isSup = me && (isAdmin || me.is_supervisor);
     var myStudent = data.students.filter(function (s) { return s.profile_id === me.id; })[0];
     var isStudentOnly = !isSup && (me.is_student || !!myStudent);
+    var hasRole = isAdmin || isSup || isStudentOnly;
     var roleLabel = isAdmin ? 'Administrator' : (me && me.is_supervisor ? 'Supervisor' : (isStudentOnly ? 'Student' : 'Member'));
     var NAV = [];
     if (isSup) { NAV.push(['dashboard', 'Dashboard']); NAV.push(['students', 'Students']); }
     if (isStudentOnly) NAV.push(['mine', 'My progress']);
-    if (!isStudentOnly) NAV.push(['supervisors', 'Supervisors']);
+    NAV.push(['supervisors', 'Supervisors']);
     NAV.push(['topics', 'Research topics']);
+    NAV.push(['account', 'My account']);
     var allowed = NAV.map(function (x) { return x[0]; });
     var cur = allowed.indexOf(view) >= 0 ? view : allowed[0];
     var nStu = data.students.length;
-    var titles = { dashboard: 'Dashboard', students: 'Students', supervisors: 'Supervisors', topics: 'Research topics', mine: 'My progress' };
-    var subs = { supervisors: data.sups.length + ' supervisors · ' + nStu + ' student' + (nStu === 1 ? '' : 's'), topics: data.topics.length + ' topics', students: nStu + ' student' + (nStu === 1 ? '' : 's'), dashboard: (isAdmin ? 'Institution-wide' : 'Your students') + ' · ' + nStu + ' student' + (nStu === 1 ? '' : 's'), mine: myStudent ? (myStudent.topic || '') : '' };
+    var titles = { dashboard: 'Dashboard', students: 'Students', supervisors: 'Supervisors', topics: 'Research topics', mine: 'My progress', account: 'My account' };
+    var subs = { supervisors: data.sups.length + ' supervisors · ' + nStu + ' student' + (nStu === 1 ? '' : 's'), topics: data.topics.length + ' topics', students: nStu + ' student' + (nStu === 1 ? '' : 's'), dashboard: (isAdmin ? 'Institution-wide' : 'Your students') + ' · ' + nStu + ' student' + (nStu === 1 ? '' : 's'), mine: myStudent ? (myStudent.topic || '') : '', account: 'Set your role and profile' };
     function canEditStudent(s) { return isAdmin || (s && s.supervisor_id === me.id); }
 
     var body;
-    if (cur === 'mine') body = myStudent ? h(StudentDetail, { student: myStudent, sups: data.sups, canEdit: false, onBack: null, onChanged: function () { loadData(); } }) : h('div', { className: 'empty' }, 'No student record is linked to your account yet — ask your supervisor or the administrator to add you.');
+    if (cur === 'account') body = h(MyAccount, { me: me, myStudent: myStudent, onChanged: boot });
+    else if (cur === 'mine') body = myStudent ? h(StudentDetail, { student: myStudent, sups: data.sups, canEdit: false, onBack: null, onChanged: function () { loadData(); } }) : h('div', { className: 'empty' }, 'No student record is linked to your account yet — register on the My account page or ask your supervisor.');
     else if (cur === 'dashboard') body = h(Dashboard, { students: data.students, milestones: data.milestones, topics: data.topics, me: me, isAdmin: isAdmin });
     else if (cur === 'supervisors') body = h(Supervisors, { sups: data.sups, students: data.students });
     else if (cur === 'topics') body = h(Topics, { topics: data.topics, sups: data.sups, me: me, isAdmin: isAdmin, canPost: isSup, onChanged: function () { loadData(); } });
@@ -402,6 +442,7 @@
         h('div', { className: 'side-foot' }, h(Avatar, { u: me, size: 32 }), h('div', { className: 'who' }, h('b', null, me.name), h('span', null, roleLabel)), h('a', { className: 'exit', href: 'Projects.html', title: 'Back to Publify' }, '←'))
       ),
       h('div', { className: 'main' },
+        (!hasRole && cur !== 'account') ? h('div', { className: 'panel', style: { background: '#eef0ff', borderColor: '#c7cdf5' } }, h('b', null, 'Welcome to the Doctoral School! '), 'Set whether you are a supervisor or a student to get started — ', h('a', { href: '#', onClick: function (e) { e.preventDefault(); setView('account'); } }, 'open My account')) : null,
         ((cur === 'students' && sel) || (cur === 'mine' && myStudent)) ? null : h('div', { className: 'head' }, h('div', null, h('h1', null, titles[cur]), h('div', { className: 'sub' }, subs[cur] || '')), isAdmin ? h('span', { className: 'badge role' }, 'admin view') : null),
         body
       )
