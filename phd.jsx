@@ -396,6 +396,17 @@
     var asg = useState({ student_id: '', supervisor_id: '', kind: 'primary' }), assign = asg[0], setAssign = asg[1];
     useEffect(function () { sb.from('profiles').select('id,name,email,role,is_supervisor,is_student').order('name').then(function (r) { setProfiles((r && r.data) || []); }); }, []);
     function toggleRole(p, field) { var patch = {}; patch[field] = !p[field]; sb.from('profiles').update(patch).eq('id', p.id).then(function (r) { if (r && r.error) { alert(r.error.message); return; } setProfiles(function (list) { return list.map(function (x) { return x.id === p.id ? Object.assign({}, x, patch) : x; }); }); props.onChanged(); }); }
+    function localFlag(id, field, val) { var patch = {}; patch[field] = val; setProfiles(function (l) { return l.map(function (x) { return x.id === id ? Object.assign({}, x, patch) : x; }); }); }
+    // "Student" = has a phd_students record (= appears in the Students list); toggling manages the record
+    function toggleStudentRecord(p) {
+      var rec = props.students.filter(function (s) { return s.profile_id === p.id; })[0];
+      if (rec) {
+        if (!window.confirm('Remove ' + (p.name || 'this user') + ' from the Students list? Their progress record will be deleted.')) return;
+        sb.from('phd_students').delete().eq('id', rec.id).then(function () { sb.from('profiles').update({ is_student: false }).eq('id', p.id).then(function () { localFlag(p.id, 'is_student', false); props.onChanged(); }); });
+      } else {
+        sb.from('phd_students').insert({ profile_id: p.id, name: p.name || 'Student', status: 'Aktív' }).then(function (r) { if (r && r.error) { alert(r.error.message); return; } sb.from('profiles').update({ is_student: true }).eq('id', p.id).then(function () { localFlag(p.id, 'is_student', true); props.onChanged(); }); });
+      }
+    }
     function doAssign() { if (!assign.student_id || !assign.supervisor_id) return; sb.from('phd_supervisions').insert({ student_id: assign.student_id, supervisor_id: assign.supervisor_id, kind: assign.kind, status: 'accepted', decided_at: new Date().toISOString() }).then(function (r) { if (r && r.error) { alert(r.error.message); return; } setAssign({ student_id: '', supervisor_id: '', kind: 'primary' }); props.onChanged(); }); }
     function setStatus(v, status) { sb.from('phd_supervisions').update({ status: status, decided_at: new Date().toISOString() }).eq('id', v.id).then(props.onChanged); }
     function del(v) { sb.from('phd_supervisions').delete().eq('id', v.id).then(props.onChanged); }
@@ -405,11 +416,12 @@
     return h('div', null,
       h('div', { className: 'panel' }, h('h3', null, 'Users & roles (' + profiles.length + ')'),
         profiles.map(function (p) {
+          var hasRec = props.students.some(function (s) { return s.profile_id === p.id; });
           return h('div', { className: 'ms', key: p.id },
             h(Avatar, { u: p, size: 28 }),
             h('div', { className: 'mt' }, h('b', null, p.name || '—'), h('span', null, p.email + (p.role === 'admin' ? ' · admin' : ''))),
-            h('span', { style: { fontSize: 11, color: 'var(--muted)' } }, 'Supervisor'), h('label', { className: 'switch' }, h('input', { type: 'checkbox', checked: !!p.is_supervisor, onChange: function () { toggleRole(p, 'is_supervisor'); } }), h('span', { className: 'sl' })),
-            h('span', { style: { fontSize: 11, color: 'var(--muted)', marginLeft: 8 } }, 'Student'), h('label', { className: 'switch' }, h('input', { type: 'checkbox', checked: !!p.is_student, onChange: function () { toggleRole(p, 'is_student'); } }), h('span', { className: 'sl' }))
+            h('span', { style: { fontSize: 11, color: 'var(--muted)' } }, 'Supervisor'), h('label', { className: 'switch', title: 'Supervisor' }, h('input', { type: 'checkbox', checked: !!p.is_supervisor, onChange: function () { toggleRole(p, 'is_supervisor'); } }), h('span', { className: 'sl' })),
+            h('span', { style: { fontSize: 11, color: 'var(--muted)', marginLeft: 8 } }, 'Student'), h('label', { className: 'switch', title: 'In the Students list' }, h('input', { type: 'checkbox', checked: hasRec, onChange: function () { toggleStudentRecord(p); } }), h('span', { className: 'sl' }))
           );
         })
       ),
