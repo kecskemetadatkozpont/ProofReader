@@ -200,10 +200,14 @@ konzulensnek" kérés ide esik), aztán a compute-infra (R3/R4).
    kvótával és cost-trackinggel; a böngésző sosem látja.
 4. **Edge Functions:** bevezetjük (R1-től), a titkos API-proxyhoz — az első szerveroldali kód a projektben.
 
-### R0 build-scope (folyamatban)
+### R0 build-scope — ✅ KÉSZ (deployed + verified)
 - **migration-11-research.sql:** `research_projects`, `research_log`, `research_tasks`, `notifications`
-  + RLS + `research_can_read/write_project()` helper (owner ∨ elfogadott konzulens ∨ admin).
-- **Research.html + research.jsx:** projekt-lista + létrehozás; projekt-detail **stage-stepperrel** (8 stage)
-  + Overview + **Research Log** (lista + bejegyzés) + **Tasks** (lista + státusz). A PhD-modul shell/RLS-mintáját követi.
-- **Drawer-link** a Research workspace-hez; **élő RLS-teszt**.
+  + RLS + `research_can_read/write_project()` helper (owner ∨ elfogadott konzulens ∨ admin). FUTOTT.
+- **migration-12-research-rls-fix.sql:** a `research_projects` saját read/update policy-je a sor `owner_id`-ját
+  olvassa közvetlenül (+ `research_supervises(sid)` helper a konzulens-ellenőrzéshez) — különben az
+  `INSERT … RETURNING` (.select()) 42501-be futott a STABLE függvény snapshotja miatt. FUTOTT.
+- **Research.html + research.jsx:** projekt-lista + létrehozás; projekt-detail **9-állomásos stage-stepperrel**
+  + Overview + **Research Log** (típusos bejegyzés) + **Tasks** (todo/doing/done). PhD-modul shell/RLS-minta.
+- **Drawer + admin-fejléc Research-link**; admin **View as** ide is kiterjed.
+- **Tesztek:** shell smoke 7/7 · élő RLS 8/8 (owner ír; konzulens read-only; idegen nem lát) · UI create+log 5/5.
 - A digest (R2), Edge/API (R1), compute (R3/R4) későbbi fázisok.
