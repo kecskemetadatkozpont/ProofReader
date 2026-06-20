@@ -132,6 +132,19 @@
     .idea-foot button { font-size: 11.5px; font-weight: 600; border: 1px solid var(--line); background: #fff; border-radius: 7px; padding: 4px 9px; cursor: pointer; font-family: inherit; color: var(--muted); }
     .idea-foot button:hover { border-color: var(--accent); color: var(--accent); }
     .src { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--soft); } .src:last-child { border-bottom: 0; }
+    /* literature metric tags + filters */
+    .mtags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+    .mtag { font-size: 10.5px; font-weight: 600; padding: 2px 7px; border-radius: 999px; background: var(--soft); color: var(--muted); white-space: nowrap; }
+    .mtag.j { background: #eef0ff; color: var(--accent); max-width: 280px; overflow: hidden; text-overflow: ellipsis; }
+    .mtag.ok { background: var(--ok-bg); color: var(--ok); }
+    .mtag.oa { background: #e7f0fb; color: #1d4ed8; }
+    .mtag.imp { background: var(--warn-bg); color: var(--warn); }
+    .lfilters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+    .lfilters .flab { font-size: 11.5px; color: var(--muted); font-weight: 600; }
+    .lfilters input.num { width: 76px; height: 30px; border: 1px solid var(--line); border-radius: 8px; padding: 0 8px; font-family: inherit; font-size: 12.5px; }
+    .lchip { font-size: 11.5px; font-weight: 600; padding: 5px 11px; border-radius: 999px; border: 1px solid var(--line); background: #fff; color: var(--muted); cursor: pointer; font-family: inherit; }
+    .lchip:hover { border-color: #cfd4e6; }
+    .lchip.on { background: var(--accent); color: #fff; border-color: var(--accent); }
     @media (max-width: 760px) { .side { width: 64px; } .side-brand i, .side-brand b, .nav button span, .side-foot .who { display: none; } .main { padding: 18px; } }
   </style>
 </head>

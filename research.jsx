@@ -211,6 +211,18 @@
 
   // ---------- Literature (R1, OpenAlex) ----------
   function abstractFromInverted(inv) { if (!inv) return null; var w = []; Object.keys(inv).forEach(function (k) { inv[k].forEach(function (p) { w[p] = k; }); }); return w.join(' ').slice(0, 1500); }
+  function normWork(w) { var s = (w.primary_location && w.primary_location.source) || {}; return { journal: s.display_name, type: s.type, indexed: !!s.is_core, doaj: !!s.is_in_doaj, oa: !!(w.open_access && w.open_access.is_oa), fwci: w.fwci, year: w.publication_year, date: w.publication_date, cites: w.cited_by_count }; }
+  function metricTags(o) {
+    var t = [];
+    if (o.journal) t.push(h('span', { className: 'mtag j', key: 'j', title: 'Journal / venue' }, o.journal));
+    if (o.type && o.type !== 'journal') t.push(h('span', { className: 'mtag', key: 't' }, o.type === 'conference' ? 'Conference' : (o.type.charAt(0).toUpperCase() + o.type.slice(1))));
+    if (o.date || o.year) t.push(h('span', { className: 'mtag', key: 'y' }, o.date || o.year));
+    if (o.cites != null) t.push(h('span', { className: 'mtag', key: 'c' }, o.cites + ' cites'));
+    if (o.indexed) t.push(h('span', { className: 'mtag ok', key: 'i', title: 'Indexed core source (OpenAlex) — the open proxy for Scopus / Web of Science indexing' }, '✓ Indexed'));
+    if (o.fwci != null) t.push(h('span', { className: 'mtag imp', key: 'f', title: 'Field-Weighted Citation Impact — 1.0 = average for the field; >1 is above-average impact' }, 'FWCI ' + Number(o.fwci).toFixed(1)));
+    if (o.oa) t.push(h('span', { className: 'mtag oa', key: 'o', title: o.doaj ? 'Open access (DOAJ journal)' : 'Open access' }, 'OA'));
+    return t.length ? h('div', { className: 'mtags' }, t) : null;
+  }
   function bibKey(s, used) {
     var first = (s.authors && s.authors[0]) ? String(s.authors[0]).split(/\s+/).pop() : 'ref';
     var base = (first + (s.year || '')).replace(/[^A-Za-z0-9]/g, '') || ('ref' + (s.year || ''));
@@ -254,16 +266,29 @@
     var q = useState(''), query = q[0], setQuery = q[1];
     var r = useState(null), results = r[0], setResults = r[1];
     var b = useState(false), busy = b[0], setBusy = b[1];
+    var fl = useState({ minCites: '', fromYear: '', indexed: false, oa: false, journals: false }), flt = fl[0], setFlt = fl[1];
     var saved = {}; (props.sources || []).forEach(function (s) { if (s.ext_id) saved[s.ext_id] = true; });
-    function search() {
+    function setF(k, v) { var o = {}; o[k] = v; setFlt(Object.assign({}, flt, o)); }
+    function buildFilter(f) {
+      var p = [];
+      var mc = parseInt(f.minCites, 10); if (mc > 0) p.push('cited_by_count:>' + (mc - 1));
+      var fy = parseInt(f.fromYear, 10); if (fy > 1800) p.push('from_publication_date:' + fy + '-01-01');
+      if (f.indexed) p.push('primary_location.source.is_core:true');
+      if (f.oa) p.push('open_access.is_oa:true');
+      if (f.journals) p.push('primary_location.source.type:journal');
+      return p.join(',');
+    }
+    function runSearch(f) {
       if (!query.trim()) return;
       setBusy(true); setResults(null);
       var email = (BE.user && BE.user.email) || 'research@publify.app';
-      fetch('https://api.openalex.org/works?search=' + encodeURIComponent(query.trim()) + '&per-page=12&mailto=' + encodeURIComponent(email))
-        .then(function (x) { return x.json(); })
-        .then(function (j) { setBusy(false); setResults((j && j.results) || []); }, function () { setBusy(false); setResults([]); });
+      var url = 'https://api.openalex.org/works?search=' + encodeURIComponent(query.trim()) + '&per-page=25&mailto=' + encodeURIComponent(email);
+      var fs = buildFilter(f || flt); if (fs) url += '&filter=' + fs.replace(/>/g, '%3E');
+      fetch(url).then(function (x) { return x.json(); }).then(function (j) { setBusy(false); setResults((j && j.results) || []); }, function () { setBusy(false); setResults([]); });
     }
-    function venueOf(w) { return (w.primary_location && w.primary_location.source && w.primary_location.source.display_name) || (w.host_venue && w.host_venue.display_name) || ''; }
+    // re-run automatically when a filter changes (only after the first search)
+    useEffect(function () { if (results !== null) runSearch(flt); }, [flt.minCites, flt.fromYear, flt.indexed, flt.oa, flt.journals]);
+    function venueOf(w) { return (w.primary_location && w.primary_location.source && w.primary_location.source.display_name) || ''; }
     function add(w) {
       var authors = (w.authorships || []).slice(0, 8).map(function (a) { return a.author && a.author.display_name; }).filter(Boolean);
       sb.from('research_sources').insert({ project_id: props.projectId, source_api: 'openalex', ext_id: w.id, doi: w.doi || null, title: w.display_name || 'Untitled', authors: authors.length ? authors : null, year: w.publication_year || null, venue: venueOf(w) || null, abstract: abstractFromInverted(w.abstract_inverted_index), cited_by: w.cited_by_count, url: w.doi || w.id, screening: 'unscreened' }).then(function (res) { if (res && res.error) { if (!/duplicate|unique/i.test(res.error.message)) alert(res.error.message); return; } props.onChanged(); });
@@ -275,14 +300,25 @@
       h('div', { className: 'panel' },
         h('h3', null, 'Literature search', h('span', { style: { fontWeight: 600, color: 'var(--faint)' } }, 'OpenAlex')),
         props.canEdit ? h('div', { className: 'addrow', style: { marginTop: 0 } },
-          h('input', { className: 'grow', value: query, placeholder: 'Search papers (e.g. LiDAR out-of-distribution detection)…', onChange: function (e) { setQuery(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter') search(); } }),
-          h('button', { className: 'btn pri', disabled: busy, onClick: search }, busy ? 'Searching…' : 'Search')
+          h('input', { className: 'grow', value: query, placeholder: 'Search papers (e.g. LiDAR out-of-distribution detection)…', onChange: function (e) { setQuery(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter') runSearch(); } }),
+          h('button', { className: 'btn pri', disabled: busy, onClick: function () { runSearch(); } }, busy ? 'Searching…' : 'Search')
+        ) : null,
+        props.canEdit ? h('div', { className: 'lfilters' },
+          h('span', { className: 'flab' }, 'Min cites'), h('input', { className: 'num', type: 'number', min: 0, value: flt.minCites, onChange: function (e) { setF('minCites', e.target.value); } }),
+          h('span', { className: 'flab' }, 'From year'), h('input', { className: 'num', type: 'number', value: flt.fromYear, placeholder: 'YYYY', onChange: function (e) { setF('fromYear', e.target.value); } }),
+          h('button', { className: 'lchip' + (flt.indexed ? ' on' : ''), title: 'Only indexed core sources (Scopus/WoS-level)', onClick: function () { setF('indexed', !flt.indexed); } }, '✓ Indexed'),
+          h('button', { className: 'lchip' + (flt.oa ? ' on' : ''), onClick: function () { setF('oa', !flt.oa); } }, 'Open access'),
+          h('button', { className: 'lchip' + (flt.journals ? ' on' : ''), onClick: function () { setF('journals', !flt.journals); } }, 'Journals only')
         ) : null,
         results ? (results.length ? results.map(function (w) {
           var au = (w.authorships || []).slice(0, 3).map(function (a) { return a.author && a.author.display_name; }).filter(Boolean).join(', ');
-          return h('div', { className: 'src', key: w.id },
-            h('div', { style: { flex: 1, minWidth: 0 } }, h('b', { style: { fontSize: 13 } }, w.display_name || 'Untitled'), h('div', { style: { fontSize: 11.5, color: 'var(--muted)' } }, [au, w.publication_year, venueOf(w)].filter(Boolean).join(' · ') + ' · ' + (w.cited_by_count || 0) + ' cites')),
-            saved[w.id] ? h('span', { className: 'chip c-ok' }, 'in library') : (props.canEdit ? h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12 }, onClick: function () { add(w); } }, 'Add') : null)
+          return h('div', { className: 'src', style: { alignItems: 'flex-start' }, key: w.id },
+            h('div', { style: { flex: 1, minWidth: 0 } },
+              h('b', { style: { fontSize: 13 } }, w.display_name || 'Untitled'),
+              au ? h('div', { style: { fontSize: 11.5, color: 'var(--muted)', marginTop: 1 } }, au) : null,
+              metricTags(normWork(w))
+            ),
+            saved[w.id] ? h('span', { className: 'chip c-ok' }, 'in library') : (props.canEdit ? h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12, flex: 'none' }, onClick: function () { add(w); } }, 'Add') : null)
           );
         }) : h('div', { style: { fontSize: 13, color: 'var(--faint)', padding: '8px 0' } }, 'No results.')) : null
       ),
@@ -292,10 +328,14 @@
           lib.length ? h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12 }, title: 'Export included (or all) as BibTeX', onClick: function () { var inc = lib.filter(function (x) { return x.screening === 'include'; }); downloadText('library.bib', genBibtex(inc.length ? inc : lib)); } }, '⬇ BibTeX') : null
         )),
         lib.length ? lib.map(function (s) {
-          return h('div', { className: 'src', key: s.id },
-            h('div', { style: { flex: 1, minWidth: 0 } }, h('b', { style: { fontSize: 13 } }, s.url ? h('a', { href: s.url, target: '_blank' }, s.title) : s.title), h('div', { style: { fontSize: 11.5, color: 'var(--muted)' } }, [(s.authors || []).slice(0, 3).join(', '), s.year, s.venue].filter(Boolean).join(' · ') + (s.cited_by != null ? ' · ' + s.cited_by + ' cites' : ''))),
-            props.canEdit ? h('div', { className: 'seg' }, ['include', 'maybe', 'exclude'].map(function (v) { return h('button', { key: v, className: s.screening === v ? 'on' : '', onClick: function () { setScreen(s, v); } }, v); })) : h('span', { className: 'chip c-grey' }, s.screening),
-            props.canEdit ? h('button', { className: 'icon-x', onClick: function () { del(s); } }, '✕') : null
+          return h('div', { className: 'src', style: { alignItems: 'flex-start' }, key: s.id },
+            h('div', { style: { flex: 1, minWidth: 0 } },
+              h('b', { style: { fontSize: 13 } }, s.url ? h('a', { href: s.url, target: '_blank' }, s.title) : s.title),
+              (s.authors && s.authors.length) ? h('div', { style: { fontSize: 11.5, color: 'var(--muted)', marginTop: 1 } }, s.authors.slice(0, 3).join(', ')) : null,
+              metricTags({ journal: s.venue, year: s.year, cites: s.cited_by })
+            ),
+            props.canEdit ? h('div', { className: 'seg', style: { flex: 'none' } }, ['include', 'maybe', 'exclude'].map(function (v) { return h('button', { key: v, className: s.screening === v ? 'on' : '', onClick: function () { setScreen(s, v); } }, v); })) : h('span', { className: 'chip c-grey' }, s.screening),
+            props.canEdit ? h('button', { className: 'icon-x', style: { flex: 'none' }, onClick: function () { del(s); } }, '✕') : null
           );
         }) : h('div', { style: { fontSize: 13, color: 'var(--faint)', padding: '8px 0' } }, 'No sources saved yet — search above and Add.')
       )
