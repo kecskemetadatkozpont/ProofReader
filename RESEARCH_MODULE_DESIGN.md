@@ -248,3 +248,52 @@ konzulensnek" kérés ide esik), aztán a compute-infra (R3/R4).
   migration-15 lefuttatása után fut** (`/tmp/aloud_research_r3r4_e2e.js`: regisztrál → queue → worker fut → eredmény).
 - **Hátra:** R5 (agentic Elicit+szintézis) · R7 (cost-dashboard, kollaboráció) · a `research-ai` Edge-deploy +
   pg_cron a usernél.
+
+## 9. R5b — Ideas chat (Consensus-szal, MCP-n keresztül) — DESIGN
+
+> Cél: az Ideas fül tetején egy **chat-ablak**, ahol a user egy **Claude-session**-nel beszélget, és Claude
+> a **Consensus**-t hívja tudományos evidenciáért (MCP-n vagy direkt tool-on át), hogy megalapozott
+> kutatási kérdéseket csiszoljanak. Az asszisztens-üzenetekből „✚ Save as idea" → `research_ideas`.
+
+### Architektúra (a kulcs sosem a böngészőben)
+```
+Böngésző chat-UI (Ideas fül)
+  → research-chat backend (Edge Function VAGY self-hosted worker)   ── itt él az Anthropic + Consensus kulcs
+      → Anthropic Messages API (streaming), agentic tool-use loop:
+          Claude → consensus_search hívás → backend lekéri Consensus-t → tool_result → Claude → …
+      ← SSE token-stream vissza a böngészőbe
+  ↘ minden üzenet perzisztálva: research_chats + research_messages (RLS: owner + konzulens + admin)
+```
+
+### Consensus bekötése — két út
+- **(A) Direkt tool (egyszerűbb, ajánlott MVP-re):** a backend definiál egy `consensus_search(query)` Claude-toolt,
+  és amikor Claude meghívja, a backend a **Consensus REST API**-t kéri le, az eredményt tool_result-ként adja
+  vissza. Teljes kontroll, nincs MCP-plumbing. Funkcionálisan azonos a „Consensus-szal beszélgetni" céllal.
+- **(B) Anthropic MCP-connector:** a Messages API natívan csatlakozik egy **távoli (URL-alapú) MCP-szerverhez**
+  (`mcp_servers: [{type:'url', url: CONSENSUS_MCP_URL, authorization_token}]`, `betas:['mcp-client-…']`).
+  Ehhez Consensusnak **remote (HTTP/SSE) MCP-szervert** kell adnia — ha csak stdio/npm MCP van, akkor a
+  backendnek saját MCP-klienst kell futtatnia (Edge-en nehéz → inkább a self-hosted worker).
+
+### Backend-runtime — két út
+- **Edge Function:** egyszerű, streamel, de időkorlátos (hosszú agentic chat kifuthat belőle).
+- **Self-hosted worker:** nincs időkorlát, illik a választott compute-modellhez, tud MCP-klienst futtatni;
+  cserébe a streaminghez Realtime/WS-plumbing kell.
+
+### Adatmodell (új, RLS a research_can_read/write_project mintára)
+- `research_chats(id, project_id, title, created_at)`
+- `research_messages(id, chat_id, role[user|assistant|tool], content, tool_calls jsonb, created_at)`
+- „Save as idea" → `research_ideas(source='consensus')`.
+
+### Kulcsok / kvóta
+Anthropic platform-kulcs + **Consensus API-kulcs** (mindkettő Edge/worker secret). Agentic = több Claude-hívás/üzenet
+→ kvóta/cost-tracking (R7). MVP: platform-kulcs + projekt-szintű napi limit.
+
+### Fázis (MVP → teljes)
+- **C1:** Edge `research-chat` + direkt `consensus_search` tool + streaming + perzisztált chat + „Save as idea".
+- **C2:** MCP-connector (ha Consensus remote MCP-t ad), Elicit/OpenAlex tool-ok hozzáadása.
+- **C3:** worker-runtime a hosszú session-ökhöz + cost-dashboard.
+
+### Nyitott döntések
+1. Consensus bekötése: **direkt tool (REST)** vs **MCP-connector** (utóbbi remote MCP-URL-t igényel).
+2. Runtime: **Edge Function** vs **self-hosted worker**.
+3. Van **Consensus API-kulcsod** (ill. remote MCP-URL)? Ez gate-eli az építést.
