@@ -76,6 +76,8 @@ function Header(props) {
 function Overview(props) {
   var me = props.me, usage = props.usage, go = props.go;
   var projects = Store.listFor(me.id) || [];
+  var [rprojects, setRprojects] = useState([]);
+  useEffect(function () { var B = window.PR_BACKEND; if (B && B.sb && B.user) B.sb.from('research_projects').select('id,title,stage,status').eq('owner_id', B.user.id).order('updated_at', { ascending: false }).then(function (r) { setRprojects((r && r.data) || []); }); }, []);
   var recent = projects.slice().sort(function (a, b) { return (b.updated || 0) - (a.updated || 0); }).slice(0, 4);
   var owned = projects.filter(function (p) { return !p._shared; }).length;
   var shared = projects.filter(function (p) { return p._shared; }).length;
@@ -90,7 +92,7 @@ function Overview(props) {
     <h2 className="pf-h">Welcome back, {me.name.split(' ')[0]}</h2>
     {flags.length ? <div className="pf-flags">{flags.map(function (f, i) { return <div className="pf-flag" key={i}><span>{f[0]}</span><button onClick={function () { go(f[2]); }}>{f[1]} →</button></div>; })}</div> : null}
     <div className="pf-stats">
-      <div className="pf-stat"><b>{owned}</b><span>Owned projects</span></div>
+      <div className="pf-stat"><b>{owned}</b><span>Publications</span></div>
       <div className="pf-stat"><b>{shared}</b><span>Shared with me</span></div>
       <div className="pf-stat"><b>{fmtBytes(usage.storageBytes)}</b><span>of {fmtBytes(usage.storageLimit)} storage</span></div>
       <div className="pf-stat"><b>{(usage.chars || 0).toLocaleString()}</b><span>of {(usage.charLimit || 0).toLocaleString()} TTS chars/mo</span></div>
@@ -105,7 +107,15 @@ function Overview(props) {
           <div className="pf-card-m">{r ? 'Resume at sentence ' + (r.idx + 1) + ' · ' + rel(r.at) : 'Updated ' + rel(p.updated)}</div>
         </a>;
       })}</div>}
-    <div className="pf-actions"><a className="btn-primary" href="Projects.html">All projects &amp; new</a></div>
+    <div className="pf-actions"><a className="btn-primary" href="Projects.html">All publications &amp; new</a></div>
+    {rprojects.length ? <div style={{ marginTop: 20 }}>
+      <h3 className="pf-h3">Research projects</h3>
+      <div className="pf-cards">{rprojects.map(function (p) {
+        var STG = ['Setup', 'Idea', 'Literature', 'Protocol', 'Data', 'Compute', 'Analysis', 'Writing', 'Submission'];
+        return <a className="pf-card" key={p.id} href="Research.html"><div className="pf-card-t">{p.title}</div><div className="pf-card-m">{(STG[p.stage] || 'Setup') + ' · ' + (p.status || 'active')}</div></a>;
+      })}</div>
+      <div className="pf-actions" style={{ marginTop: 10 }}><a className="btn-ghost" href="Research.html">Open Research →</a></div>
+    </div> : null}
   </div>;
 }
 
@@ -219,6 +229,9 @@ function Publications(props) {
   var [err, setErr] = useState(null);
   var [viewer, setViewer] = useState(null); // {url, name} for the built-in PDF viewer
   var inputRef = useRef(null);
+  var [adding, setAdding] = useState(false);
+  var [fm, setFm] = useState({ title: '', authors: '', year: '', journal: '', doi: '' });
+  var [saving, setSaving] = useState(false);
   var PF = window.PRPubFiles;
   var keyOf = function (p) { return me.email + ':' + p.mtid; };
   useEffect(function () { if (PF && pubs.length) PF.counts(pubs.map(keyOf)).then(setCounts); }, []); // eslint-disable-line
@@ -234,8 +247,40 @@ function Publications(props) {
   function closeViewer() { if (viewer) { try { URL.revokeObjectURL(viewer.url); } catch (e) { } } setViewer(null); }
   function download(m) { if (PF) PF.getBlob(m.id).then(function (b) { if (b) { var u = URL.createObjectURL(b); var a = document.createElement('a'); a.href = u; a.download = m.name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function () { URL.revokeObjectURL(u); }, 5000); } }); }
   function del(id, k) { if (PF) PF.remove(id).then(function () { loadFiles(k); PF.counts(pubs.map(keyOf)).then(setCounts); }); }
+  function addPub() {
+    var B = window.PR_BACKEND;
+    if (!B || !B.sb || !B.user) { setErr('Sign in to add publications.'); return; }
+    if (!fm.title.trim()) { setErr('A title is required.'); return; }
+    setSaving(true); setErr(null);
+    var au = fm.authors.trim();
+    B.sb.from('publications').insert({
+      researcher_id: B.user.id, mtid: -Date.now(), title: fm.title.trim(),
+      year: parseInt(fm.year, 10) || null, first_author: au ? au.split(',')[0].trim() : null,
+      author_count: au ? au.split(',').length : 1, journal: fm.journal.trim() || null,
+      doi: fm.doi.trim() || null, type: 'Manual', category: 'Manual',
+      citation: (au ? au + '. ' : '') + fm.title.trim() + (fm.year ? ' (' + fm.year + ')' : '') + (fm.journal ? ' ' + fm.journal : '')
+    }).then(function (r) { setSaving(false); if (r && r.error) { setErr(r.error.message); return; } location.reload(); });
+  }
+  var pin = { width: '100%', height: 36, border: '1px solid var(--pf-line, #e6e8ee)', borderRadius: 8, padding: '0 10px', marginBottom: 6, fontFamily: 'inherit', fontSize: 13.5, boxSizing: 'border-box', background: 'var(--pf-paper, #fff)', color: 'inherit' };
+  var addUI = preview ? null : <div className="pf-panel" style={{ marginBottom: 14 }}>
+    {!adding
+      ? <button className="btn-ghost" onClick={function () { setAdding(true); }}>+ Add a publication manually</button>
+      : <div>
+        <input style={pin} placeholder="Title *" value={fm.title} onChange={function (e) { setFm(Object.assign({}, fm, { title: e.target.value })); }} />
+        <input style={pin} placeholder="Authors (comma-separated)" value={fm.authors} onChange={function (e) { setFm(Object.assign({}, fm, { authors: e.target.value })); }} />
+        <div style={{ display: 'flex', gap: 8 }}>
+          <input style={pin} placeholder="Year" value={fm.year} onChange={function (e) { setFm(Object.assign({}, fm, { year: e.target.value })); }} />
+          <input style={pin} placeholder="Journal / venue" value={fm.journal} onChange={function (e) { setFm(Object.assign({}, fm, { journal: e.target.value })); }} />
+        </div>
+        <input style={pin} placeholder="DOI (optional)" value={fm.doi} onChange={function (e) { setFm(Object.assign({}, fm, { doi: e.target.value })); }} />
+        <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+          <button className="btn-primary" disabled={saving} onClick={addPub}>{saving ? 'Saving…' : 'Add publication'}</button>
+          <button className="btn-ghost" onClick={function () { setAdding(false); setErr(null); }}>Cancel</button>
+        </div>
+      </div>}
+  </div>;
 
-  if (!rec) return <div><h2 className="pf-h">My publications</h2><div className="pf-empty">No publication record is linked to this profile yet. Publication lists are imported from MTMT for participating researchers.</div></div>;
+  if (!rec) return <div><h2 className="pf-h">My publications</h2>{addUI}{err ? <div className="pf-note err">{err}</div> : null}<div className="pf-empty">No publications yet — add one above. (Researcher lists are imported from MTMT automatically.)</div></div>;
 
   var totalCites = pubs.reduce(function (a, p) { return a + (p.citations || 0); }, 0);
   // group by year desc
@@ -245,6 +290,7 @@ function Publications(props) {
 
   return <div>
     <h2 className="pf-h">My publications</h2>
+    {addUI}
     <input ref={inputRef} type="file" accept="application/pdf,.pdf,.doc,.docx,.txt,.csv,.xlsx,.zip,.tex,.bib,image/*" style={{ display: 'none' }} onChange={onFile} />
     <div className="pf-panel">
       <div className="pf-pub-sum">

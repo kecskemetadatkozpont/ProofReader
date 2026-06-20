@@ -212,14 +212,14 @@
     useEffect(function () { return function () { alive.current = false; }; }, []);
     function startTyping(id, full) {
       if (!full) return;
-      var i = 0, step = Math.max(2, Math.round(full.length / 90));        // ~90 frames → ~1.5s regardless of length
+      var i = 0, step = Math.max(1, Math.round(full.length / 110));       // ~half the previous speed (more frames + slower tick)
       setTyping({ id: id, len: 0 });
       (function tick() {
         if (!alive.current) return;
         i += step;
         if (i >= full.length) { setTyping(null); return; }
         setTyping({ id: id, len: i });
-        setTimeout(tick, 16);
+        setTimeout(tick, 30);
       })();
     }
     function loadMsgs(cid) {
