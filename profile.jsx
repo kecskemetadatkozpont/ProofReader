@@ -373,40 +373,45 @@ function PdfViewer(props) {
   var [playing, setPlaying] = useState(false);
   var [err, setErr] = useState('');
   var [view, setView] = useState('orig');        // orig (native iframe) | hl (rendered PDF + highlight overlay)
-  var audioRef = useRef(null), stopRef = useRef(false), idxRef = useRef(0), playingRef = useRef(false);
+  var audioRef = useRef(null), idxRef = useRef(0), playingRef = useRef(false), genRef = useRef(0);
   var hlRef = useRef(null), sentsRef = useRef([]), renderedRef = useRef(false);
   idxRef.current = idx;
   var cfg = voiceCfg();
   var isPdf = /pdf/i.test((f && f.type) || '') || /\.pdf$/i.test((f && f.name) || '');
 
+  // Fully halt any audio: cancel browser TTS, pause + release the <audio>, drop its handlers.
   function stopAudio() {
-    try { if (audioRef.current && audioRef.current.pause) audioRef.current.pause(); } catch (e) { }
     try { if (window.speechSynthesis) window.speechSynthesis.cancel(); } catch (e) { }
-    audioRef.current = null;
+    var a = audioRef.current; audioRef.current = null;
+    if (a) { try { a.onended = null; if (a.pause) a.pause(); if ('src' in a) a.src = ''; } catch (e) { } }
   }
-  useEffect(function () { return function () { stopRef.current = true; stopAudio(); }; }, []);
+  // Bump the generation token → every in-flight fetch/onended/chain from an older gen aborts.
+  function newGen() { genRef.current = (genRef.current + 1) % 1e9; stopAudio(); return genRef.current; }
+  useEffect(function () { return function () { genRef.current++; playingRef.current = false; stopAudio(); }; }, []);
   useEffect(function () {
-    var onKey = function (e) { if (e.key === 'Escape') { stopRef.current = true; stopAudio(); props.onClose(); } };
+    var onKey = function (e) { if (e.key === 'Escape') { newGen(); playingRef.current = false; props.onClose(); } };
     window.addEventListener('keydown', onKey); return function () { window.removeEventListener('keydown', onKey); };
   }, []);
 
-  function speakAt(i, list) {
-    if (stopRef.current || i < 0 || i >= list.length) { setPlaying(false); playingRef.current = false; if (i >= list.length) setIdx(0); return; }
+  function speakAt(i, list, gen) {
+    if (gen !== genRef.current) return;                          // a newer stop/seek/play superseded us
+    if (i < 0 || i >= list.length) { setPlaying(false); playingRef.current = false; if (i >= list.length) setIdx(0); return; }
     setIdx(i); idxRef.current = i; setPlaying(true); playingRef.current = true;
     var text = list[i], c = voiceCfg();
+    var alive = function () { return gen === genRef.current && playingRef.current; };
     if (elevenOn(c)) {
       try { E.prefetch(list.slice(i + 1, i + 3).map(function (t) { return { text: t }; }), c, meId); } catch (e) { }
       E.getAudio(text, c, meId).then(function (url) {
-        if (stopRef.current || idxRef.current !== i) return;
+        if (gen !== genRef.current) return;                      // stop/seek happened during the fetch
         var a = new Audio(url); audioRef.current = a; try { a.playbackRate = c.rate || 1; } catch (e) { }
-        a.onended = function () { if (!stopRef.current && idxRef.current === i && playingRef.current) speakAt(i + 1, list); };
-        if (playingRef.current) a.play().catch(function () { });   // a pause during the (async) fetch must win
-      }, function () { if (!stopRef.current && idxRef.current === i && playingRef.current) speakAt(i + 1, list); });
+        a.onended = function () { if (alive()) speakAt(i + 1, list, gen); };
+        if (playingRef.current) a.play().catch(function () { });  // a pause during the fetch must win
+      }, function () { if (alive()) speakAt(i + 1, list, gen); });
     } else {
       try { window.speechSynthesis.cancel(); } catch (e) { }
       var u = new SpeechSynthesisUtterance(text); u.rate = c.rate || 1;
       try { if (c.voiceURI) { var v = (window.speechSynthesis.getVoices() || []).filter(function (x) { return x.voiceURI === c.voiceURI; })[0]; if (v) u.voice = v; } } catch (e) { }
-      u.onend = function () { if (!stopRef.current && idxRef.current === i && playingRef.current) speakAt(i + 1, list); };
+      u.onend = function () { if (alive()) speakAt(i + 1, list, gen); };
       audioRef.current = { pause: function () { try { window.speechSynthesis.pause(); } catch (e) { } }, play: function () { try { window.speechSynthesis.resume(); } catch (e) { } } };
       if (playingRef.current) { try { window.speechSynthesis.speak(u); } catch (e) { } }
     }
@@ -468,17 +473,19 @@ function PdfViewer(props) {
     }, function (e) { setPhase('error'); setErr((e && e.message) || 'Could not render this PDF.'); return []; });
   }
   function showHighlight() { setView('hl'); return renderHighlight(); }
-  function start() { showHighlight().then(function (list) { if (list && list.length) { stopRef.current = false; speakAt(0, list); } }); }
+  function start() { showHighlight().then(function (list) { if (list && list.length) { var g = newGen(); playingRef.current = true; speakAt(0, list, g); } }); }
   function togglePlay() {
     if (playing) { setPlaying(false); playingRef.current = false; try { if (audioRef.current && audioRef.current.pause) audioRef.current.pause(); } catch (e) { } return; }
     if (!renderedRef.current || phase !== 'ready') { start(); return; }
     setView('hl'); setPlaying(true); playingRef.current = true;
-    if (audioRef.current && audioRef.current.play) audioRef.current.play(); else { stopRef.current = false; speakAt(idx, sentsRef.current); }
+    if (audioRef.current && audioRef.current.play) audioRef.current.play(); else { var g = newGen(); speakAt(idx, sentsRef.current, g); }
   }
-  function stopAll() { stopRef.current = true; playingRef.current = false; stopAudio(); setPlaying(false); setIdx(0); }
-  function seek(i) { stopRef.current = false; stopAudio(); speakAt(Math.max(0, Math.min(sentsRef.current.length - 1, i)), sentsRef.current); }   // click a sentence → read from there
+  function stopAll() { newGen(); playingRef.current = false; setPlaying(false); setIdx(0); }
+  function seek(i) { var g = newGen(); playingRef.current = true; speakAt(Math.max(0, Math.min(sentsRef.current.length - 1, i)), sentsRef.current, g); }   // click a sentence → read from there
   function jump(d) { seek(idx + d); }
   function onHlClick(e) { var t = e.target; if (t && t.classList && t.classList.contains('tl-s') && t.dataset && t.dataset.sent != null) seek(parseInt(t.dataset.sent, 10) || 0); }
+  function onHlOver(e) { var t = e.target; if (!t || !t.classList || !t.classList.contains('tl-s') || t.dataset.sent == null || !hlRef.current) return; var ss = hlRef.current.querySelectorAll('.tl-s[data-sent="' + t.dataset.sent + '"]'); for (var i = 0; i < ss.length; i++) ss[i].classList.add('hov'); }
+  function onHlOut(e) { if (!hlRef.current) return; var ss = hlRef.current.querySelectorAll('.tl-s.hov'); for (var i = 0; i < ss.length; i++) ss[i].classList.remove('hov'); }
   // highlight the spoken sentence's spans on the rendered PDF + scroll into view
   useEffect(function () {
     if (view !== 'hl' || !hlRef.current) return;
@@ -493,13 +500,13 @@ function PdfViewer(props) {
         <span className="pf-viewer-name" title={f.name}>{f.name}</span>
         {isPdf ? <button className="btn-ghost" title="Toggle sentence highlighting on the PDF" onClick={function () { view === 'hl' ? setView('orig') : showHighlight(); }}>{view === 'hl' ? '📄 Original' : '✨ Highlight'}</button> : null}
         <a className="btn-ghost" href={f.url} download={f.name}>Download</a>
-        <button className="btn-ghost" onClick={function () { stopRef.current = true; stopAudio(); props.onClose(); }}>✕ Close</button>
+        <button className="btn-ghost" onClick={function () { newGen(); playingRef.current = false; props.onClose(); }}>✕ Close</button>
       </div>
       {isPdf
         ? (view === 'hl'
           ? <div className="pf-pdf-wrap">
               {phase === 'loading' ? <div className="pf-pdf-load">Rendering the PDF…</div> : phase === 'error' ? <div className="pf-pdf-load" style={{ color: '#fecaca' }}>{err}</div> : null}
-              <div className="pf-pdf" ref={hlRef} onClick={onHlClick} />
+              <div className="pf-pdf" ref={hlRef} onClick={onHlClick} onMouseOver={onHlOver} onMouseOut={onHlOut} />
             </div>
           : <iframe className="pf-viewer-frame" src={f.url} title={f.name} />)
         : /^image\//i.test(f.type || '')

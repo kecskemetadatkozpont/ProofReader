@@ -185,8 +185,11 @@
     .pf-pdfpage .textLayer { position: absolute; inset: 0; overflow: hidden; line-height: 1; opacity: 1; }
     .pf-pdfpage .textLayer span, .pf-pdfpage .textLayer br { position: absolute; white-space: pre; transform-origin: 0% 0%; color: transparent; }
     .pf-pdfpage .textLayer span.tl-s { cursor: pointer; border-radius: 2px; }
-    .pf-pdfpage .textLayer span.tl-s:hover { background: rgba(99,102,241,.22); }
-    .pf-pdfpage .textLayer span.on { background: rgba(253,224,71,.5); }
+    /* hover lights the WHOLE sentence (JS-driven) so it's clear what a click selects */
+    .pf-pdfpage .textLayer span.hov { background: rgba(99,102,241,.20); box-shadow: 0 0 0 1px rgba(99,102,241,.20); }
+    /* the sentence being read */
+    .pf-pdfpage .textLayer span.on { background: rgba(250,204,21,.62); box-shadow: 0 0 0 2px rgba(250,204,21,.62); }
+    .pf-pdfpage .textLayer span.on.hov { background: rgba(250,204,21,.7); }
 
     @media (max-width: 760px) {
       .pf-body { flex-direction: column; }
