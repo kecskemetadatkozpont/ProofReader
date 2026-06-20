@@ -55,9 +55,13 @@ $$;
 --   select cron.schedule('research-daily-digest', '0 5 * * *',
 --                        $$ select public.run_research_digests_yesterday(); $$);
 -- (05:00 UTC daily.) Until then digests can be built on demand via the RPC above.
-do $$ begin
+do $do$
+begin
   if exists (select 1 from pg_extension where extname = 'pg_cron') then
-    perform cron.unschedule('research-daily-digest') where exists (select 1 from cron.job where jobname = 'research-daily-digest');
-    perform cron.schedule('research-daily-digest', '0 5 * * *', $$ select public.run_research_digests_yesterday(); $$);
+    if exists (select 1 from cron.job where jobname = 'research-daily-digest') then
+      perform cron.unschedule('research-daily-digest');
+    end if;
+    perform cron.schedule('research-daily-digest', '0 5 * * *', $job$ select public.run_research_digests_yesterday(); $job$);
   end if;
-end $$;
+end
+$do$;
