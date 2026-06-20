@@ -148,11 +148,120 @@
     );
   }
 
+  // ---------- Ideas (R1) ----------
+  function IdeasPanel(props) {
+    var f = useState({ question: '', hypothesis: '' }), form = f[0], setForm = f[1];
+    var b = useState(false), busy = b[0], setBusy = b[1];
+    var m = useState(''), msg = m[0], setMsg = m[1];
+    function add() {
+      if (!form.question.trim()) return;
+      sb.from('research_ideas').insert({ project_id: props.projectId, source: 'own', question: form.question.trim(), hypothesis: form.hypothesis.trim() || null, created_by: props.authorId, status: 'candidate' }).then(function (r) { if (r && r.error) { alert(r.error.message); return; } setForm({ question: '', hypothesis: '' }); props.onChanged(); });
+    }
+    function setStatus(idea, st) { sb.from('research_ideas').update({ status: st }).eq('id', idea.id).then(props.onChanged); }
+    function del(idea) { sb.from('research_ideas').delete().eq('id', idea.id).then(props.onChanged); }
+    function gap() {
+      setBusy(true); setMsg('Running gap analysis (AI)…');
+      sb.functions.invoke('research-ai', { body: { action: 'gap', project_id: props.projectId } }).then(function (res) {
+        setBusy(false);
+        if (res && res.error) { setMsg('AI not configured yet — deploy the research-ai Edge function (backend/functions/research-ai) and set ANTHROPIC_API_KEY.'); return; }
+        setMsg(''); props.onChanged();
+      }, function () { setBusy(false); setMsg('AI not configured yet — deploy the research-ai Edge function.'); });
+    }
+    var ideas = props.ideas || [];
+    return h('div', { className: 'panel' },
+      h('h3', null, 'Research ideas', props.canEdit ? h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12 }, disabled: busy, onClick: gap }, '✨ Gap analysis (AI)') : null),
+      msg ? h('div', { style: { fontSize: 12.5, color: 'var(--muted)', marginBottom: 8 } }, msg) : null,
+      props.canEdit ? h('div', { style: { marginBottom: 10 } },
+        h('input', { className: 'grow', style: { width: '100%', height: 36, border: '1px solid var(--line)', borderRadius: 8, padding: '0 10px', fontFamily: 'inherit', fontSize: 13 }, value: form.question, placeholder: 'A research question…', onChange: function (e) { setForm(Object.assign({}, form, { question: e.target.value })); } }),
+        h('input', { style: { width: '100%', height: 36, marginTop: 6, border: '1px solid var(--line)', borderRadius: 8, padding: '0 10px', fontFamily: 'inherit', fontSize: 13 }, value: form.hypothesis, placeholder: 'Hypothesis (optional)', onChange: function (e) { setForm(Object.assign({}, form, { hypothesis: e.target.value })); } }),
+        h('div', { style: { marginTop: 8 } }, h('button', { className: 'btn pri', onClick: add }, 'Add idea'))
+      ) : null,
+      ideas.length ? ideas.map(function (idea) {
+        return h('div', { className: 'idea', key: idea.id },
+          h('div', { style: { display: 'flex', gap: 7, alignItems: 'center', marginBottom: 4 } },
+            h('span', { className: 'chip ' + (idea.source === 'gap' ? 'c-acc' : 'c-grey') }, idea.source),
+            idea.novelty != null ? h('span', { className: 'chip c-ok' }, 'novelty ' + idea.novelty) : null,
+            h('span', { className: 'chip ' + (idea.status === 'selected' ? 'c-ok' : (idea.status === 'rejected' ? 'c-grey' : 'c-warn')) }, idea.status),
+            props.canEdit ? h('button', { className: 'icon-x', style: { marginLeft: 'auto' }, onClick: function () { del(idea); } }, '✕') : null
+          ),
+          h('div', { style: { fontSize: 13.5, fontWeight: 600 } }, idea.question),
+          idea.hypothesis ? h('div', { style: { fontSize: 12.5, color: 'var(--muted)', marginTop: 2 } }, idea.hypothesis) : null,
+          idea.rationale ? h('div', { style: { fontSize: 12, color: 'var(--faint)', marginTop: 4 } }, idea.rationale) : null,
+          props.canEdit ? h('div', { className: 'idea-foot' },
+            h('button', { onClick: function () { setStatus(idea, 'selected'); } }, 'Select'),
+            h('button', { onClick: function () { setStatus(idea, 'rejected'); } }, 'Reject'),
+            h('button', { onClick: function () { setStatus(idea, 'candidate'); } }, 'Reset')
+          ) : null
+        );
+      }) : h('div', { style: { fontSize: 13, color: 'var(--faint)', padding: '8px 0' } }, 'No ideas yet — add your own or run a gap analysis.')
+    );
+  }
+
+  // ---------- Literature (R1, OpenAlex) ----------
+  function abstractFromInverted(inv) { if (!inv) return null; var w = []; Object.keys(inv).forEach(function (k) { inv[k].forEach(function (p) { w[p] = k; }); }); return w.join(' ').slice(0, 1500); }
+  function LiteraturePanel(props) {
+    var q = useState(''), query = q[0], setQuery = q[1];
+    var r = useState(null), results = r[0], setResults = r[1];
+    var b = useState(false), busy = b[0], setBusy = b[1];
+    var saved = {}; (props.sources || []).forEach(function (s) { if (s.ext_id) saved[s.ext_id] = true; });
+    function search() {
+      if (!query.trim()) return;
+      setBusy(true); setResults(null);
+      var email = (BE.user && BE.user.email) || 'research@publify.app';
+      fetch('https://api.openalex.org/works?search=' + encodeURIComponent(query.trim()) + '&per-page=12&mailto=' + encodeURIComponent(email))
+        .then(function (x) { return x.json(); })
+        .then(function (j) { setBusy(false); setResults((j && j.results) || []); }, function () { setBusy(false); setResults([]); });
+    }
+    function venueOf(w) { return (w.primary_location && w.primary_location.source && w.primary_location.source.display_name) || (w.host_venue && w.host_venue.display_name) || ''; }
+    function add(w) {
+      var authors = (w.authorships || []).slice(0, 8).map(function (a) { return a.author && a.author.display_name; }).filter(Boolean);
+      sb.from('research_sources').insert({ project_id: props.projectId, source_api: 'openalex', ext_id: w.id, doi: w.doi || null, title: w.display_name || 'Untitled', authors: authors.length ? authors : null, year: w.publication_year || null, venue: venueOf(w) || null, abstract: abstractFromInverted(w.abstract_inverted_index), cited_by: w.cited_by_count, url: w.doi || w.id, screening: 'unscreened' }).then(function (res) { if (res && res.error) { if (!/duplicate|unique/i.test(res.error.message)) alert(res.error.message); return; } props.onChanged(); });
+    }
+    function setScreen(s, v) { sb.from('research_sources').update({ screening: v }).eq('id', s.id).then(props.onChanged); }
+    function del(s) { sb.from('research_sources').delete().eq('id', s.id).then(props.onChanged); }
+    var lib = props.sources || [];
+    return h('div', null,
+      h('div', { className: 'panel' },
+        h('h3', null, 'Literature search', h('span', { style: { fontWeight: 600, color: 'var(--faint)' } }, 'OpenAlex')),
+        props.canEdit ? h('div', { className: 'addrow', style: { marginTop: 0 } },
+          h('input', { className: 'grow', value: query, placeholder: 'Search papers (e.g. LiDAR out-of-distribution detection)…', onChange: function (e) { setQuery(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter') search(); } }),
+          h('button', { className: 'btn pri', disabled: busy, onClick: search }, busy ? 'Searching…' : 'Search')
+        ) : null,
+        results ? (results.length ? results.map(function (w) {
+          var au = (w.authorships || []).slice(0, 3).map(function (a) { return a.author && a.author.display_name; }).filter(Boolean).join(', ');
+          return h('div', { className: 'src', key: w.id },
+            h('div', { style: { flex: 1, minWidth: 0 } }, h('b', { style: { fontSize: 13 } }, w.display_name || 'Untitled'), h('div', { style: { fontSize: 11.5, color: 'var(--muted)' } }, [au, w.publication_year, venueOf(w)].filter(Boolean).join(' · ') + ' · ' + (w.cited_by_count || 0) + ' cites')),
+            saved[w.id] ? h('span', { className: 'chip c-ok' }, 'in library') : (props.canEdit ? h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12 }, onClick: function () { add(w); } }, 'Add') : null)
+          );
+        }) : h('div', { style: { fontSize: 13, color: 'var(--faint)', padding: '8px 0' } }, 'No results.')) : null
+      ),
+      h('div', { className: 'panel' },
+        h('h3', null, 'Library', h('span', { style: { fontWeight: 600, color: 'var(--faint)' } }, lib.length + ' source' + (lib.length === 1 ? '' : 's'))),
+        lib.length ? lib.map(function (s) {
+          return h('div', { className: 'src', key: s.id },
+            h('div', { style: { flex: 1, minWidth: 0 } }, h('b', { style: { fontSize: 13 } }, s.url ? h('a', { href: s.url, target: '_blank' }, s.title) : s.title), h('div', { style: { fontSize: 11.5, color: 'var(--muted)' } }, [(s.authors || []).slice(0, 3).join(', '), s.year, s.venue].filter(Boolean).join(' · ') + (s.cited_by != null ? ' · ' + s.cited_by + ' cites' : ''))),
+            props.canEdit ? h('div', { className: 'seg' }, ['include', 'maybe', 'exclude'].map(function (v) { return h('button', { key: v, className: s.screening === v ? 'on' : '', onClick: function () { setScreen(s, v); } }, v); })) : h('span', { className: 'chip c-grey' }, s.screening),
+            props.canEdit ? h('button', { className: 'icon-x', onClick: function () { del(s); } }, '✕') : null
+          );
+        }) : h('div', { style: { fontSize: 13, color: 'var(--faint)', padding: '8px 0' } }, 'No sources saved yet — search above and Add.')
+      )
+    );
+  }
+
   // ---------- Project detail ----------
   function ProjectDetail(props) {
     var p = props.project;
+    var tS = useState('overview'), tab = tS[0], setTab = tS[1];
     function setStage(i) { sb.from('research_projects').update({ stage: i }).eq('id', p.id).then(props.onChanged); }
     function setStatus(e) { sb.from('research_projects').update({ status: e.target.value }).eq('id', p.id).then(props.onChanged); }
+    var openTasks = (props.tasks || []).filter(function (t) { return t.status !== 'done'; }).length;
+    var TABS = [['overview', 'Overview', null], ['ideas', 'Ideas', (props.ideas || []).length], ['literature', 'Literature', (props.sources || []).length], ['log', 'Log', (props.log || []).length], ['tasks', 'Tasks', openTasks]];
+    var content;
+    if (tab === 'ideas') content = h(IdeasPanel, { projectId: p.id, ideas: props.ideas, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
+    else if (tab === 'literature') content = h(LiteraturePanel, { projectId: p.id, sources: props.sources, canEdit: props.canEdit, onChanged: props.onChanged });
+    else if (tab === 'log') content = h(LogPanel, { projectId: p.id, authorId: props.authorId, entries: props.log, canEdit: props.canEdit, onChanged: props.onChanged });
+    else if (tab === 'tasks') content = h(TasksPanel, { projectId: p.id, tasks: props.tasks, canEdit: props.canEdit, onChanged: props.onChanged });
+    else content = p.goal ? h('div', { className: 'panel' }, h('h3', null, 'Goal'), h('div', { style: { fontSize: 13.5 } }, p.goal)) : h('div', { className: 'soon' }, 'No goal set yet.');
     return h('div', null,
       h('button', { className: 'back-btn', onClick: props.onBack }, '← All projects'),
       h('div', { className: 'dhead' },
@@ -162,9 +271,8 @@
           : h('span', { className: 'chip c-grey' }, STATUS_LABEL[p.status] || p.status)
       ),
       h(Stepper, { stage: p.stage, canEdit: props.canEdit, onSet: setStage }),
-      p.goal ? h('div', { className: 'panel' }, h('h3', null, 'Goal'), h('div', { style: { fontSize: 13.5 } }, p.goal)) : null,
-      h(LogPanel, { projectId: p.id, authorId: props.authorId, entries: props.log, canEdit: props.canEdit, onChanged: props.onChanged }),
-      h(TasksPanel, { projectId: p.id, tasks: props.tasks, canEdit: props.canEdit, onChanged: props.onChanged })
+      h('div', { className: 'tabs' }, TABS.map(function (t) { return h('button', { key: t[0], className: tab === t[0] ? 'on' : '', onClick: function () { setTab(t[0]); } }, t[1], t[2] ? h('span', { className: 'c' }, t[2]) : null); })),
+      content
     );
   }
 
@@ -218,7 +326,7 @@
     var meS = useState(null), me = meS[0], setMe = meS[1];
     var pjS = useState([]), projects = pjS[0], setProjects = pjS[1];
     var selS = useState(null), sel = selS[0], setSel = selS[1];
-    var dS = useState({ log: [], tasks: [] }), detail = dS[0], setDetail = dS[1];
+    var dS = useState({ log: [], tasks: [], ideas: [], sources: [] }), detail = dS[0], setDetail = dS[1];
 
     useEffect(function () { boot(); }, []);
     function boot() {
@@ -246,9 +354,11 @@
     function loadDetail(projectId) {
       Promise.all([
         sb.from('research_log').select('id,type,summary,ts,profile_id,profiles(name)').eq('project_id', projectId).order('ts', { ascending: false }),
-        sb.from('research_tasks').select('id,title,status,stage,due').eq('project_id', projectId).order('sort', { ascending: true })
+        sb.from('research_tasks').select('id,title,status,stage,due').eq('project_id', projectId).order('sort', { ascending: true }),
+        sb.from('research_ideas').select('id,source,question,hypothesis,rationale,novelty,status').eq('project_id', projectId).order('created_at', { ascending: false }),
+        sb.from('research_sources').select('id,source_api,ext_id,doi,title,authors,year,venue,cited_by,url,screening').eq('project_id', projectId).order('cited_by', { ascending: false, nullsFirst: false })
       ]).then(function (res) {
-        setDetail({ log: (res[0] && res[0].data) || [], tasks: (res[1] && res[1].data) || [] });
+        setDetail({ log: (res[0] && res[0].data) || [], tasks: (res[1] && res[1].data) || [], ideas: (res[2] && res[2].data) || [], sources: (res[3] && res[3].data) || [] });
       });
     }
     function openProject(p) { setSel(p); loadDetail(p.id); }
@@ -280,7 +390,7 @@
 
     var body;
     if (sel) {
-      body = h(ProjectDetail, { project: sel, log: props.detail.log, tasks: props.detail.tasks, canEdit: props.canEdit(sel), authorId: props.authorId, onBack: props.onBack, onChanged: props.refreshAll });
+      body = h(ProjectDetail, { project: sel, log: props.detail.log, tasks: props.detail.tasks, ideas: props.detail.ideas, sources: props.detail.sources, canEdit: props.canEdit(sel), authorId: props.authorId, onBack: props.onBack, onChanged: props.refreshAll });
     } else if (!props.projects.length) {
       body = h('div', { className: 'soon' }, h('b', null, 'No research projects yet. '), 'Create one to start tracking a study from idea to submission.', h('div', { style: { marginTop: 14 } }, h('button', { className: 'btn pri', onClick: function () { setAdding(true); } }, '+ New project')));
     } else {

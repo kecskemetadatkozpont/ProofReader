@@ -120,6 +120,17 @@
     .notif-item:hover { background: var(--softer); }
     .notif-item.unread { background: #f5f7ff; }
     .notif-item b { font-size: 13px; } .notif-item .nx { font-size: 12px; color: var(--muted); margin-top: 3px; }
+    /* detail tabs + ideas + sources (R1) */
+    .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 16px; flex-wrap: wrap; }
+    .tabs button { border: 0; background: transparent; font-family: inherit; font-size: 13.5px; font-weight: 600; color: var(--muted); padding: 9px 13px; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+    .tabs button:hover { color: var(--ink); }
+    .tabs button.on { color: var(--accent); border-bottom-color: var(--accent); }
+    .tabs button .c { font-size: 11px; color: var(--faint); margin-left: 5px; }
+    .idea { padding: 12px 0; border-bottom: 1px solid var(--soft); } .idea:last-child { border-bottom: 0; }
+    .idea-foot { display: flex; gap: 8px; margin-top: 8px; }
+    .idea-foot button { font-size: 11.5px; font-weight: 600; border: 1px solid var(--line); background: #fff; border-radius: 7px; padding: 4px 9px; cursor: pointer; font-family: inherit; color: var(--muted); }
+    .idea-foot button:hover { border-color: var(--accent); color: var(--accent); }
+    .src { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--soft); } .src:last-child { border-bottom: 0; }
     @media (max-width: 760px) { .side { width: 64px; } .side-brand i, .side-brand b, .nav button span, .side-foot .who { display: none; } .main { padding: 18px; } }
   </style>
 </head>
