@@ -53,7 +53,16 @@
           h('div', { className: 'sec-t' }, 'Students (' + students.length + ')'),
           students.length ? students.map(function (st) { return h('div', { className: 'row', key: st.id }, h(Avatar, { u: st, size: 26 }), h('div', { style: { flex: 1 } }, h('b', null, st.name), h('div', { style: { fontSize: 11.5, color: 'var(--muted)' } }, st.topic || '—')), h('span', { className: 'badge' }, st.status)); }) : h('div', { style: { fontSize: 13, color: 'var(--faint)' } }, 'No students assigned.'),
           h('div', { className: 'sec-t' }, 'Publications (MTMT)'),
-          rec ? h('div', { style: { fontSize: 13 } }, h('b', null, rec.pubCount), ' publications · ', h('a', { href: 'https://m2.mtmt.hu/gui2/?mode=browse&params=author;' + rec.mtmtId, target: '_blank' }, 'MTMT')) : h('div', { style: { fontSize: 13, color: 'var(--faint)' } }, 'No publication record.')
+          rec ? h('div', { style: { fontSize: 13 } }, h('b', null, rec.pubCount), ' publications · ', h('a', { href: 'https://m2.mtmt.hu/gui2/?mode=browse&params=author;' + rec.mtmtId, target: '_blank' }, 'MTMT')) : h('div', { style: { fontSize: 13, color: 'var(--faint)' } }, 'No publication record.'),
+          props.myStudent ? (function () {
+            var ex = (props.mySupervisions || []).filter(function (v) { return v.supervisor_id === s.id; })[0];
+            function request(kind) { sb.from('phd_supervisions').insert({ student_id: props.myStudent.id, supervisor_id: s.id, kind: kind, status: 'pending' }).then(function (r) { if (r && r.error) { alert(r.error.message); return; } props.onChanged && props.onChanged(); }); }
+            function cancel() { sb.from('phd_supervisions').delete().eq('id', ex.id).then(function () { props.onChanged && props.onChanged(); }); }
+            return h('div', null, h('div', { className: 'sec-t' }, 'Supervision'),
+              ex ? h('div', { style: { fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 } }, h('span', { className: 'chip ' + stCls(ex.status) }, ex.status), h('span', { style: { color: 'var(--muted)' } }, ex.kind === 'co' ? 'co-supervisor' : 'primary'), ex.status === 'pending' ? h('button', { className: 'btn', onClick: cancel }, 'Cancel') : null)
+                : (s.accepting_students === false ? h('div', { style: { fontSize: 13, color: 'var(--muted)' } }, 'Not accepting new requests right now.')
+                  : h('div', { className: 'save-row', style: { marginTop: 0 } }, h('button', { className: 'btn pri', onClick: function () { request('primary'); } }, 'Request as primary'), h('button', { className: 'btn', onClick: function () { request('co'); } }, 'Request as co-supervisor'))));
+          })() : null
         )
       )
     );
@@ -61,18 +70,41 @@
   function Supervisors(props) {
     var sel = useState(null), open = sel[0], setOpen = sel[1];
     if (!props.sups.length) return h('div', { className: 'empty' }, 'No supervisors yet.');
+    var myMap = {}; (props.mySupervisions || []).forEach(function (v) { myMap[v.supervisor_id] = v; });
     return h(React.Fragment, null,
       h('div', { className: 'grid' }, props.sups.map(function (s) {
-        var n = props.students.filter(function (x) { return x.supervisor_id === s.id; }).length, cap = s.capacity_max || 0;
+        var n = props.students.filter(function (x) { return x.supervisor_id === s.id; }).length, cap = s.capacity_max || 0, my = myMap[s.id];
         return h('div', { className: 'card', key: s.id, onClick: function () { setOpen(s); } },
           h('div', { className: 'ch' }, h(Avatar, { u: s }), h('div', null, h('b', null, s.name), h('span', null, s.department || '—'))),
           (s.research_interests && s.research_interests.length) ? h('div', { className: 'tags' }, s.research_interests.slice(0, 3).map(function (t, i) { return h('span', { className: 'tag', key: i }, t); })) : null,
           h('div', { className: 'kv' }, h('span', null, 'Capacity'), h('span', null, n + ' / ' + (cap || '—'))),
           h('div', { className: 'meter' }, h('i', { style: { width: (cap ? Math.min(100, n / cap * 100) : 0) + '%', background: (cap && n >= cap) ? 'var(--danger)' : 'var(--accent)' } })),
-          h('div', { className: 'kv' }, h('span', null, pubCount(s.email) + ' publications'), h('span', null, n ? n + ' student' + (n === 1 ? '' : 's') : 'open'))
+          h('div', { className: 'kv' }, h('span', null, pubCount(s.email) + ' publications'), my ? h('span', { className: 'chip ' + stCls(my.status), style: { height: 18 } }, 'you: ' + my.status) : h('span', null, n ? n + ' student' + (n === 1 ? '' : 's') : 'open'))
         );
       })),
-      open ? h(SupervisorModal, { sup: open, students: props.students, onClose: function () { setOpen(null); } }) : null
+      open ? h(SupervisorModal, { sup: open, students: props.students, myStudent: props.myStudent, mySupervisions: props.mySupervisions, onChanged: props.onChanged, onClose: function () { setOpen(null); } }) : null
+    );
+  }
+
+  // ---------- Supervisor "Requests" inbox ----------
+  function RequestsInbox(props) {
+    var byStudent = {}; props.students.forEach(function (s) { byStudent[s.id] = s; });
+    var reqs = props.requests;
+    function decide(req, status) {
+      if (status === 'accepted' && props.capacityFull && !window.confirm('You are at capacity. Accept anyway?')) return;
+      sb.from('phd_supervisions').update({ status: status, decided_at: new Date().toISOString() }).eq('id', req.id).then(function (r) { if (r && r.error) { alert(r.error.message); return; } props.onChanged(); });
+    }
+    if (!reqs.length) return h('div', { className: 'empty' }, 'No pending supervision requests.');
+    return h('div', { className: 'panel' }, h('h3', null, 'Pending requests (' + reqs.length + ')'),
+      reqs.map(function (req) {
+        var st = byStudent[req.student_id];
+        return h('div', { className: 'ms', key: req.id },
+          h(Avatar, { u: st || { name: '?' }, size: 30 }),
+          h('div', { className: 'mt' }, h('b', null, st ? st.name : 'Student'), h('span', null, (st && st.topic ? st.topic : '—') + ' · requested as ' + (req.kind === 'co' ? 'co-supervisor' : 'primary'))),
+          h('button', { className: 'chip c-ok', onClick: function () { decide(req, 'accepted'); } }, 'Accept'),
+          h('button', { className: 'chip c-danger', onClick: function () { decide(req, 'rejected'); } }, 'Reject')
+        );
+      })
     );
   }
 
@@ -361,6 +393,7 @@
   var IC = {
     dashboard: h('svg', { viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5 }, h('rect', { x: 2, y: 2, width: 5, height: 5, rx: 1 }), h('rect', { x: 9, y: 2, width: 5, height: 5, rx: 1 }), h('rect', { x: 2, y: 9, width: 5, height: 5, rx: 1 }), h('rect', { x: 9, y: 9, width: 5, height: 5, rx: 1 })),
     account: h('svg', { viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5 }, h('circle', { cx: 8, cy: 5, r: 2.6 }), h('path', { d: 'M3 13.5c0-2.6 2.2-4 5-4s5 1.4 5 4', strokeLinecap: 'round' })),
+    requests: h('svg', { viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5 }, h('path', { d: 'M2 4.5h12v7H2zM2 5l6 4 6-4', strokeLinecap: 'round', strokeLinejoin: 'round' })),
     students: h('svg', { viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5 }, h('circle', { cx: 8, cy: 5, r: 2.4 }), h('path', { d: 'M3 13.5c0-2.5 2.2-4 5-4s5 1.5 5 4', strokeLinecap: 'round' })),
     supervisors: h('svg', { viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5 }, h('circle', { cx: 5.5, cy: 5, r: 2 }), h('circle', { cx: 11, cy: 6, r: 1.6 }), h('path', { d: 'M1.5 13c0-2 1.8-3.2 4-3.2s4 1.2 4 3.2M9.5 12.5c.2-1.5 1.4-2.4 3-2.4s2 .7 2 1.6', strokeLinecap: 'round' })),
     topics: h('svg', { viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5 }, h('rect', { x: 2, y: 2.5, width: 12, height: 11, rx: 2 }), h('path', { d: 'M5 6h6M5 9h4', strokeLinecap: 'round' }))
@@ -370,7 +403,7 @@
     var ph = useState('loading'), phase = ph[0], setPhase = ph[1];
     var meS = useState(null), me = meS[0], setMe = meS[1];
     var vS = useState('supervisors'), view = vS[0], setView = vS[1];
-    var dS = useState({ sups: [], students: [], topics: [], milestones: [] }), data = dS[0], setData = dS[1];
+    var dS = useState({ sups: [], students: [], topics: [], milestones: [], supervisions: [] }), data = dS[0], setData = dS[1];
     var selS = useState(null), sel = selS[0], setSel = selS[1];   // selected student (detail)
 
     useEffect(function () { boot(); }, []);
@@ -389,9 +422,10 @@
         sb.from('profiles').select('id,name,email,department,capacity_max,research_interests,avatar_url,mtmt_id').eq('is_supervisor', true).order('name'),
         sb.from('phd_students').select('id,name,email,profile_id,supervisor_id,topic,status,total_credits,required_credits,enrollment_year,ethics_status,complex_exam,avatar_url'),
         sb.from('phd_topics').select('id,supervisor_id,title,description,tags,status').order('created_at', { ascending: false }),
-        sb.from('phd_milestones').select('id,student_id,title,deadline,status,type').order('deadline', { ascending: true })
+        sb.from('phd_milestones').select('id,student_id,title,deadline,status,type').order('deadline', { ascending: true }),
+        sb.from('phd_supervisions').select('id,student_id,supervisor_id,kind,status,message,requested_at')
       ]).then(function (res) {
-        var nd = { sups: (res[0] && res[0].data) || [], students: (res[1] && res[1].data) || [], topics: (res[2] && res[2].data) || [], milestones: (res[3] && res[3].data) || [] };
+        var nd = { sups: (res[0] && res[0].data) || [], students: (res[1] && res[1].data) || [], topics: (res[2] && res[2].data) || [], milestones: (res[3] && res[3].data) || [], supervisions: (res[4] && res[4].data) || [] };
         setData(nd);
         setSel(function (cur) { return cur ? (nd.students.filter(function (s) { return s.id === cur.id; })[0] || null) : null; });
         if (done) done();
@@ -409,9 +443,14 @@
     var myStudent = data.students.filter(function (s) { return s.profile_id === me.id; })[0];
     var isStudentOnly = !isSup && (me.is_student || !!myStudent);
     var hasRole = isAdmin || isSup || isStudentOnly;
+    var myStudentId = myStudent ? myStudent.id : null;
+    var mySupervisions = (data.supervisions || []).filter(function (v) { return v.student_id === myStudentId; });
+    var incoming = (data.supervisions || []).filter(function (v) { return v.supervisor_id === me.id && v.status === 'pending'; });
+    var myAccepted = (data.supervisions || []).filter(function (v) { return v.supervisor_id === me.id && v.status === 'accepted'; }).length;
+    var capacityFull = !!(me.capacity_max && myAccepted >= me.capacity_max);
     var roleLabel = isAdmin ? 'Administrator' : (me && me.is_supervisor ? 'Supervisor' : (isStudentOnly ? 'Student' : 'Member'));
     var NAV = [];
-    if (isSup) { NAV.push(['dashboard', 'Dashboard']); NAV.push(['students', 'Students']); }
+    if (isSup) { NAV.push(['dashboard', 'Dashboard']); NAV.push(['students', 'Students']); NAV.push(['requests', 'Requests', incoming.length]); }
     if (isStudentOnly) NAV.push(['mine', 'My progress']);
     NAV.push(['supervisors', 'Supervisors']);
     NAV.push(['topics', 'Research topics']);
@@ -419,15 +458,16 @@
     var allowed = NAV.map(function (x) { return x[0]; });
     var cur = allowed.indexOf(view) >= 0 ? view : allowed[0];
     var nStu = data.students.length;
-    var titles = { dashboard: 'Dashboard', students: 'Students', supervisors: 'Supervisors', topics: 'Research topics', mine: 'My progress', account: 'My account' };
-    var subs = { supervisors: data.sups.length + ' supervisors · ' + nStu + ' student' + (nStu === 1 ? '' : 's'), topics: data.topics.length + ' topics', students: nStu + ' student' + (nStu === 1 ? '' : 's'), dashboard: (isAdmin ? 'Institution-wide' : 'Your students') + ' · ' + nStu + ' student' + (nStu === 1 ? '' : 's'), mine: myStudent ? (myStudent.topic || '') : '', account: 'Set your role and profile' };
+    var titles = { dashboard: 'Dashboard', students: 'Students', supervisors: 'Supervisors', topics: 'Research topics', mine: 'My progress', account: 'My account', requests: 'Requests' };
+    var subs = { supervisors: data.sups.length + ' supervisors · ' + nStu + ' student' + (nStu === 1 ? '' : 's'), topics: data.topics.length + ' topics', students: nStu + ' student' + (nStu === 1 ? '' : 's'), dashboard: (isAdmin ? 'Institution-wide' : 'Your students') + ' · ' + nStu + ' student' + (nStu === 1 ? '' : 's'), mine: myStudent ? (myStudent.topic || '') : '', account: 'Set your role and profile', requests: incoming.length + ' pending' };
     function canEditStudent(s) { return isAdmin || (s && s.supervisor_id === me.id); }
 
     var body;
     if (cur === 'account') body = h(MyAccount, { me: me, myStudent: myStudent, onChanged: boot });
     else if (cur === 'mine') body = myStudent ? h(StudentDetail, { student: myStudent, sups: data.sups, canEdit: false, onBack: null, onChanged: function () { loadData(); } }) : h('div', { className: 'empty' }, 'No student record is linked to your account yet — register on the My account page or ask your supervisor.');
     else if (cur === 'dashboard') body = h(Dashboard, { students: data.students, milestones: data.milestones, topics: data.topics, me: me, isAdmin: isAdmin });
-    else if (cur === 'supervisors') body = h(Supervisors, { sups: data.sups, students: data.students });
+    else if (cur === 'requests') body = h(RequestsInbox, { requests: incoming, students: data.students, capacityFull: capacityFull, onChanged: function () { loadData(); } });
+    else if (cur === 'supervisors') body = h(Supervisors, { sups: data.sups, students: data.students, myStudent: myStudent, mySupervisions: mySupervisions, onChanged: function () { loadData(); } });
     else if (cur === 'topics') body = h(Topics, { topics: data.topics, sups: data.sups, me: me, isAdmin: isAdmin, canPost: isSup, onChanged: function () { loadData(); } });
     else if (cur === 'students') {
       body = sel
@@ -438,7 +478,7 @@
     return h('div', { className: 'app' },
       h('div', { className: 'side' },
         h('div', { className: 'side-brand' }, h('div', { className: 'mk' }, h('span')), h('div', null, h('b', null, 'Publify'), h('i', null, 'Doctoral School'))),
-        h('nav', { className: 'nav' }, NAV.map(function (it) { return h('button', { key: it[0], className: cur === it[0] ? 'on' : '', onClick: function () { setSel(null); setView(it[0]); } }, IC[it[0]], h('span', null, it[1])); })),
+        h('nav', { className: 'nav' }, NAV.map(function (it) { return h('button', { key: it[0], className: cur === it[0] ? 'on' : '', onClick: function () { setSel(null); setView(it[0]); } }, IC[it[0]], h('span', null, it[1]), it[2] ? h('i', { className: 'nav-badge' }, it[2]) : null); })),
         h('div', { className: 'side-foot' }, h(Avatar, { u: me, size: 32 }), h('div', { className: 'who' }, h('b', null, me.name), h('span', null, roleLabel)), h('a', { className: 'exit', href: 'Projects.html', title: 'Back to Publify' }, '←'))
       ),
       h('div', { className: 'main' },
