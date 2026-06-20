@@ -108,6 +108,18 @@
     .seg button.on { background: var(--accent); color: #fff; }
     .preview-banner { background: #fef3c7; color: #92400e; padding: 9px 14px; font-size: 13px; font-weight: 600; border-radius: 10px; margin-bottom: 14px; }
     .preview-banner a { color: #92400e; }
+    /* notifications bell */
+    .notif-wrap { position: relative; }
+    .bell { position: relative; border: 1px solid var(--line); background: #fff; border-radius: 10px; width: 38px; height: 38px; cursor: pointer; display: grid; place-items: center; }
+    .bell:hover { border-color: #cfd4e6; }
+    .bell svg { width: 18px; height: 18px; }
+    .bell .nb { position: absolute; top: -6px; right: -6px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px; background: var(--danger); color: #fff; font-size: 10px; font-weight: 700; display: grid; place-items: center; }
+    .notif-pop { position: absolute; right: 0; top: 46px; width: 370px; max-width: 86vw; max-height: 460px; overflow: auto; background: #fff; border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 18px 50px rgba(20,24,40,.16); z-index: 40; }
+    .notif-pop .nh { padding: 12px 14px; border-bottom: 1px solid var(--line); font-weight: 700; font-size: 13px; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; background: #fff; }
+    .notif-item { padding: 11px 14px; border-bottom: 1px solid var(--soft); cursor: pointer; }
+    .notif-item:hover { background: var(--softer); }
+    .notif-item.unread { background: #f5f7ff; }
+    .notif-item b { font-size: 13px; } .notif-item .nx { font-size: 12px; color: var(--muted); margin-top: 3px; }
     @media (max-width: 760px) { .side { width: 64px; } .side-brand i, .side-brand b, .nav button span, .side-foot .who { display: none; } .main { padding: 18px; } }
   </style>
 </head>
