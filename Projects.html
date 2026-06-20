@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Publify — Projects</title>
+  <title>Publify — Publications</title>
 
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -15,7 +15,7 @@
   <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
 
   <style>
-    :root {
+    :root { --surface:#fff; --surface-2:#f5f6f9; --surface-3:#fafbfc; --accent-tint:#eef0ff; --ok:#15803d; --ok-bg:#e7f6ee; --warn:#b45309; --warn-bg:#fdf6e3; --danger:#b42318; --danger-bg:#fdeef0;
       --accent: #4f46e5; --accent-d: #4338ca; --line: #e4e7ec; --muted: #6b7280;
       --bg: #eceef1; --pane: #ffffff; --ink: #1d2430; --reading: #ffe08a;
     }
@@ -46,7 +46,7 @@
 
     .avatar { border-radius: 50%; color: #fff; font-weight: 700; display: grid; place-items: center; flex: none; user-select: none; }
     .usage-chip { display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 11px; border: 1px solid var(--line); border-radius: 8px; font-size: 12px; color: var(--muted); }
-    .usage-chip .mini { width: 46px; height: 5px; border-radius: 3px; background: #e1e4ea; overflow: hidden; }
+    .usage-chip .mini { width: 46px; height: 5px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
     .usage-chip .mini i { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), #8b5cf6); }
 
     .acct { position: relative; }
@@ -57,10 +57,10 @@
     .menu a.mhead-link { color: inherit; text-decoration: none; border-radius: 8px; } .menu a.mhead-link:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
     .menu a.mi { text-decoration: none; }
     .menu .mhead b { font-size: 13.5px; display: block; } .menu .mhead small { color: var(--muted); font-size: 11.5px; }
-    .menu .plan-pill { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 20px; background: #e8e7fb; color: var(--accent); margin-left: auto; }
+    .menu .plan-pill { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 20px; background: var(--accent-tint); color: var(--accent); margin-left: auto; }
     .menu button.mi { display: flex; align-items: center; gap: 9px; width: 100%; text-align: left; border: 0; background: transparent; color: var(--ink); font-size: 13px; padding: 9px 10px; border-radius: 7px; }
     .menu button.mi:hover { background: color-mix(in srgb, var(--accent) 9%, transparent); }
-    .menu button.mi.danger { color: #dc2626; } .menu button.mi.danger:hover { background: #fee2e2; }
+    .menu button.mi.danger { color: var(--danger); } .menu button.mi.danger:hover { background: var(--danger-bg); }
     .menu .divider { height: 1px; background: var(--line); margin: 5px 4px; }
     .menu svg { width: 16px; height: 16px; }
     .menu .sub { padding: 6px 10px 2px; font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 700; }
@@ -71,12 +71,12 @@
     .adr-head { display: flex; align-items: center; gap: 11px; padding: 8px 8px 14px; text-decoration: none; color: inherit; border-bottom: 1px solid var(--line); }
     .adr-head b { font-size: 14px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .adr-head small { color: var(--muted); font-size: 11.5px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .adr-head:hover b { color: var(--accent); }
-    .adr-head .plan-pill { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 20px; background: #e8e7fb; color: var(--accent); flex: none; }
+    .adr-head .plan-pill { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 20px; background: var(--accent-tint); color: var(--accent); flex: none; }
     .adr-nav { padding: 8px 0; }
     .adr-i { display: flex; align-items: center; gap: 11px; width: 100%; text-align: left; border: 0; background: transparent; color: var(--ink); font-family: inherit; font-size: 13.5px; font-weight: 500; padding: 10px 11px; border-radius: 9px; text-decoration: none; cursor: pointer; }
     .adr-i:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--accent); }
     .adr-i svg { width: 17px; height: 17px; flex: none; }
-    .adr-i.danger { color: #dc2626; } .adr-i.danger:hover { background: #fee2e2; color: #dc2626; }
+    .adr-i.danger { color: var(--danger); } .adr-i.danger:hover { background: var(--danger-bg); color: var(--danger); }
     .adr-sub { padding: 10px 11px 4px; font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 700; border-top: 1px solid var(--line); margin-top: 4px; }
     .adr-foot { margin-top: auto; border-top: 1px solid var(--line); padding-top: 6px; }
 
@@ -93,7 +93,7 @@
     .card { background: var(--pane); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; position: relative; cursor: pointer; transition: transform .14s, box-shadow .14s, border-color .14s; }
     .card:hover { transform: translateY(-3px); box-shadow: 0 12px 28px rgba(20,24,40,.13); border-color: color-mix(in srgb, var(--accent) 30%, var(--line)); }
     .thumb { height: 168px; background: linear-gradient(160deg, #f4f5f8, #e8eaf0); display: grid; place-items: center; padding: 20px; position: relative; }
-    .mini-page { width: 100%; max-width: 142px; background: #fff; border-radius: 3px; box-shadow: 0 2px 6px rgba(0,0,0,.1), 0 10px 22px rgba(20,24,40,.12); padding: 15px 14px; aspect-ratio: 1 / 1.32; font-family: 'Source Serif 4', serif; overflow: hidden; }
+    .mini-page { width: 100%; max-width: 142px; background: var(--surface); border-radius: 3px; box-shadow: 0 2px 6px rgba(0,0,0,.1), 0 10px 22px rgba(20,24,40,.12); padding: 15px 14px; aspect-ratio: 1 / 1.32; font-family: 'Source Serif 4', serif; overflow: hidden; }
     .mp-title { font-size: 8px; font-weight: 700; line-height: 1.25; color: #222; margin-bottom: 8px; text-align: center; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
     .mp-bar { height: 3px; border-radius: 2px; background: #dfe3ea; margin: 4px 0; }
     .mp-bar.h { background: #c3c8d4; height: 4px; width: 55% !important; margin-top: 9px; }
@@ -118,8 +118,8 @@
     .ca.ca-open:hover { background: color-mix(in srgb, var(--accent) 14%, var(--pane)); }
     .ca.ca-ico { width: 30px; padding: 0; justify-content: center; }
     /* resting danger cue (red icon) so Delete reads as destructive without hover and on touch */
-    .ca.ca-danger { color: #dc2626; border-color: color-mix(in srgb, #dc2626 22%, var(--line)); }
-    .ca.ca-danger:hover { color: #dc2626; border-color: color-mix(in srgb, #dc2626 55%, var(--line)); background: #fef2f2; }
+    .ca.ca-danger { color: var(--danger); border-color: color-mix(in srgb, #dc2626 22%, var(--line)); }
+    .ca.ca-danger:hover { color: var(--danger); border-color: color-mix(in srgb, #dc2626 55%, var(--line)); background: var(--danger-bg); }
     .ca-grow { flex: 1 1 0; min-width: 0; }
     /* roomier touch targets on coarse pointers (phones/tablets) */
     @media (pointer: coarse) { .ca { height: 38px; } .ca.ca-ico { width: 38px; } }
@@ -154,8 +154,8 @@
     .tpl-card.on { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent); background: color-mix(in srgb, var(--accent) 4%, var(--pane)); }
     .tpl-card-top { display: flex; align-items: center; gap: 6px; }
     .tpl-card-top b { font-size: 12.8px; font-weight: 600; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
-    .idx-badge { font-size: 8.5px; font-weight: 800; letter-spacing: .04em; padding: 1px 5px; border-radius: 10px; background: #e6f3ec; color: #1c7a47; flex: none; }
-    .idx-badge.scopus { background: #fdecdf; color: #b4530f; }
+    .idx-badge { font-size: 8.5px; font-weight: 800; letter-spacing: .04em; padding: 1px 5px; border-radius: 10px; background: var(--ok-bg); color: var(--ok); flex: none; }
+    .idx-badge.scopus { background: var(--warn-bg); color: var(--warn); }
     .tpl-cls { display: block; color: var(--muted); font-size: 10.5px; font-family: 'JetBrains Mono', ui-monospace, monospace; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .tpl-kpi { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
     .tpl-kpi span { font-size: 9.5px; font-weight: 700; padding: 1px 6px; border-radius: 9px; background: color-mix(in srgb, var(--accent) 9%, transparent); color: var(--accent); }
@@ -186,16 +186,17 @@
     .signin-card .brand-mark { width: 52px; height: 52px; margin: 0 auto 18px; border-radius: 15px; } .signin-card .brand-mark span { width: 22px; height: 22px; }
     .signin-card h1 { font-size: 23px; margin: 0 0 6px; letter-spacing: -.4px; }
     .signin-card p { color: var(--muted); font-size: 14px; margin: 0 0 24px; }
-    .google-btn { display: flex; align-items: center; justify-content: center; gap: 11px; width: 100%; height: 48px; border: 1px solid var(--line); border-radius: 11px; background: #fff; font-size: 14.5px; font-weight: 600; color: #3c4043; }
+    .google-btn { display: flex; align-items: center; justify-content: center; gap: 11px; width: 100%; height: 48px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface); font-size: 14.5px; font-weight: 600; color: #3c4043; }
     .google-btn:hover { box-shadow: 0 2px 10px rgba(0,0,0,.1); }
     .demo-note { margin-top: 20px; font-size: 12px; color: var(--muted); }
     .demo-users { display: grid; gap: 8px; margin-top: 14px; }
     .demo-user { display: flex; align-items: center; gap: 11px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 11px; background: var(--pane); text-align: left; }
     .demo-user:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 5%, var(--pane)); }
     .demo-user .du-name { font-size: 13.5px; font-weight: 600; } .demo-user .du-mail { font-size: 11.5px; color: var(--muted); }
-    .demo-user .du-plan { margin-left: auto; font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 20px; background: #e8e7fb; color: var(--accent); }
+    .demo-user .du-plan { margin-left: auto; font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 20px; background: var(--accent-tint); color: var(--accent); }
   </style>
   <script src="theme.js"></script>
+  <script src="nav.js"></script>
 </head>
 
 <body>

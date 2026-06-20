@@ -48,11 +48,11 @@
             h('td', null, r.email),
             h('td', { className: 'mono' }, h('a', { className: 'ext', href: 'https://m2.mtmt.hu/gui2/?mode=browse&params=author;' + r.mtmtId, target: '_blank', onClick: function (e) { e.stopPropagation(); } }, r.mtmtId)),
             h('td', null, r.orcid ? h('a', { className: 'ext', href: 'https://orcid.org/' + r.orcid, target: '_blank', onClick: function (e) { e.stopPropagation(); } }, r.orcid) : '—'),
-            h('td', null, r.pubCount, h('span', { style: { color: '#8a92a0', fontSize: 11 } }, ' (' + r.withDoi + ' DOI)')),
+            h('td', null, r.pubCount, h('span', { style: { color: 'var(--muted)', fontSize: 11 } }, ' (' + r.withDoi + ' DOI)')),
             h('td', null, r.cites),
             h('td', { onClick: function (e) { e.stopPropagation(); } }, h('button', { className: 'btn', onClick: function () { openProfile(r.email); } }, 'Open profile'))
           )];
-          if (open === r.email) rows.push(h('tr', { key: r.email + '-x' }, h('td', { colSpan: 7, style: { background: '#fafbfc' } },
+          if (open === r.email) rows.push(h('tr', { key: r.email + '-x' }, h('td', { colSpan: 7, style: { background: 'var(--surface-3)' } },
             h('div', { className: 'pub-rows' }, r.pubs.map(function (p) {
               return h('div', { className: 'pub-row', key: p.mtid },
                 h('span', { className: 'py' }, p.year || '—'),
@@ -85,7 +85,7 @@
       h('div', { className: 'pv', onMouseDown: function (e) { e.stopPropagation(); } },
         h('div', { className: 'pvh' },
           h('b', null, project.title || 'Untitled project'),
-          h('span', { className: 'mono', style: { color: '#8a92a0' } }, fmtBytes(bytesOf(data))),
+          h('span', { className: 'mono', style: { color: 'var(--muted)' } }, fmtBytes(bytesOf(data))),
           h('button', { className: 'x', onClick: onClose }, '✕')
         ),
         h('div', { className: 'pvb' },
@@ -112,7 +112,7 @@
         u && h(React.Fragment, null,
           h('div', { className: 'dh' },
             h(Avatar, { u: u, size: 40 }),
-            h('div', null, h('div', { style: { fontWeight: 700, fontSize: 15 } }, u.name || '—'), h('div', { style: { fontSize: 12.5, color: '#5b6473' } }, u.email)),
+            h('div', null, h('div', { style: { fontWeight: 700, fontSize: 15 } }, u.name || '—'), h('div', { style: { fontSize: 12.5, color: 'var(--muted)' } }, u.email)),
             h('button', { className: 'x', onClick: onClose }, '✕')
           ),
           h('div', { className: 'db' },
@@ -133,7 +133,7 @@
             h('div', { className: 'meta-line' }, h('b', null, 'MTMT: '), u.mtmt_id || '—', '   ', h('b', null, 'ORCID: '), u.orcid ? h('a', { className: 'ext', href: 'https://orcid.org/' + u.orcid, target: '_blank' }, u.orcid) : '—'),
             h('div', { className: 'meta-line' }, h('b', null, 'Last active: '), fmtDate(u.last_active_at), '   ', h('b', null, 'Joined: '), u.created_at ? new Date(u.created_at).toLocaleDateString() : '—'),
             h('h3', { className: 'dsub' }, 'Projects (' + agg.projects.length + ')'),
-            agg.projects.length === 0 && h('div', { style: { fontSize: 13, color: '#8a92a0' } }, 'No projects yet.'),
+            agg.projects.length === 0 && h('div', { style: { fontSize: 13, color: 'var(--muted)' } }, 'No projects yet.'),
             agg.projects.map(function (p) {
               var fc = p.data && p.data.files ? Object.keys(p.data.files).length : 0;
               return h('div', { className: 'proj', key: p.id },
@@ -244,12 +244,12 @@
           isResearcher ? h('span', { onClick: function (e) { e.stopPropagation(); toggleExpand(u.id); }, style: { display: 'block', marginTop: 3, fontSize: 11.5, color: '#6366f1', cursor: 'pointer', fontWeight: 600 } },
             (u.mtmt_id ? 'MTMT ' + u.mtmt_id + ' · ' : '') + pubCount + ' publication' + (pubCount === 1 ? '' : 's') + ' ' + (isExp ? '▴ hide' : '▾ show')) : null
         ))),
-        h('td', null, u.affiliation || h('span', { style: { color: '#b9bfca' } }, '—')),
+        h('td', null, u.affiliation || h('span', { style: { color: 'var(--muted)' } }, '—')),
         h('td', null, h(Badge, { s: u.status }), u.role === 'admin' && h('span', { className: 'badge b-admin' }, 'admin'),
-          u.is_researcher && h('span', { className: 'badge', style: { background: '#ccfbf1', color: '#0f766e' } }, 'researcher')),
+          u.is_researcher && h('span', { className: 'badge', style: { background: 'var(--ok-bg)', color: '#0f766e' } }, 'researcher')),
         h('td', null, ag.projects.length),
         h('td', null, fmtBytes(ag.storage)),
-        h('td', null, credits(ag.chars), h('span', { style: { color: '#8a92a0', fontSize: 11 } }, ' (' + (ag.chars || 0).toLocaleString() + ' ch)')),
+        h('td', null, credits(ag.chars), h('span', { style: { color: 'var(--muted)', fontSize: 11 } }, ' (' + (ag.chars || 0).toLocaleString() + ' ch)')),
         h('td', { className: 'mono' }, fmtDate(u.last_active_at)),
         h('td', { onClick: function (e) { e.stopPropagation(); } }, h('div', { className: 'acts' },
           withApprove && h('button', { className: 'btn ok', onClick: function () { setStatus(u.id, 'approved'); } }, 'Approve'),
@@ -262,9 +262,9 @@
       );
       if (!isExp) return main;
       var pubs = pubsCache[u.id];
-      var exp = h('tr', { key: u.id + '-x' }, h('td', { colSpan: 8, style: { background: '#fafbfc' } },
-        pubs === undefined ? h('div', { style: { padding: '10px 12px', color: '#8a92a0', fontSize: 13 } }, 'Loading publications…')
-          : pubs.length === 0 ? h('div', { style: { padding: '10px 12px', color: '#8a92a0', fontSize: 13 } }, 'No publications in the database for this user.')
+      var exp = h('tr', { key: u.id + '-x' }, h('td', { colSpan: 8, style: { background: 'var(--surface-3)' } },
+        pubs === undefined ? h('div', { style: { padding: '10px 12px', color: 'var(--muted)', fontSize: 13 } }, 'Loading publications…')
+          : pubs.length === 0 ? h('div', { style: { padding: '10px 12px', color: 'var(--muted)', fontSize: 13 } }, 'No publications in the database for this user.')
             : h('div', { className: 'pub-rows' }, pubs.map(function (p) {
               return h('div', { className: 'pub-row', key: p.mtid },
                 h('span', { className: 'py' }, p.year || '—'),

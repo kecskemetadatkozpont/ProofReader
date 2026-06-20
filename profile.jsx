@@ -47,7 +47,7 @@ function Header(props) {
   function setTint(c) { if (isDemo) { Auth.updateUser(me.id, { color: c }); props.setMe(Auth.byId(me.id)); } }
   var isFree = /free/i.test(usage.planLabel || '');
   return <header className="pf-head">
-    <div className="pf-head-top"><a className="pf-back" href="Projects.html">← Projects</a><span id="pr-ver-slot" className="pf-ver" /></div>
+    <div className="pf-head-top"><a className="pf-back" href="Projects.html">← Publications</a><span id="pr-ver-slot" className="pf-ver" /></div>
     <div className="pf-id">
       <Avatar user={me} size={68} />
       <div className="pf-id-main">
@@ -99,7 +99,7 @@ function Overview(props) {
     </div>
     <h3 className="pf-h3">Continue where you left off</h3>
     {recent.length === 0
-      ? <div className="pf-empty">No projects yet. <a href="Projects.html">Create your first project →</a></div>
+      ? <div className="pf-empty">No publications yet. <a href="Projects.html">Create your first publication →</a></div>
       : <div className="pf-cards">{recent.map(function (p) {
         var r = Store.getReading ? Store.getReading(me.id, p.id) : null;
         return <a className="pf-card" key={p.id} href={'ProofReader.html?p=' + encodeURIComponent(p.id)}>
@@ -692,7 +692,7 @@ function App() {
   var curRoute = allowed.indexOf(route) >= 0 ? route : 'overview';
 
   return <div className="pf">
-    {preview ? <div style={{ background: '#fef3c7', color: '#92400e', padding: '9px 16px', fontSize: 13, textAlign: 'center', fontWeight: 600 }}>
+    {preview ? <div style={{ background: 'var(--warn-bg)', color: '#92400e', padding: '9px 16px', fontSize: 13, textAlign: 'center', fontWeight: 600 }}>
       👁 Admin preview — viewing <b>{me.name}</b>’s profile read-only. <a href="PhD.html?adminView=1" style={{ color: '#92400e' }}>Doctoral School</a> · <a href="Admin.html" style={{ color: '#92400e' }}>← Back to admin</a>
     </div> : null}
     <Header me={me} setMe={setMe} mode={mode} usage={usage} />

@@ -195,26 +195,26 @@
   function injectCss() {
     if (document.getElementById('pr-auth-css')) return;
     var css = '#pr-signin,#pr-splash{position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;background:radial-gradient(120% 120% at 50% 0%,#f4f5fb 0%,#eceef1 60%);font-family:"IBM Plex Sans",system-ui,sans-serif}'
-      + '.pr-card{width:380px;max-width:calc(100% - 32px);background:#fff;border-radius:18px;box-shadow:0 20px 60px rgba(20,24,40,.18);padding:38px 34px;text-align:center}'
+      + '.pr-card{width:380px;max-width:calc(100% - 32px);background:var(--surface);border-radius:18px;box-shadow:0 20px 60px rgba(20,24,40,.18);padding:38px 34px;text-align:center}'
       + '.pr-mk{width:54px;height:54px;border-radius:15px;margin:0 auto 16px;display:grid;place-items:center;background:linear-gradient(135deg,#6366f1,#d946ef);box-shadow:0 6px 16px rgba(79,70,229,.4)}'
       + '.pr-mk span{width:18px;height:18px;border:0;border-top:3.5px solid #fff;border-left:3.5px solid #fff;border-radius:3px 0 0 0;transform:rotate(45deg)}'
       + '.pr-mk:not(.spin) span{margin-top:4px}'
       + '.pr-mk.spin span{width:23px;height:23px;border:3.5px solid #fff;border-right-color:transparent;border-radius:50%;border-top-color:#fff;border-left-color:#fff;transform:rotate(-20deg)}'
       + '.pr-mk.spin span{animation:pr-spin .8s linear infinite}@keyframes pr-spin{to{transform:rotate(340deg)}}'
-      + '.pr-card h1{font-size:21px;margin:0 0 4px;letter-spacing:-.3px;color:#1d2430}'
-      + '.pr-card p{font-size:13.5px;color:#5b6473;margin:0 0 24px;line-height:1.5}'
-      + '.pr-g{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;height:46px;border:1px solid #dadce0;border-radius:11px;background:#fff;color:#1d2430;font-size:14.5px;font-weight:600;cursor:pointer}'
+      + '.pr-card h1{font-size:21px;margin:0 0 4px;letter-spacing:-.3px;color:var(--ink)}'
+      + '.pr-card p{font-size:13.5px;color:var(--muted);margin:0 0 24px;line-height:1.5}'
+      + '.pr-g{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;height:46px;border:1px solid #dadce0;border-radius:11px;background:var(--surface);color:var(--ink);font-size:14.5px;font-weight:600;cursor:pointer}'
       + '.pr-g:hover{background:#f7f8fc;border-color:#c7cad1}'
-      + '.pr-in{width:100%;height:44px;border:1px solid #dadce0;border-radius:11px;padding:0 13px;font-size:14px;margin-bottom:10px;box-sizing:border-box;font-family:inherit;color:#1d2430}'
+      + '.pr-in{width:100%;height:44px;border:1px solid #dadce0;border-radius:11px;padding:0 13px;font-size:14px;margin-bottom:10px;box-sizing:border-box;font-family:inherit;color:var(--ink)}'
       + '.pr-in:focus{outline:none;border-color:#6366f1;box-shadow:0 0 0 3px rgba(99,102,241,.15)}'
       + '.pr-primary{width:100%;height:46px;border:0;border-radius:11px;background:linear-gradient(135deg,#6366f1,#7c3aed);color:#fff;font-size:14.5px;font-weight:600;cursor:pointer}'
       + '.pr-primary:hover{filter:brightness(1.05)}.pr-primary:disabled{opacity:.6;cursor:default}'
       + '.pr-or{display:flex;align-items:center;gap:10px;margin:18px 0;color:#9aa1ac;font-size:11.5px;text-transform:uppercase;letter-spacing:.5px}.pr-or:before,.pr-or:after{content:"";flex:1;border-top:1px solid #eceef1}'
-      + '.pr-demo{margin-top:14px;border:0;background:transparent;color:#6b7280;font-size:12.5px;font-weight:600;cursor:pointer}'
+      + '.pr-demo{margin-top:14px;border:0;background:transparent;color:var(--muted);font-size:12.5px;font-weight:600;cursor:pointer}'
       + '.pr-demo:hover{color:#4f46e5}'
       + '.pr-sep{margin:22px 0 4px;border-top:1px solid #eceef1}'
       + '.pr-note{font-size:11px;color:#9aa1ac;margin-top:18px;line-height:1.5}'
-      + '.pr-err{font-size:12.5px;color:#b42318;background:#fdeef0;border:1px solid #fbd5d5;border-radius:9px;padding:9px 11px;margin:0 0 18px;line-height:1.45;word-break:break-word}';
+      + '.pr-err{font-size:12.5px;color:var(--danger);background:var(--danger-bg);border:1px solid #fbd5d5;border-radius:9px;padding:9px 11px;margin:0 0 18px;line-height:1.45;word-break:break-word}';
     var st = document.createElement('style'); st.id = 'pr-auth-css'; st.textContent = css; document.head.appendChild(st);
   }
   var GBTN = '<svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.6 2.4 30.2 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.9 6.1C12.4 13.3 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.1 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.4c-.5 2.9-2.1 5.3-4.5 6.9l7 5.4C43.2 37.5 46.1 31.6 46.1 24.5z"/><path fill="#FBBC05" d="M10.5 28.3c-.5-1.4-.7-2.9-.7-4.3s.3-3 .7-4.3l-7.9-6.1C1 16.6 0 20.2 0 24s1 7.4 2.6 10.4l7.9-6.1z"/><path fill="#34A853" d="M24 48c6.2 0 11.5-2 15.3-5.5l-7-5.4c-2 1.3-4.5 2.1-8.3 2.1-6.3 0-11.6-3.8-13.5-9.2l-7.9 6.1C6.5 42.6 14.6 48 24 48z"/></svg>';

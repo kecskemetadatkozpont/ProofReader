@@ -15,7 +15,7 @@
   <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
 
   <style>
-    :root {
+    :root { --surface:#fff; --surface-2:#f5f6f9; --surface-3:#fafbfc; --accent-tint:#eef0ff; --ok:#15803d; --ok-bg:#e7f6ee; --warn:#b45309; --warn-bg:#fdf6e3; --danger:#b42318; --danger-bg:#fdeef0;
       --accent: #4f46e5; --accent-d: #4338ca; --line: #e4e7ec; --muted: #6b7280;
       --bg: #eceef1; --pane: #ffffff; --app-bg: #f5f6f8; --ink: #1d2430;
     }
@@ -31,9 +31,9 @@
     .btn-ghost { display: inline-flex; align-items: center; gap: 7px; height: 36px; padding: 0 14px; border: 1px solid var(--line);
       background: var(--pane); color: var(--ink); border-radius: 8px; font-size: 13px; font-weight: 600; white-space: nowrap; }
     .btn-ghost:hover { color: var(--accent); border-color: var(--accent); text-decoration: none; }
-    .btn-ghost.danger:hover { color: #dc2626; border-color: #dc2626; }
+    .btn-ghost.danger:hover { color: var(--danger); border-color: #dc2626; }
     .avatar { border-radius: 50%; color: #fff; font-weight: 700; display: grid; place-items: center; flex: none; user-select: none; }
-    .plan-pill { font-size: 10.5px; font-weight: 700; padding: 3px 9px; border-radius: 20px; background: #e8e7fb; color: var(--accent); text-transform: capitalize; }
+    .plan-pill { font-size: 10.5px; font-weight: 700; padding: 3px 9px; border-radius: 20px; background: var(--accent-tint); color: var(--accent); text-transform: capitalize; }
     .acct { position: relative; }
     .menu { position: absolute; background: var(--pane); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 14px 38px rgba(20,24,40,.2); z-index: 40; padding: 6px; }
     .menu button.mi { display: flex; align-items: center; gap: 9px; width: 100%; text-align: left; border: 0; background: transparent; color: var(--ink); font-size: 13px; padding: 9px 10px; border-radius: 7px; }
@@ -47,7 +47,7 @@
     .pf-login-card h1 { font-size: 19px; margin: 0; } .pf-login-card p { font-size: 12.5px; color: var(--muted); margin: 0 0 6px; line-height: 1.5; }
     .pf-login-in { height: 40px; border: 1px solid var(--line); border-radius: 9px; padding: 0 12px; font: inherit; font-size: 13.5px; outline: none; }
     .pf-login-in:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent); }
-    .pf-login-err { font-size: 12px; color: #dc2626; text-align: left; }
+    .pf-login-err { font-size: 12px; color: var(--danger); text-align: left; }
     .pf-login-note { font-size: 11.5px; color: var(--muted); margin-top: 4px; }
     .pf-pw { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
     .pf-pw-acts { display: flex; gap: 8px; }
@@ -68,8 +68,8 @@
     .pf-email { font-size: 13.5px; color: var(--muted); }
     .pf-chips { display: flex; align-items: center; gap: 9px; margin-top: 8px; flex-wrap: wrap; }
     .pf-mode { font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 20px; }
-    .pf-mode.cloud { background: #e6f3ec; color: #1c7a47; }
-    .pf-mode.demo { background: #fdecdf; color: #b4530f; }
+    .pf-mode.cloud { background: var(--ok-bg); color: var(--ok); }
+    .pf-mode.demo { background: var(--warn-bg); color: var(--warn); }
     .pf-tints { display: flex; gap: 5px; margin-top: 10px; }
     .pf-tint { width: 18px; height: 18px; border-radius: 50%; border: 2px solid transparent; padding: 0; }
     .pf-tint.on { border-color: var(--ink); box-shadow: 0 0 0 2px var(--pane) inset; }
@@ -88,8 +88,8 @@
     .pf-h { font-size: 19px; margin: 4px 0 16px; }
     .pf-h3 { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 24px 0 10px; }
     .pf-flags { display: flex; flex-direction: column; gap: 8px; margin-bottom: 18px; }
-    .pf-flag { display: flex; align-items: center; gap: 10px; padding: 10px 13px; background: #fdecdf; border: 1px solid #f3d3b6; border-radius: 9px; font-size: 13px; }
-    .pf-flag span { color: #92400e; } .pf-flag button { margin-left: auto; border: 0; background: transparent; color: #b4530f; font-weight: 700; font-size: 12.5px; }
+    .pf-flag { display: flex; align-items: center; gap: 10px; padding: 10px 13px; background: var(--warn-bg); border: 1px solid #f3d3b6; border-radius: 9px; font-size: 13px; }
+    .pf-flag span { color: var(--warn); } .pf-flag button { margin-left: auto; border: 0; background: transparent; color: var(--warn); font-weight: 700; font-size: 12.5px; }
     .pf-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
     .pf-stat { background: var(--pane); border: 1px solid var(--line); border-radius: 11px; padding: 14px; }
     .pf-stat b { font-size: 21px; display: block; } .pf-stat span { font-size: 11.5px; color: var(--muted); }
@@ -103,11 +103,11 @@
     .pf-panel { background: var(--pane); border: 1px solid var(--line); border-radius: 11px; padding: 15px 16px; margin-bottom: 12px; }
     .pf-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font-size: 13.5px; }
     .pf-row span { color: var(--muted); } .pf-row b { font-variant-numeric: tabular-nums; }
-    .pf-est { font-style: normal; font-size: 10.5px; color: #b4530f; background: #fdecdf; padding: 1px 6px; border-radius: 8px; margin-left: 6px; }
-    .pf-bar { height: 6px; background: #e1e4ea; border-radius: 3px; overflow: hidden; margin-top: 7px; }
+    .pf-est { font-style: normal; font-size: 10.5px; color: var(--warn); background: var(--warn-bg); padding: 1px 6px; border-radius: 8px; margin-left: 6px; }
+    .pf-bar { height: 6px; background: var(--surface-2); border-radius: 3px; overflow: hidden; margin-top: 7px; }
     .pf-bar i { display: block; height: 100%; }
     .pf-note { font-size: 11.5px; color: var(--muted); line-height: 1.5; margin-top: 9px; }
-    .pf-note.err { color: #dc2626; } .pf-note.ok { color: #16a34a; }
+    .pf-note.err { color: var(--danger); } .pf-note.ok { color: var(--ok); }
     .pf-note.bnr { background: var(--app-bg); padding: 10px 12px; border-radius: 9px; margin: 0 0 14px; }
     .pf-set-h { font-size: 13.5px; font-weight: 700; margin-bottom: 9px; }
     .pf-kv { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; padding: 5px 0; border-bottom: 1px solid var(--line); }
@@ -133,7 +133,7 @@
     .pf-pub-meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; }
     .pf-pub-j { font-size: 11px; color: var(--muted); font-style: italic; }
     .pf-tag { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 20px; background: var(--app-bg); color: var(--muted); }
-    .pf-tag.cit { background: #eef2ff; color: var(--accent); } .pf-tag.oa { background: #e6f3ec; color: #1c7a47; }
+    .pf-tag.cit { background: #eef2ff; color: var(--accent); } .pf-tag.oa { background: var(--ok-bg); color: var(--ok); }
     a.pf-tag.link { color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, transparent); }
     a.pf-tag.link:hover { text-decoration: none; background: color-mix(in srgb, var(--accent) 16%, transparent); }
     .pf-pub-files { flex: none; align-self: flex-start; border: 1px solid var(--line); background: var(--pane); color: var(--accent); font-size: 12px; font-weight: 600; border-radius: 8px; padding: 5px 10px; white-space: nowrap; }
@@ -143,13 +143,13 @@
     .pf-file-n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
     .pf-file-s { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
     .pf-file button { border: 0; background: transparent; color: var(--accent); font-size: 11.5px; font-weight: 600; padding: 2px 4px; }
-    .pf-file button.pf-file-x { color: var(--muted); } .pf-file button.pf-file-x:hover { color: #dc2626; }
+    .pf-file button.pf-file-x { color: var(--muted); } .pf-file button.pf-file-x:hover { color: var(--danger); }
     .pf-pub-files.up { background: var(--accent); color: #fff; border-color: var(--accent); }
     .pf-pub-files.up:hover { filter: brightness(1.08); }
     .pf-pub-files:disabled { opacity: .6; cursor: default; }
     /* built-in PDF / file viewer */
     .pf-viewer { position: fixed; inset: 0; z-index: 1000; background: rgba(15,20,40,.72); display: flex; align-items: center; justify-content: center; padding: 24px; }
-    .pf-viewer-box { width: min(1040px, 100%); height: 100%; background: #fff; border-radius: 14px; overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 24px 70px rgba(0,0,0,.45); }
+    .pf-viewer-box { width: min(1040px, 100%); height: 100%; background: var(--surface); border-radius: 14px; overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 24px 70px rgba(0,0,0,.45); }
     .pf-viewer-bar { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
     .pf-viewer-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; font-size: 14px; }
     .pf-viewer-bar .btn-ghost { height: 32px; }
@@ -158,7 +158,7 @@
     .pf-viewer-img img { max-width: 100%; max-height: 100%; }
     .pf-viewer-other { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 14px; }
     /* read-aloud player bar */
-    .pf-ra { border-top: 1px solid var(--line); background: #fff; padding: 9px 14px; display: flex; flex-direction: column; gap: 7px; }
+    .pf-ra { border-top: 1px solid var(--line); background: var(--surface); padding: 9px 14px; display: flex; flex-direction: column; gap: 7px; }
     .pf-ra-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
     .pf-ra-btn { width: 34px; height: 34px; border-radius: 9px; border: 1px solid var(--line); background: var(--pane); color: var(--ink); display: inline-flex; align-items: center; justify-content: center; font-size: 14px; cursor: pointer; flex: none; }
     .pf-ra-btn:hover { border-color: var(--accent); color: var(--accent); }
@@ -168,19 +168,19 @@
     .pf-ra-prog > i { display: block; height: 100%; background: var(--accent); transition: width .15s; }
     .pf-ra-meta { font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
     .pf-ra-cur { font-size: 12.5px; color: var(--ink); line-height: 1.5; max-height: 3.1em; overflow: hidden; }
-    .pf-ra-err { font-size: 12.5px; color: #b42318; }
+    .pf-ra-err { font-size: 12.5px; color: var(--danger); }
     .pf-ra-cached { color: #0f766e; }
     /* reading view: clickable, highlightable sentences (like the editor) */
-    .pf-read { flex: 1; overflow: auto; padding: 26px 30px; line-height: 1.95; font-size: 15.5px; color: var(--ink); background: #fff; }
+    .pf-read { flex: 1; overflow: auto; padding: 26px 30px; line-height: 1.95; font-size: 15.5px; color: var(--ink); background: var(--surface); }
     .pf-read-s { cursor: pointer; border-radius: 4px; padding: 1px 2px; transition: background .12s; }
-    .pf-read-s:hover { background: #eef0ff; }
+    .pf-read-s:hover { background: var(--accent-tint); }
     .pf-read-s.on { background: #fde68a; box-shadow: 0 0 0 3px #fde68a; }
     .pf-read-load { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 14px; padding: 24px; }
     /* rendered PDF (canvas) + transparent, highlightable text layer overlay */
     .pf-pdf-wrap { flex: 1; position: relative; overflow: auto; background: #525659; }
     .pf-pdf { padding: 16px 0; min-height: 100%; }
     .pf-pdf-load { position: absolute; inset: 0; z-index: 3; display: flex; align-items: center; justify-content: center; background: rgba(82,86,89,.92); color: #fff; font-size: 14px; }
-    .pf-pdfpage { position: relative; margin: 0 auto 16px; background: #fff; box-shadow: 0 3px 16px rgba(0,0,0,.45); }
+    .pf-pdfpage { position: relative; margin: 0 auto 16px; background: var(--surface); box-shadow: 0 3px 16px rgba(0,0,0,.45); }
     .pf-pdfpage canvas { display: block; }
     .pf-pdfpage .textLayer { position: absolute; inset: 0; overflow: hidden; line-height: 1; opacity: 1; }
     .pf-pdfpage .textLayer span, .pf-pdfpage .textLayer br { position: absolute; white-space: pre; transform-origin: 0% 0%; color: transparent; }
@@ -200,6 +200,7 @@
     }
   </style>
   <script src="theme.js"></script>
+  <script src="nav.js"></script>
 </head>
 
 <body>

@@ -26,7 +26,7 @@ function fmtBytes(b) { if (b < 1024) return b + ' B'; if (b < 1048576) return (b
 const ROLES = ['editor', 'commenter', 'viewer'];
 const isUrl = (s) => /^https?:\/\//i.test(String(s || '').trim());
 function journalLabel(j) { if (!j) return ''; const m = /^https?:\/\/([^/]+)/i.exec(j); return m ? m[1].replace(/^www\./, '') : j; }
-const jStyle = { display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 6, fontSize: 11.5, fontWeight: 600, color: '#475569', background: '#eef2f7', borderRadius: 6, padding: '2px 7px', maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textDecoration: 'none' };
+const jStyle = { display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 6, fontSize: 11.5, fontWeight: 600, color: 'var(--ink)', background: 'var(--surface-2)', borderRadius: 6, padding: '2px 7px', maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textDecoration: 'none' };
 const isCloudMode = () => !!(window.PR_BACKEND && window.PR_BACKEND.mode === 'cloud');
 
 /* ---------------- sign-in ---------------- */
@@ -102,7 +102,7 @@ function NewModal({ me, onClose, onCreate }) {
   return (
     <div className="overlay" onClick={onClose}>
       <div className="modal" style={{ width: 640 }} onClick={(e) => e.stopPropagation()}>
-        <div className="modal-head"><h3>New project</h3><p>Name it, pick a target venue (format &amp; KPIs auto-tracked), and invite collaborators.</p></div>
+        <div className="modal-head"><h3>New publication</h3><p>Name it, pick a target venue (format &amp; KPIs auto-tracked), and invite collaborators.</p></div>
         <div className="modal-body">
           <div className="field-label">Project name</div>
           <input ref={ref} className="text-input" value={title} placeholder="e.g. NeurIPS submission" onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') create(); }} />
@@ -149,7 +149,7 @@ function NewModal({ me, onClose, onCreate }) {
                 <button className={'tpl' + (tpl === 'sample' ? ' on' : '')} onClick={() => setTpl('sample')}><b>Sample paper</b><small>Full demo with figures &amp; math.</small></button>
               </div>}
         </div>
-        <div className="modal-foot"><button className="btn-ghost" onClick={onClose}>Cancel</button><button className="btn-primary" onClick={create}>Create project</button></div>
+        <div className="modal-foot"><button className="btn-ghost" onClick={onClose}>Cancel</button><button className="btn-primary" onClick={create}>Create publication</button></div>
       </div>
     </div>
   );
@@ -233,7 +233,7 @@ function UsageModal({ me, onClose }) {
           <div className={'bar' + (chPct > 80 ? ' warn' : '')}><i style={{ width: chPct + '%' }} /></div>
           <div className="usage-sub">{u.requests} synthesis request{u.requests === 1 ? '' : 's'} this month.</div>
 
-          <div className="usage-sub" style={{ marginTop: 16, padding: '10px 12px', background: '#f4f5f8', borderRadius: 9 }}>
+          <div className="usage-sub" style={{ marginTop: 16, padding: '10px 12px', background: 'var(--surface-2)', borderRadius: 9 }}>
             In production these counters are enforced server-side. Premium narration is billed per character, so audio is cached and prefetched to keep usage low.
           </div>
         </div>
@@ -250,7 +250,7 @@ function ActivityModal({ projects, onClose }) {
   return (
     <div className="overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-head"><h3>Recent activity</h3><p>Across all your projects</p></div>
+        <div className="modal-head"><h3>Recent activity</h3><p>Across all your publications</p></div>
         <div className="modal-body">
           {events.length === 0 && <p className="usage-sub">No activity yet.</p>}
           {events.slice(0, 60).map((a) => {
@@ -414,7 +414,7 @@ function App() {
           {isAdmin && <a className="btn-ghost" href="Admin.html" title="Admin console"><svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"><path d="M8 1.8l5 1.9v3.6c0 3-2.1 5.2-5 6.1-2.9-.9-5-3.1-5-6.1V3.7z" /><path d="M5.8 8l1.6 1.6L10.4 6.5" /></svg>Admin</a>}
           <button className="btn-ghost" onClick={() => setModal('activity')}><svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.4"><circle cx="8" cy="8" r="6" /><path d="M8 5v3l2 1.5" strokeLinecap="round" /></svg>Activity</button>
           <button className="usage-chip" onClick={() => setModal('usage')} title="Storage used"><span>Storage</span><span className="mini"><i style={{ width: stPct + '%' }} /></span></button>
-          <button className="btn-primary" onClick={() => setModal('new')}><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M8 3v10M3 8h10" /></svg>New project</button>
+          <button className="btn-primary" onClick={() => setModal('new')}><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M8 3v10M3 8h10" /></svg>New publication</button>
           <div className="acct">
             <button className="acct-btn" onClick={(e) => { e.stopPropagation(); setAcctOpen((v) => !v); }}><Avatar user={me} size={34} /></button>
             {acctOpen && <AccountMenu me={me} onUsage={() => { setAcctOpen(false); setModal('usage'); }}
@@ -426,7 +426,7 @@ function App() {
 
       <div className="wrap">
         <div className="page-head">
-          <div><h1>Your projects</h1><p>Welcome back, {me.name.split(' ')[0]} · open one to edit and hear it read aloud</p></div>
+          <div><h1>Your publications</h1><p>Welcome back, {me.name.split(' ')[0]} · open one to edit and hear it read aloud</p></div>
         </div>
         <div className="tabs">
           {[['all', 'All'], ['owned', 'Owned by me'], ['shared', 'Shared with me'], ['trash', 'Trash' + (trashed.length ? ' (' + trashed.length + ')' : '')]].map(([k, l]) => (
@@ -436,9 +436,9 @@ function App() {
 
         {tab === 'trash'
           ? (trashed.length === 0
-              ? <div className="empty"><h2>Trash is empty</h2><p>Deleted projects are kept here for 7 days, then permanently removed.</p></div>
+              ? <div className="empty"><h2>Trash is empty</h2><p>Deleted publications are kept here for 7 days, then permanently removed.</p></div>
               : <>
-                  <p className="usage-sub" style={{ margin: '2px 2px 14px' }}>Deleted projects are kept for 7 days, then permanently removed. Restore one to bring it back to your projects.</p>
+                  <p className="usage-sub" style={{ margin: '2px 2px 14px' }}>Deleted publications are kept for 7 days, then permanently removed. Restore one to bring it back to your publications.</p>
                   <div className="grid">
                     {trashed.map((p) => (
                       <TrashCard key={p.id} project={p} ttl={Store.trashTtl}
@@ -448,9 +448,9 @@ function App() {
                   </div>
                 </>)
           : shown.length === 0 && tab !== 'all'
-            ? <div className="empty"><h2>Nothing here yet</h2><p>{tab === 'shared' ? 'Projects others share with you will appear here.' : 'Create a project to get started.'}</p></div>
+            ? <div className="empty"><h2>Nothing here yet</h2><p>{tab === 'shared' ? 'Publications others share with you will appear here.' : 'Create a publication to get started.'}</p></div>
             : <div className="grid">
-                {tab !== 'shared' && <button className="card new-card" onClick={() => setModal('new')}><div className="plus"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M8 3v10M3 8h10" /></svg></div><span>New project</span></button>}
+                {tab !== 'shared' && <button className="card new-card" onClick={() => setModal('new')}><div className="plus"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M8 3v10M3 8h10" /></svg></div><span>New publication</span></button>}
                 {shown.map((p) => (
                   <Card key={p.id} project={p} me={me} onOpen={() => open(p.id)}
                     onShare={() => setShareId(p.id)}
