@@ -49,3 +49,17 @@ supabase functions deploy research-chat --project-ref jokqthwszkweyqmmdesn
 ```
 Prereq: run `backend/migration-16-research-chat.sql` first. Until the function is deployed + the secrets
 are set, the chat persists the user's messages and shows "Consensus connection pending".
+
+**Consensus is optional** — with only `ANTHROPIC_API_KEY` set, the chat works as a plain Claude chat;
+add `CONSENSUS_MCP_TOKEN` and it auto-upgrades to evidence-grounded Consensus mode (no redeploy needed).
+
+### Cost control (shared by research-chat + research-ai)
+| secret | effect | cheap-test value |
+|---|---|---|
+| `RESEARCH_AI_MODEL` | which model | `claude-haiku-4-5-20251001` (cheapest) |
+| `RESEARCH_MAX_TOKENS` | output cap per reply | `800` (chat) / lower = cheaper |
+| `RESEARCH_HISTORY` | last N messages sent (input cap) | `12` |
+
+**The hard ceiling lives in the Anthropic Console**, not the code: load a small **prepaid** balance
+(e.g. $5) with **auto-reload OFF** → the API stops when it runs out. That guarantees "a few dollars max".
+The function returns `usage` (input/output tokens) per call for monitoring.
