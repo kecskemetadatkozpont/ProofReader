@@ -344,7 +344,8 @@ function PdfViewer(props) {
   var [idx, setIdx] = useState(0);
   var [playing, setPlaying] = useState(false);
   var [err, setErr] = useState('');
-  var audioRef = useRef(null), stopRef = useRef(false), idxRef = useRef(0);
+  var [view, setView] = useState('pdf');         // pdf | reading
+  var audioRef = useRef(null), stopRef = useRef(false), idxRef = useRef(0), readRef = useRef(null);
   idxRef.current = idx;
   var cfg = voiceCfg();
   var isPdf = /pdf/i.test((f && f.type) || '') || /\.pdf$/i.test((f && f.name) || '');
@@ -381,33 +382,52 @@ function PdfViewer(props) {
       try { window.speechSynthesis.speak(u); } catch (e) { }
     }
   }
-  function start() {
-    if (phase === 'ready') { stopRef.current = false; speakAt(idx, sents); return; }
+  // extract once (no autoplay); resolves the sentence list
+  function extract() {
+    if (sents.length) return Promise.resolve(sents);
     setPhase('loading'); setErr('');
-    extractPdfText(f.url).then(function (text) {
+    return extractPdfText(f.url).then(function (text) {
       var list = splitSentences(text);
-      if (!list.length) { setPhase('error'); setErr('No readable text found — this may be a scanned PDF.'); return; }
-      setSents(list); setPhase('ready'); stopRef.current = false; speakAt(0, list);
-    }, function (e) { setPhase('error'); setErr((e && e.message) || 'Could not read this PDF.'); });
+      if (!list.length) { setPhase('error'); setErr('No readable text found — this may be a scanned PDF.'); return []; }
+      setSents(list); setPhase('ready'); return list;
+    }, function (e) { setPhase('error'); setErr((e && e.message) || 'Could not read this PDF.'); return []; });
   }
+  function start() { extract().then(function (list) { if (list.length) { setView('reading'); stopRef.current = false; speakAt(0, list); } }); }
+  function showReading() { setView('reading'); if (!sents.length) extract(); }
   function togglePlay() {
     if (playing) { setPlaying(false); try { if (audioRef.current && audioRef.current.pause) audioRef.current.pause(); } catch (e) { } return; }
     if (phase !== 'ready') { start(); return; }
-    setPlaying(true);
+    setView('reading'); setPlaying(true);
     if (audioRef.current && audioRef.current.play) audioRef.current.play(); else { stopRef.current = false; speakAt(idx, sents); }
   }
   function stopAll() { stopRef.current = true; stopAudio(); setPlaying(false); setIdx(0); }
-  function jump(d) { stopRef.current = false; stopAudio(); speakAt(Math.max(0, Math.min(sents.length - 1, idx + d)), sents); }
+  function seek(i) { stopRef.current = false; stopAudio(); speakAt(Math.max(0, Math.min(sents.length - 1, i)), sents); }   // click a sentence → read from there
+  function jump(d) { seek(idx + d); }
+  // keep the spoken sentence scrolled into view in the reading panel
+  useEffect(function () {
+    if (view !== 'reading' || !readRef.current) return;
+    var el = readRef.current.querySelector('.pf-read-s.on');
+    if (el && el.scrollIntoView) { try { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) { el.scrollIntoView(); } }
+  }, [idx, view, phase]);
 
   return <div className="pf-viewer" onMouseDown={props.onClose}>
     <div className="pf-viewer-box" onMouseDown={function (e) { e.stopPropagation(); }}>
       <div className="pf-viewer-bar">
         <span className="pf-viewer-name" title={f.name}>{f.name}</span>
+        {isPdf ? <button className="btn-ghost" title="Switch between the PDF and a clickable reading view" onClick={function () { view === 'reading' ? setView('pdf') : showReading(); }}>{view === 'reading' ? '📄 PDF view' : '📖 Reading view'}</button> : null}
         <a className="btn-ghost" href={f.url} download={f.name}>Download</a>
         <button className="btn-ghost" onClick={function () { stopRef.current = true; stopAudio(); props.onClose(); }}>✕ Close</button>
       </div>
       {isPdf
-        ? <iframe className="pf-viewer-frame" src={f.url} title={f.name} />
+        ? (view === 'reading'
+          ? <div className="pf-read" ref={readRef}>
+              {phase === 'ready'
+                ? sents.map(function (s, i) { return <span key={i} className={'pf-read-s' + (i === idx ? ' on' : '')} onClick={function () { seek(i); }}>{s + ' '}</span>; })
+                : phase === 'loading' ? <div className="pf-read-load">Extracting text…</div>
+                  : phase === 'error' ? <div className="pf-read-load" style={{ color: '#b42318' }}>{err}</div>
+                    : <div className="pf-read-load">Press ▶ to read aloud, then click any sentence to read from there.</div>}
+            </div>
+          : <iframe className="pf-viewer-frame" src={f.url} title={f.name} />)
         : /^image\//i.test(f.type || '')
           ? <div className="pf-viewer-img"><img src={f.url} alt={f.name} /></div>
           : <div className="pf-viewer-other">This file type can’t be previewed inline. <a href={f.url} download={f.name}>Download it</a> to open.</div>}

@@ -170,6 +170,12 @@
     .pf-ra-cur { font-size: 12.5px; color: var(--ink); line-height: 1.5; max-height: 3.1em; overflow: hidden; }
     .pf-ra-err { font-size: 12.5px; color: #b42318; }
     .pf-ra-cached { color: #0f766e; }
+    /* reading view: clickable, highlightable sentences (like the editor) */
+    .pf-read { flex: 1; overflow: auto; padding: 26px 30px; line-height: 1.95; font-size: 15.5px; color: var(--ink); background: #fff; }
+    .pf-read-s { cursor: pointer; border-radius: 4px; padding: 1px 2px; transition: background .12s; }
+    .pf-read-s:hover { background: #eef0ff; }
+    .pf-read-s.on { background: #fde68a; box-shadow: 0 0 0 3px #fde68a; }
+    .pf-read-load { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 14px; padding: 24px; }
 
     @media (max-width: 760px) {
       .pf-body { flex-direction: column; }
