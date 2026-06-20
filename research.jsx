@@ -4,7 +4,7 @@
 (function () {
   'use strict';
   var h = React.createElement;
-  var useState = React.useState, useEffect = React.useEffect;
+  var useState = React.useState, useEffect = React.useEffect, useRef = React.useRef;
   var BE = window.PR_BACKEND, PUBS = window.PRPubs;
   var sb = BE && BE.sb;
 
@@ -160,7 +160,13 @@
     );
   }
 
-  // ---------- Chat with Consensus (R5b) ----------
+  // ---------- Chat with Publify (R5b) ----------
+  function mdHtml(t) {
+    var s = String(t == null ? '' : t);
+    try { if (window.marked && window.DOMPurify) return window.DOMPurify.sanitize(window.marked.parse(s, { breaks: true })); } catch (e) { }
+    return s.replace(/[&<>]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]; }).replace(/\n/g, '<br>');
+  }
+  var CHAT_SUGGEST = ['What are the open problems in this field?', 'Summarize the key methods used so far.', 'Suggest 3 testable research questions for my goal.', 'What evidence would support or refute my hypothesis?'];
   function ChatPanel(props) {
     var cS = useState(null), chat = cS[0], setChat = cS[1];
     var mS = useState([]), msgs = mS[0], setMsgs = mS[1];
@@ -168,14 +174,36 @@
     var iS = useState(''), input = iS[0], setInput = iS[1];
     var bS = useState(false), busy = bS[0], setBusy = bS[1];
     var er = useState(''), err = er[0], setErr = er[1];
+    var ty = useState(null), typing = ty[0], setTyping = ty[1];          // { id, len } of the message being typed out
+    var firstLoad = useRef(true), animated = useRef({}), alive = useRef(true), scrollRef = useRef(null), taRef = useRef(null);
+    useEffect(function () { return function () { alive.current = false; }; }, []);
+    function startTyping(id, full) {
+      if (!full) return;
+      var i = 0, step = Math.max(2, Math.round(full.length / 90));        // ~90 frames → ~1.5s regardless of length
+      setTyping({ id: id, len: 0 });
+      (function tick() {
+        if (!alive.current) return;
+        i += step;
+        if (i >= full.length) { setTyping(null); return; }
+        setTyping({ id: id, len: i });
+        setTimeout(tick, 16);
+      })();
+    }
     function loadMsgs(cid) {
       Promise.all([
         sb.from('research_messages').select('id,role,content,created_at').eq('chat_id', cid).order('created_at', { ascending: true }),
         sb.from('research_evidence').select('message_id').eq('chat_id', cid)
       ]).then(function (res) {
-        setMsgs((res[0] && res[0].data) || []);
+        var data = (res[0] && res[0].data) || [];
+        setMsgs(data);
         var by = {}; ((res[1] && res[1].data) || []).forEach(function (e) { if (e.message_id) by[e.message_id] = (by[e.message_id] || 0) + 1; });
         setEvByMsg(by);
+        if (firstLoad.current) { data.forEach(function (m) { animated.current[m.id] = true; }); firstLoad.current = false; }  // no animation on the initial history load
+        else {
+          var aMsgs = data.filter(function (m) { return m.role === 'assistant'; });
+          var last = aMsgs[aMsgs.length - 1];
+          if (last && !animated.current[last.id]) { animated.current[last.id] = true; startTyping(last.id, last.content); }  // animate only a freshly-arrived reply
+        }
       });
     }
     useEffect(function () {
@@ -183,43 +211,59 @@
         var c = (r && r.data && r.data[0]) || null; setChat(c); if (c) loadMsgs(c.id);
       });
     }, []);
+    useEffect(function () { var el = scrollRef.current; if (el) el.scrollTop = el.scrollHeight; }, [msgs.length, typing]);  // follow the conversation
     function ensureChat() {
       if (chat) return Promise.resolve(chat.id);
-      return sb.from('research_chats').insert({ project_id: props.projectId, title: 'Consensus chat' }).select('id').maybeSingle().then(function (r) { var c = r && r.data; setChat(c); return c && c.id; });
+      return sb.from('research_chats').insert({ project_id: props.projectId, title: 'Publify chat' }).select('id').maybeSingle().then(function (r) { var c = r && r.data; setChat(c); return c && c.id; });
     }
-    function send() {
-      if (!input.trim() || busy) return;
-      setBusy(true); setErr(''); var txt = input.trim(); setInput('');
+    function sendText(raw) {
+      var txt = (raw || '').trim();
+      if (!txt || busy) return;
+      setBusy(true); setErr(''); setInput('');
+      if (taRef.current) taRef.current.style.height = 'auto';
       ensureChat().then(function (cid) {
         if (!cid) { setBusy(false); setErr('Could not start a chat.'); return; }
         sb.from('research_messages').insert({ chat_id: cid, role: 'user', content: txt }).then(function () {
           loadMsgs(cid);
           sb.functions.invoke('research-chat', { body: { chat_id: cid } }).then(function (res) {
             setBusy(false);
-            if (res && (res.error || (res.data && res.data.error))) { setErr('Consensus connection pending — deploy research-chat + set ANTHROPIC_API_KEY and CONSENSUS_MCP_TOKEN.'); return; }
+            if (res && (res.error || (res.data && res.data.error))) { setErr('AI connection pending — deploy the research-chat Edge function and set ANTHROPIC_API_KEY.'); return; }
             loadMsgs(cid);
-          }, function () { setBusy(false); setErr('Consensus connection pending — deploy the research-chat Edge function.'); });
+          }, function () { setBusy(false); setErr('AI connection pending — deploy the research-chat Edge function.'); });
         });
       });
     }
+    function send() { sendText(input); }
+    function copy(m) { try { navigator.clipboard.writeText(m.content || ''); } catch (e) { } }
+    function onTaKey(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }
+    function onTaInput(e) { setInput(e.target.value); e.target.style.height = 'auto'; e.target.style.height = Math.min(e.target.scrollHeight, 160) + 'px'; }
     function saveIdea(m) { sb.from('research_ideas').insert({ project_id: props.projectId, source: 'consensus', question: (m.content || '').slice(0, 500), created_by: props.authorId, status: 'candidate' }).then(function (r) { if (r && r.error) { alert(r.error.message); return; } props.onChanged(); }); }
     return h('div', { className: 'panel' },
-      h('h3', null, 'Chat with Consensus', h('span', { style: { fontWeight: 600, color: 'var(--faint)' } }, 'evidence-grounded')),
-      h('div', { className: 'chat-msgs' },
+      h('h3', null, 'Chat with Publify', h('span', { style: { fontWeight: 600, color: 'var(--faint)' } }, 'research assistant')),
+      h('div', { className: 'chat-msgs', ref: scrollRef },
         msgs.length ? msgs.map(function (m) {
-          return h('div', { key: m.id, className: 'bubble ' + (m.role === 'assistant' ? 'ai' : 'user') },
-            h('div', { className: 'btxt' }, m.content),
-            m.role === 'assistant' ? h('div', { className: 'bmeta' },
+          var isTyping = typing && typing.id === m.id;
+          var ai = m.role === 'assistant';
+          var body = (ai && !isTyping)
+            ? h('div', { className: 'btxt md', dangerouslySetInnerHTML: { __html: mdHtml(m.content) } })
+            : h('div', { className: 'btxt' }, isTyping ? (m.content || '').slice(0, typing.len) : m.content, isTyping ? h('span', { className: 'tw-cursor' }, '▌') : null);
+          return h('div', { key: m.id, className: 'bubble ' + (ai ? 'ai' : 'user') },
+            body,
+            (ai && !isTyping) ? h('div', { className: 'bmeta' },
               evByMsg[m.id] ? h('span', null, '📄 ' + evByMsg[m.id] + ' sources') : null,
+              h('button', { className: 'copybtn', onClick: function () { copy(m); } }, 'Copy'),
               props.canEdit ? h('button', { className: 'savebtn', onClick: function () { saveIdea(m); } }, '✚ Save as idea') : null
             ) : null
           );
-        }) : h('div', { className: 'chat-empty' }, 'Ask Consensus about your topic — e.g. "What does the evidence say about …?" or "Where are the gaps in …?"'),
-        busy ? h('div', { className: 'bubble ai' }, h('div', { className: 'btxt', style: { color: 'var(--faint)' } }, 'Consensus is thinking…')) : null
+        }) : h('div', null,
+          h('div', { className: 'chat-empty' }, 'Ask Publify about your topic — grounded in evidence when Consensus is connected.'),
+          props.canEdit ? h('div', { className: 'chat-suggest' }, CHAT_SUGGEST.map(function (s, i) { return h('button', { key: i, onClick: function () { sendText(s); } }, s); })) : null
+        ),
+        busy ? h('div', { className: 'bubble ai' }, h('div', { className: 'btxt', style: { color: 'var(--faint)' } }, 'Publify is thinking…')) : null
       ),
       err ? h('div', { style: { fontSize: 12.5, color: 'var(--warn)', margin: '6px 0 0' } }, err) : null,
       props.canEdit ? h('div', { className: 'chat-input' },
-        h('input', { value: input, placeholder: 'Message Consensus…', disabled: busy, onChange: function (e) { setInput(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter') send(); } }),
+        h('textarea', { ref: taRef, value: input, rows: 1, placeholder: 'Message Publify…  (Enter to send · Shift+Enter newline)', disabled: busy, onChange: onTaInput, onKeyDown: onTaKey }),
         h('button', { className: 'btn pri', disabled: busy, onClick: send }, 'Send')
       ) : null
     );
