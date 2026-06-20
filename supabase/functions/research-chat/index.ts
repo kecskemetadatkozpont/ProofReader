@@ -63,9 +63,10 @@ Deno.serve(async (req) => {
       else messages.push({ role, content: m.content });
     }
 
-    const SYSTEM = useMcp
+    const ATTACH_NOTE = ` When the user attaches sources or files, their full content is included directly in this message (as text and document blocks) — read and use that content, and never say you cannot access attachments or files.`;
+    const SYSTEM = (useMcp
       ? `You are a research-ideation partner inside a PhD platform. Use the Consensus tools to ground every non-trivial claim in peer-reviewed evidence, and cite the papers. Propose specific, falsifiable research questions and say briefly why each is a gap. Be concise.`
-      : `You are a research-ideation partner inside a PhD platform. You do NOT have live literature search; answer from your own knowledge, be explicit about uncertainty, and propose specific, falsifiable research questions with brief rationale. Be concise.`;
+      : `You are a research-ideation partner inside a PhD platform. You do NOT have live literature search, but you DO receive any attached materials inline. Answer from the attachments and your own knowledge, be explicit about uncertainty, and propose specific, falsifiable research questions with brief rationale. Be concise.`) + ATTACH_NOTE;
 
     const headers: Record<string, string> = { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' };
     if (useMcp) headers['anthropic-beta'] = 'mcp-client-2025-04-04';
@@ -96,7 +97,7 @@ Deno.serve(async (req) => {
     }
     if (ev.length) await sb.from('research_evidence').insert(ev);
 
-    return json({ ok: true, version: 'attach-v3', message_id: saved?.id, evidence: ev.length, mode: useMcp ? 'consensus' : 'plain', model: MODEL, usage: out.usage, dbg });
+    return json({ ok: true, version: 'attach-v4', message_id: saved?.id, evidence: ev.length, mode: useMcp ? 'consensus' : 'plain', model: MODEL, usage: out.usage, dbg });
   } catch (e) {
     return json({ error: String(e) }, 500);
   }
