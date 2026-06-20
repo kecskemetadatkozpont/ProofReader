@@ -344,8 +344,9 @@ function PdfViewer(props) {
   var [idx, setIdx] = useState(0);
   var [playing, setPlaying] = useState(false);
   var [err, setErr] = useState('');
-  var [view, setView] = useState('pdf');         // pdf | reading
-  var audioRef = useRef(null), stopRef = useRef(false), idxRef = useRef(0), readRef = useRef(null);
+  var [view, setView] = useState('orig');        // orig (native iframe) | hl (rendered PDF + highlight overlay)
+  var audioRef = useRef(null), stopRef = useRef(false), idxRef = useRef(0);
+  var hlRef = useRef(null), sentsRef = useRef([]), renderedRef = useRef(false);
   idxRef.current = idx;
   var cfg = voiceCfg();
   var isPdf = /pdf/i.test((f && f.type) || '') || /\.pdf$/i.test((f && f.name) || '');
@@ -382,50 +383,88 @@ function PdfViewer(props) {
       try { window.speechSynthesis.speak(u); } catch (e) { }
     }
   }
-  // extract once (no autoplay); resolves the sentence list
-  function extract() {
-    if (sents.length) return Promise.resolve(sents);
+
+  // Render each page to a canvas (keeps the real layout) + an overlaid, transparent PDF.js text
+  // layer whose spans we tag with their sentence index → highlight + click-to-read on the PDF.
+  function renderHighlight() {
+    if (renderedRef.current) return Promise.resolve(sentsRef.current);
     setPhase('loading'); setErr('');
-    return extractPdfText(f.url).then(function (text) {
-      var list = splitSentences(text);
-      if (!list.length) { setPhase('error'); setErr('No readable text found — this may be a scanned PDF.'); return []; }
-      setSents(list); setPhase('ready'); return list;
-    }, function (e) { setPhase('error'); setErr((e && e.message) || 'Could not read this PDF.'); return []; });
+    return ensurePdfJs().then(function (lib) {
+      return fetch(f.url).then(function (r) { return r.arrayBuffer(); }).then(function (ab) { return lib.getDocument({ data: new Uint8Array(ab) }).promise; }).then(function (pdf) {
+        var container = hlRef.current; if (!container) return [];
+        container.innerHTML = '';
+        var full = '', offsets = [], chain = Promise.resolve();
+        var maxW = (container.clientWidth || 820) - 28;
+        for (var p = 1; p <= pdf.numPages; p++) (function (pn) {
+          chain = chain.then(function () { return pdf.getPage(pn); }).then(function (page) {
+            var base = page.getViewport({ scale: 1 });
+            var scale = Math.max(0.5, Math.min(2, maxW / base.width));
+            var vp = page.getViewport({ scale: scale });
+            var pageDiv = document.createElement('div'); pageDiv.className = 'pf-pdfpage';
+            pageDiv.style.width = Math.floor(vp.width) + 'px'; pageDiv.style.height = Math.floor(vp.height) + 'px';
+            var canvas = document.createElement('canvas'); canvas.width = Math.floor(vp.width); canvas.height = Math.floor(vp.height);
+            pageDiv.appendChild(canvas);
+            var tld = document.createElement('div'); tld.className = 'textLayer';
+            tld.style.width = Math.floor(vp.width) + 'px'; tld.style.height = Math.floor(vp.height) + 'px';
+            pageDiv.appendChild(tld);
+            container.appendChild(pageDiv);
+            return page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise
+              .then(function () { return page.getTextContent(); })
+              .then(function (tc) {
+                var task = lib.renderTextLayer({ textContent: tc, textContentSource: tc, container: tld, viewport: vp, textDivs: [] });
+                return (task.promise || task).then(function () {
+                  var spans = tld.querySelectorAll('span');
+                  tc.items.forEach(function (it, i) { var s = full.length; full += (it.str || '') + ' '; offsets.push({ s: s, div: spans[i] }); });
+                });
+              });
+          });
+        })(p);
+        return chain.then(function () {
+          var sentences = [], ranges = [], re = /[^.!?]*[.!?]+(?:\s|$)|\S[^.!?]*$/g, m;
+          while ((m = re.exec(full)) !== null) { var s = m[0].trim(); if (s.length >= 2) { sentences.push(s); ranges.push({ s: m.index, e: m.index + m[0].length }); } if (m.index === re.lastIndex) re.lastIndex++; }
+          function sentOf(o) { for (var k = 0; k < ranges.length; k++) if (o >= ranges[k].s && o < ranges[k].e) return k; return Math.max(0, sentences.length - 1); }
+          offsets.forEach(function (off) { if (off.div) { off.div.dataset.sent = sentOf(off.s); off.div.classList.add('tl-s'); } });
+          sentsRef.current = sentences; setSents(sentences); renderedRef.current = true;
+          if (!sentences.length) { setPhase('error'); setErr('No selectable text in this PDF — it may be a scan.'); }
+          else setPhase('ready');
+          return sentences;
+        });
+      });
+    }, function (e) { setPhase('error'); setErr((e && e.message) || 'Could not render this PDF.'); return []; });
   }
-  function start() { extract().then(function (list) { if (list.length) { setView('reading'); stopRef.current = false; speakAt(0, list); } }); }
-  function showReading() { setView('reading'); if (!sents.length) extract(); }
+  function showHighlight() { setView('hl'); return renderHighlight(); }
+  function start() { showHighlight().then(function (list) { if (list && list.length) { stopRef.current = false; speakAt(0, list); } }); }
   function togglePlay() {
     if (playing) { setPlaying(false); try { if (audioRef.current && audioRef.current.pause) audioRef.current.pause(); } catch (e) { } return; }
-    if (phase !== 'ready') { start(); return; }
-    setView('reading'); setPlaying(true);
-    if (audioRef.current && audioRef.current.play) audioRef.current.play(); else { stopRef.current = false; speakAt(idx, sents); }
+    if (!renderedRef.current || phase !== 'ready') { start(); return; }
+    setView('hl'); setPlaying(true);
+    if (audioRef.current && audioRef.current.play) audioRef.current.play(); else { stopRef.current = false; speakAt(idx, sentsRef.current); }
   }
   function stopAll() { stopRef.current = true; stopAudio(); setPlaying(false); setIdx(0); }
-  function seek(i) { stopRef.current = false; stopAudio(); speakAt(Math.max(0, Math.min(sents.length - 1, i)), sents); }   // click a sentence → read from there
+  function seek(i) { stopRef.current = false; stopAudio(); speakAt(Math.max(0, Math.min(sentsRef.current.length - 1, i)), sentsRef.current); }   // click a sentence → read from there
   function jump(d) { seek(idx + d); }
-  // keep the spoken sentence scrolled into view in the reading panel
+  function onHlClick(e) { var t = e.target; if (t && t.classList && t.classList.contains('tl-s') && t.dataset && t.dataset.sent != null) seek(parseInt(t.dataset.sent, 10) || 0); }
+  // highlight the spoken sentence's spans on the rendered PDF + scroll into view
   useEffect(function () {
-    if (view !== 'reading' || !readRef.current) return;
-    var el = readRef.current.querySelector('.pf-read-s.on');
-    if (el && el.scrollIntoView) { try { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) { el.scrollIntoView(); } }
+    if (view !== 'hl' || !hlRef.current) return;
+    var on = hlRef.current.querySelectorAll('.tl-s.on'); for (var i = 0; i < on.length; i++) on[i].classList.remove('on');
+    var cur = hlRef.current.querySelectorAll('.tl-s[data-sent="' + idx + '"]'); for (var j = 0; j < cur.length; j++) cur[j].classList.add('on');
+    if (cur[0] && cur[0].scrollIntoView) { try { cur[0].scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) { try { cur[0].scrollIntoView(); } catch (e2) { } } }
   }, [idx, view, phase]);
 
   return <div className="pf-viewer" onMouseDown={props.onClose}>
     <div className="pf-viewer-box" onMouseDown={function (e) { e.stopPropagation(); }}>
       <div className="pf-viewer-bar">
         <span className="pf-viewer-name" title={f.name}>{f.name}</span>
-        {isPdf ? <button className="btn-ghost" title="Switch between the PDF and a clickable reading view" onClick={function () { view === 'reading' ? setView('pdf') : showReading(); }}>{view === 'reading' ? '📄 PDF view' : '📖 Reading view'}</button> : null}
+        {isPdf ? <button className="btn-ghost" title="Toggle sentence highlighting on the PDF" onClick={function () { view === 'hl' ? setView('orig') : showHighlight(); }}>{view === 'hl' ? '📄 Original' : '✨ Highlight'}</button> : null}
         <a className="btn-ghost" href={f.url} download={f.name}>Download</a>
         <button className="btn-ghost" onClick={function () { stopRef.current = true; stopAudio(); props.onClose(); }}>✕ Close</button>
       </div>
       {isPdf
-        ? (view === 'reading'
-          ? <div className="pf-read" ref={readRef}>
-              {phase === 'ready'
-                ? sents.map(function (s, i) { return <span key={i} className={'pf-read-s' + (i === idx ? ' on' : '')} onClick={function () { seek(i); }}>{s + ' '}</span>; })
-                : phase === 'loading' ? <div className="pf-read-load">Extracting text…</div>
-                  : phase === 'error' ? <div className="pf-read-load" style={{ color: '#b42318' }}>{err}</div>
-                    : <div className="pf-read-load">Press ▶ to read aloud, then click any sentence to read from there.</div>}
+        ? (view === 'hl'
+          ? <div className="pf-pdf-wrap">
+              {phase === 'loading' ? <div className="pf-pdf-load">Rendering the PDF…</div> : phase === 'error' ? <div className="pf-pdf-load" style={{ color: '#fecaca' }}>{err}</div> : null}
+              <div className="pf-pdf" ref={hlRef} onClick={onHlClick} />
             </div>
           : <iframe className="pf-viewer-frame" src={f.url} title={f.name} />)
         : /^image\//i.test(f.type || '')

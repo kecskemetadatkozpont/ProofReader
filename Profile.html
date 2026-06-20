@@ -176,6 +176,17 @@
     .pf-read-s:hover { background: #eef0ff; }
     .pf-read-s.on { background: #fde68a; box-shadow: 0 0 0 3px #fde68a; }
     .pf-read-load { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 14px; padding: 24px; }
+    /* rendered PDF (canvas) + transparent, highlightable text layer overlay */
+    .pf-pdf-wrap { flex: 1; position: relative; overflow: auto; background: #525659; }
+    .pf-pdf { padding: 16px 0; min-height: 100%; }
+    .pf-pdf-load { position: absolute; inset: 0; z-index: 3; display: flex; align-items: center; justify-content: center; background: rgba(82,86,89,.92); color: #fff; font-size: 14px; }
+    .pf-pdfpage { position: relative; margin: 0 auto 16px; background: #fff; box-shadow: 0 3px 16px rgba(0,0,0,.45); }
+    .pf-pdfpage canvas { display: block; }
+    .pf-pdfpage .textLayer { position: absolute; inset: 0; overflow: hidden; line-height: 1; opacity: 1; }
+    .pf-pdfpage .textLayer span, .pf-pdfpage .textLayer br { position: absolute; white-space: pre; transform-origin: 0% 0%; color: transparent; }
+    .pf-pdfpage .textLayer span.tl-s { cursor: pointer; border-radius: 2px; }
+    .pf-pdfpage .textLayer span.tl-s:hover { background: rgba(99,102,241,.22); }
+    .pf-pdfpage .textLayer span.on { background: rgba(253,224,71,.5); }
 
     @media (max-width: 760px) {
       .pf-body { flex-direction: column; }
