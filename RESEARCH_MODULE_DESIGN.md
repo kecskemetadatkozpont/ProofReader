@@ -225,8 +225,8 @@ konzulensnek" kérés ide esik), aztán a compute-infra (R3/R4).
 - **research.jsx:** projekt-detail **fülek** (Overview · Ideas · Literature · Log · Tasks); **Ideas** (saját
   kérdés/hipotézis + ✨ Gap analysis gomb); **Literature** = **OpenAlex** keresés (kulcs nélkül, böngészőből) →
   Library include/maybe/exclude screeninggel; absztrakt az inverted-indexből; dedup OpenAlex-id alapján.
-- **backend/functions/research-ai (Deno):** biztonságos Claude-proxy (a kulcs Edge-secret) — a user deployolja
-  (`backend/functions/README.md`). Enélkül minden más megy, a gomb „AI not configured"-ot ír.
+- **supabase/functions/research-ai (Deno):** biztonságos Claude-proxy (a kulcs Edge-secret) — a user deployolja
+  (`supabase/functions/README.md`). Enélkül minden más megy, a gomb „AI not configured"-ot ír.
 - **Tesztek:** backend RLS 9/9 (owner ír idea+source; konzulens read-only) · UI 5/5 (idea felvétel, valós OpenAlex
   keresés + Library-be tétel).
 

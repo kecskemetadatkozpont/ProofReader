@@ -242,7 +242,7 @@
       setBusy(true); setMsg('Running gap analysis (AI)…');
       sb.functions.invoke('research-ai', { body: { action: 'gap', project_id: props.projectId } }).then(function (res) {
         setBusy(false);
-        if (res && res.error) { setMsg('AI not configured yet — deploy the research-ai Edge function (backend/functions/research-ai) and set ANTHROPIC_API_KEY.'); return; }
+        if (res && res.error) { setMsg('AI not configured yet — deploy the research-ai Edge function (supabase/functions/research-ai) and set ANTHROPIC_API_KEY.'); return; }
         setMsg(''); props.onChanged();
       }, function () { setBusy(false); setMsg('AI not configured yet — deploy the research-ai Edge function.'); });
     }

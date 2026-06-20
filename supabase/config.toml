@@ -1,0 +1,9 @@
+project_id = "jokqthwszkweyqmmdesn"
+
+# Browser-invoked: the function handles CORS + verifies the caller via their JWT (RLS),
+# so the platform must NOT pre-reject the CORS preflight (which carries no auth).
+[functions.research-chat]
+verify_jwt = false
+
+[functions.research-ai]
+verify_jwt = false
