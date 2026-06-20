@@ -5,7 +5,7 @@
   'use strict';
   var h = React.createElement;
   var useState = React.useState, useEffect = React.useEffect;
-  var BE = window.PR_BACKEND;
+  var BE = window.PR_BACKEND, PUBS = window.PRPubs;
   var sb = BE && BE.sb;
 
   var STAGES = ['Setup', 'Idea', 'Literature', 'Protocol', 'Data', 'Compute', 'Analysis', 'Writing', 'Submission'];
@@ -166,9 +166,11 @@
     var b = useState(false), busy = b[0], setBusy = b[1];
     var m = useState(''), msg = m[0], setMsg = m[1];
     function add() {
-      if (!form.question.trim()) return;
-      sb.from('research_ideas').insert({ project_id: props.projectId, source: 'own', question: form.question.trim(), hypothesis: form.hypothesis.trim() || null, created_by: props.authorId, status: 'candidate' }).then(function (r) { if (r && r.error) { alert(r.error.message); return; } setForm({ question: '', hypothesis: '' }); props.onChanged(); });
+      if (!form.question.trim()) { setMsg('Type a research question first.'); return; }
+      setMsg('');
+      sb.from('research_ideas').insert({ project_id: props.projectId, source: 'own', question: form.question.trim(), hypothesis: form.hypothesis.trim() || null, created_by: props.authorId, status: 'candidate' }).then(function (r) { if (r && r.error) { setMsg('Could not add: ' + r.error.message); return; } setForm({ question: '', hypothesis: '' }); props.onChanged(); });
     }
+    function onKey(e) { if (e.key === 'Enter') add(); }
     function setStatus(idea, st) { sb.from('research_ideas').update({ status: st }).eq('id', idea.id).then(props.onChanged); }
     function del(idea) { sb.from('research_ideas').delete().eq('id', idea.id).then(props.onChanged); }
     function gap() {
@@ -184,8 +186,8 @@
       h('h3', null, 'Research ideas', props.canEdit ? h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12 }, disabled: busy, onClick: gap }, '✨ Gap analysis (AI)') : null),
       msg ? h('div', { style: { fontSize: 12.5, color: 'var(--muted)', marginBottom: 8 } }, msg) : null,
       props.canEdit ? h('div', { style: { marginBottom: 10 } },
-        h('input', { className: 'grow', style: { width: '100%', height: 36, border: '1px solid var(--line)', borderRadius: 8, padding: '0 10px', fontFamily: 'inherit', fontSize: 13 }, value: form.question, placeholder: 'A research question…', onChange: function (e) { setForm(Object.assign({}, form, { question: e.target.value })); } }),
-        h('input', { style: { width: '100%', height: 36, marginTop: 6, border: '1px solid var(--line)', borderRadius: 8, padding: '0 10px', fontFamily: 'inherit', fontSize: 13 }, value: form.hypothesis, placeholder: 'Hypothesis (optional)', onChange: function (e) { setForm(Object.assign({}, form, { hypothesis: e.target.value })); } }),
+        h('input', { style: { width: '100%', height: 36, border: '1px solid var(--line)', borderRadius: 8, padding: '0 10px', fontFamily: 'inherit', fontSize: 13 }, value: form.question, placeholder: 'A research question…', onChange: function (e) { setForm(Object.assign({}, form, { question: e.target.value })); }, onKeyDown: onKey }),
+        h('input', { style: { width: '100%', height: 36, marginTop: 6, border: '1px solid var(--line)', borderRadius: 8, padding: '0 10px', fontFamily: 'inherit', fontSize: 13 }, value: form.hypothesis, placeholder: 'Hypothesis (optional)', onChange: function (e) { setForm(Object.assign({}, form, { hypothesis: e.target.value })); }, onKeyDown: onKey }),
         h('div', { style: { marginTop: 8 } }, h('button', { className: 'btn pri', onClick: add }, 'Add idea'))
       ) : null,
       ideas.length ? ideas.map(function (idea) {
@@ -279,8 +281,38 @@
       '\\bibliographystyle{plain}', '\\bibliography{library}', '\\end{document}'
     ].join('\n');
   }
+  // ---------- Add the user's own (MTMT) publications to the library ----------
+  function MyPubsModal(props) {
+    var pubs = props.pubs || [];
+    return h('div', { className: 'scrim', onClick: props.onClose },
+      h('div', { className: 'modal', onClick: function (e) { e.stopPropagation(); } },
+        h('div', { className: 'modal-h' }, h('b', null, 'Add from my publications'), h('span', { style: { fontSize: 12, color: 'var(--faint)' } }, pubs.length + ' from MTMT'), h('button', { className: 'x', onClick: props.onClose }, '×')),
+        h('div', { className: 'modal-b' },
+          pubs.length ? pubs.map(function (p) {
+            var inLib = props.saved['mtmt:' + p.mtid];
+            return h('div', { className: 'src', style: { alignItems: 'flex-start' }, key: p.mtid },
+              h('div', { style: { flex: 1, minWidth: 0 } },
+                h('b', { style: { fontSize: 13 } }, p.title || 'Untitled'),
+                h('div', { style: { fontSize: 11.5, color: 'var(--muted)', marginTop: 1 } }, [p.firstAuthor ? (p.firstAuthor + (p.authorCount > 1 ? ' et al.' : '')) : '', p.year, p.journal].filter(Boolean).join(' · ')),
+                metricTags({ journal: p.journal, year: p.year, cites: p.citations })
+              ),
+              inLib ? h('span', { className: 'chip c-ok' }, 'in library') : h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12, flex: 'none' }, onClick: function () { props.onAdd(p); } }, 'Add')
+            );
+          }) : h('div', { className: 'empty' }, 'No publications are linked to your account (MTMT).')
+        ),
+        h('div', { className: 'modal-foot' },
+          h('button', { className: 'btn', onClick: props.onClose }, 'Close'),
+          pubs.length ? h('button', { className: 'btn pri', onClick: function () { pubs.forEach(function (p) { if (!props.saved['mtmt:' + p.mtid]) props.onAdd(p); }); } }, 'Add all') : null
+        )
+      )
+    );
+  }
+
   function LiteraturePanel(props) {
     var q = useState(''), query = q[0], setQuery = q[1];
+    var pm = useState(false), pubsOpen = pm[0], setPubsOpen = pm[1];
+    var myPubs = (PUBS && props.myEmail) ? ((PUBS.forUser({ email: props.myEmail }) || {}).publications || []) : [];
+    function addPub(p) { sb.from('research_sources').insert({ project_id: props.projectId, source_api: 'mtmt', ext_id: 'mtmt:' + p.mtid, doi: p.doi || null, title: p.title || 'Untitled', authors: p.firstAuthor ? [p.firstAuthor + (p.authorCount > 1 ? ' et al.' : '')] : null, year: p.year || null, venue: p.journal || null, cited_by: p.citations, url: p.doi ? 'https://doi.org/' + p.doi : p.mtmtUrl, screening: 'unscreened' }).then(function (res) { if (res && res.error) { if (!/duplicate|unique/i.test(res.error.message)) alert(res.error.message); return; } props.onChanged(); }); }
     var r = useState(null), results = r[0], setResults = r[1];
     var b = useState(false), busy = b[0], setBusy = b[1];
     var fl = useState({ minCites: '', fromYear: '', indexed: false, oa: false, journals: false }), flt = fl[0], setFlt = fl[1];
@@ -333,6 +365,7 @@
           h('button', { className: 'lchip' + (flt.journals ? ' on' : ''), onClick: function () { setF('journals', !flt.journals); } }, 'Journals only'),
           hasSci ? h('select', { className: 'num', style: { width: 'auto' }, value: scopusMax, title: 'Scopus quartile (SCImago)', onChange: function (e) { setScopusMax(parseInt(e.target.value, 10)); } }, h('option', { value: 0 }, 'Scopus: any'), h('option', { value: 1 }, 'Scopus Q1'), h('option', { value: 2 }, 'Scopus Q1–Q2'), h('option', { value: 3 }, 'Scopus Q1–Q3')) : null
         ) : null,
+        (props.canEdit && myPubs.length) ? h('div', { style: { marginTop: 10, fontSize: 12.5, color: 'var(--muted)' } }, 'Add your own work: ', h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12 }, onClick: function () { setPubsOpen(true); } }, '📚 From my publications (' + myPubs.length + ')')) : null,
         results ? (shown.length ? shown.map(function (w) {
           var au = (w.authorships || []).slice(0, 3).map(function (a) { return a.author && a.author.display_name; }).filter(Boolean).join(', ');
           var nw = normWork(w); nw.scopus = scopusQ(scimap, w);
@@ -362,7 +395,8 @@
             props.canEdit ? h('button', { className: 'icon-x', style: { flex: 'none' }, onClick: function () { del(s); } }, '✕') : null
           );
         }) : h('div', { style: { fontSize: 13, color: 'var(--faint)', padding: '8px 0' } }, 'No sources saved yet — search above and Add.')
-      )
+      ),
+      pubsOpen ? h(MyPubsModal, { pubs: myPubs, saved: saved, onAdd: addPub, onClose: function () { setPubsOpen(false); } }) : null
     );
   }
 
@@ -497,7 +531,7 @@
     var TABS = [['overview', 'Overview', null], ['ideas', 'Ideas', (props.ideas || []).length], ['literature', 'Literature', (props.sources || []).length], ['data', 'Data', (props.datasets || []).length], ['compute', 'Compute', (props.jobs || []).length], ['writing', 'Writing', null], ['log', 'Log', (props.log || []).length], ['tasks', 'Tasks', openTasks]];
     var content;
     if (tab === 'ideas') content = h(IdeasPanel, { projectId: p.id, ideas: props.ideas, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
-    else if (tab === 'literature') content = h(LiteraturePanel, { projectId: p.id, sources: props.sources, canEdit: props.canEdit, onChanged: props.onChanged });
+    else if (tab === 'literature') content = h(LiteraturePanel, { projectId: p.id, sources: props.sources, canEdit: props.canEdit, myEmail: props.myEmail, onChanged: props.onChanged });
     else if (tab === 'data') content = h(DataPanel, { projectId: p.id, datasets: props.datasets, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
     else if (tab === 'compute') content = h(ComputePanel, { projectId: p.id, jobs: props.jobs, datasets: props.datasets, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
     else if (tab === 'writing') content = h(WritingPanel, { project: p, sources: props.sources, ideas: props.ideas, jobs: props.jobs });
@@ -577,11 +611,12 @@
       if (BE.mode !== 'cloud' || !BE.user) { setPhase('demo'); return; }
       var target = adminTargetUser();
       var pid = target ? target.id : BE.user.id;
+      var email = target ? target.email : (BE.user && BE.user.email);
       sb.from('profiles').select('role,name').eq('id', pid).maybeSingle().then(function (r) {
         var p = (r && r.data) || {};
-        setMe({ id: pid, name: p.name || (target && target.name) || BE.user.name, role: p.role, _preview: !!target });
+        setMe({ id: pid, name: p.name || (target && target.name) || BE.user.name, role: p.role, email: email, _preview: !!target });
         loadProjects(pid, !!target, function () { setPhase('ready'); });
-      }, function () { setMe({ id: pid, name: (target && target.name) || BE.user.name, _preview: !!target }); setPhase('ready'); });
+      }, function () { setMe({ id: pid, name: (target && target.name) || BE.user.name, email: email, _preview: !!target }); setPhase('ready'); });
     }
     function loadProjects(pid, preview, done) {
       sb.from('research_projects').select('id,owner_id,student_id,title,field,keywords,stage,status,goal,updated_at').order('updated_at', { ascending: false }).then(function (r) {
@@ -634,7 +669,7 @@
 
     var body;
     if (sel) {
-      body = h(ProjectDetail, { project: sel, log: props.detail.log, tasks: props.detail.tasks, ideas: props.detail.ideas, sources: props.detail.sources, datasets: props.detail.datasets, jobs: props.detail.jobs, canEdit: props.canEdit(sel), authorId: props.authorId, onBack: props.onBack, onChanged: props.refreshAll });
+      body = h(ProjectDetail, { project: sel, log: props.detail.log, tasks: props.detail.tasks, ideas: props.detail.ideas, sources: props.detail.sources, datasets: props.detail.datasets, jobs: props.detail.jobs, canEdit: props.canEdit(sel), authorId: props.authorId, myEmail: props.me.email, onBack: props.onBack, onChanged: props.refreshAll });
     } else if (!props.projects.length) {
       body = h('div', { className: 'soon' }, h('b', null, 'No research projects yet. '), 'Create one to start tracking a study from idea to submission.', h('div', { style: { marginTop: 14 } }, h('button', { className: 'btn pri', onClick: function () { setAdding(true); } }, '+ New project')));
     } else {
