@@ -191,11 +191,19 @@ konzulensnek" kérés ide esik), aztán a compute-infra (R3/R4).
 
 ---
 
-## 8. Nyitott döntések (ezek a te hívásaid — ezek határozzák meg a kezdést)
+## 8. Döntések (eldöntve — 2026-06-20)
 
-1. **Központi compute hol fut?** (a) self-hosted worker a saját géped/VM/GPU-d (a thesis H1–H8 már lokálisan fut)
-   · (b) mindig-on kis VM + queue · (c) serverless GPU (Modal/Replicate/RunPod). → költség & komplexitás.
-2. **API-kulcs modell?** platform-kulcs (Edge secret, kvótával) vs. **BYOK** (mindenki a saját kulcsát hozza, titkosítva). MVP-re valószínűleg platform-kulcs + kvóta.
-3. **Edge Functions bevezetése OK?** ez az első szerveroldali kód a no-build projektben (a titkokhoz kell).
-4. **Hol kezdjünk?** R0 foundation a default; vagy előrevennéd az irodalom/digest részt.
-5. **Most építsünk, vagy csak a design?** a design kész — szólj, ha R0-t kezdem.
+1. **Kezdés:** ✅ **R0 Foundation** — külső függés nélkül, azonnal építhető (mint a PhD-modul).
+2. **Központi compute:** ✅ **Self-hosted worker** (saját gép / VM / GPU; a thesis H1–H8 már lokálisan fut).
+   A `research_jobs` queue ehhez tervezve; a worker service-role kulccsal poll-ozza a queue-t és ír vissza.
+3. **API-kulcs modell:** ✅ **Platform-kulcs + kvóta** — közös kulcs Edge-secretként, per-user/projekt
+   kvótával és cost-trackinggel; a böngésző sosem látja.
+4. **Edge Functions:** bevezetjük (R1-től), a titkos API-proxyhoz — az első szerveroldali kód a projektben.
+
+### R0 build-scope (folyamatban)
+- **migration-11-research.sql:** `research_projects`, `research_log`, `research_tasks`, `notifications`
+  + RLS + `research_can_read/write_project()` helper (owner ∨ elfogadott konzulens ∨ admin).
+- **Research.html + research.jsx:** projekt-lista + létrehozás; projekt-detail **stage-stepperrel** (8 stage)
+  + Overview + **Research Log** (lista + bejegyzés) + **Tasks** (lista + státusz). A PhD-modul shell/RLS-mintáját követi.
+- **Drawer-link** a Research workspace-hez; **élő RLS-teszt**.
+- A digest (R2), Edge/API (R1), compute (R3/R4) későbbi fázisok.
