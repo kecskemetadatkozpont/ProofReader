@@ -222,6 +222,22 @@
     var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
     document.body.appendChild(a); a.click(); a.remove(); setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
   }
+  function escapeTex(s) { return String(s == null ? '' : s).replace(/([&%#_$])/g, '\\$1'); }
+  function genTexSkeleton(project, idea, sources, doneJobs) {
+    var used = {}, keys = (sources || []).map(function (s) { return bibKey(s, used); });
+    var cites = keys.length ? '\\cite{' + keys.join(',') + '}' : '';
+    var results = (doneJobs || []).map(function (j) { return '\\paragraph{' + escapeTex(j.title || 'Result') + '} ' + (j.result ? escapeTex(JSON.stringify(j.result)) : ''); }).join('\n');
+    return [
+      '\\documentclass{article}', '\\usepackage{cite}',
+      '\\title{' + escapeTex(project.title || '') + '}', '\\begin{document}', '\\maketitle', '',
+      '\\begin{abstract}', escapeTex(idea ? (idea.question + (idea.hypothesis ? ' ' + idea.hypothesis : '')) : (project.goal || '')), '\\end{abstract}', '',
+      '\\section{Introduction}', escapeTex(project.goal || '% TODO') + ' ' + cites, '',
+      '\\section{Related work}', 'We reviewed ' + (sources || []).length + ' relevant works. ' + cites, '',
+      '\\section{Method}', idea && idea.hypothesis ? escapeTex(idea.hypothesis) : '% TODO: methodology', '',
+      '\\section{Results}', results || '% TODO: results', '',
+      '\\bibliographystyle{plain}', '\\bibliography{library}', '\\end{document}'
+    ].join('\n');
+  }
   function LiteraturePanel(props) {
     var q = useState(''), query = q[0], setQuery = q[1];
     var r = useState(null), results = r[0], setResults = r[1];
@@ -368,6 +384,28 @@
     );
   }
 
+  // ---------- Writing (R6 bridge) ----------
+  function WritingPanel(props) {
+    var p = props.project;
+    var inc = (props.sources || []).filter(function (s) { return s.screening === 'include'; });
+    var lib = inc.length ? inc : (props.sources || []);
+    var idea = (props.ideas || []).filter(function (i) { return i.status === 'selected'; })[0] || (props.ideas || [])[0];
+    var doneJobs = (props.jobs || []).filter(function (j) { return j.status === 'done'; });
+    return h('div', { className: 'panel' },
+      h('h3', null, 'Writing'),
+      h('div', { style: { fontSize: 13, color: 'var(--muted)', marginBottom: 12 } },
+        'Assemble a manuscript starter from this project — the selected idea as the abstract, the ',
+        h('b', null, lib.length), ' library source' + (lib.length === 1 ? '' : 's') + ' as \\cite references' + (inc.length ? ' (included)' : '') + ', and ',
+        h('b', null, doneJobs.length), ' finished result' + (doneJobs.length === 1 ? '' : 's') + '.'),
+      h('div', { style: { display: 'flex', gap: 10, flexWrap: 'wrap' } },
+        h('button', { className: 'btn pri', onClick: function () { downloadText((p.title || 'manuscript').replace(/[^A-Za-z0-9]+/g, '_') + '.tex', genTexSkeleton(p, idea, lib, doneJobs)); } }, '⬇ .tex skeleton'),
+        h('button', { className: 'btn', onClick: function () { downloadText('library.bib', genBibtex(lib)); } }, '⬇ library.bib'),
+        h('a', { className: 'btn', href: 'ProofReader.html', style: { textDecoration: 'none', display: 'inline-flex', alignItems: 'center' } }, 'Open LaTeX editor →')
+      ),
+      idea ? h('div', { style: { marginTop: 14, fontSize: 12.5, color: 'var(--faint)' } }, 'Abstract seed: ' + idea.question) : h('div', { style: { marginTop: 14, fontSize: 12.5, color: 'var(--faint)' } }, 'Tip: select an idea on the Ideas tab to seed the abstract.')
+    );
+  }
+
   // ---------- Project detail ----------
   function ProjectDetail(props) {
     var p = props.project;
@@ -375,12 +413,13 @@
     function setStage(i) { sb.from('research_projects').update({ stage: i }).eq('id', p.id).then(props.onChanged); }
     function setStatus(e) { sb.from('research_projects').update({ status: e.target.value }).eq('id', p.id).then(props.onChanged); }
     var openTasks = (props.tasks || []).filter(function (t) { return t.status !== 'done'; }).length;
-    var TABS = [['overview', 'Overview', null], ['ideas', 'Ideas', (props.ideas || []).length], ['literature', 'Literature', (props.sources || []).length], ['data', 'Data', (props.datasets || []).length], ['compute', 'Compute', (props.jobs || []).length], ['log', 'Log', (props.log || []).length], ['tasks', 'Tasks', openTasks]];
+    var TABS = [['overview', 'Overview', null], ['ideas', 'Ideas', (props.ideas || []).length], ['literature', 'Literature', (props.sources || []).length], ['data', 'Data', (props.datasets || []).length], ['compute', 'Compute', (props.jobs || []).length], ['writing', 'Writing', null], ['log', 'Log', (props.log || []).length], ['tasks', 'Tasks', openTasks]];
     var content;
     if (tab === 'ideas') content = h(IdeasPanel, { projectId: p.id, ideas: props.ideas, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
     else if (tab === 'literature') content = h(LiteraturePanel, { projectId: p.id, sources: props.sources, canEdit: props.canEdit, onChanged: props.onChanged });
     else if (tab === 'data') content = h(DataPanel, { projectId: p.id, datasets: props.datasets, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
     else if (tab === 'compute') content = h(ComputePanel, { projectId: p.id, jobs: props.jobs, datasets: props.datasets, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
+    else if (tab === 'writing') content = h(WritingPanel, { project: p, sources: props.sources, ideas: props.ideas, jobs: props.jobs });
     else if (tab === 'log') content = h(LogPanel, { projectId: p.id, authorId: props.authorId, entries: props.log, canEdit: props.canEdit, onChanged: props.onChanged });
     else if (tab === 'tasks') content = h(TasksPanel, { projectId: p.id, tasks: props.tasks, canEdit: props.canEdit, onChanged: props.onChanged });
     else content = p.goal ? h('div', { className: 'panel' }, h('h3', null, 'Goal'), h('div', { style: { fontSize: 13.5 } }, p.goal)) : h('div', { className: 'soon' }, 'No goal set yet.');

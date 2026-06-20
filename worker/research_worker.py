@@ -134,6 +134,16 @@ class DB:
     def set_dataset(self, dsid, fields):
         self._req("PATCH", "/rest/v1/research_datasets?id=eq.%s" % dsid, fields)
 
+    def add_log(self, project_id, profile_id, summary, ltype="RESULT"):
+        # so finished compute shows up in the research log (and the supervisor's daily digest)
+        if not profile_id:
+            return
+        try:
+            self._req("POST", "/rest/v1/research_log",
+                      {"project_id": project_id, "profile_id": profile_id, "type": ltype, "summary": summary})
+        except Exception:  # noqa  (logging is best-effort)
+            pass
+
     def storage_bytes(self, path):
         # download an object from the research-data bucket (service key)
         url = self.url + "/storage/v1/object/research-data/" + urllib.parse.quote(path)
@@ -186,6 +196,9 @@ def process(db, job, py_timeout=60):
         else:
             result, logs, ok = None, "unknown job type: %s" % jtype, False
         db.finish(job["id"], "done" if ok else "error", result, logs)
+        if ok:
+            db.add_log(job["project_id"], job.get("created_by"),
+                       'Compute job "%s" (%s) finished' % (job.get("title", "job"), jtype))
         print("  job %s [%s] -> %s" % (job["id"][:8], jtype, "done" if ok else "error"))
     except Exception as e:  # noqa
         db.finish(job["id"], "error", None, "worker exception: %r" % e)
