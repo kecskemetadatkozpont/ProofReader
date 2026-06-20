@@ -9,6 +9,19 @@
   var BE = window.PR_BACKEND, PUBS = window.PRPubs;
   var sb = BE && BE.sb;
 
+  // Admin "view as": opened from the Admin page with ?adminView=1 + a stored target, render the
+  // Doctoral School AS that user (their role, their students/requests/KPIs). The real (admin)
+  // session drives the queries — RLS lets an admin read/write any record — so all of the target's
+  // functionality is reachable; client-side filtering scopes the views to the target's perspective.
+  function adminTargetUser() {
+    try {
+      if (!/[?&]adminView=1/.test(location.search)) return null;
+      if (!(BE && BE.user)) return null;
+      var t = JSON.parse(localStorage.getItem('pr-admin-view') || 'null');
+      return t && t.id ? t : null;
+    } catch (e) { return null; }
+  }
+
   function initials(n) { return String(n || '?').trim().split(/\s+/).slice(0, 2).map(function (w) { return w[0]; }).join('').toUpperCase(); }
   var PALETTE = ['#4f46e5', '#0e9f6e', '#d9760b', '#db2777', '#0891b2', '#7c3aed', '#ca8a04', '#dc2626'];
   function colorFor(id) { var x = 0; id = String(id || ''); for (var i = 0; i < id.length; i++) x = (x * 31 + id.charCodeAt(i)) >>> 0; return PALETTE[x % PALETTE.length]; }
@@ -467,11 +480,13 @@
       if (!BE || !BE.sb) { setPhase('nobackend'); return; }
       if (BE.mode === 'signin' || BE.mode === 'pending') { setPhase('signin'); return; }
       if (BE.mode !== 'cloud' || !BE.user) { setPhase('demo'); return; }
-      sb.from('profiles').select('role,is_supervisor,is_student,name,department,capacity_max,research_interests,accepting_students').eq('id', BE.user.id).maybeSingle().then(function (r) {
+      var target = adminTargetUser();
+      var pid = target ? target.id : BE.user.id;
+      sb.from('profiles').select('role,is_supervisor,is_student,name,department,capacity_max,research_interests,accepting_students').eq('id', pid).maybeSingle().then(function (r) {
         var p = (r && r.data) || {};
-        setMe({ id: BE.user.id, name: p.name || BE.user.name, role: p.role, is_supervisor: p.is_supervisor, is_student: p.is_student, department: p.department, capacity_max: p.capacity_max, research_interests: p.research_interests, accepting_students: p.accepting_students });
+        setMe({ id: pid, name: p.name || (target && target.name) || BE.user.name, role: p.role, is_supervisor: p.is_supervisor, is_student: p.is_student, department: p.department, capacity_max: p.capacity_max, research_interests: p.research_interests, accepting_students: p.accepting_students, _preview: !!target });
         loadData(function () { setPhase('ready'); });
-      }, function () { setMe({ id: BE.user.id, name: BE.user.name }); setPhase('ready'); });
+      }, function () { setMe({ id: pid, name: (target && target.name) || BE.user.name, _preview: !!target }); setPhase('ready'); });
     }
     function loadData(done) {
       Promise.all([
@@ -504,6 +519,14 @@
     var incoming = (data.supervisions || []).filter(function (v) { return v.supervisor_id === me.id && v.status === 'pending'; });
     var myAccepted = (data.supervisions || []).filter(function (v) { return v.supervisor_id === me.id && v.status === 'accepted'; }).length;
     var capacityFull = !!(me.capacity_max && myAccepted >= me.capacity_max);
+    // in admin-preview the queries return ALL records (admin RLS); scope the Students list + Dashboard
+    // to the previewed user's own perspective (their students / accepted supervisions / own record).
+    var preview = !!me._preview;
+    var effStudents = data.students;
+    if (preview) {
+      var _acc = (data.supervisions || []).filter(function (v) { return v.supervisor_id === me.id && v.status === 'accepted'; }).map(function (v) { return v.student_id; });
+      effStudents = data.students.filter(function (s) { return s.supervisor_id === me.id || _acc.indexOf(s.id) >= 0 || s.profile_id === me.id; });
+    }
     var roleLabel = isAdmin ? 'Administrator' : (me && me.is_supervisor ? 'Supervisor' : (isStudentOnly ? 'Student' : 'Member'));
     var NAV = [];
     if (isSup) { NAV.push(['dashboard', 'Dashboard']); NAV.push(['students', 'Students']); NAV.push(['requests', 'Requests', incoming.length]); }
@@ -514,7 +537,7 @@
     NAV.push(['account', 'My account']);
     var allowed = NAV.map(function (x) { return x[0]; });
     var cur = allowed.indexOf(view) >= 0 ? view : allowed[0];
-    var nStu = data.students.length;
+    var nStu = effStudents.length;
     var titles = { dashboard: 'Dashboard', students: 'Students', supervisors: 'Supervisors', topics: 'Research topics', mine: 'My progress', account: 'My account', requests: 'Requests', admin: 'Admin' };
     var subs = { supervisors: data.sups.length + ' supervisors · ' + nStu + ' student' + (nStu === 1 ? '' : 's'), topics: data.topics.length + ' topics', students: nStu + ' student' + (nStu === 1 ? '' : 's'), dashboard: (isAdmin ? 'Institution-wide' : 'Your students') + ' · ' + nStu + ' student' + (nStu === 1 ? '' : 's'), mine: myStudent ? (myStudent.topic || '') : '', account: 'Set your role and profile', requests: incoming.length + ' pending', admin: 'Roles & supervision relationships' };
     function canEditStudent(s) { return isAdmin || (s && s.supervisor_id === me.id); }
@@ -522,7 +545,7 @@
     var body;
     if (cur === 'account') body = h(MyAccount, { me: me, myStudent: myStudent, onChanged: boot });
     else if (cur === 'mine') body = myStudent ? h(StudentDetail, { student: myStudent, sups: data.sups, canEdit: false, onBack: null, onChanged: function () { loadData(); } }) : h('div', { className: 'empty' }, 'No student record is linked to your account yet — register on the My account page or ask your supervisor.');
-    else if (cur === 'dashboard') body = h(Dashboard, { students: data.students, milestones: data.milestones, topics: data.topics, me: me, isAdmin: isAdmin });
+    else if (cur === 'dashboard') body = h(Dashboard, { students: effStudents, milestones: data.milestones, topics: data.topics, me: me, isAdmin: isAdmin });
     else if (cur === 'requests') body = h(RequestsInbox, { requests: incoming, students: data.students, capacityFull: capacityFull, onChanged: function () { loadData(); } });
     else if (cur === 'admin') body = h(AdminPanel, { students: data.students, sups: data.sups, supervisions: data.supervisions, onChanged: function () { loadData(); } });
     else if (cur === 'supervisors') body = h(Supervisors, { sups: data.sups, students: data.students, myStudent: myStudent, mySupervisions: mySupervisions, onChanged: function () { loadData(); } });
@@ -530,7 +553,7 @@
     else if (cur === 'students') {
       body = sel
         ? h(StudentDetail, { student: sel, sups: data.sups, canEdit: canEditStudent(sel), onBack: function () { setSel(null); }, onChanged: function () { loadData(); } })
-        : h(StudentList, { students: data.students, sups: data.sups, me: me, isAdmin: isAdmin, canAdd: isSup, onOpen: function (s) { setSel(s); }, onChanged: function () { loadData(); } });
+        : h(StudentList, { students: effStudents, sups: data.sups, me: me, isAdmin: isAdmin, canAdd: isSup, onOpen: function (s) { setSel(s); }, onChanged: function () { loadData(); } });
     } else body = h('div', { className: 'soon' }, titles[cur] + ' — coming in the next phase.');
 
     return h('div', { className: 'app' },
@@ -540,6 +563,7 @@
         h('div', { className: 'side-foot' }, h(Avatar, { u: me, size: 32 }), h('div', { className: 'who' }, h('b', null, me.name), h('span', null, roleLabel)), h('a', { className: 'exit', href: 'Projects.html', title: 'Back to Publify' }, '←'))
       ),
       h('div', { className: 'main' },
+        preview ? h('div', { style: { background: '#fef3c7', color: '#92400e', padding: '9px 14px', fontSize: 13, fontWeight: 600, borderRadius: 10, marginBottom: 14 } }, '👁 Admin preview — viewing ', h('b', null, me.name), '’s Doctoral School (', roleLabel, '). ', h('a', { href: 'Profile.html?adminView=1', style: { color: '#92400e' } }, 'Profile view'), ' · ', h('a', { href: 'Admin.html', style: { color: '#92400e' } }, '← Back to admin')) : null,
         (!hasRole && cur !== 'account') ? h('div', { className: 'panel', style: { background: '#eef0ff', borderColor: '#c7cdf5' } }, h('b', null, 'Welcome to the Doctoral School! '), 'Set whether you are a supervisor or a student to get started — ', h('a', { href: '#', onClick: function (e) { e.preventDefault(); setView('account'); } }, 'open My account')) : null,
         ((cur === 'students' && sel) || (cur === 'mine' && myStudent)) ? null : h('div', { className: 'head' }, h('div', null, h('h1', null, titles[cur]), h('div', { className: 'sub' }, subs[cur] || '')), isAdmin ? h('span', { className: 'badge role' }, 'admin view') : null),
         body

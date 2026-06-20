@@ -647,7 +647,7 @@ function App() {
 
   return <div className="pf">
     {preview ? <div style={{ background: '#fef3c7', color: '#92400e', padding: '9px 16px', fontSize: 13, textAlign: 'center', fontWeight: 600 }}>
-      👁 Admin preview — viewing <b>{me.name}</b>’s profile read-only. <a href="Admin.html" style={{ color: '#92400e' }}>← Back to admin</a>
+      👁 Admin preview — viewing <b>{me.name}</b>’s profile read-only. <a href="PhD.html?adminView=1" style={{ color: '#92400e' }}>Doctoral School</a> · <a href="Admin.html" style={{ color: '#92400e' }}>← Back to admin</a>
     </div> : null}
     <Header me={me} setMe={setMe} mode={mode} usage={usage} />
     <div className="pf-body">
