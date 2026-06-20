@@ -31,3 +31,21 @@ works without it.
 ### Cost / quota (platform-key model)
 The key is shared, so add per-user/project quotas before opening this widely. A later migration will add
 an `ai_usage` table + a budget check at the top of the function (R7 — cost dashboards).
+
+## research-chat (R5b — Ideas chat with Consensus via MCP)
+
+A Claude session in the Ideas tab that talks to **Consensus** through the Anthropic **MCP connector**
+(remote MCP server `https://mcp.consensus.app/mcp`). Loads the chat history under the caller's JWT (RLS),
+runs one Claude turn with the Consensus MCP attached, then persists the assistant message + raw
+tool-use/tool-result blocks + best-effort evidence into `research_messages` / `research_evidence` — so
+the app owns and can reuse everything discussed.
+
+### Setup
+```bash
+supabase secrets set ANTHROPIC_API_KEY=sk-ant-...
+supabase secrets set CONSENSUS_MCP_TOKEN=<bearer token from consensus.app>   # the Consensus API key, used as the MCP bearer
+# optional: supabase secrets set CONSENSUS_MCP_URL=https://mcp.consensus.app/mcp   RESEARCH_AI_MODEL=claude-opus-4-8
+supabase functions deploy research-chat --project-ref jokqthwszkweyqmmdesn
+```
+Prereq: run `backend/migration-16-research-chat.sql` first. Until the function is deployed + the secrets
+are set, the chat persists the user's messages and shows "Consensus connection pending".

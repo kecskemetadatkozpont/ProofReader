@@ -140,6 +140,18 @@
     .mtag.oa { background: #e7f0fb; color: #1d4ed8; }
     .mtag.imp { background: var(--warn-bg); color: var(--warn); }
     .mtag.sc { background: #f3e8ff; color: #7c3aed; }
+    /* Consensus chat (R5b) */
+    .chat-msgs { display: flex; flex-direction: column; gap: 10px; max-height: 440px; overflow-y: auto; padding: 4px 2px; }
+    .bubble { max-width: 88%; padding: 10px 13px; border-radius: 12px; font-size: 13.5px; line-height: 1.45; }
+    .bubble.user { align-self: flex-end; background: var(--accent); color: #fff; }
+    .bubble.ai { align-self: flex-start; background: var(--soft); color: var(--ink); border: 1px solid var(--line); }
+    .bubble .btxt { white-space: pre-wrap; word-wrap: break-word; }
+    .bubble .bmeta { display: flex; gap: 10px; align-items: center; margin-top: 7px; font-size: 11px; color: var(--muted); }
+    .bubble .savebtn { border: 1px solid var(--line); background: #fff; border-radius: 7px; padding: 3px 8px; font-size: 11px; font-weight: 600; color: var(--muted); cursor: pointer; font-family: inherit; }
+    .bubble .savebtn:hover { border-color: var(--accent); color: var(--accent); }
+    .chat-empty { color: var(--faint); font-size: 13px; padding: 16px 4px; }
+    .chat-input { display: flex; gap: 8px; margin-top: 10px; }
+    .chat-input input { flex: 1; height: 38px; border: 1px solid var(--line); border-radius: 9px; padding: 0 12px; font-family: inherit; font-size: 13.5px; }
     .lfilters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
     .lfilters .flab { font-size: 11.5px; color: var(--muted); font-weight: 600; }
     .lfilters input.num { width: 76px; height: 30px; border: 1px solid var(--line); border-radius: 8px; padding: 0 8px; font-family: inherit; font-size: 12.5px; }

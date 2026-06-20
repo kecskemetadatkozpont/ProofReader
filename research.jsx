@@ -160,6 +160,71 @@
     );
   }
 
+  // ---------- Chat with Consensus (R5b) ----------
+  function ChatPanel(props) {
+    var cS = useState(null), chat = cS[0], setChat = cS[1];
+    var mS = useState([]), msgs = mS[0], setMsgs = mS[1];
+    var eS = useState({}), evByMsg = eS[0], setEvByMsg = eS[1];
+    var iS = useState(''), input = iS[0], setInput = iS[1];
+    var bS = useState(false), busy = bS[0], setBusy = bS[1];
+    var er = useState(''), err = er[0], setErr = er[1];
+    function loadMsgs(cid) {
+      Promise.all([
+        sb.from('research_messages').select('id,role,content,created_at').eq('chat_id', cid).order('created_at', { ascending: true }),
+        sb.from('research_evidence').select('message_id').eq('chat_id', cid)
+      ]).then(function (res) {
+        setMsgs((res[0] && res[0].data) || []);
+        var by = {}; ((res[1] && res[1].data) || []).forEach(function (e) { if (e.message_id) by[e.message_id] = (by[e.message_id] || 0) + 1; });
+        setEvByMsg(by);
+      });
+    }
+    useEffect(function () {
+      sb.from('research_chats').select('id').eq('project_id', props.projectId).order('created_at', { ascending: true }).limit(1).then(function (r) {
+        var c = (r && r.data && r.data[0]) || null; setChat(c); if (c) loadMsgs(c.id);
+      });
+    }, []);
+    function ensureChat() {
+      if (chat) return Promise.resolve(chat.id);
+      return sb.from('research_chats').insert({ project_id: props.projectId, title: 'Consensus chat' }).select('id').maybeSingle().then(function (r) { var c = r && r.data; setChat(c); return c && c.id; });
+    }
+    function send() {
+      if (!input.trim() || busy) return;
+      setBusy(true); setErr(''); var txt = input.trim(); setInput('');
+      ensureChat().then(function (cid) {
+        if (!cid) { setBusy(false); setErr('Could not start a chat.'); return; }
+        sb.from('research_messages').insert({ chat_id: cid, role: 'user', content: txt }).then(function () {
+          loadMsgs(cid);
+          sb.functions.invoke('research-chat', { body: { chat_id: cid } }).then(function (res) {
+            setBusy(false);
+            if (res && (res.error || (res.data && res.data.error))) { setErr('Consensus connection pending — deploy research-chat + set ANTHROPIC_API_KEY and CONSENSUS_MCP_TOKEN.'); return; }
+            loadMsgs(cid);
+          }, function () { setBusy(false); setErr('Consensus connection pending — deploy the research-chat Edge function.'); });
+        });
+      });
+    }
+    function saveIdea(m) { sb.from('research_ideas').insert({ project_id: props.projectId, source: 'consensus', question: (m.content || '').slice(0, 500), created_by: props.authorId, status: 'candidate' }).then(function (r) { if (r && r.error) { alert(r.error.message); return; } props.onChanged(); }); }
+    return h('div', { className: 'panel' },
+      h('h3', null, 'Chat with Consensus', h('span', { style: { fontWeight: 600, color: 'var(--faint)' } }, 'evidence-grounded')),
+      h('div', { className: 'chat-msgs' },
+        msgs.length ? msgs.map(function (m) {
+          return h('div', { key: m.id, className: 'bubble ' + (m.role === 'assistant' ? 'ai' : 'user') },
+            h('div', { className: 'btxt' }, m.content),
+            m.role === 'assistant' ? h('div', { className: 'bmeta' },
+              evByMsg[m.id] ? h('span', null, '📄 ' + evByMsg[m.id] + ' sources') : null,
+              props.canEdit ? h('button', { className: 'savebtn', onClick: function () { saveIdea(m); } }, '✚ Save as idea') : null
+            ) : null
+          );
+        }) : h('div', { className: 'chat-empty' }, 'Ask Consensus about your topic — e.g. "What does the evidence say about …?" or "Where are the gaps in …?"'),
+        busy ? h('div', { className: 'bubble ai' }, h('div', { className: 'btxt', style: { color: 'var(--faint)' } }, 'Consensus is thinking…')) : null
+      ),
+      err ? h('div', { style: { fontSize: 12.5, color: 'var(--warn)', margin: '6px 0 0' } }, err) : null,
+      props.canEdit ? h('div', { className: 'chat-input' },
+        h('input', { value: input, placeholder: 'Message Consensus…', disabled: busy, onChange: function (e) { setInput(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter') send(); } }),
+        h('button', { className: 'btn pri', disabled: busy, onClick: send }, 'Send')
+      ) : null
+    );
+  }
+
   // ---------- Ideas (R1) ----------
   function IdeasPanel(props) {
     var f = useState({ question: '', hypothesis: '' }), form = f[0], setForm = f[1];
@@ -530,7 +595,7 @@
     var openTasks = (props.tasks || []).filter(function (t) { return t.status !== 'done'; }).length;
     var TABS = [['overview', 'Overview', null], ['ideas', 'Ideas', (props.ideas || []).length], ['literature', 'Literature', (props.sources || []).length], ['data', 'Data', (props.datasets || []).length], ['compute', 'Compute', (props.jobs || []).length], ['writing', 'Writing', null], ['log', 'Log', (props.log || []).length], ['tasks', 'Tasks', openTasks]];
     var content;
-    if (tab === 'ideas') content = h(IdeasPanel, { projectId: p.id, ideas: props.ideas, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
+    if (tab === 'ideas') content = h('div', null, h(ChatPanel, { projectId: p.id, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged }), h(IdeasPanel, { projectId: p.id, ideas: props.ideas, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged }));
     else if (tab === 'literature') content = h(LiteraturePanel, { projectId: p.id, sources: props.sources, canEdit: props.canEdit, myEmail: props.myEmail, onChanged: props.onChanged });
     else if (tab === 'data') content = h(DataPanel, { projectId: p.id, datasets: props.datasets, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
     else if (tab === 'compute') content = h(ComputePanel, { projectId: p.id, jobs: props.jobs, datasets: props.datasets, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
