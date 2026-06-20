@@ -274,6 +274,100 @@
     );
   }
 
+  // ---------- Data (R3) ----------
+  var DS_SOURCES = ['url', 'upload', 'huggingface', 'kaggle', 'zenodo', 'openml', 'other'];
+  function fmtBytes(n) { if (!n) return ''; var u = ['B', 'KB', 'MB', 'GB', 'TB']; var i = 0; while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; } return n.toFixed(n < 10 && i > 0 ? 1 : 0) + ' ' + u[i]; }
+  function DataPanel(props) {
+    var f = useState({ name: '', source: 'url', uri: '', license: '' }), form = f[0], setForm = f[1];
+    var u = useState(''), msg = u[0], setMsg = u[1];
+    function up(k, v) { var o = {}; o[k] = v; setForm(Object.assign({}, form, o)); }
+    function register() {
+      if (!form.name.trim()) return;
+      sb.from('research_datasets').insert({ project_id: props.projectId, name: form.name.trim(), source: form.source, uri: form.uri.trim() || null, license: form.license.trim() || null, status: 'registered', created_by: props.authorId }).then(function (r) { if (r && r.error) { alert(r.error.message); return; } setForm({ name: '', source: 'url', uri: '', license: '' }); props.onChanged(); });
+    }
+    function onFile(e) {
+      var file = e.target.files && e.target.files[0]; if (!file) return;
+      setMsg('Uploading ' + file.name + '…');
+      var path = props.projectId + '/' + Date.now() + '_' + file.name.replace(/[^A-Za-z0-9._-]/g, '_');
+      sb.storage.from('research-data').upload(path, file).then(function (res) {
+        if (res.error) { setMsg('Upload failed: ' + res.error.message); return; }
+        sb.from('research_datasets').insert({ project_id: props.projectId, name: file.name, source: 'upload', uri: path, size_bytes: file.size, status: 'ready', created_by: props.authorId }).then(function (r) { setMsg(''); if (r && r.error) { alert(r.error.message); return; } props.onChanged(); });
+      });
+    }
+    function del(d) { if (d.source === 'upload' && d.uri) sb.storage.from('research-data').remove([d.uri]); sb.from('research_datasets').delete().eq('id', d.id).then(props.onChanged); }
+    var ds = props.datasets || [];
+    var stCls = { ready: 'c-ok', downloading: 'c-warn', error: 'c-danger', registered: 'c-grey' };
+    return h('div', null,
+      props.canEdit ? h('div', { className: 'panel' }, h('h3', null, 'Add data'),
+        h('div', { className: 'addrow', style: { marginTop: 0 } },
+          h('input', { className: 'grow', value: form.name, placeholder: 'Dataset name', onChange: function (e) { up('name', e.target.value); } }),
+          h('select', { value: form.source, onChange: function (e) { up('source', e.target.value); } }, DS_SOURCES.map(function (s) { return h('option', { key: s, value: s }, s); })),
+          h('input', { className: 'grow', value: form.uri, placeholder: 'URL / identifier (e.g. hf: user/dataset)', onChange: function (e) { up('uri', e.target.value); } }),
+          h('input', { value: form.license, placeholder: 'License', style: { width: 110 }, onChange: function (e) { up('license', e.target.value); } }),
+          h('button', { className: 'btn pri', onClick: register }, 'Register')
+        ),
+        h('div', { style: { marginTop: 10, fontSize: 12.5, color: 'var(--muted)' } }, 'Or upload a file: ', h('input', { type: 'file', onChange: onFile }), msg ? h('span', { style: { marginLeft: 8 } }, msg) : null),
+        h('div', { style: { marginTop: 6, fontSize: 11.5, color: 'var(--faint)' } }, 'Registered external datasets are fetched by the self-hosted worker (a download job).')
+      ) : null,
+      h('div', { className: 'panel' }, h('h3', null, 'Datasets', h('span', { style: { fontWeight: 600, color: 'var(--faint)' } }, ds.length + '')),
+        ds.length ? ds.map(function (d) {
+          return h('div', { className: 'src', key: d.id },
+            h('div', { style: { flex: 1, minWidth: 0 } }, h('b', { style: { fontSize: 13 } }, d.name), h('div', { style: { fontSize: 11.5, color: 'var(--muted)' } }, [d.source, d.uri, fmtBytes(d.size_bytes), d.license].filter(Boolean).join(' · '))),
+            h('span', { className: 'chip ' + (stCls[d.status] || 'c-grey') }, d.status),
+            props.canEdit ? h('button', { className: 'icon-x', onClick: function () { del(d); } }, '✕') : null
+          );
+        }) : h('div', { style: { fontSize: 13, color: 'var(--faint)', padding: '8px 0' } }, 'No datasets yet — register a source or upload a file.')
+      )
+    );
+  }
+
+  // ---------- Compute (R4) ----------
+  var JOB_TYPES = ['python', 'stats', 'download'];
+  function ComputePanel(props) {
+    var t = useState('python'), type = t[0], setType = t[1];
+    var ti = useState(''), title = ti[0], setTitle = ti[1];
+    var c = useState('print(2 + 2)'), code = c[0], setCode = c[1];
+    var d = useState(''), datasetId = d[0], setDatasetId = d[1];
+    var ex = useState(null), exp = ex[0], setExp = ex[1];
+    function submit() {
+      var spec = type === 'python' ? { code: code } : { dataset_id: datasetId };
+      if (type !== 'python' && !datasetId) { alert('Pick a dataset.'); return; }
+      sb.from('research_jobs').insert({ project_id: props.projectId, type: type, title: title.trim() || (type + ' job'), spec: spec, status: 'queued', created_by: props.authorId }).then(function (r) { if (r && r.error) { alert(r.error.message); return; } setTitle(''); props.onChanged(); });
+    }
+    function cancel(j) { sb.from('research_jobs').update({ status: 'canceled' }).eq('id', j.id).then(props.onChanged); }
+    function del(j) { sb.from('research_jobs').delete().eq('id', j.id).then(props.onChanged); }
+    var jobs = props.jobs || [], datasets = props.datasets || [];
+    var stCls = { done: 'c-ok', running: 'c-warn', queued: 'c-grey', error: 'c-danger', canceled: 'c-grey' };
+    return h('div', null,
+      props.canEdit ? h('div', { className: 'panel' }, h('h3', null, 'Submit a compute job', h('span', { style: { fontWeight: 600, color: 'var(--faint)' } }, 'self-hosted worker')),
+        h('div', { className: 'addrow', style: { marginTop: 0 } },
+          h('input', { className: 'grow', value: title, placeholder: 'Job title', onChange: function (e) { setTitle(e.target.value); } }),
+          h('select', { value: type, onChange: function (e) { setType(e.target.value); } }, JOB_TYPES.map(function (x) { return h('option', { key: x, value: x }, x); }))
+        ),
+        type === 'python'
+          ? h('textarea', { value: code, onChange: function (e) { setCode(e.target.value); }, rows: 5, style: { width: '100%', marginTop: 8, border: '1px solid var(--line)', borderRadius: 9, padding: '9px 11px', fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 12.5 } })
+          : h('select', { value: datasetId, style: { marginTop: 8, width: '100%', height: 36, border: '1px solid var(--line)', borderRadius: 9, padding: '0 10px', fontFamily: 'inherit' }, onChange: function (e) { setDatasetId(e.target.value); } }, [h('option', { key: '', value: '' }, 'Choose a dataset…')].concat(datasets.map(function (ds) { return h('option', { key: ds.id, value: ds.id }, ds.name); }))),
+        h('div', { style: { marginTop: 8 } }, h('button', { className: 'btn pri', onClick: submit }, 'Queue job')),
+        h('div', { style: { marginTop: 6, fontSize: 11.5, color: 'var(--faint)' } }, 'Jobs run on your self-hosted worker (worker/README.md). Results return here when done.')
+      ) : null,
+      h('div', { className: 'panel' }, h('h3', null, 'Jobs', h('span', { style: { fontWeight: 600, color: 'var(--faint)' } }, jobs.length + '')),
+        jobs.length ? jobs.map(function (j) {
+          return h('div', { key: j.id, style: { padding: '10px 0', borderBottom: '1px solid var(--soft)' } },
+            h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
+              h('div', { style: { flex: 1, minWidth: 0 } }, h('b', { style: { fontSize: 13 } }, j.title), h('span', { style: { fontSize: 11.5, color: 'var(--muted)', marginLeft: 6 } }, j.type)),
+              j.status === 'running' && j.progress ? h('span', { style: { fontSize: 11, color: 'var(--muted)' } }, j.progress + '%') : null,
+              h('span', { className: 'chip ' + (stCls[j.status] || 'c-grey') }, j.status),
+              (j.result || j.logs) ? h('button', { className: 'icon-x', style: { color: 'var(--muted)' }, title: 'Details', onClick: function () { setExp(exp === j.id ? null : j.id); } }, exp === j.id ? '▾' : '▸') : null,
+              props.canEdit && j.status === 'queued' ? h('button', { className: 'chip c-grey', onClick: function () { cancel(j); } }, 'Cancel') : null,
+              props.canEdit ? h('button', { className: 'icon-x', onClick: function () { del(j); } }, '✕') : null
+            ),
+            exp === j.id ? h('pre', { style: { marginTop: 8, background: 'var(--softer)', border: '1px solid var(--line)', borderRadius: 8, padding: 10, fontSize: 11.5, overflow: 'auto', maxHeight: 220, whiteSpace: 'pre-wrap' } }, (j.result ? JSON.stringify(j.result, null, 2) + '\n\n' : '') + (j.logs || '')) : null
+          );
+        }) : h('div', { style: { fontSize: 13, color: 'var(--faint)', padding: '8px 0' } }, 'No jobs yet — queue one above.')
+      )
+    );
+  }
+
   // ---------- Project detail ----------
   function ProjectDetail(props) {
     var p = props.project;
@@ -281,10 +375,12 @@
     function setStage(i) { sb.from('research_projects').update({ stage: i }).eq('id', p.id).then(props.onChanged); }
     function setStatus(e) { sb.from('research_projects').update({ status: e.target.value }).eq('id', p.id).then(props.onChanged); }
     var openTasks = (props.tasks || []).filter(function (t) { return t.status !== 'done'; }).length;
-    var TABS = [['overview', 'Overview', null], ['ideas', 'Ideas', (props.ideas || []).length], ['literature', 'Literature', (props.sources || []).length], ['log', 'Log', (props.log || []).length], ['tasks', 'Tasks', openTasks]];
+    var TABS = [['overview', 'Overview', null], ['ideas', 'Ideas', (props.ideas || []).length], ['literature', 'Literature', (props.sources || []).length], ['data', 'Data', (props.datasets || []).length], ['compute', 'Compute', (props.jobs || []).length], ['log', 'Log', (props.log || []).length], ['tasks', 'Tasks', openTasks]];
     var content;
     if (tab === 'ideas') content = h(IdeasPanel, { projectId: p.id, ideas: props.ideas, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
     else if (tab === 'literature') content = h(LiteraturePanel, { projectId: p.id, sources: props.sources, canEdit: props.canEdit, onChanged: props.onChanged });
+    else if (tab === 'data') content = h(DataPanel, { projectId: p.id, datasets: props.datasets, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
+    else if (tab === 'compute') content = h(ComputePanel, { projectId: p.id, jobs: props.jobs, datasets: props.datasets, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
     else if (tab === 'log') content = h(LogPanel, { projectId: p.id, authorId: props.authorId, entries: props.log, canEdit: props.canEdit, onChanged: props.onChanged });
     else if (tab === 'tasks') content = h(TasksPanel, { projectId: p.id, tasks: props.tasks, canEdit: props.canEdit, onChanged: props.onChanged });
     else content = p.goal ? h('div', { className: 'panel' }, h('h3', null, 'Goal'), h('div', { style: { fontSize: 13.5 } }, p.goal)) : h('div', { className: 'soon' }, 'No goal set yet.');
@@ -352,7 +448,7 @@
     var meS = useState(null), me = meS[0], setMe = meS[1];
     var pjS = useState([]), projects = pjS[0], setProjects = pjS[1];
     var selS = useState(null), sel = selS[0], setSel = selS[1];
-    var dS = useState({ log: [], tasks: [], ideas: [], sources: [] }), detail = dS[0], setDetail = dS[1];
+    var dS = useState({ log: [], tasks: [], ideas: [], sources: [], datasets: [], jobs: [] }), detail = dS[0], setDetail = dS[1];
 
     useEffect(function () { boot(); }, []);
     function boot() {
@@ -382,9 +478,11 @@
         sb.from('research_log').select('id,type,summary,ts,profile_id,profiles(name)').eq('project_id', projectId).order('ts', { ascending: false }),
         sb.from('research_tasks').select('id,title,status,stage,due').eq('project_id', projectId).order('sort', { ascending: true }),
         sb.from('research_ideas').select('id,source,question,hypothesis,rationale,novelty,status').eq('project_id', projectId).order('created_at', { ascending: false }),
-        sb.from('research_sources').select('id,source_api,ext_id,doi,title,authors,year,venue,cited_by,url,screening').eq('project_id', projectId).order('cited_by', { ascending: false, nullsFirst: false })
+        sb.from('research_sources').select('id,source_api,ext_id,doi,title,authors,year,venue,cited_by,url,screening').eq('project_id', projectId).order('cited_by', { ascending: false, nullsFirst: false }),
+        sb.from('research_datasets').select('id,name,source,uri,size_bytes,license,status,local_path').eq('project_id', projectId).order('created_at', { ascending: false }),
+        sb.from('research_jobs').select('id,type,title,status,progress,result,result_path,logs,created_at').eq('project_id', projectId).order('created_at', { ascending: false })
       ]).then(function (res) {
-        setDetail({ log: (res[0] && res[0].data) || [], tasks: (res[1] && res[1].data) || [], ideas: (res[2] && res[2].data) || [], sources: (res[3] && res[3].data) || [] });
+        setDetail({ log: (res[0] && res[0].data) || [], tasks: (res[1] && res[1].data) || [], ideas: (res[2] && res[2].data) || [], sources: (res[3] && res[3].data) || [], datasets: (res[4] && res[4].data) || [], jobs: (res[5] && res[5].data) || [] });
       });
     }
     function openProject(p) { setSel(p); loadDetail(p.id); }
@@ -416,7 +514,7 @@
 
     var body;
     if (sel) {
-      body = h(ProjectDetail, { project: sel, log: props.detail.log, tasks: props.detail.tasks, ideas: props.detail.ideas, sources: props.detail.sources, canEdit: props.canEdit(sel), authorId: props.authorId, onBack: props.onBack, onChanged: props.refreshAll });
+      body = h(ProjectDetail, { project: sel, log: props.detail.log, tasks: props.detail.tasks, ideas: props.detail.ideas, sources: props.detail.sources, datasets: props.detail.datasets, jobs: props.detail.jobs, canEdit: props.canEdit(sel), authorId: props.authorId, onBack: props.onBack, onChanged: props.refreshAll });
     } else if (!props.projects.length) {
       body = h('div', { className: 'soon' }, h('b', null, 'No research projects yet. '), 'Create one to start tracking a study from idea to submission.', h('div', { style: { marginTop: 14 } }, h('button', { className: 'btn pri', onClick: function () { setAdding(true); } }, '+ New project')));
     } else {
