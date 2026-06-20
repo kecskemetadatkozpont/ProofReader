@@ -390,8 +390,52 @@
     );
   }
 
+  // ---------- Admin: roles + relationships ----------
+  function AdminPanel(props) {
+    var pr = useState(null), profiles = pr[0], setProfiles = pr[1];
+    var asg = useState({ student_id: '', supervisor_id: '', kind: 'primary' }), assign = asg[0], setAssign = asg[1];
+    useEffect(function () { sb.from('profiles').select('id,name,email,role,is_supervisor,is_student').order('name').then(function (r) { setProfiles((r && r.data) || []); }); }, []);
+    function toggleRole(p, field) { var patch = {}; patch[field] = !p[field]; sb.from('profiles').update(patch).eq('id', p.id).then(function (r) { if (r && r.error) { alert(r.error.message); return; } setProfiles(function (list) { return list.map(function (x) { return x.id === p.id ? Object.assign({}, x, patch) : x; }); }); props.onChanged(); }); }
+    function doAssign() { if (!assign.student_id || !assign.supervisor_id) return; sb.from('phd_supervisions').insert({ student_id: assign.student_id, supervisor_id: assign.supervisor_id, kind: assign.kind, status: 'accepted', decided_at: new Date().toISOString() }).then(function (r) { if (r && r.error) { alert(r.error.message); return; } setAssign({ student_id: '', supervisor_id: '', kind: 'primary' }); props.onChanged(); }); }
+    function setStatus(v, status) { sb.from('phd_supervisions').update({ status: status, decided_at: new Date().toISOString() }).eq('id', v.id).then(props.onChanged); }
+    function del(v) { sb.from('phd_supervisions').delete().eq('id', v.id).then(props.onChanged); }
+    var byStu = {}; props.students.forEach(function (s) { byStu[s.id] = s; });
+    var byProf = {}; (profiles || []).forEach(function (p) { byProf[p.id] = p; });
+    if (!profiles) return h('div', { className: 'empty' }, 'Loading…');
+    return h('div', null,
+      h('div', { className: 'panel' }, h('h3', null, 'Users & roles (' + profiles.length + ')'),
+        profiles.map(function (p) {
+          return h('div', { className: 'ms', key: p.id },
+            h(Avatar, { u: p, size: 28 }),
+            h('div', { className: 'mt' }, h('b', null, p.name || '—'), h('span', null, p.email + (p.role === 'admin' ? ' · admin' : ''))),
+            h('span', { style: { fontSize: 11, color: 'var(--muted)' } }, 'Supervisor'), h('label', { className: 'switch' }, h('input', { type: 'checkbox', checked: !!p.is_supervisor, onChange: function () { toggleRole(p, 'is_supervisor'); } }), h('span', { className: 'sl' })),
+            h('span', { style: { fontSize: 11, color: 'var(--muted)', marginLeft: 8 } }, 'Student'), h('label', { className: 'switch' }, h('input', { type: 'checkbox', checked: !!p.is_student, onChange: function () { toggleRole(p, 'is_student'); } }), h('span', { className: 'sl' }))
+          );
+        })
+      ),
+      h('div', { className: 'panel' }, h('h3', null, 'Supervision relationships (' + props.supervisions.length + ')'),
+        h('div', { className: 'addrow' },
+          h('select', { className: 'grow', value: assign.student_id, onChange: function (e) { setAssign(Object.assign({}, assign, { student_id: e.target.value })); } }, h('option', { value: '' }, 'Student…'), props.students.map(function (s) { return h('option', { value: s.id, key: s.id }, s.name); })),
+          h('select', { className: 'grow', value: assign.supervisor_id, onChange: function (e) { setAssign(Object.assign({}, assign, { supervisor_id: e.target.value })); } }, h('option', { value: '' }, 'Supervisor…'), props.sups.map(function (s) { return h('option', { value: s.id, key: s.id }, s.name); })),
+          h('select', { value: assign.kind, onChange: function (e) { setAssign(Object.assign({}, assign, { kind: e.target.value })); } }, h('option', { value: 'primary' }, 'primary'), h('option', { value: 'co' }, 'co')),
+          h('button', { className: 'btn pri', onClick: doAssign }, 'Assign')
+        ),
+        props.supervisions.length ? props.supervisions.map(function (v) {
+          var st = byStu[v.student_id], su = byProf[v.supervisor_id] || props.sups.filter(function (x) { return x.id === v.supervisor_id; })[0];
+          return h('div', { className: 'ms', key: v.id },
+            h('div', { className: 'mt' }, h('b', null, (st ? st.name : '—') + ' → ' + (su ? su.name : '—')), h('span', null, v.kind)),
+            h('span', { className: 'chip ' + stCls(v.status) }, v.status),
+            v.status !== 'accepted' ? h('button', { className: 'chip c-ok', onClick: function () { setStatus(v, 'accepted'); } }, 'Accept') : null,
+            h('button', { className: 'icon-x', onClick: function () { del(v); } }, '✕')
+          );
+        }) : h('div', { style: { fontSize: 13, color: 'var(--faint)' } }, 'No relationships yet — assign one above.')
+      )
+    );
+  }
+
   var IC = {
     dashboard: h('svg', { viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5 }, h('rect', { x: 2, y: 2, width: 5, height: 5, rx: 1 }), h('rect', { x: 9, y: 2, width: 5, height: 5, rx: 1 }), h('rect', { x: 2, y: 9, width: 5, height: 5, rx: 1 }), h('rect', { x: 9, y: 9, width: 5, height: 5, rx: 1 })),
+    admin: h('svg', { viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5 }, h('path', { d: 'M8 1.8l5 1.9v3.6c0 3-2.1 5.2-5 6.1-2.9-.9-5-3.1-5-6.1V3.7z' }), h('path', { d: 'M5.8 8l1.6 1.6 2.8-3.1', strokeLinecap: 'round', strokeLinejoin: 'round' })),
     account: h('svg', { viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5 }, h('circle', { cx: 8, cy: 5, r: 2.6 }), h('path', { d: 'M3 13.5c0-2.6 2.2-4 5-4s5 1.4 5 4', strokeLinecap: 'round' })),
     requests: h('svg', { viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5 }, h('path', { d: 'M2 4.5h12v7H2zM2 5l6 4 6-4', strokeLinecap: 'round', strokeLinejoin: 'round' })),
     students: h('svg', { viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5 }, h('circle', { cx: 8, cy: 5, r: 2.4 }), h('path', { d: 'M3 13.5c0-2.5 2.2-4 5-4s5 1.5 5 4', strokeLinecap: 'round' })),
@@ -454,12 +498,13 @@
     if (isStudentOnly) NAV.push(['mine', 'My progress']);
     NAV.push(['supervisors', 'Supervisors']);
     NAV.push(['topics', 'Research topics']);
+    if (isAdmin) NAV.push(['admin', 'Admin']);
     NAV.push(['account', 'My account']);
     var allowed = NAV.map(function (x) { return x[0]; });
     var cur = allowed.indexOf(view) >= 0 ? view : allowed[0];
     var nStu = data.students.length;
-    var titles = { dashboard: 'Dashboard', students: 'Students', supervisors: 'Supervisors', topics: 'Research topics', mine: 'My progress', account: 'My account', requests: 'Requests' };
-    var subs = { supervisors: data.sups.length + ' supervisors · ' + nStu + ' student' + (nStu === 1 ? '' : 's'), topics: data.topics.length + ' topics', students: nStu + ' student' + (nStu === 1 ? '' : 's'), dashboard: (isAdmin ? 'Institution-wide' : 'Your students') + ' · ' + nStu + ' student' + (nStu === 1 ? '' : 's'), mine: myStudent ? (myStudent.topic || '') : '', account: 'Set your role and profile', requests: incoming.length + ' pending' };
+    var titles = { dashboard: 'Dashboard', students: 'Students', supervisors: 'Supervisors', topics: 'Research topics', mine: 'My progress', account: 'My account', requests: 'Requests', admin: 'Admin' };
+    var subs = { supervisors: data.sups.length + ' supervisors · ' + nStu + ' student' + (nStu === 1 ? '' : 's'), topics: data.topics.length + ' topics', students: nStu + ' student' + (nStu === 1 ? '' : 's'), dashboard: (isAdmin ? 'Institution-wide' : 'Your students') + ' · ' + nStu + ' student' + (nStu === 1 ? '' : 's'), mine: myStudent ? (myStudent.topic || '') : '', account: 'Set your role and profile', requests: incoming.length + ' pending', admin: 'Roles & supervision relationships' };
     function canEditStudent(s) { return isAdmin || (s && s.supervisor_id === me.id); }
 
     var body;
@@ -467,6 +512,7 @@
     else if (cur === 'mine') body = myStudent ? h(StudentDetail, { student: myStudent, sups: data.sups, canEdit: false, onBack: null, onChanged: function () { loadData(); } }) : h('div', { className: 'empty' }, 'No student record is linked to your account yet — register on the My account page or ask your supervisor.');
     else if (cur === 'dashboard') body = h(Dashboard, { students: data.students, milestones: data.milestones, topics: data.topics, me: me, isAdmin: isAdmin });
     else if (cur === 'requests') body = h(RequestsInbox, { requests: incoming, students: data.students, capacityFull: capacityFull, onChanged: function () { loadData(); } });
+    else if (cur === 'admin') body = h(AdminPanel, { students: data.students, sups: data.sups, supervisions: data.supervisions, onChanged: function () { loadData(); } });
     else if (cur === 'supervisors') body = h(Supervisors, { sups: data.sups, students: data.students, myStudent: myStudent, mySupervisions: mySupervisions, onChanged: function () { loadData(); } });
     else if (cur === 'topics') body = h(Topics, { topics: data.topics, sups: data.sups, me: me, isAdmin: isAdmin, canPost: isSup, onChanged: function () { loadData(); } });
     else if (cur === 'students') {
