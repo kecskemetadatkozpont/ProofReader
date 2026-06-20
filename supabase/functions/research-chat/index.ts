@@ -47,11 +47,15 @@ Deno.serve(async (req) => {
     if (!rows.length) return json({ error: 'no messages to respond to' }, 400);
     let lastUserIdx = -1;
     for (let i = rows.length - 1; i >= 0; i--) { if (rows[i].role !== 'assistant') { lastUserIdx = i; break; } }
+    const dbg: any = {};
     const messages: any[] = [];
     for (let i = 0; i < rows.length; i++) {
       const m: any = rows[i], role = m.role === 'assistant' ? 'assistant' : 'user';
+      let atts: any = m.attachments;
+      if (typeof atts === 'string') { try { atts = JSON.parse(atts); } catch { atts = null; } }   // robustness if jsonb arrives as text
+      if (i === lastUserIdx) { dbg.attType = typeof m.attachments; dbg.attCount = Array.isArray(atts) ? atts.length : 0; }
       // attachments only on the most recent user turn (keeps cost bounded)
-      if (i === lastUserIdx && Array.isArray(m.attachments) && m.attachments.length) messages.push({ role, content: await buildBlocks(sb, m) });
+      if (i === lastUserIdx && Array.isArray(atts) && atts.length) { const c = await buildBlocks(sb, atts, m.content, dbg); dbg.blocks = c.length; messages.push({ role, content: c }); }
       else messages.push({ role, content: m.content });
     }
 
@@ -88,7 +92,7 @@ Deno.serve(async (req) => {
     }
     if (ev.length) await sb.from('research_evidence').insert(ev);
 
-    return json({ ok: true, version: 'attach-v1', message_id: saved?.id, evidence: ev.length, mode: useMcp ? 'consensus' : 'plain', model: MODEL, usage: out.usage });
+    return json({ ok: true, version: 'attach-v2', message_id: saved?.id, evidence: ev.length, mode: useMcp ? 'consensus' : 'plain', model: MODEL, usage: out.usage, dbg });
   } catch (e) {
     return json({ error: String(e) }, 500);
   }
@@ -100,18 +104,21 @@ function toB64(buf: ArrayBuffer): string {
   return btoa(bin);
 }
 
-// Expand a user message's attachments into Claude content blocks (text + PDF document).
-async function buildBlocks(sb: any, m: any): Promise<any[]> {
-  const blocks: any[] = [{ type: 'text', text: m.content }];
+// Expand attachments into Claude content blocks (text + PDF document). dbg collects per-item outcomes.
+async function buildBlocks(sb: any, atts: any[], content: string, dbg: any): Promise<any[]> {
+  const blocks: any[] = [{ type: 'text', text: content }];
+  dbg.items = [];
   let n = 0;
-  for (const a of m.attachments) {
+  for (const a of atts) {
     if (n >= 5) break;
     try {
       if (a.kind === 'source' && a.source_id) {
-        const { data: s } = await sb.from('research_sources').select('title,abstract,year,venue').eq('id', a.source_id).maybeSingle();
+        const { data: s, error } = await sb.from('research_sources').select('title,abstract,year,venue').eq('id', a.source_id).maybeSingle();
+        dbg.items.push({ kind: 'source', ok: !!s, err: error?.message });
         if (s) { blocks.push({ type: 'text', text: `[Attached source: ${s.title} (${s.year ?? ''}${s.venue ? ', ' + s.venue : ''})]\n${(s.abstract ?? '').slice(0, 6000)}` }); n++; }
       } else if (a.kind === 'file' && a.bucket && a.path) {
-        const { data: blob } = await sb.storage.from(a.bucket).download(a.path);   // caller's JWT → RLS-gated
+        const { data: blob, error } = await sb.storage.from(a.bucket).download(a.path);   // caller's JWT → RLS-gated
+        dbg.items.push({ kind: 'file', bucket: a.bucket, ok: !!blob, err: error?.message });
         if (!blob) continue;
         const buf = await blob.arrayBuffer();
         const mime = a.mime || '';
@@ -125,7 +132,7 @@ async function buildBlocks(sb: any, m: any): Promise<any[]> {
           blocks.push({ type: 'text', text: `[Attached "${a.name}" (${mime}) — type not readable inline]` });
         }
       }
-    } catch (_e) { /* skip unreadable attachment */ }
+    } catch (e) { dbg.items.push({ kind: a.kind, ok: false, err: String(e).slice(0, 140) }); }
   }
   return blocks;
 }
