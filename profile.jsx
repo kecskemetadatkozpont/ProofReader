@@ -336,6 +336,34 @@ function voiceCfg() {
 }
 function elevenOn(c) { return c.engine !== 'browser' && E && E.hasKey(); }
 
+// Put PDF.js text spans into human reading order (handles a simple 2-column layout) so sentences
+// come out contiguous instead of in scrambled content-stream order.
+function orderReading(spans, pageW) {
+  if (spans.length < 2) return spans;
+  var mid = pageW / 2, crossing = 0, leftC = [], rightC = [];
+  spans.forEach(function (s) {
+    if (s.left < mid && (s.left + s.w) > mid) crossing++;
+    ((s.left + s.w / 2) < mid ? leftC : rightC).push(s);
+  });
+  function byTopLeft(a, b) { return Math.abs(a.top - b.top) > 6 ? a.top - b.top : a.left - b.left; }
+  if (leftC.length > spans.length * 0.25 && rightC.length > spans.length * 0.25 && crossing < spans.length * 0.08) {
+    leftC.sort(byTopLeft); rightC.sort(byTopLeft); return leftC.concat(rightC);   // two columns: left then right
+  }
+  return spans.slice().sort(byTopLeft);
+}
+// Words that end in "." but do NOT end a sentence.
+var SENT_ABBR = { 'e.g': 1, 'i.e': 1, 'al': 1, 'vs': 1, 'cf': 1, 'fig': 1, 'figs': 1, 'eq': 1, 'eqs': 1, 'no': 1, 'nos': 1, 'pp': 1, 'p': 1, 'dr': 1, 'prof': 1, 'mr': 1, 'mrs': 1, 'ms': 1, 'st': 1, 'vol': 1, 'ed': 1, 'eds': 1, 'approx': 1, 'inc': 1, 'ltd': 1, 'co': 1, 'etc': 1, 'ref': 1, 'refs': 1, 'sec': 1, 'ch': 1, 'tab': 1, 'resp': 1, 'al': 1, 'phd': 1, 'msc': 1, 'bsc': 1 };
+function endsSentence(buf) {
+  var t = buf.replace(/[)\]"'»“”’]+$/, '');
+  if (!/[.!?]$/.test(t)) return false;
+  if (/[!?]$/.test(t)) return true;
+  if (/\.\.\.$/.test(t)) return false;                       // ellipsis, mid-sentence
+  if (/(^|\s)[A-Z]\.$/.test(t)) return false;                // a single capital initial, e.g. "J."
+  var m = t.match(/([A-Za-z.]+)\.$/); var word = m ? m[1].toLowerCase().replace(/\.+$/, '') : '';
+  if (word && SENT_ABBR[word]) return false;                 // known abbreviation
+  return true;
+}
+
 function PdfViewer(props) {
   var f = props.file;
   var meId = (props.me && props.me.id) || ((Auth.current && Auth.current()) || {}).id;
@@ -345,7 +373,7 @@ function PdfViewer(props) {
   var [playing, setPlaying] = useState(false);
   var [err, setErr] = useState('');
   var [view, setView] = useState('orig');        // orig (native iframe) | hl (rendered PDF + highlight overlay)
-  var audioRef = useRef(null), stopRef = useRef(false), idxRef = useRef(0);
+  var audioRef = useRef(null), stopRef = useRef(false), idxRef = useRef(0), playingRef = useRef(false);
   var hlRef = useRef(null), sentsRef = useRef([]), renderedRef = useRef(false);
   idxRef.current = idx;
   var cfg = voiceCfg();
@@ -363,24 +391,24 @@ function PdfViewer(props) {
   }, []);
 
   function speakAt(i, list) {
-    if (stopRef.current || i < 0 || i >= list.length) { setPlaying(false); if (i >= list.length) setIdx(0); return; }
-    setIdx(i); idxRef.current = i; setPlaying(true);
+    if (stopRef.current || i < 0 || i >= list.length) { setPlaying(false); playingRef.current = false; if (i >= list.length) setIdx(0); return; }
+    setIdx(i); idxRef.current = i; setPlaying(true); playingRef.current = true;
     var text = list[i], c = voiceCfg();
     if (elevenOn(c)) {
       try { E.prefetch(list.slice(i + 1, i + 3).map(function (t) { return { text: t }; }), c, meId); } catch (e) { }
       E.getAudio(text, c, meId).then(function (url) {
         if (stopRef.current || idxRef.current !== i) return;
         var a = new Audio(url); audioRef.current = a; try { a.playbackRate = c.rate || 1; } catch (e) { }
-        a.onended = function () { if (!stopRef.current && idxRef.current === i) speakAt(i + 1, list); };
-        a.play().catch(function () { });
-      }, function () { if (!stopRef.current && idxRef.current === i) speakAt(i + 1, list); });
+        a.onended = function () { if (!stopRef.current && idxRef.current === i && playingRef.current) speakAt(i + 1, list); };
+        if (playingRef.current) a.play().catch(function () { });   // a pause during the (async) fetch must win
+      }, function () { if (!stopRef.current && idxRef.current === i && playingRef.current) speakAt(i + 1, list); });
     } else {
       try { window.speechSynthesis.cancel(); } catch (e) { }
       var u = new SpeechSynthesisUtterance(text); u.rate = c.rate || 1;
       try { if (c.voiceURI) { var v = (window.speechSynthesis.getVoices() || []).filter(function (x) { return x.voiceURI === c.voiceURI; })[0]; if (v) u.voice = v; } } catch (e) { }
-      u.onend = function () { if (!stopRef.current && idxRef.current === i) speakAt(i + 1, list); };
+      u.onend = function () { if (!stopRef.current && idxRef.current === i && playingRef.current) speakAt(i + 1, list); };
       audioRef.current = { pause: function () { try { window.speechSynthesis.pause(); } catch (e) { } }, play: function () { try { window.speechSynthesis.resume(); } catch (e) { } } };
-      try { window.speechSynthesis.speak(u); } catch (e) { }
+      if (playingRef.current) { try { window.speechSynthesis.speak(u); } catch (e) { } }
     }
   }
 
@@ -393,7 +421,7 @@ function PdfViewer(props) {
       return fetch(f.url).then(function (r) { return r.arrayBuffer(); }).then(function (ab) { return lib.getDocument({ data: new Uint8Array(ab) }).promise; }).then(function (pdf) {
         var container = hlRef.current; if (!container) return [];
         container.innerHTML = '';
-        var full = '', offsets = [], chain = Promise.resolve();
+        var pageSpans = [], chain = Promise.resolve();
         var maxW = (container.clientWidth || 820) - 28;
         for (var p = 1; p <= pdf.numPages; p++) (function (pn) {
           chain = chain.then(function () { return pdf.getPage(pn); }).then(function (page) {
@@ -413,17 +441,24 @@ function PdfViewer(props) {
               .then(function (tc) {
                 var task = lib.renderTextLayer({ textContent: tc, textContentSource: tc, container: tld, viewport: vp, textDivs: [] });
                 return (task.promise || task).then(function () {
-                  var spans = tld.querySelectorAll('span');
-                  tc.items.forEach(function (it, i) { var s = full.length; full += (it.str || '') + ' '; offsets.push({ s: s, div: spans[i] }); });
+                  var spans = tld.querySelectorAll('span'), arr = [];
+                  for (var k = 0; k < spans.length; k++) { var d = spans[k], txt = d.textContent || ''; if (txt.trim()) arr.push({ div: d, text: txt, left: d.offsetLeft, top: d.offsetTop, w: d.offsetWidth }); }
+                  pageSpans[pn - 1] = { spans: arr, w: vp.width };
                 });
               });
           });
         })(p);
         return chain.then(function () {
-          var sentences = [], ranges = [], re = /[^.!?]*[.!?]+(?:\s|$)|\S[^.!?]*$/g, m;
-          while ((m = re.exec(full)) !== null) { var s = m[0].trim(); if (s.length >= 2) { sentences.push(s); ranges.push({ s: m.index, e: m.index + m[0].length }); } if (m.index === re.lastIndex) re.lastIndex++; }
-          function sentOf(o) { for (var k = 0; k < ranges.length; k++) if (o >= ranges[k].s && o < ranges[k].e) return k; return Math.max(0, sentences.length - 1); }
-          offsets.forEach(function (off) { if (off.div) { off.div.dataset.sent = sentOf(off.s); off.div.classList.add('tl-s'); } });
+          // walk spans in human reading order; accumulate text into sentences with smart boundaries
+          var ordered = [];
+          pageSpans.forEach(function (pg) { if (pg) ordered = ordered.concat(orderReading(pg.spans, pg.w)); });
+          var sentences = [], curIdx = 0, buf = '';
+          ordered.forEach(function (sp) {
+            sp.div.dataset.sent = curIdx; sp.div.classList.add('tl-s');
+            buf += (buf ? ' ' : '') + sp.text;
+            if (endsSentence(buf) && buf.trim().length >= 8) { sentences[curIdx] = buf.replace(/\s+/g, ' ').trim(); curIdx++; buf = ''; }
+          });
+          if (buf.trim()) sentences[curIdx] = buf.replace(/\s+/g, ' ').trim();   // tail (spans already tagged curIdx)
           sentsRef.current = sentences; setSents(sentences); renderedRef.current = true;
           if (!sentences.length) { setPhase('error'); setErr('No selectable text in this PDF — it may be a scan.'); }
           else setPhase('ready');
@@ -435,12 +470,12 @@ function PdfViewer(props) {
   function showHighlight() { setView('hl'); return renderHighlight(); }
   function start() { showHighlight().then(function (list) { if (list && list.length) { stopRef.current = false; speakAt(0, list); } }); }
   function togglePlay() {
-    if (playing) { setPlaying(false); try { if (audioRef.current && audioRef.current.pause) audioRef.current.pause(); } catch (e) { } return; }
+    if (playing) { setPlaying(false); playingRef.current = false; try { if (audioRef.current && audioRef.current.pause) audioRef.current.pause(); } catch (e) { } return; }
     if (!renderedRef.current || phase !== 'ready') { start(); return; }
-    setView('hl'); setPlaying(true);
+    setView('hl'); setPlaying(true); playingRef.current = true;
     if (audioRef.current && audioRef.current.play) audioRef.current.play(); else { stopRef.current = false; speakAt(idx, sentsRef.current); }
   }
-  function stopAll() { stopRef.current = true; stopAudio(); setPlaying(false); setIdx(0); }
+  function stopAll() { stopRef.current = true; playingRef.current = false; stopAudio(); setPlaying(false); setIdx(0); }
   function seek(i) { stopRef.current = false; stopAudio(); speakAt(Math.max(0, Math.min(sentsRef.current.length - 1, i)), sentsRef.current); }   // click a sentence → read from there
   function jump(d) { seek(idx + d); }
   function onHlClick(e) { var t = e.target; if (t && t.classList && t.classList.contains('tl-s') && t.dataset && t.dataset.sent != null) seek(parseInt(t.dataset.sent, 10) || 0); }
