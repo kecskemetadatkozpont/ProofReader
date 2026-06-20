@@ -289,9 +289,14 @@ Anthropic platform-kulcs + **Consensus API-kulcs** (mindkettő Edge/worker secre
 → kvóta/cost-tracking (R7). MVP: platform-kulcs + projekt-szintű napi limit.
 
 ### Fázis (MVP → teljes)
-- **C1:** Edge `research-chat` + direkt `consensus_search` tool + streaming + perzisztált chat + „Save as idea".
-- **C2:** MCP-connector (ha Consensus remote MCP-t ad), Elicit/OpenAlex tool-ok hozzáadása.
-- **C3:** worker-runtime a hosszú session-ökhöz + cost-dashboard.
+- **C1 — ✅ KÉSZ (UI+schema deployed; live a token+deploy után):** Consensus a **remote MCP-n** (`https://mcp.consensus.app/mcp`)
+  az **Anthropic MCP-connectorral** (nem direkt REST — a kontroll a teljes perzisztálásból jön). `research-chat`
+  Edge Function minden választ + nyers tool-blokkot + evidenciát visszaír. Ideas-chat UI + „Save as idea".
+  **migration-16** futott; RLS 8/8 (owner ír · konzulens read-only · idegen nem lát) · chat-küldés UI 4/4
+  (perzisztál + DB-ből visszatölt + graceful pending). **Hátra a usernél:** Edge-deploy + `CONSENSUS_MCP_TOKEN`.
+- **C2:** evidencia strukturált kinyerése (title/DOI/claim) a Consensus tool-output alapján → „library-be" /
+  „idézet" egy kattintással; streaming; Elicit/OpenAlex tool-ok.
+- **C3:** worker-runtime a hosszú session-ökhöz + cost-dashboard (R7).
 
 ### Nyitott döntések
 1. Consensus bekötése: **direkt tool (REST)** vs **MCP-connector** (utóbbi remote MCP-URL-t igényel).
