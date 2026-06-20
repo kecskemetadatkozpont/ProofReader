@@ -229,4 +229,22 @@ konzulensnek" kérés ide esik), aztán a compute-infra (R3/R4).
   (`backend/functions/README.md`). Enélkül minden más megy, a gomb „AI not configured"-ot ír.
 - **Tesztek:** backend RLS 9/9 (owner ír idea+source; konzulens read-only) · UI 5/5 (idea felvétel, valós OpenAlex
   keresés + Library-be tétel).
-- A compute-offload (R3/R4) + agentic irodalom (R5) + írás-integráció (R6) későbbi fázisok.
+
+### R3 + R4 + R6 build-scope — ✅ KÉSZ (UI deployed; **migration-15 futtatása vár**)
+- **migration-15-research-data-jobs.sql:** `research_datasets` + `research_jobs` + RLS; **`research-data`
+  Storage bucket** + path-szkópolt policy-k (`safe_uuid()` guarddal). ⚠️ **a usernek le kell futtatnia.**
+- **R3 — Data tab:** külső dataset regisztráció (url/huggingface/kaggle/zenodo/openml) **vagy fájl-feltöltés**
+  a research-data bucketbe (projektre szkópolva); státusz-lista.
+- **R4 — Compute tab:** job-queue (`python` snippet / `stats` dataseten / `download`); státusz, progress,
+  kibontható result+logs, cancel/delete. **+ `worker/research_worker.py`** (stdlib-only self-hosted worker):
+  pollozza a queue-t a service-kulccsal, futtat, visszaír; optimista job-claim; kész job → `research_log`
+  RESULT (a digestbe is). README + cron-útmutató. **Pure executorok unit 6/6.**
+- **R6 — Writing tab:** `.tex` skeleton (kiválasztott ötlet → abstract, included library → `\cite`, kész
+  eredmények → Results) + `library.bib` (egyező, dedupolt kulcsok, unit-verifikálva) + LaTeX-editor link.
+- **BibTeX export** a Library-ből (included vagy mind), dedupolt AuthorYear kulcsokkal.
+- **Stage-léptetés** mostantól `research_log` MILESTONE-t ír (a digestbe is).
+- **Tesztek (migration-15 nélkül futtatható rész):** shell smoke 7/7 · R1/R2 UI regresszió 8/8 (új fülök
+  gracefully degradálnak) · worker pure 6/6 · tex/bib kulcs-invariáns ✓. **R3/R4 élő e2e (8 assert) a
+  migration-15 lefuttatása után fut** (`/tmp/aloud_research_r3r4_e2e.js`: regisztrál → queue → worker fut → eredmény).
+- **Hátra:** R5 (agentic Elicit+szintézis) · R7 (cost-dashboard, kollaboráció) · a `research-ai` Edge-deploy +
+  pg_cron a usernél.
