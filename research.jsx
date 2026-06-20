@@ -199,6 +199,29 @@
 
   // ---------- Literature (R1, OpenAlex) ----------
   function abstractFromInverted(inv) { if (!inv) return null; var w = []; Object.keys(inv).forEach(function (k) { inv[k].forEach(function (p) { w[p] = k; }); }); return w.join(' ').slice(0, 1500); }
+  function bibKey(s, used) {
+    var first = (s.authors && s.authors[0]) ? String(s.authors[0]).split(/\s+/).pop() : 'ref';
+    var base = (first + (s.year || '')).replace(/[^A-Za-z0-9]/g, '') || ('ref' + (s.year || ''));
+    var k = base, i = 0; while (used[k]) { k = base + String.fromCharCode(97 + i); i++; } used[k] = true; return k;
+  }
+  function genBibtex(sources) {
+    var used = {};
+    return sources.map(function (s) {
+      var key = bibKey(s, used), f = [];
+      f.push('  title = {' + (s.title || '') + '}');
+      if (s.authors && s.authors.length) f.push('  author = {' + s.authors.join(' and ') + '}');
+      if (s.year) f.push('  year = {' + s.year + '}');
+      if (s.venue) f.push('  journal = {' + s.venue + '}');
+      if (s.doi) f.push('  doi = {' + String(s.doi).replace(/^https?:\/\/doi\.org\//, '') + '}');
+      if (s.url) f.push('  url = {' + s.url + '}');
+      return '@article{' + key + ',\n' + f.join(',\n') + '\n}';
+    }).join('\n\n');
+  }
+  function downloadText(name, text) {
+    var blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+  }
   function LiteraturePanel(props) {
     var q = useState(''), query = q[0], setQuery = q[1];
     var r = useState(null), results = r[0], setResults = r[1];
@@ -236,7 +259,10 @@
         }) : h('div', { style: { fontSize: 13, color: 'var(--faint)', padding: '8px 0' } }, 'No results.')) : null
       ),
       h('div', { className: 'panel' },
-        h('h3', null, 'Library', h('span', { style: { fontWeight: 600, color: 'var(--faint)' } }, lib.length + ' source' + (lib.length === 1 ? '' : 's'))),
+        h('h3', null, 'Library', h('div', { style: { display: 'flex', gap: 10, alignItems: 'center' } },
+          h('span', { style: { fontWeight: 600, color: 'var(--faint)' } }, lib.length + ' source' + (lib.length === 1 ? '' : 's')),
+          lib.length ? h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12 }, title: 'Export included (or all) as BibTeX', onClick: function () { var inc = lib.filter(function (x) { return x.screening === 'include'; }); downloadText('library.bib', genBibtex(inc.length ? inc : lib)); } }, '⬇ BibTeX') : null
+        )),
         lib.length ? lib.map(function (s) {
           return h('div', { className: 'src', key: s.id },
             h('div', { style: { flex: 1, minWidth: 0 } }, h('b', { style: { fontSize: 13 } }, s.url ? h('a', { href: s.url, target: '_blank' }, s.title) : s.title), h('div', { style: { fontSize: 11.5, color: 'var(--muted)' } }, [(s.authors || []).slice(0, 3).join(', '), s.year, s.venue].filter(Boolean).join(' · ') + (s.cited_by != null ? ' · ' + s.cited_by + ' cites' : ''))),
