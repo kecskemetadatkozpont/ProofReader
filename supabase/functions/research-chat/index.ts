@@ -38,6 +38,10 @@ Deno.serve(async (req) => {
 
     const { data: chat } = await sb.from('research_chats').select('id,project_id').eq('id', chat_id).maybeSingle();
     if (!chat) return json({ error: 'chat not found or no access' }, 404);
+    const { data: ures } = await sb.auth.getUser();
+    const callerUid: string = (ures && ures.user && ures.user.id) || '';
+    // service client for reading attachment files (caller-JWT storage RLS is unreliable; we path-guard instead)
+    const svc = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
     const { data: proj } = await sb.from('research_projects').select('title,field,goal,keywords').eq('id', chat.project_id).maybeSingle();
     const { data: history } = await sb.from('research_messages').select('role,content,attachments').eq('chat_id', chat_id).order('created_at', { ascending: true });
 
@@ -55,7 +59,7 @@ Deno.serve(async (req) => {
       if (typeof atts === 'string') { try { atts = JSON.parse(atts); } catch { atts = null; } }   // robustness if jsonb arrives as text
       if (i === lastUserIdx) { dbg.attType = typeof m.attachments; dbg.attCount = Array.isArray(atts) ? atts.length : 0; }
       // attachments only on the most recent user turn (keeps cost bounded)
-      if (i === lastUserIdx && Array.isArray(atts) && atts.length) { const c = await buildBlocks(sb, atts, m.content, dbg); dbg.blocks = c.length; messages.push({ role, content: c }); }
+      if (i === lastUserIdx && Array.isArray(atts) && atts.length) { const c = await buildBlocks(sb, svc, atts, m.content, dbg, { projectId: chat.project_id, uid: callerUid }); dbg.blocks = c.length; messages.push({ role, content: c }); }
       else messages.push({ role, content: m.content });
     }
 
@@ -92,7 +96,7 @@ Deno.serve(async (req) => {
     }
     if (ev.length) await sb.from('research_evidence').insert(ev);
 
-    return json({ ok: true, version: 'attach-v2', message_id: saved?.id, evidence: ev.length, mode: useMcp ? 'consensus' : 'plain', model: MODEL, usage: out.usage, dbg });
+    return json({ ok: true, version: 'attach-v3', message_id: saved?.id, evidence: ev.length, mode: useMcp ? 'consensus' : 'plain', model: MODEL, usage: out.usage, dbg });
   } catch (e) {
     return json({ error: String(e) }, 500);
   }
@@ -105,7 +109,9 @@ function toB64(buf: ArrayBuffer): string {
 }
 
 // Expand attachments into Claude content blocks (text + PDF document). dbg collects per-item outcomes.
-async function buildBlocks(sb: any, atts: any[], content: string, dbg: any): Promise<any[]> {
+// Files are read with the SERVICE client but path-guarded to the caller's own scope (their uid for
+// publication-files, the chat's project for research-data) so a crafted path can't reach others' files.
+async function buildBlocks(sb: any, svc: any, atts: any[], content: string, dbg: any, scope: { projectId: string; uid: string }): Promise<any[]> {
   const blocks: any[] = [{ type: 'text', text: content }];
   dbg.items = [];
   let n = 0;
@@ -117,7 +123,10 @@ async function buildBlocks(sb: any, atts: any[], content: string, dbg: any): Pro
         dbg.items.push({ kind: 'source', ok: !!s, err: error?.message });
         if (s) { blocks.push({ type: 'text', text: `[Attached source: ${s.title} (${s.year ?? ''}${s.venue ? ', ' + s.venue : ''})]\n${(s.abstract ?? '').slice(0, 6000)}` }); n++; }
       } else if (a.kind === 'file' && a.bucket && a.path) {
-        const { data: blob, error } = await sb.storage.from(a.bucket).download(a.path);   // caller's JWT → RLS-gated
+        const seg0 = String(a.path).split('/')[0];
+        const allowed = (a.bucket === 'publication-files' && seg0 === scope.uid) || (a.bucket === 'research-data' && seg0 === scope.projectId);
+        if (!allowed) { dbg.items.push({ kind: 'file', bucket: a.bucket, ok: false, err: 'path outside caller scope' }); continue; }
+        const { data: blob, error } = await svc.storage.from(a.bucket).download(a.path);   // service read, path-guarded above
         dbg.items.push({ kind: 'file', bucket: a.bucket, ok: !!blob, err: error?.message });
         if (!blob) continue;
         const buf = await blob.arrayBuffer();
