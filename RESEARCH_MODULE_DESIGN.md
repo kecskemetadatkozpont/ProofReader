@@ -210,4 +210,23 @@ konzulensnek" kérés ide esik), aztán a compute-infra (R3/R4).
   + Overview + **Research Log** (típusos bejegyzés) + **Tasks** (todo/doing/done). PhD-modul shell/RLS-minta.
 - **Drawer + admin-fejléc Research-link**; admin **View as** ide is kiterjed.
 - **Tesztek:** shell smoke 7/7 · élő RLS 8/8 (owner ír; konzulens read-only; idegen nem lát) · UI create+log 5/5.
-- A digest (R2), Edge/API (R1), compute (R3/R4) későbbi fázisok.
+
+### R2 build-scope — ✅ KÉSZ (deployed + verified)
+- **migration-13-research-digest.sql:** `build_research_digests(for_day)` supervisoronként egy digestbe rakja
+  a hallgatók előző napi `research_log`-ját (idempotens (supervisor, day)); `run_research_digests_yesterday()`;
+  opcionális **pg_cron** (05:00 UTC, magától települ ha a pg_cron él). Tisztán SQL — nincs külső kulcs. FUTOTT.
+- **research.jsx NotifBell:** értesítés-csengő (olvasatlan-szám + popover); a digest renderelve (nap · N hallgató,
+  M frissítés), kibontható tételekkel, mark-one/all read.
+- **Tesztek:** backend 9/9 (digest létrejön, recipient-only RLS, tartalmazza a log-bejegyzést, idempotens) ·
+  UI 3/3 (csengő badge, digest-popover, kibontás).
+
+### R1 build-scope — ✅ KÉSZ (UI deployed + verified; AI gap = Edge, user-deploy)
+- **migration-14-research-lit-ideas.sql:** `research_ideas` + `research_sources` + RLS. FUTOTT.
+- **research.jsx:** projekt-detail **fülek** (Overview · Ideas · Literature · Log · Tasks); **Ideas** (saját
+  kérdés/hipotézis + ✨ Gap analysis gomb); **Literature** = **OpenAlex** keresés (kulcs nélkül, böngészőből) →
+  Library include/maybe/exclude screeninggel; absztrakt az inverted-indexből; dedup OpenAlex-id alapján.
+- **backend/functions/research-ai (Deno):** biztonságos Claude-proxy (a kulcs Edge-secret) — a user deployolja
+  (`backend/functions/README.md`). Enélkül minden más megy, a gomb „AI not configured"-ot ír.
+- **Tesztek:** backend RLS 9/9 (owner ír idea+source; konzulens read-only) · UI 5/5 (idea felvétel, valós OpenAlex
+  keresés + Library-be tétel).
+- A compute-offload (R3/R4) + agentic irodalom (R5) + írás-integráció (R6) későbbi fázisok.
