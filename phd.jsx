@@ -458,6 +458,38 @@
     );
   }
 
+  // ---------- Notifications bell (shared with Research; digests land for supervisors here too) ----------
+  function NotifBell() {
+    var nS = useState([]), notes = nS[0], setNotes = nS[1];
+    var oS = useState(false), open = oS[0], setOpen = oS[1];
+    var eS = useState(null), expanded = eS[0], setExpanded = eS[1];
+    function load() { sb.from('notifications').select('id,kind,payload,read_at,created_at').order('created_at', { ascending: false }).limit(40).then(function (r) { setNotes((r && r.data) || []); }); }
+    useEffect(function () { load(); }, []);
+    function markRead(n) { if (n.read_at) return; sb.from('notifications').update({ read_at: new Date().toISOString() }).eq('id', n.id).then(function () { setNotes(function (l) { return l.map(function (x) { return x.id === n.id ? Object.assign({}, x, { read_at: 'now' }) : x; }); }); }); }
+    function markAll() { var ids = notes.filter(function (n) { return !n.read_at; }).map(function (n) { return n.id; }); if (!ids.length) return; sb.from('notifications').update({ read_at: new Date().toISOString() }).in('id', ids).then(load); }
+    var unread = notes.filter(function (n) { return !n.read_at; }).length;
+    function ttl(n) { return n.kind === 'digest' ? 'Daily research digest' : ((n.payload && n.payload.title) || n.kind); }
+    function summ(n) { var p = n.payload || {}; if (n.kind === 'digest') return (p.day || '') + ' · ' + (p.students || 0) + ' student' + (p.students === 1 ? '' : 's') + ', ' + (p.entries || 0) + ' update' + (p.entries === 1 ? '' : 's'); return p.body || ''; }
+    return h('div', { className: 'notif-wrap' },
+      h('button', { className: 'bell', onClick: function () { setOpen(!open); if (!open) load(); } },
+        h('svg', { viewBox: '0 0 16 16', fill: 'none', stroke: 'var(--muted)', strokeWidth: 1.5 }, h('path', { d: 'M8 2a3.5 3.5 0 0 0-3.5 3.5c0 3-1.5 4-1.5 4h10s-1.5-1-1.5-4A3.5 3.5 0 0 0 8 2z', strokeLinejoin: 'round' }), h('path', { d: 'M6.6 12.4a1.5 1.5 0 0 0 2.8 0', strokeLinecap: 'round' })),
+        unread ? h('i', { className: 'nb' }, unread) : null
+      ),
+      open ? h('div', { className: 'notif-pop' },
+        h('div', { className: 'nh' }, 'Notifications', unread ? h('button', { className: 'back-btn', style: { margin: 0 }, onClick: markAll }, 'Mark all read') : null),
+        notes.length ? notes.map(function (n) {
+          var p = n.payload || {};
+          return h('div', { key: n.id, className: 'notif-item' + (n.read_at ? '' : ' unread'), onClick: function () { markRead(n); setExpanded(expanded === n.id ? null : n.id); } },
+            h('b', null, ttl(n)), h('div', { className: 'nx' }, summ(n)),
+            (expanded === n.id && n.kind === 'digest' && p.items && p.items.length) ? h('div', { style: { marginTop: 8 } }, p.items.map(function (it, i) {
+              return h('div', { key: i, className: 'nx', style: { paddingTop: 4 } }, h('span', { className: 'chip c-grey', style: { marginRight: 6 } }, it.type), it.student + ' — ' + it.summary);
+            })) : null
+          );
+        }) : h('div', { style: { padding: 22, textAlign: 'center', color: 'var(--faint)', fontSize: 13 } }, 'No notifications.')
+      ) : null
+    );
+  }
+
   var IC = {
     dashboard: h('svg', { viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5 }, h('rect', { x: 2, y: 2, width: 5, height: 5, rx: 1 }), h('rect', { x: 9, y: 2, width: 5, height: 5, rx: 1 }), h('rect', { x: 2, y: 9, width: 5, height: 5, rx: 1 }), h('rect', { x: 9, y: 9, width: 5, height: 5, rx: 1 })),
     admin: h('svg', { viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5 }, h('path', { d: 'M8 1.8l5 1.9v3.6c0 3-2.1 5.2-5 6.1-2.9-.9-5-3.1-5-6.1V3.7z' }), h('path', { d: 'M5.8 8l1.6 1.6 2.8-3.1', strokeLinecap: 'round', strokeLinejoin: 'round' })),
@@ -565,7 +597,7 @@
       h('div', { className: 'main' },
         preview ? h('div', { style: { background: '#fef3c7', color: '#92400e', padding: '9px 14px', fontSize: 13, fontWeight: 600, borderRadius: 10, marginBottom: 14 } }, '👁 Admin preview — viewing ', h('b', null, me.name), '’s Doctoral School (', roleLabel, '). ', h('a', { href: 'Profile.html?adminView=1', style: { color: '#92400e' } }, 'Profile view'), ' · ', h('a', { href: 'Admin.html', style: { color: '#92400e' } }, '← Back to admin')) : null,
         (!hasRole && cur !== 'account') ? h('div', { className: 'panel', style: { background: '#eef0ff', borderColor: '#c7cdf5' } }, h('b', null, 'Welcome to the Doctoral School! '), 'Set whether you are a supervisor or a student to get started — ', h('a', { href: '#', onClick: function (e) { e.preventDefault(); setView('account'); } }, 'open My account')) : null,
-        ((cur === 'students' && sel) || (cur === 'mine' && myStudent)) ? null : h('div', { className: 'head' }, h('div', null, h('h1', null, titles[cur]), h('div', { className: 'sub' }, subs[cur] || '')), isAdmin ? h('span', { className: 'badge role' }, 'admin view') : null),
+        ((cur === 'students' && sel) || (cur === 'mine' && myStudent)) ? null : h('div', { className: 'head' }, h('div', null, h('h1', null, titles[cur]), h('div', { className: 'sub' }, subs[cur] || '')), h('div', { style: { display: 'flex', gap: 10, alignItems: 'center' } }, h(NotifBell, null), isAdmin ? h('span', { className: 'badge role' }, 'admin view') : null)),
         body
       )
     );
