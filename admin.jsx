@@ -283,6 +283,7 @@
       h('div', { className: 'topbar' },
         h('div', { className: 'brand' }, h('span', { className: 'mk' }, h('span')), 'Publify', h('span', { className: 'tag' }, 'ADMIN')),
         h('div', { className: 'sp' }),
+        h('a', { className: 'back', href: 'PhD.html', style: { marginRight: 14 } }, 'Doctoral School →'),
         h('a', { className: 'back', href: 'ProofReader.html' }, '← Back to app'),
         me && h('div', { className: 'me' }, h(Avatar, { u: me, size: 28 }), h('span', { className: 'nm' }, me.name || me.email)),
         h('button', { className: 'so', onClick: signOut }, 'Sign out')

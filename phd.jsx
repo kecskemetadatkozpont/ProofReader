@@ -167,7 +167,7 @@
     var sup = props.sups.filter(function (x) { return x.id === stu.supervisor_id; })[0];
     var ce = stu.complex_exam || {};
     return h('div', null,
-      h('button', { className: 'back-btn', onClick: props.onBack }, '← Students'),
+      props.onBack ? h('button', { className: 'back-btn', onClick: props.onBack }, '← Students') : null,
       h('div', { className: 'dhead' },
         h(Avatar, { u: stu, size: 52 }),
         h('div', { className: 'dt' }, h('h1', null, stu.name), h('p', null, (stu.topic || 'No topic set') + (sup ? ' · ' + sup.name : '') + (stu.enrollment_year ? ' · enrolled ' + stu.enrollment_year : ''))),
@@ -350,7 +350,7 @@
     function loadData(done) {
       Promise.all([
         sb.from('profiles').select('id,name,email,department,capacity_max,research_interests,avatar_url,mtmt_id').eq('is_supervisor', true).order('name'),
-        sb.from('phd_students').select('id,name,email,supervisor_id,topic,status,total_credits,required_credits,enrollment_year,ethics_status,complex_exam,avatar_url'),
+        sb.from('phd_students').select('id,name,email,profile_id,supervisor_id,topic,status,total_credits,required_credits,enrollment_year,ethics_status,complex_exam,avatar_url'),
         sb.from('phd_topics').select('id,supervisor_id,title,description,tags,status').order('created_at', { ascending: false }),
         sb.from('phd_milestones').select('id,student_id,title,deadline,status,type').order('deadline', { ascending: true })
       ]).then(function (res) {
@@ -369,19 +369,24 @@
 
     var isAdmin = me && me.role === 'admin';
     var isSup = me && (isAdmin || me.is_supervisor);
-    var roleLabel = isAdmin ? 'Administrator' : (me && me.is_supervisor ? 'Supervisor' : (me && me.is_student ? 'Student' : 'Member'));
+    var myStudent = data.students.filter(function (s) { return s.profile_id === me.id; })[0];
+    var isStudentOnly = !isSup && (me.is_student || !!myStudent);
+    var roleLabel = isAdmin ? 'Administrator' : (me && me.is_supervisor ? 'Supervisor' : (isStudentOnly ? 'Student' : 'Member'));
     var NAV = [];
     if (isSup) { NAV.push(['dashboard', 'Dashboard']); NAV.push(['students', 'Students']); }
-    NAV.push(['supervisors', 'Supervisors']); NAV.push(['topics', 'Research topics']);
+    if (isStudentOnly) NAV.push(['mine', 'My progress']);
+    if (!isStudentOnly) NAV.push(['supervisors', 'Supervisors']);
+    NAV.push(['topics', 'Research topics']);
     var allowed = NAV.map(function (x) { return x[0]; });
-    var cur = allowed.indexOf(view) >= 0 ? view : 'supervisors';
+    var cur = allowed.indexOf(view) >= 0 ? view : allowed[0];
     var nStu = data.students.length;
-    var titles = { dashboard: 'Dashboard', students: 'Students', supervisors: 'Supervisors', topics: 'Research topics' };
-    var subs = { supervisors: data.sups.length + ' supervisors · ' + nStu + ' student' + (nStu === 1 ? '' : 's'), topics: data.topics.length + ' topics', students: nStu + ' student' + (nStu === 1 ? '' : 's'), dashboard: (isAdmin ? 'Institution-wide' : 'Your students') + ' · ' + nStu + ' student' + (nStu === 1 ? '' : 's') };
+    var titles = { dashboard: 'Dashboard', students: 'Students', supervisors: 'Supervisors', topics: 'Research topics', mine: 'My progress' };
+    var subs = { supervisors: data.sups.length + ' supervisors · ' + nStu + ' student' + (nStu === 1 ? '' : 's'), topics: data.topics.length + ' topics', students: nStu + ' student' + (nStu === 1 ? '' : 's'), dashboard: (isAdmin ? 'Institution-wide' : 'Your students') + ' · ' + nStu + ' student' + (nStu === 1 ? '' : 's'), mine: myStudent ? (myStudent.topic || '') : '' };
     function canEditStudent(s) { return isAdmin || (s && s.supervisor_id === me.id); }
 
     var body;
-    if (cur === 'dashboard') body = h(Dashboard, { students: data.students, milestones: data.milestones, topics: data.topics, me: me, isAdmin: isAdmin });
+    if (cur === 'mine') body = myStudent ? h(StudentDetail, { student: myStudent, sups: data.sups, canEdit: false, onBack: null, onChanged: function () { loadData(); } }) : h('div', { className: 'empty' }, 'No student record is linked to your account yet — ask your supervisor or the administrator to add you.');
+    else if (cur === 'dashboard') body = h(Dashboard, { students: data.students, milestones: data.milestones, topics: data.topics, me: me, isAdmin: isAdmin });
     else if (cur === 'supervisors') body = h(Supervisors, { sups: data.sups, students: data.students });
     else if (cur === 'topics') body = h(Topics, { topics: data.topics, sups: data.sups, me: me, isAdmin: isAdmin, canPost: isSup, onChanged: function () { loadData(); } });
     else if (cur === 'students') {
@@ -397,7 +402,7 @@
         h('div', { className: 'side-foot' }, h(Avatar, { u: me, size: 32 }), h('div', { className: 'who' }, h('b', null, me.name), h('span', null, roleLabel)), h('a', { className: 'exit', href: 'Projects.html', title: 'Back to Publify' }, '←'))
       ),
       h('div', { className: 'main' },
-        (cur === 'students' && sel) ? null : h('div', { className: 'head' }, h('div', null, h('h1', null, titles[cur]), h('div', { className: 'sub' }, subs[cur] || '')), isAdmin ? h('span', { className: 'badge role' }, 'admin view') : null),
+        ((cur === 'students' && sel) || (cur === 'mine' && myStudent)) ? null : h('div', { className: 'head' }, h('div', null, h('h1', null, titles[cur]), h('div', { className: 'sub' }, subs[cur] || '')), isAdmin ? h('span', { className: 'badge role' }, 'admin view') : null),
         body
       )
     );
