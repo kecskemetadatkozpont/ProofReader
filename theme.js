@@ -28,7 +28,7 @@
     // shadows read as harsh dark blocks on dark; soften the most common ones
     'html.dark .card:hover, html.dark .stu-row:hover { box-shadow: 0 6px 18px rgba(0,0,0,.4) !important; }',
     // hardcoded light gradient backgrounds the variable pass cannot reach (full-screen scrims first)
-    'html.dark #pr-ob, html.dark .signin { background: radial-gradient(120% 120% at 50% -10%, #1b1d2e 0%, #0f1115 60%) !important; }',
+    'html.dark #pr-ob, html.dark .signin, html.dark #pr-signin, html.dark #pr-splash { background: radial-gradient(120% 120% at 50% -10%, #1b1d2e 0%, #0f1115 60%) !important; }',
     'html.dark .hero { background: radial-gradient(120% 90% at 80% -10%, #1b1d2e 0%, var(--bg) 70%) !important; }',
     'html.dark .thumb, html.dark .pf-viewer-img { background: var(--surface-2) !important; }'
   ].join('\n');

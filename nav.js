@@ -23,8 +23,10 @@
     if (p.indexOf('phd') === 0) return 'phd';
     if (p.indexOf('projects') === 0) return 'publications';
     if (p.indexOf('admin') === 0) return 'admin';
+    if (p.indexOf('proofreader') === 0) return 'editor';
     return '';
   }
+  var PAGE_NAME = { profile: 'Profile', research: 'Research', phd: 'Doctoral School', publications: 'Publications', admin: 'Admin', editor: 'Editor' };
   function initials(name, email) {
     var s = (name || email || '?').trim();
     var parts = s.split(/\s+/).filter(Boolean);
@@ -45,6 +47,8 @@
     '  display: flex; align-items: center; justify-content: space-between; padding: 0 16px;',
     '  background: var(--surface, #fff); border-bottom: 1px solid var(--line, #e6e8ee);',
     '  font-family: "IBM Plex Sans", system-ui, sans-serif; box-sizing: border-box; }',
+    '#pubnav .pn-left { display: flex; align-items: center; gap: 12px; min-width: 0; }',
+    '#pubnav .pn-page { font-size: 13px; font-weight: 600; color: var(--muted, #5b6473); padding-left: 12px; border-left: 1px solid var(--line, #e6e8ee); white-space: nowrap; }',
     '#pubnav .pn-brand { display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--ink, #1a2030); font-weight: 700; font-size: 15px; letter-spacing: -.2px; }',
     '#pubnav .pn-mk { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: linear-gradient(135deg, #6366f1, #d946ef); box-shadow: 0 3px 10px rgba(79,70,229,.34); }',
     '#pubnav .pn-mk i { width: 10px; height: 10px; border-top: 2.2px solid #fff; border-left: 2.2px solid #fff; border-radius: 2px 0 0 0; transform: rotate(45deg); margin-top: 2px; }',
@@ -78,7 +82,15 @@
     '.pnd-sw i { position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; transition: transform .15s; box-shadow: 0 1px 3px rgba(0,0,0,.3); }',
     '.pnd-sw.on i { transform: translateX(20px); }',
     '.pnd-signout { width: 100%; margin-top: 4px; padding: 10px; border: 1px solid var(--line, #e6e8ee); background: transparent; border-radius: 10px; color: var(--muted, #5b6473); font-family: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer; }',
-    '.pnd-signout:hover { color: var(--danger, #b42318); border-color: var(--danger, #b42318); }'
+    '.pnd-signout:hover { color: var(--danger, #b42318); border-color: var(--danger, #b42318); }',
+    // --- consolidation: the global bar owns branding + profile, so hide each page\'s duplicate chrome ---
+    '.side-brand { display: none !important; }',                                          // Research / Doctoral School sidebar brand
+    'html.pn-research .side .nav, html.pn-phd .side .nav { padding-top: 12px; }',
+    'html.pn-publications .topbar > .brand, html.pn-publications .topbar .acct { display: none !important; }',
+    'html.pn-publications .topbar { justify-content: flex-end !important; }',
+    'html.pn-admin .topbar > .brand { display: none !important; }',
+    // editor: keep the back button + document title, drop the redundant logo, tagline and account mini
+    'html.pn-editor .topbar .brand .brand-mark, html.pn-editor .topbar .brand .brand-text i, html.pn-editor .acct-mini { display: none !important; }'
   ].join('\n');
 
   function svg(d) { return '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">' + d + '</svg>'; }
@@ -94,8 +106,10 @@
     if (document.getElementById('pubnav') || !document.body) return;
     var u = curUser(), here = pageKey(), admin = isAdmin();
 
+    if (here) document.documentElement.classList.add('pn-' + here);
     var bar = document.createElement('header'); bar.id = 'pubnav';
-    bar.innerHTML = '<a class="pn-brand" href="Profile.html"><span class="pn-mk"><i></i></span>Publify</a>'
+    bar.innerHTML = '<div class="pn-left"><a class="pn-brand" href="Profile.html"><span class="pn-mk"><i></i></span>Publify</a>'
+      + (PAGE_NAME[here] ? '<span class="pn-page">' + PAGE_NAME[here] + '</span>' : '') + '</div>'
       + '<button class="pn-prof" id="pn-prof" aria-label="Open menu"></button>';
 
     var scrim = document.createElement('div'); scrim.id = 'pn-scrim';
