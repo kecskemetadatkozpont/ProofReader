@@ -39,6 +39,9 @@
     var BE = window.PR_BACKEND;
     if (BE && BE.user) return BE.user;
     if (window.PRNavUser) return window.PRNavUser;
+    // the Admin page publishes its own user (PRNavUser) once authenticated — until then show nothing
+    // rather than a stale PRAuth identity, so the bar never flashes the wrong person.
+    if (pageKey() === 'admin') return null;
     try { if (window.PRAuth && PRAuth.current()) return PRAuth.current(); } catch (e) { }
     return null;
   }
@@ -120,7 +123,10 @@
     'html.pn-publications .topbar { justify-content: flex-end !important; }',
     'html.pn-admin .topbar > .brand { display: none !important; }',
     // editor: keep the back button + document title, drop the redundant logo, tagline and account mini
-    'html.pn-editor .topbar .brand .brand-mark, html.pn-editor .topbar .brand .brand-text i, html.pn-editor .acct-mini { display: none !important; }'
+    'html.pn-editor .topbar .brand .brand-mark, html.pn-editor .topbar .brand .brand-text i, html.pn-editor .acct-mini { display: none !important; }',
+    // the editor is a full-height flex column (.app: 100vh) — subtract the bar so its bottom transport
+    // (the read-aloud controls) stays on screen instead of being pushed below the fold
+    'html.pn-editor .app { height: calc(100vh - var(--pubnav-h, 52px)) !important; }'
   ].join('\n');
 
   function svg(d) { return '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">' + d + '</svg>'; }

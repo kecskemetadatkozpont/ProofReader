@@ -104,6 +104,8 @@
 
   function App() {
     const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
+    const [, bumpTheme] = useState(0);
+    useEffect(() => { const h = () => bumpTheme((n) => n + 1); window.addEventListener('pr-theme', h); return () => window.removeEventListener('pr-theme', h); }, []); // re-render the editor when the global dark toggle flips
     const init = useMemo(buildInitial, []);
 
     const [files, setFiles] = useState(init.files);
@@ -1671,15 +1673,20 @@
       return { items: items, fails: fails, warns: warns, verdict: fails ? 'fail' : warns ? 'warn' : 'ok' };
     })();
 
+    // the global dark toggle drives the editor: dark → the "night" paper theme; light → the user's pick
+    const globalDark = !!(window.PRTheme ? window.PRTheme.isDark() : document.documentElement.classList.contains('dark'));
+    const effTheme = globalDark ? 'night' : (t.theme || 'paper');
     const themeVars = {
       paper: { bg: '#eceef1', pane: '#ffffff', paperBg: '#ffffff', ink: '#1d2430' },
       sepia: { bg: '#e9e2d2', pane: '#fbf6ea', paperBg: '#fbf6ea', ink: '#3a3220' },
       night: { bg: '#0f1320', pane: '#161b29', paperBg: '#1b2233', ink: '#dfe6f2' }
-    }[t.theme] || {};
+    }[effTheme] || {};
+    // the light highlight pastels would hide light text on the dark paper — tint instead of cover
+    const readingHl = effTheme === 'night' ? ('color-mix(in srgb, ' + (t.reading || '#ffe08a') + ' 32%, transparent)') : t.reading;
 
     return (
-      <div className="app" data-theme={t.theme} style={{
-        '--reading': t.reading, '--serif-size': t.serifSize + 'px', '--mono-size': t.monoSize + 'px',
+      <div className="app" data-theme={effTheme} style={{
+        '--reading': readingHl, '--serif-size': t.serifSize + 'px', '--mono-size': t.monoSize + 'px',
         '--paper-width': t.paperWidth + 'px', '--app-bg': themeVars.bg, '--pane': themeVars.pane,
         '--paper-bg': themeVars.paperBg, '--ink': themeVars.ink, '--dim': t.dimInactive ? 1 : 0
       }}>

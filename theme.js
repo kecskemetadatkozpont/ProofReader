@@ -16,7 +16,8 @@
   // 2. inject the dark palette: re-point every shared variable to a dark value
   var css = [
     'html.dark { color-scheme: dark;',
-    '  --ink: #e7e9ee; --muted: #a3acbd; --faint: #7b8494; --dim: #8a92a0; --reading: #e7e9ee;',
+    '  --ink: #e7e9ee; --muted: #a3acbd; --faint: #7b8494; --dim: #8a92a0;',
+    '  --reading: #6e5612;',  // read-aloud highlight is a BACKGROUND (amber), not a text colour — keep it dark so light text stays legible
     '  --paper: #1b1e26; --pane: #1b1e26; --paper-bg: #1b1e26;',
     '  --soft: #232733; --softer: #15171c; --bg: #14161c; --app-bg: #0f1115;',
     '  --line: #2c313b;',
