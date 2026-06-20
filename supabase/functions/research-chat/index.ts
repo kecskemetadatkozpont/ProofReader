@@ -88,7 +88,7 @@ Deno.serve(async (req) => {
     }
     if (ev.length) await sb.from('research_evidence').insert(ev);
 
-    return json({ ok: true, message_id: saved?.id, evidence: ev.length, mode: useMcp ? 'consensus' : 'plain', model: MODEL, usage: out.usage });
+    return json({ ok: true, version: 'attach-v1', message_id: saved?.id, evidence: ev.length, mode: useMcp ? 'consensus' : 'plain', model: MODEL, usage: out.usage });
   } catch (e) {
     return json({ error: String(e) }, 500);
   }
