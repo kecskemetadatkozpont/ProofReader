@@ -212,9 +212,26 @@
   // ---------- Literature (R1, OpenAlex) ----------
   function abstractFromInverted(inv) { if (!inv) return null; var w = []; Object.keys(inv).forEach(function (k) { inv[k].forEach(function (p) { w[p] = k; }); }); return w.join(' ').slice(0, 1500); }
   function normWork(w) { var s = (w.primary_location && w.primary_location.source) || {}; return { journal: s.display_name, type: s.type, indexed: !!s.is_core, doaj: !!s.is_in_doaj, oa: !!(w.open_access && w.open_access.is_oa), fwci: w.fwci, year: w.publication_year, date: w.publication_date, cites: w.cited_by_count }; }
+  // SCImago (Scopus) quartile map — lazy-loaded once; absent/{} until backend/scimago/build_scimago.py is run
+  var _scimago = null, _scimagoP = null;
+  function loadScimago() {
+    if (_scimago) return Promise.resolve(_scimago);
+    if (_scimagoP) return _scimagoP;
+    _scimagoP = fetch('scimago-scopus.json').then(function (r) { return r.ok ? r.json() : {}; }).then(function (m) { _scimago = m || {}; return _scimago; }, function () { _scimago = {}; return _scimago; });
+    return _scimagoP;
+  }
+  function scopusQ(map, w) {
+    if (!map) return null;
+    var s = (w.primary_location && w.primary_location.source) || {}, c = [];
+    if (s.issn_l) c.push(s.issn_l);
+    if (Array.isArray(s.issn)) c = c.concat(s.issn);
+    for (var i = 0; i < c.length; i++) { var n = String(c[i] || '').replace(/[^0-9Xx]/g, '').toUpperCase(); if (n.length === 8 && map[n]) return map[n]; }
+    return null;
+  }
   function metricTags(o) {
     var t = [];
     if (o.journal) t.push(h('span', { className: 'mtag j', key: 'j', title: 'Journal / venue' }, o.journal));
+    if (o.scopus) t.push(h('span', { className: 'mtag sc', key: 's', title: 'Scopus quartile (SCImago Journal Rank) — Q1 is the top 25% by SJR in its field' }, 'Scopus Q' + o.scopus));
     if (o.type && o.type !== 'journal') t.push(h('span', { className: 'mtag', key: 't' }, o.type === 'conference' ? 'Conference' : (o.type.charAt(0).toUpperCase() + o.type.slice(1))));
     if (o.date || o.year) t.push(h('span', { className: 'mtag', key: 'y' }, o.date || o.year));
     if (o.cites != null) t.push(h('span', { className: 'mtag', key: 'c' }, o.cites + ' cites'));
@@ -267,6 +284,9 @@
     var r = useState(null), results = r[0], setResults = r[1];
     var b = useState(false), busy = b[0], setBusy = b[1];
     var fl = useState({ minCites: '', fromYear: '', indexed: false, oa: false, journals: false }), flt = fl[0], setFlt = fl[1];
+    var sm = useState(null), scimap = sm[0], setScimap = sm[1];
+    var sq = useState(0), scopusMax = sq[0], setScopusMax = sq[1];
+    useEffect(function () { loadScimago().then(setScimap); }, []);
     var saved = {}; (props.sources || []).forEach(function (s) { if (s.ext_id) saved[s.ext_id] = true; });
     function setF(k, v) { var o = {}; o[k] = v; setFlt(Object.assign({}, flt, o)); }
     function buildFilter(f) {
@@ -296,6 +316,8 @@
     function setScreen(s, v) { sb.from('research_sources').update({ screening: v }).eq('id', s.id).then(props.onChanged); }
     function del(s) { sb.from('research_sources').delete().eq('id', s.id).then(props.onChanged); }
     var lib = props.sources || [];
+    var hasSci = scimap && Object.keys(scimap).length > 0;
+    var shown = results ? (scopusMax ? results.filter(function (w) { var qq = scopusQ(scimap, w); return qq != null && qq <= scopusMax; }) : results) : null;
     return h('div', null,
       h('div', { className: 'panel' },
         h('h3', null, 'Literature search', h('span', { style: { fontWeight: 600, color: 'var(--faint)' } }, 'OpenAlex')),
@@ -308,19 +330,21 @@
           h('span', { className: 'flab' }, 'From year'), h('input', { className: 'num', type: 'number', value: flt.fromYear, placeholder: 'YYYY', onChange: function (e) { setF('fromYear', e.target.value); } }),
           h('button', { className: 'lchip' + (flt.indexed ? ' on' : ''), title: 'Only indexed core sources (Scopus/WoS-level)', onClick: function () { setF('indexed', !flt.indexed); } }, '✓ Indexed'),
           h('button', { className: 'lchip' + (flt.oa ? ' on' : ''), onClick: function () { setF('oa', !flt.oa); } }, 'Open access'),
-          h('button', { className: 'lchip' + (flt.journals ? ' on' : ''), onClick: function () { setF('journals', !flt.journals); } }, 'Journals only')
+          h('button', { className: 'lchip' + (flt.journals ? ' on' : ''), onClick: function () { setF('journals', !flt.journals); } }, 'Journals only'),
+          hasSci ? h('select', { className: 'num', style: { width: 'auto' }, value: scopusMax, title: 'Scopus quartile (SCImago)', onChange: function (e) { setScopusMax(parseInt(e.target.value, 10)); } }, h('option', { value: 0 }, 'Scopus: any'), h('option', { value: 1 }, 'Scopus Q1'), h('option', { value: 2 }, 'Scopus Q1–Q2'), h('option', { value: 3 }, 'Scopus Q1–Q3')) : null
         ) : null,
-        results ? (results.length ? results.map(function (w) {
+        results ? (shown.length ? shown.map(function (w) {
           var au = (w.authorships || []).slice(0, 3).map(function (a) { return a.author && a.author.display_name; }).filter(Boolean).join(', ');
+          var nw = normWork(w); nw.scopus = scopusQ(scimap, w);
           return h('div', { className: 'src', style: { alignItems: 'flex-start' }, key: w.id },
             h('div', { style: { flex: 1, minWidth: 0 } },
               h('b', { style: { fontSize: 13 } }, w.display_name || 'Untitled'),
               au ? h('div', { style: { fontSize: 11.5, color: 'var(--muted)', marginTop: 1 } }, au) : null,
-              metricTags(normWork(w))
+              metricTags(nw)
             ),
             saved[w.id] ? h('span', { className: 'chip c-ok' }, 'in library') : (props.canEdit ? h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12, flex: 'none' }, onClick: function () { add(w); } }, 'Add') : null)
           );
-        }) : h('div', { style: { fontSize: 13, color: 'var(--faint)', padding: '8px 0' } }, 'No results.')) : null
+        }) : h('div', { style: { fontSize: 13, color: 'var(--faint)', padding: '8px 0' } }, scopusMax ? 'No results match the Scopus filter.' : 'No results.')) : null
       ),
       h('div', { className: 'panel' },
         h('h3', null, 'Library', h('div', { style: { display: 'flex', gap: 10, alignItems: 'center' } },
