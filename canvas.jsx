@@ -14,8 +14,17 @@
     idea: { label: 'Idea', bg: 'var(--warn-bg, #fdf6e3)', bd: 'var(--warn, #b45309)', accent: 'var(--warn, #b45309)' },
     publication: { label: 'Publication', bg: 'var(--accent-tint, #eef0ff)', bd: 'var(--accent, #4f46e5)', accent: 'var(--accent, #4f46e5)' },
     source: { label: 'Forrás', bg: 'var(--ok-bg, #e7f6ee)', bd: 'var(--ok, #15803d)', accent: 'var(--ok, #15803d)' },
-    data: { label: 'Adat', bg: 'var(--surface-2, #f5f6f9)', bd: 'var(--accent-d, #4338ca)', accent: 'var(--accent-d, #4338ca)' }
+    data: { label: 'Adat', bg: 'var(--surface-2, #f5f6f9)', bd: 'var(--accent-d, #4338ca)', accent: 'var(--accent-d, #4338ca)' },
+    image: { label: 'Kép', bg: 'var(--surface, #fff)', bd: 'var(--line)', accent: 'var(--muted)' },
+    pdf: { label: 'PDF', bg: 'var(--surface, #fff)', bd: 'var(--danger, #b42318)', accent: 'var(--danger, #b42318)' },
+    video: { label: 'Videó', bg: 'var(--surface, #fff)', bd: 'var(--accent, #4f46e5)', accent: 'var(--accent, #4f46e5)' },
+    markdown: { label: 'Markdown', bg: 'var(--surface, #fff)', bd: 'var(--line)', accent: 'var(--muted)' },
+    link: { label: 'Link', bg: 'var(--surface, #fff)', bd: 'var(--accent, #4f46e5)', accent: 'var(--accent, #4f46e5)' }
   };
+  var MEDIA = { image: 1, pdf: 1, video: 1, markdown: 1, link: 1 };
+  var MEDIA_SIZE = { image: { w: 260, h: 190 }, pdf: { w: 320, h: 400 }, video: { w: 340, h: 210 }, markdown: { w: 320, h: 240 }, link: { w: 280, h: 96 } };
+  function ytId(u) { var m = String(u).match(/(?:youtube\.com\/(?:watch\?v=|embed\/)|youtu\.be\/)([\w-]{11})/); return m ? m[1] : null; }
+  function vimeoId(u) { var m = String(u).match(/vimeo\.com\/(\d+)/); return m ? m[1] : null; }
   var EDGE_TYPES = ['relates', 'supports', 'contradicts', 'leads-to'];
   var EDGE_COLOR = { relates: 'var(--faint)', supports: 'var(--ok)', contradicts: 'var(--danger)', 'leads-to': 'var(--accent)' };
 
@@ -37,8 +46,10 @@
     var peerS = useState([]), peers = peerS[0], setPeers = peerS[1];     // remote cursors
     var sumS = useState(null), summary = sumS[0], setSummary = sumS[1];  // AI summary { loading?, text?, err? }
     var expS = useState(false), expOpen = expS[0], setExpOpen = expS[1]; // export menu
+    var urlS = useState({}), urls = urlS[0], setUrls = urlS[1];          // storage path -> signed URL
+    var upS = useState(false), uploading = upS[0], setUploading = upS[1];
 
-    var vpRef = useRef(null), drag = useRef(null), justLoaded = useRef(false), saveT = useRef(null), chanRef = useRef(null), lastBcast = useRef(0);
+    var vpRef = useRef(null), drag = useRef(null), justLoaded = useRef(false), saveT = useRef(null), chanRef = useRef(null), lastBcast = useRef(0), fileRef = useRef(null);
 
     // ---- load ----
     useEffect(function () {
@@ -109,6 +120,35 @@
       sb.from('research_datasets').select('id,name,source,status').eq('project_id', props.projectId).order('created_at', { ascending: false }).limit(60).then(function (r) { setPickDats((r && r.data) || []); });
     }
 
+    // ---- media: upload (PDF / image / video / markdown) + links, displayed via signed URLs ----
+    function signPath(path) {
+      if (!path || urls[path]) return;
+      sb.storage.from('research-data').createSignedUrl(path, 86400).then(function (r) { if (r && r.data && r.data.signedUrl) setUrls(function (u) { var n = Object.assign({}, u); n[path] = r.data.signedUrl; return n; }); });
+    }
+    useEffect(function () { nodes.forEach(function (n) { if (MEDIA[n.type] && n.path && !urls[n.path]) signPath(n.path); }); }, [nodes]); // eslint-disable-line
+    function pickFile() { if (fileRef.current) { fileRef.current.value = ''; fileRef.current.click(); } }
+    function onPickFile(e) {
+      var f = e.target.files && e.target.files[0]; if (!f) return;
+      var mime = f.type || '', name = f.name, ext = (name.split('.').pop() || '').toLowerCase();
+      var type = mime.indexOf('image') === 0 ? 'image' : (mime === 'application/pdf' || ext === 'pdf') ? 'pdf' : mime.indexOf('video') === 0 ? 'video' : (ext === 'md' || ext === 'markdown' || mime === 'text/markdown') ? 'markdown' : null;
+      if (!type) { alert('Nem támogatott típus. Tölthető: kép, PDF, videó, .md.'); return; }
+      setUploading(true);
+      var path = props.projectId + '/canvas/' + Date.now() + '_' + name.replace(/[^A-Za-z0-9._-]/g, '_');
+      sb.storage.from('research-data').upload(path, f).then(function (res) {
+        if (res && res.error) { setUploading(false); alert('Feltöltés sikertelen: ' + res.error.message); return; }
+        var sz = MEDIA_SIZE[type];
+        if (type === 'markdown') { f.text().then(function (txt) { setUploading(false); addNode('markdown', { path: path, name: name, mime: mime, text: String(txt).slice(0, 60000), w: sz.w, h: sz.h }); }); }
+        else { setUploading(false); addNode(type, { path: path, name: name, mime: mime, w: sz.w, h: sz.h }); signPath(path); }
+      }, function () { setUploading(false); alert('Feltöltés sikertelen.'); });
+    }
+    function addLink() {
+      var url = window.prompt('Link URL (weboldal, YouTube, Vimeo, kép…):'); if (!url) return;
+      url = url.trim(); if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+      var big = ytId(url) || vimeoId(url);
+      addNode('link', { url: url, name: url, w: big ? MEDIA_SIZE.video.w : MEDIA_SIZE.link.w, h: big ? MEDIA_SIZE.video.h : MEDIA_SIZE.link.h });
+    }
+    function renderMd(t) { try { return (window.DOMPurify && window.marked) ? DOMPurify.sanitize(marked.parse(t || '')) : String(t || '').replace(/[<&>]/g, function (c) { return { '<': '&lt;', '&': '&amp;', '>': '&gt;' }[c]; }).replace(/\n/g, '<br>'); } catch (e) { return ''; } }
+
     // ---- live cursors (Supabase presence, isolated channel per canvas) ----
     useEffect(function () {
       if (!sb || !BE || !BE.user) return;
@@ -144,7 +184,7 @@
       var COL = { note: '#94a3b8', idea: '#b45309', publication: '#4f46e5', source: '#15803d', data: '#4338ca' };
       var eSvg = edges.map(function (e) { var a = nb[e.from], b = nb[e.to]; if (!a || !b) return ''; var c1 = center(a), c2 = center(b); return '<line x1="' + c1.x + '" y1="' + c1.y + '" x2="' + c2.x + '" y2="' + c2.y + '" stroke="#94a3b8" stroke-width="2"' + (e.type === 'contradicts' ? ' stroke-dasharray="6 4"' : '') + '/>'; }).join('');
       var nSvg = nodes.map(function (n) {
-        var w = n.w || NW, col = COL[n.type] || '#94a3b8', lines = wrap((n.text || '').replace(/\n/g, ' '), Math.floor((w - 22) / 6.6), 4);
+        var w = n.w || NW, col = COL[n.type] || '#94a3b8', lines = wrap((n.text || n.name || n.url || '').replace(/\n/g, ' '), Math.floor((w - 22) / 6.6), 4);
         var tspans = lines.map(function (ln, i) { return '<tspan x="' + (n.x + 11) + '" dy="' + (i === 0 ? 0 : 15) + '">' + esc(ln) + '</tspan>'; }).join('');
         return '<g><rect x="' + n.x + '" y="' + n.y + '" width="' + w + '" height="' + NH + '" rx="12" fill="#ffffff" stroke="' + col + '" stroke-width="1.5"/>' +
           '<text x="' + (n.x + 11) + '" y="' + (n.y + 18) + '" font-family="sans-serif" font-size="10" font-weight="700" fill="' + col + '">' + esc((TYPE[n.type] || TYPE.note).label).toUpperCase() + '</text>' +
@@ -162,7 +202,7 @@
     }
     function canvasText() {
       var nb = {}; nodes.forEach(function (n) { nb[n.id] = n; });
-      var ns = nodes.map(function (n) { return '• [' + (TYPE[n.type] || TYPE.note).label + '] ' + (n.text || '').replace(/\n/g, ' '); }).join('\n');
+      var ns = nodes.map(function (n) { return '• [' + (TYPE[n.type] || TYPE.note).label + '] ' + (n.text || n.name || n.url || '').replace(/\n/g, ' '); }).join('\n');
       var es = edges.map(function (e) { var a = nb[e.from], b = nb[e.to]; if (!a || !b) return null; return (a.text || (TYPE[a.type] || {}).label) + ' —[' + e.type + ']→ ' + (b.text || (TYPE[b.type] || {}).label); }).filter(Boolean).join('\n');
       return ns + (es ? '\n\nKapcsolatok:\n' + es : '');
     }
@@ -197,10 +237,12 @@
       setConn({ from: n.id, x: s.x, y: s.y });
       window.addEventListener('mousemove', onMove); window.addEventListener('mouseup', onUp);
     }
+    function onResizeDown(e, n) { e.stopPropagation(); if (!canEdit) return; setSel({ kind: 'node', id: n.id }); drag.current = { mode: 'resize', id: n.id, media: !!MEDIA[n.type], sx: e.clientX, sy: e.clientY, ow: n.w || NW, oh: n.h || NH }; window.addEventListener('mousemove', onMove); window.addEventListener('mouseup', onUp); }
     function onMove(e) {
       var d = drag.current; if (!d) return;
       if (d.mode === 'pan') setView(function (v) { return { tx: d.tx + (e.clientX - d.sx), ty: d.ty + (e.clientY - d.sy), k: v.k }; });
       else if (d.mode === 'node') { var dx = (e.clientX - d.sx) / view.k, dy = (e.clientY - d.sy) / view.k; updateNode(d.id, { x: Math.round(d.ox + dx), y: Math.round(d.oy + dy) }); }
+      else if (d.mode === 'resize') { var rw = Math.round(d.ow + (e.clientX - d.sx) / view.k), rh = Math.round(d.oh + (e.clientY - d.sy) / view.k); updateNode(d.id, d.media ? { w: Math.max(160, rw), h: Math.max(90, rh) } : { w: Math.max(140, rw) }); }
       else if (d.mode === 'conn') { var r = vpRef.current.getBoundingClientRect(); setConn(function (c) { return c && { from: c.from, x: e.clientX - r.left, y: e.clientY - r.top }; }); }
     }
     function onUp(e) {
@@ -257,23 +299,45 @@
     });
     var connEl = conn ? (function () { var a = nodeById[conn.from]; if (!a) return null; var p1 = screen(center(a)); return h('path', { d: 'M' + p1.x + ',' + p1.y + ' L' + conn.x + ',' + conn.y, fill: 'none', stroke: 'var(--accent)', strokeWidth: 2, strokeDasharray: '5 4' }); })() : null;
 
+    // ---- media preview body ----
+    function nodeBody(n) {
+      var u = urls[n.path], loading = h('div', { style: { padding: 14, color: 'var(--faint)', fontSize: 12 } }, 'betöltés…');
+      if (n.type === 'image') return u ? h('img', { src: u, draggable: false, style: { width: '100%', height: '100%', objectFit: 'contain', display: 'block' } }) : loading;
+      if (n.type === 'pdf') return u ? h('iframe', { src: u + '#toolbar=0&navpanes=0', title: n.name, style: { width: '100%', height: '100%', border: 0, background: '#fff' } }) : loading;
+      if (n.type === 'video') return u ? h('video', { src: u, controls: true, style: { width: '100%', height: '100%', background: '#000', display: 'block' } }) : loading;
+      if (n.type === 'markdown') return h('div', { className: 'md', style: { padding: '8px 12px', overflow: 'auto', height: '100%', fontSize: 13, lineHeight: 1.5, boxSizing: 'border-box' }, dangerouslySetInnerHTML: { __html: renderMd(n.text) } });
+      if (n.type === 'link') {
+        var yt = ytId(n.url), vm = vimeoId(n.url);
+        if (yt) return h('iframe', { src: 'https://www.youtube.com/embed/' + yt, title: n.name || 'YouTube', allowFullScreen: true, style: { width: '100%', height: '100%', border: 0 } });
+        if (vm) return h('iframe', { src: 'https://player.vimeo.com/video/' + vm, title: n.name || 'Vimeo', allowFullScreen: true, style: { width: '100%', height: '100%', border: 0 } });
+        var dom = n.url; try { dom = new URL(n.url).hostname.replace(/^www\./, ''); } catch (e) { }
+        return h('a', { href: n.url, target: '_blank', rel: 'noopener', onMouseDown: function (e) { e.stopPropagation(); }, style: { display: 'flex', alignItems: 'center', gap: 9, padding: '10px 12px', textDecoration: 'none', color: 'var(--ink)', height: '100%', boxSizing: 'border-box' } },
+          h('img', { src: 'https://www.google.com/s2/favicons?domain=' + encodeURIComponent(dom) + '&sz=32', width: 20, height: 20, style: { borderRadius: 4, flex: 'none' } }),
+          h('div', { style: { minWidth: 0 } }, h('div', { style: { fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, dom), h('div', { style: { fontSize: 11, color: 'var(--accent)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, n.url)));
+      }
+      return null;
+    }
+
     // ---- node boxes (world via transform) ----
     var nodeEls = nodes.map(function (n) {
-      var t = TYPE[n.type] || TYPE.note, on = sel && sel.kind === 'node' && sel.id === n.id, isEd = editing === n.id;
+      var t = TYPE[n.type] || TYPE.note, on = sel && sel.kind === 'node' && sel.id === n.id, isEd = editing === n.id, media = !!MEDIA[n.type];
       return h('div', {
         key: n.id, 'data-node': n.id,
-        style: { position: 'absolute', left: n.x, top: n.y, width: (n.w || NW), minHeight: NH, boxSizing: 'border-box', background: t.bg, border: '1.5px solid ' + (on ? 'var(--accent)' : t.bd), borderRadius: 12, boxShadow: on ? '0 4px 16px rgba(0,0,0,.18)' : '0 2px 8px rgba(0,0,0,.08)', cursor: canEdit ? 'grab' : 'default', userSelect: isEd ? 'text' : 'none' },
-        onMouseDown: function (e) { onNodeDown(e, n); }, onDoubleClick: function (e) { e.stopPropagation(); if (canEdit && n.type === 'note') setEditing(n.id); }
+        onMouseDown: function (e) { if (canEdit && !media && !isEd) onNodeDown(e, n); else { e.stopPropagation(); setSel({ kind: 'node', id: n.id }); } },
+        onDoubleClick: function (e) { e.stopPropagation(); if (canEdit && n.type === 'note') setEditing(n.id); },
+        style: { position: 'absolute', left: n.x, top: n.y, width: (n.w || NW), height: media ? (n.h || NH) : undefined, minHeight: media ? undefined : NH, display: 'flex', flexDirection: 'column', boxSizing: 'border-box', background: t.bg, border: '1.5px solid ' + (on ? 'var(--accent)' : t.bd), borderRadius: 12, boxShadow: on ? '0 4px 16px rgba(0,0,0,.18)' : '0 2px 8px rgba(0,0,0,.08)', overflow: 'hidden', userSelect: isEd ? 'text' : 'none' }
       },
-        h('div', { style: { fontSize: 9.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.4px', color: t.accent, padding: '6px 10px 0' } }, t.label),
-        isEd
-          ? h('textarea', { autoFocus: true, defaultValue: n.text || '', onBlur: function (e) { updateNode(n.id, { text: e.target.value }); setEditing(null); }, onMouseDown: function (e) { e.stopPropagation(); }, style: { width: '100%', minHeight: 50, border: 0, background: 'transparent', resize: 'none', fontFamily: 'inherit', fontSize: 13, lineHeight: 1.4, padding: '2px 10px 10px', color: 'inherit', outline: 'none', boxSizing: 'border-box' } })
-          : h('div', { style: { fontSize: 13, lineHeight: 1.4, padding: '2px 10px 10px', color: 'var(--ink)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, n.text || h('span', { style: { color: 'var(--faint)' } }, n.type === 'note' ? 'dupla katt a szerkesztéshez' : '—')),
-        n.meta ? h('div', { style: { fontSize: 11, color: 'var(--muted)', padding: '0 10px 8px' } }, n.meta) : null,
-        // connector handle
-        canEdit ? h('div', { title: 'Húzd egy másik node-ra', onMouseDown: function (e) { onHandleDown(e, n); }, style: { position: 'absolute', right: -7, top: '50%', marginTop: -7, width: 14, height: 14, borderRadius: '50%', background: 'var(--accent)', border: '2px solid var(--surface)', cursor: 'crosshair' } }) : null,
-        // delete
-        (on && canEdit) ? h('button', { onClick: function (e) { e.stopPropagation(); delNode(n.id); }, onMouseDown: function (e) { e.stopPropagation(); }, style: { position: 'absolute', top: -10, right: -10, width: 22, height: 22, borderRadius: '50%', border: '1px solid var(--line)', background: 'var(--surface)', color: 'var(--danger)', cursor: 'pointer', fontSize: 13, lineHeight: '20px', padding: 0 } }, '×') : null);
+        // header = drag handle (so iframes/video don't block dragging)
+        h('div', { 'data-nodehead': '1', onMouseDown: function (e) { if (canEdit) onNodeDown(e, n); }, style: { fontSize: 9.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.4px', color: t.accent, padding: media ? '6px 10px' : '6px 10px 0', cursor: canEdit ? 'grab' : 'default', flex: 'none', display: 'flex', alignItems: 'center', gap: 6, borderBottom: media ? '1px solid var(--line)' : 'none' } },
+          t.label, media && n.name ? h('span', { style: { fontWeight: 500, textTransform: 'none', color: 'var(--faint)', fontSize: 10.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, n.name) : null),
+        // body
+        media ? h('div', { style: { flex: 1, minHeight: 0, position: 'relative' } }, nodeBody(n))
+          : isEd ? h('textarea', { autoFocus: true, defaultValue: n.text || '', onBlur: function (e) { updateNode(n.id, { text: e.target.value }); setEditing(null); }, onMouseDown: function (e) { e.stopPropagation(); }, style: { width: '100%', minHeight: 50, border: 0, background: 'transparent', resize: 'none', fontFamily: 'inherit', fontSize: 13, lineHeight: 1.4, padding: '2px 10px 10px', color: 'inherit', outline: 'none', boxSizing: 'border-box' } })
+            : h('div', { style: { fontSize: 13, lineHeight: 1.4, padding: '2px 10px 10px', color: 'var(--ink)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, n.text || h('span', { style: { color: 'var(--faint)' } }, n.type === 'note' ? 'dupla katt a szerkesztéshez' : '—')),
+        (!media && n.meta) ? h('div', { style: { fontSize: 11, color: 'var(--muted)', padding: '0 10px 8px' } }, n.meta) : null,
+        canEdit ? h('div', { title: 'Húzd egy másik node-ra', onMouseDown: function (e) { onHandleDown(e, n); }, style: { position: 'absolute', right: -7, top: '50%', marginTop: -7, width: 14, height: 14, borderRadius: '50%', background: 'var(--accent)', border: '2px solid var(--surface)', cursor: 'crosshair', zIndex: 2 } }) : null,
+        canEdit ? h('div', { title: 'Átméretezés', onMouseDown: function (e) { onResizeDown(e, n); }, style: { position: 'absolute', right: 0, bottom: 0, width: 16, height: 16, cursor: 'nwse-resize', zIndex: 2, background: 'linear-gradient(135deg, transparent 45%, ' + (on ? 'var(--accent)' : 'var(--muted)') + ' 45%, ' + (on ? 'var(--accent)' : 'var(--muted)') + ' 60%, transparent 60%)' } }) : null,
+        (on && canEdit) ? h('button', { onClick: function (e) { e.stopPropagation(); delNode(n.id); }, onMouseDown: function (e) { e.stopPropagation(); }, style: { position: 'absolute', top: -10, right: -10, width: 22, height: 22, borderRadius: '50%', border: '1px solid var(--line)', background: 'var(--surface)', color: 'var(--danger)', cursor: 'pointer', fontSize: 13, lineHeight: '20px', padding: 0, zIndex: 3 } }, '×') : null);
     });
 
     var btn = { border: '1px solid var(--line)', background: 'var(--surface)', color: 'var(--ink)', borderRadius: 8, padding: '6px 11px', fontFamily: 'inherit', fontSize: 13, fontWeight: 600, cursor: 'pointer' };
@@ -285,6 +349,9 @@
         canEdit ? h('button', { style: btn, onClick: openPubs }, '+ Publikáció') : null,
         canEdit ? h('button', { style: btn, onClick: openSources }, '+ Forrás') : null,
         canEdit ? h('button', { style: btn, onClick: openData }, '+ Adat') : null,
+        canEdit ? h('button', { style: btn, onClick: pickFile, disabled: uploading, title: 'Kép / PDF / videó / .md feltöltése' }, uploading ? 'Feltöltés…' : '⬆ Feltöltés') : null,
+        canEdit ? h('button', { style: btn, onClick: addLink, title: 'Weboldal / YouTube / Vimeo / kép link' }, '+ Link') : null,
+        canEdit ? h('input', { ref: fileRef, type: 'file', accept: 'image/*,application/pdf,video/*,.md,.markdown,text/markdown', style: { display: 'none' }, onChange: onPickFile }) : null,
         h('span', { style: { width: 1, height: 22, background: 'var(--line)', margin: '0 2px' } }),
         h('button', { style: btn, title: 'Kicsinyítés', onClick: function () { zoom(1 / 1.2); } }, '−'),
         h('button', { style: btn, title: 'Nagyítás', onClick: function () { zoom(1.2); } }, '+'),
