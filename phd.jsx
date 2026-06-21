@@ -520,6 +520,7 @@
                 h(Avatar, { u: s, size: 34 }),
                 h('div', { style: { flex: 1, minWidth: 0 } }, h('b', null, s.name), h('span', { style: { display: 'block', fontSize: 12, color: 'var(--muted)' } }, s.topic || '—')),
                 rep ? h('span', { className: 'chip c-grey' }, (rep.chat_msgs || 0) + ' chat · ' + (rep.ideas || 0) + ' ötlet · ' + (rep.log_entries || 0) + ' napló') : null,
+                h('a', { className: 'btn', style: { textDecoration: 'none' }, href: 'Research.html?student=' + s.id, title: 'A diák kutatási projektjei (csak olvasható)' }, 'Kutatás →'),
                 h('button', { className: 'btn' + (rep ? '' : ' pri'), disabled: g, onClick: function () { generate(s.id); } }, g ? 'Készül…' : (rep ? 'Frissítés' : 'Generálás'))),
               !rep ? h('div', { style: { fontSize: 13, color: 'var(--muted)', marginTop: 8 } }, 'Erre a napra még nincs riport. A „Generálás" összefoglalja a diák aznapi kutatási aktivitását (AI-chat, napló, ötletek, irodalom, adat/compute).') :
                 h('div', { style: { marginTop: 10 } },
@@ -585,7 +586,7 @@
   function App() {
     var ph = useState('loading'), phase = ph[0], setPhase = ph[1];
     var meS = useState(null), me = meS[0], setMe = meS[1];
-    var vS = useState('supervisors'), view = vS[0], setView = vS[1];
+    var vS = useState((function () { try { return new URLSearchParams(location.search).get('view') || 'supervisors'; } catch (e) { return 'supervisors'; } })()), view = vS[0], setView = vS[1];
     var dS = useState({ sups: [], students: [], topics: [], milestones: [], supervisions: [] }), data = dS[0], setData = dS[1];
     var selS = useState(null), sel = selS[0], setSel = selS[1];   // selected student (detail)
 

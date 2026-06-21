@@ -61,14 +61,21 @@
     function save() {
       if (!form.title.trim()) return;
       setSaving(true);
-      sb.from('research_projects').insert({
-        owner_id: props.ownerId, title: form.title.trim(), field: form.field.trim() || null,
-        keywords: form.keywords ? form.keywords.split(',').map(function (x) { return x.trim(); }).filter(Boolean) : null,
-        goal: form.goal.trim() || null, stage: 0, status: 'active'
-      }).select().maybeSingle().then(function (r) {
-        setSaving(false);
-        if (r && r.error) { alert('Could not create: ' + r.error.message); return; }
-        props.onSaved(r && r.data);
+      // Stamp student_id when the creator is a PhD student, so the project is visible to (and digestible
+      // for) their supervisor. Without this the project stays owner-only and never reaches the supervisor.
+      sb.from('phd_students').select('id').eq('profile_id', props.ownerId).maybeSingle().then(function (sr) {
+        var sid = sr && sr.data && sr.data.id;
+        var payload = {
+          owner_id: props.ownerId, title: form.title.trim(), field: form.field.trim() || null,
+          keywords: form.keywords ? form.keywords.split(',').map(function (x) { return x.trim(); }).filter(Boolean) : null,
+          goal: form.goal.trim() || null, stage: 0, status: 'active'
+        };
+        if (sid) payload.student_id = sid;
+        sb.from('research_projects').insert(payload).select().maybeSingle().then(function (r) {
+          setSaving(false);
+          if (r && r.error) { alert('Could not create: ' + r.error.message); return; }
+          props.onSaved(r && r.data);
+        });
       });
     }
     return h('div', { className: 'scrim', onClick: props.onClose },
@@ -736,6 +743,7 @@
     else content = p.goal ? h('div', { className: 'panel' }, h('h3', null, 'Goal'), h('div', { style: { fontSize: 13.5 } }, p.goal)) : h('div', { className: 'soon' }, 'No goal set yet.');
     return h('div', null,
       h('button', { className: 'back-btn', onClick: props.onBack }, '← All projects'),
+      (!props.canEdit && props.viewerId && p.owner_id !== props.viewerId) ? h('div', { className: 'ro-banner' }, '👁 Témavezetői nézet — ' + (props.studentName ? props.studentName + ' projektje' : 'diák projektje') + '. Csak olvasható.') : null,
       h('div', { className: 'dhead' },
         h('div', { className: 'dt' }, h('h1', null, p.title), h('p', null, (p.field || 'No field set') + (p.keywords && p.keywords.length ? ' · ' + p.keywords.join(', ') : ''))),
         props.canEdit
@@ -752,8 +760,12 @@
   function ProjectCard(props) {
     var p = props.project;
     var openTasks = p._openTasks;
+    // explicit author attribution so a student's (or a test's) project can never read as the viewer's own
+    var badge;
+    if (props.meId && p.owner_id === props.meId) badge = h('span', { className: 'chip c-grey author-badge' }, 'Saját');
+    else { var st = props.studentById && props.studentById[p.student_id]; badge = h('span', { className: 'chip ' + (st ? 'c-acc' : 'c-warn') + ' author-badge' }, st ? 'Diák: ' + st.name : 'Diák munkája'); }
     return h('div', { className: 'card', onClick: function () { props.onOpen(p); } },
-      h('div', { className: 'ch' }, h('div', null, h('b', null, p.title), h('span', null, p.field || '—'))),
+      h('div', { className: 'ch' }, h('div', null, h('b', null, p.title), h('span', null, p.field || '—')), badge),
       p.keywords && p.keywords.length ? h('div', { className: 'tags' }, p.keywords.slice(0, 4).map(function (k, i) { return h('span', { className: 'tag', key: i }, k); })) : null,
       h('div', { className: 'meter' }, h('i', { style: { width: Math.round((p.stage / (STAGES.length - 1)) * 100) + '%' } })),
       h('div', { className: 'kv' }, h('span', null, 'Stage: ' + STAGES[p.stage || 0]), h('span', { className: 'chip ' + (p.status === 'active' ? 'c-ok' : 'c-grey') }, STATUS_LABEL[p.status] || p.status))
@@ -792,6 +804,53 @@
     );
   }
 
+  // ---------- Supervisor view: each supervised student → their (read-only) projects + today's digest chip ----------
+  function SupervisedView(props) {
+    var students = (props.students && props.students.list) || [];
+    var projects = props.projects || [];
+    var day = new Date().toISOString().slice(0, 10);
+    var dgS = useState({}), digests = dgS[0], setDigests = dgS[1];
+    var gnS = useState({}), gen = gnS[0], setGen = gnS[1];
+    var ids = students.map(function (s) { return s.id; });
+    function loadDigests() {
+      if (!ids.length) return;
+      sb.from('student_daily_reports').select('student_id,chat_msgs,ideas,log_entries').in('student_id', ids).eq('day', day).then(function (r) {
+        var m = {}; ((r && r.data) || []).forEach(function (x) { m[x.student_id] = x; }); setDigests(m);
+      });
+    }
+    useEffect(loadDigests, [ids.length]); // eslint-disable-line
+    function setG(sid, v) { setGen(function (g) { var n = Object.assign({}, g); n[sid] = v; return n; }); }
+    function generate(sid) {
+      setG(sid, true);
+      sb.functions.invoke('student-digest', { body: { student_id: sid, day: day } }).then(function () { setG(sid, false); loadDigests(); }, function () { setG(sid, false); });
+    }
+    var byStudent = {}; projects.forEach(function (p) { (byStudent[p.student_id] = byStudent[p.student_id] || []).push(p); });
+    var known = {}; students.forEach(function (s) { known[s.id] = 1; });
+    var orphans = projects.filter(function (p) { return !known[p.student_id]; });
+    function card(p) { return h(ProjectCard, { key: p.id, project: p, meId: null, studentById: props.studentById, onOpen: props.onOpen }); }
+    if (!students.length && !projects.length) return h('div', { className: 'soon' }, h('b', null, 'Még nincs diákod kutatási projekttel. '), 'Amikor egy diákod kutatási projektet hoz létre, itt jelenik meg — diákonként és összesítve.');
+    return h('div', null,
+      students.map(function (s) {
+        var ps = byStudent[s.id] || [];
+        var rep = digests[s.id], g = gen[s.id];
+        return h('div', { className: 'sup-student', key: s.id },
+          h('div', { className: 'sup-head' },
+            h(Avatar, { u: s, size: 30 }),
+            h('div', { style: { flex: 1, minWidth: 0 } }, h('b', null, s.name), h('span', { className: 'sup-topic' }, s.topic || '—')),
+            rep ? h('span', { className: 'chip c-grey' }, (rep.chat_msgs || 0) + ' chat · ' + (rep.ideas || 0) + ' ötlet · ' + (rep.log_entries || 0) + ' napló') : null,
+            h('button', { className: 'btn' + (rep ? '' : ' pri'), style: { padding: '5px 10px', fontSize: 12 }, disabled: g, onClick: function () { generate(s.id); } }, g ? 'Készül…' : (rep ? 'Riport frissítése' : 'Riport generálása')),
+            h('a', { className: 'btn', style: { padding: '5px 10px', fontSize: 12, textDecoration: 'none' }, href: 'PhD.html?view=reports', title: 'Napi AI-összefoglaló a Doctoral School-ban' }, 'Napi riport →')
+          ),
+          ps.length ? h('div', { className: 'grid' }, ps.map(card)) : h('div', { className: 'sup-empty' }, 'Nincs aktív kutatási projekt.')
+        );
+      }),
+      orphans.length ? h('div', { className: 'sup-student' },
+        h('div', { className: 'sup-head' }, h('b', null, 'Egyéb diák-projektek')),
+        h('div', { className: 'grid' }, orphans.map(card))
+      ) : null
+    );
+  }
+
   // ---------- App ----------
   function App() {
     var ph = useState('loading'), phase = ph[0], setPhase = ph[1];
@@ -799,6 +858,7 @@
     var pjS = useState([]), projects = pjS[0], setProjects = pjS[1];
     var selS = useState(null), sel = selS[0], setSel = selS[1];
     var dS = useState({ log: [], tasks: [], ideas: [], sources: [], datasets: [], jobs: [] }), detail = dS[0], setDetail = dS[1];
+    var stuS = useState({ byId: {}, list: [] }), supStudents = stuS[0], setSupStudents = stuS[1];   // this supervisor's students (for the "Diákjaim kutatása" view + author badges)
 
     useEffect(function () { boot(); }, []);
     function boot() {
@@ -812,7 +872,22 @@
         var p = (r && r.data) || {};
         setMe({ id: pid, name: p.name || (target && target.name) || BE.user.name, role: p.role, email: email, _preview: !!target });
         loadProjects(pid, !!target, function () { setPhase('ready'); });
+        loadStudents(pid);
       }, function () { setMe({ id: pid, name: (target && target.name) || BE.user.name, email: email, _preview: !!target }); setPhase('ready'); });
+    }
+    // Load the students this user supervises (scoped like phd.jsx effStudents). Empty for non-supervisors
+    // or if RLS returns nothing — the supervised view + badges then degrade gracefully.
+    function loadStudents(pid) {
+      Promise.all([
+        sb.from('phd_students').select('id,name,email,profile_id,supervisor_id,topic,avatar_url'),
+        sb.from('phd_supervisions').select('student_id,supervisor_id,status')
+      ]).then(function (res) {
+        var all = (res[0] && res[0].data) || [];
+        var acc = ((res[1] && res[1].data) || []).filter(function (v) { return v.supervisor_id === pid && v.status === 'accepted'; }).map(function (v) { return v.student_id; });
+        var mine = all.filter(function (s) { return s.supervisor_id === pid || acc.indexOf(s.id) >= 0; });
+        var byId = {}; mine.forEach(function (s) { byId[s.id] = s; });
+        setSupStudents({ byId: byId, list: mine });
+      }, function () { setSupStudents({ byId: {}, list: [] }); });
     }
     function loadProjects(pid, preview, done) {
       sb.from('research_projects').select('id,owner_id,student_id,title,field,keywords,stage,status,goal,updated_at').order('updated_at', { ascending: false }).then(function (r) {
@@ -849,8 +924,9 @@
     var authorId = (BE.user && BE.user.id) || me.id;   // RLS ties a log author to the real session user
     function canEdit(p) { return !!(p && (isAdmin || p.owner_id === me.id)); }
 
+    var initStudent = null; try { initStudent = new URLSearchParams(location.search).get('student'); } catch (e) { }
     return h(AppShell, {
-      me: me, preview: preview, projects: projects, sel: sel,
+      me: me, preview: preview, projects: projects, sel: sel, students: supStudents, initStudent: initStudent,
       openProject: openProject, onBack: function () { setSel(null); },
       detail: detail, canEdit: canEdit, authorId: authorId, refreshAll: refreshAll, reloadProjects: reloadProjects
     });
@@ -859,17 +935,30 @@
   // shell split out so "new project" modal state is local & simple
   function AppShell(props) {
     var a = useState(false), adding = a[0], setAdding = a[1];
-    var me = props.me, sel = props.sel;
-    var roleLabel = me.role === 'admin' ? 'Administrator' : 'Researcher';
-    var sub = sel ? STAGES[sel.stage || 0] + ' stage' : (props.projects.length + ' project' + (props.projects.length === 1 ? '' : 's'));
+    var me = props.me, sel = props.sel, meId = me.id;
+    var studentById = (props.students && props.students.byId) || {};
+    var studentList = (props.students && props.students.list) || [];
+    var mineProjects = props.projects.filter(function (p) { return p.owner_id === meId; });
+    var supProjects = props.projects.filter(function (p) { return p.owner_id !== meId; });
+    var isSup = studentList.length > 0 || supProjects.length > 0;
+    var vw = useState(props.initStudent ? 'supervised' : 'mine'), view = vw[0], setView = vw[1];
+    if (!isSup && view === 'supervised') view = 'mine';
+    var roleLabel = me.role === 'admin' ? 'Administrator' : (isSup ? 'Supervisor' : 'Researcher');
+    var sub = sel ? STAGES[sel.stage || 0] + ' stage' : (view === 'supervised' ? (studentList.length + ' diák') : (mineProjects.length + ' project' + (mineProjects.length === 1 ? '' : 's')));
 
+    var seg = (isSup && !sel) ? h('div', { className: 'segctl' },
+      h('button', { className: view === 'mine' ? 'on' : '', onClick: function () { setView('mine'); } }, 'Saját kutatásom (' + mineProjects.length + ')'),
+      h('button', { className: view === 'supervised' ? 'on' : '', onClick: function () { setView('supervised'); } }, 'Diákjaim kutatása (' + supProjects.length + ')')
+    ) : null;
     var body;
     if (sel) {
-      body = h(ProjectDetail, { project: sel, log: props.detail.log, tasks: props.detail.tasks, ideas: props.detail.ideas, sources: props.detail.sources, datasets: props.detail.datasets, jobs: props.detail.jobs, canEdit: props.canEdit(sel), authorId: props.authorId, myEmail: props.me.email, onBack: props.onBack, onChanged: props.refreshAll });
-    } else if (!props.projects.length) {
-      body = h('div', { className: 'soon' }, h('b', null, 'No research projects yet. '), 'Create one to start tracking a study from idea to submission.', h('div', { style: { marginTop: 14 } }, h('button', { className: 'btn pri', onClick: function () { setAdding(true); } }, '+ New project')));
+      body = h(ProjectDetail, { project: sel, log: props.detail.log, tasks: props.detail.tasks, ideas: props.detail.ideas, sources: props.detail.sources, datasets: props.detail.datasets, jobs: props.detail.jobs, canEdit: props.canEdit(sel), viewerId: meId, studentName: (studentById[sel.student_id] && studentById[sel.student_id].name) || null, authorId: props.authorId, myEmail: props.me.email, onBack: props.onBack, onChanged: props.refreshAll });
+    } else if (view === 'supervised') {
+      body = h('div', null, seg, h(SupervisedView, { students: props.students, projects: supProjects, studentById: studentById, onOpen: props.openProject }));
+    } else if (!mineProjects.length) {
+      body = h('div', null, seg, h('div', { className: 'soon' }, h('b', null, 'No research projects yet. '), 'Create one to start tracking a study from idea to submission.', h('div', { style: { marginTop: 14 } }, h('button', { className: 'btn pri', onClick: function () { setAdding(true); } }, '+ New project'))));
     } else {
-      body = h('div', { className: 'grid' }, props.projects.map(function (p) { return h(ProjectCard, { key: p.id, project: p, onOpen: props.openProject }); }));
+      body = h('div', null, seg, h('div', { className: 'grid' }, mineProjects.map(function (p) { return h(ProjectCard, { key: p.id, project: p, meId: meId, studentById: studentById, onOpen: props.openProject }); })));
     }
 
     return h('div', { className: 'app' },
@@ -886,7 +975,7 @@
           h('div', null, h('h1', null, sel ? 'Project' : 'Research projects'), h('div', { className: 'sub' }, sub)),
           h('div', { style: { display: 'flex', gap: 10, alignItems: 'center' } },
             h(NotifBell, null),
-            sel ? null : h('button', { className: 'btn pri', onClick: function () { setAdding(true); } }, '+ New project')
+            (sel || view === 'supervised') ? null : h('button', { className: 'btn pri', onClick: function () { setAdding(true); } }, '+ New project')
           )
         ),
         body,
