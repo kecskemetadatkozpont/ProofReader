@@ -459,6 +459,86 @@
     );
   }
 
+  // ---------- Student reports (supervisor: an LLM digest of each student's research day) ----------
+  function StudentReports(props) {
+    var students = props.students || [];
+    var d0 = useState(new Date().toISOString().slice(0, 10)), day = d0[0], setDay = d0[1];
+    var r0 = useState({}), reports = r0[0], setReports = r0[1];
+    var l0 = useState(true), loading = l0[0], setLoading = l0[1];
+    var g0 = useState({}), gen = g0[0], setGen = g0[1];
+    var e0 = useState({}), expanded = e0[0], setExpanded = e0[1];
+    var ids = students.map(function (s) { return s.id; });
+    function load() {
+      if (!ids.length || !sb) { setLoading(false); return; }
+      setLoading(true);
+      sb.from('student_daily_reports').select('*').in('student_id', ids).eq('day', day).then(function (r) {
+        var m = {}; ((r && r.data) || []).forEach(function (x) { m[x.student_id] = x; });
+        setReports(m); setLoading(false);
+      });
+    }
+    useEffect(load, [day, ids.length]); // eslint-disable-line
+    function setFlag(setter, sid, val) { setter(function (o) { var n = Object.assign({}, o); n[sid] = val; return n; }); }
+    function generate(sid) {
+      setFlag(setGen, sid, true);
+      sb.functions.invoke('student-digest', { body: { student_id: sid, day: day } }).then(function () { setFlag(setGen, sid, false); load(); }, function () { setFlag(setGen, sid, false); });
+    }
+    function toggleChat(sid) {
+      if (expanded[sid] && expanded[sid].open) { setFlag(setExpanded, sid, { open: false }); return; }
+      var end = new Date(new Date(day + 'T00:00:00Z').getTime() + 86400000).toISOString();
+      sb.from('research_projects').select('id').eq('student_id', sid).then(function (pr) {
+        var pids = ((pr && pr.data) || []).map(function (p) { return p.id; });
+        if (!pids.length) { setFlag(setExpanded, sid, { open: true, msgs: [] }); return; }
+        sb.from('research_chats').select('id').in('project_id', pids).then(function (cr) {
+          var cids = ((cr && cr.data) || []).map(function (c) { return c.id; });
+          if (!cids.length) { setFlag(setExpanded, sid, { open: true, msgs: [] }); return; }
+          sb.from('research_messages').select('role,content,created_at').in('chat_id', cids).gte('created_at', day + 'T00:00:00Z').lt('created_at', end).order('created_at', { ascending: true }).then(function (mr) {
+            setFlag(setExpanded, sid, { open: true, msgs: (mr && mr.data) || [] });
+          });
+        });
+      });
+    }
+    function blk(label, arr) {
+      if (!arr || !arr.length) return null;
+      return h('div', { style: { marginTop: 8 } },
+        h('div', { style: { fontSize: 11.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.3px', color: 'var(--faint)', marginBottom: 4 } }, label),
+        h('ul', { style: { margin: 0, paddingLeft: 18, fontSize: 13, lineHeight: 1.5 } }, arr.map(function (x, i) { return h('li', { key: i }, String(x)); })));
+    }
+    var today = new Date().toISOString().slice(0, 10);
+    var yday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+    var dateInput = h('input', { type: 'date', value: day, max: today, onChange: function (e) { if (e.target.value) setDay(e.target.value); }, style: { height: 34, border: '1px solid var(--line)', borderRadius: 8, padding: '0 10px', fontFamily: 'inherit', fontSize: 13, background: 'var(--surface)', color: 'inherit' } });
+    return h('div', null,
+      h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14, flexWrap: 'wrap' } },
+        h('button', { className: 'btn' + (day === today ? ' pri' : ''), onClick: function () { setDay(today); } }, 'Ma'),
+        h('button', { className: 'btn' + (day === yday ? ' pri' : ''), onClick: function () { setDay(yday); } }, 'Tegnap'),
+        dateInput),
+      !students.length ? h('div', { className: 'empty' }, 'Nincs diákod, akiről riport készülhetne.') :
+        loading ? h('div', { className: 'empty' }, 'Betöltés…') :
+          students.map(function (s) {
+            var rep = reports[s.id], sm = (rep && rep.summary) || null, g = gen[s.id], ex = expanded[s.id];
+            return h('div', { className: 'panel', key: s.id, style: { marginBottom: 12 } },
+              h('div', { style: { display: 'flex', alignItems: 'center', gap: 11 } },
+                h(Avatar, { u: s, size: 34 }),
+                h('div', { style: { flex: 1, minWidth: 0 } }, h('b', null, s.name), h('span', { style: { display: 'block', fontSize: 12, color: 'var(--muted)' } }, s.topic || '—')),
+                rep ? h('span', { className: 'chip c-grey' }, (rep.chat_msgs || 0) + ' chat · ' + (rep.ideas || 0) + ' ötlet · ' + (rep.log_entries || 0) + ' napló') : null,
+                h('button', { className: 'btn' + (rep ? '' : ' pri'), disabled: g, onClick: function () { generate(s.id); } }, g ? 'Készül…' : (rep ? 'Frissítés' : 'Generálás'))),
+              !rep ? h('div', { style: { fontSize: 13, color: 'var(--muted)', marginTop: 8 } }, 'Erre a napra még nincs riport. A „Generálás" összefoglalja a diák aznapi kutatási aktivitását (AI-chat, napló, ötletek, irodalom, adat/compute).') :
+                h('div', { style: { marginTop: 10 } },
+                  sm.work_summary ? h('p', { style: { margin: '0 0 6px', fontSize: 13.5, lineHeight: 1.55 } }, sm.work_summary) : null,
+                  blk('Döntések', sm.decisions),
+                  blk('Nyitott kérdések', sm.open_questions),
+                  blk('Új ötletek', sm.ideas),
+                  (sm.blockers && sm.blockers.length) ? blk('⚠ Elakadás / iránymutatás kell', sm.blockers) : null,
+                  (sm.topics && sm.topics.length) ? h('div', { style: { marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 6 } }, sm.topics.map(function (t, i) { return h('span', { key: i, className: 'chip c-grey' }, t); })) : null,
+                  h('div', { style: { marginTop: 12, display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' } },
+                    rep.chat_msgs ? h('button', { className: 'btn', style: { padding: '5px 10px', fontSize: 12.5 }, onClick: function () { toggleChat(s.id); } }, (ex && ex.open) ? 'Beszélgetés elrejtése' : 'Beszélgetés megnyitása (' + rep.chat_msgs + ')') : null,
+                    h('span', { style: { fontSize: 11.5, color: 'var(--faint)' } }, 'Generálva: ' + (rep.generated_at || '').slice(0, 16).replace('T', ' '))),
+                  (ex && ex.open) ? h('div', { style: { marginTop: 10, borderTop: '1px solid var(--line)', paddingTop: 10, maxHeight: 320, overflowY: 'auto' } },
+                    (ex.msgs && ex.msgs.length) ? ex.msgs.map(function (m, i) {
+                      return h('div', { key: i, style: { fontSize: 12.5, lineHeight: 1.5, marginBottom: 8 } }, h('b', { style: { color: m.role === 'user' ? 'var(--accent)' : 'var(--muted)' } }, (m.role === 'user' ? s.name : 'AI') + ': '), m.content);
+                    }) : h('div', { style: { fontSize: 12.5, color: 'var(--faint)' } }, 'Nincs aznapi üzenet.')) : null));
+          }));
+  }
+
   // ---------- Notifications bell (shared with Research; digests land for supervisors here too) ----------
   function NotifBell() {
     var nS = useState([]), notes = nS[0], setNotes = nS[1];
@@ -469,8 +549,8 @@
     function markRead(n) { if (n.read_at) return; sb.from('notifications').update({ read_at: new Date().toISOString() }).eq('id', n.id).then(function () { setNotes(function (l) { return l.map(function (x) { return x.id === n.id ? Object.assign({}, x, { read_at: 'now' }) : x; }); }); }); }
     function markAll() { var ids = notes.filter(function (n) { return !n.read_at; }).map(function (n) { return n.id; }); if (!ids.length) return; sb.from('notifications').update({ read_at: new Date().toISOString() }).in('id', ids).then(load); }
     var unread = notes.filter(function (n) { return !n.read_at; }).length;
-    function ttl(n) { return n.kind === 'digest' ? 'Daily research digest' : ((n.payload && n.payload.title) || n.kind); }
-    function summ(n) { var p = n.payload || {}; if (n.kind === 'digest') return (p.day || '') + ' · ' + (p.students || 0) + ' student' + (p.students === 1 ? '' : 's') + ', ' + (p.entries || 0) + ' update' + (p.entries === 1 ? '' : 's'); return p.body || ''; }
+    function ttl(n) { return n.kind === 'digest' ? 'Daily research digest' : n.kind === 'student_report' ? 'Student daily report' : ((n.payload && n.payload.title) || n.kind); }
+    function summ(n) { var p = n.payload || {}; if (n.kind === 'digest') return (p.day || '') + ' · ' + (p.students || 0) + ' student' + (p.students === 1 ? '' : 's') + ', ' + (p.entries || 0) + ' update' + (p.entries === 1 ? '' : 's'); if (n.kind === 'student_report') return (p.student || 'Student') + ' · ' + (p.day || '') + ' · ' + (p.msgs || 0) + ' chat, ' + (p.decisions || 0) + ' döntés'; return p.body || ''; }
     return h('div', { className: 'notif-wrap' },
       h('button', { className: 'bell', onClick: function () { setOpen(!open); if (!open) load(); } },
         h('svg', { viewBox: '0 0 16 16', fill: 'none', stroke: 'var(--muted)', strokeWidth: 1.5 }, h('path', { d: 'M8 2a3.5 3.5 0 0 0-3.5 3.5c0 3-1.5 4-1.5 4h10s-1.5-1-1.5-4A3.5 3.5 0 0 0 8 2z', strokeLinejoin: 'round' }), h('path', { d: 'M6.6 12.4a1.5 1.5 0 0 0 2.8 0', strokeLinecap: 'round' })),
@@ -497,6 +577,7 @@
     account: h('svg', { viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5 }, h('circle', { cx: 8, cy: 5, r: 2.6 }), h('path', { d: 'M3 13.5c0-2.6 2.2-4 5-4s5 1.4 5 4', strokeLinecap: 'round' })),
     requests: h('svg', { viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5 }, h('path', { d: 'M2 4.5h12v7H2zM2 5l6 4 6-4', strokeLinecap: 'round', strokeLinejoin: 'round' })),
     students: h('svg', { viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5 }, h('circle', { cx: 8, cy: 5, r: 2.4 }), h('path', { d: 'M3 13.5c0-2.5 2.2-4 5-4s5 1.5 5 4', strokeLinecap: 'round' })),
+    reports: h('svg', { viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5 }, h('path', { d: 'M4 2.5h6l2.5 2.5V13a.5.5 0 0 1-.5.5H4a.5.5 0 0 1-.5-.5V3a.5.5 0 0 1 .5-.5z', strokeLinejoin: 'round' }), h('path', { d: 'M6 7h4M6 9.3h4M6 11.6h2.5', strokeLinecap: 'round' })),
     supervisors: h('svg', { viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5 }, h('circle', { cx: 5.5, cy: 5, r: 2 }), h('circle', { cx: 11, cy: 6, r: 1.6 }), h('path', { d: 'M1.5 13c0-2 1.8-3.2 4-3.2s4 1.2 4 3.2M9.5 12.5c.2-1.5 1.4-2.4 3-2.4s2 .7 2 1.6', strokeLinecap: 'round' })),
     topics: h('svg', { viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5 }, h('rect', { x: 2, y: 2.5, width: 12, height: 11, rx: 2 }), h('path', { d: 'M5 6h6M5 9h4', strokeLinecap: 'round' }))
   };
@@ -562,7 +643,7 @@
     }
     var roleLabel = isAdmin ? 'Administrator' : (me && me.is_supervisor ? 'Supervisor' : (isStudentOnly ? 'Student' : 'Member'));
     var NAV = [];
-    if (isSup) { NAV.push(['dashboard', 'Dashboard']); NAV.push(['students', 'Students']); NAV.push(['requests', 'Requests', incoming.length]); }
+    if (isSup) { NAV.push(['dashboard', 'Dashboard']); NAV.push(['students', 'Students']); NAV.push(['reports', 'Student reports']); NAV.push(['requests', 'Requests', incoming.length]); }
     if (isStudentOnly) NAV.push(['mine', 'My progress']);
     NAV.push(['supervisors', 'Supervisors']);
     NAV.push(['topics', 'Research topics']);
@@ -571,14 +652,15 @@
     var allowed = NAV.map(function (x) { return x[0]; });
     var cur = allowed.indexOf(view) >= 0 ? view : allowed[0];
     var nStu = effStudents.length;
-    var titles = { dashboard: 'Dashboard', students: 'Students', supervisors: 'Supervisors', topics: 'Research topics', mine: 'My progress', account: 'My account', requests: 'Requests', admin: 'Admin' };
-    var subs = { supervisors: data.sups.length + ' supervisors · ' + nStu + ' student' + (nStu === 1 ? '' : 's'), topics: data.topics.length + ' topics', students: nStu + ' student' + (nStu === 1 ? '' : 's'), dashboard: (isAdmin ? 'Institution-wide' : 'Your students') + ' · ' + nStu + ' student' + (nStu === 1 ? '' : 's'), mine: myStudent ? (myStudent.topic || '') : '', account: 'Set your role and profile', requests: incoming.length + ' pending', admin: 'Roles & supervision relationships' };
+    var titles = { dashboard: 'Dashboard', students: 'Students', reports: 'Student reports', supervisors: 'Supervisors', topics: 'Research topics', mine: 'My progress', account: 'My account', requests: 'Requests', admin: 'Admin' };
+    var subs = { reports: 'Napi összefoglaló a diákok kutatómunkájáról · ' + nStu + ' diák', supervisors: data.sups.length + ' supervisors · ' + nStu + ' student' + (nStu === 1 ? '' : 's'), topics: data.topics.length + ' topics', students: nStu + ' student' + (nStu === 1 ? '' : 's'), dashboard: (isAdmin ? 'Institution-wide' : 'Your students') + ' · ' + nStu + ' student' + (nStu === 1 ? '' : 's'), mine: myStudent ? (myStudent.topic || '') : '', account: 'Set your role and profile', requests: incoming.length + ' pending', admin: 'Roles & supervision relationships' };
     function canEditStudent(s) { return isAdmin || (s && s.supervisor_id === me.id); }
 
     var body;
     if (cur === 'account') body = h(MyAccount, { me: me, myStudent: myStudent, onChanged: boot });
     else if (cur === 'mine') body = myStudent ? h(StudentDetail, { student: myStudent, sups: data.sups, canEdit: false, onBack: null, onChanged: function () { loadData(); } }) : h('div', { className: 'empty' }, 'No student record is linked to your account yet — register on the My account page or ask your supervisor.');
     else if (cur === 'dashboard') body = h(Dashboard, { students: effStudents, milestones: data.milestones, topics: data.topics, me: me, isAdmin: isAdmin });
+    else if (cur === 'reports') body = h(StudentReports, { students: effStudents });
     else if (cur === 'requests') body = h(RequestsInbox, { requests: incoming, students: data.students, capacityFull: capacityFull, onChanged: function () { loadData(); } });
     else if (cur === 'admin') body = h(AdminPanel, { students: data.students, sups: data.sups, supervisions: data.supervisions, onChanged: function () { loadData(); } });
     else if (cur === 'supervisors') body = h(Supervisors, { sups: data.sups, students: data.students, myStudent: myStudent, mySupervisions: mySupervisions, onChanged: function () { loadData(); } });

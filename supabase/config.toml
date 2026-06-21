@@ -7,3 +7,6 @@ verify_jwt = false
 
 [functions.research-ai]
 verify_jwt = false
+
+[functions.student-digest]
+verify_jwt = false
