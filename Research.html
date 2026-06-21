@@ -141,10 +141,10 @@
     .mtag.imp { background: var(--warn-bg); color: var(--warn); }
     .mtag.sc { background: #f3e8ff; color: #7c3aed; }
     /* Consensus chat (R5b) */
-    .chat-msgs { display: flex; flex-direction: column; gap: 10px; max-height: 440px; overflow-y: auto; padding: 4px 2px; }
-    .bubble { max-width: 88%; padding: 10px 13px; border-radius: 12px; font-size: 13.5px; line-height: 1.45; }
-    .bubble.user { align-self: flex-end; background: var(--accent); color: #fff; }
-    .bubble.ai { align-self: flex-start; background: var(--soft); color: var(--ink); border: 1px solid var(--line); }
+    .chat-msgs { display: flex; flex-direction: column; gap: 18px; max-height: 500px; overflow-y: auto; padding: 8px 2px; scroll-behavior: smooth; }
+    .bubble { font-size: 14px; line-height: 1.6; }
+    .bubble.user { align-self: flex-end; max-width: 80%; padding: 9px 14px; border-radius: 18px 18px 6px 18px; background: var(--accent); color: #fff; }
+    .bubble.ai { align-self: stretch; max-width: 100%; padding: 0 2px; background: transparent; color: var(--ink); }   /* Zola-style: the answer reads as clean prose, no heavy bubble */
     .bubble .btxt { white-space: pre-wrap; word-wrap: break-word; }
     .bubble .bmeta { display: flex; gap: 10px; align-items: center; margin-top: 7px; font-size: 11px; color: var(--muted); }
     .bubble .savebtn { border: 1px solid var(--line); background: var(--surface); border-radius: 7px; padding: 3px 8px; font-size: 11px; font-weight: 600; color: var(--muted); cursor: pointer; font-family: inherit; }
@@ -155,6 +155,8 @@
     .chat-input textarea { flex: 1; min-height: 40px; max-height: 160px; border: 1px solid var(--line); border-radius: 11px; padding: 9px 12px; font-family: inherit; font-size: 13.5px; line-height: 1.4; resize: none; }
     .tw-cursor { display: inline-block; width: 6px; margin-left: 1px; color: var(--accent); animation: twblink 1s steps(1) infinite; }
     @keyframes twblink { 50% { opacity: 0; } }
+    .tw-word { animation: twfade .22s ease both; }   /* each freshly-revealed word fades in (smooth streaming feel) */
+    @keyframes twfade { from { opacity: .12; } to { opacity: 1; } }
     .chat-suggest { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
     .chat-suggest button { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 6px 12px; font-size: 12.5px; color: var(--muted); cursor: pointer; font-family: inherit; }
     .chat-suggest button:hover { border-color: var(--accent); color: var(--accent); }

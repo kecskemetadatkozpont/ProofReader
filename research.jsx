@@ -220,14 +220,18 @@
     useEffect(function () { return function () { alive.current = false; }; }, []);
     function startTyping(id, full) {
       if (!full) return;
-      var i = 0, step = Math.max(1, Math.round(full.length / 110));       // ~half the previous speed (more frames + slower tick)
-      setTyping({ id: id, len: 0 });
+      // reveal word-by-word at a calm, readable pace (each word fades in) — clearly slower than a raw
+      // char dump, but the per-token delay scales down for long replies so they never drag.
+      var toks = full.split(/(\s+)/);
+      var per = Math.max(15, Math.min(48, Math.round(7000 / toks.length)));
+      var n = 0;
+      setTyping({ id: id, n: 0 });
       (function tick() {
         if (!alive.current) return;
-        i += step;
-        if (i >= full.length) { setTyping(null); return; }
-        setTyping({ id: id, len: i });
-        setTimeout(tick, 30);
+        n += 1;
+        if (n >= toks.length) { setTyping(null); return; }
+        setTyping({ id: id, n: n });
+        setTimeout(tick, per);
       })();
     }
     function loadMsgs(cid) {
@@ -289,9 +293,12 @@
         msgs.length ? msgs.map(function (m) {
           var isTyping = typing && typing.id === m.id;
           var ai = m.role === 'assistant';
-          var body = (ai && !isTyping)
-            ? h('div', { className: 'btxt md', dangerouslySetInnerHTML: { __html: mdHtml(m.content) } })
-            : h('div', { className: 'btxt' }, isTyping ? (m.content || '').slice(0, typing.len) : m.content, isTyping ? h('span', { className: 'tw-cursor' }, '▌') : null);
+          var body;
+          if (ai && !isTyping) body = h('div', { className: 'btxt md', dangerouslySetInnerHTML: { __html: mdHtml(m.content) } });
+          else if (ai && isTyping) {
+            var toks = (m.content || '').split(/(\s+)/), shown = toks.slice(0, typing.n);
+            body = h('div', { className: 'btxt' }, shown.slice(0, -1).join(''), h('span', { key: typing.n, className: 'tw-word' }, shown[shown.length - 1] || ''), h('span', { className: 'tw-cursor' }, '▌'));
+          } else body = h('div', { className: 'btxt' }, m.content);
           return h('div', { key: m.id, className: 'bubble ' + (ai ? 'ai' : 'user') },
             body,
             (ai && !isTyping) ? h('div', { className: 'bmeta' },
