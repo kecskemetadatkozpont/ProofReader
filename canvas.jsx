@@ -13,7 +13,8 @@
     note: { label: 'Note', bg: 'var(--surface, #fff)', bd: 'var(--line, #e6e8ee)', accent: 'var(--muted)' },
     idea: { label: 'Idea', bg: 'var(--warn-bg, #fdf6e3)', bd: 'var(--warn, #b45309)', accent: 'var(--warn, #b45309)' },
     publication: { label: 'Publication', bg: 'var(--accent-tint, #eef0ff)', bd: 'var(--accent, #4f46e5)', accent: 'var(--accent, #4f46e5)' },
-    source: { label: 'Source', bg: 'var(--ok-bg, #e7f6ee)', bd: 'var(--ok, #15803d)', accent: 'var(--ok, #15803d)' }
+    source: { label: 'Forrás', bg: 'var(--ok-bg, #e7f6ee)', bd: 'var(--ok, #15803d)', accent: 'var(--ok, #15803d)' },
+    data: { label: 'Adat', bg: 'var(--surface-2, #f5f6f9)', bd: 'var(--accent-d, #4338ca)', accent: 'var(--accent-d, #4338ca)' }
   };
   var EDGE_TYPES = ['relates', 'supports', 'contradicts', 'leads-to'];
   var EDGE_COLOR = { relates: 'var(--faint)', supports: 'var(--ok)', contradicts: 'var(--danger)', 'leads-to': 'var(--accent)' };
@@ -31,8 +32,13 @@
     var mnS = useState(null), menu = mnS[0], setMenu = mnS[1];       // 'idea' | 'pub' picker open
     var ideaS = useState([]), pickIdeas = ideaS[0], setPickIdeas = ideaS[1];
     var pubS = useState([]), pickPubs = pubS[0], setPickPubs = pubS[1];
+    var srcS = useState([]), pickSrcs = srcS[0], setPickSrcs = srcS[1];
+    var datS = useState([]), pickDats = datS[0], setPickDats = datS[1];
+    var peerS = useState([]), peers = peerS[0], setPeers = peerS[1];     // remote cursors
+    var sumS = useState(null), summary = sumS[0], setSummary = sumS[1];  // AI summary { loading?, text?, err? }
+    var expS = useState(false), expOpen = expS[0], setExpOpen = expS[1]; // export menu
 
-    var vpRef = useRef(null), drag = useRef(null), justLoaded = useRef(false), saveT = useRef(null);
+    var vpRef = useRef(null), drag = useRef(null), justLoaded = useRef(false), saveT = useRef(null), chanRef = useRef(null), lastBcast = useRef(0);
 
     // ---- load ----
     useEffect(function () {
@@ -93,6 +99,79 @@
     function openPubs() {
       setMenu('pub');
       sb.from('publications').select('mtid,title,year,journal').eq('researcher_id', props.authorId).order('year', { ascending: false }).limit(80).then(function (r) { setPickPubs((r && r.data) || []); });
+    }
+    function openSources() {
+      setMenu('source');
+      sb.from('research_sources').select('id,title,year,venue,screening').eq('project_id', props.projectId).order('created_at', { ascending: false }).limit(60).then(function (r) { setPickSrcs((r && r.data) || []); });
+    }
+    function openData() {
+      setMenu('data');
+      sb.from('research_datasets').select('id,name,source,status').eq('project_id', props.projectId).order('created_at', { ascending: false }).limit(60).then(function (r) { setPickDats((r && r.data) || []); });
+    }
+
+    // ---- live cursors (Supabase presence, isolated channel per canvas) ----
+    useEffect(function () {
+      if (!sb || !BE || !BE.user) return;
+      var me = BE.user;
+      var ch = sb.channel('rcanvas:' + props.projectId, { config: { presence: { key: me.id } } });
+      chanRef.current = ch;
+      ch.on('presence', { event: 'sync' }, function () {
+        var st = ch.presenceState(), list = [];
+        Object.keys(st).forEach(function (k) { if (k !== me.id) (st[k] || []).forEach(function (m) { if (m && m.cursor) list.push({ id: k, name: m.name, color: m.color, cursor: m.cursor }); }); });
+        setPeers(list);
+      });
+      ch.subscribe(function (s) { if (s === 'SUBSCRIBED') ch.track({ name: me.name, color: me.color, cursor: null }); });
+      return function () { try { ch.untrack(); sb.removeChannel(ch); } catch (e) { } };
+    }, [props.projectId]); // eslint-disable-line
+    function broadcastCursor(e) {
+      var now = Date.now(); if (now - lastBcast.current < 55 || !chanRef.current || !BE.user) return;
+      lastBcast.current = now;
+      var w = toWorld(e.clientX, e.clientY);
+      try { chanRef.current.track({ name: BE.user.name, color: BE.user.color, cursor: { x: Math.round(w.x), y: Math.round(w.y) } }); } catch (er) { }
+    }
+
+    // ---- export (dependency-free SVG → file, and SVG → PNG) ----
+    function esc(s) { return String(s == null ? '' : s).replace(/[<&>"]/g, function (c) { return { '<': '&lt;', '&': '&amp;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+    function buildSVG() {
+      if (!nodes.length) return null;
+      var pad = 36;
+      var minX = Math.min.apply(null, nodes.map(function (n) { return n.x; })) - pad;
+      var minY = Math.min.apply(null, nodes.map(function (n) { return n.y; })) - pad;
+      var maxX = Math.max.apply(null, nodes.map(function (n) { return n.x + (n.w || NW); })) + pad;
+      var maxY = Math.max.apply(null, nodes.map(function (n) { return n.y + NH; })) + pad;
+      var W = Math.round(maxX - minX), H = Math.round(maxY - minY), nb = {};
+      nodes.forEach(function (n) { nb[n.id] = n; });
+      var COL = { note: '#94a3b8', idea: '#b45309', publication: '#4f46e5', source: '#15803d', data: '#4338ca' };
+      var eSvg = edges.map(function (e) { var a = nb[e.from], b = nb[e.to]; if (!a || !b) return ''; var c1 = center(a), c2 = center(b); return '<line x1="' + c1.x + '" y1="' + c1.y + '" x2="' + c2.x + '" y2="' + c2.y + '" stroke="#94a3b8" stroke-width="2"' + (e.type === 'contradicts' ? ' stroke-dasharray="6 4"' : '') + '/>'; }).join('');
+      var nSvg = nodes.map(function (n) {
+        var w = n.w || NW, col = COL[n.type] || '#94a3b8', lines = wrap((n.text || '').replace(/\n/g, ' '), Math.floor((w - 22) / 6.6), 4);
+        var tspans = lines.map(function (ln, i) { return '<tspan x="' + (n.x + 11) + '" dy="' + (i === 0 ? 0 : 15) + '">' + esc(ln) + '</tspan>'; }).join('');
+        return '<g><rect x="' + n.x + '" y="' + n.y + '" width="' + w + '" height="' + NH + '" rx="12" fill="#ffffff" stroke="' + col + '" stroke-width="1.5"/>' +
+          '<text x="' + (n.x + 11) + '" y="' + (n.y + 18) + '" font-family="sans-serif" font-size="10" font-weight="700" fill="' + col + '">' + esc((TYPE[n.type] || TYPE.note).label).toUpperCase() + '</text>' +
+          '<text x="' + (n.x + 11) + '" y="' + (n.y + 38) + '" font-family="sans-serif" font-size="12" fill="#1e293b">' + tspans + '</text></g>';
+      }).join('');
+      return '<svg xmlns="http://www.w3.org/2000/svg" width="' + W + '" height="' + H + '" viewBox="' + Math.round(minX) + ' ' + Math.round(minY) + ' ' + W + ' ' + H + '"><rect x="' + Math.round(minX) + '" y="' + Math.round(minY) + '" width="' + W + '" height="' + H + '" fill="#ffffff"/>' + eSvg + nSvg + '</svg>';
+    }
+    function wrap(s, perLine, maxLines) { var out = [], cur = ''; (s || '').split(/\s+/).forEach(function (wd) { if ((cur + ' ' + wd).trim().length > perLine) { out.push(cur.trim()); cur = wd; } else cur = (cur + ' ' + wd).trim(); }); if (cur) out.push(cur); if (out.length > maxLines) { out = out.slice(0, maxLines); out[maxLines - 1] = out[maxLines - 1].slice(0, perLine - 1) + '…'; } return out; }
+    function download(name, blob) { var u = URL.createObjectURL(blob); var a = document.createElement('a'); a.href = u; a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function () { URL.revokeObjectURL(u); }, 4000); }
+    function exportSVG() { var svg = buildSVG(); setExpOpen(false); if (!svg) return; download('research-canvas.svg', new Blob([svg], { type: 'image/svg+xml' })); }
+    function exportPNG() {
+      var svg = buildSVG(); setExpOpen(false); if (!svg) return;
+      var img = new Image(); img.onload = function () { var c = document.createElement('canvas'); c.width = img.width * 2; c.height = img.height * 2; var cx = c.getContext('2d'); cx.scale(2, 2); cx.drawImage(img, 0, 0); c.toBlob(function (b) { if (b) download('research-canvas.png', b); }); };
+      img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svg)));
+    }
+    function canvasText() {
+      var nb = {}; nodes.forEach(function (n) { nb[n.id] = n; });
+      var ns = nodes.map(function (n) { return '• [' + (TYPE[n.type] || TYPE.note).label + '] ' + (n.text || '').replace(/\n/g, ' '); }).join('\n');
+      var es = edges.map(function (e) { var a = nb[e.from], b = nb[e.to]; if (!a || !b) return null; return (a.text || (TYPE[a.type] || {}).label) + ' —[' + e.type + ']→ ' + (b.text || (TYPE[b.type] || {}).label); }).filter(Boolean).join('\n');
+      return ns + (es ? '\n\nKapcsolatok:\n' + es : '');
+    }
+    function aiSummary() {
+      if (!nodes.length) { setSummary({ err: 'A vászon üres.' }); return; }
+      setSummary({ loading: true });
+      sb.functions.invoke('research-ai', { body: { action: 'canvas-summary', project_id: props.projectId, canvas: canvasText() } }).then(function (r) {
+        var d = r && r.data; if (d && d.summary) setSummary({ text: d.summary }); else setSummary({ err: (d && d.error) || 'Nem sikerült.' });
+      }, function () { setSummary({ err: 'Hálózati hiba.' }); });
     }
 
     // ---- pan / zoom / drag (window-level during a gesture) ----
@@ -204,28 +283,52 @@
         canEdit ? h('button', { style: btn, onClick: function () { addNode('note'); } }, '+ Jegyzet') : null,
         canEdit ? h('button', { style: btn, onClick: openIdeas }, '+ Ötlet') : null,
         canEdit ? h('button', { style: btn, onClick: openPubs }, '+ Publikáció') : null,
+        canEdit ? h('button', { style: btn, onClick: openSources }, '+ Forrás') : null,
+        canEdit ? h('button', { style: btn, onClick: openData }, '+ Adat') : null,
         h('span', { style: { width: 1, height: 22, background: 'var(--line)', margin: '0 2px' } }),
         h('button', { style: btn, title: 'Kicsinyítés', onClick: function () { zoom(1 / 1.2); } }, '−'),
         h('button', { style: btn, title: 'Nagyítás', onClick: function () { zoom(1.2); } }, '+'),
         h('button', { style: btn, onClick: fit }, 'Illesztés'),
         h('span', { style: { fontSize: 12, color: 'var(--muted)' } }, Math.round(view.k * 100) + '%'),
+        h('span', { style: { width: 1, height: 22, background: 'var(--line)', margin: '0 2px' } }),
+        h('button', { style: btn, onClick: aiSummary }, '✨ AI összefoglaló'),
+        h('span', { style: { position: 'relative' } },
+          h('button', { style: btn, onClick: function () { setExpOpen(!expOpen); } }, 'Export ▾'),
+          expOpen ? h('div', { style: { position: 'absolute', zIndex: 30, top: 36, right: 0, background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 9, boxShadow: '0 10px 30px rgba(0,0,0,.2)', padding: 5, width: 130 } },
+            h('div', { onClick: exportSVG, style: { padding: '7px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 13 } }, 'SVG (.svg)'),
+            h('div', { onClick: exportPNG, style: { padding: '7px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 13 } }, 'Kép (.png)')) : null),
         h('span', { style: { flex: 1 } }),
         status ? h('span', { style: { fontSize: 12, fontWeight: 600, color: /sikertelen/.test(status) ? 'var(--danger)' : 'var(--ok)' } }, status) : null),
       // picker dropdown
-      menu ? h('div', { style: { position: 'absolute', zIndex: 30, top: 44, left: menu === 'idea' ? 92 : 168, width: 320, maxHeight: 280, overflowY: 'auto', background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 10, boxShadow: '0 12px 36px rgba(0,0,0,.22)', padding: 6 } },
-        (menu === 'idea' ? pickIdeas : pickPubs).length === 0 ? h('div', { style: { fontSize: 12.5, color: 'var(--muted)', padding: 10 } }, menu === 'idea' ? 'Nincs ötlet ebben a projektben.' : 'Nincs publikáció.') :
-          (menu === 'idea' ? pickIdeas : pickPubs).map(function (it) {
-            var label = menu === 'idea' ? it.question : (it.title + (it.year ? ' (' + it.year + ')' : ''));
-            return h('div', { key: it.id || it.mtid, onClick: function () { addNode(menu === 'idea' ? 'idea' : 'publication', { text: label, ref: menu === 'idea' ? { kind: 'idea', id: it.id } : { kind: 'publication', mtid: it.mtid }, meta: menu === 'idea' ? ('státusz: ' + (it.status || '—')) : (it.journal || null) }); setMenu(null); }, style: { fontSize: 13, padding: '8px 10px', borderRadius: 7, cursor: 'pointer', lineHeight: 1.35 }, onMouseEnter: function (e) { e.currentTarget.style.background = 'var(--surface-2)'; }, onMouseLeave: function (e) { e.currentTarget.style.background = 'transparent'; } }, label);
-          })) : null,
+      menu ? (function () {
+        var cfg = {
+          idea: { list: pickIdeas, type: 'idea', empty: 'Nincs ötlet ebben a projektben.', left: 92, label: function (it) { return it.question; }, ref: function (it) { return { kind: 'idea', id: it.id }; }, meta: function (it) { return 'státusz: ' + (it.status || '—'); } },
+          pub: { list: pickPubs, type: 'publication', empty: 'Nincs publikáció.', left: 168, label: function (it) { return it.title + (it.year ? ' (' + it.year + ')' : ''); }, ref: function (it) { return { kind: 'publication', mtid: it.mtid }; }, meta: function (it) { return it.journal || null; } },
+          source: { list: pickSrcs, type: 'source', empty: 'Nincs forrás (Literature).', left: 250, label: function (it) { return it.title + (it.year ? ' (' + it.year + ')' : ''); }, ref: function (it) { return { kind: 'source', id: it.id }; }, meta: function (it) { return [it.venue, it.screening].filter(Boolean).join(' · ') || null; } },
+          data: { list: pickDats, type: 'data', empty: 'Nincs adathalmaz (Data).', left: 320, label: function (it) { return it.name; }, ref: function (it) { return { kind: 'dataset', id: it.id }; }, meta: function (it) { return [it.source, it.status].filter(Boolean).join(' · ') || null; } }
+        }[menu];
+        return h('div', { style: { position: 'absolute', zIndex: 30, top: 44, left: cfg.left, width: 320, maxHeight: 280, overflowY: 'auto', background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 10, boxShadow: '0 12px 36px rgba(0,0,0,.22)', padding: 6 } },
+          !cfg.list.length ? h('div', { style: { fontSize: 12.5, color: 'var(--muted)', padding: 10 } }, cfg.empty) :
+            cfg.list.map(function (it) {
+              var label = cfg.label(it);
+              return h('div', { key: it.id || it.mtid, onClick: function () { addNode(cfg.type, { text: label, ref: cfg.ref(it), meta: cfg.meta(it) }); setMenu(null); }, style: { fontSize: 13, padding: '8px 10px', borderRadius: 7, cursor: 'pointer', lineHeight: 1.35 }, onMouseEnter: function (e) { e.currentTarget.style.background = 'var(--surface-2)'; }, onMouseLeave: function (e) { e.currentTarget.style.background = 'transparent'; } }, label);
+            }));
+      })() : null,
       // viewport
-      h('div', { ref: vpRef, onMouseDown: onVpDown, onWheel: onWheel, style: { position: 'relative', height: '64vh', minHeight: 420, border: '1px solid var(--line)', borderRadius: 14, overflow: 'hidden', background: 'var(--softer)', backgroundImage: 'radial-gradient(var(--line) 1px, transparent 1px)', backgroundSize: (22 * view.k) + 'px ' + (22 * view.k) + 'px', backgroundPosition: view.tx + 'px ' + view.ty + 'px', cursor: drag.current && drag.current.mode === 'pan' ? 'grabbing' : 'default' } },
+      h('div', { ref: vpRef, onMouseDown: onVpDown, onWheel: onWheel, onMouseMove: broadcastCursor, style: { position: 'relative', height: '64vh', minHeight: 420, border: '1px solid var(--line)', borderRadius: 14, overflow: 'hidden', background: 'var(--softer)', backgroundImage: 'radial-gradient(var(--line) 1px, transparent 1px)', backgroundSize: (22 * view.k) + 'px ' + (22 * view.k) + 'px', backgroundPosition: view.tx + 'px ' + view.ty + 'px', cursor: drag.current && drag.current.mode === 'pan' ? 'grabbing' : 'default' } },
         h('svg', { style: { position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', overflow: 'visible' } },
           h('defs', null, h('marker', { id: 'arrow', viewBox: '0 0 10 10', refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: 'auto-start-reverse' }, h('path', { d: 'M0,0 L10,5 L0,10 z', fill: 'var(--faint)' }))),
           h('g', { style: { pointerEvents: 'auto' } }, edgeEls), connEl),
         h('div', { style: { position: 'absolute', left: 0, top: 0, transform: 'translate(' + view.tx + 'px,' + view.ty + 'px) scale(' + view.k + ')', transformOrigin: '0 0' } }, nodeEls),
-        nodes.length === 0 ? h('div', { style: { position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: 'var(--faint)', fontSize: 14, pointerEvents: 'none' } }, 'Üres vászon — adj hozzá Jegyzetet / Ötletet / Publikációt, és kösd össze őket.') : null),
-      h('div', { style: { fontSize: 11.5, color: 'var(--faint)', marginTop: 6 } }, 'Háttér húzása = mozgatás · görgő = zoom · node széléről húzva = kapcsolat · dupla katt élen = típus · Delete = törlés')
+        peers.map(function (pr) { var s = screen(pr.cursor); return h('div', { key: pr.id, style: { position: 'absolute', left: s.x, top: s.y, pointerEvents: 'none', zIndex: 45, display: 'flex', alignItems: 'flex-start' } }, h('svg', { width: 18, height: 18, viewBox: '0 0 16 16', style: { filter: 'drop-shadow(0 1px 1px rgba(0,0,0,.3))' } }, h('path', { d: 'M2 2l4.5 11 2-4.5 4.5-2z', fill: pr.color || 'var(--accent)', stroke: '#fff', strokeWidth: 1 })), h('span', { style: { background: pr.color || 'var(--accent)', color: '#fff', fontSize: 10.5, fontWeight: 600, padding: '1px 6px', borderRadius: 7, marginLeft: 2, marginTop: 10, whiteSpace: 'nowrap' } }, pr.name || 'Valaki')); }),
+        nodes.length === 0 ? h('div', { style: { position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: 'var(--faint)', fontSize: 14, pointerEvents: 'none' } }, 'Üres vászon — adj hozzá Jegyzetet / Ötletet / Publikációt / Forrást / Adatot, és kösd össze őket.') : null),
+      h('div', { style: { fontSize: 11.5, color: 'var(--faint)', marginTop: 6 } }, 'Háttér húzása = mozgatás · görgő = zoom · node széléről húzva = kapcsolat · dupla katt élen = típus · Delete = törlés'),
+      summary ? h('div', { onClick: function () { setSummary(null); }, style: { position: 'fixed', inset: 0, background: 'rgba(8,10,16,.5)', zIndex: 2000, display: 'grid', placeItems: 'center', padding: 20 } },
+        h('div', { onClick: function (e) { e.stopPropagation(); }, style: { width: 560, maxWidth: '100%', maxHeight: '80vh', overflowY: 'auto', background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 16, boxShadow: '0 24px 70px rgba(0,0,0,.4)', padding: '22px 24px' } },
+          h('div', { style: { display: 'flex', alignItems: 'center', marginBottom: 12 } }, h('b', { style: { fontSize: 16 } }, '✨ Vászon-összefoglaló'), h('button', { onClick: function () { setSummary(null); }, style: { marginLeft: 'auto', border: 0, background: 'transparent', fontSize: 20, color: 'var(--muted)', cursor: 'pointer' } }, '×')),
+          summary.loading ? h('div', { style: { color: 'var(--muted)', fontSize: 14 } }, 'Elemzés…') :
+            summary.err ? h('div', { style: { color: 'var(--danger)', fontSize: 14 } }, summary.err) :
+              h('div', { style: { fontSize: 14, lineHeight: 1.6 }, dangerouslySetInnerHTML: { __html: (window.DOMPurify && window.marked) ? DOMPurify.sanitize(marked.parse(summary.text || '')) : (summary.text || '').replace(/\n/g, '<br>') } }))) : null
     );
   }
 
