@@ -213,10 +213,11 @@
     var iS = useState(''), input = iS[0], setInput = iS[1];
     var bS = useState(false), busy = bS[0], setBusy = bS[1];
     var er = useState(''), err = er[0], setErr = er[1];
-    var ty = useState(null), typing = ty[0], setTyping = ty[1];          // { id, len } of the message being typed out
+    var ty = useState(null), typing = ty[0], setTyping = ty[1];          // { id, len } of the message being typed out (non-stream fallback)
+    var stmS = useState(null), streaming = stmS[0], setStreaming = stmS[1];   // { text } while a reply streams in live
     var atS = useState([]), attach = atS[0], setAttach = atS[1];          // pending attachments for the next message
     var pkS = useState(false), picker = pkS[0], setPicker = pkS[1];
-    var firstLoad = useRef(true), animated = useRef({}), alive = useRef(true), scrollRef = useRef(null), taRef = useRef(null);
+    var firstLoad = useRef(true), animated = useRef({}), alive = useRef(true), scrollRef = useRef(null), taRef = useRef(null), justStreamed = useRef(false);
     useEffect(function () { return function () { alive.current = false; }; }, []);
     function startTyping(id, full) {
       if (!full) return;
@@ -247,7 +248,8 @@
         else {
           var aMsgs = data.filter(function (m) { return m.role === 'assistant'; });
           var last = aMsgs[aMsgs.length - 1];
-          if (last && !animated.current[last.id]) { animated.current[last.id] = true; startTyping(last.id, last.content); }  // animate only a freshly-arrived reply
+          if (last && !animated.current[last.id]) { animated.current[last.id] = true; if (!justStreamed.current) startTyping(last.id, last.content); }  // a streamed reply was already revealed live → no replay
+          justStreamed.current = false;
         }
       });
     }
@@ -256,10 +258,36 @@
         var c = (r && r.data && r.data[0]) || null; setChat(c); if (c) loadMsgs(c.id);
       });
     }, []);
-    useEffect(function () { var el = scrollRef.current; if (el) el.scrollTop = el.scrollHeight; }, [msgs.length, typing]);  // follow the conversation
+    useEffect(function () { var el = scrollRef.current; if (el) el.scrollTop = el.scrollHeight; }, [msgs.length, typing, streaming]);  // follow the conversation (incl. live stream)
     function ensureChat() {
       if (chat) return Promise.resolve(chat.id);
       return sb.from('research_chats').insert({ project_id: props.projectId, title: 'Publify chat' }).select('id').maybeSingle().then(function (r) { var c = r && r.data; setChat(c); return c && c.id; });
+    }
+    // Real token streaming: POST to the Edge function and append text deltas to a live bubble as they arrive.
+    function streamReply(cid) {
+      var CFG = window.PR_CONFIG || {};
+      if (!CFG.supabaseUrl) { setBusy(false); setErr('Missing backend config.'); return; }
+      sb.auth.getSession().then(function (s) {
+        var token = (s && s.data && s.data.session && s.data.session.access_token) || CFG.supabaseAnonKey;
+        fetch(CFG.supabaseUrl + '/functions/v1/research-chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'apikey': CFG.supabaseAnonKey, 'Authorization': 'Bearer ' + token },
+          body: JSON.stringify({ chat_id: cid, stream: true })
+        }).then(function (resp) {
+          if (!resp.ok || !resp.body || !resp.body.getReader) { setBusy(false); setErr('AI connection pending — deploy the research-chat Edge function and set ANTHROPIC_API_KEY.'); return; }
+          var reader = resp.body.getReader(), dec = new TextDecoder(), acc = '';
+          setStreaming({ text: '' });
+          (function pump() {
+            reader.read().then(function (r) {
+              if (!alive.current) return;
+              if (r.done) { setStreaming(null); setBusy(false); justStreamed.current = true; loadMsgs(cid); return; }
+              acc += dec.decode(r.value, { stream: true });
+              setStreaming({ text: acc });
+              pump();
+            }, function () { setStreaming(null); setBusy(false); loadMsgs(cid); });
+          })();
+        }, function () { setBusy(false); setErr('AI connection pending — deploy the research-chat Edge function.'); });
+      });
     }
     function sendText(raw) {
       var txt = (raw || '').trim();
@@ -273,11 +301,7 @@
         sb.from('research_messages').insert(payload).then(function (ins) {
           if (ins && ins.error) { setBusy(false); setErr(atts.length ? 'Attachments need migration-17 + a research-chat redeploy — ' + ins.error.message : ins.error.message); return; }
           loadMsgs(cid);
-          sb.functions.invoke('research-chat', { body: { chat_id: cid } }).then(function (res) {
-            setBusy(false);
-            if (res && (res.error || (res.data && res.data.error))) { setErr('AI connection pending — deploy the research-chat Edge function and set ANTHROPIC_API_KEY.'); return; }
-            loadMsgs(cid);
-          }, function () { setBusy(false); setErr('AI connection pending — deploy the research-chat Edge function.'); });
+          streamReply(cid);   // live token stream → persisted + reloaded on completion
         });
       });
     }
@@ -311,7 +335,8 @@
           h('div', { className: 'chat-empty' }, 'Ask Publify about your topic — grounded in evidence when Consensus is connected.'),
           props.canEdit ? h('div', { className: 'chat-suggest' }, CHAT_SUGGEST.map(function (s, i) { return h('button', { key: i, onClick: function () { sendText(s); } }, s); })) : null
         ),
-        busy ? h('div', { className: 'bubble ai' }, h('div', { className: 'btxt', style: { color: 'var(--faint)' } }, 'Publify is thinking…')) : null
+        streaming ? h('div', { className: 'bubble ai', key: 'stream' }, h('div', { className: 'btxt' }, streaming.text || '', h('span', { className: 'tw-cursor' }, '▌')))
+          : busy ? h('div', { className: 'bubble ai' }, h('div', { className: 'btxt', style: { color: 'var(--faint)' } }, 'Publify is thinking…')) : null
       ),
       err ? h('div', { style: { fontSize: 12.5, color: 'var(--warn)', margin: '6px 0 0' } }, err) : null,
       props.canEdit ? h('div', null,

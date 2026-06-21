@@ -33,7 +33,7 @@ Deno.serve(async (req) => {
     const useMcp = !!CONSENSUS_TOKEN;
     const auth = req.headers.get('Authorization') || '';
     const sb = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!, { global: { headers: { Authorization: auth } } });
-    const { chat_id } = await req.json().catch(() => ({}));
+    const { chat_id, stream: wantStream } = await req.json().catch(() => ({}));
     if (!chat_id) return json({ error: 'chat_id required' }, 400);
 
     const { data: chat } = await sb.from('research_chats').select('id,project_id').eq('id', chat_id).maybeSingle();
@@ -77,6 +77,58 @@ Deno.serve(async (req) => {
     if (useMcp) headers['anthropic-beta'] = 'mcp-client-2025-04-04';
     const body: Record<string, unknown> = { model: MODEL, max_tokens: MAX_TOKENS, system: SYSTEM + ctx, messages };
     if (useMcp) body.mcp_servers = [{ type: 'url', url: CONSENSUS_MCP_URL, name: 'consensus', authorization_token: CONSENSUS_TOKEN }];
+
+    // ---- Streaming path: forward Claude's text deltas to the browser live, rebuild the full block list
+    //      from the SSE events, then persist the message + evidence once the stream finishes. ----
+    if (wantStream) {
+      const TRUNC = '\n\n---\n_⚠️ A válasz a hosszkorlát miatt megszakadt. Írd be, hogy **„folytasd"**, és a bot folytatja onnan._';
+      const stream = new ReadableStream({
+        async start(controller) {
+          const enc = new TextEncoder();
+          try {
+            const sr = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers, body: JSON.stringify({ ...body, stream: true }) });
+            if (!sr.ok || !sr.body) { controller.enqueue(enc.encode('\n\n[hiba: ' + (await sr.text()).slice(0, 300) + ']')); controller.close(); return; }
+            const reader = sr.body.getReader(); const dec = new TextDecoder();
+            const sblocks: any[] = []; let stopReason = ''; let buf = '';
+            for (;;) {
+              const { done, value } = await reader.read(); if (done) break;
+              buf += dec.decode(value, { stream: true });
+              let nl: number;
+              while ((nl = buf.indexOf('\n\n')) !== -1) {
+                const piece = buf.slice(0, nl); buf = buf.slice(nl + 2);
+                const dl = piece.split('\n').find((l) => l.startsWith('data:')); if (!dl) continue;
+                const raw = dl.slice(5).trim(); if (!raw || raw === '[DONE]') continue;
+                let ev: any; try { ev = JSON.parse(raw); } catch { continue; }
+                if (ev.type === 'content_block_start') { const b = JSON.parse(JSON.stringify(ev.content_block || {})); if (b.type === 'text' && b.text == null) b.text = ''; sblocks[ev.index] = b; }
+                else if (ev.type === 'content_block_delta') {
+                  const d = ev.delta || {};
+                  if (d.type === 'text_delta' && typeof d.text === 'string') { if (!sblocks[ev.index]) sblocks[ev.index] = { type: 'text', text: '' }; sblocks[ev.index].text = (sblocks[ev.index].text || '') + d.text; controller.enqueue(enc.encode(d.text)); }
+                  else if (d.type === 'input_json_delta' && typeof d.partial_json === 'string') { if (!sblocks[ev.index]) sblocks[ev.index] = {}; sblocks[ev.index]._pj = (sblocks[ev.index]._pj || '') + d.partial_json; }
+                }
+                else if (ev.type === 'content_block_stop') { const b = sblocks[ev.index]; if (b && b._pj) { try { b.input = JSON.parse(b._pj); } catch { /* keep partial */ } delete b._pj; } }
+                else if (ev.type === 'message_delta') { if (ev.delta && ev.delta.stop_reason) stopReason = ev.delta.stop_reason; }
+                else if (ev.type === 'error') { controller.enqueue(enc.encode('\n\n[hiba: ' + ((ev.error && ev.error.message) || 'anthropic') + ']')); }
+              }
+            }
+            const cleanBlocks = sblocks.filter(Boolean);
+            let text = cleanBlocks.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
+            if (stopReason === 'max_tokens') { controller.enqueue(enc.encode(TRUNC)); text += TRUNC; }
+            // persist + evidence — best-effort, never fail the already-delivered stream
+            try {
+              const { data: saved } = await sb.from('research_messages').insert({ chat_id, role: 'assistant', content: text || '(no text)', blocks: cleanBlocks }).select('id').maybeSingle();
+              const ev2: any[] = []; let lastQuery: string | null = null;
+              for (const b of cleanBlocks) {
+                if (b.type === 'mcp_tool_use') lastQuery = typeof b.input === 'object' ? (b.input.query || b.input.q || JSON.stringify(b.input)) : String(b.input);
+                if (b.type === 'mcp_tool_result') { const c = Array.isArray(b.content) ? b.content : [b.content]; for (const item of c) { const snip = item?.text ?? (typeof item === 'string' ? item : JSON.stringify(item)); if (snip) ev2.push({ chat_id, message_id: saved?.id ?? null, query: lastQuery, snippet: String(snip).slice(0, 4000) }); } }
+              }
+              if (ev2.length) await sb.from('research_evidence').insert(ev2);
+            } catch { /* persistence is best-effort here */ }
+            controller.close();
+          } catch (e) { try { controller.enqueue(enc.encode('\n\n[hiba: ' + String(e) + ']')); } catch { /* */ } controller.close(); }
+        },
+      });
+      return new Response(stream, { headers: { ...CORS, 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no' } });
+    }
 
     const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers, body: JSON.stringify(body) });
     const out = await r.json();
