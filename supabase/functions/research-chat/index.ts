@@ -9,7 +9,7 @@
 // Secrets: supabase secrets set ANTHROPIC_API_KEY=sk-ant-...
 //          supabase secrets set CONSENSUS_MCP_TOKEN=<bearer>           (optional — enables Consensus)
 //   COST:  supabase secrets set RESEARCH_AI_MODEL=claude-haiku-4-5-20251001   (cheapest; default sonnet)
-//          supabase secrets set RESEARCH_MAX_TOKENS=800                (output cap per reply; default 800)
+//          supabase secrets set RESEARCH_MAX_TOKENS=8192               (output cap per reply; default 4096)
 //          supabase secrets set RESEARCH_HISTORY=12                    (last N messages sent; default 12)
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -17,7 +17,7 @@ const ANTHROPIC_KEY = Deno.env.get('ANTHROPIC_API_KEY');
 const CONSENSUS_TOKEN = Deno.env.get('CONSENSUS_MCP_TOKEN');
 const CONSENSUS_MCP_URL = Deno.env.get('CONSENSUS_MCP_URL') || 'https://mcp.consensus.app/mcp';
 const MODEL = Deno.env.get('RESEARCH_AI_MODEL') || 'claude-sonnet-4-6';
-const MAX_TOKENS = parseInt(Deno.env.get('RESEARCH_MAX_TOKENS') || '800', 10);
+const MAX_TOKENS = parseInt(Deno.env.get('RESEARCH_MAX_TOKENS') || '4096', 10);  // long answers were cut at 800 (stop_reason=max_tokens)
 const HISTORY = parseInt(Deno.env.get('RESEARCH_HISTORY') || '12', 10);
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -83,7 +83,9 @@ Deno.serve(async (req) => {
     if (out.error) return json({ error: 'anthropic: ' + (out.error.message || JSON.stringify(out.error)) }, 502);
 
     const blocks: any[] = out.content || [];
-    const text = blocks.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
+    let text = blocks.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
+    // If the model ran out of output budget, don't leave a silent mid-sentence stop — tell the user.
+    if (out.stop_reason === 'max_tokens') text += '\n\n---\n_⚠️ A válasz a hosszkorlát miatt megszakadt. Írd be, hogy **„folytasd"**, és a bot folytatja onnan._';
     const { data: saved, error: smErr } = await sb.from('research_messages')
       .insert({ chat_id, role: 'assistant', content: text || '(no text)', blocks }).select('id').maybeSingle();
     if (smErr) return json({ error: 'persist failed: ' + smErr.message }, 403);
