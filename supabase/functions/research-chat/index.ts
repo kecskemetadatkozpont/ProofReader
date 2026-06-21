@@ -114,6 +114,22 @@ function toB64(buf: ArrayBuffer): string {
   return btoa(bin);
 }
 
+// Concatenate a LaTeX project's TEXT files (tex/bib/…) in load order, skipping binaries (images/PDFs are
+// stored as dataURL/storagePath and have no .content). Caps at ~220KB so a big thesis can't blow the budget.
+function thesisText(data: any): string {
+  if (!data || !data.files) return '';
+  const TEXT: Record<string, number> = { tex: 1, bib: 1, bbl: 1, bst: 1, cls: 1, sty: 1, md: 1, txt: 1 };
+  const order: string[] = Array.isArray(data.order) && data.order.length ? data.order : Object.keys(data.files);
+  let out = '';
+  for (const p of order) {
+    const f = data.files[p];
+    if (!f || !TEXT[f.type] || !f.content) continue;
+    out += `\n% ==================== FILE: ${p} ====================\n${f.content}\n`;
+    if (out.length > 240000) break;
+  }
+  return out.slice(0, 220000).trim();
+}
+
 // Expand attachments into Claude content blocks (text + PDF document). dbg collects per-item outcomes.
 // Files are read with the SERVICE client but path-guarded to the caller's own scope (their uid for
 // publication-files, the chat's project for research-data) so a crafted path can't reach others' files.
@@ -128,6 +144,15 @@ async function buildBlocks(sb: any, svc: any, atts: any[], content: string, dbg:
         const { data: s, error } = await sb.from('research_sources').select('title,abstract,year,venue').eq('id', a.source_id).maybeSingle();
         dbg.items.push({ kind: 'source', ok: !!s, err: error?.message });
         if (s) { blocks.push({ type: 'text', text: `[Attached source: ${s.title} (${s.year ?? ''}${s.venue ? ', ' + s.venue : ''})]\n${(s.abstract ?? '').slice(0, 6000)}` }); n++; }
+      } else if (a.kind === 'project' && a.project_id) {
+        // a LaTeX editor project (thesis) — the projects-table RLS lets the caller read their own/shared
+        // row under their JWT, so no service client; we extract the combined .tex/.bib text, not the raw json.
+        const { data: proj, error } = await sb.from('projects').select('id,title,data').eq('id', a.project_id).maybeSingle();
+        dbg.items.push({ kind: 'project', ok: !!proj, err: error?.message });
+        if (proj && proj.data) {
+          const txt = thesisText(proj.data);
+          if (txt) { blocks.push({ type: 'text', text: `[Attached LaTeX publication: ${proj.title ?? a.title ?? 'thesis'}]\n\n${txt}` }); n++; }
+        }
       } else if (a.kind === 'file' && a.bucket && a.path) {
         const seg0 = String(a.path).split('/')[0];
         const allowed = (a.bucket === 'publication-files' && seg0 === scope.uid) || (a.bucket === 'research-data' && seg0 === scope.projectId);

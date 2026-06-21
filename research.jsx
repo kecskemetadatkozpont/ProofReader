@@ -164,8 +164,13 @@
   // ---------- Attach to chat (library source / publication file / upload) ----------
   function AttachModal(props) {
     var fS = useState(null), files = fS[0], setFiles = fS[1];
+    var pS = useState(null), latexProjects = pS[0], setLatexProjects = pS[1];
     var uS = useState(''), upMsg = uS[0], setUpMsg = uS[1];
-    useEffect(function () { sb.from('publication_files').select('id,name,mime,size,storage_path').eq('owner_id', props.authorId).order('created_at', { ascending: false }).then(function (r) { setFiles((r && r.data) || []); }); }, []);
+    useEffect(function () {
+      sb.from('publication_files').select('id,name,mime,size,storage_path').eq('owner_id', props.authorId).order('created_at', { ascending: false }).then(function (r) { setFiles((r && r.data) || []); });
+      var uid = (BE && BE.user && BE.user.id) || props.authorId;
+      sb.from('projects').select('id,title').eq('owner_id', uid).is('deleted_at', null).order('updated_at', { ascending: false }).then(function (r) { setLatexProjects((r && r.data) || []); });
+    }, []);
     function onUpload(e) {
       var f = e.target.files && e.target.files[0]; if (!f) return;
       setUpMsg('Uploading…');
@@ -185,6 +190,8 @@
           srcs.length ? srcs.map(function (s) { return row('s' + s.id, s.title, [s.year, s.venue].filter(Boolean).join(' · '), function () { props.onPick({ kind: 'source', source_id: s.id, title: s.title, label: s.title }); props.onClose(); }); }) : h('div', { style: { fontSize: 12.5, color: 'var(--faint)' } }, 'No library sources yet — add some on the Literature tab.'),
           h('div', { className: 'sec-t' }, 'My publication files'),
           files === null ? h('div', { style: { fontSize: 12.5, color: 'var(--faint)' } }, 'Loading…') : (files.length ? files.map(function (f) { return row('f' + f.id, f.name, (f.mime || '') + (f.size ? ' · ' + fmtBytes(f.size) : ''), function () { props.onPick({ kind: 'file', bucket: 'publication-files', path: f.storage_path, name: f.name, mime: f.mime, label: f.name }); props.onClose(); }); }) : h('div', { style: { fontSize: 12.5, color: 'var(--faint)' } }, 'No files uploaded to your profile yet.')),
+          h('div', { className: 'sec-t' }, 'My LaTeX publications'),
+          latexProjects === null ? h('div', { style: { fontSize: 12.5, color: 'var(--faint)' } }, 'Loading…') : (latexProjects.length ? latexProjects.map(function (p) { return row('p' + p.id, p.title || 'Untitled', 'LaTeX projekt — a teljes szöveg csatolva lesz', function () { props.onPick({ kind: 'project', project_id: p.id, title: p.title, label: p.title || 'LaTeX' }); props.onClose(); }); }) : h('div', { style: { fontSize: 12.5, color: 'var(--faint)' } }, 'Nincs LaTeX publikációd (Editor-projekt) még.')),
           h('div', { className: 'sec-t' }, 'Upload a file'),
           h('div', null, h('input', { type: 'file', onChange: onUpload }), upMsg ? h('span', { style: { marginLeft: 8, fontSize: 12 } }, upMsg) : null)
         )
