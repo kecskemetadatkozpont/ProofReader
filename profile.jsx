@@ -27,6 +27,7 @@ const IC = {
   settings: <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><circle cx="8" cy="8" r="2.2" /><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.5 3.5l1.4 1.4M11.1 11.1l1.4 1.4M12.5 3.5l-1.4 1.4M4.9 11.1l-1.4 1.4" strokeLinecap="round" /></svg>,
   data: <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><ellipse cx="8" cy="3.5" rx="5.5" ry="2" /><path d="M2.5 3.5v9c0 1.1 2.5 2 5.5 2s5.5-.9 5.5-2v-9M2.5 8c0 1.1 2.5 2 5.5 2s5.5-.9 5.5-2" /></svg>,
   publications: <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M4 2.5h6l2.5 2.5V13a.5.5 0 01-.5.5H4a.5.5 0 01-.5-.5V3a.5.5 0 01.5-.5z" strokeLinejoin="round" /><path d="M5.8 6.5h4.4M5.8 8.7h4.4M5.8 10.9h2.6" strokeLinecap="round" /></svg>,
+  chatprompt: <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M2.5 3.5h11a1 1 0 011 1v6a1 1 0 01-1 1H7l-3 2.5V11.5H2.5a1 1 0 01-1-1v-6a1 1 0 011-1z" strokeLinejoin="round" /><path d="M5 6.3h6M5 8.4h4" strokeLinecap="round" /></svg>,
 };
 
 function Avatar(props) {
@@ -666,6 +667,52 @@ function adminTargetUser() {
   } catch (e) { return null; }
 }
 
+// The editable system prompt for the user's "Chat with Publify" research assistant (Research → Ideas).
+function ChatPrompt(props) {
+  var me = props.me;
+  var [prompt, setPrompt] = useState('');
+  var [loaded, setLoaded] = useState(false);
+  var [saving, setSaving] = useState(false);
+  var [status, setStatus] = useState('');
+  useEffect(function () {
+    var BE = window.PR_BACKEND;
+    if (BE && BE.sb && BE.user) {
+      BE.sb.from('research_system_prompts').select('prompt').eq('user_id', BE.user.id).maybeSingle().then(function (r) {
+        setPrompt((r && r.data && r.data.prompt) || ''); setLoaded(true);
+      }, function () { setLoaded(true); });
+    } else { setLoaded(true); }
+  }, []); // eslint-disable-line
+  function save() {
+    var BE = window.PR_BACKEND;
+    if (!BE || !BE.sb || !BE.user) { setStatus('Sign in to save.'); return; }
+    setSaving(true); setStatus('');
+    BE.sb.from('research_system_prompts').upsert({ user_id: BE.user.id, prompt: prompt, updated_at: new Date().toISOString() }, { onConflict: 'user_id' }).then(function (r) {
+      setSaving(false);
+      setStatus(r && r.error ? ('Error: ' + r.error.message) : 'Saved ✓');
+      setTimeout(function () { setStatus(''); }, 2500);
+    });
+  }
+  var words = prompt.trim() ? prompt.trim().split(/\s+/).length : 0;
+  return <div>
+    <h2 className="pf-h">Chat prompt</h2>
+    <p style={{ fontSize: 13.5, color: 'var(--muted)', margin: '0 0 14px', maxWidth: '52em', lineHeight: 1.6 }}>
+      This is the system prompt that steers your <b>“Chat with Publify”</b> assistant in the Research → Ideas tab.
+      It's pre-tuned to your field and publications — edit it freely to change how the assistant brainstorms,
+      challenges, and proposes research ideas with you.
+    </p>
+    {!loaded ? <div className="pf-empty">Loading…</div> : <div className="pf-panel">
+      <textarea value={prompt} onChange={function (e) { setPrompt(e.target.value); }} rows={18} spellCheck={false}
+        style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'inherit', fontSize: 13.5, lineHeight: 1.6, padding: '12px 14px', border: '1px solid var(--line)', borderRadius: 10, background: 'var(--surface, #fff)', color: 'inherit', resize: 'vertical' }}
+        placeholder="Te egy világszínvonalú kutatótárs vagy a … területén. Segíts ötletelni, réseket találni, és falszifikálható kutatási kérdéseket javasolni…" />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 10, flexWrap: 'wrap' }}>
+        <button className="btn-primary" disabled={saving} onClick={save}>{saving ? 'Saving…' : 'Save prompt'}</button>
+        <span style={{ fontSize: 12.5, color: 'var(--faint)' }}>{words} words</span>
+        {status ? <span style={{ fontSize: 13, fontWeight: 600, color: /Error/.test(status) ? 'var(--danger)' : 'var(--ok)' }}>{status}</span> : null}
+      </div>
+    </div>}
+  </div>;
+}
+
 function App() {
   var preview = adminTargetUser();
   var [me, setMe] = useState(function () { return preview || Auth.current(); });
@@ -688,7 +735,7 @@ function App() {
   // in preview only Overview + Publications are faithful to the target (the rest is session-bound)
   var RAIL = [['overview', 'Overview']];
   if (myPubs) RAIL.push(['publications', 'My publications']);
-  if (!preview) RAIL = RAIL.concat([['usage', 'Usage & cost'], ['settings', 'Settings'], ['data', 'Data & sync']]);
+  if (!preview) RAIL = RAIL.concat([['chatprompt', 'Chat prompt'], ['usage', 'Usage & cost'], ['settings', 'Settings'], ['data', 'Data & sync']]);
   var allowed = RAIL.map(function (r) { return r[0]; });
   var curRoute = allowed.indexOf(route) >= 0 ? route : 'overview';
 
@@ -709,10 +756,11 @@ function App() {
       </nav>
       <main className="pf-main">
         {curRoute === 'publications' ? <Publications me={me} preview={preview} />
-          : curRoute === 'usage' ? <UsageCost me={me} usage={usage} />
-            : curRoute === 'settings' ? <Settings me={me} />
-              : curRoute === 'data' ? <DataSync me={me} mode={mode} onChanged={refresh} />
-                : <Overview me={me} usage={usage} go={go} />}
+          : curRoute === 'chatprompt' ? <ChatPrompt me={me} />
+            : curRoute === 'usage' ? <UsageCost me={me} usage={usage} />
+              : curRoute === 'settings' ? <Settings me={me} />
+                : curRoute === 'data' ? <DataSync me={me} mode={mode} onChanged={refresh} />
+                  : <Overview me={me} usage={usage} go={go} />}
       </main>
     </div>
   </div>;

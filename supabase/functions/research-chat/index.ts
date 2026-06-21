@@ -44,6 +44,9 @@ Deno.serve(async (req) => {
     const svc = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
     const { data: proj } = await sb.from('research_projects').select('title,field,goal,keywords').eq('id', chat.project_id).maybeSingle();
     const { data: history } = await sb.from('research_messages').select('role,content,attachments').eq('chat_id', chat_id).order('created_at', { ascending: true });
+    // the caller's own editable system prompt (seeded per researcher; editable in Profile → Chat prompt)
+    const { data: spRow } = await sb.from('research_system_prompts').select('prompt').eq('user_id', callerUid).maybeSingle();
+    const userPrompt = ((spRow && spRow.prompt) || '').trim();
 
     const ctx = proj ? `\n\nCurrent project — Title: ${proj.title}; Field: ${proj.field ?? '—'}; Goal: ${proj.goal ?? '—'}; Keywords: ${(proj.keywords ?? []).join(', ')}` : '';
     let rows: any[] = (history || []).filter((m: any) => m.content);
@@ -64,9 +67,11 @@ Deno.serve(async (req) => {
     }
 
     const ATTACH_NOTE = ` When the user attaches sources or files, their full content is included directly in this message (as text and document blocks) — read and use that content, and never say you cannot access attachments or files.`;
-    const SYSTEM = (useMcp
-      ? `You are a research-ideation partner inside a PhD platform. Use the Consensus tools to ground every non-trivial claim in peer-reviewed evidence, and cite the papers. Propose specific, falsifiable research questions and say briefly why each is a gap. Be concise.`
-      : `You are a research-ideation partner inside a PhD platform. You do NOT have live literature search, but you DO receive any attached materials inline. Answer from the attachments and your own knowledge, be explicit about uncertainty, and propose specific, falsifiable research questions with brief rationale. Be concise.`) + ATTACH_NOTE;
+    // the researcher's own persona drives the chat when present; otherwise a sensible default
+    const BASE = `You are a research-ideation partner inside a PhD platform. Propose specific, falsifiable research questions with brief rationale, surface gaps, and be concise.`;
+    const persona = userPrompt || BASE;
+    const mcpNote = useMcp ? ` Use the Consensus tools to ground every non-trivial claim in peer-reviewed evidence, and cite the papers.` : '';
+    const SYSTEM = persona + mcpNote + ATTACH_NOTE;
 
     const headers: Record<string, string> = { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' };
     if (useMcp) headers['anthropic-beta'] = 'mcp-client-2025-04-04';
