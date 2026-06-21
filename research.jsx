@@ -9,6 +9,8 @@
   var sb = BE && BE.sb;
 
   var STAGES = ['Setup', 'Idea', 'Literature', 'Protocol', 'Data', 'Compute', 'Analysis', 'Writing', 'Submission'];
+  // clicking a workflow step opens the matching panel (the old redundant tab row is gone)
+  var STAGE_TAB = ['overview', 'ideas', 'literature', 'tasks', 'data', 'compute', 'compute', 'writing', 'writing'];
   function svg() { var args = Array.prototype.slice.call(arguments); return h('svg', { viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round', strokeLinejoin: 'round' }, args.map(function (d, i) { return h('path', { key: i, d: d }); })); }
   var STAGE_ICONS = [
     svg('M4 14V2.5', 'M4 3h7l-1.4 2.3L11 7.6H4'),                                         // Setup — flag
@@ -100,9 +102,9 @@
       if (i > 0) kids.push(h('div', { className: 'step-sep', key: 'sep' + i }));
       var cls = 'step' + (i === cur ? ' cur' : (i < cur ? ' done' : ''));
       kids.push(h('button', {
-        key: i, className: cls, disabled: !props.canEdit,
-        title: props.canEdit ? 'Set stage to ' + name : name,
-        onClick: function () { if (props.canEdit && i !== cur) props.onSet(i); }
+        key: i, className: cls,
+        title: name + (props.canEdit ? ' — megnyitás / szakasz beállítása' : ' — megnyitás'),
+        onClick: function () { if (props.onNav) props.onNav(i); if (props.canEdit && i !== cur && props.onSet) props.onSet(i); }
       }, h('span', { className: 'dot' }, STAGE_ICONS[i] || (i + 1)), name));
     });
     return h('div', { className: 'stepper' }, kids);
@@ -174,9 +176,9 @@
     var pS = useState(null), latexProjects = pS[0], setLatexProjects = pS[1];
     var uS = useState(''), upMsg = uS[0], setUpMsg = uS[1];
     useEffect(function () {
-      sb.from('publication_files').select('id,name,mime,size,storage_path').eq('owner_id', props.authorId).order('created_at', { ascending: false }).then(function (r) { setFiles((r && r.data) || []); });
-      var uid = (BE && BE.user && BE.user.id) || props.authorId;
-      sb.from('projects').select('id,title').eq('owner_id', uid).is('deleted_at', null).order('updated_at', { ascending: false }).then(function (r) { setLatexProjects((r && r.data) || []); });
+      var owner = props.fileOwnerId || props.authorId;   // whose files to list = the VIEWED user (me.id), not the real session user — matters in admin-preview
+      sb.from('publication_files').select('id,name,mime,size,storage_path').eq('owner_id', owner).order('created_at', { ascending: false }).then(function (r) { setFiles((r && r.data) || []); });
+      sb.from('projects').select('id,title').eq('owner_id', owner).is('deleted_at', null).order('updated_at', { ascending: false }).then(function (r) { setLatexProjects((r && r.data) || []); });
     }, []);
     function onUpload(e) {
       var f = e.target.files && e.target.files[0]; if (!f) return;
@@ -357,7 +359,7 @@
           h('button', { className: 'btn pri', disabled: busy, onClick: send }, 'Send')
         )
       ) : null,
-      picker ? h(AttachModal, { projectId: props.projectId, authorId: props.authorId, sources: props.sources, onPick: function (a) { setAttach(function (p) { return p.concat([a]); }); }, onClose: function () { setPicker(false); } }) : null
+      picker ? h(AttachModal, { projectId: props.projectId, authorId: props.authorId, fileOwnerId: props.fileOwnerId, sources: props.sources, onPick: function (a) { setAttach(function (p) { return p.concat([a]); }); }, onClose: function () { setPicker(false); } }) : null
     );
   }
 
@@ -731,7 +733,7 @@
     var openTasks = (props.tasks || []).filter(function (t) { return t.status !== 'done'; }).length;
     var TABS = [['overview', 'Overview', null], ['ideas', 'Ideas', (props.ideas || []).length], ['literature', 'Literature', (props.sources || []).length], ['data', 'Data', (props.datasets || []).length], ['compute', 'Compute', (props.jobs || []).length], ['writing', 'Writing', null], ['canvas', 'Canvas', null], ['notes', 'Notes', null], ['log', 'Log', (props.log || []).length], ['tasks', 'Tasks', openTasks]];
     var content;
-    if (tab === 'ideas') content = h('div', null, h(ChatPanel, { projectId: p.id, supervised: !!p.student_id, canEdit: props.canEdit, authorId: props.authorId, sources: props.sources, onChanged: props.onChanged }), h(IdeasPanel, { projectId: p.id, ideas: props.ideas, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged }));
+    if (tab === 'ideas') content = h('div', null, h(ChatPanel, { projectId: p.id, supervised: !!p.student_id, canEdit: props.canEdit, authorId: props.authorId, fileOwnerId: props.fileOwnerId, sources: props.sources, onChanged: props.onChanged }), h(IdeasPanel, { projectId: p.id, ideas: props.ideas, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged }));
     else if (tab === 'literature') content = h(LiteraturePanel, { projectId: p.id, sources: props.sources, canEdit: props.canEdit, myEmail: props.myEmail, onChanged: props.onChanged });
     else if (tab === 'data') content = h(DataPanel, { projectId: p.id, datasets: props.datasets, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
     else if (tab === 'compute') content = h(ComputePanel, { projectId: p.id, jobs: props.jobs, datasets: props.datasets, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
@@ -750,8 +752,10 @@
           ? h('select', { className: 'field', style: { width: 'auto', height: 32 }, value: p.status, onChange: setStatus }, Object.keys(STATUS_LABEL).map(function (k) { return h('option', { key: k, value: k }, STATUS_LABEL[k]); }))
           : h('span', { className: 'chip c-grey' }, STATUS_LABEL[p.status] || p.status)
       ),
-      h(Stepper, { stage: p.stage, canEdit: props.canEdit, onSet: setStage }),
-      h('div', { className: 'tabs' }, TABS.map(function (t) { return h('button', { key: t[0], className: tab === t[0] ? 'on' : '', onClick: function () { setTab(t[0]); } }, t[1], t[2] ? h('span', { className: 'c' }, t[2]) : null); })),
+      h(Stepper, { stage: p.stage, canEdit: props.canEdit, onSet: setStage, onNav: function (i) { setTab(STAGE_TAB[i] || 'overview'); } }),
+      h('div', { className: 'subtabs' }, [['overview', 'Overview', null], ['canvas', 'Canvas', null], ['notes', 'Notes', null], ['log', 'Log', (props.log || []).length], ['tasks', 'Tasks', openTasks]].map(function (t) {
+        return h('button', { key: t[0], className: tab === t[0] ? 'on' : '', onClick: function () { setTab(t[0]); } }, t[1], t[2] ? h('span', { className: 'c' }, t[2]) : null);
+      })),
       content
     );
   }
@@ -922,7 +926,7 @@
     var preview = !!me._preview;
     var isAdmin = me.role === 'admin';
     var authorId = (BE.user && BE.user.id) || me.id;   // RLS ties a log author to the real session user
-    function canEdit(p) { return !!(p && (isAdmin || p.owner_id === me.id)); }
+    function canEdit(p) { return !!(p && !preview && (isAdmin || p.owner_id === me.id)); }   // admin-preview is read-only (you are viewing another user's data)
 
     var initStudent = null; try { initStudent = new URLSearchParams(location.search).get('student'); } catch (e) { }
     return h(AppShell, {
@@ -952,7 +956,7 @@
     ) : null;
     var body;
     if (sel) {
-      body = h(ProjectDetail, { project: sel, log: props.detail.log, tasks: props.detail.tasks, ideas: props.detail.ideas, sources: props.detail.sources, datasets: props.detail.datasets, jobs: props.detail.jobs, canEdit: props.canEdit(sel), viewerId: meId, studentName: (studentById[sel.student_id] && studentById[sel.student_id].name) || null, authorId: props.authorId, myEmail: props.me.email, onBack: props.onBack, onChanged: props.refreshAll });
+      body = h(ProjectDetail, { project: sel, log: props.detail.log, tasks: props.detail.tasks, ideas: props.detail.ideas, sources: props.detail.sources, datasets: props.detail.datasets, jobs: props.detail.jobs, canEdit: props.canEdit(sel), viewerId: meId, fileOwnerId: meId, studentName: (studentById[sel.student_id] && studentById[sel.student_id].name) || null, authorId: props.authorId, myEmail: props.me.email, onBack: props.onBack, onChanged: props.refreshAll });
     } else if (view === 'supervised') {
       body = h('div', null, seg, h(SupervisedView, { students: props.students, projects: supProjects, studentById: studentById, onOpen: props.openProject }));
     } else if (!mineProjects.length) {

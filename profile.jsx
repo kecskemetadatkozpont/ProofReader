@@ -122,9 +122,9 @@ function Overview(props) {
       <h3 className="pf-h3">Research projects</h3>
       <div className="pf-cards">{rprojects.map(function (p) {
         var STG = ['Setup', 'Idea', 'Literature', 'Protocol', 'Data', 'Compute', 'Analysis', 'Writing', 'Submission'];
-        return <a className="pf-card" key={p.id} href="Research.html"><div className="pf-card-t">{p.title}</div><div className="pf-card-m">{(STG[p.stage] || 'Setup') + ' · ' + (p.status || 'active')}</div></a>;
+        return <a className="pf-card" key={p.id} href={adminTargetUser() ? 'Research.html?adminView=1' : 'Research.html'}><div className="pf-card-t">{p.title}</div><div className="pf-card-m">{(STG[p.stage] || 'Setup') + ' · ' + (p.status || 'active')}</div></a>;
       })}</div>
-      <div className="pf-actions" style={{ marginTop: 10 }}><a className="btn-ghost" href="Research.html">Open Research →</a></div>
+      <div className="pf-actions" style={{ marginTop: 10 }}><a className="btn-ghost" href={adminTargetUser() ? 'Research.html?adminView=1' : 'Research.html'}>Open Research →</a></div>
     </div> : null}
   </div>;
 }
