@@ -75,10 +75,19 @@ function Header(props) {
 }
 
 function Overview(props) {
-  var me = props.me, usage = props.usage, go = props.go;
-  var projects = Store.listFor(me.id) || [];
+  var me = props.me, usage = props.usage, go = props.go, preview = props.preview;
   var [rprojects, setRprojects] = useState([]);
-  useEffect(function () { var B = window.PR_BACKEND; if (B && B.sb && B.user) B.sb.from('research_projects').select('id,title,stage,status').eq('owner_id', B.user.id).order('updated_at', { ascending: false }).then(function (r) { setRprojects((r && r.data) || []); }); }, []);
+  var [previewProjects, setPreviewProjects] = useState(null);
+  useEffect(function () {
+    var B = window.PR_BACKEND; if (!(B && B.sb)) return;
+    // research projects belong to the DISPLAYED user (me) — in admin view that's the viewed researcher
+    B.sb.from('research_projects').select('id,title,stage,status').eq('owner_id', me.id).order('updated_at', { ascending: false }).then(function (r) { setRprojects((r && r.data) || []); });
+    // in admin preview the local Store only holds the admin's projects — fetch the viewed user's writing projects directly (admin RLS)
+    if (preview) B.sb.from('projects').select('id,data,updated_at,deleted_at').eq('owner_id', me.id).is('deleted_at', null).order('updated_at', { ascending: false }).then(function (r) {
+      setPreviewProjects(((r && r.data) || []).map(function (row) { return { id: row.id, title: (row.data && row.data.title) || 'Untitled publication', ownerId: me.id, updated: row.updated_at ? Date.parse(row.updated_at) : 0, _shared: false }; }));
+    });
+  }, [me.id, preview]);
+  var projects = preview ? (previewProjects || []) : (Store.listFor(me.id) || []);
   var recent = projects.slice().sort(function (a, b) { return (b.updated || 0) - (a.updated || 0); }).slice(0, 4);
   var owned = projects.filter(function (p) { return !p._shared; }).length;
   var shared = projects.filter(function (p) { return p._shared; }).length;
@@ -716,6 +725,14 @@ function ChatPrompt(props) {
 function App() {
   var preview = adminTargetUser();
   var [me, setMe] = useState(function () { return preview || Auth.current(); });
+  // admin "view as": the gate in adminTargetUser() needs the admin's role, which loads async — re-check
+  // when it resolves (pr-profile) and switch to the viewed user, so the profile isn't stuck on the admin.
+  useEffect(function () {
+    function sync() { var t = adminTargetUser(); if (t) setMe(function (cur) { return cur && cur.id === t.id ? cur : t; }); }
+    sync();
+    window.addEventListener('pr-profile', sync);
+    return function () { window.removeEventListener('pr-profile', sync); };
+  }, []);
   var [route, setRoute] = useState(function () { return ((location.hash || '#overview').replace('#', '').split('?')[0]) || 'overview'; });
   var [, force] = useState(0);
   var refresh = useCallback(function () { force(function (x) { return x + 1; }); }, []);
@@ -760,7 +777,7 @@ function App() {
             : curRoute === 'usage' ? <UsageCost me={me} usage={usage} />
               : curRoute === 'settings' ? <Settings me={me} />
                 : curRoute === 'data' ? <DataSync me={me} mode={mode} onChanged={refresh} />
-                  : <Overview me={me} usage={usage} go={go} />}
+                  : <Overview me={me} usage={usage} go={go} preview={!!preview} />}
       </main>
     </div>
   </div>;
