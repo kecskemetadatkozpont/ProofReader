@@ -24,7 +24,10 @@
     var cwS = useState(false), canWf = cwS[0], setCanWf = cwS[1];         // admin-granted permission
     var flS = useState([]), files = flS[0], setFiles = flS[1];           // user_chat_files for the current chat
     var pvS = useState(null), preview = pvS[0], setPreview = pvS[1];
-    var alive = useRef(true), scrollRef = useRef(null), taRef = useRef(null);
+    var atS = useState(false), atOpen = atS[0], setAtOpen = atS[1];        // attach menu open
+    var pkS = useState(null), picker = pkS[0], setPicker = pkS[1];         // {kind, items} for the browse pickers
+    var dgS = useState(false), dragOver = dgS[0], setDragOver = dgS[1];
+    var alive = useRef(true), scrollRef = useRef(null), taRef = useRef(null), fileRef = useRef(null);
     useEffect(function () { return function () { alive.current = false; }; }, []);
     useEffect(function () { boot(); }, []);
 
@@ -87,13 +90,58 @@
     function onInput(e) { setInput(e.target.value); e.target.style.height = 'auto'; e.target.style.height = Math.min(e.target.scrollHeight, 200) + 'px'; }
     function copy(m) { try { navigator.clipboard.writeText(m.content || ''); } catch (e) { } }
 
+    // ---- attachments: file uploads + browse LaTeX/research projects + publications.
+    // Everything lands as a row in user_chat_files; the Edge injects them into Publify's context. ----
+    useEffect(function () { if (!atOpen) return; var c = function (e) { if (!e.target.closest('.attach-wrap')) setAtOpen(false); }; document.addEventListener('mousedown', c); return function () { document.removeEventListener('mousedown', c); }; }, [atOpen]);
+    function attachText(path, content, source) {
+      if (!content) return Promise.resolve();
+      return ensureChat(path).then(function (id) { if (!id) return;
+        return sb.from('user_chat_files').upsert({ chat_id: id, path: String(path).slice(0, 200), content: String(content).slice(0, 200000), source: source || 'upload', updated_at: new Date().toISOString() }, { onConflict: 'chat_id,path' }).then(function () { loadFiles(id); loadChats(); });
+      });
+    }
+    function isTextFile(f) { return /^text\//.test(f.type || '') || /\.(txt|md|markdown|tex|bib|cls|sty|csv|tsv|json|ya?ml|js|ts|jsx|tsx|py|r|html?|css|log|bbl)$/i.test(f.name || ''); }
+    function doUpload(fileList) {
+      var arr = Array.prototype.slice.call(fileList || []); if (!arr.length) return;
+      var texts = arr.filter(isTextFile), skipped = arr.length - texts.length;
+      if (skipped) window.alert(skipped + ' fájl kihagyva — egyelőre csak szövegfájlok csatolhatók (PDF/kép nem).');
+      texts.reduce(function (chain, f) { return chain.then(function () { return f.text().then(function (t) { return attachText(f.name, t, 'upload'); }); }); }, Promise.resolve());
+    }
+    function onPickedFiles(e) { doUpload(e.target.files); e.target.value = ''; }
+    function pickFiles() { setAtOpen(false); if (fileRef.current) fileRef.current.click(); }
+    function onDrop(e) { e.preventDefault(); setDragOver(false); if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) doUpload(e.dataTransfer.files); }
+    function openPicker(kind) {
+      setAtOpen(false); setPicker({ kind: kind, items: null });
+      if (kind === 'latex') sb.from('projects').select('id,title').is('deleted_at', null).order('updated_at', { ascending: false }).then(function (r) { setPicker({ kind: kind, items: (r && r.data) || [] }); });
+      else if (kind === 'research') sb.from('research_projects').select('id,title,field,goal,keywords,status,stage').order('updated_at', { ascending: false }).then(function (r) { setPicker({ kind: kind, items: (r && r.data) || [] }); });
+      else if (kind === 'pub') sb.from('publications').select('id,title,year,journal,first_author,citation,doi').eq('researcher_id', me.id).order('year', { ascending: false }).limit(300).then(function (r) { setPicker({ kind: kind, items: (r && r.data) || [] }); });
+    }
+    function attachLatex(p) {
+      setPicker(null);
+      sb.from('projects').select('data').eq('id', p.id).maybeSingle().then(function (r) {
+        var data = r && r.data && r.data.data, files = (data && data.files) || {}, out = [];
+        Object.keys(files).forEach(function (k) { if (/\.(tex|md|txt)$/i.test(k)) { var c = files[k] && files[k].content; if (c) out.push('% ===== ' + k + ' =====\n' + c); } });
+        attachText('LaTeX: ' + (p.title || 'projekt'), out.join('\n\n').slice(0, 150000) || '(nincs szöveges .tex tartalom)', 'project');
+      });
+    }
+    function attachResearch(p) {
+      setPicker(null);
+      var body = 'Kutatási projekt: ' + (p.title || '') + '\n' + (p.field ? 'Terület: ' + p.field + '\n' : '') + (p.goal ? 'Cél: ' + p.goal + '\n' : '') + (p.keywords && p.keywords.length ? 'Kulcsszavak: ' + p.keywords.join(', ') + '\n' : '') + 'Állapot: ' + (p.status || '') + ' · fázis ' + (p.stage || 0) + '/7';
+      attachText('Kutatás: ' + (p.title || 'projekt'), body, 'project');
+    }
+    function attachPub(p) {
+      setPicker(null);
+      var body = (p.title || '') + (p.year ? ' (' + p.year + ')' : '') + '\n' + (p.first_author ? 'Szerző: ' + p.first_author + '\n' : '') + (p.journal ? 'Folyóirat: ' + p.journal + '\n' : '') + (p.doi ? 'DOI: ' + p.doi + '\n' : '') + (p.citation ? '\n' + p.citation : '');
+      attachText('Publikáció: ' + String(p.title || 'publikáció').slice(0, 70), body, 'publication');
+    }
+    function removeFile(f, e) { e.stopPropagation(); sb.from('user_chat_files').delete().eq('id', f.id).then(function () { loadFiles(cid); }); }
+
     if (phase === 'loading') return h('div', { className: 'center' }, 'Betöltés…');
     if (phase === 'nobackend') return h('div', { className: 'center' }, 'A felhő backend nem elérhető.');
     if (phase === 'signin') return null;
-    if (phase === 'demo') return h('div', { className: 'center' }, h('div', null, h('h1', null, 'Jelentkezz be'), h('p', null, 'A Claude Session a fiókodat igényli.'), h('button', { className: 'newchat', style: { display: 'inline-flex', marginTop: 12 }, onClick: function () { try { localStorage.removeItem('proofreader:mode'); } catch (e) { } location.reload(); } }, 'Bejelentkezés')));
+    if (phase === 'demo') return h('div', { className: 'center' }, h('div', null, h('h1', null, 'Jelentkezz be'), h('p', null, 'A Publify chat a fiókodat igényli.'), h('button', { className: 'newchat', style: { display: 'inline-flex', marginTop: 12 }, onClick: function () { try { localStorage.removeItem('proofreader:mode'); } catch (e) { } location.reload(); } }, 'Bejelentkezés')));
 
     var side = h('div', { className: 'side' },
-      h('div', { className: 'side-brand' }, h('div', { className: 'mk' }, h('span')), h('div', null, h('b', null, 'Publify'), h('i', null, 'Claude Session'))),
+      h('div', { className: 'side-brand' }, h('div', { className: 'mk' }, h('span')), h('div', null, h('b', null, 'Publify'), h('i', null, 'Chat with Publify'))),
       h('button', { className: 'newchat', onClick: newChat }, '➕  Új beszélgetés'),
       h('div', { className: 'hist-h' }, 'Előzmények'),
       h('div', { className: 'hist' }, chats.length ? chats.map(function (c) {
@@ -112,28 +160,49 @@
           ai ? h('div', { className: 'bmeta' }, h('button', { onClick: function () { copy(m); } }, 'Másolás')) : null);
       }),
       streaming ? h('div', { className: 'bubble ai', key: 'stream' }, h('div', { className: 'btxt' }, streaming.text || '', h('span', { className: 'tw-cursor' }, '▌')))
-        : busy ? h('div', { className: 'bubble ai' }, h('div', { className: 'btxt', style: { color: 'var(--faint)' } }, wf ? '🛠 Claude dolgozik a feladaton (több lépés, fájlokkal)…' : 'Claude gondolkodik…')) : null
-    )) : h('div', { className: 'empty' }, h('h1', null, 'Miben segíthetek?'), h('p', null, 'Teljes értékű Claude beszélgetés — kérdezz bármit.'),
+        : busy ? h('div', { className: 'bubble ai' }, h('div', { className: 'btxt', style: { color: 'var(--faint)' } }, wf ? '🛠 A Publify dolgozik a feladaton (több lépés, fájlokkal)…' : 'A Publify gondolkodik…')) : null
+    )) : h('div', { className: 'empty' }, h('h1', null, 'Miben segíthetek?'), h('p', null, 'Ask Publify — kérdezz bármit a kutatásodról; csatolj fájlokat, LaTeX/kutatási projekteket vagy publikációkat (📎).'),
       h('div', { className: 'suggest' }, SUGGEST.map(function (s, i) { return h('button', { key: i, onClick: function () { sendText(s); } }, s); })));
 
     var curTitle = (cid && (chats.filter(function (c) { return c.id === cid; })[0] || {}).title) || 'Új beszélgetés';
-    var main = h('div', { className: 'main' },
-      h('div', { className: 'topbar' }, h('span', null, curTitle), h('span', { className: 'mtag' }, wf ? '🛠 Workflow' : 'Claude')),
-      (cid && files.length) ? h('div', { className: 'files-strip' }, h('span', { className: 'fs-h' }, '🗂 Fájlok:'), files.map(function (f) { return h('button', { className: 'fs-chip', key: f.id, onClick: function () { setPreview(f); } }, f.path); })) : null,
+    var main = h('div', { className: 'main', onDragOver: function (e) { e.preventDefault(); if (!dragOver) setDragOver(true); }, onDragLeave: function (e) { if (e.target === e.currentTarget) setDragOver(false); }, onDrop: onDrop },
+      h('div', { className: 'topbar' }, h('span', null, curTitle), h('span', { className: 'mtag' }, wf ? '🛠 Workflow' : 'Publify')),
+      (cid && files.length) ? h('div', { className: 'files-strip' }, h('span', { className: 'fs-h' }, '🗂 Csatolva:'), files.map(function (f) { return h('span', { className: 'fs-chip', key: f.id },
+        h('button', { className: 'fs-name', title: 'Előnézet', onClick: function () { setPreview(f); } }, f.path),
+        h('button', { className: 'fs-x', title: 'Eltávolítás', onClick: function (e) { removeFile(f, e); } }, '×')); })) : null,
       conv,
       h('div', { className: 'composer' },
         canWf ? h('div', { className: 'wf-row' },
           h('button', { className: 'wf-toggle' + (wf ? ' on' : ''), onClick: function () { setWf(!wf); } }, '🛠 Workflow mód: ' + (wf ? 'BE' : 'KI')),
-          h('span', { className: 'wf-hint' }, wf ? 'Claude több lépésben, fájlokkal old meg egy feladatot.' : 'Több-lépéses ügynök-mód (admin engedélyezte).')) : null,
+          h('span', { className: 'wf-hint' }, wf ? 'A Publify több lépésben, fájlokkal old meg egy feladatot.' : 'Több-lépéses ügynök-mód (admin engedélyezte).')) : null,
         h('div', { className: 'composer-in' },
-          h('textarea', { ref: taRef, value: input, rows: 1, placeholder: wf ? 'Írd le a feladatot — Claude több lépésben megoldja…' : 'Üzenet Claude-nak…  (Enter = küldés · Shift+Enter = új sor)', disabled: busy, onChange: onInput, onKeyDown: onKey }),
-          h('button', { className: 'send-btn', disabled: busy || !input.trim(), onClick: send }, '↑')))
+          h('div', { className: 'attach-wrap' },
+            h('button', { className: 'attach-btn', title: 'Csatolás', disabled: busy, onClick: function () { setAtOpen(!atOpen); } }, '📎'),
+            atOpen ? h('div', { className: 'attach-menu' },
+              h('button', { onClick: pickFiles }, '📄  Fájl feltöltése'),
+              h('button', { onClick: function () { openPicker('latex'); } }, '📐  LaTeX projekt'),
+              h('button', { onClick: function () { openPicker('research'); } }, '🔬  Kutatási projekt'),
+              h('button', { onClick: function () { openPicker('pub'); } }, '📚  Publikáció')) : null),
+          h('textarea', { ref: taRef, value: input, rows: 1, placeholder: wf ? 'Írd le a feladatot — a Publify több lépésben megoldja…' : 'Üzenet a Publifynak…  (Enter = küldés · Shift+Enter = új sor)', disabled: busy, onChange: onInput, onKeyDown: onKey }),
+          h('button', { className: 'send-btn', disabled: busy || !input.trim(), onClick: send }, '↑'))),
+      dragOver ? h('div', { className: 'drop-ov' }, h('div', { className: 'drop-card' }, '📎 Húzd ide a fájlokat a csatoláshoz')) : null
     );
 
     return h('div', { className: 'app' }, side, main,
+      h('input', { ref: fileRef, type: 'file', multiple: true, style: { display: 'none' }, onChange: onPickedFiles }),
       preview ? h('div', { className: 'pv-scrim', onClick: function () { setPreview(null); } }, h('div', { className: 'pv-modal', onClick: function (e) { e.stopPropagation(); } },
         h('div', { className: 'pv-head' }, h('b', null, preview.path), h('button', { className: 'pv-x', onClick: function () { setPreview(null); } }, '×')),
-        h('div', { className: 'btxt md pv-body', dangerouslySetInnerHTML: { __html: foldCode(mdHtml(preview.content || '')) } }))) : null);
+        h('div', { className: 'btxt md pv-body', dangerouslySetInnerHTML: { __html: foldCode(mdHtml(preview.content || '')) } }))) : null,
+      picker ? h('div', { className: 'pv-scrim', onClick: function () { setPicker(null); } }, h('div', { className: 'pv-modal pick-modal', onClick: function (e) { e.stopPropagation(); } },
+        h('div', { className: 'pv-head' }, h('b', null, picker.kind === 'latex' ? '📐 LaTeX projektek' : picker.kind === 'research' ? '🔬 Kutatási projektek' : '📚 Publikációk'), h('button', { className: 'pv-x', onClick: function () { setPicker(null); } }, '×')),
+        h('div', { className: 'pick-body' },
+          picker.items == null ? h('div', { className: 'pick-empty' }, 'Betöltés…')
+            : !picker.items.length ? h('div', { className: 'pick-empty' }, 'Nincs elérhető elem.')
+              : picker.items.map(function (it) {
+                var label = (it.title || '(cím nélkül)') + (picker.kind === 'pub' && it.year ? ' (' + it.year + ')' : '');
+                var sub = picker.kind === 'latex' ? 'LaTeX projekt' : picker.kind === 'research' ? (it.field || 'kutatási projekt') : (it.journal || it.first_author || '');
+                return h('button', { className: 'pick-item', key: it.id, onClick: function () { if (picker.kind === 'latex') attachLatex(it); else if (picker.kind === 'research') attachResearch(it); else attachPub(it); } }, h('b', null, label), sub ? h('small', null, sub) : null);
+              })))) : null);
   }
 
   ReactDOM.createRoot(document.getElementById('root')).render(h(App));

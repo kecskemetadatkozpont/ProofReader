@@ -10,7 +10,7 @@ const MODEL = Deno.env.get('RESEARCH_AI_MODEL') || 'claude-sonnet-4-6';
 const ALLOWED_MODELS = new Set(['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001']);
 const MAX_TOKENS = parseInt(Deno.env.get('SESSION_MAX_TOKENS') || '4096', 10);
 const HISTORY = parseInt(Deno.env.get('SESSION_HISTORY') || '20', 10);
-const SYSTEM = `You are Claude, a helpful, knowledgeable assistant inside the Publify platform. Answer clearly and concisely in the user's language. Use Markdown; put code in fenced code blocks.`;
+const SYSTEM = `You are Publify, a helpful, knowledgeable research assistant inside the Publify platform. You help researchers with their writing, publications, and projects. Answer clearly and concisely in the user's language. Use Markdown; put code in fenced code blocks. When the user has attached documents, LaTeX/research projects, or publications, ground your answers in them and cite which attachment you used.`;
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -40,8 +40,25 @@ Deno.serve(async (req) => {
     if (!rows.length) return json({ error: 'no messages to respond to' }, 400);
     const messages = rows.map((m: any) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content }));
 
+    // Attached materials (uploads / LaTeX & research projects / publications) → injected as context so Publify
+    // "sees" them in normal chat too. Agent-written workspace files are excluded (workflow tools read those).
+    const { data: filesData } = await sb.from('user_chat_files').select('path,content,source').eq('chat_id', chat_id).order('path');
+    let attachCtx = '';
+    if (filesData && filesData.length) {
+      let budget = 60000; const parts: string[] = [];
+      for (const f of (filesData as any[])) {
+        if (f.source === 'agent') continue;
+        const c = String(f.content || ''); if (!c) continue;
+        const chunk = `### ${f.path}\n${c.slice(0, 24000)}`;
+        if (budget - chunk.length < 0) { parts.push(`### ${f.path}\n_(túl nagy — kihagyva a kontextusból)_`); continue; }
+        budget -= chunk.length; parts.push(chunk);
+      }
+      if (parts.length) attachCtx = '\n\n# Csatolt anyagok\nA felhasználó az alábbi dokumentumokat / projekteket / publikációkat csatolta. Használd őket, ha relevánsak, és jelezd, melyikre támaszkodtál.\n\n' + parts.join('\n\n---\n\n');
+    }
+    const systemFull = SYSTEM + attachCtx;
+
     const headers: Record<string, string> = { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' };
-    const body = { model, max_tokens: MAX_TOKENS, system: SYSTEM, messages };
+    const body = { model, max_tokens: MAX_TOKENS, system: systemFull, messages };
     const TRUNC = '\n\n---\n_⚠️ A válasz a hosszkorlát miatt megszakadt. Írd be, hogy **„folytasd"**._';
 
     // ---- Workflow (agentic) mode: Claude works autonomously across steps with file tools (item 4) ----
@@ -52,7 +69,7 @@ Deno.serve(async (req) => {
         { name: 'read_file', description: 'Read a file from the session workspace.', input_schema: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } },
         { name: 'list_files', description: 'List the files in the session workspace.', input_schema: { type: 'object', properties: {} } },
       ];
-      const sysW = SYSTEM + ' You are in WORKFLOW mode: complete the task autonomously across multiple steps. Save every deliverable with write_file (Markdown); use list_files/read_file to inspect the workspace. Keep going until the task is done, then give a short summary of what you produced.';
+      const sysW = systemFull + ' You are in WORKFLOW mode: complete the task autonomously across multiple steps. Save every deliverable with write_file (Markdown); use list_files/read_file to inspect the workspace. Keep going until the task is done, then give a short summary of what you produced.';
       const convo: any[] = messages.slice();
       const steps: any[] = [];
       let finalText = '';
