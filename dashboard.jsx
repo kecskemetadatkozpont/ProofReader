@@ -178,7 +178,10 @@ function NewModal({ me, onClose, onCreate }) {
 
 function ShareModal({ project, me, onClose, onChange }) {
   const [email, setEmail] = useState(''); const [role, setRole] = useState('editor'); const [err, setErr] = useState('');
+  const [accept, setAccept] = useState({}); const [resent, setResent] = useState({});
   const owner = Auth.byId(project.ownerId);
+  const isOwnerView = project.ownerId === me.id;
+  useEffect(() => { if (isOwnerView && isCloudMode() && Store.loadAcceptance) Store.loadAcceptance(project.id).then(setAccept); }, [project.id, project.members.length]);
   const invite = async () => {
     const e = email.trim(); if (!e) return;
     let u = Auth.byEmail(e);
@@ -209,12 +212,18 @@ function ShareModal({ project, me, onClose, onChange }) {
           </div>
           {project.members.map((m) => {
             const u = Auth.byId(m.userId);
+            const acc = accept[m.userId];
+            const pending = acc == null;
             return (
               <div key={m.userId} className="member-row">
                 <Avatar user={u} size={32} />
                 <span className="mname">{u ? u.name : m.userId}{u && u.id === me.id ? ' (you)' : ''}<small>{u && u.email}</small></span>
+                {isOwnerView && isCloudMode()
+                  ? <span className={'inv-pill ' + (pending ? 'pending' : 'ok')} title={pending ? 'A meghívott még nem fogadta el a meghívást' : ('Elfogadva: ' + new Date(acc).toLocaleString())}>{pending ? 'Függőben' : 'Elfogadva'}</span>
+                  : null}
                 {project.ownerId === me.id
                   ? <>
+                      {pending && isCloudMode() ? <button className="btn-text" title="Meghívó-értesítés újraküldése" onClick={() => { Store.resendInvite(project.id, m.userId, m.role, project.title); setResent((s) => Object.assign({}, s, { [m.userId]: true })); }}>{resent[m.userId] ? 'Elküldve ✓' : 'Resend'}</button> : null}
                       <select className="sel" value={m.role} onChange={(e) => { Store.setRole(project.id, m.userId, e.target.value); onChange(); }}>{ROLES.map((r) => <option key={r} value={r}>{r}</option>)}</select>
                       <button className="btn-text danger" style={{ color: '#dc2626' }} onClick={() => { Store.removeMember(project.id, m.userId); onChange(); }}>Remove</button>
                     </>
@@ -291,7 +300,7 @@ function ActivityModal({ projects, onClose }) {
   );
 }
 
-function AccountMenu({ me, onClose, onUsage, onSwitch, onSignOut, notes = [], unread = 0, onView, onMarkAll }) {
+function AccountMenu({ me, onClose, onUsage, onSwitch, onSignOut, notes = [], unread = 0, onView, onMarkAll, onAccept }) {
   const u = Store.usage(me.id);
   const others = (Auth.demoUsers ? Auth.demoUsers() : Auth.users()).filter((x) => x.id !== me.id);
   return (
@@ -304,7 +313,10 @@ function AccountMenu({ me, onClose, onUsage, onSwitch, onSignOut, notes = [], un
           {notes.length ? notes.slice(0, 10).map((n) => { const tgt = notifTarget(n); return (
             <div key={n.id} className={'adr-notif' + (n.read_at ? '' : ' unread')}>
               <div className="adr-notif-t"><b>{notifTitle(n)}</b><div className="adr-notif-x">{notifSumm(n)}</div></div>
-              {tgt ? <button className="adr-view" onClick={() => onView(n, tgt)}>View →</button> : null}
+              <div className="adr-notif-actions">
+                {n.kind === 'share' ? <button className="adr-accept" onClick={() => onAccept(n)}>Elfogad</button> : null}
+                {tgt ? <button className="adr-view" onClick={() => onView(n, tgt)}>Megnyit →</button> : null}
+              </div>
             </div>
           ); }) : <div className="adr-notif-empty">Nincs értesítés.</div>}
         </div>
@@ -482,6 +494,7 @@ function App() {
             {acctOpen && <AccountMenu me={me}
               notes={notif.notes} unread={notif.unread} onMarkAll={notif.markAll}
               onView={(n, tgt) => { notif.markRead(n); if (tgt) location.href = tgt; }}
+              onAccept={(n) => { const p = n.payload || {}; if (p.project_id) Store.acceptInvitation(p.project_id); notif.markRead(n); }}
               onUsage={() => { setAcctOpen(false); setModal('usage'); }}
               onSwitch={(id) => { Auth.signIn(id); setMe(Auth.byId(id)); setAcctOpen(false); }}
               onSignOut={() => { Auth.signOut(); setMe(null); }}

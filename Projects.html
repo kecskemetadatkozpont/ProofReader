@@ -208,6 +208,13 @@
     .adr-view { flex: none; border: 1px solid var(--line); background: transparent; color: var(--accent); font-family: inherit; font-size: 11.5px; font-weight: 600; padding: 3px 8px; border-radius: 7px; cursor: pointer; white-space: nowrap; }
     .adr-view:hover { background: var(--accent-tint); border-color: var(--accent); }
     .adr-notif-empty { padding: 12px 11px; font-size: 12.5px; color: var(--muted); }
+    .adr-notif-actions { display: flex; flex-direction: column; gap: 5px; flex: none; }
+    .adr-accept { border: 0; background: #4f46e5; color: #fff; font-family: inherit; font-size: 11.5px; font-weight: 700; padding: 3px 10px; border-radius: 7px; cursor: pointer; white-space: nowrap; }
+    .adr-accept:hover { filter: brightness(1.06); }
+    /* invitation acceptance status in the Share modal */
+    .inv-pill { font-size: 10.5px; font-weight: 700; padding: 2px 8px; border-radius: 20px; white-space: nowrap; flex: none; }
+    .inv-pill.pending { background: var(--warn-bg, #fef3c7); color: var(--warn, #b45309); }
+    .inv-pill.ok { background: var(--ok-bg, #dcfce7); color: var(--ok, #15803d); }
   </style>
   <script src="theme.js"></script>
   <script src="nav.js"></script>

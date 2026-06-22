@@ -749,6 +749,10 @@
     const owner = Auth.byId(project.ownerId);
     const ROLES = ['editor', 'commenter', 'viewer'];
     const isMember = (id) => id === project.ownerId || (project.members || []).some((m) => m.userId === id);
+    const cloud = !!(BE && BE.mode === 'cloud');
+    const isOwnerView = project.ownerId === me.id;
+    const [accept, setAccept] = useState({}); const [resent, setResent] = useState({});
+    useEffect(() => { if (isOwnerView && cloud && Store.loadAcceptance) Store.loadAcceptance(project.id).then(setAccept); }, [project.id, (project.members || []).length]);
     const search = (q) => {
       setEmail(q);
       if (BE && BE.searchUsers && q.trim().length >= 2) { BE.searchUsers(q).then((list) => { setSugg((list || []).filter((u) => u.id !== me.id && !isMember(u.id))); setOpen(true); }); }
@@ -777,8 +781,9 @@
         </div>
         <div className="field-label" style={{ marginTop: 16 }}>People with access</div>
         <div className="member-row"><Avatar user={owner} size={30} /><span className="mname">{owner ? owner.name : project.ownerId}{owner && owner.id === me.id ? ' (you)' : ''}</span><span className="role-pill">Owner</span></div>
-        {project.members.map((m) => { const u = Auth.byId(m.userId); return <div key={m.userId} className="member-row"><Avatar user={u} size={30} /><span className="mname">{u ? u.name : m.userId}</span>
-          {project.ownerId === me.id ? <><select className="sel" value={m.role} onChange={(e) => { Store.setRole(project.id, m.userId, e.target.value); p.onChange(); }}>{ROLES.map((r) => <option key={r} value={r}>{r}</option>)}</select><button className="link" style={{ color: '#dc2626' }} onClick={() => { Store.removeMember(project.id, m.userId); p.onChange(); }}>Remove</button></> : <span className="role-pill">{m.role}</span>}
+        {project.members.map((m) => { const u = Auth.byId(m.userId); const acc = accept[m.userId]; const pending = acc == null; return <div key={m.userId} className="member-row"><Avatar user={u} size={30} /><span className="mname">{u ? u.name : m.userId}</span>
+          {isOwnerView && cloud ? <span className={'inv-pill ' + (pending ? 'pending' : 'ok')} title={pending ? 'A meghívott még nem fogadta el a meghívást' : ('Elfogadva: ' + new Date(acc).toLocaleString())}>{pending ? 'Függőben' : 'Elfogadva'}</span> : null}
+          {project.ownerId === me.id ? <>{pending && cloud ? <button className="link" title="Meghívó-értesítés újraküldése" onClick={() => { Store.resendInvite(project.id, m.userId, m.role, project.title); setResent((s) => Object.assign({}, s, { [m.userId]: true })); }}>{resent[m.userId] ? 'Elküldve ✓' : 'Resend'}</button> : null}<select className="sel" value={m.role} onChange={(e) => { Store.setRole(project.id, m.userId, e.target.value); p.onChange(); }}>{ROLES.map((r) => <option key={r} value={r}>{r}</option>)}</select><button className="link" style={{ color: '#dc2626' }} onClick={() => { Store.removeMember(project.id, m.userId); p.onChange(); }}>Remove</button></> : <span className="role-pill">{m.role}</span>}
         </div>; })}
         <div className="field-label" style={{ marginTop: 16 }}>Public link</div>
         <label style={{ display: 'flex', alignItems: 'center', gap: 9, fontSize: 13 }}>

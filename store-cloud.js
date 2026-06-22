@@ -285,6 +285,12 @@
     // Drop an in-app notification in the invitee's bell (cloud only). RLS lets any signed-in user insert
     // for any recipient; the invitee reads their own via nf_read. Fire-and-forget — never block the share.
     notifyShare: function (id, userId, role, title) { try { sb.from('notifications').insert({ recipient_id: userId, kind: 'share', payload: { type: 'share', project_id: id, title: title || 'Untitled project', role: role, by: (me && me.name) || '', by_id: (me && me.id) || null } }).then(function () { }, function () { }); } catch (e) { } },
+    // Re-send a pending invitation: pops a fresh (unread) share notification on the invitee's side.
+    resendInvite: function (id, userId, role, title) { var p = this.get(id); this.notifyShare(id, userId, role || 'editor', title || (p && p.title)); },
+    // Invitee accepts their own invitation (sets project_members.accepted_at via SECURITY DEFINER RPC).
+    acceptInvitation: function (id) { try { return sb.rpc('pr_accept_invitation', { p_project: id }); } catch (e) { return Promise.resolve(null); } },
+    // Owner reads acceptance state for all members of a project → { userId: accepted_at|null }.
+    loadAcceptance: function (id) { try { return sb.from('project_members').select('user_id,accepted_at').eq('project_id', id).then(function (r) { var m = {}; ((r && r.data) || []).forEach(function (x) { m[x.user_id] = x.accepted_at || null; }); return m; }, function () { return {}; }); } catch (e) { return Promise.resolve({}); } },
     setRole: function (id, userId, role) { this.addMember(id, userId, role); },
     removeMember: function (id, userId) { var p = this.get(id); if (!p) return; p.members = p.members.filter(function (m) { return m.userId !== userId; }); this.save(p); try { sb.from('project_members').delete().eq('project_id', id).eq('user_id', userId).then(function () { }); } catch (e) { } },
     setLink: function (id, enabled, role) { var p = this.get(id); if (!p) return; p.link = { enabled: enabled, role: role || p.link.role || 'viewer' }; this.save(p); },
