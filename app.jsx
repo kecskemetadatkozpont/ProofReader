@@ -102,6 +102,57 @@
     };
   }
 
+  // AI figure generation (PaperBanana). Calls the paper-figure Edge fn (placeholder until PAPERBANANA_ENDPOINT
+  // is set), shows candidates, and hands the chosen one (as a PNG blob) back to the editor to insert.
+  function FigureGenModal({ open, defaultCaption, defaultMethod, onPick, onClose }) {
+    const [method, setMethod] = useState('');
+    const [caption, setCaption] = useState('');
+    const [n, setN] = useState(4);
+    const [busy, setBusy] = useState(false);
+    const [err, setErr] = useState('');
+    const [cands, setCands] = useState(null);
+    const [mode, setMode] = useState('');
+    useEffect(() => { if (open) { setCaption(defaultCaption || ''); setMethod(defaultMethod || ''); setCands(null); setErr(''); } }, [open]);
+    if (!open) return null;
+    const CFG = window.PR_CONFIG || {};
+    function rasterize(dataUrl) {
+      return new Promise((res) => {
+        if (/^data:image\/(png|jpe?g)/i.test(dataUrl)) { fetch(dataUrl).then((r) => r.blob()).then(res, () => res(null)); return; }
+        const img = new Image();
+        img.onload = () => { const c = document.createElement('canvas'); c.width = img.naturalWidth || 520; c.height = img.naturalHeight || 360; const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height); x.drawImage(img, 0, 0); c.toBlob(res, 'image/png'); };
+        img.onerror = () => res(null); img.src = dataUrl;
+      });
+    }
+    function generate() {
+      if (!caption.trim() && !method.trim()) { setErr('Adj meg legalább egy feliratot (caption).'); return; }
+      setBusy(true); setErr(''); setCands(null);
+      (window.PR_SB ? window.PR_SB.auth.getSession() : Promise.resolve({})).then((s) => {
+        const token = (s && s.data && s.data.session && s.data.session.access_token) || CFG.supabaseAnonKey;
+        fetch(CFG.supabaseUrl + '/functions/v1/paper-figure', { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: CFG.supabaseAnonKey, Authorization: 'Bearer ' + token }, body: JSON.stringify({ method: method, caption: caption, task: 'diagram', n: n }) })
+          .then((r) => r.json()).then((out) => { setBusy(false); if (!out || out.error) { setErr((out && out.error) || 'Hiba.'); return; } setCands(out.candidates || []); setMode(out.mode || ''); }, () => { setBusy(false); setErr('A generálás nem sikerült (paper-figure Edge function elérhető?).'); });
+      });
+    }
+    function pick(c) { rasterize(c.dataUrl).then((blob) => { if (!blob) { setErr('A kép feldolgozása nem sikerült.'); return; } onPick(blob, caption); }); }
+    return <div className="overlay" onClick={onClose}>
+      <div className="fig-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="fig-h"><b>✨ Ábra generálása (AI)</b><button className="fig-x" onClick={onClose}>✕</button></div>
+        <label className="fig-l">Felirat (caption)</label>
+        <input className="fig-in" value={caption} placeholder="Pl. A Fisher Fusion pipeline architektúrája." onChange={(e) => setCaption(e.target.value)} />
+        <label className="fig-l">Method-szöveg — opcionális, jobb ábráért</label>
+        <textarea className="fig-ta" value={method} placeholder="Illeszd be a method-szekció releváns részét (markdown ajánlott)…" onChange={(e) => setMethod(e.target.value)} />
+        <div className="fig-row">
+          <span className="fig-l" style={{ margin: 0 }}>Jelöltek: {n}</span>
+          <input type="range" min="1" max="8" value={n} onChange={(e) => setN(+e.target.value)} />
+          <button className="fig-gen" disabled={busy} onClick={generate}>{busy ? 'Generálás…' : 'Generálás'}</button>
+        </div>
+        {err ? <div className="fig-err">{err}</div> : null}
+        {mode === 'placeholder' && cands ? <div className="fig-note">Placeholder ábrák — állítsd be a <code>PAPERBANANA_ENDPOINT</code> secretet a valódi generáláshoz.</div> : null}
+        {busy ? <div className="fig-busy">Az AI dolgozik a jelölteken… (a valódi pipeline több lépés, eltarthat egy ideig)</div> : null}
+        {cands ? <div className="fig-grid">{cands.map((c, i) => <button className="fig-cand" key={i} title="Beszúrás a dokumentumba" onClick={() => pick(c)}><img src={c.dataUrl} alt={c.label || ('cand ' + i)} /><span>{c.label || ('Jelölt ' + (i + 1))}</span></button>)}</div> : null}
+      </div>
+    </div>;
+  }
+
   function App() {
     const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
     const [, bumpTheme] = useState(0);
@@ -175,6 +226,9 @@
     const [shareOpen, setShareOpen] = useState(false);
     // admin role (cloud only) — drives the top-bar Admin link (replaces the old bottom-right floating button)
     const [isAdmin, setIsAdmin] = useState(() => !!(window.PR_BACKEND && window.PR_BACKEND.user && window.PR_BACKEND.user.role === 'admin'));
+    const [canFigures, setCanFigures] = useState(false);   // admin-granted AI figure generation (PaperBanana)
+    const [figOpen, setFigOpen] = useState(false);
+    useEffect(() => { try { if (window.PR_SB && me && me.id) window.PR_SB.from('profiles').select('can_figures').eq('id', me.id).maybeSingle().then((r) => { if (r && r.data) setCanFigures(!!r.data.can_figures); }, function () { }); } catch (e) { } }, []);
     useEffect(() => { const h = (e) => setIsAdmin(!!(e.detail && e.detail.role === 'admin')); window.addEventListener('pr-profile', h); return () => window.removeEventListener('pr-profile', h); }, []);
     const [voiceOpen, setVoiceOpen] = useState(false);
     const [acctOpen, setAcctOpen] = useState(false);
@@ -1236,6 +1290,19 @@
       });
     };
 
+    // Insert an AI-generated figure (PNG blob) with the user's caption, before \end{document}.
+    const onInsertFigure = (blob, caption) => {
+      if (!blob) return;
+      const ext = ((blob.type || 'image/png').split('/')[1] || 'png').replace('jpeg', 'jpg').replace('svg+xml', 'svg');
+      const path = uniquePath((p) => !!filesRef.current[p], pjoin(currentDir, 'figure-' + Date.now() + '.' + ext));
+      filesRef.current = { ...filesRef.current, [path]: {} };
+      putBinary(path, blob, 'image', bn(path), (name) => {
+        const lab = (name.replace(/\.[^.]+$/, '').replace(/[^A-Za-z0-9]/g, '') || 'fig');
+        const cap = String(caption || 'Caption').replace(/([%#&_$])/g, '\\$1');
+        onInsertBlock('\\begin{figure}[h]\n\\centering\n\\includegraphics[width=0.7\\linewidth]{' + name + '}\n\\caption{' + cap + '}\n\\label{fig:' + lab + '}\n\\end{figure}', null);
+      });
+    };
+
     // bibKeys for \cite autocomplete is derived above from bibEntries (single-sourced through the PRRefs
     // parser, so offered keys and "Title (Year)" hints can never drift apart).
     const displayAnns = useMemo(() => annotations.map((a) => {
@@ -1784,6 +1851,7 @@
             <div className="ws-toolbar">
               <window.Workspace.Presets ctx={{ preset, onPreset: wsOnPreset }} />
               <span className="ws-tb-sp" />
+              {canFigures ? <button className="ws-tb-btn" title="AI ábra generálása (PaperBanana)" onClick={() => setFigOpen(true)}>✨ Ábra</button> : null}
               {diags.length > 0
                 ? <div className="diag-wrap">
                     <button className={'diag-chip' + (diagOpen ? ' on' : '')} title="Rendering issues" onClick={(e) => { e.stopPropagation(); setDiagOpen((o) => !o); }}>
@@ -1855,6 +1923,7 @@
             onSpellAddDict={onSpellAddDict} onSpellIgnore={onSpellIgnore} onSpellUndoDict={onSpellUndoDict} onSpellRetry={() => setSpellRetry((n) => n + 1)} />}
           <input ref={pdfInput} type="file" accept="application/pdf,.pdf" style={{ display: 'none' }} onChange={onPdfPicked} />
           <input ref={imgInsertInput} type="file" accept="image/png,image/jpeg,image/gif,image/svg+xml,.png,.jpg,.jpeg,.gif,.svg" style={{ display: 'none' }} onChange={onInsertImagePicked} />
+          <FigureGenModal open={figOpen} defaultCaption="" defaultMethod="" onClose={() => setFigOpen(false)} onPick={(blob, cap) => { onInsertFigure(blob, cap); setFigOpen(false); }} />
         </div>
 
         <Transport status={status} idx={idx} total={total} sentence={sentence} docLabel={bn(active)}

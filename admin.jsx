@@ -106,7 +106,7 @@
 
   /* ---------- user drawer ---------- */
   function UserDrawer(props) {
-    var u = props.user, agg = props.agg, onClose = props.onClose, onPreview = props.onPreview, onAction = props.onAction, onSetModel = props.onSetModel, onSetWorkflows = props.onSetWorkflows;
+    var u = props.user, agg = props.agg, onClose = props.onClose, onPreview = props.onPreview, onAction = props.onAction, onSetModel = props.onSetModel, onSetWorkflows = props.onSetWorkflows, onSetFigures = props.onSetFigures;
     var open = !!u;
     return h(React.Fragment, null,
       h('div', { className: 'scrim' + (open ? ' on' : ''), onClick: onClose }),
@@ -134,6 +134,11 @@
               h('label', { style: { display: 'flex', alignItems: 'flex-start', gap: 9, fontSize: 13, cursor: 'pointer' } },
                 h('input', { type: 'checkbox', checked: !!u.can_workflows, style: { marginTop: 2 }, onChange: function (e) { onSetWorkflows(u.id, e.target.checked); } }),
                 h('span', null, h('b', null, 'Claude Workflow-k indítása'), h('span', { style: { display: 'block', fontSize: 11.5, color: 'var(--faint)', marginTop: 1 } }, 'Engedélyezi, hogy a felhasználó több-lépéses Claude workflow-kat futtasson a session-ben.')))
+            ),
+            h('div', { style: { marginBottom: 16 } },
+              h('label', { style: { display: 'flex', alignItems: 'flex-start', gap: 9, fontSize: 13, cursor: 'pointer' } },
+                h('input', { type: 'checkbox', checked: !!u.can_figures, style: { marginTop: 2 }, onChange: function (e) { onSetFigures(u.id, e.target.checked); } }),
+                h('span', null, h('b', null, 'Ábra-generálás (PaperBanana)'), h('span', { style: { display: 'block', fontSize: 11.5, color: 'var(--faint)', marginTop: 1 } }, 'Engedélyezi, hogy a felhasználó AI-val publikációs ábrákat generáljon a LaTeX editorban.')))
             ),
             h('div', { className: 'kv' },
               h('div', { className: 'c' }, h('div', { className: 'l' }, 'Projects'), h('div', { className: 'v' }, agg.projects.length)),
@@ -228,6 +233,11 @@
       setProfiles(function (list) { return list.map(function (u) { return u.id === uid ? Object.assign({}, u, { can_workflows: on }) : u; }); });
       setSelUser(function (u) { return u && u.id === uid ? Object.assign({}, u, { can_workflows: on }) : u; });
       sb.from('profiles').update({ can_workflows: on }).eq('id', uid).then(function (r) { if (r && r.error) { alert('Update failed: ' + r.error.message); loadData(); } });
+    }
+    function setFigures(uid, on) {
+      setProfiles(function (list) { return list.map(function (u) { return u.id === uid ? Object.assign({}, u, { can_figures: on }) : u; }); });
+      setSelUser(function (u) { return u && u.id === uid ? Object.assign({}, u, { can_figures: on }) : u; });
+      sb.from('profiles').update({ can_figures: on }).eq('id', uid).then(function (r) { if (r && r.error) { alert('Update failed: ' + r.error.message); loadData(); } });
     }
     function loadPubs(uid) {
       if (pubsCache[uid] !== undefined) return;
@@ -336,7 +346,7 @@
             : h('table', null, h('thead', null, tableHead), h('tbody', null, sorted.map(function (u) { return userRow(u, false); })))
         )
       ),
-      h(UserDrawer, { user: selUser, agg: selUser ? aggFor(selUser.id) : { projects: [], storage: 0, chars: 0, requests: 0 }, onClose: function () { setSelUser(null); }, onPreview: function (p) { setPreview(p); }, onAction: setStatus, onSetModel: setModel, onSetWorkflows: setWorkflows }),
+      h(UserDrawer, { user: selUser, agg: selUser ? aggFor(selUser.id) : { projects: [], storage: 0, chars: 0, requests: 0 }, onClose: function () { setSelUser(null); }, onPreview: function (p) { setPreview(p); }, onAction: setStatus, onSetModel: setModel, onSetWorkflows: setWorkflows, onSetFigures: setFigures }),
       preview && h(ProjectPreview, { project: preview, onClose: function () { setPreview(null); } })
     );
   }
