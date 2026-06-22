@@ -38,24 +38,41 @@ Deno.serve(async (req) => {
     let rows = (history || []).filter((m: any) => m.content);
     if (rows.length > HISTORY) rows = rows.slice(-HISTORY);
     if (!rows.length) return json({ error: 'no messages to respond to' }, 400);
-    const messages = rows.map((m: any) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content }));
+    let messages: any[] = rows.map((m: any) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content }));
 
-    // Attached materials (uploads / LaTeX & research projects / publications) → injected as context so Publify
-    // "sees" them in normal chat too. Agent-written workspace files are excluded (workflow tools read those).
+    // Attached materials (uploads / PDFs / LaTeX & research projects / publications) → text injected as context
+    // so Publify "sees" them in normal chat too. Images go through the vision API (below); agent-written
+    // workspace files are excluded (workflow tools read those).
     const { data: filesData } = await sb.from('user_chat_files').select('path,content,source').eq('chat_id', chat_id).order('path');
     let attachCtx = '';
     if (filesData && filesData.length) {
       let budget = 60000; const parts: string[] = [];
       for (const f of (filesData as any[])) {
-        if (f.source === 'agent') continue;
+        if (f.source === 'agent' || f.source === 'image') continue;
         const c = String(f.content || ''); if (!c) continue;
         const chunk = `### ${f.path}\n${c.slice(0, 24000)}`;
         if (budget - chunk.length < 0) { parts.push(`### ${f.path}\n_(túl nagy — kihagyva a kontextusból)_`); continue; }
         budget -= chunk.length; parts.push(chunk);
       }
-      if (parts.length) attachCtx = '\n\n# Csatolt anyagok\nA felhasználó az alábbi dokumentumokat / projekteket / publikációkat csatolta. Használd őket, ha relevánsak, és jelezd, melyikre támaszkodtál.\n\n' + parts.join('\n\n---\n\n');
+      const imgNames = (filesData as any[]).filter((f) => f.source === 'image').map((f) => f.path);
+      if (imgNames.length) parts.push('_Csatolt képek (a vízió-API kapja meg): ' + imgNames.join(', ') + '_');
+      if (parts.length) attachCtx = '\n\n# Csatolt anyagok\nA felhasználó az alábbi dokumentumokat / projekteket / publikációkat / képeket csatolta. Használd őket, ha relevánsak, és jelezd, melyikre támaszkodtál.\n\n' + parts.join('\n\n---\n\n');
     }
     const systemFull = SYSTEM + attachCtx;
+
+    // Attached images → append as vision blocks to the most recent user message.
+    const imgFiles = (filesData || []).filter((f: any) => f.source === 'image' && /^data:image\//.test(String(f.content || '')));
+    if (imgFiles.length) {
+      const blocks: any[] = [];
+      for (const f of imgFiles.slice(0, 6)) {
+        const mm = /^data:(image\/[a-z.+-]+);base64,(.+)$/i.exec(String(f.content));
+        if (mm) blocks.push({ type: 'image', source: { type: 'base64', media_type: mm[1], data: mm[2] } });
+      }
+      if (blocks.length) {
+        let li = -1; for (let i = messages.length - 1; i >= 0; i--) { if (messages[i].role === 'user') { li = i; break; } }
+        if (li >= 0) messages[li] = { role: 'user', content: [{ type: 'text', text: String(messages[li].content) }, ...blocks] };
+      }
+    }
 
     const headers: Record<string, string> = { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' };
     const body = { model, max_tokens: MAX_TOKENS, system: systemFull, messages };

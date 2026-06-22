@@ -100,20 +100,75 @@
       });
     }
     function isTextFile(f) { return /^text\//.test(f.type || '') || /\.(txt|md|markdown|tex|bib|cls|sty|csv|tsv|json|ya?ml|js|ts|jsx|tsx|py|r|html?|css|log|bbl)$/i.test(f.name || ''); }
+    function isPdf(f) { return /^application\/pdf$/i.test(f.type || '') || /\.pdf$/i.test(f.name || ''); }
+    function isImage(f) { return /^image\//i.test(f.type || '') || /\.(png|jpe?g|gif|webp)$/i.test(f.name || ''); }
+    // PDF → text via pdf.js (loaded in Session.html).
+    function extractPdf(file) {
+      if (!window.pdfjsLib) return Promise.resolve('(A PDF-olvasó nem töltődött be.)');
+      return file.arrayBuffer().then(function (buf) {
+        return window.pdfjsLib.getDocument({ data: buf }).promise.then(function (pdf) {
+          var pages = [], seq = Promise.resolve();
+          for (var i = 1; i <= pdf.numPages; i++) { (function (n) { seq = seq.then(function () { return pdf.getPage(n).then(function (pg) { return pg.getTextContent().then(function (tc) { pages.push(tc.items.map(function (it) { return it.str; }).join(' ')); }); }); }); })(i); }
+          return seq.then(function () { return pages.join('\n\n').trim() || '(A PDF-ből nem nyerhető ki szöveg — lehet, hogy szkennelt.)'; });
+        });
+      }).catch(function (e) { return '(PDF-kinyerési hiba: ' + e + ')'; });
+    }
+    // Image → downscaled data URL (so the vision API gets a reasonable payload).
+    function downscaleImage(file) {
+      return new Promise(function (resolve) {
+        var url = URL.createObjectURL(file), img = new Image();
+        img.onload = function () { var max = 1280, w = img.naturalWidth, ht = img.naturalHeight, s = Math.min(1, max / Math.max(w, ht)); var c = document.createElement('canvas'); c.width = Math.round(w * s); c.height = Math.round(ht * s); c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(url); try { resolve(c.toDataURL(/png/i.test(file.type) ? 'image/png' : 'image/jpeg', 0.82)); } catch (e) { resolve(null); } };
+        img.onerror = function () { URL.revokeObjectURL(url); resolve(null); };
+        img.src = url;
+      });
+    }
+    function attachImage(path, dataUrl) {
+      if (!dataUrl) return Promise.resolve();
+      return ensureChat(path).then(function (id) { if (!id) return;
+        return sb.from('user_chat_files').upsert({ chat_id: id, path: String(path).slice(0, 200), content: dataUrl, source: 'image', updated_at: new Date().toISOString() }, { onConflict: 'chat_id,path' }).then(function () { loadFiles(id); loadChats(); });
+      });
+    }
     function doUpload(fileList) {
       var arr = Array.prototype.slice.call(fileList || []); if (!arr.length) return;
-      var texts = arr.filter(isTextFile), skipped = arr.length - texts.length;
-      if (skipped) window.alert(skipped + ' fájl kihagyva — egyelőre csak szövegfájlok csatolhatók (PDF/kép nem).');
-      texts.reduce(function (chain, f) { return chain.then(function () { return f.text().then(function (t) { return attachText(f.name, t, 'upload'); }); }); }, Promise.resolve());
+      var skipped = 0;
+      arr.reduce(function (chain, f) {
+        return chain.then(function () {
+          if (isTextFile(f)) return f.text().then(function (t) { return attachText(f.name, t, 'upload'); });
+          if (isPdf(f)) return extractPdf(f).then(function (t) { return attachText(f.name + ' (PDF)', t, 'pdf'); });
+          if (isImage(f)) return downscaleImage(f).then(function (d) { return attachImage(f.name, d); });
+          skipped++; return null;
+        });
+      }, Promise.resolve()).then(function () { if (skipped) window.alert(skipped + ' fájl kihagyva (nem támogatott típus — szöveg, PDF és kép csatolható).'); });
     }
     function onPickedFiles(e) { doUpload(e.target.files); e.target.value = ''; }
     function pickFiles() { setAtOpen(false); if (fileRef.current) fileRef.current.click(); }
     function onDrop(e) { e.preventDefault(); setDragOver(false); if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) doUpload(e.dataTransfer.files); }
+    function loadPubs(rid) {
+      sb.from('publications').select('id,title,year,journal,first_author,citation,doi').eq('researcher_id', rid).order('year', { ascending: false }).limit(500).then(function (r) {
+        setPicker(function (p) { return (p && p.kind === 'pub') ? Object.assign({}, p, { rid: rid, items: (r && r.data) || [] }) : p; });
+      });
+    }
     function openPicker(kind) {
-      setAtOpen(false); setPicker({ kind: kind, items: null });
+      setAtOpen(false);
+      if (kind === 'pub') {
+        // Browse ANY researcher's publications: list researchers who have publications, default to me.
+        setPicker({ kind: 'pub', researchers: null, rid: null, items: null });
+        sb.from('publications').select('researcher_id').then(function (r) {
+          var seen = {}; ((r && r.data) || []).forEach(function (x) { if (x.researcher_id) seen[x.researcher_id] = 1; });
+          var ids = Object.keys(seen);
+          if (!ids.length) { setPicker({ kind: 'pub', researchers: [], rid: null, items: [] }); return; }
+          sb.from('profiles').select('id,name').in('id', ids).then(function (pr) {
+            var rsr = ((pr && pr.data) || []).sort(function (a, b) { return String(a.name || '').localeCompare(String(b.name || '')); });
+            var rid = rsr.filter(function (x) { return x.id === me.id; })[0] ? me.id : (rsr[0] && rsr[0].id);
+            setPicker({ kind: 'pub', researchers: rsr, rid: rid, items: null });
+            if (rid) loadPubs(rid);
+          });
+        });
+        return;
+      }
+      setPicker({ kind: kind, items: null });
       if (kind === 'latex') sb.from('projects').select('id,title').is('deleted_at', null).order('updated_at', { ascending: false }).then(function (r) { setPicker({ kind: kind, items: (r && r.data) || [] }); });
       else if (kind === 'research') sb.from('research_projects').select('id,title,field,goal,keywords,status,stage').order('updated_at', { ascending: false }).then(function (r) { setPicker({ kind: kind, items: (r && r.data) || [] }); });
-      else if (kind === 'pub') sb.from('publications').select('id,title,year,journal,first_author,citation,doi').eq('researcher_id', me.id).order('year', { ascending: false }).limit(300).then(function (r) { setPicker({ kind: kind, items: (r && r.data) || [] }); });
     }
     function attachLatex(p) {
       setPicker(null);
@@ -192,9 +247,15 @@
       h('input', { ref: fileRef, type: 'file', multiple: true, style: { display: 'none' }, onChange: onPickedFiles }),
       preview ? h('div', { className: 'pv-scrim', onClick: function () { setPreview(null); } }, h('div', { className: 'pv-modal', onClick: function (e) { e.stopPropagation(); } },
         h('div', { className: 'pv-head' }, h('b', null, preview.path), h('button', { className: 'pv-x', onClick: function () { setPreview(null); } }, '×')),
-        h('div', { className: 'btxt md pv-body', dangerouslySetInnerHTML: { __html: foldCode(mdHtml(preview.content || '')) } }))) : null,
+        (preview.content && /^data:image\//.test(preview.content))
+          ? h('div', { className: 'pv-body', style: { textAlign: 'center' } }, h('img', { src: preview.content, style: { maxWidth: '100%', borderRadius: 8 } }))
+          : h('div', { className: 'btxt md pv-body', dangerouslySetInnerHTML: { __html: foldCode(mdHtml(preview.content || '')) } }))) : null,
       picker ? h('div', { className: 'pv-scrim', onClick: function () { setPicker(null); } }, h('div', { className: 'pv-modal pick-modal', onClick: function (e) { e.stopPropagation(); } },
         h('div', { className: 'pv-head' }, h('b', null, picker.kind === 'latex' ? '📐 LaTeX projektek' : picker.kind === 'research' ? '🔬 Kutatási projektek' : '📚 Publikációk'), h('button', { className: 'pv-x', onClick: function () { setPicker(null); } }, '×')),
+        (picker.kind === 'pub' && picker.researchers && picker.researchers.length) ? h('div', { className: 'pick-filter' },
+          h('span', null, 'Kutató:'),
+          h('select', { className: 'pf-sel', value: picker.rid || '', onChange: function (e) { var v = e.target.value; setPicker(function (p) { return Object.assign({}, p, { rid: v, items: null }); }); loadPubs(v); } },
+            picker.researchers.map(function (rs) { return h('option', { key: rs.id, value: rs.id }, (rs.name || '(névtelen)') + (rs.id === me.id ? ' (te)' : '')); }))) : null,
         h('div', { className: 'pick-body' },
           picker.items == null ? h('div', { className: 'pick-empty' }, 'Betöltés…')
             : !picker.items.length ? h('div', { className: 'pick-empty' }, 'Nincs elérhető elem.')
