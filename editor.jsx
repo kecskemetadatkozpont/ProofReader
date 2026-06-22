@@ -436,7 +436,8 @@
     // spell-check squiggles (red wavy underline under misspelled words)
     if (props.spellMarks && props.spellMarks.length) marks = marks.concat(props.spellMarks);
 
-    const fontStyle = { fontSize: props.fontSize + 'px', lineHeight: props.lineHeight + 'px' };
+    var _fz = Number(props.fontSize) || 13.5, _lh = Number(props.lineHeight) || Math.round(_fz * 1.6);
+    const fontStyle = { fontSize: _fz + 'px', lineHeight: _lh + 'px' };   // always a valid, identical metric on both layers (caret align)
 
     const reportCaret = () => { const ta = taRef.current; if (!ta) return; if (props.onCaret) props.onCaret(ta.selectionStart); if (props.onSelectRange) props.onSelectRange(ta.selectionStart, ta.selectionEnd); };
     const reportJump = () => { const ta = taRef.current; if (!ta) return; if (props.onJump) props.onJump(ta.selectionStart); if (props.onSelectRange) props.onSelectRange(ta.selectionStart, ta.selectionEnd); };
@@ -551,7 +552,7 @@
     }
 
     return (
-      React.createElement('div', { className: 'editor' },
+      React.createElement('div', { className: 'editor' + (props.hlHide || '') },
         React.createElement('div', { className: 'gutter', ref: gutRef },
           React.createElement('div', { className: 'gutter-inner', style: fontStyle },
             gutter.map((k) => React.createElement('div', { key: k, className: 'ln' + (props.readLine === k - 1 ? ' ln-active' : '') }, k))

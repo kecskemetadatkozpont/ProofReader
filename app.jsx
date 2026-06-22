@@ -207,7 +207,8 @@
     const [showReview, setShowReview] = useState(pf0.showReview !== false); // ✦ review-marker layer toggle
     const [spellOn, setSpellOn] = useState(!!pf0.spellOn);                  // spell-check (off by default — downloads a dictionary)
     const [spellLangPref, setSpellLangPref] = useState(pf0.spellLang || ''); // '' = auto-detect per document
-    useEffect(() => { if (window.PRStore) window.PRStore.setPrefs({ showVoiced, showReview, spellOn, spellLang: spellLangPref }); }, [showVoiced, showReview, spellOn, spellLangPref]);
+    const [hlShow, setHlShow] = useState(() => Object.assign({ comment: true, todo: true, spell: true }, pf0.hlShow || {})); // per-category code-editor highlight toggles
+    useEffect(() => { if (window.PRStore) window.PRStore.setPrefs({ showVoiced, showReview, spellOn, spellLang: spellLangPref, hlShow }); }, [showVoiced, showReview, spellOn, spellLangPref, hlShow]);
     const [spellResult, setSpellResult] = useState(null);
     const [spellBusy, setSpellBusy] = useState(false);
     const [spellErr, setSpellErr] = useState(null);
@@ -378,29 +379,32 @@
       if (!docId || !window.AloudTeX) return;
       const first = force || !pdfCompiledRef.current[docId];
       clearTimeout(pdfCompileTimers.current[docId]);
+      // Flip the UI synchronously the instant this runs — otherwise busy is only set deep inside run()
+      // (after the setTimeout + await assembleTexFiles), so the button felt inert for hundreds of ms.
+      setPdfCompiled((s) => ({ ...s, [docId]: { ...(s[docId] || {}), err: null, pending: !force, busy: force ? true : (s[docId] || {}).busy, phase: force ? 'fordításra vár…' : (s[docId] || {}).phase } }));
       const run = async () => {
         if (window.AloudTeX.isBusy && window.AloudTeX.isBusy()) { pdfCompileTimers.current[docId] = setTimeout(run, 700); return; }
         let input;
         try { input = await assembleTexFiles(docId); }
-        catch (e) { setPdfCompiled((s) => ({ ...s, [docId]: { ...(s[docId] || {}), busy: false, err: String((e && e.message) || e), mode: 'browser', ts: Date.now() } })); return; }
+        catch (e) { setPdfCompiled((s) => ({ ...s, [docId]: { ...(s[docId] || {}), busy: false, pending: false, phase: null, err: String((e && e.message) || e), mode: 'browser', ts: Date.now() } })); return; }
         const C = window.PRPdfCache;
         const hash = C ? C.hashOf(input, 'browser') : null;
         const cur = pdfCompiledRef.current[docId];
         // (1) content unchanged since the last browser compile → keep the current PDF, skip recompiling
-        if (!force && hash && cur && cur.hash === hash && cur.pdf) { if (cur.busy) setPdfCompiled((s) => ({ ...s, [docId]: { ...(s[docId] || {}), busy: false } })); return; }
-        setPdfCompiled((s) => ({ ...s, [docId]: { ...(s[docId] || {}), busy: true, err: null } }));
+        if (!force && hash && cur && cur.hash === hash && cur.pdf) { setPdfCompiled((s) => ({ ...s, [docId]: { ...(s[docId] || {}), busy: false, pending: false, phase: null } })); return; }
+        setPdfCompiled((s) => ({ ...s, [docId]: { ...(s[docId] || {}), busy: true, pending: false, phase: 'fordítás előkészítése…', err: null } }));
         // (2) persistent cache hit → load the stored PDF instantly, no compile (but never replace a
         // current exact-mode "Pontos PDF" with a cached browser PDF unless the user forced it)
         if (!force && hash && C && !(cur && cur.mode === 'exact')) {
-          try { const cached = await C.get(hash); if (cached && cached.pdf) { setPdfCompiled((s) => ({ ...s, [docId]: { busy: false, pdf: cached.pdf, pages: cached.pages, status: 0, mode: 'browser', err: null, hash: hash, cached: true, ts: Date.now() } })); return; } } catch (e) { }
+          try { const cached = await C.get(hash); if (cached && cached.pdf) { setPdfCompiled((s) => ({ ...s, [docId]: { busy: false, pending: false, phase: null, pdf: cached.pdf, pages: cached.pages, status: 0, mode: 'browser', err: null, hash: hash, cached: true, ts: Date.now() } })); return; } } catch (e) { }
         }
         // (3) compile, then remember the result by content hash
         try {
-          const r = await window.AloudTeX.compile({ mainFile: input.mainFile, files: input.files, passes: 3 });
+          const r = await window.AloudTeX.compile({ mainFile: input.mainFile, files: input.files, passes: 3, onProgress: (m) => setPdfCompiled((s) => ({ ...s, [docId]: { ...(s[docId] || {}), phase: m } })) });
           if (r.ok && hash && C) { try { C.put(hash, { pdf: r.pdf, pages: r.pages, ts: Date.now() }); } catch (e) { } }
-          setPdfCompiled((s) => ({ ...s, [docId]: { busy: false, pdf: r.ok ? r.pdf : ((s[docId] || {}).pdf || null), log: r.log, pages: r.pages, status: r.status, mode: 'browser', err: r.ok ? null : (r.reason || ('Fordítás nem sikerült (status ' + r.status + ')')), ms: r.ms, hash: r.ok ? hash : ((s[docId] || {}).hash), ts: Date.now() } }));
+          setPdfCompiled((s) => ({ ...s, [docId]: { busy: false, pending: false, phase: null, pdf: r.ok ? r.pdf : ((s[docId] || {}).pdf || null), log: r.log, pages: r.pages, status: r.status, mode: 'browser', err: r.ok ? null : (r.reason || ('Fordítás nem sikerült (status ' + r.status + ')')), ms: r.ms, hash: r.ok ? hash : ((s[docId] || {}).hash), ts: Date.now() } }));
         } catch (e) {
-          setPdfCompiled((s) => ({ ...s, [docId]: { ...(s[docId] || {}), busy: false, err: String((e && e.message) || e), mode: 'browser', ts: Date.now() } }));
+          setPdfCompiled((s) => ({ ...s, [docId]: { ...(s[docId] || {}), busy: false, pending: false, phase: null, err: String((e && e.message) || e), mode: 'browser', ts: Date.now() } }));
         }
       };
       pdfCompileTimers.current[docId] = setTimeout(run, first ? 0 : 1300);
@@ -1821,6 +1825,7 @@
               writeMode, setWrite: setWriteMode, onPreviewEdit, onBlockTransform, onInsertBlock, onTableEdit, onInsertImage, onInsertImageBlob,
               isCurProj, docExists, readOnlyDoc, getSource, getCompiled, docLabel, docColor,
               getCompiledPdf, requestCompile, onCompileExact, annoMarks: annoMarksFor, spellMarks: spellMarksFor, annoSids: annoSidsFor, voicedSids: voicedSidsFor, reviewSids: reviewSidsFor,
+              hlHide: (hlShow.comment ? '' : ' hl-hide-comment') + (hlShow.todo ? '' : ' hl-hide-todo') + (hlShow.spell ? '' : ' hl-hide-spell'),
               canClose: window.WS.allPanes(layout).length > 1,
               onFocus: wsOnFocus, onAdd: wsOnAdd, onSplit: wsOnAdd, onClose: wsOnClose, onSolo: wsOnSolo, onSetRatio: wsOnSetRatio,
               dragId, onDragStart: (id) => setDragId(id), onDragEnd: () => setDragId(null), onMovePane: wsOnMovePane,
@@ -1858,6 +1863,7 @@
           onVoice={() => setVoiceOpen((v) => !v)} engine={voice.engine} busy={elevenBusy} err={elevenErr}
           showVoiced={showVoiced} onToggleVoiced={() => setShowVoiced((v) => !v)}
           showReview={showReview} onToggleReview={() => setShowReview((v) => !v)} hasReview={reviewAnns.length > 0}
+          hlShow={hlShow} onToggleHl={(k) => setHlShow((s) => Object.assign({}, s, { [k]: !s[k] }))}
           onBookmark={saveReading} saved={savedFlash} />
 
         {shareOpen && <Collab.ShareModal project={projForShare} me={me} onClose={() => setShareOpen(false)} onChange={refreshCollab} />}
@@ -2108,6 +2114,9 @@
         <div className="tp-right">
           <button className={'tp-toggle' + (props.showVoiced ? ' on' : ' off')} title={props.showVoiced ? 'Hide ♪ voiced-sentence highlights' : 'Show ♪ voiced-sentence highlights'} onClick={(e) => { e.stopPropagation(); props.onToggleVoiced && props.onToggleVoiced(); }}><span className="tp-glyph">♪</span></button>
           {props.hasReview ? <button className={'tp-toggle' + (props.showReview ? ' on' : ' off')} title={props.showReview ? 'Hide AI review markers' : 'Show AI review markers'} onClick={(e) => { e.stopPropagation(); props.onToggleReview && props.onToggleReview(); }}><span className="tp-glyph">✦</span></button> : null}
+          {props.hlShow ? <button className={'tp-toggle' + (props.hlShow.comment ? ' on' : ' off')} title={(props.hlShow.comment ? 'Elrejt' : 'Mutat') + ': komment-kiemelések a kódban'} onClick={(e) => { e.stopPropagation(); props.onToggleHl && props.onToggleHl('comment'); }}><span className="tp-glyph">✎</span></button> : null}
+          {props.hlShow ? <button className={'tp-toggle' + (props.hlShow.todo ? ' on' : ' off')} title={(props.hlShow.todo ? 'Elrejt' : 'Mutat') + ': javítandó (to-do) kiemelések a kódban'} onClick={(e) => { e.stopPropagation(); props.onToggleHl && props.onToggleHl('todo'); }}><span className="tp-glyph">✓</span></button> : null}
+          {props.hlShow ? <button className={'tp-toggle' + (props.hlShow.spell ? ' on' : ' off')} title={(props.hlShow.spell ? 'Elrejt' : 'Mutat') + ': helyesírás-kiemelések a kódban'} onClick={(e) => { e.stopPropagation(); props.onToggleHl && props.onToggleHl('spell'); }}><span className="tp-glyph">∿</span></button> : null}
           <button className={'tp-gear' + (props.engine === 'eleven' ? ' on' : '')} title="Voice engine" onClick={(e) => { e.stopPropagation(); props.onVoice && props.onVoice(); }}>
             <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="10" cy="10" r="2.6" /><path d="M10 2.5v2M10 15.5v2M2.5 10h2M15.5 10h2M4.7 4.7l1.4 1.4M13.9 13.9l1.4 1.4M4.7 15.3l1.4-1.4M13.9 6.1l1.4-1.4" strokeLinecap="round" /></svg>
             {props.engine === 'eleven' ? <span className="gear-tag">EL</span> : null}
