@@ -282,9 +282,10 @@
 
     /* sharing */
     addMember: function (id, userId, role) { var p = this.get(id); if (!p) return; if (userId === p.ownerId) return; var m = p.members.filter(function (x) { return x.userId === userId; })[0]; if (m) m.role = role; else { p.members.push({ userId: userId, role: role, invitedAt: Date.now() }); this.notifyShare(id, userId, role, p.title); } this.save(p); this.logActivity(id, me.id, 'shared with', (window.PRAuth.byId(userId) || {}).name || userId); },
-    // Drop an in-app notification in the invitee's bell (cloud only). RLS lets any signed-in user insert
-    // for any recipient; the invitee reads their own via nf_read. Fire-and-forget — never block the share.
-    notifyShare: function (id, userId, role, title) { try { sb.from('notifications').insert({ recipient_id: userId, kind: 'share', payload: { type: 'share', project_id: id, title: title || 'Untitled project', role: role, by: (me && me.name) || '', by_id: (me && me.id) || null } }).then(function () { }, function () { }); } catch (e) { } },
+    // Drop an in-app notification in the invitee's bell (cloud only). Goes through the pr_notify_share
+    // SECURITY DEFINER RPC, which verifies the caller owns/edits the project — direct cross-recipient
+    // inserts are now blocked by RLS (no spoofing). Fire-and-forget — never block the share.
+    notifyShare: function (id, userId, role, title) { try { sb.rpc('pr_notify_share', { p_recipient: userId, p_project: id, p_title: title || 'Untitled project', p_role: role || 'editor' }).then(function () { }, function () { }); } catch (e) { } },
     // Re-send a pending invitation: pops a fresh (unread) share notification on the invitee's side.
     resendInvite: function (id, userId, role, title) { var p = this.get(id); this.notifyShare(id, userId, role || 'editor', title || (p && p.title)); },
     // Invitee accepts their own invitation (sets project_members.accepted_at via SECURITY DEFINER RPC).
