@@ -32,10 +32,13 @@ const isCloudMode = () => !!(window.PR_BACKEND && window.PR_BACKEND.mode === 'cl
 /* ---------------- notifications ----------------
    In-app notifications (e.g. "X shared a document with you"). The unread count shows as a red badge on
    the profile avatar (top-right); the list + a per-item "View" link live in the account drawer. Cloud only. */
-function useNotifications() {
+function useNotifications(uid) {
   const sb = window.PR_BACKEND && window.PR_BACKEND.sb;
   const [notes, setNotes] = useState([]);
-  const load = useCallback(() => { if (!sb) return; sb.from('notifications').select('id,kind,payload,read_at,created_at').order('created_at', { ascending: false }).limit(40).then((r) => setNotes((r && r.data) || [])); }, []);
+  // Always scope to the displayed user. Admins can read ALL notifications via the nf_read RLS
+  // (recipient_id = auth.uid() OR is_admin()), so without this filter an admin's bell would show
+  // everyone's notifications — and in admin "view as" preview they'd be misattributed to the target.
+  const load = useCallback(() => { if (!sb || !uid) { setNotes([]); return; } sb.from('notifications').select('id,kind,payload,read_at,created_at').eq('recipient_id', uid).order('created_at', { ascending: false }).limit(40).then((r) => setNotes((r && r.data) || [])); }, [uid]);
   useEffect(() => { load(); }, [load]);
   const markRead = (n) => { if (!n || n.read_at || !sb) return; sb.from('notifications').update({ read_at: new Date().toISOString() }).eq('id', n.id).then(() => setNotes((l) => l.map((x) => x.id === n.id ? { ...x, read_at: 'now' } : x))); };
   const markAll = () => { const ids = notes.filter((n) => !n.read_at).map((n) => n.id); if (!ids.length || !sb) return; sb.from('notifications').update({ read_at: new Date().toISOString() }).in('id', ids).then(load); };
@@ -424,7 +427,7 @@ function App() {
   const preview = !!(me && me._preview);
   const [projects, setProjects] = useState([]);
   const [acctOpen, setAcctOpen] = useState(false);
-  const notif = useNotifications();
+  const notif = useNotifications(me && me.id);
   const [modal, setModal] = useState(null); // 'new' | 'usage' | 'activity'
   const [shareId, setShareId] = useState(null);
   const [tab, setTab] = useState('all');
