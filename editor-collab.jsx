@@ -743,18 +743,35 @@
 
   function ShareModal(p) {
     const Store = window.PRStore; const project = p.project; const me = p.me;
+    const BE = window.PR_BACKEND;
     const [email, setEmail] = useState(''); const [role, setRole] = useState('editor');
+    const [sugg, setSugg] = useState([]); const [open, setOpen] = useState(false);
     const owner = Auth.byId(project.ownerId);
     const ROLES = ['editor', 'commenter', 'viewer'];
-    const invite = () => { const u = Auth.byEmail(email.trim()); if (!u) { alert('Try: ' + Auth.users().map((x) => x.email).join(', ')); return; } Store.addMember(project.id, u.id, role); setEmail(''); p.onChange(); };
+    const isMember = (id) => id === project.ownerId || (project.members || []).some((m) => m.userId === id);
+    const search = (q) => {
+      setEmail(q);
+      if (BE && BE.searchUsers && q.trim().length >= 2) { BE.searchUsers(q).then((list) => { setSugg((list || []).filter((u) => u.id !== me.id && !isMember(u.id))); setOpen(true); }); }
+      else { setSugg([]); setOpen(false); }
+    };
+    const add = (u) => { if (!u) return; Store.addMember(project.id, u.id, role); setEmail(''); setSugg([]); setOpen(false); p.onChange(); };
+    const invite = () => {
+      const e = email.trim(); if (!e) return;
+      if (sugg[0]) { add(sugg[0]); return; }
+      const cached = Auth.byEmail(e); if (cached) { add(cached); return; }
+      if (BE && BE.findUserByEmail) { BE.findUserByEmail(e).then((u) => { if (u) add(u); else alert('Nincs ilyen regisztrált felhasználó: ' + e); }); }
+      else alert('Nincs ilyen regisztrált felhasználó.');
+    };
     const link = location.href.split('#')[0];
     return <div className="overlay" onClick={p.onClose}><div className="modal" onClick={(e) => e.stopPropagation()}>
       <div className="modal-head"><h3>Share “{project.title}”</h3><p>Invite collaborators or share a link.</p></div>
       <div className="modal-body">
         <div className="field-label">Invite by email</div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <input className="text-input" list="ul2" value={email} placeholder="name@lab.edu" onChange={(e) => setEmail(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') invite(); }} style={{ flex: 1 }} />
-          <datalist id="ul2">{Auth.users().map((u) => <option key={u.id} value={u.email} />)}</datalist>
+          <div style={{ flex: 1, position: 'relative' }}>
+            <input className="text-input" value={email} placeholder="Név vagy e-mail — kezdj el gépelni…" autoComplete="off" onChange={(e) => search(e.target.value)} onFocus={() => { if (sugg.length) setOpen(true); }} onKeyDown={(e) => { if (e.key === 'Enter') invite(); if (e.key === 'Escape') setOpen(false); }} style={{ width: '100%' }} />
+            {open && sugg.length > 0 ? <div className="share-sugg">{sugg.map((u) => <button key={u.id} className="share-sugg-it" onMouseDown={(e) => e.preventDefault()} onClick={() => add(u)}><Avatar user={u} size={24} /><span className="ss-t"><b>{u.name}</b><small>{u.email}</small></span></button>)}</div> : null}
+          </div>
           <select className="sel" value={role} onChange={(e) => setRole(e.target.value)}>{ROLES.map((r) => <option key={r} value={r}>{r}</option>)}</select>
           <button className="solid" onClick={invite} style={{ padding: '0 14px' }}>Invite</button>
         </div>
