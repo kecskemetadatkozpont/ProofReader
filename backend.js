@@ -251,21 +251,44 @@
       + '<input class="pr-in" id="pr-pw" type="password" autocomplete="current-password" placeholder="Password" aria-label="Password" />'
       + '<button class="pr-primary" id="pr-pwbtn" type="submit">Sign in</button>'
       + '</form>'
+      + '<div style="text-align:center;margin-top:11px;font-size:13px"><a href="#" id="pr-toggle" style="font-weight:600;text-decoration:none">Nincs még fiókod? Regisztrálj</a></div>'
       + '<div class="pr-or">or</div>'
       + '<button class="pr-g" id="pr-google">' + GBTN + 'Continue with Google</button>'
       + '<div class="pr-sep"></div>'
       + '<button class="pr-demo" id="pr-demo">Continue in demo mode (this browser only)</button>'
       + '<div class="pr-note">Researchers: use the institutional email and password you were given. Demo mode keeps everything in this browser.</div></div>';
     (document.body || document.documentElement).appendChild(d);
+    var isSignup = false;
     document.getElementById('pr-pwform').onsubmit = function (e) {
       e.preventDefault();
       var em = (document.getElementById('pr-email').value || '').trim(), pw = document.getElementById('pr-pw').value || '';
-      if (!em || !pw) { setOverlayErr('Enter your email and password.'); return; }
-      var btn = document.getElementById('pr-pwbtn'); btn.disabled = true; btn.textContent = 'Signing in…';
+      if (!em || !pw) { setOverlayErr(isSignup ? 'Add meg az e-mailed és egy jelszót.' : 'Enter your email and password.'); return; }
+      var btn = document.getElementById('pr-pwbtn');
+      if (isSignup) {
+        if (pw.length < 6) { setOverlayErr('A jelszó legyen legalább 6 karakter.'); return; }
+        btn.disabled = true; btn.textContent = 'Regisztráció…';
+        sb.auth.signUp({ email: em, password: pw, options: { data: { full_name: em.split('@')[0] }, emailRedirectTo: cleanUrl() } }).then(function (res) {
+          btn.disabled = false; btn.textContent = 'Regisztráció';
+          if (res && res.error) { setOverlayErr(res.error.message); return; }
+          if (res.data && res.data.session) return;   // (rare) auto-confirmed → onAuthStateChange reboots
+          setOverlayErr('');
+          var pEl = document.querySelector('#pr-signin p'); if (pEl) pEl.innerHTML = '✅ <b>Sikeres regisztráció!</b> Küldtünk egy megerősítő e-mailt — kattints a benne lévő linkre, majd jelentkezz be. Első belépéskor kitöltöd a profilodat, és egy admin jóváhagy.';
+        }, function (er) { btn.disabled = false; btn.textContent = 'Regisztráció'; setOverlayErr((er && er.message) || 'A regisztráció nem sikerült.'); });
+        return;
+      }
+      btn.disabled = true; btn.textContent = 'Signing in…';
       sb.auth.signInWithPassword({ email: em, password: pw }).then(function (res) {
         if (res && res.error) { btn.disabled = false; btn.textContent = 'Sign in'; setOverlayErr(/invalid|credential/i.test(res.error.message || '') ? 'Incorrect email or password.' : res.error.message); return; }
         // SIGNED_IN fires → onAuthStateChange reboots into cloud mode; keep the button disabled.
       }, function (er) { btn.disabled = false; btn.textContent = 'Sign in'; setOverlayErr((er && er.message) || 'Sign-in failed.'); });
+    };
+    document.getElementById('pr-toggle').onclick = function (e) {
+      e.preventDefault(); isSignup = !isSignup;
+      document.getElementById('pr-pwbtn').textContent = isSignup ? 'Regisztráció' : 'Sign in';
+      var h1 = document.querySelector('#pr-signin h1'); if (h1) h1.textContent = isSignup ? 'Fiók létrehozása' : 'Sign in to Publify';
+      var pwi = document.getElementById('pr-pw'); pwi.setAttribute('autocomplete', isSignup ? 'new-password' : 'current-password'); pwi.placeholder = isSignup ? 'Válassz jelszót (min. 6 karakter)' : 'Password';
+      this.textContent = isSignup ? 'Van már fiókod? Jelentkezz be' : 'Nincs még fiókod? Regisztrálj';
+      setOverlayErr('');
     };
     document.getElementById('pr-google').onclick = function () { this.textContent = 'Redirecting…'; signInWithGoogle(); };
     document.getElementById('pr-demo').onclick = chooseDemo;

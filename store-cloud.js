@@ -75,8 +75,23 @@
     clearTimeout(timers[p.id]);
     timers[p.id] = setTimeout(function () { flush(p.id); }, 500);
   }
+  function myRoleOn(p) {
+    if (!p) return null;
+    if (p.ownerId === me.id) return 'owner';
+    var m = (p.members || []).filter(function (x) { return x.userId === me.id; })[0];
+    return m ? m.role : null;
+  }
   function flush(id) {
     var p = pending[id]; if (!p) return; delete pending[id];
+    // A commenter cannot UPDATE the projects row (RLS = owner/editor), so a full upsert is rejected and
+    // their comments/todos would be lost. Persist just the annotations via the SECURITY DEFINER RPC that
+    // role_on allows for commenters too (migration-27).
+    if (myRoleOn(p) === 'commenter') {
+      sb.rpc('pr_save_annotations', { p_project: id, p_annotations: p.annotations || [] }).then(function (r) {
+        if (r && r.error) { console.warn('[PR] comment save failed, will retry', r.error.message); pending[id] = p; clearTimeout(timers[id]); timers[id] = setTimeout(function () { flush(id); }, 4000); }
+      }).catch(function (e) { console.warn('[PR] comment save error', e); });
+      return;
+    }
     // deleted_at is a timestamptz column — serialise the epoch-ms flag as ISO, NOT a raw
     // number (a bare integer fails the timestamptz cast and rejects the whole upsert, which
     // is why soft-deletes used to vanish on reload).
