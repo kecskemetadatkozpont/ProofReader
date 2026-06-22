@@ -87,7 +87,7 @@ function screenSystem(question: string, config: any): string {
   const exc = (config.exclude || []).filter(Boolean);
   return `You are screening papers for a systematic literature review.
 Research question: ${question || '(none given)'}
-${(config.keywords || []).length ? 'Keywords: ' + (config.keywords || []).join(', ') + '\n' : ''}${inc.length ? 'INCLUDE only if ALL hold: ' + inc.join('; ') + '\n' : ''}${exc.length ? 'EXCLUDE if ANY holds: ' + exc.join('; ') + '\n' : ''}For each paper decide: "include", "maybe", or "exclude". Give a one-line reason, a 0..100 relevance score, and detect signals has_github (a public code repo) and has_dataset (a public dataset). Be strict — only include clearly relevant papers that meet the criteria.
+${(config.keywords || []).length ? 'Keywords: ' + (config.keywords || []).join(', ') + '\n' : ''}${inc.length ? 'Inclusion criteria (the paper should plausibly satisfy ALL): ' + inc.join('; ') + '\n' : ''}${exc.length ? 'Exclusion criteria (exclude if ANY clearly holds): ' + exc.join('; ') + '\n' : ''}For each paper decide: "include" (relevant to the question and plausibly meets the inclusion criteria), "maybe" (relevant but you are genuinely unsure it meets a criterion), or "exclude" (off-topic, or clearly violates an exclusion criterion). This is a screening FUNNEL — be inclusive here; later steps narrow further. Prefer "maybe" over "exclude" when uncertain. Give a one-line reason, a 0..100 relevance score, and detect signals has_github (a public code repo) and has_dataset (a public dataset).
 Return ONLY a JSON array, one object per paper in order: [{"i":0,"decision":"include|maybe|exclude","reason":"...","score":0,"signals":{"has_github":false,"has_dataset":false}}]`;
 }
 
@@ -165,7 +165,7 @@ Deno.serve(async (req) => {
         const { data: srow } = await sb.from('research_sources').upsert({
           project_id: study.project_id, source_api: config.source_adapter || 'openalex', ext_id: p.ext_id,
           doi: p.doi, title: p.title, authors: p.authors.length ? p.authors : null, year: p.year, venue: p.venue,
-          abstract: p.abstract || null, cited_by: p.cited_by, url: p.url, screening: 'unscreened',
+          abstract: p.abstract || null, cited_by: p.cited_by, url: p.url, oa_pdf_url: p.oa_pdf_url || null, screening: 'unscreened',
         }, { onConflict: 'project_id,ext_id' }).select('id,created_at').maybeSingle();
         if (!srow) continue;
         await sb.from('research_study_papers').upsert({ study_id, source_id: srow.id, step: 1, decision: 'unscreened' }, { onConflict: 'study_id,source_id,step' });
@@ -189,9 +189,9 @@ Deno.serve(async (req) => {
       const total = count || 0;
       const inputs: any[] = [];
       if (ids.length) {
-        const { data: srcs } = await sb.from('research_sources').select('id,title,abstract,year,venue,url,doi').in('id', ids);
+        const { data: srcs } = await sb.from('research_sources').select('id,title,abstract,year,venue,url,doi,oa_pdf_url').in('id', ids);
         const byId: Record<string, any> = {}; (srcs || []).forEach((s: any) => { byId[s.id] = s; });
-        for (const id of ids) { const s = byId[id]; if (s) inputs.push({ source_id: s.id, oa_pdf_url: s.url, title: s.title, abstract: s.abstract, year: s.year, venue: s.venue, url: s.url, doi: s.doi, _fullText: step === 3 }); }
+        for (const id of ids) { const s = byId[id]; if (s) inputs.push({ source_id: s.id, oa_pdf_url: s.oa_pdf_url, title: s.title, abstract: s.abstract, year: s.year, venue: s.venue, url: s.url, doi: s.doi, _fullText: step === 3 }); }
       }
       const results = await screenAndWrite(sb, study, study_id, step, config, model, inputs, step === 3);
       const counts = await recount(sb, study_id, step);
