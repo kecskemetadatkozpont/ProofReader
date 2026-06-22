@@ -214,6 +214,11 @@
     try { if (window.marked && window.DOMPurify) return window.DOMPurify.sanitize(window.marked.parse(s, { breaks: true })); } catch (e) { }
     return s.replace(/[&<>]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]; }).replace(/\n/g, '<br>');
   }
+  // wrap each rendered code block in a collapsible <details> so the AI's code stays folded until expanded
+  function foldCode(html) {
+    if (!html) return html;
+    return html.replace(/<pre>/g, '<details class="code-fold"><summary>⟨⟩ Kód — kinyitás / összecsukás</summary><pre>').replace(/<\/pre>/g, '</pre></details>');
+  }
   var CHAT_SUGGEST = ['What are the open problems in this field?', 'Summarize the key methods used so far.', 'Suggest 3 testable research questions for my goal.', 'What evidence would support or refute my hypothesis?'];
   // In a chat reply, the AI saves files via fenced ```file:<path> … ``` blocks. For DISPLAY we collapse
   // those to a compact chip (the full content lives in the file browser, not inline in the chat).
@@ -251,7 +256,7 @@
     function openSigned(path) { sb.storage.from('research-data').createSignedUrl(path, 3600).then(function (r) { if (r && r.data && r.data.signedUrl) window.open(r.data.signedUrl, '_blank'); }); }
     function attach(f) { props.onAttach({ kind: f.content != null ? 'projectfile' : 'file', file_id: f.id, bucket: 'research-data', path: f.storage_path, name: f.path, title: f.path, label: f.path }); }
     function icon(f) { var p = (f.path || '').toLowerCase(); if (/\.md$|\.txt$/.test(p)) return '📄'; if (/\.(png|jpe?g|gif|webp|svg)$/.test(p)) return '🖼'; if (/\.pdf$/.test(p)) return '📕'; if (/\.(csv|tsv|xlsx?)$/.test(p)) return '📊'; return '📎'; }
-    return h('div', { className: 'filebrowser' },
+    return h('div', { className: 'filebrowser', style: { width: (props.width || 256) } },
       h('div', { className: 'fb-head' }, h('b', null, 'Files'), h('span', { style: { flex: 1 } }),
         props.canEdit ? h('button', { className: 'fb-mini', title: 'Új fájl', onClick: newFile }, '+') : null,
         props.canEdit ? h('button', { className: 'fb-mini', title: 'Feltöltés', onClick: function () { if (upRef.current) upRef.current.click(); } }, '⤒') : null,
@@ -284,6 +289,8 @@
     var ty = useState(null), typing = ty[0], setTyping = ty[1];          // { id, len } of the message being typed out (non-stream fallback)
     var stmS = useState(null), streaming = stmS[0], setStreaming = stmS[1];   // { text } while a reply streams in live
     var fvS = useState(0), filesVersion = fvS[0], setFilesVersion = fvS[1];   // bump to refresh the file browser after the AI writes files
+    var fbwS = useState(function () { try { return parseInt(localStorage.getItem('pr-fb-width') || '280', 10) || 280; } catch (e) { return 280; } }), fbWidth = fbwS[0], setFbWidth = fbwS[1];   // resizable file-browser width
+    var spS = useState(null), selPop = spS[0], setSelPop = spS[1];   // { text, x, y } floating "add selection to ideas" button
     var atS = useState([]), attach = atS[0], setAttach = atS[1];          // pending attachments for the next message
     var pkS = useState(false), picker = pkS[0], setPicker = pkS[1];
     var firstLoad = useRef(true), animated = useRef({}), alive = useRef(true), scrollRef = useRef(null), taRef = useRef(null), justStreamed = useRef(false);
@@ -386,16 +393,36 @@
     function onTaKey(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }
     function onTaInput(e) { setInput(e.target.value); e.target.style.height = 'auto'; e.target.style.height = Math.min(e.target.scrollHeight, 160) + 'px'; }
     function saveIdea(m) { sb.from('research_ideas').insert({ project_id: props.projectId, source: 'consensus', question: (m.content || '').slice(0, 8000), created_by: props.authorId, status: 'candidate' }).then(function (r) { if (r && r.error) { alert(r.error.message); return; } props.onChanged(); }); }
+    function saveIdeaText(text) { sb.from('research_ideas').insert({ project_id: props.projectId, source: 'own', question: (text || '').slice(0, 8000), created_by: props.authorId, status: 'candidate' }).then(function (r) { if (r && r.error) { alert(r.error.message); return; } props.onChanged(); }); }
+    // drag the divider to resize the file browser (the chat takes the rest); persisted in localStorage
+    function startResize(e) {
+      e.preventDefault();
+      var startX = e.clientX, startW = fbWidth, last = startW;
+      function move(ev) { last = Math.max(190, Math.min(620, startW + (startX - ev.clientX))); setFbWidth(last); }
+      function up() { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); document.body.style.cursor = ''; try { localStorage.setItem('pr-fb-width', String(last)); } catch (e2) { } }
+      document.body.style.cursor = 'col-resize';
+      document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
+    }
+    // a text selection inside a chat bubble pops an "add to ideas" button
+    function onChatMouseUp() {
+      if (!props.canEdit) return;
+      setTimeout(function () {
+        var s = window.getSelection ? window.getSelection() : null;
+        var txt = s ? String(s).trim() : '';
+        if (txt && txt.length > 3) { try { var r = s.getRangeAt(0).getBoundingClientRect(); setSelPop({ text: txt, x: r.left + r.width / 2, y: r.top }); } catch (e) { setSelPop(null); } }
+        else setSelPop(null);
+      }, 1);
+    }
     return h('div', { className: 'panel chatwrap' },
       h('div', { className: 'chat-col' },
       h('h3', null, 'Chat with Publify', h('span', { style: { fontWeight: 600, color: 'var(--faint)' } }, 'research assistant')),
       props.supervised ? h('div', { style: { fontSize: 12, color: 'var(--muted)', background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 8, padding: '7px 11px', marginBottom: 10, lineHeight: 1.45 } }, 'ℹ️ A kutatási beszélgetéseidből a témavezetőd napi összefoglalót kaphat (mit dolgoztál, milyen döntéseket hoztál).') : null,
-      h('div', { className: 'chat-msgs', ref: scrollRef },
+      h('div', { className: 'chat-msgs', ref: scrollRef, onMouseUp: onChatMouseUp, onScroll: function () { if (selPop) setSelPop(null); } },
         msgs.length ? msgs.map(function (m) {
           var isTyping = typing && typing.id === m.id;
           var ai = m.role === 'assistant';
           var body;
-          if (ai && !isTyping) body = h('div', { className: 'btxt md', dangerouslySetInnerHTML: { __html: mdHtml(stripFiles(m.content)) } });
+          if (ai && !isTyping) body = h('div', { className: 'btxt md', dangerouslySetInnerHTML: { __html: foldCode(mdHtml(stripFiles(m.content))) } });
           else if (ai && isTyping) {
             var toks = (m.content || '').split(/(\s+)/), shown = toks.slice(0, typing.n);
             body = h('div', { className: 'btxt' }, shown.slice(0, -1).join(''), h('span', { key: typing.n, className: 'tw-word' }, shown[shown.length - 1] || ''), h('span', { className: 'tw-cursor' }, '▌'));
@@ -428,7 +455,9 @@
         )
       ) : null
       ),
-      h(SessionFileBrowser, { projectId: props.projectId, authorId: props.authorId, canEdit: props.canEdit, version: filesVersion, onAttach: function (a) { setAttach(function (p) { return p.concat([a]); }); } }),
+      h('div', { className: 'fb-resizer', onMouseDown: startResize, title: 'Húzd az ablakok átméretezéséhez' }),
+      h(SessionFileBrowser, { projectId: props.projectId, authorId: props.authorId, canEdit: props.canEdit, version: filesVersion, width: fbWidth, onAttach: function (a) { setAttach(function (p) { return p.concat([a]); }); } }),
+      selPop ? h('button', { className: 'sel-idea-btn', style: { position: 'fixed', left: selPop.x, top: selPop.y - 40, transform: 'translateX(-50%)', zIndex: 60 }, onMouseDown: function (e) { e.preventDefault(); }, onClick: function () { saveIdeaText(selPop.text); setSelPop(null); try { window.getSelection().removeAllRanges(); } catch (e) { } } }, '✚ Ötlethez') : null,
       picker ? h(AttachModal, { projectId: props.projectId, authorId: props.authorId, fileOwnerId: props.fileOwnerId, sources: props.sources, onPick: function (a) { setAttach(function (p) { return p.concat([a]); }); }, onClose: function () { setPicker(false); } }) : null
     );
   }

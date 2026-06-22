@@ -218,7 +218,18 @@
     .fb-preview { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 10px; }
     .fb-pv-head { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
     .fb-pv-head .fb-lbl { flex: 1; font-weight: 700; font-size: 12px; }
-    @media (max-width: 900px) { .chatwrap { flex-direction: column; } .filebrowser { width: 100%; } }
+    .fb-resizer { flex: none; width: 7px; align-self: stretch; cursor: col-resize; border-radius: 4px; background: transparent; transition: background .12s; }
+    .fb-resizer:hover { background: var(--accent-tint); }
+    .sel-idea-btn { border: 0; background: var(--accent); color: #fff; font-family: inherit; font-size: 12px; font-weight: 700; padding: 6px 12px; border-radius: 999px; cursor: pointer; box-shadow: 0 4px 14px rgba(20,24,40,.28); }
+    /* collapsible code blocks in chat replies (item 3) */
+    .code-fold { margin: 6px 0; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
+    .code-fold > summary { cursor: pointer; font-size: 11.5px; font-weight: 700; color: var(--muted); padding: 6px 10px; background: var(--surface-2); list-style: none; user-select: none; }
+    .code-fold > summary::-webkit-details-marker { display: none; }
+    .code-fold > summary:hover { color: var(--accent); }
+    .code-fold[open] > summary { border-bottom: 1px solid var(--line); }
+    .code-fold > pre { margin: 0; border-radius: 0; }
+    .code-fold:not([open]) > pre { display: none !important; }
+    @media (max-width: 900px) { .chatwrap { flex-direction: column; } .filebrowser { width: 100% !important; } .fb-resizer { display: none; } }
     .lfilters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
     .lfilters .flab { font-size: 11.5px; color: var(--muted); font-weight: 600; }
     .lfilters input.num { width: 76px; height: 30px; border: 1px solid var(--line); border-radius: 8px; padding: 0 8px; font-family: inherit; font-size: 12.5px; }
