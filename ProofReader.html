@@ -458,7 +458,7 @@
     .preview-scroll.write-mode .sent.wm-edit:focus { background: color-mix(in srgb, var(--accent) 11%, transparent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 32%, transparent); }
     .preview-scroll.write-mode .sent.wm-lock { cursor: pointer; border-radius: 3px; text-decoration: underline dotted color-mix(in srgb, var(--muted) 55%, transparent); text-underline-offset: 3px; }
     .preview-scroll.write-mode .sent.wm-lock:hover { background: color-mix(in srgb, #d9760b 13%, transparent); }
-    .wm-fmt { z-index: 130; display: flex; gap: 3px; background: var(--ink); padding: 5px 6px; border-radius: 9px; box-shadow: 0 8px 24px rgba(0,0,0,.32); }
+    .wm-fmt { z-index: 130; display: flex; gap: 3px; background: #252a36; padding: 5px 6px; border-radius: 9px; box-shadow: 0 8px 24px rgba(0,0,0,.32); }
     .wm-fmt button { width: 30px; height: 28px; border: 0; background: rgba(255,255,255,.13); color: #fff; border-radius: 6px; font-size: 13.5px; display: grid; place-items: center; }
     .wm-fmt button:hover { background: rgba(255,255,255,.28); }
     .wm-fmt-sep { width: 1px; height: 20px; background: rgba(255,255,255,.22); margin: 0 3px; }
@@ -482,7 +482,7 @@
     .wm-grid-c { width: 18px; height: 18px; border: 1px solid var(--line); border-radius: 3px; background: var(--pane); cursor: pointer; }
     .wm-grid-c.on { background: color-mix(in srgb, #be185d 30%, var(--pane)); border-color: #be185d; }
     .wm-grid-lbl { font-size: 11px; color: var(--muted); margin-top: 7px; text-align: center; font-weight: 600; }
-    .wm-tbltb { z-index: 130; display: flex; gap: 3px; align-items: center; background: var(--ink); padding: 5px 6px; border-radius: 9px; box-shadow: 0 8px 24px rgba(0,0,0,.32); }
+    .wm-tbltb { z-index: 130; display: flex; gap: 3px; align-items: center; background: #252a36; padding: 5px 6px; border-radius: 9px; box-shadow: 0 8px 24px rgba(0,0,0,.32); }
     .wm-tbltb button { border: 0; background: rgba(255,255,255,.13); color: #fff; font-size: 11px; font-weight: 600; padding: 4px 9px; border-radius: 6px; }
     .wm-tbltb button:hover { background: rgba(255,255,255,.28); }
     .preview-scroll.write-mode table.wm-tbl td, .preview-scroll.write-mode table.wm-tbl th { cursor: text; }
@@ -837,7 +837,7 @@
     .kpi-status-sel { width: 100%; height: 36px; border: 1px solid var(--line); border-radius: 8px; background: var(--pane); color: var(--ink); font: inherit; font-size: 13px; padding: 0 10px; }
 
     /* selection toolbar */
-    .seltool { position: absolute; top: 40px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 6px; background: var(--ink); color: #fff; padding: 6px 8px 6px 12px; border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.28); z-index: 12; max-width: 90%; }
+    .seltool { position: absolute; top: 40px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 6px; background: #252a36; color: #fff; padding: 6px 8px 6px 12px; border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.28); z-index: 12; max-width: 90%; }
     .seltool-q { font-family: 'Source Serif 4', serif; font-size: 12px; opacity: .8; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .seltool button { display: inline-flex; align-items: center; gap: 5px; border: 0; background: rgba(255,255,255,.14); color: #fff; font-size: 12px; font-weight: 600; padding: 5px 9px; border-radius: 7px; }
     .seltool button:hover { background: rgba(255,255,255,.26); } .seltool button.x { background: transparent; padding: 4px 6px; opacity: .7; }
@@ -875,8 +875,8 @@
     .anno-pop2-empty { color: var(--muted, #9aa0aa); }
 
     /* resume pill */
-    .resume-pill { position: fixed; bottom: 90px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 9px; background: var(--ink); color: #fff; padding: 8px 8px 8px 14px; border-radius: 24px; box-shadow: 0 8px 26px rgba(0,0,0,.3); z-index: 30; font-size: 13px; }
-    .resume-pill button { border: 0; background: var(--accent); color: #fff; font-size: 12.5px; font-weight: 600; padding: 6px 12px; border-radius: 18px; } .resume-pill button.x { background: transparent; color: rgba(255,255,255,.7); padding: 4px 6px; }
+    .resume-pill { position: fixed; bottom: 90px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 9px; background: #4f46e5; color: #fff; padding: 8px 8px 8px 14px; border-radius: 24px; box-shadow: 0 8px 26px rgba(79,70,229,.42); z-index: 30; font-size: 13px; font-weight: 600; }
+    .resume-pill button { border: 0; background: #fff; color: #4f46e5; font-size: 12.5px; font-weight: 700; padding: 6px 12px; border-radius: 18px; } .resume-pill button.x { background: transparent; color: rgba(255,255,255,.8); font-weight: 600; padding: 4px 6px; }
 
     /* voice popover */
     .storage-toast { position: fixed; bottom: 90px; right: 18px; z-index: 80; display: flex; align-items: flex-start; gap: 10px; max-width: 340px;
