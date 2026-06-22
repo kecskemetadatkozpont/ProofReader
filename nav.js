@@ -12,7 +12,7 @@
   var LINKS = [
     { key: 'profile', label: 'Open Profile', href: 'Profile.html' },
     { key: 'research', label: 'Research', href: 'Research.html' },
-    { key: 'session', label: 'Claude Session', href: 'Session.html' },
+    { key: 'session', label: 'Publify Chat', href: 'Session.html' },
     { key: 'phd', label: 'Doctoral School', href: 'PhD.html' },
     { key: 'publications', label: 'Publications', href: 'Projects.html' },
     { key: 'admin', label: 'Admin', href: 'Admin.html', adminOnly: true }
@@ -28,7 +28,7 @@
     if (p.indexOf('proofreader') === 0) return 'editor';
     return '';
   }
-  var PAGE_NAME = { profile: 'Profile', research: 'Research', phd: 'Doctoral School', publications: 'Publications', admin: 'Admin', editor: 'Editor' };
+  var PAGE_NAME = { profile: 'Profile', research: 'Research', session: 'Publify Chat', phd: 'Doctoral School', publications: 'Publications', admin: 'Admin', editor: 'Editor' };
   function initials(name, email) {
     var s = (name || email || '?').trim();
     var parts = s.split(/\s+/).filter(Boolean);
@@ -134,6 +134,7 @@
   function svg(d) { return '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">' + d + '</svg>'; }
   var ICONS = {
     profile: svg('<circle cx="8" cy="5.5" r="2.6"/><path d="M3 13c.6-2.4 2.5-3.6 5-3.6S12.4 10.6 13 13"/>'),
+    session: svg('<path d="M14 8c0 2.5-2.7 4.5-6 4.5-.9 0-1.7-.1-2.5-.4L2 13l.9-2.6C2.3 9.7 2 8.9 2 8c0-2.5 2.7-4.5 6-4.5S14 5.5 14 8z"/>'),
     research: svg('<path d="M6 2v4.5L3 12.5A1 1 0 0 0 4 14h8a1 1 0 0 0 .9-1.5L10 6.5V2"/><path d="M5 2h6"/>'),
     phd: svg('<path d="M8 2L1.5 5.5 8 9l6.5-3.5z"/><path d="M4 7v3.2c0 .9 1.8 1.8 4 1.8s4-.9 4-1.8V7"/>'),
     publications: svg('<path d="M3 2.5h7l3 3V13a.5.5 0 0 1-.5.5H3a.5.5 0 0 1-.5-.5V3a.5.5 0 0 1 .5-.5z"/><path d="M5 7h6M5 9.5h6"/>'),
