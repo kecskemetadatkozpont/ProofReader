@@ -50,6 +50,33 @@ function notifSumm(n) { const p = n.payload || {}; if (n.kind === 'share') retur
 // Where a notification's "View" link goes (null → no link). Share → open the shared document.
 function notifTarget(n) { const p = n.payload || {}; if (n.kind === 'share' && p.project_id) return 'ProofReader.html?p=' + p.project_id; return null; }
 
+// Always-visible bell next to the profile avatar: red count when unread, dropdown lists notifications
+// with "Elfogad" (accept invitation) + "Megnyit" (open) actions. Cloud only.
+function NotifBell({ notif }) {
+  const [open, setOpen] = useState(false);
+  useEffect(() => { if (!open) return; const h = (e) => { if (!e.target.closest('.notif-wrap')) setOpen(false); }; document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h); }, [open]);
+  const accept = (n) => { const p = n.payload || {}; if (p.project_id && Store.acceptInvitation) Store.acceptInvitation(p.project_id); notif.markRead(n); };
+  const view = (n) => { notif.markRead(n); const t = notifTarget(n); if (t) location.href = t; };
+  return <div className="notif-wrap">
+    <button className="bell" title="Értesítések" onClick={(e) => { e.stopPropagation(); const o = !open; setOpen(o); if (o) notif.reload(); }}>
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M8 2a3.5 3.5 0 0 0-3.5 3.5c0 3-1.5 4-1.5 4h10s-1.5-1-1.5-4A3.5 3.5 0 0 0 8 2z" strokeLinejoin="round" /><path d="M6.6 12.4a1.5 1.5 0 0 0 2.8 0" strokeLinecap="round" /></svg>
+      {notif.unread ? <i className="nb">{notif.unread > 9 ? '9+' : notif.unread}</i> : null}
+    </button>
+    {open ? <div className="notif-pop" onClick={(e) => e.stopPropagation()}>
+      <div className="nh">Értesítések{notif.unread ? <button className="back-btn" onClick={notif.markAll}>Mind olvasott</button> : null}</div>
+      {notif.notes.length ? notif.notes.slice(0, 20).map((n) => { const tgt = notifTarget(n); return (
+        <div key={n.id} className={'notif-item' + (n.read_at ? '' : ' unread')}>
+          <b>{notifTitle(n)}</b><div className="nx">{notifSumm(n)}</div>
+          <div className="ni-actions">
+            {n.kind === 'share' ? <button className="adr-accept" onClick={() => accept(n)}>Elfogad</button> : null}
+            {tgt ? <button className="adr-view" onClick={() => view(n)}>Megnyit →</button> : null}
+          </div>
+        </div>
+      ); }) : <div className="adr-notif-empty" style={{ textAlign: 'center' }}>Nincs értesítés.</div>}
+    </div> : null}
+  </div>;
+}
+
 /* ---------------- sign-in ---------------- */
 function SignIn({ onSignIn }) {
   const [pick, setPick] = useState(false);
@@ -300,7 +327,7 @@ function ActivityModal({ projects, onClose }) {
   );
 }
 
-function AccountMenu({ me, onClose, onUsage, onSwitch, onSignOut, notes = [], unread = 0, onView, onMarkAll, onAccept }) {
+function AccountMenu({ me, onClose, onUsage, onSwitch, onSignOut }) {
   const u = Store.usage(me.id);
   const others = (Auth.demoUsers ? Auth.demoUsers() : Auth.users()).filter((x) => x.id !== me.id);
   return (
@@ -308,18 +335,6 @@ function AccountMenu({ me, onClose, onUsage, onSwitch, onSignOut, notes = [], un
       <div className="acct-scrim" onClick={onClose} />
       <aside className="acct-drawer" onClick={(e) => e.stopPropagation()}>
         <a className="adr-head" href="Profile.html" title="Open your profile"><Avatar user={me} size={42} /><div style={{ minWidth: 0, flex: 1 }}><b>{me.name}</b><small>{me.email}</small></div><span className="plan-pill">{u.planLabel}</span></a>
-        <div className="adr-sub adr-notif-h">Értesítések{unread ? <button className="adr-markall" onClick={onMarkAll}>Mind olvasott</button> : null}</div>
-        <div className="adr-notifs">
-          {notes.length ? notes.slice(0, 10).map((n) => { const tgt = notifTarget(n); return (
-            <div key={n.id} className={'adr-notif' + (n.read_at ? '' : ' unread')}>
-              <div className="adr-notif-t"><b>{notifTitle(n)}</b><div className="adr-notif-x">{notifSumm(n)}</div></div>
-              <div className="adr-notif-actions">
-                {n.kind === 'share' ? <button className="adr-accept" onClick={() => onAccept(n)}>Elfogad</button> : null}
-                {tgt ? <button className="adr-view" onClick={() => onView(n, tgt)}>Megnyit →</button> : null}
-              </div>
-            </div>
-          ); }) : <div className="adr-notif-empty">Nincs értesítés.</div>}
-        </div>
         <div className="adr-nav">
           <a className="adr-i" href="Profile.html"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><circle cx="8" cy="5.5" r="2.5" /><path d="M3.5 13.5c0-2.5 2-4 4.5-4s4.5 1.5 4.5 4" strokeLinecap="round" /></svg>Open profile</a>
           <a className="adr-i" href="PhD.html"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M8 2L1.5 5 8 8l6.5-3L8 2z" strokeLinejoin="round" /><path d="M4.5 6.3v3.4c0 1 1.6 1.8 3.5 1.8s3.5-.8 3.5-1.8V6.3M14.5 5.2v3.3" strokeLinecap="round" /></svg>Doctoral School</a>
@@ -451,11 +466,25 @@ function App() {
     if (me._preview) {
       const sb = window.PR_BACKEND && window.PR_BACKEND.sb;
       if (!sb) { setProjects([]); return; }
-      sb.from('projects').select('id,data,updated_at,deleted_at').eq('owner_id', me.id).is('deleted_at', null).order('updated_at', { ascending: false })
-        .then((r) => setProjects(((r && r.data) || []).map((row) => Object.assign({}, row.data || {}, {
-          id: row.id, title: (row.data && row.data.title) || 'Untitled publication', ownerId: me.id,
-          updated: row.updated_at ? Date.parse(row.updated_at) : 0, members: (row.data && row.data.members) || [], _shared: false, _preview: true
-        }))));
+      const mk = (row, shared) => Object.assign({}, row.data || {}, {
+        id: row.id, title: (row.data && row.data.title) || 'Untitled publication', ownerId: row.owner_id || me.id,
+        updated: row.updated_at ? Date.parse(row.updated_at) : 0, members: (row.data && row.data.members) || [], _shared: shared, _preview: true
+      });
+      // The target's own publications + the ones shared with them (so "Shared with me" matches their real view).
+      Promise.all([
+        sb.from('projects').select('id,data,updated_at,deleted_at,owner_id').eq('owner_id', me.id).is('deleted_at', null),
+        sb.from('project_members').select('project_id').eq('user_id', me.id)
+      ]).then(([owned, mem]) => {
+        const memIds = ((mem && mem.data) || []).map((r) => r.project_id);
+        const sharedQ = memIds.length
+          ? sb.from('projects').select('id,data,updated_at,deleted_at,owner_id').in('id', memIds).is('deleted_at', null)
+          : Promise.resolve({ data: [] });
+        sharedQ.then((shared) => {
+          const list = (((owned && owned.data) || []).map((r) => mk(r, false)))
+            .concat(((shared && shared.data) || []).map((r) => mk(r, true)));
+          setProjects(list);
+        });
+      });
       return;
     }
     Store.seedIfEmpty(); setProjects(Store.listFor(me.id));
@@ -486,15 +515,10 @@ function App() {
           {!preview && <button className="btn-ghost" onClick={() => setModal('activity')}><svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.4"><circle cx="8" cy="8" r="6" /><path d="M8 5v3l2 1.5" strokeLinecap="round" /></svg>Activity</button>}
           {!preview && <button className="btn-ghost" onClick={() => setModal('usage')} title="Storage used"><svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"><ellipse cx="8" cy="4" rx="5" ry="2" /><path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4" /><path d="M3 8c0 1.1 2.2 2 5 2s5-.9 5-2" /></svg>Storage</button>}
           {!preview && <button className="btn-primary" onClick={() => setModal('new')}><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M8 3v10M3 8h10" /></svg>New publication</button>}
+          {isCloudMode() && <NotifBell notif={notif} />}
           <div className="acct">
-            <button className="acct-btn" title="Fiók és értesítések" onClick={(e) => { e.stopPropagation(); const o = !acctOpen; setAcctOpen(o); if (o) notif.reload(); }}>
-              <Avatar user={me} size={34} />
-              {notif.unread ? <i className="acct-nb">{notif.unread > 9 ? '9+' : notif.unread}</i> : null}
-            </button>
+            <button className="acct-btn" title="Fiók" onClick={(e) => { e.stopPropagation(); setAcctOpen((v) => !v); }}><Avatar user={me} size={34} /></button>
             {acctOpen && <AccountMenu me={me}
-              notes={notif.notes} unread={notif.unread} onMarkAll={notif.markAll}
-              onView={(n, tgt) => { notif.markRead(n); if (tgt) location.href = tgt; }}
-              onAccept={(n) => { const p = n.payload || {}; if (p.project_id) Store.acceptInvitation(p.project_id); notif.markRead(n); }}
               onUsage={() => { setAcctOpen(false); setModal('usage'); }}
               onSwitch={(id) => { Auth.signIn(id); setMe(Auth.byId(id)); setAcctOpen(false); }}
               onSignOut={() => { Auth.signOut(); setMe(null); }}
