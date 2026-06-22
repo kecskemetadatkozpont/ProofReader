@@ -236,6 +236,22 @@
     .lchip { font-size: 11.5px; font-weight: 600; padding: 5px 11px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--muted); cursor: pointer; font-family: inherit; }
     .lchip:hover { border-color: #cfd4e6; }
     .lchip.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+    /* Literature study workflow (Elicit-style 4-step funnel) */
+    .field-label { font-size: 11.5px; font-weight: 700; color: var(--muted); margin: 8px 0 4px; }
+    .funnel { display: flex; gap: 8px; flex-wrap: wrap; }
+    .funnel-step { flex: 1; min-width: 108px; border: 1px solid var(--line); background: var(--surface); border-radius: 10px; padding: 9px 11px; cursor: pointer; text-align: left; font-family: inherit; display: flex; flex-direction: column; gap: 2px; }
+    .funnel-step b { font-size: 12.5px; color: var(--ink); }
+    .funnel-step .funnel-count { font-size: 11px; color: var(--muted); }
+    .funnel-step:hover { border-color: var(--accent); }
+    .funnel-step.on { border-color: var(--accent); background: var(--accent-tint); }
+    .funnel-step.on b { color: var(--accent); }
+    .funnel-step.done { border-color: var(--ok); }
+    .runbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+    .progress { flex: 1; min-width: 160px; position: relative; height: 18px; background: var(--surface-2); border-radius: 9px; overflow: hidden; display: flex; align-items: center; }
+    .progress > i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent); opacity: .22; transition: width .2s; }
+    .progress-t { position: relative; font-size: 10.5px; color: var(--muted); padding-left: 8px; z-index: 1; }
+    .result-reason { font-size: 11.5px; color: var(--muted); margin-top: 2px; line-height: 1.4; }
+    .mtag.warn { background: var(--warn-bg); color: var(--warn); }
     @media (max-width: 760px) { .side { width: 64px; } .side-brand i, .side-brand b, .nav button span, .side-foot .who { display: none; } .main { padding: 18px; } }
   </style>
   <script src="theme.js"></script>

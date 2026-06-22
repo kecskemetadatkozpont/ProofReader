@@ -506,7 +506,8 @@
           props.canEdit ? h('div', { className: 'idea-foot' },
             h('button', { onClick: function () { setStatus(idea, 'selected'); } }, 'Select'),
             h('button', { onClick: function () { setStatus(idea, 'rejected'); } }, 'Reject'),
-            h('button', { onClick: function () { setStatus(idea, 'candidate'); } }, 'Reset')
+            h('button', { onClick: function () { setStatus(idea, 'candidate'); } }, 'Reset'),
+            props.onStartStudy ? h('button', { style: { marginLeft: 'auto', color: 'var(--accent)' }, title: 'Elicit-szerű irodalmi szűrés indítása', onClick: function () { props.onStartStudy(idea); } }, '🔬 Tanulmány') : null
           ) : null
         );
       }) : h('div', { style: { fontSize: 13, color: 'var(--faint)', padding: '8px 0' } }, 'No ideas yet — add your own or run a gap analysis.')
@@ -818,6 +819,171 @@
     );
   }
 
+  // ---------- Literature Study (Elicit-style 4-step funnel) ----------
+  var LS_STEPS = [{ step: 1, kind: 'quick', label: '1. Gyors' }, { step: 2, kind: 'abstract', label: '2. Absztrakt' }, { step: 3, kind: 'fulltext', label: '3. Teljes szöveg' }, { step: 4, kind: 'review', label: '4. Review' }];
+  function lsDefaultConfig(step, project, idea) {
+    if (step === 1) return { keywords: (project && project.keywords) || [], include: [], exclude: [], filters: { fromYear: '', minCites: '', oa: false, journals: true }, signals: ['has_github', 'has_dataset'], source_adapter: 'openalex', max_results: 150 };
+    return { keywords: [], include: [], exclude: [], filters: {}, signals: ['has_github', 'has_dataset'] };
+  }
+  function callStudy(body) {
+    var CFG = window.PR_CONFIG || {};
+    return sb.auth.getSession().then(function (s) {
+      var token = (s && s.data && s.data.session && s.data.session.access_token) || CFG.supabaseAnonKey;
+      return fetch(CFG.supabaseUrl + '/functions/v1/research-study', { method: 'POST', headers: { 'Content-Type': 'application/json', 'apikey': CFG.supabaseAnonKey, 'Authorization': 'Bearer ' + token }, body: JSON.stringify(body) }).then(function (r) { return r.json(); }, function () { return { error: 'network' }; });
+    });
+  }
+  function LiteratureStudy(props) {
+    var studies = props.studies || [];
+    var seS = useState((studies[0] && studies[0].id) || null), selId = seS[0], setSelId = seS[1];
+    var stS = useState([]), steps = stS[0], setSteps = stS[1];
+    var paS = useState([]), papers = paS[0], setPapers = paS[1];
+    var cuS = useState(1), curStep = cuS[0], setCurStep = cuS[1];
+    var cfS = useState(lsDefaultConfig(1, props.project)), cfg = cfS[0], setCfg = cfS[1];
+    var rnS = useState(false), running = rnS[0], setRunning = rnS[1];
+    var pgS = useState(null), prog = pgS[0], setProg = pgS[1];
+    var ttS = useState({}), titles = ttS[0], setTitles = ttS[1];
+    var erS = useState(''), err = erS[0], setErr = erS[1];
+    var alive = useRef(true), stop = useRef(false);
+    useEffect(function () { return function () { alive.current = false; }; }, []);
+    var sel = studies.filter(function (x) { return x.id === selId; })[0];
+    var srcMap = {}; (props.sources || []).forEach(function (s) { srcMap[s.id] = s; });
+
+    function loadStudy(id) {
+      if (!id) { setSteps([]); setPapers([]); return; }
+      Promise.all([
+        sb.from('research_study_steps').select('step,kind,config,status,cursor,total,counts').eq('study_id', id).order('step'),
+        sb.from('research_study_papers').select('source_id,step,decision,reason,score,signals,overridden').eq('study_id', id)
+      ]).then(function (r) {
+        var st = (r[0] && r[0].data) || []; setSteps(st); setPapers((r[1] && r[1].data) || []);
+        var cs = st.filter(function (x) { return x.step === curStep; })[0]; if (cs && cs.config) setCfg(cs.config);
+      });
+    }
+    useEffect(function () { loadStudy(selId); }, [selId]);
+    function stepRow(n) { return steps.filter(function (x) { return x.step === n; })[0]; }
+    function viewStep(n) { setCurStep(n); var cs = stepRow(n); setCfg((cs && cs.config) || lsDefaultConfig(n, props.project)); }
+    function incCount(n) { return papers.filter(function (p) { return p.step === n && p.decision === 'include'; }).length; }
+
+    function newStudy(idea) {
+      var title = String(idea ? idea.question : (props.project.title + ' — irodalom')).slice(0, 80);
+      sb.from('research_studies').insert({ project_id: props.projectId, idea_id: idea ? idea.id : null, title: title, question: idea ? idea.question : props.project.title, created_by: props.authorId }).select('id').maybeSingle().then(function (r) {
+        var id = r && r.data && r.data.id; if (!id) { setErr('Nem sikerült létrehozni a tanulmányt.'); return; }
+        var rows = LS_STEPS.map(function (s) { return { study_id: id, step: s.step, kind: s.kind, config: lsDefaultConfig(s.step, props.project, idea) }; });
+        sb.from('research_study_steps').insert(rows).then(function () { setSelId(id); setCurStep(1); props.onChanged(); });
+      });
+    }
+    function up(k, v) { setCfg(Object.assign({}, cfg, (function () { var o = {}; o[k] = v; return o; })())); }
+    function upFilter(k, v) { setCfg(Object.assign({}, cfg, { filters: Object.assign({}, cfg.filters || {}, (function () { var o = {}; o[k] = v; return o; })()) })); }
+    var linesToArr = function (s) { return String(s || '').split('\n').map(function (x) { return x.trim(); }).filter(Boolean); };
+
+    function runStep(n) {
+      if (running) return; setErr(''); stop.current = false; setRunning(true); setProg({ done: 0, total: 0, counts: {} }); setTitles({});
+      sb.from('research_study_steps').update({ config: cfg, status: 'running' }).eq('study_id', selId).eq('step', n).then(function () {
+        if (n === 4) {
+          callStudy({ action: 'generate_review', study_id: selId }).then(function (d) {
+            setRunning(false); setProg(null);
+            if (!d || d.error) { setErr((d && d.error) || 'Hiba a review generálásnál.'); return; }
+            loadStudy(selId); props.onChanged(); window.alert('Review elkészült: ' + d.file_path + ' (a Fájlok közt).');
+          });
+          return;
+        }
+        sb.from('research_study_papers').delete().eq('study_id', selId).gte('step', n).eq('overridden', false).then(function () {
+          var action = n === 1 ? 'search_step1' : 'screen_batch';
+          (function loop(offset) {
+            if (!alive.current || stop.current) { setRunning(false); setProg(null); loadStudy(selId); return; }
+            callStudy({ action: action, study_id: selId, step: n, offset: offset }).then(function (d) {
+              if (!d || d.error) { setRunning(false); setProg(null); setErr((d && d.error) || 'A lépés hibázott.'); loadStudy(selId); return; }
+              setProg({ done: d.next_offset, total: d.total_estimate || d.next_offset, counts: d.counts });
+              setTitles(function (t) { var n2 = Object.assign({}, t); (d.results || []).forEach(function (x) { if (x.title) n2[x.source_id] = x.title; }); return n2; });
+              loadStudy(selId);
+              if (!d.done && alive.current && !stop.current) loop(d.next_offset);
+              else { setRunning(false); setProg(null); loadStudy(selId); props.onChanged(); }
+            });
+          })(0);
+        });
+      });
+    }
+    function override(p, dec) { sb.from('research_study_papers').update({ decision: dec, overridden: true }).eq('study_id', selId).eq('source_id', p.source_id).eq('step', curStep).then(function () { loadStudy(selId); }); }
+
+    if (!studies.length) {
+      var selIdeas = (props.ideas || []).filter(function (i) { return i.status === 'selected'; });
+      return h('div', { className: 'panel' }, h('h3', null, '🔬 Irodalmi tanulmány'),
+        h('p', { style: { fontSize: 13, color: 'var(--muted)' } }, 'Indíts egy Elicit-szerű, 4-lépéses irodalmi szűrést egy ötletből: gyors screening → absztrakt → teljes szöveg → review. Minden lépés előtt finomhangolhatod a következőt (kulcsszavak, kritériumok).'),
+        props.canEdit ? h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 } },
+          (selIdeas.length ? selIdeas : (props.ideas || []).slice(0, 1)).map(function (i) { return h('button', { className: 'btn pri', key: i.id, onClick: function () { newStudy(i); } }, '🔬 Indítás: ' + i.question.slice(0, 40) + (i.question.length > 40 ? '…' : '')); }),
+          h('button', { className: 'btn', onClick: function () { newStudy(null); } }, '+ Üres tanulmány')
+        ) : h('div', { style: { fontSize: 13, color: 'var(--faint)' } }, 'Csak olvasható nézet.'),
+        err ? h('div', { style: { color: 'var(--danger)', fontSize: 12.5, marginTop: 8 } }, err) : null);
+    }
+
+    var stepPapers = papers.filter(function (p) { return p.step === curStep; });
+    var grp = { include: [], maybe: [], exclude: [] }; stepPapers.forEach(function (p) { (grp[p.decision] || (grp[p.decision] = [])).push(p); });
+    var cur = stepRow(curStep) || {};
+    return h('div', null,
+      // study selector
+      h('div', { style: { display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' } },
+        h('select', { className: 'field', style: { width: 'auto', height: 32 }, value: selId || '', onChange: function (e) { setSelId(e.target.value); setCurStep(1); } }, studies.map(function (s) { return h('option', { key: s.id, value: s.id }, s.title + (s.status === 'done' ? ' ✓' : '')); })),
+        props.canEdit ? h('button', { className: 'btn', onClick: function () { newStudy(null); } }, '+ Új') : null,
+        sel ? h('span', { className: 'chip c-grey' }, sel.question ? sel.question.slice(0, 60) : '') : null),
+      // funnel stepper
+      h('div', { className: 'funnel' }, LS_STEPS.map(function (s) {
+        return h('button', { key: s.step, className: 'funnel-step' + (curStep === s.step ? ' on' : '') + (((stepRow(s.step) || {}).status === 'done') ? ' done' : ''), onClick: function () { viewStep(s.step); } },
+          h('b', null, s.label), s.step < 4 ? h('span', { className: 'funnel-count' }, incCount(s.step) + ' include') : h('span', { className: 'funnel-count' }, (stepRow(4) || {}).status === 'done' ? 'kész' : 'review'));
+      })),
+      // config panel (steps 1-3) or review panel (step 4)
+      curStep < 4 ? h('div', { className: 'panel', style: { marginTop: 10 } },
+        h('h3', null, LS_STEPS[curStep - 1].label + ' — beállítások'),
+        h('div', { className: 'field-label' }, 'Kulcsszavak (vesszővel)'),
+        h('input', { className: 'field', style: { width: '100%' }, disabled: !props.canEdit, value: (cfg.keywords || []).join(', '), placeholder: 'pl. out-of-distribution, LiDAR', onChange: function (e) { up('keywords', e.target.value.split(',').map(function (x) { return x.trim(); }).filter(Boolean)); } }),
+        h('div', { style: { display: 'flex', gap: 12, marginTop: 8, flexWrap: 'wrap' } },
+          h('div', { style: { flex: 1, minWidth: 200 } }, h('div', { className: 'field-label' }, 'Beválogatási kritériumok (soronként egy)'), h('textarea', { rows: 3, style: { width: '100%', border: '1px solid var(--line)', borderRadius: 8, padding: '6px 9px', fontSize: 12.5 }, disabled: !props.canEdit, value: (cfg.include || []).join('\n'), placeholder: 'pl. van publikus github repo vagy dataset', onChange: function (e) { up('include', linesToArr(e.target.value)); } })),
+          h('div', { style: { flex: 1, minWidth: 200 } }, h('div', { className: 'field-label' }, 'Kizárási kritériumok (soronként egy)'), h('textarea', { rows: 3, style: { width: '100%', border: '1px solid var(--line)', borderRadius: 8, padding: '6px 9px', fontSize: 12.5 }, disabled: !props.canEdit, value: (cfg.exclude || []).join('\n'), placeholder: 'pl. nincs kvantitatív kiértékelés', onChange: function (e) { up('exclude', linesToArr(e.target.value)); } }))),
+        curStep === 1 ? h('div', { className: 'lfilters', style: { marginTop: 8 } },
+          h('input', { className: 'num', type: 'number', disabled: !props.canEdit, placeholder: 'Évtől', value: (cfg.filters || {}).fromYear || '', onChange: function (e) { upFilter('fromYear', e.target.value); } }),
+          h('input', { className: 'num', type: 'number', disabled: !props.canEdit, placeholder: 'Min. idézet', value: (cfg.filters || {}).minCites || '', onChange: function (e) { upFilter('minCites', e.target.value); } }),
+          h('button', { className: 'lchip' + ((cfg.filters || {}).oa ? ' on' : ''), disabled: !props.canEdit, onClick: function () { upFilter('oa', !(cfg.filters || {}).oa); } }, 'Csak open access'),
+          h('button', { className: 'lchip' + ((cfg.filters || {}).journals ? ' on' : ''), disabled: !props.canEdit, onClick: function () { upFilter('journals', !(cfg.filters || {}).journals); } }, 'Csak cikkek')
+        ) : null,
+        curStep > 1 && incCount(curStep - 1) === 0 ? h('div', { style: { fontSize: 12.5, color: 'var(--warn)', marginTop: 8 } }, 'Az előző lépésben még nincs „include" cikk — futtasd előbb azt.') : null,
+        props.canEdit ? h('div', { className: 'runbar' },
+          h('button', { className: 'btn pri', disabled: running || (curStep > 1 && incCount(curStep - 1) === 0), onClick: function () { runStep(curStep); } }, running ? 'Fut…' : ((cur.status === 'done' ? 'Újra: ' : 'Futtatás: ') + LS_STEPS[curStep - 1].label)),
+          running ? h('button', { className: 'btn', onClick: function () { stop.current = true; } }, 'Mégse') : null,
+          (cur.status === 'done' && curStep < 4) ? h('span', { style: { fontSize: 11.5, color: 'var(--warn)' } }, 'Az újrafuttatás törli a későbbi lépéseket.') : null,
+          prog ? h('span', { className: 'progress' }, h('i', { style: { width: (prog.total ? Math.round(prog.done / prog.total * 100) : 0) + '%' } }), h('span', { className: 'progress-t' }, prog.done + (prog.total ? '/' + prog.total : '') + ' · ✓' + ((prog.counts || {}).include || 0) + ' ✗' + ((prog.counts || {}).exclude || 0))) : null
+        ) : null,
+        err ? h('div', { style: { color: 'var(--danger)', fontSize: 12.5, marginTop: 6 } }, err) : null
+      ) : h('div', { className: 'panel', style: { marginTop: 10 } },
+        h('h3', null, '4. Review cikk'),
+        h('p', { style: { fontSize: 13, color: 'var(--muted)' } }, 'A 3. lépésben „include"-olt ' + incCount(3) + ' cikkből egy strukturált review-t generálunk (a Fájlok közé mentve). Consensus-grounding, ha be van kötve a token.'),
+        props.canEdit ? h('div', { className: 'runbar' }, h('button', { className: 'btn pri', disabled: running || incCount(3) === 0, onClick: function () { runStep(4); } }, running ? 'Generálás…' : 'Review generálása'), (stepRow(4) || {}).status === 'done' ? h('span', { className: 'chip c-ok' }, 'Kész — lásd a Fájlokat') : null) : null,
+        err ? h('div', { style: { color: 'var(--danger)', fontSize: 12.5, marginTop: 6 } }, err) : null
+      ),
+      // results list (steps 1-3)
+      curStep < 4 ? h('div', { className: 'panel', style: { marginTop: 10 } },
+        h('h3', null, 'Eredmények — ' + LS_STEPS[curStep - 1].label + ' (' + stepPapers.length + ' cikk)'),
+        stepPapers.length === 0 ? h('div', { style: { fontSize: 13, color: 'var(--faint)' } }, 'Még nincs eredmény — futtasd a lépést.') :
+          ['include', 'maybe', 'exclude'].map(function (dec) {
+            var arr = grp[dec] || []; if (!arr.length) return null;
+            return h('div', { key: dec, style: { marginTop: 6 } },
+              h('div', { className: 'field-label' }, (dec === 'include' ? '✅ Beválogatva' : dec === 'maybe' ? '🟡 Talán' : '❌ Kizárva') + ' (' + arr.length + ')'),
+              arr.map(function (p) {
+                var s = srcMap[p.source_id]; var title = titles[p.source_id] || (s && s.title) || '(cikk)';
+                return h('div', { className: 'src', key: p.source_id },
+                  h('div', { style: { flex: 1, minWidth: 0 } },
+                    h('div', { style: { fontSize: 12.5, fontWeight: 600 } }, s && s.url ? h('a', { href: s.url, target: '_blank', rel: 'noreferrer', style: { color: 'var(--ink)' } }, title) : title),
+                    p.reason ? h('div', { className: 'result-reason' }, p.reason) : null,
+                    h('div', { style: { display: 'flex', gap: 5, marginTop: 3, flexWrap: 'wrap' } },
+                      p.score != null ? h('span', { className: 'mtag' }, p.score + '%') : null,
+                      (p.signals && p.signals.has_github) ? h('span', { className: 'mtag ok' }, 'github') : null,
+                      (p.signals && p.signals.has_dataset) ? h('span', { className: 'mtag ok' }, 'dataset') : null,
+                      (p.signals && p.signals.screened_on) ? h('span', { className: 'mtag' }, p.signals.screened_on) : null,
+                      p.overridden ? h('span', { className: 'mtag warn' }, 'kézi') : null)),
+                  props.canEdit ? h('div', { className: 'seg', style: { flex: 'none' } }, ['include', 'maybe', 'exclude'].map(function (v) { return h('button', { key: v, className: p.decision === v ? 'on' : '', onClick: function () { override(p, v); } }, v); })) : null);
+              }));
+          })
+      ) : null
+    );
+  }
+
   // ---------- Project detail ----------
   function ProjectDetail(props) {
     var p = props.project;
@@ -830,10 +996,19 @@
     }
     function setStatus(e) { sb.from('research_projects').update({ status: e.target.value }).eq('id', p.id).then(props.onChanged); }
     var openTasks = (props.tasks || []).filter(function (t) { return t.status !== 'done'; }).length;
-    var TABS = [['overview', 'Overview', null], ['ideas', 'Ideas', (props.ideas || []).length], ['literature', 'Literature', (props.sources || []).length], ['data', 'Data', (props.datasets || []).length], ['compute', 'Compute', (props.jobs || []).length], ['writing', 'Writing', null], ['canvas', 'Canvas', null], ['notes', 'Notes', null], ['log', 'Log', (props.log || []).length], ['tasks', 'Tasks', openTasks]];
+    function startStudyFromIdea(idea) {
+      var title = String((idea && idea.question) || 'Irodalom').slice(0, 80);
+      sb.from('research_studies').insert({ project_id: p.id, idea_id: idea ? idea.id : null, title: title, question: idea ? idea.question : p.title, created_by: props.authorId }).select('id').maybeSingle().then(function (r) {
+        var id = r && r.data && r.data.id; if (!id) return;
+        var rows = LS_STEPS.map(function (s) { return { study_id: id, step: s.step, kind: s.kind, config: lsDefaultConfig(s.step, p, idea) }; });
+        sb.from('research_study_steps').insert(rows).then(function () { props.onChanged(); setTab('study'); });
+      });
+    }
+    var TABS = [['overview', 'Overview', null], ['ideas', 'Ideas', (props.ideas || []).length], ['literature', 'Literature', (props.sources || []).length], ['study', 'Lit. study', (props.studies || []).length], ['data', 'Data', (props.datasets || []).length], ['compute', 'Compute', (props.jobs || []).length], ['writing', 'Writing', null], ['canvas', 'Canvas', null], ['notes', 'Notes', null], ['log', 'Log', (props.log || []).length], ['tasks', 'Tasks', openTasks]];
     var content;
-    if (tab === 'ideas') content = h('div', null, h(ChatPanel, { projectId: p.id, supervised: !!p.student_id, canEdit: props.canEdit, authorId: props.authorId, fileOwnerId: props.fileOwnerId, sources: props.sources, onChanged: props.onChanged }), h(IdeasPanel, { projectId: p.id, ideas: props.ideas, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged }));
+    if (tab === 'ideas') content = h('div', null, h(ChatPanel, { projectId: p.id, supervised: !!p.student_id, canEdit: props.canEdit, authorId: props.authorId, fileOwnerId: props.fileOwnerId, sources: props.sources, onChanged: props.onChanged }), h(IdeasPanel, { projectId: p.id, ideas: props.ideas, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, onStartStudy: startStudyFromIdea }));
     else if (tab === 'literature') content = h(LiteraturePanel, { projectId: p.id, sources: props.sources, canEdit: props.canEdit, myEmail: props.myEmail, onChanged: props.onChanged });
+    else if (tab === 'study') content = h(LiteratureStudy, { projectId: p.id, project: p, studies: props.studies, sources: props.sources, ideas: props.ideas, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
     else if (tab === 'data') content = h(DataPanel, { projectId: p.id, datasets: props.datasets, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
     else if (tab === 'compute') content = h(ComputePanel, { projectId: p.id, jobs: props.jobs, datasets: props.datasets, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
     else if (tab === 'writing') content = h(WritingPanel, { project: p, sources: props.sources, ideas: props.ideas, jobs: props.jobs });
@@ -1009,10 +1184,11 @@
         sb.from('research_ideas').select('id,source,question,hypothesis,rationale,novelty,status').eq('project_id', projectId).order('created_at', { ascending: false }),
         sb.from('research_sources').select('id,source_api,ext_id,doi,title,authors,year,venue,cited_by,url,screening').eq('project_id', projectId).order('cited_by', { ascending: false, nullsFirst: false }),
         sb.from('research_datasets').select('id,name,source,uri,size_bytes,license,status,local_path').eq('project_id', projectId).order('created_at', { ascending: false }),
-        sb.from('research_jobs').select('id,type,title,status,progress,result,result_path,logs,created_at').eq('project_id', projectId).order('created_at', { ascending: false })
+        sb.from('research_jobs').select('id,type,title,status,progress,result,result_path,logs,created_at').eq('project_id', projectId).order('created_at', { ascending: false }),
+        sb.from('research_studies').select('id,idea_id,title,question,status,cur_step,created_at').eq('project_id', projectId).order('created_at', { ascending: false })
       ]).then(function (res) {
         var log = (res[0] && res[0].data) || [];
-        var base = { log: log, tasks: (res[1] && res[1].data) || [], ideas: (res[2] && res[2].data) || [], sources: (res[3] && res[3].data) || [], datasets: (res[4] && res[4].data) || [], jobs: (res[5] && res[5].data) || [] };
+        var base = { log: log, tasks: (res[1] && res[1].data) || [], ideas: (res[2] && res[2].data) || [], sources: (res[3] && res[3].data) || [], datasets: (res[4] && res[4].data) || [], jobs: (res[5] && res[5].data) || [], studies: (res[6] && res[6].data) || [] };
         // resolve log author names via profiles_public (base profiles is own/admin-only now), keeping the
         // e.profiles.name shape the renderer expects.
         var ids = {}; log.forEach(function (e) { if (e.profile_id) ids[e.profile_id] = 1; });
@@ -1063,7 +1239,7 @@
     ) : null;
     var body;
     if (sel) {
-      body = h(ProjectDetail, { project: sel, log: props.detail.log, tasks: props.detail.tasks, ideas: props.detail.ideas, sources: props.detail.sources, datasets: props.detail.datasets, jobs: props.detail.jobs, canEdit: props.canEdit(sel), viewerId: meId, fileOwnerId: meId, studentName: (studentById[sel.student_id] && studentById[sel.student_id].name) || null, authorId: props.authorId, myEmail: props.me.email, onBack: props.onBack, onChanged: props.refreshAll });
+      body = h(ProjectDetail, { project: sel, log: props.detail.log, tasks: props.detail.tasks, ideas: props.detail.ideas, sources: props.detail.sources, datasets: props.detail.datasets, jobs: props.detail.jobs, studies: props.detail.studies, canEdit: props.canEdit(sel), viewerId: meId, fileOwnerId: meId, studentName: (studentById[sel.student_id] && studentById[sel.student_id].name) || null, authorId: props.authorId, myEmail: props.me.email, onBack: props.onBack, onChanged: props.refreshAll });
     } else if (view === 'supervised') {
       body = h('div', null, seg, h(SupervisedView, { students: props.students, projects: supProjects, studentById: studentById, onOpen: props.openProject }));
     } else if (!mineProjects.length) {
