@@ -77,6 +77,21 @@
     .send-btn { flex: none; width: 38px; height: 38px; border: 0; border-radius: 11px; background: var(--accent); color: #fff; cursor: pointer; font-size: 16px; display: grid; place-items: center; }
     .send-btn:disabled { opacity: .5; cursor: default; }
     .center { display: grid; place-items: center; height: 100vh; text-align: center; color: var(--muted); }
+    /* workflow (agentic) mode + session files */
+    .files-strip { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 8px 22px; border-bottom: 1px solid var(--line); background: var(--surface-2); }
+    .fs-h { font-size: 11.5px; font-weight: 700; color: var(--muted); }
+    .fs-chip { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 4px 11px; font-size: 12px; color: var(--ink); cursor: pointer; font-family: inherit; }
+    .fs-chip:hover { border-color: var(--accent); color: var(--accent); }
+    .wf-row { max-width: 760px; margin: 0 auto 8px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .wf-toggle { flex: none; border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 6px 13px; font-size: 12.5px; font-weight: 700; color: var(--muted); cursor: pointer; font-family: inherit; }
+    .wf-toggle.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .wf-hint { font-size: 11.5px; color: var(--faint); }
+    .pv-scrim { position: fixed; inset: 0; background: rgba(20,24,40,.45); display: grid; place-items: center; z-index: 80; }
+    .pv-modal { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; width: min(720px, 92vw); max-height: 84vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(20,24,40,.35); }
+    .pv-head { display: flex; align-items: center; gap: 8px; padding: 13px 16px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--surface); }
+    .pv-head b { flex: 1; font-size: 13.5px; }
+    .pv-x { border: 0; background: transparent; font-size: 18px; color: var(--muted); cursor: pointer; }
+    .pv-body { padding: 16px; font-size: 13.5px; }
     @media (max-width: 820px) { .side { display: none; } }
   </style>
   <script src="theme.js"></script>

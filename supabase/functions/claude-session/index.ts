@@ -24,14 +24,14 @@ Deno.serve(async (req) => {
     if (!ANTHROPIC_KEY) return json({ error: 'ANTHROPIC_API_KEY not set' }, 503);
     const auth = req.headers.get('Authorization') || '';
     const sb = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!, { global: { headers: { Authorization: auth } } });
-    const { chat_id, stream: wantStream } = await req.json().catch(() => ({}));
+    const { chat_id, stream: wantStream, mode } = await req.json().catch(() => ({}));
     if (!chat_id) return json({ error: 'chat_id required' }, 400);
 
     const { data: chat } = await sb.from('user_chats').select('id').eq('id', chat_id).maybeSingle();
     if (!chat) return json({ error: 'chat not found or no access' }, 404);
     const { data: ures } = await sb.auth.getUser();
     const uid = (ures && ures.user && ures.user.id) || '';
-    const { data: profRow } = await sb.from('profiles').select('ai_model').eq('id', uid).maybeSingle();
+    const { data: profRow } = await sb.from('profiles').select('ai_model,can_workflows').eq('id', uid).maybeSingle();
     const model = (profRow && profRow.ai_model && ALLOWED_MODELS.has(profRow.ai_model)) ? profRow.ai_model : MODEL;
 
     const { data: history } = await sb.from('user_chat_messages').select('role,content').eq('chat_id', chat_id).order('created_at', { ascending: true });
@@ -43,6 +43,55 @@ Deno.serve(async (req) => {
     const headers: Record<string, string> = { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' };
     const body = { model, max_tokens: MAX_TOKENS, system: SYSTEM, messages };
     const TRUNC = '\n\n---\n_⚠️ A válasz a hosszkorlát miatt megszakadt. Írd be, hogy **„folytasd"**._';
+
+    // ---- Workflow (agentic) mode: Claude works autonomously across steps with file tools (item 4) ----
+    if (mode === 'workflow') {
+      if (!profRow || !profRow.can_workflows) return json({ error: 'A workflow-mód nincs engedélyezve ehhez a felhasználóhoz.' }, 403);
+      const TOOLS = [
+        { name: 'write_file', description: 'Create or overwrite a Markdown/text file in the session workspace.', input_schema: { type: 'object', properties: { path: { type: 'string', description: 'short relative path e.g. plan.md' }, content: { type: 'string' } }, required: ['path', 'content'] } },
+        { name: 'read_file', description: 'Read a file from the session workspace.', input_schema: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } },
+        { name: 'list_files', description: 'List the files in the session workspace.', input_schema: { type: 'object', properties: {} } },
+      ];
+      const sysW = SYSTEM + ' You are in WORKFLOW mode: complete the task autonomously across multiple steps. Save every deliverable with write_file (Markdown); use list_files/read_file to inspect the workspace. Keep going until the task is done, then give a short summary of what you produced.';
+      const convo: any[] = messages.slice();
+      const steps: any[] = [];
+      let finalText = '';
+      for (let iter = 0; iter < 14; iter++) {
+        const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers, body: JSON.stringify({ model, max_tokens: MAX_TOKENS, system: sysW, tools: TOOLS, messages: convo }) });
+        const o = await r.json();
+        if (o.error) return json({ error: 'anthropic: ' + (o.error.message || '') }, 502);
+        const blocks = o.content || [];
+        const tp = blocks.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n').trim();
+        if (tp) finalText = tp;
+        if (o.stop_reason !== 'tool_use') break;
+        convo.push({ role: 'assistant', content: blocks });
+        const results: any[] = [];
+        for (const b of blocks) {
+          if (b.type !== 'tool_use') continue;
+          let out = '';
+          try {
+            if (b.name === 'write_file') {
+              const p = String(b.input.path || 'untitled.md').slice(0, 200), c = String(b.input.content || '');
+              await sb.from('user_chat_files').upsert({ chat_id, path: p, content: c, source: 'agent', updated_at: new Date().toISOString() }, { onConflict: 'chat_id,path' });
+              steps.push({ tool: 'write_file', path: p }); out = 'OK — saved ' + p;
+            } else if (b.name === 'read_file') {
+              const { data: f } = await sb.from('user_chat_files').select('content').eq('chat_id', chat_id).eq('path', String(b.input.path || '')).maybeSingle();
+              steps.push({ tool: 'read_file', path: b.input.path }); out = f ? (f.content || '') : 'File not found';
+            } else if (b.name === 'list_files') {
+              const { data: fl } = await sb.from('user_chat_files').select('path').eq('chat_id', chat_id);
+              steps.push({ tool: 'list_files' }); out = (fl || []).map((x: any) => x.path).join('\n') || '(empty)';
+            }
+          } catch (e) { out = 'error: ' + String(e); }
+          results.push({ type: 'tool_result', tool_use_id: b.id, content: String(out).slice(0, 8000) });
+        }
+        convo.push({ role: 'user', content: results });
+      }
+      const wrote = steps.filter((s) => s.tool === 'write_file').map((s) => s.path);
+      const summary = (wrote.length ? ('🛠 **Workflow kész** — ' + wrote.length + ' fájl: ' + wrote.join(', ') + '\n\n') : '') + (finalText || 'Kész.');
+      await sb.from('user_chat_messages').insert({ chat_id, role: 'assistant', content: summary });
+      await sb.from('user_chats').update({ updated_at: new Date().toISOString() }).eq('id', chat_id);
+      return json({ ok: true, text: finalText, steps, files: wrote });
+    }
 
     if (wantStream) {
       const out = new ReadableStream({
