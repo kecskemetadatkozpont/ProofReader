@@ -12,6 +12,7 @@
   var LINKS = [
     { key: 'profile', label: 'Open Profile', href: 'Profile.html' },
     { key: 'research', label: 'Research', href: 'Research.html' },
+    { key: 'session', label: 'Claude Session', href: 'Session.html' },
     { key: 'phd', label: 'Doctoral School', href: 'PhD.html' },
     { key: 'publications', label: 'Publications', href: 'Projects.html' },
     { key: 'admin', label: 'Admin', href: 'Admin.html', adminOnly: true }
@@ -20,6 +21,7 @@
     var p = (location.pathname.split('/').pop() || '').toLowerCase();
     if (p.indexOf('profile') === 0) return 'profile';
     if (p.indexOf('research') === 0) return 'research';
+    if (p.indexOf('session') === 0) return 'session';
     if (p.indexOf('phd') === 0) return 'phd';
     if (p.indexOf('projects') === 0) return 'publications';
     if (p.indexOf('admin') === 0) return 'admin';
