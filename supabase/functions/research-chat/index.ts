@@ -17,6 +17,8 @@ const ANTHROPIC_KEY = Deno.env.get('ANTHROPIC_API_KEY');
 const CONSENSUS_TOKEN = Deno.env.get('CONSENSUS_MCP_TOKEN');
 const CONSENSUS_MCP_URL = Deno.env.get('CONSENSUS_MCP_URL') || 'https://mcp.consensus.app/mcp';
 const MODEL = Deno.env.get('RESEARCH_AI_MODEL') || 'claude-sonnet-4-6';
+// admins assign a per-user model (profiles.ai_model); validate against this whitelist before trusting it
+const ALLOWED_MODELS = new Set(['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001']);
 const MAX_TOKENS = parseInt(Deno.env.get('RESEARCH_MAX_TOKENS') || '4096', 10);  // long answers were cut at 800 (stop_reason=max_tokens)
 const HISTORY = parseInt(Deno.env.get('RESEARCH_HISTORY') || '12', 10);
 const CORS = {
@@ -47,6 +49,9 @@ Deno.serve(async (req) => {
     // the caller's own editable system prompt (seeded per researcher; editable in Profile → Chat prompt)
     const { data: spRow } = await sb.from('research_system_prompts').select('prompt').eq('user_id', callerUid).maybeSingle();
     const userPrompt = ((spRow && spRow.prompt) || '').trim();
+    // per-user model assigned by an admin (profiles.ai_model); fall back to the env default if unset/invalid
+    const { data: profRow } = await sb.from('profiles').select('ai_model').eq('id', callerUid).maybeSingle();
+    const userModel = (profRow && profRow.ai_model && ALLOWED_MODELS.has(profRow.ai_model)) ? profRow.ai_model : MODEL;
 
     const ctx = proj ? `\n\nCurrent project — Title: ${proj.title}; Field: ${proj.field ?? '—'}; Goal: ${proj.goal ?? '—'}; Keywords: ${(proj.keywords ?? []).join(', ')}` : '';
     let rows: any[] = (history || []).filter((m: any) => m.content);
@@ -76,7 +81,7 @@ Deno.serve(async (req) => {
 
     const headers: Record<string, string> = { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' };
     if (useMcp) headers['anthropic-beta'] = 'mcp-client-2025-04-04';
-    const body: Record<string, unknown> = { model: MODEL, max_tokens: MAX_TOKENS, system: SYSTEM + ctx, messages };
+    const body: Record<string, unknown> = { model: userModel, max_tokens: MAX_TOKENS, system: SYSTEM + ctx, messages };
     if (useMcp) body.mcp_servers = [{ type: 'url', url: CONSENSUS_MCP_URL, name: 'consensus', authorization_token: CONSENSUS_TOKEN }];
 
     // ---- Streaming path: forward Claude's text deltas to the browser live, rebuild the full block list
@@ -157,7 +162,7 @@ Deno.serve(async (req) => {
     }
     if (ev.length) await sb.from('research_evidence').insert(ev);
 
-    return json({ ok: true, version: 'attach-v4', message_id: saved?.id, evidence: ev.length, mode: useMcp ? 'consensus' : 'plain', model: MODEL, usage: out.usage, dbg });
+    return json({ ok: true, version: 'attach-v4', message_id: saved?.id, evidence: ev.length, mode: useMcp ? 'consensus' : 'plain', model: userModel, usage: out.usage, dbg });
   } catch (e) {
     return json({ error: String(e) }, 500);
   }

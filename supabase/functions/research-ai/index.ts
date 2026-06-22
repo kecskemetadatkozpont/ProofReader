@@ -11,6 +11,8 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const ANTHROPIC_KEY = Deno.env.get('ANTHROPIC_API_KEY');
 const MODEL = Deno.env.get('RESEARCH_AI_MODEL') || 'claude-sonnet-4-6';
+// admins assign a per-user model (profiles.ai_model); validate before trusting it
+const ALLOWED_MODELS = new Set(['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001']);
 const MAX_TOKENS = parseInt(Deno.env.get('RESEARCH_MAX_TOKENS') || '1500', 10);
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -38,15 +40,20 @@ Deno.serve(async (req) => {
       .select('title,field,keywords,goal').eq('id', project_id).maybeSingle();
     if (!proj) return json({ error: 'project not found or no access' }, 404);
 
+    // per-user model assigned by an admin (profiles.ai_model); fall back to the env default if unset/invalid
+    const { data: ures } = await sb.auth.getUser();
+    const { data: profRow } = await sb.from('profiles').select('ai_model').eq('id', ures?.user?.id ?? '').maybeSingle();
+    const userModel = (profRow && profRow.ai_model && ALLOWED_MODELS.has(profRow.ai_model)) ? profRow.ai_model : MODEL;
+
     // Research Canvas: free-text summary of the edgeless whiteboard (no DB writes).
     if (action === 'canvas-summary') {
-      const summary = await summarizeCanvas(proj, String(canvas || '').slice(0, 12000));
+      const summary = await summarizeCanvas(proj, String(canvas || '').slice(0, 12000), userModel);
       return json({ ok: true, summary });
     }
     const { data: sources } = await sb.from('research_sources')
       .select('title,year,venue,abstract').eq('project_id', project_id).limit(40);
 
-    const ideas = await askClaude(action, proj, sources || []);
+    const ideas = await askClaude(action, proj, sources || [], userModel);
     if (ideas.length) {
       const rows = ideas.slice(0, 8).map((i: any) => ({
         project_id, source: 'gap', question: String(i.question || '').slice(0, 600),
@@ -64,7 +71,7 @@ Deno.serve(async (req) => {
   }
 });
 
-async function summarizeCanvas(proj: any, canvas: string): Promise<string> {
+async function summarizeCanvas(proj: any, canvas: string, model: string): Promise<string> {
   const prompt = `Egy kutató edgeless vásznát (Research Canvas) kapod: tipizált csomópontok (jegyzet/ötlet/publikáció/forrás/adat) és tipizált kapcsolatok (kapcsolódik/alátámaszt/cáfol/vezet-hozzá). Projekt: "${proj.title}"${proj.field ? ' (' + proj.field + ')' : ''}.
 
 VÁSZON TARTALMA:
@@ -74,14 +81,14 @@ Készíts TÖMÖR, magyar nyelvű összefoglalót a témavezető/kutató számá
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'x-api-key': ANTHROPIC_KEY!, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-    body: JSON.stringify({ model: MODEL, max_tokens: 600, messages: [{ role: 'user', content: prompt }] }),
+    body: JSON.stringify({ model, max_tokens: 600, messages: [{ role: 'user', content: prompt }] }),
   });
   const out = await r.json();
   if (out.error) throw new Error(out.error.message || 'anthropic error');
   return (out.content || []).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n').trim();
 }
 
-async function askClaude(action: string, proj: any, sources: any[]): Promise<any[]> {
+async function askClaude(action: string, proj: any, sources: any[], model: string): Promise<any[]> {
   const lib = sources.map((s, i) =>
     `[${i + 1}] ${s.title} (${s.year ?? 'n.d.'}, ${s.venue ?? ''})\n${(s.abstract ?? '').slice(0, 600)}`).join('\n\n');
   const verb = action === 'ideas' ? 'Propose novel research directions' : 'Perform a research-gap analysis';
@@ -107,7 +114,7 @@ Return ONLY a JSON array, no prose, each item:
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'x-api-key': ANTHROPIC_KEY!, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-    body: JSON.stringify({ model: MODEL, max_tokens: MAX_TOKENS, messages: [{ role: 'user', content: prompt }] }),
+    body: JSON.stringify({ model, max_tokens: MAX_TOKENS, messages: [{ role: 'user', content: prompt }] }),
   });
   const j = await r.json();
   const text = (j?.content?.[0]?.text) || '';

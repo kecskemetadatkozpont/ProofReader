@@ -16,6 +16,8 @@
   function fmtDate(s) { if (!s) return '—'; var d = new Date(s); var now = Date.now(), diff = (now - d.getTime()) / 1000; if (diff < 60) return 'just now'; if (diff < 3600) return Math.floor(diff / 60) + 'm ago'; if (diff < 86400) return Math.floor(diff / 3600) + 'h ago'; if (diff < 604800) return Math.floor(diff / 86400) + 'd ago'; return d.toLocaleDateString(); }
   function initials(n) { return String(n || 'U').trim().split(/\s+/).slice(0, 2).map(function (w) { return w[0]; }).join('').toUpperCase(); }
   function colorFor(id) { var p = ['#4f46e5', '#0e9f6e', '#d9760b', '#db2777', '#0891b2', '#7c3aed', '#ca8a04', '#dc2626']; var x = 0; id = String(id || ''); for (var i = 0; i < id.length; i++) x = (x * 31 + id.charCodeAt(i)) >>> 0; return p[x % p.length]; }
+  // models an admin can assign per user (profiles.ai_model); '' = system default. Must match the Edge whitelist.
+  var AI_MODELS = [['', 'Alapértelmezett (rendszerbeállítás)'], ['claude-opus-4-8', 'Opus 4.8 — legjobb minőség'], ['claude-sonnet-4-6', 'Sonnet 4.6 — kiegyensúlyozott'], ['claude-haiku-4-5-20251001', 'Haiku 4.5 — leggyorsabb / olcsó']];
   function Avatar(props) {
     var u = props.u, sz = props.size || 32;
     var st = { width: sz, height: sz, fontSize: sz * 0.38 };
@@ -104,7 +106,7 @@
 
   /* ---------- user drawer ---------- */
   function UserDrawer(props) {
-    var u = props.user, agg = props.agg, onClose = props.onClose, onPreview = props.onPreview, onAction = props.onAction;
+    var u = props.user, agg = props.agg, onClose = props.onClose, onPreview = props.onPreview, onAction = props.onAction, onSetModel = props.onSetModel;
     var open = !!u;
     return h(React.Fragment, null,
       h('div', { className: 'scrim' + (open ? ' on' : ''), onClick: onClose }),
@@ -122,6 +124,11 @@
               u.status === 'pending' && h('button', { className: 'btn dng', onClick: function () { onAction(u.id, 'rejected'); } }, 'Reject'),
               (u.status === 'approved') && u.role !== 'admin' && h('button', { className: 'btn', onClick: function () { onAction(u.id, 'suspended'); } }, 'Suspend'),
               (u.status === 'suspended' || u.status === 'rejected') && h('button', { className: 'btn ok', onClick: function () { onAction(u.id, 'approved'); } }, 'Reactivate')
+            ),
+            h('div', { style: { marginBottom: 16 } },
+              h('div', { style: { fontSize: 12, fontWeight: 700, color: 'var(--muted)', marginBottom: 5 } }, 'AI modell — research chat + elemzés'),
+              h('select', { value: u.ai_model || '', onChange: function (e) { onSetModel(u.id, e.target.value); }, style: { width: '100%', height: 36, border: '1px solid var(--line)', borderRadius: 8, padding: '0 10px', fontFamily: 'inherit', fontSize: 13, background: 'var(--surface)', color: 'inherit' } },
+                AI_MODELS.map(function (m) { return h('option', { key: m[0], value: m[0] }, m[1]); }))
             ),
             h('div', { className: 'kv' },
               h('div', { className: 'c' }, h('div', { className: 'l' }, 'Projects'), h('div', { className: 'v' }, agg.projects.length)),
@@ -205,6 +212,12 @@
       sb.from('profiles').update({ status: status }).eq('id', uid).then(function (r) {
         if (r && r.error) { alert('Update failed: ' + r.error.message); loadData(); }
       });
+    }
+    function setModel(uid, model) {
+      var m = model || null;
+      setProfiles(function (list) { return list.map(function (u) { return u.id === uid ? Object.assign({}, u, { ai_model: m }) : u; }); });
+      setSelUser(function (u) { return u && u.id === uid ? Object.assign({}, u, { ai_model: m }) : u; });
+      sb.from('profiles').update({ ai_model: m }).eq('id', uid).then(function (r) { if (r && r.error) { alert('Model update failed: ' + r.error.message); loadData(); } });
     }
     function loadPubs(uid) {
       if (pubsCache[uid] !== undefined) return;
@@ -313,7 +326,7 @@
             : h('table', null, h('thead', null, tableHead), h('tbody', null, sorted.map(function (u) { return userRow(u, false); })))
         )
       ),
-      h(UserDrawer, { user: selUser, agg: selUser ? aggFor(selUser.id) : { projects: [], storage: 0, chars: 0, requests: 0 }, onClose: function () { setSelUser(null); }, onPreview: function (p) { setPreview(p); }, onAction: setStatus }),
+      h(UserDrawer, { user: selUser, agg: selUser ? aggFor(selUser.id) : { projects: [], storage: 0, chars: 0, requests: 0 }, onClose: function () { setSelUser(null); }, onPreview: function (p) { setPreview(p); }, onAction: setStatus, onSetModel: setModel }),
       preview && h(ProjectPreview, { project: preview, onClose: function () { setPreview(null); } })
     );
   }
