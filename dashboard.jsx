@@ -94,7 +94,7 @@ function SignIn({ onSignIn }) {
           : <>
               <div className="field-label" style={{ textAlign: 'left' }}>Choose a demo account</div>
               <div className="demo-users">
-                {(Auth.demoUsers ? Auth.demoUsers() : Auth.users()).map((u) => (
+                {(Auth.demoUsers ? Auth.demoUsers() : []).map((u) => (
                   <button key={u.id} className="demo-user" onClick={() => onSignIn(u.id)}>
                     <Avatar user={u} size={34} />
                     <span><span className="du-name">{u.name}</span><br /><span className="du-mail">{u.email}</span></span>
@@ -329,7 +329,7 @@ function ActivityModal({ projects, onClose }) {
 
 function AccountMenu({ me, onClose, onUsage, onSwitch, onSignOut }) {
   const u = Store.usage(me.id);
-  const others = (Auth.demoUsers ? Auth.demoUsers() : Auth.users()).filter((x) => x.id !== me.id);
+  const others = (Auth.demoUsers ? Auth.demoUsers() : []).filter((x) => x.id !== me.id); // switch-account: demo only (cloud users can't switch + must not see the directory)
   return (
     <React.Fragment>
       <div className="acct-scrim" onClick={onClose} />

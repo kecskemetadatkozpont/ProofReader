@@ -605,7 +605,7 @@
     }
     function loadData(done) {
       Promise.all([
-        sb.from('profiles').select('id,name,email,department,capacity_max,research_interests,avatar_url,mtmt_id').eq('is_supervisor', true).order('name'),
+        sb.from('supervisors_public').select('id,name,avatar_url,department,position,research_interests,capacity_max,accepting_students').order('name'),
         sb.from('phd_students').select('id,name,email,profile_id,supervisor_id,topic,status,total_credits,required_credits,enrollment_year,ethics_status,complex_exam,avatar_url'),
         sb.from('phd_topics').select('id,supervisor_id,title,description,tags,status').order('created_at', { ascending: false }),
         sb.from('phd_milestones').select('id,student_id,title,deadline,status,type').order('deadline', { ascending: true }),

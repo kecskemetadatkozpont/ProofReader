@@ -150,8 +150,9 @@
     var ids = {}; projects.forEach(function (p) { (p.members || []).forEach(function (m) { if (m.userId) ids[m.userId] = 1; }); if (p.ownerId) ids[p.ownerId] = 1; });
     var need = Object.keys(ids).filter(function (id) { return !BE.profiles[id]; });
     if (!need.length) return;
-    sb.from('profiles').select('id,name,email,avatar_url,color,plan').in('id', need).then(function (r) {
-      if (r && r.data) { r.data.forEach(function (u) { BE.profiles[u.id] = { id: u.id, name: u.name, email: u.email, avatar: u.avatar_url, color: u.color || BE.colorFor(u.id), plan: u.plan || 'free' }; }); BE.cacheProfiles(); notify(); }
+    // profiles_public exposes only id/name/avatar/color/plan — collaborator names/avatars, no email/PII.
+    sb.from('profiles_public').select('id,name,avatar_url,color,plan').in('id', need).then(function (r) {
+      if (r && r.data) { r.data.forEach(function (u) { BE.profiles[u.id] = { id: u.id, name: u.name, avatar: u.avatar_url, color: u.color || BE.colorFor(u.id), plan: u.plan || 'free' }; }); BE.cacheProfiles(); notify(); }
     }).catch(function () { });
   }
 

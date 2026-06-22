@@ -143,32 +143,14 @@
     function onPickedFiles(e) { doUpload(e.target.files); e.target.value = ''; }
     function pickFiles() { setAtOpen(false); if (fileRef.current) fileRef.current.click(); }
     function onDrop(e) { e.preventDefault(); setDragOver(false); if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) doUpload(e.dataTransfer.files); }
-    function loadPubs(rid) {
-      sb.from('publications').select('id,title,year,journal,first_author,citation,doi').eq('researcher_id', rid).order('year', { ascending: false }).limit(500).then(function (r) {
-        setPicker(function (p) { return (p && p.kind === 'pub') ? Object.assign({}, p, { rid: rid, items: (r && r.data) || [] }) : p; });
-      });
-    }
     function openPicker(kind) {
       setAtOpen(false);
-      if (kind === 'pub') {
-        // Browse ANY researcher's publications: list researchers who have publications, default to me.
-        setPicker({ kind: 'pub', researchers: null, rid: null, items: null });
-        sb.from('publications').select('researcher_id').then(function (r) {
-          var seen = {}; ((r && r.data) || []).forEach(function (x) { if (x.researcher_id) seen[x.researcher_id] = 1; });
-          var ids = Object.keys(seen);
-          if (!ids.length) { setPicker({ kind: 'pub', researchers: [], rid: null, items: [] }); return; }
-          sb.from('profiles').select('id,name').in('id', ids).then(function (pr) {
-            var rsr = ((pr && pr.data) || []).sort(function (a, b) { return String(a.name || '').localeCompare(String(b.name || '')); });
-            var rid = rsr.filter(function (x) { return x.id === me.id; })[0] ? me.id : (rsr[0] && rsr[0].id);
-            setPicker({ kind: 'pub', researchers: rsr, rid: rid, items: null });
-            if (rid) loadPubs(rid);
-          });
-        });
-        return;
-      }
       setPicker({ kind: kind, items: null });
+      // LaTeX/research pickers are RLS-scoped (you only see your own + shared projects).
       if (kind === 'latex') sb.from('projects').select('id,title').is('deleted_at', null).order('updated_at', { ascending: false }).then(function (r) { setPicker({ kind: kind, items: (r && r.data) || [] }); });
       else if (kind === 'research') sb.from('research_projects').select('id,title,field,goal,keywords,status,stage').order('updated_at', { ascending: false }).then(function (r) { setPicker({ kind: kind, items: (r && r.data) || [] }); });
+      // Publications: only YOUR OWN (publications are world-readable, so scope on the client to your researcher id).
+      else if (kind === 'pub') sb.from('publications').select('id,title,year,journal,first_author,citation,doi').eq('researcher_id', me.id).order('year', { ascending: false }).limit(500).then(function (r) { setPicker({ kind: kind, items: (r && r.data) || [] }); });
     }
     function attachLatex(p) {
       setPicker(null);
@@ -252,10 +234,6 @@
           : h('div', { className: 'btxt md pv-body', dangerouslySetInnerHTML: { __html: foldCode(mdHtml(preview.content || '')) } }))) : null,
       picker ? h('div', { className: 'pv-scrim', onClick: function () { setPicker(null); } }, h('div', { className: 'pv-modal pick-modal', onClick: function (e) { e.stopPropagation(); } },
         h('div', { className: 'pv-head' }, h('b', null, picker.kind === 'latex' ? '📐 LaTeX projektek' : picker.kind === 'research' ? '🔬 Kutatási projektek' : '📚 Publikációk'), h('button', { className: 'pv-x', onClick: function () { setPicker(null); } }, '×')),
-        (picker.kind === 'pub' && picker.researchers && picker.researchers.length) ? h('div', { className: 'pick-filter' },
-          h('span', null, 'Kutató:'),
-          h('select', { className: 'pf-sel', value: picker.rid || '', onChange: function (e) { var v = e.target.value; setPicker(function (p) { return Object.assign({}, p, { rid: v, items: null }); }); loadPubs(v); } },
-            picker.researchers.map(function (rs) { return h('option', { key: rs.id, value: rs.id }, (rs.name || '(névtelen)') + (rs.id === me.id ? ' (te)' : '')); }))) : null,
         h('div', { className: 'pick-body' },
           picker.items == null ? h('div', { className: 'pick-empty' }, 'Betöltés…')
             : !picker.items.length ? h('div', { className: 'pick-empty' }, 'Nincs elérhető elem.')

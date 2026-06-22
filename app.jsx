@@ -1814,7 +1814,7 @@
                     <a className="adr-i" href="Projects.html"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M10 3L5 8l5 5" strokeLinecap="round" strokeLinejoin="round" /></svg>Back to projects</a>
                   </div>
                   <div className="adr-sub">Switch account</div>
-                  <div className="adr-nav">{(window.PRAuth.demoUsers ? window.PRAuth.demoUsers() : window.PRAuth.users()).filter((u) => u.id !== me.id).map((u) => <button key={u.id} className="adr-i" onClick={() => { window.PRAuth.signIn(u.id); location.reload(); }}><Collab.Avatar user={u} size={22} />{u.name}</button>)}</div>
+                  <div className="adr-nav">{(window.PRAuth.demoUsers ? window.PRAuth.demoUsers() : []).filter((u) => u.id !== me.id).map((u) => <button key={u.id} className="adr-i" onClick={() => { window.PRAuth.signIn(u.id); location.reload(); }}><Collab.Avatar user={u} size={22} />{u.name}</button>)}</div>
                   <div className="adr-foot"><button className="adr-i danger" onClick={() => { window.PRAuth.signOut(); location.href = 'Projects.html'; }}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M6 14H3V2h3M10 11l3-3-3-3M13 8H6" strokeLinecap="round" strokeLinejoin="round" /></svg>Sign out</button></div>
                 </aside>
               </React.Fragment>}

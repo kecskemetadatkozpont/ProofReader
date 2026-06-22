@@ -110,16 +110,17 @@
       var e = String(email || '').trim().toLowerCase(); if (!e) return Promise.resolve(null);
       var hit = Object.keys(PROFILES).map(function (k) { return PROFILES[k]; }).filter(function (u) { return (u.email || '').toLowerCase() === e; })[0];
       if (hit) return Promise.resolve(hit);
-      return sb.from('profiles').select('id,name,email,avatar_url,color,plan').ilike('email', e).limit(1)
-        .then(function (r) { var row = r && r.data && r.data[0]; if (!row) return null; var u = { id: row.id, name: row.name, email: row.email, avatar: row.avatar_url, color: row.color || colorFor(row.id), plan: row.plan || 'free' }; PROFILES[u.id] = u; cacheProfiles(); return u; })
+      // Privacy-preserving: pr_search_users (SECURITY DEFINER) matches the email but returns only id/name/avatar.
+      return sb.rpc('pr_search_users', { q: e })
+        .then(function (r) { var row = ((r && r.data) || [])[0]; if (!row) return null; var u = { id: row.id, name: row.name, email: e, avatar: row.avatar_url, color: colorFor(row.id), plan: 'free' }; PROFILES[u.id] = u; cacheProfiles(); return u; })
         .catch(function () { return null; });
     },
-    // Free-text search of registered users (cloud only) for collaborator pickers.
+    // Free-text search of registered users (cloud only) for collaborator pickers. Returns id/name/avatar
+    // only (no email/PII) via the pr_search_users SECURITY DEFINER RPC.
     searchUsers: function (query) {
       var q = String(query || '').trim(); if (q.length < 2) return Promise.resolve([]);
-      var esc = q.replace(/[%,]/g, ' ');
-      return sb.from('profiles').select('id,name,email,avatar_url,color,plan').or('email.ilike.%' + esc + '%,name.ilike.%' + esc + '%').limit(8)
-        .then(function (r) { return (r && r.data ? r.data : []).map(function (row) { var u = { id: row.id, name: row.name, email: row.email, avatar: row.avatar_url, color: row.color || colorFor(row.id), plan: row.plan || 'free' }; PROFILES[u.id] = u; return u; }); })
+      return sb.rpc('pr_search_users', { q: q })
+        .then(function (r) { return ((r && r.data) || []).map(function (row) { var u = { id: row.id, name: row.name, avatar: row.avatar_url, color: colorFor(row.id), plan: 'free' }; PROFILES[u.id] = u; return u; }); })
         .catch(function () { return []; });
     }
   };
