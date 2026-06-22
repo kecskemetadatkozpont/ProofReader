@@ -71,7 +71,8 @@ Deno.serve(async (req) => {
     const BASE = `You are a research-ideation partner inside a PhD platform. Propose specific, falsifiable research questions with brief rationale, surface gaps, and be concise.`;
     const persona = userPrompt || BASE;
     const mcpNote = useMcp ? ` Use the Consensus tools to ground every non-trivial claim in peer-reviewed evidence, and cite the papers.` : '';
-    const SYSTEM = persona + mcpNote + ATTACH_NOTE;
+    const FILE_NOTE = ` You can save a file into the project's file browser by emitting a fenced block in EXACTLY this form (the opening line is \`\`\`file: followed by a short descriptive relative path, nothing else on that line):\n\`\`\`file:lit-review.md\n<the full file content>\n\`\`\`\nDo this whenever the user asks you to write something to a file, create/save a document, or produce an artifact (a literature summary, a research plan, a draft section, notes). Prefer .md. Keep a short normal reply too, but put the document itself inside the file block — only emit a file block when a saved file is actually wanted.`;
+    const SYSTEM = persona + mcpNote + ATTACH_NOTE + FILE_NOTE;
 
     const headers: Record<string, string> = { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' };
     if (useMcp) headers['anthropic-beta'] = 'mcp-client-2025-04-04';
@@ -207,6 +208,11 @@ async function buildBlocks(sb: any, svc: any, atts: any[], content: string, dbg:
           const txt = thesisText(proj.data);
           if (txt) { blocks.push({ type: 'text', text: `[Attached LaTeX publication: ${proj.title ?? a.title ?? 'thesis'}]\n\n${txt}` }); n++; }
         }
+      } else if (a.kind === 'projectfile' && a.file_id) {
+        // a file from the project's file browser (research_files) — RLS lets the caller read their project's rows
+        const { data: rf, error } = await sb.from('research_files').select('path,content').eq('id', a.file_id).maybeSingle();
+        dbg.items.push({ kind: 'projectfile', ok: !!rf, err: error?.message });
+        if (rf && rf.content != null) { blocks.push({ type: 'text', text: `[Attached project file: ${rf.path}]\n\n${String(rf.content).slice(0, 100000)}` }); n++; }
       } else if (a.kind === 'file' && a.bucket && a.path) {
         const seg0 = String(a.path).split('/')[0];
         const allowed = (a.bucket === 'publication-files' && seg0 === scope.uid) || (a.bucket === 'research-data' && seg0 === scope.projectId);

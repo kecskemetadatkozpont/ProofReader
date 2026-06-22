@@ -215,6 +215,65 @@
     return s.replace(/[&<>]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]; }).replace(/\n/g, '<br>');
   }
   var CHAT_SUGGEST = ['What are the open problems in this field?', 'Summarize the key methods used so far.', 'Suggest 3 testable research questions for my goal.', 'What evidence would support or refute my hypothesis?'];
+  // In a chat reply, the AI saves files via fenced ```file:<path> … ``` blocks. For DISPLAY we collapse
+  // those to a compact chip (the full content lives in the file browser, not inline in the chat).
+  function stripFiles(text) {
+    if (!text) return text;
+    return text.replace(/```file:([^\n`]+)\n[\s\S]*?```/g, function (_, p) { return '\n📄 **' + p.trim() + '** _(elmentve a fájlokhoz)_\n'; });
+  }
+  function extractFiles(text) {
+    var out = [], re = /```file:([^\n`]+)\n([\s\S]*?)```/g, m;
+    while ((m = re.exec(text || ''))) { out.push({ path: m[1].trim(), content: m[2].replace(/\n+$/, '') }); }
+    return out;
+  }
+
+  // ---------- Session file browser (Antigravity-style): the project's file tree next to the chat ----------
+  function SessionFileBrowser(props) {
+    var fS = useState(null), files = fS[0], setFiles = fS[1];
+    var pvS = useState(null), preview = pvS[0], setPreview = pvS[1];
+    var upRef = useRef(null);
+    function load() { sb.from('research_files').select('id,path,content,storage_path,mime,size,source,updated_at').eq('project_id', props.projectId).order('path', { ascending: true }).then(function (r) { setFiles((r && r.data) || []); }); }
+    useEffect(load, [props.projectId, props.version]);
+    function newFile() {
+      var name = (window.prompt('Új fájl neve:', 'jegyzet.md') || '').trim(); if (!name) return;
+      sb.from('research_files').upsert({ project_id: props.projectId, path: name, content: '', mime: 'text/markdown', source: 'manual', created_by: props.authorId, updated_by: props.authorId, updated_at: new Date().toISOString() }, { onConflict: 'project_id,path' }).then(function (r) { if (r && r.error) { alert(r.error.message); return; } load(); });
+    }
+    function onUpload(e) {
+      var f = e.target.files && e.target.files[0]; if (!f) return;
+      var sp = props.projectId + '/files/' + Date.now() + '_' + f.name.replace(/[^A-Za-z0-9._-]/g, '_');
+      sb.storage.from('research-data').upload(sp, f).then(function (res) {
+        if (res && res.error) { alert(res.error.message); return; }
+        sb.from('research_files').upsert({ project_id: props.projectId, path: f.name, storage_path: sp, mime: f.type || 'application/octet-stream', size: f.size, source: 'upload', created_by: props.authorId, updated_by: props.authorId, updated_at: new Date().toISOString() }, { onConflict: 'project_id,path' }).then(load);
+      });
+      if (upRef.current) upRef.current.value = '';
+    }
+    function del(f) { if (!window.confirm('Törlöd: ' + f.path + ' ?')) return; sb.from('research_files').delete().eq('id', f.id).then(function () { if (f.storage_path) { try { sb.storage.from('research-data').remove([f.storage_path]); } catch (e) { } } if (preview && preview.id === f.id) setPreview(null); load(); }); }
+    function openSigned(path) { sb.storage.from('research-data').createSignedUrl(path, 3600).then(function (r) { if (r && r.data && r.data.signedUrl) window.open(r.data.signedUrl, '_blank'); }); }
+    function attach(f) { props.onAttach({ kind: f.content != null ? 'projectfile' : 'file', file_id: f.id, bucket: 'research-data', path: f.storage_path, name: f.path, title: f.path, label: f.path }); }
+    function icon(f) { var p = (f.path || '').toLowerCase(); if (/\.md$|\.txt$/.test(p)) return '📄'; if (/\.(png|jpe?g|gif|webp|svg)$/.test(p)) return '🖼'; if (/\.pdf$/.test(p)) return '📕'; if (/\.(csv|tsv|xlsx?)$/.test(p)) return '📊'; return '📎'; }
+    return h('div', { className: 'filebrowser' },
+      h('div', { className: 'fb-head' }, h('b', null, 'Files'), h('span', { style: { flex: 1 } }),
+        props.canEdit ? h('button', { className: 'fb-mini', title: 'Új fájl', onClick: newFile }, '+') : null,
+        props.canEdit ? h('button', { className: 'fb-mini', title: 'Feltöltés', onClick: function () { if (upRef.current) upRef.current.click(); } }, '⤒') : null,
+        h('input', { ref: upRef, type: 'file', style: { display: 'none' }, onChange: onUpload })
+      ),
+      files === null ? h('div', { className: 'fb-empty' }, 'Betöltés…')
+        : (files.length ? h('div', { className: 'fb-list' }, files.map(function (f) {
+          return h('div', { className: 'fb-item' + (preview && preview.id === f.id ? ' on' : ''), key: f.id },
+            h('button', { className: 'fb-name', title: f.path, onClick: function () { setPreview(f); } }, h('span', { className: 'fb-ic' }, icon(f)), h('span', { className: 'fb-lbl' }, f.path), f.source === 'ai' ? h('span', { className: 'fb-tag' }, 'AI') : null),
+            h('span', { className: 'fb-acts' },
+              props.canEdit ? h('button', { className: 'fb-mini', title: 'Csatolás a chathez', onClick: function () { attach(f); } }, '📎') : null,
+              props.canEdit ? h('button', { className: 'fb-mini', title: 'Törlés', onClick: function () { del(f); } }, '×') : null));
+        })) : h('div', { className: 'fb-empty' }, 'Még nincs fájl. Kérd a chatben: „írd ki egy fájlba…", vagy tölts fel egyet.')),
+      preview ? h('div', { className: 'fb-preview' },
+        h('div', { className: 'fb-pv-head' }, h('span', { className: 'fb-lbl' }, preview.path), h('button', { className: 'fb-mini', onClick: function () { setPreview(null); } }, '×')),
+        preview.content != null
+          ? h('div', { className: 'btxt md', style: { fontSize: 12.5 }, dangerouslySetInnerHTML: { __html: mdHtml(preview.content) } })
+          : h('button', { className: 'btn', style: { fontSize: 12 }, onClick: function () { openSigned(preview.storage_path); } }, 'Megnyitás / letöltés →')
+      ) : null
+    );
+  }
+
   function ChatPanel(props) {
     var cS = useState(null), chat = cS[0], setChat = cS[1];
     var mS = useState([]), msgs = mS[0], setMsgs = mS[1];
@@ -224,6 +283,7 @@
     var er = useState(''), err = er[0], setErr = er[1];
     var ty = useState(null), typing = ty[0], setTyping = ty[1];          // { id, len } of the message being typed out (non-stream fallback)
     var stmS = useState(null), streaming = stmS[0], setStreaming = stmS[1];   // { text } while a reply streams in live
+    var fvS = useState(0), filesVersion = fvS[0], setFilesVersion = fvS[1];   // bump to refresh the file browser after the AI writes files
     var atS = useState([]), attach = atS[0], setAttach = atS[1];          // pending attachments for the next message
     var pkS = useState(false), picker = pkS[0], setPicker = pkS[1];
     var firstLoad = useRef(true), animated = useRef({}), alive = useRef(true), scrollRef = useRef(null), taRef = useRef(null), justStreamed = useRef(false);
@@ -272,6 +332,13 @@
       if (chat) return Promise.resolve(chat.id);
       return sb.from('research_chats').insert({ project_id: props.projectId, title: 'Publify chat' }).select('id').maybeSingle().then(function (r) { var c = r && r.data; setChat(c); return c && c.id; });
     }
+    // Persist any ```file:…``` blocks the AI emitted into the project's file browser.
+    function saveAiFiles(text) {
+      var fs = extractFiles(text); if (!fs.length) return;
+      Promise.all(fs.map(function (f) {
+        return sb.from('research_files').upsert({ project_id: props.projectId, path: f.path, content: f.content, mime: 'text/markdown', size: (f.content || '').length, source: 'ai', created_by: props.authorId, updated_by: props.authorId, updated_at: new Date().toISOString() }, { onConflict: 'project_id,path' });
+      })).then(function () { setFilesVersion(function (v) { return v + 1; }); });
+    }
     // Real token streaming: POST to the Edge function and append text deltas to a live bubble as they arrive.
     function streamReply(cid) {
       var CFG = window.PR_CONFIG || {};
@@ -289,7 +356,7 @@
           (function pump() {
             reader.read().then(function (r) {
               if (!alive.current) return;
-              if (r.done) { setStreaming(null); setBusy(false); justStreamed.current = true; loadMsgs(cid); return; }
+              if (r.done) { setStreaming(null); setBusy(false); justStreamed.current = true; saveAiFiles(acc); loadMsgs(cid); return; }
               acc += dec.decode(r.value, { stream: true });
               setStreaming({ text: acc });
               pump();
@@ -319,7 +386,8 @@
     function onTaKey(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }
     function onTaInput(e) { setInput(e.target.value); e.target.style.height = 'auto'; e.target.style.height = Math.min(e.target.scrollHeight, 160) + 'px'; }
     function saveIdea(m) { sb.from('research_ideas').insert({ project_id: props.projectId, source: 'consensus', question: (m.content || '').slice(0, 8000), created_by: props.authorId, status: 'candidate' }).then(function (r) { if (r && r.error) { alert(r.error.message); return; } props.onChanged(); }); }
-    return h('div', { className: 'panel' },
+    return h('div', { className: 'panel chatwrap' },
+      h('div', { className: 'chat-col' },
       h('h3', null, 'Chat with Publify', h('span', { style: { fontWeight: 600, color: 'var(--faint)' } }, 'research assistant')),
       props.supervised ? h('div', { style: { fontSize: 12, color: 'var(--muted)', background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 8, padding: '7px 11px', marginBottom: 10, lineHeight: 1.45 } }, 'ℹ️ A kutatási beszélgetéseidből a témavezetőd napi összefoglalót kaphat (mit dolgoztál, milyen döntéseket hoztál).') : null,
       h('div', { className: 'chat-msgs', ref: scrollRef },
@@ -327,7 +395,7 @@
           var isTyping = typing && typing.id === m.id;
           var ai = m.role === 'assistant';
           var body;
-          if (ai && !isTyping) body = h('div', { className: 'btxt md', dangerouslySetInnerHTML: { __html: mdHtml(m.content) } });
+          if (ai && !isTyping) body = h('div', { className: 'btxt md', dangerouslySetInnerHTML: { __html: mdHtml(stripFiles(m.content)) } });
           else if (ai && isTyping) {
             var toks = (m.content || '').split(/(\s+)/), shown = toks.slice(0, typing.n);
             body = h('div', { className: 'btxt' }, shown.slice(0, -1).join(''), h('span', { key: typing.n, className: 'tw-word' }, shown[shown.length - 1] || ''), h('span', { className: 'tw-cursor' }, '▌'));
@@ -358,7 +426,9 @@
           h('textarea', { ref: taRef, value: input, rows: 1, placeholder: 'Message Publify…  (Enter to send · Shift+Enter newline)', disabled: busy, onChange: onTaInput, onKeyDown: onTaKey }),
           h('button', { className: 'btn pri', disabled: busy, onClick: send }, 'Send')
         )
-      ) : null,
+      ) : null
+      ),
+      h(SessionFileBrowser, { projectId: props.projectId, authorId: props.authorId, canEdit: props.canEdit, version: filesVersion, onAttach: function (a) { setAttach(function (p) { return p.concat([a]); }); } }),
       picker ? h(AttachModal, { projectId: props.projectId, authorId: props.authorId, fileOwnerId: props.fileOwnerId, sources: props.sources, onPick: function (a) { setAttach(function (p) { return p.concat([a]); }); }, onClose: function () { setPicker(false); } }) : null
     );
   }
