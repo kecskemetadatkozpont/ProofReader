@@ -281,7 +281,10 @@
     },
 
     /* sharing */
-    addMember: function (id, userId, role) { var p = this.get(id); if (!p) return; if (userId === p.ownerId) return; var m = p.members.filter(function (x) { return x.userId === userId; })[0]; if (m) m.role = role; else p.members.push({ userId: userId, role: role, invitedAt: Date.now() }); this.save(p); this.logActivity(id, me.id, 'shared with', (window.PRAuth.byId(userId) || {}).name || userId); },
+    addMember: function (id, userId, role) { var p = this.get(id); if (!p) return; if (userId === p.ownerId) return; var m = p.members.filter(function (x) { return x.userId === userId; })[0]; if (m) m.role = role; else { p.members.push({ userId: userId, role: role, invitedAt: Date.now() }); this.notifyShare(id, userId, role, p.title); } this.save(p); this.logActivity(id, me.id, 'shared with', (window.PRAuth.byId(userId) || {}).name || userId); },
+    // Drop an in-app notification in the invitee's bell (cloud only). RLS lets any signed-in user insert
+    // for any recipient; the invitee reads their own via nf_read. Fire-and-forget — never block the share.
+    notifyShare: function (id, userId, role, title) { try { sb.from('notifications').insert({ recipient_id: userId, kind: 'share', payload: { type: 'share', project_id: id, title: title || 'Untitled project', role: role, by: (me && me.name) || '', by_id: (me && me.id) || null } }).then(function () { }, function () { }); } catch (e) { } },
     setRole: function (id, userId, role) { this.addMember(id, userId, role); },
     removeMember: function (id, userId) { var p = this.get(id); if (!p) return; p.members = p.members.filter(function (m) { return m.userId !== userId; }); this.save(p); try { sb.from('project_members').delete().eq('project_id', id).eq('user_id', userId).then(function () { }); } catch (e) { } },
     setLink: function (id, enabled, role) { var p = this.get(id); if (!p) return; p.link = { enabled: enabled, role: role || p.link.role || 'viewer' }; this.save(p); },

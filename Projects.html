@@ -194,6 +194,20 @@
     .demo-user:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 5%, var(--pane)); }
     .demo-user .du-name { font-size: 13.5px; font-weight: 600; } .demo-user .du-mail { font-size: 11.5px; color: var(--muted); }
     .demo-user .du-plan { margin-left: auto; font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 20px; background: var(--accent-tint); color: var(--accent); }
+    /* notifications bell (shared look with Research/PhD) */
+    .notif-wrap { position: relative; }
+    .bell { position: relative; border: 1px solid var(--line); background: var(--surface); border-radius: 10px; width: 36px; height: 36px; cursor: pointer; display: grid; place-items: center; }
+    .bell:hover { border-color: var(--accent); }
+    .bell svg { width: 18px; height: 18px; }
+    .bell .nb { position: absolute; top: -6px; right: -6px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px; background: var(--danger); color: #fff; font-size: 10px; font-weight: 700; display: grid; place-items: center; }
+    .notif-pop { position: absolute; right: 0; top: 44px; width: 370px; max-width: 86vw; max-height: 460px; overflow: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 18px 50px rgba(20,24,40,.16); z-index: 40; }
+    .notif-pop .nh { padding: 12px 14px; border-bottom: 1px solid var(--line); font-weight: 700; font-size: 13px; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; background: var(--surface); color: var(--ink); }
+    .notif-item { padding: 11px 14px; border-bottom: 1px solid var(--soft, var(--line)); cursor: pointer; color: var(--ink); }
+    .notif-item:hover { background: var(--softer, var(--surface-2)); }
+    .notif-item.unread { background: var(--surface-2); }
+    .notif-item b { font-size: 13px; } .notif-item .nx { font-size: 12px; color: var(--muted); margin-top: 3px; }
+    .notif-pop .back-btn { border: 0; background: transparent; color: var(--muted); font-family: inherit; font-size: 12px; font-weight: 600; cursor: pointer; padding: 0; }
+    .notif-pop .back-btn:hover { color: var(--accent); }
   </style>
   <script src="theme.js"></script>
   <script src="nav.js"></script>
