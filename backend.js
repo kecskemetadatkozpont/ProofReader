@@ -235,6 +235,7 @@
   function setOverlayErr(msg) {
     var card = document.querySelector('#pr-signin .pr-card'); if (!card) return;
     var ex = card.querySelector('.pr-err');
+    if (!msg) { if (ex) ex.remove(); return; }   // empty message → remove the bar entirely (no blank red strip)
     if (!ex) { ex = document.createElement('div'); ex.className = 'pr-err'; var anchor = card.querySelector('#pr-pwform') || card.querySelector('.pr-g'); card.insertBefore(ex, anchor); }
     ex.textContent = msg;
   }
@@ -286,6 +287,7 @@
       e.preventDefault(); isSignup = !isSignup;
       document.getElementById('pr-pwbtn').textContent = isSignup ? 'Regisztráció' : 'Sign in';
       var h1 = document.querySelector('#pr-signin h1'); if (h1) h1.textContent = isSignup ? 'Fiók létrehozása' : 'Sign in to Publify';
+      var pEl = document.querySelector('#pr-signin p'); if (pEl) pEl.textContent = isSignup ? 'Hozz létre egy Publify-fiókot e-mailcímmel és jelszóval — vagy folytasd Google-fiókkal.' : 'Sign in with your email and password, or your Google account. Your work syncs to the cloud.';
       var pwi = document.getElementById('pr-pw'); pwi.setAttribute('autocomplete', isSignup ? 'new-password' : 'current-password'); pwi.placeholder = isSignup ? 'Válassz jelszót (min. 6 karakter)' : 'Password';
       this.textContent = isSignup ? 'Van már fiókod? Jelentkezz be' : 'Nincs még fiókod? Regisztrálj';
       setOverlayErr('');
