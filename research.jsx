@@ -1072,7 +1072,7 @@
     var content;
     if (tab === 'ideas') content = h('div', null, h(ChatPanel, { projectId: p.id, supervised: !!p.student_id, canEdit: props.canEdit, authorId: props.authorId, fileOwnerId: props.fileOwnerId, sources: props.sources, onChanged: props.onChanged }), h(IdeasPanel, { projectId: p.id, ideas: props.ideas, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, onStartStudy: startStudyFromIdea }));
     else if (tab === 'literature') content = h(LiteraturePanel, { projectId: p.id, sources: props.sources, canEdit: props.canEdit, myEmail: props.myEmail, onChanged: props.onChanged });
-    else if (tab === 'study') content = h(LiteratureStudy, { projectId: p.id, project: p, studies: props.studies, sources: props.sources, ideas: props.ideas, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
+    else if (tab === 'study') content = null;   // #9: rendered persistently below so a running study survives tab switches
     else if (tab === 'data') content = h(DataPanel, { projectId: p.id, datasets: props.datasets, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
     else if (tab === 'compute') content = h(ComputePanel, { projectId: p.id, jobs: props.jobs, datasets: props.datasets, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
     else if (tab === 'writing') content = h(WritingPanel, { project: p, sources: props.sources, ideas: props.ideas, jobs: props.jobs });
@@ -1098,6 +1098,9 @@
         return h('button', { key: t[0], className: tab === t[0] ? 'on' : '', onClick: function () { setTab(t[0]); } }, t[1], t[2] ? h('span', { className: 'c' }, t[2]) : null);
       })),
       content,
+      // #9 — persistent Lit. study: stays mounted (just hidden) on other tabs, so a running study keeps going
+      // in the background while you use the Chat / other tabs.
+      h('div', { style: { display: tab === 'study' ? 'block' : 'none' } }, h(LiteratureStudy, { projectId: p.id, project: p, studies: props.studies, sources: props.sources, ideas: props.ideas, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged })),
       editOpen ? h(ProjectSettingsModal, { project: p, onClose: function () { setEditOpen(false); }, onSaved: function () { setEditOpen(false); props.onChanged(); } }) : null
     );
   }
