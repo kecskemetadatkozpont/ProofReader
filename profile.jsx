@@ -269,8 +269,10 @@ function DataSync(props) {
 
 function Publications(props) {
   var me = props.me, preview = props.preview;
-  var rec = (window.PRPubs && window.PRPubs.forUser(me)) || null;
-  var pubs = (rec && rec.publications) || [];
+  var staticRec = (window.PRPubs && window.PRPubs.forUser(me)) || null;
+  var [liveRows, setLiveRows] = useState(null);   // publications-table rows (cloud): preferred & refreshable
+  var [syncing, setSyncing] = useState(false);
+  var [syncMsg, setSyncMsg] = useState(null);
   var [counts, setCounts] = useState({});
   var [open, setOpen] = useState(null);     // expanded pubKey
   var [files, setFiles] = useState({});     // pubKey -> [meta]
@@ -281,6 +283,34 @@ function Publications(props) {
   var [adding, setAdding] = useState(false);
   var [fm, setFm] = useState({ title: '', authors: '', year: '', journal: '', doi: '' });
   var [saving, setSaving] = useState(false);
+  function rowToPub(r) { return { mtid: r.mtid, title: r.title, year: r.year, firstAuthor: r.first_author, authorCount: r.author_count, journal: r.journal, volume: r.volume, issue: r.issue, pages: r.pages, doi: r.doi, citations: r.citations, indepCitations: r.indep_citations, oaType: r.oa_type, category: r.category, core: r.core, citation: r.citation, type: r.type, typeHu: r.type_hu, mtmtUrl: r.mtmt_url }; }
+  // merge the bundled MTMT snapshot with the live publications table (table wins per mtid → freshest data)
+  var _by = {};
+  ((staticRec && staticRec.publications) || []).forEach(function (p) { _by[p.mtid] = p; });
+  (liveRows || []).forEach(function (r) { _by[r.mtid] = rowToPub(r); });
+  var pubs = Object.keys(_by).map(function (k) { return _by[k]; });
+  var synced = !!(liveRows && liveRows.length);
+  var rec = staticRec || (synced ? { name: me.name, mtmtId: '', orcid: null, publications: pubs } : null);
+  // on mount (cloud): load this user's publications table so a refresh persists across reloads
+  useEffect(function () {
+    var B = window.PR_BACKEND;
+    if (!(B && B.sb && B.user)) return;
+    B.sb.from('publications').select('*').eq('researcher_id', B.user.id).order('year', { ascending: false }).then(function (r) { if (r && r.data) setLiveRows(r.data); });
+  }, []);
+  // refresh: pull the latest from MTMT (by the user's mtmt_id) via the mtmt-sync edge function
+  function syncMtmt() {
+    var B = window.PR_BACKEND;
+    if (!(B && B.sb)) { setSyncMsg(['err', 'Csak bejelentkezve frissíthető.']); return; }
+    setSyncing(true); setSyncMsg(null);
+    B.sb.functions.invoke('mtmt-sync').then(function (res) {
+      setSyncing(false);
+      if (res && res.error) { setSyncMsg(['err', 'A frissítés nem sikerült (mtmt-sync edge function nincs telepítve?).']); return; }
+      var d = res && res.data;
+      if (d && d.error) { setSyncMsg(['err', d.error === 'no_mtmt_id' ? 'Előbb állítsd be az MTMT azonosítód a Beállításokban.' : ('Hiba: ' + d.error)]); return; }
+      setLiveRows((d && d.publications) || []);
+      setSyncMsg(['ok', '✓ Frissítve — ' + ((d && d.count) || 0) + ' publikáció az MTMT-ből.']);
+    }, function () { setSyncing(false); setSyncMsg(['err', 'A frissítés nem sikerült.']); });
+  }
   var PF = window.PRPubFiles;
   var keyOf = function (p) { return me.email + ':' + p.mtid; };
   useEffect(function () { if (PF && pubs.length) PF.counts(pubs.map(keyOf)).then(setCounts); }, []); // eslint-disable-line
@@ -310,6 +340,9 @@ function Publications(props) {
       citation: (au ? au + '. ' : '') + fm.title.trim() + (fm.year ? ' (' + fm.year + ')' : '') + (fm.journal ? ' ' + fm.journal : '')
     }).then(function (r) { setSaving(false); if (r && r.error) { setErr(r.error.message); return; } location.reload(); });
   }
+  var isCloud = !!(window.PR_BACKEND && window.PR_BACKEND.sb && window.PR_BACKEND.user);
+  var refreshBtn = (isCloud && !preview) ? <button className="btn-ghost" disabled={syncing} onClick={syncMtmt} title="A publikációs lista frissítése az MTMT-ből (az MTMT azonosítód alapján)">{syncing ? 'Frissítés…' : '🔄 Frissítés MTMT-ből'}</button> : null;
+  var syncNote = syncMsg ? <div className={'pf-note ' + (syncMsg[0] === 'ok' ? 'ok' : 'err')} style={{ margin: '6px 0 0' }}>{syncMsg[1]}</div> : null;
   var pin = { width: '100%', height: 36, border: '1px solid var(--pf-line, #e6e8ee)', borderRadius: 8, padding: '0 10px', marginBottom: 6, fontFamily: 'inherit', fontSize: 13.5, boxSizing: 'border-box', background: 'var(--pf-paper, #fff)', color: 'inherit' };
   var addUI = preview ? null : <div className="pf-panel" style={{ marginBottom: 14 }}>
     {!adding
@@ -329,7 +362,7 @@ function Publications(props) {
       </div>}
   </div>;
 
-  if (!rec) return <div><h2 className="pf-h">My publications</h2>{addUI}{err ? <div className="pf-note err">{err}</div> : null}<div className="pf-empty">No publications yet — add one above. (Researcher lists are imported from MTMT automatically.)</div></div>;
+  if (!rec) return <div><div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}><h2 className="pf-h" style={{ margin: 0 }}>My publications</h2>{refreshBtn}</div>{syncNote}{addUI}{err ? <div className="pf-note err">{err}</div> : null}<div className="pf-empty">No publications yet — add one above, or refresh from MTMT. (Researcher lists are imported from MTMT.)</div></div>;
 
   var totalCites = pubs.reduce(function (a, p) { return a + (p.citations || 0); }, 0);
   // group by year desc
@@ -338,7 +371,8 @@ function Publications(props) {
   years.sort(function (a, b) { return b - a; });
 
   return <div>
-    <h2 className="pf-h">My publications</h2>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}><h2 className="pf-h" style={{ margin: 0 }}>My publications</h2>{refreshBtn}</div>
+    {syncNote}
     {addUI}
     <input ref={inputRef} type="file" accept="application/pdf,.pdf,.doc,.docx,.txt,.csv,.xlsx,.zip,.tex,.bib,image/*" style={{ display: 'none' }} onChange={onFile} />
     <div className="pf-panel">
@@ -347,7 +381,7 @@ function Publications(props) {
         <div><b>{totalCites}</b><span>citations (MTMT)</span></div>
         <div><b>{pubs.filter(function (p) { return p.doi; }).length}</b><span>with a DOI</span></div>
       </div>
-      <div className="pf-note">Imported from <a href={'https://m2.mtmt.hu/gui2/?mode=browse&params=author;' + rec.mtmtId} target="_blank" rel="noopener">MTMT</a> (as of 19 June 2026){rec.orcid ? <span> · ORCID <a href={'https://orcid.org/' + rec.orcid} target="_blank" rel="noopener">{rec.orcid}</a></span> : null}. Citation counts are a snapshot. {preview ? <span><b>Admin:</b> you can upload or manage PDFs on behalf of {me.name} — files are stored in their account.</span> : <span>Attach the PDF or data files for each item below — {(window.PRPubFiles && window.PRPubFiles.cloud) ? 'they are stored securely in your cloud account (Supabase Storage), available on any device.' : 'they are stored in this browser.'}</span>}</div>
+      <div className="pf-note">Imported from <a href={'https://m2.mtmt.hu/gui2/?mode=browse&params=author;' + rec.mtmtId} target="_blank" rel="noopener">MTMT</a> {synced ? '(frissítve MTMT-ből)' : '(as of 19 June 2026)'}{rec.orcid ? <span> · ORCID <a href={'https://orcid.org/' + rec.orcid} target="_blank" rel="noopener">{rec.orcid}</a></span> : null}. Citation counts are a snapshot. {preview ? <span><b>Admin:</b> you can upload or manage PDFs on behalf of {me.name} — files are stored in their account.</span> : <span>Attach the PDF or data files for each item below — {(window.PRPubFiles && window.PRPubFiles.cloud) ? 'they are stored securely in your cloud account (Supabase Storage), available on any device.' : 'they are stored in this browser.'}</span>}</div>
     </div>
     {err ? <div className="pf-note err" style={{ margin: '0 0 10px' }}>{err}</div> : null}
     {years.map(function (y) { return <div key={y}>
