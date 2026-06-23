@@ -331,6 +331,7 @@
     var spS = useState(null), selPop = spS[0], setSelPop = spS[1];   // { text, x, y } floating "add selection to ideas" button
     var atS = useState([]), attach = atS[0], setAttach = atS[1];          // pending attachments for the next message
     var pkS = useState(false), picker = pkS[0], setPicker = pkS[1];
+    var enS = useState(false), enhancing = enS[0], setEnhancing = enS[1];   // #6: prompt enhancement in flight
     var firstLoad = useRef(true), animated = useRef({}), alive = useRef(true), scrollRef = useRef(null), taRef = useRef(null), justStreamed = useRef(false);
     useEffect(function () { return function () { alive.current = false; }; }, []);
     function startTyping(id, full) {
@@ -427,6 +428,17 @@
       });
     }
     function send() { sendText(input); }
+    // #6 — rewrite the current input into a clearer, more specific prompt via research-ai (action: enhance)
+    function enhance() {
+      var txt = (input || '').trim(); if (!txt || enhancing || busy) return;
+      setEnhancing(true); setErr('');
+      sb.functions.invoke('research-ai', { body: { action: 'enhance', project_id: props.projectId, text: txt } }).then(function (res) {
+        setEnhancing(false);
+        if (res && res.error) { setErr('A prompt-feljavítás nem elérhető (research-ai / ANTHROPIC_API_KEY).'); return; }
+        var d = res && res.data;
+        if (d && d.text) { setInput(d.text); var ta = taRef.current; if (ta) { setTimeout(function () { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 160) + 'px'; ta.focus(); }, 0); } }
+      }, function () { setEnhancing(false); setErr('A prompt-feljavítás nem elérhető.'); });
+    }
     function copy(m) { try { navigator.clipboard.writeText(m.content || ''); } catch (e) { } }
     function onTaKey(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }
     function onTaInput(e) { setInput(e.target.value); e.target.style.height = 'auto'; e.target.style.height = Math.min(e.target.scrollHeight, 160) + 'px'; }
@@ -488,6 +500,7 @@
         })) : null,
         h('div', { className: 'chat-input' },
           h('button', { className: 'attach-btn', title: 'Attach a library source, publication or file', disabled: busy, onClick: function () { setPicker(true); } }, '📎'),
+          h('button', { className: 'attach-btn', title: 'Prompt feljavítása (AI) — érthetőbbé, konkrétabbá teszi a beírt szöveget', disabled: busy || enhancing || !input.trim(), onClick: enhance }, enhancing ? '⏳' : '✨'),
           h('textarea', { ref: taRef, value: input, rows: 1, placeholder: 'Message Publify…  (Enter to send · Shift+Enter newline)', disabled: busy, onChange: onTaInput, onKeyDown: onTaKey }),
           h('button', { className: 'btn pri', disabled: busy, onClick: send }, 'Send')
         )

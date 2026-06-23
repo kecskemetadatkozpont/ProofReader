@@ -201,6 +201,49 @@
     window.addEventListener('pr-profile', render);
     // user/admin may resolve after auth loads — refresh a few times
     var tries = 0; var iv = setInterval(function () { tries++; render(); if (tries > 12 || (curUser() && curUser().name)) clearInterval(iv); }, 700);
+    buildBugWidget();
+  }
+
+  // #13 — in-app bug reports: a floating button + modal, isolated from the nav DOM (createElement only).
+  function buildBugWidget() {
+    if (document.getElementById('pn-bug-btn')) return;
+    var btn = document.createElement('button');
+    btn.id = 'pn-bug-btn'; btn.title = 'Hibajelentés'; btn.textContent = '🐞';
+    btn.setAttribute('style', 'position:fixed;right:16px;bottom:16px;z-index:90;width:42px;height:42px;border-radius:50%;border:1px solid var(--line,#e4e7ec);background:var(--pane,#fff);box-shadow:0 4px 14px rgba(20,24,40,.18);font-size:18px;cursor:pointer;line-height:1;padding:0');
+    var modal = document.createElement('div');
+    modal.id = 'pn-bug-modal';
+    modal.setAttribute('style', 'position:fixed;inset:0;z-index:95;background:rgba(15,20,40,.4);display:none;align-items:center;justify-content:center');
+    var card = document.createElement('div');
+    card.setAttribute('style', 'background:var(--pane,#fff);color:var(--ink,#111);width:min(460px,92vw);border-radius:14px;box-shadow:0 20px 60px rgba(15,20,40,.35);padding:16px 18px');
+    card.innerHTML = '<div style="font-weight:700;font-size:15px;margin-bottom:4px">🐞 Hibajelentés</div>'
+      + '<div style="font-size:12px;color:var(--muted,#667);margin-bottom:10px">Mit tapasztaltál? (az oldal és a verzió automatikusan rögzül)</div>'
+      + '<input id="pn-bug-title" placeholder="Rövid cím (opcionális)" style="width:100%;box-sizing:border-box;border:1px solid var(--line,#e4e7ec);border-radius:8px;padding:8px 10px;font-size:13px;margin-bottom:8px;background:var(--app-bg,#fff);color:inherit">'
+      + '<textarea id="pn-bug-body" rows="5" placeholder="A hiba leírása…" style="width:100%;box-sizing:border-box;border:1px solid var(--line,#e4e7ec);border-radius:8px;padding:8px 10px;font-size:13px;font-family:inherit;resize:vertical;background:var(--app-bg,#fff);color:inherit"></textarea>'
+      + '<div id="pn-bug-msg" style="font-size:12px;margin-top:6px;min-height:16px"></div>'
+      + '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px"><button id="pn-bug-cancel" style="border:1px solid var(--line,#e4e7ec);background:var(--app-bg,#f7f8fa);color:inherit;border-radius:8px;padding:7px 12px;font-size:13px;cursor:pointer">Mégse</button><button id="pn-bug-send" style="border:0;background:var(--accent,#4f46e5);color:#fff;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:600;cursor:pointer">Küldés</button></div>';
+    modal.appendChild(card);
+    document.body.appendChild(btn); document.body.appendChild(modal);
+    function show() { modal.style.display = 'flex'; var t = document.getElementById('pn-bug-body'); if (t) t.focus(); }
+    function hide() { modal.style.display = 'none'; }
+    btn.onclick = show;
+    modal.onclick = function (e) { if (e.target === modal) hide(); };
+    document.getElementById('pn-bug-cancel').onclick = hide;
+    document.getElementById('pn-bug-send').onclick = function () {
+      var msg = document.getElementById('pn-bug-msg');
+      var body = (document.getElementById('pn-bug-body').value || '').trim();
+      var title = (document.getElementById('pn-bug-title').value || '').trim();
+      if (!body) { msg.style.color = 'var(--danger,#b42318)'; msg.textContent = 'Írd le röviden a hibát.'; return; }
+      var BE = window.PR_BACKEND, u = curUser();
+      if (!(BE && BE.sb && u)) { msg.style.color = 'var(--danger,#b42318)'; msg.textContent = 'Bejelentkezés szükséges a küldéshez.'; return; }
+      var ver = ''; try { ver = (document.getElementById('pr-ver-slot') && document.getElementById('pr-ver-slot').textContent) || ''; } catch (e) { }
+      msg.style.color = 'var(--muted,#667)'; msg.textContent = 'Küldés…';
+      BE.sb.from('bug_reports').insert({ reporter_id: u.id, title: title || null, body: body, page: location.pathname, app_version: String(ver || '').slice(0, 60) }).then(function (r) {
+        if (r && r.error) { msg.style.color = 'var(--danger,#b42318)'; msg.textContent = 'Hiba: ' + r.error.message; return; }
+        msg.style.color = 'var(--accent,#4f46e5)'; msg.textContent = '✓ Köszönjük! Elküldve.';
+        document.getElementById('pn-bug-body').value = ''; document.getElementById('pn-bug-title').value = '';
+        setTimeout(hide, 1100);
+      });
+    };
   }
 
   var st = document.createElement('style'); st.id = 'pn-style'; st.textContent = CSS;

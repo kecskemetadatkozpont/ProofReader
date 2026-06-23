@@ -31,7 +31,7 @@ Deno.serve(async (req) => {
       Deno.env.get('SUPABASE_ANON_KEY')!,
       { global: { headers: { Authorization: auth } } },
     );
-    const { action = 'gap', project_id, canvas } = await req.json().catch(() => ({}));
+    const { action = 'gap', project_id, canvas, text } = await req.json().catch(() => ({}));
     if (!project_id) return json({ error: 'project_id required' }, 400);
     if (!ANTHROPIC_KEY) return json({ error: 'ANTHROPIC_API_KEY not set on the function' }, 503);
 
@@ -49,6 +49,11 @@ Deno.serve(async (req) => {
     if (action === 'canvas-summary') {
       const summary = await summarizeCanvas(proj, String(canvas || '').slice(0, 12000), userModel);
       return json({ ok: true, summary });
+    }
+    // #6 — automatic prompt enhancement: rewrite the user's chat prompt to be clearer/more specific (no DB writes)
+    if (action === 'enhance') {
+      const improved = await enhancePrompt(proj, String(text || '').slice(0, 4000), userModel);
+      return json({ ok: true, text: improved });
     }
     const { data: sources } = await sb.from('research_sources')
       .select('title,year,venue,abstract').eq('project_id', project_id).limit(40);
@@ -86,6 +91,26 @@ Készíts TÖMÖR, magyar nyelvű összefoglalót a témavezető/kutató számá
   const out = await r.json();
   if (out.error) throw new Error(out.error.message || 'anthropic error');
   return (out.content || []).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n').trim();
+}
+
+async function enhancePrompt(proj: any, text: string, model: string): Promise<string> {
+  if (!text.trim()) return text;
+  const ctx = `Project: "${proj.title || ''}"${proj.field ? ' (' + proj.field + ')' : ''}.${proj.goal ? ' Goal: ' + proj.goal + '.' : ''}${(proj.keywords && proj.keywords.length) ? ' Keywords: ' + proj.keywords.join(', ') + '.' : ''}`;
+  const prompt = `You improve prompts for an AI research assistant. Rewrite the user's message below to be clearer, more specific and well-structured: keep the SAME language and intent, expand vague terms, and add helpful framing where obvious — but do not invent facts or answer it. Return ONLY the improved prompt text — no preamble, no quotes, no explanation.
+
+Context: ${ctx}
+
+User's message:
+${text}`;
+  const r = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'x-api-key': ANTHROPIC_KEY!, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+    body: JSON.stringify({ model, max_tokens: 800, messages: [{ role: 'user', content: prompt }] }),
+  });
+  const out = await r.json();
+  if (out.error) throw new Error(out.error.message || 'anthropic error');
+  const t = (out.content || []).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n').trim();
+  return t || text;
 }
 
 async function askClaude(action: string, proj: any, sources: any[], model: string): Promise<any[]> {
