@@ -163,6 +163,8 @@
   } catch (e) { }
   window.addEventListener('focus', function () { hydrate(); });
   document.addEventListener('visibilitychange', function () { if (!document.hidden) hydrate(); });
+  // fallback poll: keep collaborators' comments/to-dos in sync even if a realtime event is missed/dropped
+  setInterval(function () { if (!document.hidden) hydrate(); }, 10000);
 
   /* ---- prefs sync: the Supabase `prefs` row is the cross-device truth; mirror it into the local
      cache so prefs() stays synchronous, and push local changes back (debounced). ---- */

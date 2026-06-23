@@ -567,9 +567,15 @@
     }, [files, order, active, folders, idx, rate, voiceURI, voice]);
 
     /* ---- collaboration effects ---- */
+    const collabSigRef = useRef('');
     const refreshCollab = useCallback(() => {
       if (!projectId || !window.PRStore) return;
       const p = window.PRStore.get(projectId); if (!p) return;
+      // a hydrate/poll fires refreshCollab even with no remote change — skip the state update (and the
+      // annotation DOM rebuild) unless something the collab UI shows actually changed.
+      const sig = JSON.stringify(p.annotations || []) + '|' + ((p.versions || []).length) + '|' + JSON.stringify(p.members || []) + '|' + ((p.activity || []).length) + '|' + JSON.stringify(p.link || null) + '|' + JSON.stringify(p.submission || null);
+      if (sig === collabSigRef.current) return;
+      collabSigRef.current = sig;
       setAnnotations(p.annotations); setVersions(p.versions);
       setProjMeta({ members: p.members, ownerId: p.ownerId, link: p.link, activity: p.activity, templateId: p.templateId, journalMeta: p.journalMeta, limits: p.limits, journal: p.journal, submission: p.submission, tts: window.PRStore.ttsForProject ? window.PRStore.ttsForProject(me.id, projectId) : null });
     }, [projectId]);

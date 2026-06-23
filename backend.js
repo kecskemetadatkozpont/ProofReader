@@ -160,6 +160,7 @@
   sb.auth.getSession().then(function (res) {
     var s = res && res.data && res.data.session;
     if (s) {
+      try { sb.realtime.setAuth(s.access_token); } catch (e) { }   // RLS-protected realtime (postgres_changes) needs the user JWT, not the anon key
       var u = userFromSession(s); if (u) writeMyUser(u);
       if (mode !== 'cloud') { rebootInto(cleanUrl()); return; }   // pending/signin → become cloud
       sessionStorage.removeItem('pr_reboot');
@@ -186,6 +187,7 @@
   });
 
   sb.auth.onAuthStateChange(function (event, session) {
+    if (session && session.access_token) { try { sb.realtime.setAuth(session.access_token); } catch (e) { } }   // keep realtime authed across token refreshes
     if (event === 'SIGNED_IN' && session) { writeMyUser(userFromSession(session)); if (mode !== 'cloud') rebootInto(cleanUrl()); }
     if (event === 'SIGNED_OUT') { clearMyUser(); }
   });
