@@ -243,7 +243,7 @@
     [].forEach.call(document.querySelectorAll('#pn-bug-cats button'), function (b) { b.onclick = function () { setCat(b.getAttribute('data-cat')); }; });
     setCat('bug');
 
-    function show() { modal.style.display = 'flex'; var t = document.getElementById('pn-bug-body'); if (t) t.focus(); }
+    function show() { var m = document.getElementById('pn-bug-msg'); if (m) m.textContent = '';   /* clear a stale "elküldve" message from a previous submit */ modal.style.display = 'flex'; var t = document.getElementById('pn-bug-body'); if (t) t.focus(); }
     function hide() { modal.style.display = 'none'; }
     btn.onclick = show;
     modal.onclick = function (e) { if (e.target === modal) hide(); };
