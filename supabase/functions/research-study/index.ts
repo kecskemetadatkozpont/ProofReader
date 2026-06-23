@@ -105,6 +105,26 @@ function parseDecisions(text: string): any[] {
   const m = text.match(/\[[\s\S]*\]/); if (!m) return [];
   try { return JSON.parse(m[0]); } catch { return []; }
 }
+// AI-prefill the whole 4-step funnel config from the project + the study's question(s) — the user just fine-tunes.
+async function planStudy(study: any, proj: any, model: string): Promise<any> {
+  const kw = ((proj && proj.keywords) || []).join(', ');
+  const prompt = `You are configuring an Elicit-style 4-step literature screening funnel so a researcher only fine-tunes it. Tailor EVERYTHING to the question(s) below.
+
+Project: "${(proj && proj.title) || study.title || ''}"${(proj && proj.field) ? ' — field: ' + proj.field : ''}.${(proj && proj.goal) ? ' Goal: ' + proj.goal + '.' : ''}${kw ? ' Project keywords: ' + kw + '.' : ''}
+Research question(s) / ideas this study is based on:
+${study.question || study.title || ''}
+
+Return ONLY JSON, no prose:
+{
+  "step1": { "keywords": ["6-10 precise OpenAlex search terms/phrases"], "filters": { "fromYear": <int or null>, "oa": <bool>, "journals": <bool> } },
+  "step2": { "include": ["3-5 abstract-level inclusion criteria, one short line each"], "exclude": ["2-4 exclusion criteria"] },
+  "step3": { "include": ["3-5 full-text inclusion criteria"], "exclude": ["2-4 exclusion criteria"], "signals": ["has_github","has_dataset"] }
+}`;
+  let out = '';
+  try { out = await callClaude(model, '', prompt, false, 1500); } catch { return {}; }
+  const m = out.match(/\{[\s\S]*\}/); if (!m) return {};
+  try { return JSON.parse(m[0]); } catch { return {}; }
+}
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
@@ -142,6 +162,25 @@ Deno.serve(async (req) => {
       await sb.from('research_study_steps').update({ status: 'done', last_run_at: new Date().toISOString() }).eq('study_id', study_id).eq('step', 4);
       await sb.from('research_studies').update({ status: 'done', cur_step: 4, updated_at: new Date().toISOString() }).eq('id', study_id);
       return json({ ok: true, file_path: path, words: md.split(/\s+/).length });
+    }
+
+    // ---------------- plan: Claude pre-fills the funnel config for every step (the user fine-tunes) ----------------
+    if (action === 'plan') {
+      const { data: proj } = await sb.from('research_projects').select('title,field,goal,keywords').eq('id', study.project_id).maybeSingle();
+      const plan = await planStudy(study, proj || {}, model);
+      for (const n of [1, 2, 3]) {
+        const sp = plan['step' + n]; if (!sp || typeof sp !== 'object') continue;
+        const { data: row } = await sb.from('research_study_steps').select('config').eq('study_id', study_id).eq('step', n).maybeSingle();
+        const cur: any = (row && row.config) || {};
+        const next: any = Object.assign({}, cur);
+        if (n === 1 && Array.isArray(sp.keywords)) next.keywords = sp.keywords.slice(0, 12).map((k: any) => String(k));
+        if (n === 1 && sp.filters && typeof sp.filters === 'object') next.filters = Object.assign({}, cur.filters || {}, sp.filters);
+        if (Array.isArray(sp.include)) next.include = sp.include.slice(0, 8).map((k: any) => String(k));
+        if (Array.isArray(sp.exclude)) next.exclude = sp.exclude.slice(0, 8).map((k: any) => String(k));
+        if (Array.isArray(sp.signals)) next.signals = sp.signals.map((k: any) => String(k));
+        await sb.from('research_study_steps').update({ config: next }).eq('study_id', study_id).eq('step', n);
+      }
+      return json({ ok: true });
     }
 
     const step = parseInt(String(body.step || '1'), 10);

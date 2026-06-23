@@ -967,6 +967,7 @@
     var pgS = useState(null), prog = pgS[0], setProg = pgS[1];
     var ttS = useState({}), titles = ttS[0], setTitles = ttS[1];
     var erS = useState(''), err = erS[0], setErr = erS[1];
+    var plS = useState(false), planning = plS[0], setPlanning = plS[1];   // Claude pre-filling the funnel config
     var alive = useRef(true), stop = useRef(false);
     useEffect(function () { return function () { alive.current = false; }; }, []);
     // #12 — selId is seeded from studies[0] at mount; if the studies list loads AFTER mount it stays null
@@ -990,13 +991,27 @@
     function viewStep(n) { setCurStep(n); var cs = stepRow(n); setCfg((cs && cs.config) || lsDefaultConfig(n, props.project)); }
     function incCount(n) { return papers.filter(function (p) { return p.step === n && p.decision === 'include'; }).length; }
 
-    function newStudy(idea) {
-      var title = String(idea ? idea.question : (props.project.title + ' — irodalom')).slice(0, 80);
-      sb.from('research_studies').insert({ project_id: props.projectId, idea_id: idea ? idea.id : null, title: title, question: idea ? idea.question : props.project.title, created_by: props.authorId }).select('id').maybeSingle().then(function (r) {
-        var id = r && r.data && r.data.id; if (!id) { setErr('Nem sikerült létrehozni a tanulmányt.'); return; }
-        var rows = LS_STEPS.map(function (s) { return { study_id: id, step: s.step, kind: s.kind, config: lsDefaultConfig(s.step, props.project, idea) }; });
-        sb.from('research_study_steps').insert(rows).then(function () { setSelId(id); setCurStep(1); props.onChanged(); });
+    // create a study from one OR MORE selected ideas (or empty), then let Claude pre-fill the funnel config
+    function newStudy(ideas) {
+      var arr = Array.isArray(ideas) ? ideas : (ideas ? [ideas] : []);
+      var q = arr.length ? arr.map(function (i) { return i.question + (i.hypothesis ? ' — hipotézis: ' + i.hypothesis : ''); }).join('\n\n') : props.project.title;
+      var title = String(arr.length ? (arr.length > 1 ? (props.project.title + ' — ' + arr.length + ' ötlet') : arr[0].question) : (props.project.title + ' — irodalom')).slice(0, 80);
+      setErr(''); setPlanning(true);
+      sb.from('research_studies').insert({ project_id: props.projectId, idea_id: arr[0] ? arr[0].id : null, title: title, question: String(q).slice(0, 4000), created_by: props.authorId }).select('id').maybeSingle().then(function (r) {
+        var id = r && r.data && r.data.id; if (!id) { setPlanning(false); setErr('Nem sikerült létrehozni a tanulmányt.'); return; }
+        var rows = LS_STEPS.map(function (s) { return { study_id: id, step: s.step, kind: s.kind, config: lsDefaultConfig(s.step, props.project, arr[0]) }; });
+        sb.from('research_study_steps').insert(rows).then(function () {
+          setSelId(id); setCurStep(1); props.onChanged();
+          // dynamically pre-fill keywords + criteria + filters with Claude; the user only fine-tunes
+          callStudy({ action: 'plan', study_id: id }).then(function (d) { setPlanning(false); loadStudy(id); if (d && d.error) setErr('AI-kitöltés: ' + d.error); }, function () { setPlanning(false); });
+        });
       });
+    }
+    // re-run the AI pre-fill for the current study (Claude regenerates keywords/criteria/filters)
+    function runPlan() {
+      if (!selId || planning) return;
+      setErr(''); setPlanning(true);
+      callStudy({ action: 'plan', study_id: selId }).then(function (d) { setPlanning(false); if (d && d.error) { setErr('AI-kitöltés: ' + d.error); return; } loadStudy(selId); }, function () { setPlanning(false); setErr('AI-kitöltés nem sikerült.'); });
     }
     function up(k, v) { setCfg(Object.assign({}, cfg, (function () { var o = {}; o[k] = v; return o; })())); }
     function upFilter(k, v) { setCfg(Object.assign({}, cfg, { filters: Object.assign({}, cfg.filters || {}, (function () { var o = {}; o[k] = v; return o; })()) })); }
@@ -1036,10 +1051,12 @@
     if (!studies.length) {
       var selIdeas = (props.ideas || []).filter(function (i) { return i.status === 'selected'; });
       return h('div', { className: 'panel' }, h('h3', null, '🔬 Irodalmi tanulmány'),
-        h('p', { style: { fontSize: 13, color: 'var(--muted)' } }, 'Indíts egy Elicit-szerű, 4-lépéses irodalmi szűrést egy ötletből: gyors screening → absztrakt → teljes szöveg → review. Minden lépés előtt finomhangolhatod a következőt (kulcsszavak, kritériumok).'),
-        props.canEdit ? h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 } },
-          (selIdeas.length ? selIdeas : (props.ideas || []).slice(0, 1)).map(function (i) { return h('button', { className: 'btn pri', key: i.id, onClick: function () { newStudy(i); } }, '🔬 Indítás: ' + i.question.slice(0, 40) + (i.question.length > 40 ? '…' : '')); }),
-          h('button', { className: 'btn', onClick: function () { newStudy(null); } }, '+ Üres tanulmány')
+        h('p', { style: { fontSize: 13, color: 'var(--muted)' } }, 'Jelöld ki (Select) az Ötletek közül azokat, amik alapján a tanulmány menjen, majd indíts egy 4-lépéses szűrést: gyors screening → absztrakt → teljes szöveg → review. A lépéseket Claude előre kitölti (kulcsszavak, kritériumok, szűrők) az ötletek alapján — Te csak finomhangolsz.'),
+        props.canEdit ? h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginTop: 10 } },
+          selIdeas.length
+            ? h('button', { className: 'btn pri', disabled: planning, onClick: function () { newStudy(selIdeas); } }, planning ? '✨ Claude tervez…' : ('🔬 Tanulmány a kijelölt ' + selIdeas.length + ' ötletből'))
+            : h('span', { style: { fontSize: 12.5, color: 'var(--warn)' } }, 'Jelölj ki legalább egy ötletet (Select) az Ötletek fülön.'),
+          h('button', { className: 'btn', disabled: planning, onClick: function () { newStudy(null); } }, '+ Üres tanulmány')
         ) : h('div', { style: { fontSize: 13, color: 'var(--faint)' } }, 'Csak olvasható nézet.'),
         err ? h('div', { style: { color: 'var(--danger)', fontSize: 12.5, marginTop: 8 } }, err) : null);
     }
@@ -1060,7 +1077,9 @@
       })),
       // config panel (steps 1-3) or review panel (step 4)
       curStep < 4 ? h('div', { className: 'panel', style: { marginTop: 10 } },
-        h('h3', null, LS_STEPS[curStep - 1].label + ' — beállítások'),
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
+          h('h3', { style: { margin: 0 } }, LS_STEPS[curStep - 1].label + ' — beállítások'),
+          props.canEdit ? h('button', { className: 'btn', style: { padding: '3px 9px', fontSize: 11.5, marginLeft: 'auto', flex: 'none' }, disabled: planning, title: 'Claude (újra)tölti a kulcsszavakat, kritériumokat és szűrőket az ötletek alapján', onClick: runPlan }, planning ? '✨ Claude tölti…' : '✨ AI-kitöltés') : null),
         h('div', { className: 'field-label' }, 'Kulcsszavak (vesszővel)'),
         h('input', { className: 'field', style: { width: '100%' }, disabled: !props.canEdit, value: (cfg.keywords || []).join(', '), placeholder: 'pl. out-of-distribution, LiDAR', onChange: function (e) { up('keywords', e.target.value.split(',').map(function (x) { return x.trim(); }).filter(Boolean)); } }),
         h('div', { style: { display: 'flex', gap: 12, marginTop: 8, flexWrap: 'wrap' } },
