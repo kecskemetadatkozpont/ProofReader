@@ -136,6 +136,7 @@
           if (isTextFile(f)) return f.text().then(function (t) { return attachText(f.name, t, 'upload'); });
           if (isPdf(f)) return extractPdf(f).then(function (t) { return attachText(f.name + ' (PDF)', t, 'pdf'); });
           if (isImage(f)) return downscaleImage(f).then(function (d) { return attachImage(f.name, d); });
+          if (window.PROffice && window.PROffice.isOffice(f.name)) return window.PROffice.extract(f).then(function (r) { return attachText(f.name + ' (Office)', r.text || '', 'upload'); }, function () { skipped++; });
           skipped++; return null;
         });
       }, Promise.resolve()).then(function () { if (skipped) window.alert(skipped + ' fájl kihagyva (nem támogatott típus — szöveg, PDF és kép csatolható).'); });

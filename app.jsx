@@ -1016,10 +1016,24 @@
       }
     }
 
+    // Office (Word/Excel/PowerPoint) → an editable .md file in the project (shared PROffice util, lazy CDN libs)
+    const importOfficeFile = (file, dir) => {
+      const uid = uAdd(file.name, file.size, 'uploading');
+      window.PROffice.extract(file).then((r) => {
+        const base = file.name.replace(/\.(docx|xlsx|xlsm|xls|pptx)$/i, '') + '.md';
+        const path = uniquePath((p) => !!filesRef.current[p], pjoin(dir, base));
+        filesRef.current = { ...filesRef.current, [path]: {} };
+        setFiles((f) => ({ ...f, [path]: { type: fileTypeOf(base), content: r.text || '' } }));
+        setOrder((o) => o.includes(path) ? o : [...o, path]);
+        uSet(uid, { status: 'done' });
+        if (dir) setExpanded((s) => new Set(s).add(dir));
+      }, (er) => uSet(uid, { status: 'error', reason: 'Office: ' + ((er && er.message) || er) }));
+    };
     function onUpload(e) {
       const list = Array.from(e.target.files || []);
       const dir = currentDir;
       list.forEach((file) => {
+        if (window.PROffice && window.PROffice.isOffice(file.name)) { importOfficeFile(file, dir); return; }
         const isText = TEXT_EXT_RE.test(file.name);
         const isImg = /\.(png|jpe?g|gif|svg|webp|pdf)$/i.test(file.name);
         const isPdf = /\.pdf$/i.test(file.name);
@@ -1888,7 +1902,7 @@
             <button className="btn" onClick={() => setShareOpen(true)}>
               <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4"><circle cx="4" cy="8" r="2" /><circle cx="12" cy="4" r="2" /><circle cx="12" cy="12" r="2" /><path d="M5.8 7l4.4-2.2M5.8 9l4.4 2.2" /></svg>Share
             </button>
-            <input ref={fileInput} type="file" multiple accept=".tex,.bib,.bbl,.bst,.cls,.sty,.txt,.md,.markdown,.pdf,application/pdf,image/*" style={{ display: 'none' }} onChange={onUpload} />
+            <input ref={fileInput} type="file" multiple accept=".tex,.bib,.bbl,.bst,.cls,.sty,.txt,.md,.markdown,.pdf,application/pdf,.docx,.xlsx,.xls,.pptx,image/*" style={{ display: 'none' }} onChange={onUpload} />
             <input ref={reviewInput} type="file" accept=".json,application/json" style={{ display: 'none' }} onChange={onReviewFile} />
             <input ref={dirInput} type="file" multiple style={{ display: 'none' }} onChange={onUploadFolder} />
             <button className="btn btn-icon" title="Upload files" onClick={() => fileInput.current.click()}>

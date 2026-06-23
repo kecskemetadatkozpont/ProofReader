@@ -219,6 +219,19 @@
     function onUpload(e) {
       var f = e.target.files && e.target.files[0]; if (!f) return;
       setUpMsg('Uploading…');
+      // Office files → extract text and attach THAT (so the AI reads the content, not an opaque binary)
+      if (window.PROffice && window.PROffice.isOffice(f.name)) {
+        setUpMsg('Office-fájl feldolgozása…');
+        window.PROffice.extract(f).then(function (r) {
+          var name = f.name.replace(/\.(docx|xlsx|xlsm|xls|pptx)$/i, '') + '.' + (r.ext || 'md');
+          var path = props.projectId + '/' + Date.now() + '_' + name.replace(/[^A-Za-z0-9._-]/g, '_');
+          sb.storage.from('research-data').upload(path, new Blob([r.text || ''], { type: r.ext === 'csv' ? 'text/csv' : 'text/markdown' })).then(function (res) {
+            if (res.error) { setUpMsg('Upload failed: ' + res.error.message); return; }
+            props.onPick({ kind: 'file', bucket: 'research-data', path: path, name: name, mime: 'text/markdown', label: name }); props.onClose();
+          });
+        }, function (er) { setUpMsg('Office-feldolgozás hiba: ' + ((er && er.message) || er)); });
+        return;
+      }
       var path = props.projectId + '/' + Date.now() + '_' + f.name.replace(/[^A-Za-z0-9._-]/g, '_');
       sb.storage.from('research-data').upload(path, f).then(function (res) {
         if (res.error) { setUpMsg('Upload failed: ' + res.error.message); return; }
@@ -306,29 +319,27 @@
     function onUpload(e) {
       var f = e.target.files && e.target.files[0]; if (!f) return;
       if (upRef.current) upRef.current.value = '';
-      if (/\.docx$/i.test(f.name)) { importDocx(f); return; }   // #5: Word import → editable markdown
+      if (window.PROffice && window.PROffice.isOffice(f.name)) { importOffice(f); return; }   // Word/Excel/PowerPoint → editable text/markdown
       var sp = props.projectId + '/files/' + Date.now() + '_' + f.name.replace(/[^A-Za-z0-9._-]/g, '_');
       sb.storage.from('research-data').upload(sp, f).then(function (res) {
         if (res && res.error) { alert(res.error.message); return; }
         sb.from('research_files').upsert({ project_id: props.projectId, path: f.name, storage_path: sp, mime: f.type || 'application/octet-stream', size: f.size, source: 'upload', created_by: props.authorId, updated_by: props.authorId, updated_at: new Date().toISOString() }, { onConflict: 'project_id,path' }).then(load);
       });
     }
-    // #5 — Word (.docx) → markdown via mammoth, stored as an editable .md file
-    function importDocx(f) {
-      loadMammoth().then(function (m) {
-        var reader = new FileReader();
-        reader.onload = function () {
-          m.convertToMarkdown({ arrayBuffer: reader.result }).then(function (res) {
-            var md = (res && res.value) || '';
-            var name = f.name.replace(/\.docx$/i, '') + '.md';
-            sb.from('research_files').upsert({ project_id: props.projectId, path: name, content: md, mime: 'text/markdown', source: 'upload', created_by: props.authorId, updated_by: props.authorId, updated_at: new Date().toISOString() }, { onConflict: 'project_id,path' }).then(function (r) { if (r && r.error) { alert(r.error.message); return; } load(); });
-          }, function (er) { alert('Word import hiba: ' + ((er && er.message) || er)); });
-        };
-        reader.readAsArrayBuffer(f);
-      }, function () { alert('A Word-import könyvtár nem töltődött be (offline?).'); });
+    // Office (Word/Excel/PowerPoint) → editable markdown/CSV stored as a text file (shared PROffice util)
+    function importOffice(f) {
+      window.PROffice.extract(f).then(function (r) {
+        var name = f.name.replace(/\.(docx|xlsx|xlsm|xls|pptx)$/i, '') + '.' + (r.ext || 'md');
+        sb.from('research_files').upsert({ project_id: props.projectId, path: name, content: r.text || '', mime: r.ext === 'csv' ? 'text/csv' : 'text/markdown', source: 'upload', created_by: props.authorId, updated_by: props.authorId, updated_at: new Date().toISOString() }, { onConflict: 'project_id,path' }).then(function (rr) { if (rr && rr.error) { alert(rr.error.message); return; } load(); });
+      }, function (er) { alert('Office-feldolgozás hiba: ' + ((er && er.message) || er)); });
     }
     function del(f) { if (!window.confirm('Törlöd: ' + f.path + ' ?')) return; sb.from('research_files').delete().eq('id', f.id).then(function () { if (f.storage_path) { try { sb.storage.from('research-data').remove([f.storage_path]); } catch (e) { } } if (preview && preview.id === f.id) setPreview(null); load(); }); }
     function openSigned(path) { sb.storage.from('research-data').createSignedUrl(path, 3600).then(function (r) { if (r && r.data && r.data.signedUrl) window.open(r.data.signedUrl, '_blank'); }); }
+    function dlBlob(name, url) { var a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove(); }
+    function download(f) {   // #1: download a file (inline content as a blob; binary via a forced-download signed URL)
+      if (f.content != null) { var u = URL.createObjectURL(new Blob([f.content], { type: 'text/plain;charset=utf-8' })); dlBlob(f.path, u); setTimeout(function () { URL.revokeObjectURL(u); }, 4000); }
+      else if (f.storage_path) { sb.storage.from('research-data').createSignedUrl(f.storage_path, 3600, { download: f.path }).then(function (r) { if (r && r.data && r.data.signedUrl) dlBlob(f.path, r.data.signedUrl); }); }
+    }
     function attach(f) { props.onAttach({ kind: f.content != null ? 'projectfile' : 'file', file_id: f.id, bucket: 'research-data', path: f.storage_path, name: f.path, title: f.path, label: f.path }); }
     function icon(f) { var p = (f.path || '').toLowerCase(); if (/\.md$|\.txt$/.test(p)) return '📄'; if (/\.(png|jpe?g|gif|webp|svg)$/.test(p)) return '🖼'; if (/\.pdf$/.test(p)) return '📕'; if (/\.(csv|tsv|xlsx?)$/.test(p)) return '📊'; return '📎'; }
     return h('div', { className: 'filebrowser', style: { width: (props.width || 256) } },
@@ -342,6 +353,7 @@
           return h('div', { className: 'fb-item' + (preview && preview.id === f.id ? ' on' : ''), key: f.id },
             h('button', { className: 'fb-name', title: f.path, onClick: function () { setPreview(f); } }, h('span', { className: 'fb-ic' }, icon(f)), h('span', { className: 'fb-lbl' }, f.path), f.source === 'ai' ? h('span', { className: 'fb-tag' }, 'AI') : null),
             h('span', { className: 'fb-acts' },
+              h('button', { className: 'fb-mini', title: 'Letöltés', onClick: function () { download(f); } }, '⬇'),
               props.canEdit ? h('button', { className: 'fb-mini', title: 'Csatolás a chathez', onClick: function () { attach(f); } }, '📎') : null,
               props.canEdit ? h('button', { className: 'fb-mini', title: 'Törlés', onClick: function () { del(f); } }, '×') : null));
         })) : h('div', { className: 'fb-empty' }, 'Még nincs fájl. Kérd a chatben: „írd ki egy fájlba…", vagy tölts fel egyet.')),
