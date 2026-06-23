@@ -15,6 +15,23 @@
   function credits(chars) { return Math.ceil((chars || 0) / 1000); }
   function fmtDate(s) { if (!s) return '—'; var d = new Date(s); var now = Date.now(), diff = (now - d.getTime()) / 1000; if (diff < 60) return 'just now'; if (diff < 3600) return Math.floor(diff / 60) + 'm ago'; if (diff < 86400) return Math.floor(diff / 3600) + 'h ago'; if (diff < 604800) return Math.floor(diff / 86400) + 'd ago'; return d.toLocaleDateString(); }
   function initials(n) { return String(n || 'U').trim().split(/\s+/).slice(0, 2).map(function (w) { return w[0]; }).join('').toUpperCase(); }
+  // canonical university for grouping — collapses the common Hungarian name variants (e.g. "Neumann János
+  // Egyetem" + "John von Neumann University" → one group); unknown affiliations keep their raw value.
+  function canonAff(a) {
+    var s = String(a == null ? '' : a).trim();
+    if (!s) return '— Nincs megadva —';
+    var l = s.toLowerCase();
+    if (/neumann/.test(l)) return 'John von Neumann University';
+    if (/sz[eé]chenyi/.test(l)) return 'Széchenyi István University';
+    if (/\bbme\b|budapesti m[űu]szaki/.test(l)) return 'Budapesti Műszaki Egyetem (BME)';
+    if (/\belte\b|e[öo]tv[öo]s lor/.test(l)) return 'Eötvös Loránd Tudományegyetem (ELTE)';
+    if (/debrecen/.test(l)) return 'Debreceni Egyetem';
+    if (/szeged/.test(l)) return 'Szegedi Tudományegyetem';
+    if (/p[eé]cs/.test(l)) return 'Pécsi Tudományegyetem';
+    if (/corvinus/.test(l)) return 'Budapesti Corvinus Egyetem';
+    if (/semmelweis/.test(l)) return 'Semmelweis Egyetem';
+    return s;
+  }
   function colorFor(id) { var p = ['#4f46e5', '#0e9f6e', '#d9760b', '#db2777', '#0891b2', '#7c3aed', '#ca8a04', '#dc2626']; var x = 0; id = String(id || ''); for (var i = 0; i < id.length; i++) x = (x * 31 + id.charCodeAt(i)) >>> 0; return p[x % p.length]; }
   // models an admin can assign per user (profiles.ai_model); '' = system default. Must match the Edge whitelist.
   var AI_MODELS = [['', 'Alapértelmezett (rendszerbeállítás)'], ['claude-opus-4-8', 'Opus 4.8 — legjobb minőség'], ['claude-sonnet-4-6', 'Sonnet 4.6 — kiegyensúlyozott'], ['claude-haiku-4-5-20251001', 'Haiku 4.5 — leggyorsabb / olcsó']];
@@ -222,6 +239,8 @@
     var errS = useState(''), errMsg = errS[0], setErr = errS[1];
     var exS = useState(null), expanded = exS[0], setExpanded = exS[1];
     var pcS = useState({}), pubsCache = pcS[0], setPubsCache = pcS[1];
+    var ogS = useState({}), openGroups = ogS[0], setOpenGroups = ogS[1];   // expanded affiliation groups
+    function toggleGroup(k) { setOpenGroups(function (m) { var n = Object.assign({}, m); n[k] = !n[k]; return n; }); }
 
     useEffect(function () { boot(); }, []);
     function boot() {
@@ -362,6 +381,13 @@
     }
 
     var tableHead = h('tr', null, ['User', 'Affiliation', 'Status', 'Projects', 'Storage', 'Credits', 'Last active', 'Actions'].map(function (t) { return h('th', { key: t }, t); }));
+    // group the user list by (canonical) affiliation; "no affiliation" sorts last, else by size desc
+    var affGroups = {};
+    sorted.forEach(function (u) { var k = canonAff(u.affiliation); (affGroups[k] || (affGroups[k] = [])).push(u); });
+    var affKeys = Object.keys(affGroups).sort(function (a, b) {
+      var na = a[0] === '—', nb = b[0] === '—'; if (na !== nb) return na ? 1 : -1;
+      return affGroups[b].length - affGroups[a].length || a.localeCompare(b, 'hu');
+    });
 
     return h(React.Fragment, null,
       h('div', { className: 'topbar' },
@@ -387,11 +413,29 @@
           h('div', { className: 'panel' }, h('table', null, h('thead', null, tableHead), h('tbody', null, pending.map(function (u) { return userRow(u, true); }))))
         ),
 
-        h('div', { className: 'sec-h' }, h('h2', null, 'All users'), h('span', { className: 'count' }, profiles.length + ' users · ' + profiles.filter(function (u) { return u.is_researcher; }).length + ' researchers (expand a row for their publications)')),
+        h('div', { className: 'sec-h' }, h('h2', null, 'Users by affiliation'),
+          h('span', { className: 'count' }, profiles.length + ' users · ' + affKeys.length + ' affiliations · ' + profiles.filter(function (u) { return u.is_researcher; }).length + ' researchers'),
+          h('span', { style: { marginLeft: 'auto', display: 'inline-flex', gap: 8 } },
+            h('button', { className: 'btn', onClick: function () { var m = {}; affKeys.forEach(function (k) { m[k] = true; }); setOpenGroups(m); } }, 'Expand all'),
+            h('button', { className: 'btn', onClick: function () { setOpenGroups({}); } }, 'Collapse all'))
+        ),
         h('div', { className: 'panel' },
           profiles.length === 0
             ? h('div', { className: 'empty' }, 'No users yet.')
-            : h('table', null, h('thead', null, tableHead), h('tbody', null, sorted.map(function (u) { return userRow(u, false); })))
+            : affKeys.map(function (k) {
+              var us = affGroups[k];
+              var researchers = us.filter(function (u) { return u.is_researcher; }).length;
+              var pendingN = us.filter(function (u) { return u.status === 'pending'; }).length;
+              var on = !!openGroups[k];
+              return h('div', { key: k },
+                h('button', { onClick: function () { toggleGroup(k); }, style: { display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', background: 'var(--surface-2, #f6f7f9)', border: 0, borderTop: '1px solid var(--line)', padding: '11px 14px', cursor: 'pointer', font: 'inherit', color: 'inherit' } },
+                  h('span', { style: { width: 12, color: 'var(--muted)' } }, on ? '▾' : '▸'),
+                  h('span', { style: { fontWeight: 700, fontSize: 13.5 } }, k),
+                  h('span', { style: { marginLeft: 'auto', fontSize: 12, color: 'var(--muted)' } }, us.length + ' user' + (us.length === 1 ? '' : 's') + (researchers ? ' · ' + researchers + ' researcher' + (researchers === 1 ? '' : 's') : '') + (pendingN ? ' · ' + pendingN + ' pending' : ''))
+                ),
+                on ? h('table', null, h('thead', null, tableHead), h('tbody', null, us.map(function (u) { return userRow(u, false); }))) : null
+              );
+            })
         ),
         h(BugReports)
       ),
