@@ -286,7 +286,17 @@
     var fS = useState(null), files = fS[0], setFiles = fS[1];
     var pvS = useState(null), preview = pvS[0], setPreview = pvS[1];
     var adS = useState(false), added = adS[0], setAdded = adS[1];   // #8: brief "added to ideas" feedback
+    var spS = useState(null), selPop = spS[0], setSelPop = spS[1];   // #1: text selection in the MD preview → "add to idea" popup
     var upRef = useRef(null);
+    function onPreviewMouseUp() {
+      if (!(props.canEdit && props.onAddIdea)) return;
+      setTimeout(function () {
+        var s = window.getSelection ? window.getSelection() : null;
+        var txt = s ? String(s).trim() : '';
+        if (txt && txt.length > 3) { try { var r = s.getRangeAt(0).getBoundingClientRect(); setSelPop({ text: txt, x: r.left + r.width / 2, y: r.top }); } catch (e) { setSelPop(null); } }
+        else setSelPop(null);
+      }, 1);
+    }
     function load() { sb.from('research_files').select('id,path,content,storage_path,mime,size,source,updated_at').eq('project_id', props.projectId).order('updated_at', { ascending: false }).then(function (r) { setFiles((r && r.data) || []); }); }
     useEffect(load, [props.projectId, props.version]);
     function newFile() {
@@ -340,9 +350,11 @@
           (props.canEdit && props.onAddIdea && preview.content != null) ? h('button', { className: 'fb-mini', style: { width: 'auto', padding: '0 7px', fontSize: 11, color: 'var(--accent)' }, title: 'A fájl tartalmának hozzáadása ötletként', onClick: function () { props.onAddIdea(preview.content); setAdded(true); setTimeout(function () { setAdded(false); }, 1800); } }, added ? '✓ Hozzáadva' : '✚ Ötlethez') : null,
           h('button', { className: 'fb-mini', onClick: function () { setPreview(null); } }, '×')),
         preview.content != null
-          ? h('div', { className: 'btxt md', style: { fontSize: 12.5 }, dangerouslySetInnerHTML: { __html: mdHtml(preview.content) } })
+          ? h('div', { className: 'btxt md', style: { fontSize: 12.5 }, onMouseUp: onPreviewMouseUp, onScroll: function () { if (selPop) setSelPop(null); }, dangerouslySetInnerHTML: { __html: mdHtml(preview.content) } })
           : h('button', { className: 'btn', style: { fontSize: 12 }, onClick: function () { openSigned(preview.storage_path); } }, 'Megnyitás / letöltés →')
-      ) : null
+      ) : null,
+      // #1 — floating "add the selected passage to a research idea" button, popped on a text selection in the preview
+      selPop ? h('button', { className: 'sel-idea-btn', style: { position: 'fixed', left: selPop.x, top: selPop.y - 40, transform: 'translateX(-50%)', zIndex: 60 }, onMouseDown: function (e) { e.preventDefault(); }, onClick: function () { props.onAddIdea(selPop.text); setSelPop(null); try { window.getSelection().removeAllRanges(); } catch (e) { } } }, '✚ Ötlethez') : null
     );
   }
 
@@ -361,8 +373,21 @@
     var atS = useState([]), attach = atS[0], setAttach = atS[1];          // pending attachments for the next message
     var pkS = useState(false), picker = pkS[0], setPicker = pkS[1];
     var enS = useState(false), enhancing = enS[0], setEnhancing = enS[1];   // #6: prompt enhancement in flight
-    var firstLoad = useRef(true), animated = useRef({}), alive = useRef(true), scrollRef = useRef(null), taRef = useRef(null), justStreamed = useRef(false);
+    var firstLoad = useRef(true), animated = useRef({}), alive = useRef(true), scrollRef = useRef(null), taRef = useRef(null), justStreamed = useRef(false), lastSuggestRef = useRef(0);
     useEffect(function () { return function () { alive.current = false; }; }, []);
+    // #2 — after each AI exchange, surface NEW research ideas from the conversation into the Ideas list as
+    // candidates (the user accepts/rejects). Throttled to ~once per exchange; deduped + capped server-side.
+    useEffect(function () {
+      if (!props.canEdit || msgs.length < 2) return;
+      var last = msgs[msgs.length - 1];
+      if (!last || last.role !== 'assistant') return;
+      if (msgs.length - lastSuggestRef.current < 2) return;
+      lastSuggestRef.current = msgs.length;
+      var transcript = msgs.slice(-12).map(function (m) { return (m.role === 'assistant' ? 'AI: ' : 'User: ') + String(m.content || ''); }).join('\n\n').slice(0, 9000);
+      sb.functions.invoke('research-ai', { body: { action: 'suggest', project_id: props.projectId, text: transcript } }).then(function (res) {
+        var d = res && res.data; if (d && d.count) { props.onChanged(); }
+      }, function () { });
+    }, [msgs.length]);
     function startTyping(id, full) {
       if (!full) return;
       // reveal word-by-word at a calm, readable pace (each word fades in) — clearly slower than a raw
@@ -582,7 +607,7 @@
         return h('div', { className: 'idea', key: idea.id },
           h('div', { style: { display: 'flex', gap: 7, alignItems: 'center', marginBottom: 4 } },
             h('button', { className: 'icon-x', title: open ? 'Összecsukás' : 'Kinyitás', style: { marginRight: 1, flex: 'none' }, onClick: function () { toggle(idea.id); } }, open ? '▾' : '▸'),
-            h('span', { className: 'chip ' + (idea.source === 'gap' ? 'c-acc' : 'c-grey') }, idea.source),
+            h('span', { className: 'chip ' + (idea.source === 'gap' || idea.source === 'chat' ? 'c-acc' : 'c-grey') }, idea.source === 'chat' ? '💡 AI (chat)' : idea.source === 'gap' ? '💡 AI (gap)' : idea.source === 'own' ? 'saját' : idea.source),
             idea.novelty != null ? h('span', { className: 'chip c-ok' }, 'novelty ' + idea.novelty) : null,
             h('span', { className: 'chip ' + (idea.status === 'selected' ? 'c-ok' : (idea.status === 'rejected' ? 'c-grey' : 'c-warn')) }, idea.status),
             props.canEdit ? h('button', { className: 'icon-x', style: { marginLeft: 'auto' }, onClick: function () { del(idea); } }, '✕') : null

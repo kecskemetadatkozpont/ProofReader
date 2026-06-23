@@ -55,6 +55,24 @@ Deno.serve(async (req) => {
       const improved = await enhancePrompt(proj, String(text || '').slice(0, 4000), userModel);
       return json({ ok: true, text: improved });
     }
+    // #2 — continuously suggest research ideas grounded in the chat conversation; inserted as candidates the
+    // user accepts/rejects in the Ideas list. Deduped against existing ideas; returns at most 3 per call.
+    if (action === 'suggest') {
+      const { data: existing } = await sb.from('research_ideas').select('question').eq('project_id', project_id).limit(60);
+      const existingQs = (existing || []).map((e: any) => String(e.question || ''));
+      const ideas = await suggestFromChat(proj, String(text || '').slice(0, 9000), existingQs, userModel);
+      const rows = ideas.slice(0, 3).map((i: any) => ({
+        project_id, source: 'chat', question: String(i.question || '').slice(0, 600),
+        hypothesis: i.hypothesis ? String(i.hypothesis).slice(0, 800) : null,
+        rationale: i.rationale ? String(i.rationale).slice(0, 1000) : null,
+        status: 'candidate',
+      })).filter((r: any) => r.question);
+      if (rows.length) {
+        const { error } = await sb.from('research_ideas').insert(rows);
+        if (error) return json({ error: 'insert failed: ' + error.message }, 403);
+      }
+      return json({ ok: true, count: rows.length });
+    }
     const { data: sources } = await sb.from('research_sources')
       .select('title,year,venue,abstract').eq('project_id', project_id).limit(40);
 
@@ -111,6 +129,31 @@ ${text}`;
   if (out.error) throw new Error(out.error.message || 'anthropic error');
   const t = (out.content || []).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n').trim();
   return t || text;
+}
+
+async function suggestFromChat(proj: any, transcript: string, existingQs: string[], model: string): Promise<any[]> {
+  if (!transcript.trim()) return [];
+  const avoid = existingQs.slice(0, 40).map((q) => '- ' + q).join('\n');
+  const prompt = `You watch a researcher's chat and surface NEW research ideas as they emerge. Project: "${proj.title || ''}"${proj.field ? ' (' + proj.field + ')' : ''}.${proj.goal ? ' Goal: ' + proj.goal + '.' : ''}
+
+From the conversation below, propose 1-3 concrete, specific research ideas/questions that genuinely emerged from it. Each must be well-grounded in what was discussed — do NOT invent generic ideas, and do NOT repeat anything already in this list:
+${avoid || '(none yet)'}
+
+Conversation (most recent last):
+${transcript}
+
+Return ONLY a JSON array, no prose. Each item: {"question": "...", "hypothesis": "... or null", "rationale": "one sentence on why this follows from the conversation"}. If nothing genuinely new is worth proposing, return [].`;
+  const r = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'x-api-key': ANTHROPIC_KEY!, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+    body: JSON.stringify({ model, max_tokens: 1200, messages: [{ role: 'user', content: prompt }] }),
+  });
+  const out = await r.json();
+  if (out.error) throw new Error(out.error.message || 'anthropic error');
+  const txt = (out.content || []).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n');
+  const m = txt.match(/\[[\s\S]*\]/);
+  if (!m) return [];
+  try { const arr = JSON.parse(m[0]); return Array.isArray(arr) ? arr : []; } catch { return []; }
 }
 
 async function askClaude(action: string, proj: any, sources: any[], model: string): Promise<any[]> {
