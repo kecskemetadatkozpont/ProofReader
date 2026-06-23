@@ -430,7 +430,7 @@
           if (cell) { const r = cell.getBoundingClientRect(); setTableTb({ top: r.top - 38 > 60 ? r.top - 38 : r.bottom + 6, left: r.left + r.width / 2, cell }); return; }
           const s = e.target.closest && e.target.closest('.sent'); if (s) { setActiveSid(+s.getAttribute('data-sid')); setTableTb(null); }
         } : undefined}
-        onScroll={fmt || tableTb ? () => { setFmt(null); setTableTb(null); } : undefined}
+        onScroll={() => { if (fmt || tableTb) { setFmt(null); setTableTb(null); } if (ctx.onPreviewScroll) ctx.onPreviewScroll(); }}
         onMouseUp={onMouseUp}
         onBlur={editable ? (e) => {
           const cell = e.target.closest && e.target.closest('td, th');

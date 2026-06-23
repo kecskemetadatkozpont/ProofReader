@@ -325,6 +325,8 @@
     const canComment = canEdit || myRole === 'commenter';
 
     const idxRef = useRef(idx), statusRef = useRef(status), seqRef = useRef(0);
+    const userScrolledRef = useRef(0), progScrollRef = useRef(0);   // read-aloud: don't fight a manual scroll
+    const onPreviewScroll = useCallback(() => { if (Date.now() > progScrollRef.current) userScrolledRef.current = Date.now(); }, []);
     const sentsRef = useRef(compiled.sentences), rateRef = useRef(rate), voiceRef = useRef(voiceURI), filesRef = useRef(files);
     const setIdx = (v) => { idxRef.current = v; setIdxState(v); };
     const setStatus = (v) => { statusRef.current = v; setStatusState(v); };
@@ -724,9 +726,20 @@
         const el = root.querySelector('.sent[data-sid="' + sentId + '"]'); if (!el) return;
         const cr = root.getBoundingClientRect(), er = el.getBoundingClientRect();
         const target = root.scrollTop + (er.top - cr.top) - root.clientHeight / 2 + er.height / 2;
+        progScrollRef.current = Date.now() + 900;
         root.scrollTo({ top: Math.max(0, target), behavior: 'smooth' });
       });
     }, [active]);
+    // briefly pulse a sentence (used by the Review "Jump" so the target is clearly visible)
+    const flashSentence = useCallback((docId, sentId) => {
+      if (sentId == null) return;
+      setTimeout(() => {
+        document.querySelectorAll('.preview-scroll[data-doc="' + docId + '"] .sent[data-sid="' + sentId + '"]').forEach((el) => {
+          el.classList.remove('sent-flash'); void el.offsetWidth; el.classList.add('sent-flash');
+          setTimeout(() => el.classList.remove('sent-flash'), 1700);
+        });
+      }, 70);
+    }, []);
     // editor click -> sync the preview to the clicked sentence
     const onEditorJump = useCallback((off) => {
       const k = sentAt(off); if (k < 0) return;
@@ -901,9 +914,12 @@
         const el = root.querySelector('.sent[data-sid="' + sent.id + '"]');
         if (!el) return;
         el.classList.add(status === 'idle' ? 'cursor' : 'reading');
-        if (status !== 'idle') {
+        // Auto-follow the read sentence — but NOT while the user is manually scrolling (let reading
+        // continue in the background for ~5s after a manual scroll instead of yanking them back).
+        if (status !== 'idle' && Date.now() - userScrolledRef.current >= 5000) {
           const cr = root.getBoundingClientRect(), er = el.getBoundingClientRect();
           const target = root.scrollTop + (er.top - cr.top) - root.clientHeight / 2 + er.height / 2;
+          progScrollRef.current = Date.now() + 900;   // mark this as OUR scroll, not the user's
           root.scrollTo({ top: Math.max(0, target), behavior: 'smooth' });
         }
       });
@@ -920,13 +936,15 @@
       const k = comp.sentences.findIndex((x) => x.id === id); if (k < 0) return;
       if (isCurProj(pane.docId) && pane.docId !== active) { idxByDoc.current[pane.docId] = k; setActive(pane.docId); return; }
       if (isCurProj(pane.docId)) {
-        seekTo(k);
+        if (k !== idxRef.current) seekTo(k);   // clicking the already-current sentence must not restart playback
         const sent = comp.sentences[k];
         if (files[active] && files[active].type === 'tex') setSelectReq({ start: sent.start, end: sent.start, nonce: Date.now() });
       }
     }, [getCompiled, isCurProj, active, files, seekTo]);
 
     const onPreviewMouseUp = useCallback((pane, e) => {
+      // only a deliberate drag-selection pops the comment/to-do toolbar — not a double/triple-click word select
+      if (e && e.detail >= 2) { setSelPaneId(null); setSelQuote(''); return; }
       const root = previewElByPane(pane.id); if (!root) { setSelPaneId(null); return; }
       const sel = window.getSelection();
       if (!sel || sel.rangeCount === 0 || sel.isCollapsed || !sel.toString().trim()) { setSelPaneId(null); setSelQuote(''); return; }
@@ -1440,16 +1458,17 @@
       if (a.file !== active) {
         // cross-file: index against the TARGET file's own sentences (not the stale active list), then
         // let the [active] effect place it — mirrors onPreviewClick's cross-file path.
+        var fsid = null;
         try {
           const comp = window.LatexEngine.process(getSource(a.file), files); const sents = comp.sentences || [];
           let k = -1; for (let i = 0; i < sents.length; i++) { if (a.start >= sents[i].start && a.start <= sents[i].end) { k = i; break; } if (sents[i].start > a.start) { k = Math.max(0, i - 1); break; } }
-          idxByDoc.current[a.file] = Math.max(0, k < 0 ? sents.length - 1 : k);
+          const ki = Math.max(0, k < 0 ? sents.length - 1 : k); idxByDoc.current[a.file] = ki; fsid = sents[ki] && sents[ki].id;
         } catch (e) { }
-        setActive(a.file); setSelectReq({ start: a.start, end: a.end, nonce: Date.now() }); return;
+        setActive(a.file); setSelectReq({ start: a.start, end: a.end, nonce: Date.now() }); if (fsid != null) setTimeout(() => flashSentence(a.file, fsid), 450); return;
       }
       setSelectReq({ start: a.start, end: a.end, nonce: Date.now() });
       const k = sentAt(a.start);
-      if (k >= 0) { seekTo(k); const s = sentsRef.current[k]; if (s) requestAnimationFrame(() => scrollPreviewTo(s.id)); }
+      if (k >= 0) { seekTo(k); const s = sentsRef.current[k]; if (s) { requestAnimationFrame(() => scrollPreviewTo(s.id)); flashSentence(active, s.id); } }
     };
     // does offset `pos` fall inside a verbatim-like environment? (a % comment there becomes literal text)
     const inVerbatim = (src, pos) => {
@@ -1899,7 +1918,7 @@
               dragId, onDragStart: (id) => setDragId(id), onDragEnd: () => setDragId(null), onMovePane: wsOnMovePane,
               onRebind: wsOnRebind, onEditSource: (docId, v) => { if (docId === active) handleEdit(v); },
               onCaret: (pane, off) => { if (pane.docId === active) onCaret(off); }, onJump: (pane, off) => { if (pane.docId === active) onEditorJump(off); },
-              onSourceSel, onPreviewClick, onPreviewMouseUp, registerPreview,
+              onSourceSel, onPreviewClick, onPreviewMouseUp, onPreviewScroll, registerPreview,
               getFileURL, getFileData, onPrint: onPrintDoc, listFiles: listProjFiles, externalDocs: externalDocsList,
               selPaneId, selQuote, selPos, onComment: () => startAnnotation('comment'), onTodo: () => startAnnotation('todo'), onCloseSel: () => { setSelQuote(''); setSelPaneId(null); }
             }} />

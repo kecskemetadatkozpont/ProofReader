@@ -439,8 +439,9 @@
     var _fz = Number(props.fontSize) || 13.5, _lh = Number(props.lineHeight) || Math.round(_fz * 1.6);
     const fontStyle = { fontSize: _fz + 'px', lineHeight: _lh + 'px' };   // always a valid, identical metric on both layers (caret align)
 
-    const reportCaret = () => { const ta = taRef.current; if (!ta) return; if (props.onCaret) props.onCaret(ta.selectionStart); if (props.onSelectRange) props.onSelectRange(ta.selectionStart, ta.selectionEnd); };
-    const reportJump = () => { const ta = taRef.current; if (!ta) return; if (props.onJump) props.onJump(ta.selectionStart); if (props.onSelectRange) props.onSelectRange(ta.selectionStart, ta.selectionEnd); };
+    const dblTs = React.useRef(0);   // suppress the comment/to-do toolbar on a double-click word-select
+    const reportCaret = () => { const ta = taRef.current; if (!ta) return; if (props.onCaret) props.onCaret(ta.selectionStart); if (props.onSelectRange && Date.now() - dblTs.current > 350) props.onSelectRange(ta.selectionStart, ta.selectionEnd); };
+    const reportJump = () => { const ta = taRef.current; if (!ta) return; if (props.onJump) props.onJump(ta.selectionStart); if (props.onSelectRange && Date.now() - dblTs.current > 350) props.onSelectRange(ta.selectionStart, ta.selectionEnd); };
 
     /* ------- find / replace logic ------- */
     function buildRe(f) {
@@ -569,7 +570,7 @@
             value: props.value, wrap: 'off', readOnly: !!props.readOnly,
             onChange: (e) => { props.onChange(e.target.value); refreshAC(); },
             onScroll: sync, onKeyDown: onKeyDown,
-            onClick: () => { setAc(null); reportJump(); }, onKeyUp: reportCaret, onSelect: reportCaret, onMouseUp: reportCaret,
+            onClick: () => { setAc(null); reportJump(); }, onKeyUp: reportCaret, onSelect: reportCaret, onMouseUp: reportCaret, onDoubleClick: () => { dblTs.current = Date.now(); },
             onBlur: () => setTimeout(() => setAc(null), 150)
           }),
           ac && React.createElement('div', { className: 'ac-menu', style: { left: ac.x + 'px', top: ac.y + 'px' } },
