@@ -136,7 +136,8 @@ Deno.serve(async (req) => {
       const sys = `You are writing a concise structured literature REVIEW (Markdown) for the research question: ${study.question || study.title}. Use ONLY the ${ids.length} included papers below; cite them as [n]. Sections: ## Áttekintés, ## Fő témák és eredmények, ## Módszerek és adathalmazok, ## Hiányosságok (research gaps), ## Következtetés. ${useMcp ? 'Ground non-trivial claims with the Consensus tools and cite the papers.' : ''} Be specific and synthesize across papers — do not just list them. End with a ## Hivatkozások list.`;
       const md = await callClaude(REVIEW_MODEL, sys, `Included papers:\n\n${list}\n\nWrite the review now.`, useMcp, 8192);
       const slug = String(study.title || 'study').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'study';
-      const path = 'studies/' + slug + '-review.md';
+      const sid8 = String(study_id).replace(/-/g, '').slice(0, 8);   // #9b: stable per-study id in the filename (unique + traceable, idempotent on re-run)
+      const path = 'studies/' + slug + '-' + sid8 + '-review.md';
       await sb.from('research_files').upsert({ project_id: study.project_id, path, content: md, mime: 'text/markdown', size: md.length, source: 'ai', created_by: uid, updated_by: uid, updated_at: new Date().toISOString() }, { onConflict: 'project_id,path' });
       await sb.from('research_study_steps').update({ status: 'done', last_run_at: new Date().toISOString() }).eq('study_id', study_id).eq('step', 4);
       await sb.from('research_studies').update({ status: 'done', cur_step: 4, updated_at: new Date().toISOString() }).eq('id', study_id);
