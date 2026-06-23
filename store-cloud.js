@@ -96,15 +96,19 @@
       }).catch(function (e) { console.warn('[PR] comment save error', e); });
       return;
     }
-    // deleted_at is a timestamptz column — serialise the epoch-ms flag as ISO, NOT a raw
-    // number (a bare integer fails the timestamptz cast and rejects the whole upsert, which
-    // is why soft-deletes used to vanish on reload).
+    // deleted_at is a timestamptz column — serialise the epoch-ms flag as ISO, NOT a raw number.
     var delAt = p.deletedAt ? new Date(p.deletedAt).toISOString() : null;
-    var row = { id: p.id, owner_id: p.ownerId || me.id, title: p.title || 'Untitled project', data: p, deleted_at: delAt, updated_at: nowISO() };
-    sb.from('projects').upsert(row).then(function (r) {
-      if (r.error) { console.warn('[PR] save failed, will retry', r.error.message); pending[id] = p; clearTimeout(timers[id]); timers[id] = setTimeout(function () { flush(id); }, 4000); return; }
-      syncMembers(p);
-    }).catch(function (e) { console.warn('[PR] save error', e); });
+    var onErr = function (r) { if (r && r.error) { console.warn('[PR] save failed, will retry', r.error.message); pending[id] = p; clearTimeout(timers[id]); timers[id] = setTimeout(function () { flush(id); }, 4000); return true; } return false; };
+    if (role === 'owner') {
+      var row = { id: p.id, owner_id: p.ownerId || me.id, title: p.title || 'Untitled project', data: p, deleted_at: delAt, updated_at: nowISO() };
+      sb.from('projects').upsert(row).then(function (r) { if (onErr(r)) return; syncMembers(p); }).catch(function (e) { console.warn('[PR] save error', e); });
+    } else {
+      // non-owner EDITOR: UPDATE only. An upsert also evaluates the INSERT policy (with check owner_id =
+      // auth.uid()), which a non-owner fails — so the whole write is rejected and the editor's edits/comments
+      // are silently dropped. The UPDATE policy allows editors. Never touch owner_id / deleted_at (owner-only).
+      sb.from('projects').update({ title: p.title || 'Untitled project', data: p, updated_at: nowISO() }).eq('id', p.id)
+        .then(function (r) { if (onErr(r)) return; }).catch(function (e) { console.warn('[PR] save error', e); });
+    }
   }
   function syncMembers(p) {
     try {
