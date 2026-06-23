@@ -197,9 +197,11 @@
         h('div', { className: 'modal-b' },
           h('div', { className: 'sec-t' }, 'Project library'),
           srcs.length ? srcs.map(function (s) { return row('s' + s.id, s.title, [s.year, s.venue].filter(Boolean).join(' · '), function () { props.onPick({ kind: 'source', source_id: s.id, title: s.title, label: s.title }); props.onClose(); }); }) : h('div', { style: { fontSize: 12.5, color: 'var(--faint)' } }, 'No library sources yet — add some on the Literature tab.'),
-          h('div', { className: 'sec-t' }, 'My publication files'),
+          h('div', { className: 'sec-t', style: { display: 'flex', alignItems: 'center', gap: 8 } }, h('span', null, 'My publication files'),
+            (files && files.length > 1) ? h('button', { className: 'btn', style: { padding: '2px 8px', fontSize: 11, marginLeft: 'auto', flex: 'none' }, onClick: function () { files.forEach(function (f) { props.onPick({ kind: 'file', bucket: 'publication-files', path: f.storage_path, name: f.name, mime: f.mime, label: f.name }); }); props.onClose(); } }, '📎 Összes csatolása') : null),
           files === null ? h('div', { style: { fontSize: 12.5, color: 'var(--faint)' } }, 'Loading…') : (files.length ? files.map(function (f) { return row('f' + f.id, f.name, (f.mime || '') + (f.size ? ' · ' + fmtBytes(f.size) : ''), function () { props.onPick({ kind: 'file', bucket: 'publication-files', path: f.storage_path, name: f.name, mime: f.mime, label: f.name }); props.onClose(); }); }) : h('div', { style: { fontSize: 12.5, color: 'var(--faint)' } }, 'No files uploaded to your profile yet.')),
-          h('div', { className: 'sec-t' }, 'My LaTeX publications'),
+          h('div', { className: 'sec-t', style: { display: 'flex', alignItems: 'center', gap: 8 } }, h('span', null, 'My LaTeX publications'),
+            (latexProjects && latexProjects.length > 1) ? h('button', { className: 'btn', style: { padding: '2px 8px', fontSize: 11, marginLeft: 'auto', flex: 'none' }, onClick: function () { latexProjects.forEach(function (p) { props.onPick({ kind: 'project', project_id: p.id, title: p.title, label: p.title || 'LaTeX' }); }); props.onClose(); } }, '📎 Összes csatolása') : null),
           latexProjects === null ? h('div', { style: { fontSize: 12.5, color: 'var(--faint)' } }, 'Loading…') : (latexProjects.length ? latexProjects.map(function (p) { return row('p' + p.id, p.title || 'Untitled', 'LaTeX projekt — a teljes szöveg csatolva lesz', function () { props.onPick({ kind: 'project', project_id: p.id, title: p.title, label: p.title || 'LaTeX' }); props.onClose(); }); }) : h('div', { style: { fontSize: 12.5, color: 'var(--faint)' } }, 'Nincs LaTeX publikációd (Editor-projekt) még.')),
           h('div', { className: 'sec-t' }, 'Upload a file'),
           h('div', null, h('input', { type: 'file', onChange: onUpload }), upMsg ? h('span', { style: { marginLeft: 8, fontSize: 12 } }, upMsg) : null)
@@ -236,8 +238,9 @@
   function SessionFileBrowser(props) {
     var fS = useState(null), files = fS[0], setFiles = fS[1];
     var pvS = useState(null), preview = pvS[0], setPreview = pvS[1];
+    var adS = useState(false), added = adS[0], setAdded = adS[1];   // #8: brief "added to ideas" feedback
     var upRef = useRef(null);
-    function load() { sb.from('research_files').select('id,path,content,storage_path,mime,size,source,updated_at').eq('project_id', props.projectId).order('path', { ascending: true }).then(function (r) { setFiles((r && r.data) || []); }); }
+    function load() { sb.from('research_files').select('id,path,content,storage_path,mime,size,source,updated_at').eq('project_id', props.projectId).order('updated_at', { ascending: false }).then(function (r) { setFiles((r && r.data) || []); }); }
     useEffect(load, [props.projectId, props.version]);
     function newFile() {
       var name = (window.prompt('Új fájl neve:', 'jegyzet.md') || '').trim(); if (!name) return;
@@ -271,7 +274,9 @@
               props.canEdit ? h('button', { className: 'fb-mini', title: 'Törlés', onClick: function () { del(f); } }, '×') : null));
         })) : h('div', { className: 'fb-empty' }, 'Még nincs fájl. Kérd a chatben: „írd ki egy fájlba…", vagy tölts fel egyet.')),
       preview ? h('div', { className: 'fb-preview' },
-        h('div', { className: 'fb-pv-head' }, h('span', { className: 'fb-lbl' }, preview.path), h('button', { className: 'fb-mini', onClick: function () { setPreview(null); } }, '×')),
+        h('div', { className: 'fb-pv-head' }, h('span', { className: 'fb-lbl' }, preview.path),
+          (props.canEdit && props.onAddIdea && preview.content != null) ? h('button', { className: 'fb-mini', style: { width: 'auto', padding: '0 7px', fontSize: 11, color: 'var(--accent)' }, title: 'A fájl tartalmának hozzáadása ötletként', onClick: function () { props.onAddIdea(preview.content); setAdded(true); setTimeout(function () { setAdded(false); }, 1800); } }, added ? '✓ Hozzáadva' : '✚ Ötlethez') : null,
+          h('button', { className: 'fb-mini', onClick: function () { setPreview(null); } }, '×')),
         preview.content != null
           ? h('div', { className: 'btxt md', style: { fontSize: 12.5 }, dangerouslySetInnerHTML: { __html: mdHtml(preview.content) } })
           : h('button', { className: 'btn', style: { fontSize: 12 }, onClick: function () { openSigned(preview.storage_path); } }, 'Megnyitás / letöltés →')
@@ -456,7 +461,7 @@
       ) : null
       ),
       h('div', { className: 'fb-resizer', onMouseDown: startResize, title: 'Húzd az ablakok átméretezéséhez' }),
-      h(SessionFileBrowser, { projectId: props.projectId, authorId: props.authorId, canEdit: props.canEdit, version: filesVersion, width: fbWidth, onAttach: function (a) { setAttach(function (p) { return p.concat([a]); }); } }),
+      h(SessionFileBrowser, { projectId: props.projectId, authorId: props.authorId, canEdit: props.canEdit, version: filesVersion, width: fbWidth, onAttach: function (a) { setAttach(function (p) { return p.concat([a]); }); }, onAddIdea: function (text) { saveIdeaText(text); } }),
       selPop ? h('button', { className: 'sel-idea-btn', style: { position: 'fixed', left: selPop.x, top: selPop.y - 40, transform: 'translateX(-50%)', zIndex: 60 }, onMouseDown: function (e) { e.preventDefault(); }, onClick: function () { saveIdeaText(selPop.text); setSelPop(null); try { window.getSelection().removeAllRanges(); } catch (e) { } } }, '✚ Ötlethez') : null,
       picker ? h(AttachModal, { projectId: props.projectId, authorId: props.authorId, fileOwnerId: props.fileOwnerId, sources: props.sources, onPick: function (a) { setAttach(function (p) { return p.concat([a]); }); }, onClose: function () { setPicker(false); } }) : null
     );
@@ -467,10 +472,15 @@
     var f = useState({ question: '', hypothesis: '' }), form = f[0], setForm = f[1];
     var b = useState(false), busy = b[0], setBusy = b[1];
     var m = useState(''), msg = m[0], setMsg = m[1];
+    var exS = useState({}), expanded = exS[0], setExpanded = exS[1];   // #10: per-idea open/closed
+    function toggle(id) { setExpanded(function (e) { var n = Object.assign({}, e); n[id] = e[id] === false ? true : false; return n; }); }
     function add() {
-      if (!form.question.trim()) { setMsg('Type a research question first.'); return; }
+      var q = form.question.trim();
+      if (!q) { setMsg('Type a research question first.'); return; }
+      // #11 — tell the user instead of silently storing a duplicate
+      if ((props.ideas || []).some(function (i) { return (i.question || '').trim().toLowerCase() === q.toLowerCase(); })) { setMsg('⚠️ Ez az ötlet már szerepel a listában.'); return; }
       setMsg('');
-      sb.from('research_ideas').insert({ project_id: props.projectId, source: 'own', question: form.question.trim(), hypothesis: form.hypothesis.trim() || null, created_by: props.authorId, status: 'candidate' }).then(function (r) { if (r && r.error) { setMsg('Could not add: ' + r.error.message); return; } setForm({ question: '', hypothesis: '' }); props.onChanged(); });
+      sb.from('research_ideas').insert({ project_id: props.projectId, source: 'own', question: q, hypothesis: form.hypothesis.trim() || null, created_by: props.authorId, status: 'candidate' }).then(function (r) { if (r && r.error) { setMsg('Could not add: ' + r.error.message); return; } setForm({ question: '', hypothesis: '' }); setMsg('✓ Ötlet hozzáadva.'); setTimeout(function () { setMsg(''); }, 2500); props.onChanged(); });
     }
     function onKey(e) { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); add(); } }
     function setStatus(idea, st) { sb.from('research_ideas').update({ status: st }).eq('id', idea.id).then(props.onChanged); }
@@ -493,16 +503,18 @@
         h('div', { style: { marginTop: 8 } }, h('button', { className: 'btn pri', onClick: add }, 'Add idea'))
       ) : null,
       ideas.length ? ideas.map(function (idea) {
+        var open = expanded[idea.id] !== false;   // #10: default open; click chevron / question to collapse
         return h('div', { className: 'idea', key: idea.id },
           h('div', { style: { display: 'flex', gap: 7, alignItems: 'center', marginBottom: 4 } },
+            h('button', { className: 'icon-x', title: open ? 'Összecsukás' : 'Kinyitás', style: { marginRight: 1, flex: 'none' }, onClick: function () { toggle(idea.id); } }, open ? '▾' : '▸'),
             h('span', { className: 'chip ' + (idea.source === 'gap' ? 'c-acc' : 'c-grey') }, idea.source),
             idea.novelty != null ? h('span', { className: 'chip c-ok' }, 'novelty ' + idea.novelty) : null,
             h('span', { className: 'chip ' + (idea.status === 'selected' ? 'c-ok' : (idea.status === 'rejected' ? 'c-grey' : 'c-warn')) }, idea.status),
             props.canEdit ? h('button', { className: 'icon-x', style: { marginLeft: 'auto' }, onClick: function () { del(idea); } }, '✕') : null
           ),
-          h('div', { style: { fontSize: 13.5, fontWeight: 600, whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, idea.question),
-          idea.hypothesis ? h('div', { style: { fontSize: 12.5, color: 'var(--muted)', marginTop: 2, whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, idea.hypothesis) : null,
-          idea.rationale ? h('div', { style: { fontSize: 12, color: 'var(--faint)', marginTop: 4, whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, idea.rationale) : null,
+          h('div', { onClick: function () { toggle(idea.id); }, title: open ? '' : idea.question, style: open ? { fontSize: 13.5, fontWeight: 600, whiteSpace: 'pre-wrap', wordBreak: 'break-word', cursor: 'pointer' } : { fontSize: 13.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', cursor: 'pointer' } }, idea.question),
+          open && idea.hypothesis ? h('div', { style: { fontSize: 12.5, color: 'var(--muted)', marginTop: 2, whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, idea.hypothesis) : null,
+          open && idea.rationale ? h('div', { style: { fontSize: 12, color: 'var(--faint)', marginTop: 4, whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, idea.rationale) : null,
           props.canEdit ? h('div', { className: 'idea-foot' },
             h('button', { onClick: function () { setStatus(idea, 'selected'); } }, 'Select'),
             h('button', { onClick: function () { setStatus(idea, 'rejected'); } }, 'Reject'),
@@ -845,6 +857,9 @@
     var erS = useState(''), err = erS[0], setErr = erS[1];
     var alive = useRef(true), stop = useRef(false);
     useEffect(function () { return function () { alive.current = false; }; }, []);
+    // #12 — selId is seeded from studies[0] at mount; if the studies list loads AFTER mount it stays null
+    // and a step run would POST an empty study_id ("study_id required"). Sync selId once studies arrive.
+    useEffect(function () { if (!selId && studies.length) setSelId(studies[0].id); }, [studies.length]);
     var sel = studies.filter(function (x) { return x.id === selId; })[0];
     var srcMap = {}; (props.sources || []).forEach(function (s) { srcMap[s.id] = s; });
 
@@ -876,7 +891,9 @@
     var linesToArr = function (s) { return String(s || '').split('\n').map(function (x) { return x.trim(); }).filter(Boolean); };
 
     function runStep(n) {
-      if (running) return; setErr(''); stop.current = false; setRunning(true); setProg({ done: 0, total: 0, counts: {} }); setTitles({});
+      if (running) return;
+      if (!selId) { setErr('Nincs kiválasztott tanulmány — válassz egyet a listából.'); return; }   // #12 guard
+      setErr(''); stop.current = false; setRunning(true); setProg({ done: 0, total: 0, counts: {} }); setTitles({});
       sb.from('research_study_steps').update({ config: cfg, status: 'running' }).eq('study_id', selId).eq('step', n).then(function () {
         if (n === 4) {
           callStudy({ action: 'generate_review', study_id: selId }).then(function (d) {
