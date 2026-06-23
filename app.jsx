@@ -1403,6 +1403,17 @@
         .map((a) => { const au = A && A.byId(a.authorId); return { kind: a.kind, body: a.body, due: a.due, author: au ? au.name : 'Valaki', color: (au && au.color) ? au.color : '#8a8f98', initials: (au && A.initials) ? A.initials(au.name) : '•' }; });
     }, [getCompiled, displayAnns, annotations, active]);
 
+    // raw annotation objects (id, replies, status…) overlapping a sentence — for the bubble thread popover
+    const annoObjsForSentence = useCallback((docId, sid) => {
+      const comp = getCompiled(docId); if (!comp) return [];
+      const s = comp.sentences.find((x) => String(x.id) === String(sid)); if (!s) return [];
+      const anns = docId === active ? displayAnns : annotations;
+      return anns.filter((a) => a.kind !== 'review' && a.anchor && a.anchor.file === docId && !a._orphan && a.anchor.start < s.end && a.anchor.end > s.start);
+    }, [getCompiled, displayAnns, annotations, active]);
+    // bubble thread popover: which sentence's threads are open, and where (anchored next to the clicked card)
+    const [bubble, setBubble] = useState(null); // { docId, sid, rect }
+    const onOpenBubble = useCallback((docId, sid, rect) => setBubble({ docId: docId, sid: String(sid), rect: rect }), []);
+
     // hover card showing the comment/to-do text + author at the sentence's top-right corner
     const [annoPop, setAnnoPop] = useState(null);
     const annoPopTimer = useRef(null);
@@ -1689,7 +1700,7 @@
         const cards = Object.keys(bySentAnns).map((sid) => {
           const el = root.querySelector('.sent[data-sid="' + sid + '"]'); if (!el) return null;
           const er = el.getBoundingClientRect();
-          return { top: er.top - rr.top + root.scrollTop, anns: bySentAnns[sid] };
+          return { top: er.top - rr.top + root.scrollTop, sid: sid, anns: bySentAnns[sid] };
         }).filter(Boolean).sort((a, b) => a.top - b.top);
         if (cards.length && root.clientWidth >= 900) {
           root.classList.add('has-anno-margin');
@@ -1706,7 +1717,7 @@
             const body = document.createElement('div'); body.className = 'amc-body'; body.textContent = first.body || (todoOnly ? '(to-do)' : '(comment)');
             card.appendChild(head); card.appendChild(body);
             card.addEventListener('mousedown', (e) => { e.preventDefault(); });
-            card.addEventListener('click', (e) => { e.stopPropagation(); card.classList.toggle('expanded'); });
+            card.addEventListener('click', (e) => { e.stopPropagation(); onOpenBubble(docId, c.sid, card.getBoundingClientRect()); });
             root.appendChild(card);
           });
         }
@@ -1940,7 +1951,7 @@
               monoSize: t.monoSize, canEdit, canComment, bibKeys, bibMeta,
               writeMode, setWrite: setWriteMode, onPreviewEdit, onBlockTransform, onInsertBlock, onTableEdit, onInsertImage, onInsertImageBlob,
               isCurProj, docExists, readOnlyDoc, getSource, getCompiled, docLabel, docColor,
-              getCompiledPdf, requestCompile, onCompileExact, annoMarks: annoMarksFor, spellMarks: spellMarksFor, annoSids: annoSidsFor, annoForSentence, voicedSids: voicedSidsFor, reviewSids: reviewSidsFor,
+              getCompiledPdf, requestCompile, onCompileExact, annoMarks: annoMarksFor, spellMarks: spellMarksFor, annoSids: annoSidsFor, annoForSentence, onOpenBubble, voicedSids: voicedSidsFor, reviewSids: reviewSidsFor,
               hlHide: (hlShow.comment ? '' : ' hl-hide-comment') + (hlShow.todo ? '' : ' hl-hide-todo') + (hlShow.spell ? '' : ' hl-hide-spell'),
               canClose: window.WS.allPanes(layout).length > 1,
               onFocus: wsOnFocus, onAdd: wsOnAdd, onSplit: wsOnAdd, onClose: wsOnClose, onSolo: wsOnSolo, onSetRatio: wsOnSetRatio,
@@ -1982,6 +1993,11 @@
           showReview={showReview} onToggleReview={() => setShowReview((v) => !v)} hasReview={reviewAnns.length > 0}
           hlShow={hlShow} onToggleHl={(k) => setHlShow((s) => Object.assign({}, s, { [k]: !s[k] }))}
           onBookmark={saveReading} saved={savedFlash} />
+
+        {bubble && <Collab.BubbleThreads rect={bubble.rect} anns={annoObjsForSentence(bubble.docId, bubble.sid)}
+          me={me} members={collabMembers} canEdit={canEdit}
+          onReply={onReply} onResolve={onResolve} onDelete={onDeleteAnn} onToggleTodo={onToggleTodo}
+          onJump={onJumpAnn} onEdit={onEditAnn} onClose={() => setBubble(null)} />}
 
         {shareOpen && <Collab.ShareModal project={projForShare} me={me} onClose={() => setShareOpen(false)} onChange={refreshCollab} />}
         {diffVersion && <Collab.DiffModal version={diffVersion} file={active} currentSource={source} onClose={() => setDiffVersion(null)} onRestore={onRestore} />}

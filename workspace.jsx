@@ -622,7 +622,7 @@
         const anns = ctx.annoForSentence ? ctx.annoForSentence(docId, sid) : [];
         if (!anns.length) return;
         const er = sp.getBoundingClientRect();
-        cards.push({ top: er.top - rr.top + root.scrollTop, anns: anns });
+        cards.push({ top: er.top - rr.top + root.scrollTop, sid: sid, anns: anns });
       });
       if (!cards.length) return;
       cards.sort((a, b) => a.top - b.top);
@@ -639,7 +639,7 @@
         const body = document.createElement('div'); body.className = 'amc-body'; body.textContent = first.body || (todoOnly ? '(teendő)' : '(komment)');
         card.appendChild(head); card.appendChild(body);
         card.addEventListener('mousedown', (e) => e.preventDefault());
-        card.addEventListener('click', (e) => { e.stopPropagation(); card.classList.toggle('expanded'); });
+        card.addEventListener('click', (e) => { e.stopPropagation(); if (ctx.onOpenBubble) ctx.onOpenBubble(docId, c.sid, card.getBoundingClientRect()); });
         root.appendChild(card);
       });
     }

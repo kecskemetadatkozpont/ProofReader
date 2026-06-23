@@ -246,6 +246,36 @@
     </div>;
   }
 
+  /* Floating thread popover opened from a margin bubble — the full conversation (replies, reply box,
+     resolve/reopen, delete) and to-dos for ONE sentence, anchored next to it. Reuses Thread/TodoItem so the
+     side drawer is no longer needed to read or answer a comment. */
+  function BubbleThreads(p) {
+    const ref = useRef(null);
+    useEffect(() => {
+      const onKey = (e) => { if (e.key === 'Escape') p.onClose(); };
+      const onDown = (e) => { if (ref.current && !ref.current.contains(e.target)) p.onClose(); };
+      window.addEventListener('keydown', onKey);
+      const t = setTimeout(() => window.addEventListener('mousedown', onDown), 0);
+      return () => { clearTimeout(t); window.removeEventListener('keydown', onKey); window.removeEventListener('mousedown', onDown); };
+    }, []);
+    const r = p.rect || { left: 320, right: 320, top: 120, bottom: 120 };
+    const W = 326;
+    let left = r.left - W - 12;                                            // prefer LEFT of the bubble (gutter is on the right)
+    if (left < 12) left = Math.min(window.innerWidth - W - 12, (r.right || r.left) + 12);
+    const top = Math.max(12, Math.min(r.top, window.innerHeight - 380));
+    const anns = p.anns || [];
+    const comments = anns.filter((a) => a.kind !== 'todo');
+    const todos = anns.filter((a) => a.kind === 'todo');
+    return <div className="bubble-pop" ref={ref} style={{ left: left, top: top, width: W }}>
+      <div className="bubble-pop-head"><span>{[comments.length ? 'Megjegyzés' : '', todos.length ? 'Teendő' : ''].filter(Boolean).join(' · ')}</span><button className="bubble-pop-x" onClick={p.onClose} title="Bezárás">✕</button></div>
+      <div className="bubble-pop-body">
+        {comments.map((a) => <Thread key={a.id} ann={a} me={p.me} members={p.members} canEdit={p.canEdit} onReply={p.onReply} onResolve={p.onResolve} onDelete={p.onDelete} onJump={p.onJump} onEdit={p.onEdit} />)}
+        {todos.map((a) => <TodoItem key={a.id} ann={a} me={p.me} members={p.members} canEdit={p.canEdit} onToggle={p.onToggleTodo} onJump={p.onJump} onDelete={p.onDelete} onEdit={p.onEdit} />)}
+        {!anns.length && <div className="bubble-empty">Ehhez a mondathoz nincs nyitott megjegyzés.</div>}
+      </div>
+    </div>;
+  }
+
   function buildMarkdown(todos, projectTitle) {
     let md = '# To-dos — ' + projectTitle + '\n\n_Exported ' + new Date().toLocaleString() + '_\n\n';
     const byFile = {};
@@ -818,5 +848,5 @@
     </div></div>;
   }
 
-  window.Collab = { Avatar, PresenceBar, ResumePill, SelectionToolbar, AnnoPopover, RightDrawer, VoiceSettings, ShareModal, DiffModal };
+  window.Collab = { Avatar, PresenceBar, ResumePill, SelectionToolbar, AnnoPopover, BubbleThreads, RightDrawer, VoiceSettings, ShareModal, DiffModal };
 })();

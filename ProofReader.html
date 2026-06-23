@@ -412,6 +412,13 @@
     .anno-margin-card::before { content: ''; position: absolute; left: -7px; top: 13px; width: 0; height: 0; border: 6px solid transparent; border-right-color: var(--pane); }
     .anno-margin-card.expanded .amc-body { -webkit-line-clamp: unset; overflow: visible; }
     .anno-margin-card.expanded { box-shadow: 0 10px 26px rgba(20,24,40,.22); border-color: var(--accent); z-index: 9; }
+    /* floating thread popover opened from a margin bubble — full conversation + reply + resolve, no list */
+    .bubble-pop { position: fixed; z-index: 90; background: var(--pane, #fff); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 18px 50px rgba(15,20,40,.28); display: flex; flex-direction: column; max-height: 72vh; overflow: hidden; }
+    .bubble-pop-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--line); font-size: 10.5px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+    .bubble-pop-x { border: 1px solid var(--line); background: var(--app-bg); color: var(--ink); font-size: 13px; font-weight: 700; line-height: 1; width: 24px; height: 24px; border-radius: 6px; cursor: pointer; display: grid; place-items: center; flex: none; }
+    .bubble-pop-x:hover { background: var(--danger-bg, #fdeef0); color: var(--danger, #b42318); border-color: var(--danger, #b42318); }
+    .bubble-pop-body { padding: 8px; overflow: auto; }
+    .bubble-empty { padding: 14px 8px; color: var(--muted); font-size: 12px; text-align: center; }
     .paper { background: var(--paper-bg); color: var(--ink); width: var(--paper-width); max-width: calc(100% - 48px);
       margin: 0 auto; padding: 56px 64px 64px; border-radius: 3px; box-shadow: 0 1px 3px rgba(0,0,0,.08), 0 12px 32px rgba(20,24,40,.10);
       font-family: 'Source Serif 4', Georgia, serif; font-size: var(--serif-size); line-height: 1.62; }
