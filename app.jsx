@@ -1691,7 +1691,7 @@
           const er = el.getBoundingClientRect();
           return { top: er.top - rr.top + root.scrollTop, anns: bySentAnns[sid] };
         }).filter(Boolean).sort((a, b) => a.top - b.top);
-        if (cards.length) {
+        if (cards.length && root.clientWidth >= 900) {
           root.classList.add('has-anno-margin');
           let lastBottom = -999;
           cards.forEach((c) => {
@@ -1706,7 +1706,7 @@
             const body = document.createElement('div'); body.className = 'amc-body'; body.textContent = first.body || (todoOnly ? '(to-do)' : '(comment)');
             card.appendChild(head); card.appendChild(body);
             card.addEventListener('mousedown', (e) => { e.preventDefault(); });
-            card.addEventListener('click', (e) => { e.stopPropagation(); if (docId !== active && isCurProj(docId)) setActive(docId); setDrawer({ open: true, tab: todoOnly ? 'todos' : 'comments' }); onJumpAnn(first); });
+            card.addEventListener('click', (e) => { e.stopPropagation(); card.classList.toggle('expanded'); });
             root.appendChild(card);
           });
         }
@@ -1940,7 +1940,7 @@
               monoSize: t.monoSize, canEdit, canComment, bibKeys, bibMeta,
               writeMode, setWrite: setWriteMode, onPreviewEdit, onBlockTransform, onInsertBlock, onTableEdit, onInsertImage, onInsertImageBlob,
               isCurProj, docExists, readOnlyDoc, getSource, getCompiled, docLabel, docColor,
-              getCompiledPdf, requestCompile, onCompileExact, annoMarks: annoMarksFor, spellMarks: spellMarksFor, annoSids: annoSidsFor, voicedSids: voicedSidsFor, reviewSids: reviewSidsFor,
+              getCompiledPdf, requestCompile, onCompileExact, annoMarks: annoMarksFor, spellMarks: spellMarksFor, annoSids: annoSidsFor, annoForSentence, voicedSids: voicedSidsFor, reviewSids: reviewSidsFor,
               hlHide: (hlShow.comment ? '' : ' hl-hide-comment') + (hlShow.todo ? '' : ' hl-hide-todo') + (hlShow.spell ? '' : ' hl-hide-spell'),
               canClose: window.WS.allPanes(layout).length > 1,
               onFocus: wsOnFocus, onAdd: wsOnAdd, onSplit: wsOnAdd, onClose: wsOnClose, onSolo: wsOnSolo, onSetRatio: wsOnSetRatio,

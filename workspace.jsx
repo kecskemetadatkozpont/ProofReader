@@ -560,6 +560,7 @@
     const playingRef = useRef(playing); playingRef.current = playing;
     const annoMap = ctx.annoSids ? ctx.annoSids(docId) : {};
     const annoRef = useRef(annoMap); annoRef.current = annoMap;
+    const hasAnno = Object.keys(annoMap).length > 0;   // reserve a right gutter for margin cards (#6)
     const voicedMap = ctx.voicedSids ? ctx.voicedSids(docId) : {};
     const voicedRef = useRef(voicedMap); voicedRef.current = voicedMap;
     const reviewMap = ctx.reviewSids ? ctx.reviewSids(docId) : {};
@@ -603,6 +604,45 @@
       root.querySelectorAll('.ct-textlayer > span.sent').forEach((s) => { const id = s.dataset.sid; if (map[id]) { s.classList.add('voiced'); (bySid[id] = bySid[id] || []).push(s); } });
       Object.keys(bySid).forEach((id) => { const arr = bySid[id]; const last = arr[arr.length - 1]; last.classList.add('voiced-end'); last.title = 'Voiced with ElevenLabs — replays free, no extra credits'; });
     }
+    // #6 — margin comment/to-do cards anchored beside their sentence in the REAL compiled PDF, scrolling
+    // with the document. Sentence positions come from the token-aligned text-layer spans
+    // (.ct-textlayer > span.sent[data-sid]); only rendered pages have spans, so this re-runs per page
+    // render + on annotation change. Clicking a card expands it in place (read the bubble, not a list).
+    function applyMarginCards(root) {
+      root = root || (ref.current); if (!root) return;
+      root.querySelectorAll(':scope > .anno-margin-card').forEach((c) => c.remove());
+      if (!root.classList.contains('ct-has-gutter')) return;   // no reserved room (narrow pane / no annotations)
+      const firstBySid = {};
+      root.querySelectorAll('.ct-textlayer > span.sent').forEach((sp) => { const sid = sp.dataset.sid; if (sid == null || firstBySid[sid]) return; firstBySid[sid] = sp; });
+      const map = annoRef.current || {};
+      const rr = root.getBoundingClientRect();
+      const cards = [];
+      Object.keys(map).forEach((sid) => {
+        const sp = firstBySid[sid]; if (!sp) return; // page not rendered yet
+        const anns = ctx.annoForSentence ? ctx.annoForSentence(docId, sid) : [];
+        if (!anns.length) return;
+        const er = sp.getBoundingClientRect();
+        cards.push({ top: er.top - rr.top + root.scrollTop, anns: anns });
+      });
+      if (!cards.length) return;
+      cards.sort((a, b) => a.top - b.top);
+      let lastBottom = -999;
+      cards.forEach((c) => {
+        const top = Math.max(c.top, lastBottom + 8); lastBottom = top + 74;
+        const first = c.anns[0]; const todoOnly = c.anns.every((a) => a.kind === 'todo');
+        const card = document.createElement('div');
+        card.className = 'anno-margin-card' + (todoOnly ? ' todo' : ''); card.style.top = top + 'px';
+        const head = document.createElement('div'); head.className = 'amc-head';
+        const av = document.createElement('span'); av.className = 'anno-av'; av.style.background = first.color; av.textContent = first.initials; head.appendChild(av);
+        const nm = document.createElement('b'); nm.textContent = first.author; head.appendChild(nm);
+        if (c.anns.length > 1) { const more = document.createElement('span'); more.className = 'amc-more'; more.textContent = '+' + (c.anns.length - 1); head.appendChild(more); }
+        const body = document.createElement('div'); body.className = 'amc-body'; body.textContent = first.body || (todoOnly ? '(teendő)' : '(komment)');
+        card.appendChild(head); card.appendChild(body);
+        card.addEventListener('mousedown', (e) => e.preventDefault());
+        card.addEventListener('click', (e) => { e.stopPropagation(); card.classList.toggle('expanded'); });
+        root.appendChild(card);
+      });
+    }
 
     useEffect(() => {
       let cancelled = false; const lib = window.pdfjsLib; const root = ref.current;
@@ -614,7 +654,9 @@
           const pdf = await lib.getDocument({ data: bytes.slice(), disableStream: true, disableAutoFetch: true }).promise;
           if (cancelled) return;
           const comp = ctx.getCompiled(docId); const sentences = (comp && comp.sentences) || [];
-          const width = Math.max(280, root.clientWidth - 28);
+          const gutter = (hasAnno && root.clientWidth >= 900) ? 240 : 0;   // room for margin cards (#6)
+          if (gutter) root.classList.add('ct-has-gutter'); else root.classList.remove('ct-has-gutter');
+          const width = Math.max(280, root.clientWidth - 28 - gutter);
           const dpr = window.devicePixelRatio || 1;
           const base1 = (await pdf.getPage(1)).getViewport({ scale: 1 });
           const scale = Math.min(2.0, width / base1.width);
@@ -675,7 +717,7 @@
             await lib.renderTextLayer({ textContent: tc, container: tl, viewport: cssVp, textDivs: textDivs }).promise;
             const sids = st.sids[n] || [];
             textDivs.forEach((sp, i) => { const sid = sids[i]; if (sid != null) { sp.classList.add('sent'); sp.dataset.sid = sid; } });
-            applyHighlight(root); applyAnno(root); applyVoiced(root); applyReview(root);
+            applyHighlight(root); applyAnno(root); applyVoiced(root); applyReview(root); applyMarginCards(root);
           };
           st.renderPage = renderPage;
           const io = new IntersectionObserver((ents) => { ents.forEach((e) => { if (e.isIntersecting) renderPage(+e.target.dataset.page).catch(() => { }); }); }, { root: root, rootMargin: '800px 0px' });
@@ -684,12 +726,12 @@
         } catch (e) { if (!cancelled) setState('error'); }
       })();
       return () => { cancelled = true; if (stRef.current && stRef.current.io) stRef.current.io.disconnect(); };
-    }, [bytes, docId]);
+    }, [bytes, docId, hasAnno]);
 
     // re-highlight when the active spoken sentence changes
     useEffect(() => { applyHighlight(); }, [curSid, playing, state]);
     // re-apply comment/to-do highlights to already-rendered pages when annotations change
-    useEffect(() => { applyAnno(); }, [JSON.stringify(annoMap), state]);
+    useEffect(() => { applyAnno(); applyMarginCards(); }, [JSON.stringify(annoMap), state]);
     // re-apply ♪ voiced markers when the cached-audio set or voice changes
     useEffect(() => { applyVoiced(); }, [JSON.stringify(voicedMap), state]);
     // re-apply AI-review markers when the review set changes
