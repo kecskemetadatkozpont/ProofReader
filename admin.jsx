@@ -141,7 +141,7 @@
                 h('span', null, h('b', null, 'Ábra-generálás (PaperBanana)'), h('span', { style: { display: 'block', fontSize: 11.5, color: 'var(--faint)', marginTop: 1 } }, 'Engedélyezi, hogy a felhasználó AI-val publikációs ábrákat generáljon a LaTeX editorban.')))
             ),
             h('div', { className: 'kv' },
-              h('div', { className: 'c' }, h('div', { className: 'l' }, 'Projects'), h('div', { className: 'v' }, agg.projects.length)),
+              h('div', { className: 'c' }, h('div', { className: 'l' }, 'Projects'), h('div', { className: 'v' }, agg.projCount), agg.researchCount ? h('div', { className: 's' }, agg.projects.length + ' LaTeX + ' + agg.researchCount + ' research') : null),
               h('div', { className: 'c' }, h('div', { className: 'l' }, 'Storage'), h('div', { className: 'v' }, fmtBytes(agg.storage))),
               h('div', { className: 'c' }, h('div', { className: 'l' }, 'Credits used'), h('div', { className: 'v' }, credits(agg.chars)), h('div', { className: 's' }, '1 credit = 1,000 chars')),
               h('div', { className: 'c' }, h('div', { className: 'l' }, 'AI voice'), h('div', { className: 'v' }, (agg.chars || 0).toLocaleString()), h('div', { className: 's' }, (agg.requests || 0) + ' requests · chars'))
@@ -149,8 +149,8 @@
             h('div', { className: 'meta-line' }, h('b', null, 'Affiliation: '), u.affiliation || '—'),
             h('div', { className: 'meta-line' }, h('b', null, 'MTMT: '), u.mtmt_id || '—', '   ', h('b', null, 'ORCID: '), u.orcid ? h('a', { className: 'ext', href: 'https://orcid.org/' + u.orcid, target: '_blank' }, u.orcid) : '—'),
             h('div', { className: 'meta-line' }, h('b', null, 'Last active: '), fmtDate(u.last_active_at), '   ', h('b', null, 'Joined: '), u.created_at ? new Date(u.created_at).toLocaleDateString() : '—'),
-            h('h3', { className: 'dsub' }, 'Projects (' + agg.projects.length + ')'),
-            agg.projects.length === 0 && h('div', { style: { fontSize: 13, color: 'var(--muted)' } }, 'No projects yet.'),
+            h('h3', { className: 'dsub' }, 'LaTeX projects (' + agg.projects.length + ')'),
+            agg.projects.length === 0 && h('div', { style: { fontSize: 13, color: 'var(--muted)' } }, 'No LaTeX projects yet.'),
             agg.projects.map(function (p) {
               var fc = p.data && p.data.files ? Object.keys(p.data.files).length : 0;
               return h('div', { className: 'proj', key: p.id },
@@ -215,6 +215,7 @@
     var meS = useState(null), me = meS[0], setMe = meS[1];
     var pS = useState([]), profiles = pS[0], setProfiles = pS[1];
     var prS = useState([]), projects = prS[0], setProjects = prS[1];
+    var rprS = useState([]), rprojects = rprS[0], setRprojects = rprS[1];   // research_projects (also counted)
     var uS = useState([]), usage = uS[0], setUsage = uS[1];
     var selS = useState(null), selUser = selS[0], setSelUser = selS[1];
     var pvS = useState(null), preview = pvS[0], setPreview = pvS[1];
@@ -243,22 +244,25 @@
       Promise.all([
         sb.from('profiles').select('*, publications(count)'),
         sb.from('projects').select('id,owner_id,title,data,created_at,updated_at,deleted_at'),
-        sb.from('usage_meters').select('*')
+        sb.from('usage_meters').select('*'),
+        sb.from('research_projects').select('id,owner_id')
       ]).then(function (res) {
         if (res[0].error) { setErr(res[0].error.message); setPhase('error'); return; }
         setProfiles(res[0].data || []);
         setProjects((res[1].data || []).filter(function (p) { return !p.deleted_at; }));
         setUsage(res[2].data || []);
+        setRprojects((res[3] && res[3].data) || []);
         setPhase('ready');
       }).catch(function (e) { setErr(String(e)); setPhase('error'); });
     }
     function aggFor(uid) {
       var ps = projects.filter(function (p) { return p.owner_id === uid; });
+      var rps = rprojects.filter(function (p) { return p.owner_id === uid; });   // research projects
       var storage = ps.reduce(function (s, p) { return s + bytesOf(p.data); }, 0);
       var us = usage.filter(function (u) { return u.user_id === uid; });
       var chars = us.reduce(function (s, u) { return s + (u.tts_chars || 0); }, 0);
       var requests = us.reduce(function (s, u) { return s + (u.tts_requests || 0); }, 0);
-      return { projects: ps, storage: storage, chars: chars, requests: requests };
+      return { projects: ps, researchCount: rps.length, projCount: ps.length + rps.length, storage: storage, chars: chars, requests: requests };
     }
     function setStatus(uid, status) {
       setProfiles(function (list) { return list.map(function (u) { return u.id === uid ? Object.assign({}, u, { status: status }) : u; }); });
@@ -327,7 +331,7 @@
         h('td', null, u.affiliation || h('span', { style: { color: 'var(--muted)' } }, '—')),
         h('td', null, h(Badge, { s: u.status }), u.role === 'admin' && h('span', { className: 'badge b-admin' }, 'admin'),
           u.is_researcher && h('span', { className: 'badge', style: { background: 'var(--ok-bg)', color: '#0f766e' } }, 'researcher')),
-        h('td', null, ag.projects.length),
+        h('td', null, ag.projCount, ag.researchCount ? h('span', { style: { color: 'var(--muted)', fontSize: 11 } }, ' (' + ag.projects.length + ' LaTeX + ' + ag.researchCount + ' research)') : null),
         h('td', null, fmtBytes(ag.storage)),
         h('td', null, credits(ag.chars), h('span', { style: { color: 'var(--muted)', fontSize: 11 } }, ' (' + (ag.chars || 0).toLocaleString() + ' ch)')),
         h('td', { className: 'mono' }, fmtDate(u.last_active_at)),
@@ -374,7 +378,7 @@
           h('div', { className: 'stat' }, h('div', { className: 'n' }, profiles.length), h('div', { className: 'l' }, 'Registered users')),
           h('div', { className: 'stat' + (pending.length ? ' alert' : '') }, h('div', { className: 'n' }, pending.length), h('div', { className: 'l' }, 'Pending approval')),
           h('div', { className: 'stat' }, h('div', { className: 'n' }, profiles.filter(function (u) { return u.status === 'approved'; }).length), h('div', { className: 'l' }, 'Approved')),
-          h('div', { className: 'stat' }, h('div', { className: 'n' }, projects.length), h('div', { className: 'l' }, 'Total projects')),
+          h('div', { className: 'stat' }, h('div', { className: 'n' }, projects.length + rprojects.length), h('div', { className: 'l' }, 'Total projects')),
           h('div', { className: 'stat' }, h('div', { className: 'n' }, fmtBytes(totalStorage)), h('div', { className: 'l' }, 'Total storage · ' + credits(totalChars) + ' credits'))
         ),
 
