@@ -23,7 +23,6 @@ window.PR_UNIVERSITIES = [
   "Moholy-Nagy University of Art and Design, Hungary",
   "Liszt Ferenc Academy of Music, Hungary",
   "John von Neumann University, Hungary",
-  "Neumann János Egyetem (NJE), Hungary",
   "Eszterházy Károly Catholic University, Hungary",
   "University of Nyíregyháza, Hungary",
   "University of Dunaújváros, Hungary",
