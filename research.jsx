@@ -94,6 +94,39 @@
     );
   }
 
+  // ---------- Edit project base settings (#2) ----------
+  function ProjectSettingsModal(props) {
+    var p = props.project;
+    var f = useState({ title: p.title || '', field: p.field || '', keywords: (p.keywords || []).join(', '), goal: p.goal || '' }), form = f[0], setForm = f[1];
+    var s = useState(false), saving = s[0], setSaving = s[1];
+    function up(k, v) { setForm(Object.assign({}, form, (function () { var o = {}; o[k] = v; return o; })())); }
+    function save() {
+      if (!form.title.trim()) return;
+      setSaving(true);
+      sb.from('research_projects').update({
+        title: form.title.trim(), field: form.field.trim() || null,
+        keywords: form.keywords ? form.keywords.split(',').map(function (x) { return x.trim(); }).filter(Boolean) : null,
+        goal: form.goal.trim() || null
+      }).eq('id', p.id).then(function (r) {
+        setSaving(false);
+        if (r && r.error) { alert('Could not save: ' + r.error.message); return; }
+        props.onSaved();
+      });
+    }
+    return h('div', { className: 'scrim', onClick: props.onClose },
+      h('div', { className: 'modal', onClick: function (e) { e.stopPropagation(); } },
+        h('div', { className: 'modal-h' }, h('b', null, 'Projekt beállításai'), h('button', { className: 'x', onClick: props.onClose }, '×')),
+        h('div', { className: 'modal-b' },
+          h('div', { className: 'field' }, h('label', null, 'Title *'), h('input', { value: form.title, onChange: function (e) { up('title', e.target.value); } })),
+          h('div', { className: 'field' }, h('label', null, 'Field'), h('input', { value: form.field, onChange: function (e) { up('field', e.target.value); }, placeholder: 'e.g. Computer vision, Robotics' })),
+          h('div', { className: 'field' }, h('label', null, 'Keywords (comma-separated)'), h('input', { value: form.keywords, onChange: function (e) { up('keywords', e.target.value); }, placeholder: 'OOD, LiDAR, uncertainty' })),
+          h('div', { className: 'field' }, h('label', null, 'Goal / expected output'), h('textarea', { rows: 3, value: form.goal, onChange: function (e) { up('goal', e.target.value); } }))
+        ),
+        h('div', { className: 'modal-foot' }, h('button', { className: 'btn', onClick: props.onClose }, 'Cancel'), h('button', { className: 'btn pri', disabled: saving, onClick: save }, saving ? 'Saving…' : 'Save'))
+      )
+    );
+  }
+
   // ---------- Stage stepper ----------
   function Stepper(props) {
     var cur = props.stage || 0;
@@ -1005,6 +1038,7 @@
   function ProjectDetail(props) {
     var p = props.project;
     var tS = useState('overview'), tab = tS[0], setTab = tS[1];
+    var edS = useState(false), editOpen = edS[0], setEditOpen = edS[1];   // #2: project settings editor
     function setStage(i) {
       sb.from('research_projects').update({ stage: i }).eq('id', p.id).then(function () {
         // record the milestone so stage progress shows in the log + the supervisor's digest
@@ -1039,15 +1073,19 @@
       (!props.canEdit && props.viewerId && p.owner_id !== props.viewerId) ? h('div', { className: 'ro-banner' }, '👁 Témavezetői nézet — ' + (props.studentName ? props.studentName + ' projektje' : 'diák projektje') + '. Csak olvasható.') : null,
       h('div', { className: 'dhead' },
         h('div', { className: 'dt' }, h('h1', null, p.title), h('p', null, (p.field || 'No field set') + (p.keywords && p.keywords.length ? ' · ' + p.keywords.join(', ') : ''))),
-        props.canEdit
-          ? h('select', { className: 'field', style: { width: 'auto', height: 32 }, value: p.status, onChange: setStatus }, Object.keys(STATUS_LABEL).map(function (k) { return h('option', { key: k, value: k }, STATUS_LABEL[k]); }))
-          : h('span', { className: 'chip c-grey' }, STATUS_LABEL[p.status] || p.status)
+        h('div', { style: { display: 'flex', gap: 8, alignItems: 'center' } },
+          props.canEdit
+            ? h('select', { className: 'field', style: { width: 'auto', height: 32 }, value: p.status, onChange: setStatus }, Object.keys(STATUS_LABEL).map(function (k) { return h('option', { key: k, value: k }, STATUS_LABEL[k]); }))
+            : h('span', { className: 'chip c-grey' }, STATUS_LABEL[p.status] || p.status),
+          props.canEdit ? h('button', { className: 'btn', style: { height: 32, flex: 'none' }, title: 'Projekt alapbeállításai (cím, terület, kulcsszavak, cél)', onClick: function () { setEditOpen(true); } }, '✎ Beállítások') : null
+        )
       ),
       h(Stepper, { stage: p.stage, canEdit: props.canEdit, onSet: setStage, onNav: function (i) { setTab(STAGE_TAB[i] || 'overview'); } }),
       h('div', { className: 'subtabs' }, [['overview', 'Overview', null], ['canvas', 'Canvas', null], ['notes', 'Notes', null], ['log', 'Log', (props.log || []).length], ['tasks', 'Tasks', openTasks]].map(function (t) {
         return h('button', { key: t[0], className: tab === t[0] ? 'on' : '', onClick: function () { setTab(t[0]); } }, t[1], t[2] ? h('span', { className: 'c' }, t[2]) : null);
       })),
-      content
+      content,
+      editOpen ? h(ProjectSettingsModal, { project: p, onClose: function () { setEditOpen(false); }, onSaved: function () { setEditOpen(false); props.onChanged(); } }) : null
     );
   }
 

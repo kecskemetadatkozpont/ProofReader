@@ -162,7 +162,7 @@
       var av = adminView();
       var du = av || curUser(), admin = isAdmin();
       document.documentElement.classList.toggle('pn-adminview', !!av);
-      document.getElementById('pn-left').innerHTML = '<a class="pn-brand" href="' + withAv('Profile.html') + '"><span class="pn-mk"><i></i></span>Publify</a>'
+      document.getElementById('pn-left').innerHTML = '<a class="pn-brand" href="' + withAv('Projects.html') + '" title="Főoldal"><span class="pn-mk"><i></i></span>Publify</a>'
         + (PAGE_NAME[here] ? '<span class="pn-page">' + PAGE_NAME[here] + '</span>' : '')
         + (av ? '<span class="pn-as">👁 ' + esc(av.name || av.email || '') + '</span>' : '');
       document.getElementById('pn-prof').innerHTML = avHtml(du) + '<span class="pn-nm">' + esc((du && du.name) || 'Menu') + '</span><span class="pn-cv">' + (av ? '👁' : '▾') + '</span>';

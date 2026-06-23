@@ -48,7 +48,7 @@ function Header(props) {
   function setTint(c) { if (isDemo) { Auth.updateUser(me.id, { color: c }); props.setMe(Auth.byId(me.id)); } }
   var isFree = /free/i.test(usage.planLabel || '');
   return <header className="pf-head">
-    <div className="pf-head-top"><a className="pf-back" href="Projects.html">← Publications</a><span id="pr-ver-slot" className="pf-ver" /></div>
+    <div className="pf-head-top"><a className="pf-back" href="Projects.html">← Publications</a><a className="pf-back" href="Landing.html" style={{ marginLeft: 14 }}>Kezdőlap ↗</a><span id="pr-ver-slot" className="pf-ver" /></div>
     <div className="pf-id">
       <Avatar user={me} size={68} />
       <div className="pf-id-main">
@@ -163,6 +163,44 @@ function UsageCost(props) {
   </div>;
 }
 
+// #1 — edit MTMT + ORCID after registration (cloud accounts), saved to the profiles table
+function ResearchIds(props) {
+  var [v, setV] = useState({ mtmt: '', orcid: '', loaded: false });
+  var [busy, setBusy] = useState(false), [msg, setMsg] = useState(null);
+  useEffect(function () {
+    var B = window.PR_BACKEND;
+    if (!(B && B.sb && B.mode === 'cloud')) { setV({ mtmt: '', orcid: '', loaded: true }); return; }
+    B.sb.from('profiles').select('mtmt_id,orcid').eq('id', props.id).maybeSingle().then(function (r) {
+      var d = (r && r.data) || {};
+      setV({ mtmt: d.mtmt_id || '', orcid: d.orcid || '', loaded: true });
+    });
+  }, []);
+  function save(e) {
+    if (e) e.preventDefault();
+    var orc = v.orcid.trim();
+    if (orc && !/^\d{4}-\d{4}-\d{4}-\d{3}[\dXx]$/.test(orc)) { setMsg(['err', 'Az ORCID formátuma: 0000-0000-0000-0000.']); return; }
+    var B = window.PR_BACKEND;
+    if (!(B && B.sb)) { setMsg(['err', 'Csak bejelentkezve menthető.']); return; }
+    setBusy(true); setMsg(null);
+    B.sb.from('profiles').update({ mtmt_id: v.mtmt.trim() || null, orcid: orc || null }).eq('id', props.id).then(function (r) {
+      setBusy(false);
+      if (r && r.error) { setMsg(['err', r.error.message]); return; }
+      setMsg(['ok', 'Mentve.']);
+    });
+  }
+  return <div className="pf-panel">
+    <div className="pf-set-h">Kutatói azonosítók</div>
+    <form className="pf-pw" onSubmit={save}>
+      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 3 }}>MTMT azonosító</div>
+      <input className="pf-login-in" value={v.mtmt} placeholder="pl. 10012345" onChange={function (e) { setV(Object.assign({}, v, { mtmt: e.target.value })); }} aria-label="MTMT azonosító" />
+      <div style={{ fontSize: 12, color: 'var(--muted)', margin: '6px 0 3px' }}>ORCID</div>
+      <input className="pf-login-in" value={v.orcid} placeholder="0000-0000-0000-0000" onChange={function (e) { setV(Object.assign({}, v, { orcid: e.target.value })); }} aria-label="ORCID" />
+      <div className="pf-pw-acts"><button className="btn-primary" type="submit" disabled={busy}>{busy ? 'Mentés…' : 'Mentés'}</button></div>
+    </form>
+    {msg ? <div className={'pf-note ' + (msg[0] === 'ok' ? 'ok' : 'err')}>{msg[1]}</div> : null}
+  </div>;
+}
+
 function Settings(props) {
   var me = props.me, p = Store.prefs ? Store.prefs() : {};
   var recent = (Store.listFor(me.id) || []).slice().sort(function (a, b) { return (b.updated || 0) - (a.updated || 0); })[0];
@@ -188,6 +226,7 @@ function Settings(props) {
       <div className="pf-kv"><span>Pronunciation overrides</span><b>{(p.ttsDict || []).length} entries</b></div>
       <a className="btn-ghost" href={editorLink}>Open the editor to change these →</a>
     </div>
+    {((window.PR_BACKEND && window.PR_BACKEND.mode) === 'cloud') ? <ResearchIds id={me.id} /> : null}
     {(((window.PR_BACKEND && window.PR_BACKEND.mode) === 'cloud') || (window.PRAuth && window.PRAuth.isProtected && window.PRAuth.isProtected(me.email))) ? <ChangePassword email={me.email} /> : null}
   </div>;
 }
