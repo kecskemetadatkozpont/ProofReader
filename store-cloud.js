@@ -31,6 +31,30 @@
   var CACHE = [];
   (function warm() { try { CACHE = JSON.parse(localStorage.getItem(WARM) || '[]') || []; } catch (e) { CACHE = []; } })();
   function persistWarm() { try { localStorage.setItem(WARM, JSON.stringify(CACHE)); } catch (e) { } }
+  // ---- unconfirmed-annotation queue ----
+  // Comments/to-dos persist via granular RPCs that are NOT part of the project-level `pending` flush, so a
+  // hydrate (10s poll / realtime / focus) could otherwise replace the local array before the RPC commits and
+  // make a just-typed comment vanish (or, on a failed save, be lost). This queue holds locally-applied-but-
+  // unconfirmed ops; mergeRow re-applies them on top of the server copy, and they're retried (persisted across
+  // reloads) until the server confirms — the granular equivalent of the `pending` protection for full saves.
+  var annoQ = {}; try { annoQ = JSON.parse(localStorage.getItem('pr-anno-q') || '{}') || {}; } catch (e) { annoQ = {}; }
+  function persistAnnoQ() { try { localStorage.setItem('pr-anno-q', JSON.stringify(annoQ)); } catch (e) { } }
+  function qAnno(pid, entry) { if (!annoQ[pid]) annoQ[pid] = {}; annoQ[pid][entry.op === 'delete' ? entry.id : entry.ann.id] = entry; persistAnnoQ(); }
+  function unqAnno(pid, annId) { if (annoQ[pid]) { delete annoQ[pid][annId]; if (!Object.keys(annoQ[pid]).length) delete annoQ[pid]; persistAnnoQ(); } }
+  // overlay the queued (unconfirmed) ops on top of a server annotations array (used during the hydrate merge)
+  function applyAnnoQ(pid, anns) {
+    var q = annoQ[pid]; if (!q) return anns || [];
+    var out = (anns || []).slice();
+    Object.keys(q).forEach(function (aid) {
+      var e = q[aid], i = -1; for (var k = 0; k < out.length; k++) { if (out[k] && out[k].id === aid) { i = k; break; } }
+      if (e.op === 'delete') { if (i >= 0) out.splice(i, 1); }
+      else { if (i >= 0) out[i] = e.ann; else out.push(e.ann); }
+    });
+    return out;
+  }
+  function permanentRpcError(err) { return !!err && (err.code === '42501' || /no annotation access|not found|no write access/i.test(err.message || '')); }
+  // on load, re-drive anything still unconfirmed (e.g. the tab was closed before a retry landed)
+  function redriveAnnoQ() { Object.keys(annoQ).forEach(function (pid) { Object.keys(annoQ[pid] || {}).forEach(function (aid) { var e = annoQ[pid][aid]; if (e.op === 'delete') delAnno(pid, aid); else if (e.ann) saveAnno(pid, e.ann); }); }); }
 
   function normalize(p) {
     if (!p) return p;
@@ -68,16 +92,30 @@
   function notify() { subs.forEach(function (cb) { try { cb(); } catch (e) { } }); }
   function subscribe(cb) { subs.push(cb); return function () { subs = subs.filter(function (x) { return x !== cb; }); }; }
   // granular annotation persistence — each comment/to-do is upserted by id (the server merges it into the
-  // array), so concurrent/rapid edits never clobber each other (unlike the old whole-array replace). Retried.
+  // array), so concurrent/rapid edits never clobber each other. Queued as unconfirmed (survives hydrate +
+  // reload), retried with backoff until the server confirms; dropped only on a permanent (permission) rejection.
   function saveAnno(pid, ann) {
-    function go(tries) {
+    qAnno(pid, { op: 'upsert', ann: ann });
+    (function go(tries) {
       sb.rpc('pr_upsert_annotation', { p_project: pid, p_ann: ann }).then(function (r) {
-        if (r && r.error) { if (tries < 3) setTimeout(function () { go(tries + 1); }, 2500); else console.warn('[PR] annotation save failed', r.error.message); }
-      }, function () { if (tries < 3) setTimeout(function () { go(tries + 1); }, 2500); });
-    }
-    go(0);
+        if (r && r.error) {
+          if (permanentRpcError(r.error)) { unqAnno(pid, ann.id); console.warn('[PR] annotation save rejected (dropped)', r.error.message); return; }
+          if (tries < 8) setTimeout(function () { go(tries + 1); }, Math.min(30000, 2000 * (tries + 1))); else console.warn('[PR] annotation save failed (kept in queue, retried on reload)', r.error.message);
+        } else unqAnno(pid, ann.id);
+      }, function () { if (tries < 8) setTimeout(function () { go(tries + 1); }, Math.min(30000, 2000 * (tries + 1))); });
+    })(0);
   }
-  function delAnno(pid, annId) { sb.rpc('pr_delete_annotation', { p_project: pid, p_ann_id: annId }).then(function () { }, function () { }); }
+  function delAnno(pid, annId) {
+    qAnno(pid, { op: 'delete', id: annId });
+    (function go(tries) {
+      sb.rpc('pr_delete_annotation', { p_project: pid, p_ann_id: annId }).then(function (r) {
+        if (r && r.error) {
+          if (permanentRpcError(r.error)) { unqAnno(pid, annId); return; }
+          if (tries < 8) setTimeout(function () { go(tries + 1); }, Math.min(30000, 2000 * (tries + 1))); else console.warn('[PR] annotation delete failed (kept in queue)', r.error.message);
+        } else unqAnno(pid, annId);
+      }, function () { if (tries < 8) setTimeout(function () { go(tries + 1); }, Math.min(30000, 2000 * (tries + 1))); });
+    })(0);
+  }
 
   /* ---- server push (debounced per project) ---- */
   var pending = {}, timers = {};
@@ -123,7 +161,7 @@
   function hardDelete(id) { sb.from('projects').update({ deleted_at: nowISO() }).eq('id', id).then(function () { }).catch(function () { }); }
 
   /* ---- hydrate from server ---- */
-  function mergeRow(p) { if (!p || !p.id) return; var i = idx(p.id); if (i >= 0) CACHE[i] = normalize(p); else CACHE.push(normalize(p)); }
+  function mergeRow(p) { if (!p || !p.id) return; if (annoQ[p.id]) p.annotations = applyAnnoQ(p.id, p.annotations || []); var i = idx(p.id); if (i >= 0) CACHE[i] = normalize(p); else CACHE.push(normalize(p)); }
   function hydrate() {
     // Scope the editor's project list to what THIS user owns or is a member of
     // (explicit, not RLS-implicit) so an admin's own editor isn't flooded with
@@ -172,6 +210,7 @@
 
   // initial hydrate + realtime + focus refresh
   hydrate();
+  redriveAnnoQ();   // re-send any annotations left unconfirmed from a previous session
   try {
     sb.channel('projects-feed').on('postgres_changes', { event: '*', schema: 'public', table: 'projects' }, function () { hydrate(); }).subscribe();
   } catch (e) { }
