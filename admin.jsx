@@ -166,6 +166,50 @@
   }
 
   /* ---------- main ---------- */
+  // #13 — admin bug / feature-request console: see every report, set status, reply to the reporter
+  function BugReports() {
+    var lS = useState(null), rows = lS[0], setRows = lS[1];
+    var rpS = useState({}), replies = rpS[0], setReplies = rpS[1];
+    var imS = useState(null), imgOpen = imS[0], setImgOpen = imS[1];
+    function load() { sb.from('bug_reports').select('*').order('created_at', { ascending: false }).then(function (r) { setRows((r && r.data) || []); }); }
+    useEffect(function () { load(); }, []);
+    function setStatus(b, st) { sb.from('bug_reports').update({ status: st }).eq('id', b.id).then(load); }
+    function sendReply(b) {
+      var txt = String(replies[b.id] != null ? replies[b.id] : (b.reply || '')).trim();
+      sb.auth.getUser().then(function (u) {
+        var uid = u && u.data && u.data.user && u.data.user.id;
+        sb.from('bug_reports').update({ reply: txt || null, replied_at: new Date().toISOString(), replied_by: uid || null }).eq('id', b.id).then(load);
+      });
+    }
+    if (rows === null) return h('div', { className: 'panel' }, h('div', { style: { padding: 12, color: 'var(--muted)' } }, 'Loading reports…'));
+    var open = rows.filter(function (b) { return b.status !== 'fixed' && b.status !== 'wontfix'; });
+    return h(React.Fragment, null,
+      h('div', { className: 'sec-h' }, h('h2', null, 'Bug reports & feature requests'), h('span', { className: 'count' }, rows.length + ' total · ' + open.length + ' open')),
+      h('div', { className: 'panel' },
+        rows.length === 0 ? h('div', { className: 'empty' }, 'No reports yet.') :
+          rows.map(function (b) {
+            var draft = replies[b.id] != null ? replies[b.id] : (b.reply || '');
+            return h('div', { key: b.id, style: { borderBottom: '1px solid var(--line)', padding: '12px 14px' } },
+              h('div', { style: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' } },
+                h('span', { className: 'badge', style: { background: b.category === 'feature' ? '#eef2ff' : '#fef3e6', color: b.category === 'feature' ? '#4f46e5' : '#b4530f' } }, b.category === 'feature' ? '💡 Feature' : '🐞 Bug'),
+                b.title ? h('b', null, b.title) : h('span', { style: { color: 'var(--muted)' } }, '(no title)'),
+                h('span', { style: { marginLeft: 'auto', fontSize: 11.5, color: 'var(--muted)' } }, fmtDate(b.created_at) + (b.page ? ' · ' + b.page : '') + (b.app_version ? ' · v' + b.app_version : '')),
+                h('select', { className: 'btn', value: b.status, onChange: function (e) { setStatus(b, e.target.value); } }, ['open', 'triaged', 'fixed', 'wontfix'].map(function (s) { return h('option', { key: s, value: s }, s); }))
+              ),
+              h('div', { style: { fontSize: 13, marginTop: 6, whiteSpace: 'pre-wrap' } }, b.body),
+              b.image_data ? h('img', { src: b.image_data, alt: 'screenshot', style: { maxWidth: 300, maxHeight: 190, borderRadius: 8, border: '1px solid var(--line)', marginTop: 8, cursor: 'zoom-in' }, onClick: function () { setImgOpen(b.image_data); } }) : null,
+              h('div', { style: { display: 'flex', gap: 8, marginTop: 8 } },
+                h('textarea', { rows: 2, value: draft, placeholder: 'Válasz az ügyfélnek (a bejelentő látja a „Korábbi jelentéseim" alatt)…', style: { flex: 1, border: '1px solid var(--line)', borderRadius: 8, padding: '6px 9px', fontSize: 13, fontFamily: 'inherit', resize: 'vertical' }, onChange: function (e) { var v = e.target.value; setReplies(function (p) { var n = Object.assign({}, p); n[b.id] = v; return n; }); } }),
+                h('button', { className: 'btn pri', style: { flex: 'none' }, onClick: function () { sendReply(b); } }, b.reply ? 'Update reply' : 'Reply')
+              ),
+              b.replied_at ? h('div', { style: { fontSize: 11.5, color: 'var(--muted)', marginTop: 4 } }, '✓ Replied · ' + fmtDate(b.replied_at)) : null
+            );
+          })
+      ),
+      imgOpen ? h('div', { onClick: function () { setImgOpen(null); }, style: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,.72)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, cursor: 'zoom-out' } }, h('img', { src: imgOpen, style: { maxWidth: '92%', maxHeight: '92%', borderRadius: 8 } })) : null
+    );
+  }
+
   function App() {
     var ph = useState('loading'), phase = ph[0], setPhase = ph[1];
     var meS = useState(null), me = meS[0], setMe = meS[1];
@@ -344,7 +388,8 @@
           profiles.length === 0
             ? h('div', { className: 'empty' }, 'No users yet.')
             : h('table', null, h('thead', null, tableHead), h('tbody', null, sorted.map(function (u) { return userRow(u, false); })))
-        )
+        ),
+        h(BugReports)
       ),
       h(UserDrawer, { user: selUser, agg: selUser ? aggFor(selUser.id) : { projects: [], storage: 0, chars: 0, requests: 0 }, onClose: function () { setSelUser(null); }, onPreview: function (p) { setPreview(p); }, onAction: setStatus, onSetModel: setModel, onSetWorkflows: setWorkflows, onSetFigures: setFigures }),
       preview && h(ProjectPreview, { project: preview, onClose: function () { setPreview(null); } })
