@@ -67,6 +67,17 @@
   var subs = [];
   function notify() { subs.forEach(function (cb) { try { cb(); } catch (e) { } }); }
   function subscribe(cb) { subs.push(cb); return function () { subs = subs.filter(function (x) { return x !== cb; }); }; }
+  // granular annotation persistence — each comment/to-do is upserted by id (the server merges it into the
+  // array), so concurrent/rapid edits never clobber each other (unlike the old whole-array replace). Retried.
+  function saveAnno(pid, ann) {
+    function go(tries) {
+      sb.rpc('pr_upsert_annotation', { p_project: pid, p_ann: ann }).then(function (r) {
+        if (r && r.error) { if (tries < 3) setTimeout(function () { go(tries + 1); }, 2500); else console.warn('[PR] annotation save failed', r.error.message); }
+      }, function () { if (tries < 3) setTimeout(function () { go(tries + 1); }, 2500); });
+    }
+    go(0);
+  }
+  function delAnno(pid, annId) { sb.rpc('pr_delete_annotation', { p_project: pid, p_ann_id: annId }).then(function () { }, function () { }); }
 
   /* ---- server push (debounced per project) ---- */
   var pending = {}, timers = {};
@@ -83,37 +94,30 @@
   }
   function flush(id) {
     var p = pending[id]; if (!p) return; delete pending[id];
-    // A commenter cannot UPDATE the projects row (RLS = owner/editor), so a full upsert is rejected and
-    // their comments/todos would be lost. Persist just the annotations via the SECURITY DEFINER RPC that
-    // role_on allows for commenters too (migration-27).
     var role = myRoleOn(p);
-    // owner/editor write the full projects row; everyone else (commenter, viewer, or a STALE/unknown local
-    // role from a not-yet-synced members list) persists annotations via the RPC the server gates by role_on —
-    // never a full upsert the RLS rejects and silently drops (the cause of "comments sometimes don't save").
-    if (role !== 'owner' && role !== 'editor') {
-      sb.rpc('pr_save_annotations', { p_project: id, p_annotations: p.annotations || [] }).then(function (r) {
-        if (r && r.error) { console.warn('[PR] comment save failed, will retry', r.error.message); pending[id] = p; clearTimeout(timers[id]); timers[id] = setTimeout(function () { flush(id); }, 4000); }
-      }).catch(function (e) { console.warn('[PR] comment save error', e); });
-      return;
-    }
-    // deleted_at is a timestamptz column — serialise the epoch-ms flag as ISO, NOT a raw number.
+    // Commenters/viewers never write the project row; their comments/to-dos go through the granular annotation
+    // RPCs (pr_upsert_annotation / pr_delete_annotation), not this full-project flush.
+    if (role !== 'owner' && role !== 'editor') return;
     var delAt = p.deletedAt ? new Date(p.deletedAt).toISOString() : null;
-    var onErr = function (r) { if (r && r.error) { console.warn('[PR] save failed, will retry', r.error.message); pending[id] = p; clearTimeout(timers[id]); timers[id] = setTimeout(function () { flush(id); }, 4000); return true; } return false; };
-    if (role === 'owner') {
-      var row = { id: p.id, owner_id: p.ownerId || me.id, title: p.title || 'Untitled project', data: p, deleted_at: delAt, updated_at: nowISO() };
-      sb.from('projects').upsert(row).then(function (r) { if (onErr(r)) return; syncMembers(p); }).catch(function (e) { console.warn('[PR] save error', e); });
-    } else {
-      // non-owner EDITOR: UPDATE only. An upsert also evaluates the INSERT policy (with check owner_id =
-      // auth.uid()), which a non-owner fails — so the whole write is rejected and the editor's edits/comments
-      // are silently dropped. The UPDATE policy allows editors. Never touch owner_id / deleted_at (owner-only).
-      sb.from('projects').update({ title: p.title || 'Untitled project', data: p, updated_at: nowISO() }).eq('id', p.id)
-        .then(function (r) { if (onErr(r)) return; }).catch(function (e) { console.warn('[PR] save error', e); });
-    }
+    // pr_save_project saves the doc/files/members but PRESERVES the server's annotations array — so a debounced
+    // full-project save can never clobber comments/to-dos a collaborator added meanwhile (insert if new,
+    // update if it exists; gated to owner/editor server-side, which also lets a non-owner editor save).
+    sb.rpc('pr_save_project', { p_id: p.id, p_owner: p.ownerId || me.id, p_data: p, p_title: p.title || 'Untitled project', p_deleted_at: delAt }).then(function (r) {
+      if (r && r.error) { console.warn('[PR] save failed, will retry', r.error.message); pending[id] = p; clearTimeout(timers[id]); timers[id] = setTimeout(function () { flush(id); }, 4000); return; }
+      syncMembers(p);
+    }).catch(function (e) { console.warn('[PR] save error', e); });
   }
   function syncMembers(p) {
     try {
-      var rows = (p.members || []).filter(function (m) { return m.userId && m.userId !== p.ownerId; }).map(function (m) { return { project_id: p.id, user_id: m.userId, role: m.role }; });
+      var members = (p.members || []).filter(function (m) { return m.userId && m.userId !== p.ownerId; });
+      var rows = members.map(function (m) { return { project_id: p.id, user_id: m.userId, role: m.role }; });
       if (rows.length) sb.from('project_members').upsert(rows).then(function () { }).catch(function () { });
+      // RECONCILE removals: delete membership rows no longer in the project's member list, so a removed share's
+      // access is actually revoked (the old code only upserted → removed members kept role_on → kept access).
+      var keep = members.map(function (m) { return m.userId; });
+      var del = sb.from('project_members').delete().eq('project_id', p.id);
+      if (keep.length) del = del.not('user_id', 'in', '(' + keep.join(',') + ')');
+      del.then(function () { }, function () { });
     } catch (e) { }
   }
   function hardDelete(id) { sb.from('projects').update({ deleted_at: nowISO() }).eq('id', id).then(function () { }).catch(function () { }); }
@@ -335,17 +339,23 @@
 
     /* annotations */
     listAnnotations: function (id) { var p = this.get(id); return p ? p.annotations : []; },
-    addAnnotation: function (id, ann) { var p = this.get(id); if (!p) return null; ann.id = sid(); ann.createdAt = Date.now(); ann.replies = ann.replies || []; ann.status = ann.status || 'open'; p.annotations.push(ann); this.save(p); this.logActivity(id, ann.authorId, ann.kind === 'todo' ? 'added a to-do' : 'commented', ann.anchor && ann.anchor.quote ? '“' + ann.anchor.quote.slice(0, 40) + '”' : ''); return ann; },
-    updateAnnotation: function (id, annId, patch) { var p = this.get(id); if (!p) return; var a = p.annotations.filter(function (x) { return x.id === annId; })[0]; if (!a) return; Object.assign(a, patch); this.save(p); },
-    replyAnnotation: function (id, annId, authorId, body, extra) { var p = this.get(id); if (!p) return; var a = p.annotations.filter(function (x) { return x.id === annId; })[0]; if (!a) return; extra = extra || {}; a.replies.push({ id: sid(), authorId: authorId, body: body, at: Date.now(), mentions: extra.mentions || [], attachments: extra.attachments || [] }); this.save(p); },
-    deleteAnnotation: function (id, annId) { var p = this.get(id); if (!p) return; p.annotations = p.annotations.filter(function (x) { return x.id !== annId; }); this.save(p); },
+    // Annotations persist GRANULARLY (per-id RPC), never via the full-project flush — so concurrent/rapid
+    // comments & to-dos can't clobber each other. Local mutate + notify gives instant UI; the RPC merges server-side.
+    addAnnotation: function (id, ann) { var p = this.get(id); if (!p) return null; ann.id = uuid(); ann.createdAt = Date.now(); ann.replies = ann.replies || []; ann.status = ann.status || 'open'; p.annotations.push(ann); persistWarm(); notify(); saveAnno(id, ann); this.logActivity(id, ann.authorId, ann.kind === 'todo' ? 'added a to-do' : 'commented', ann.anchor && ann.anchor.quote ? '“' + ann.anchor.quote.slice(0, 40) + '”' : ''); return ann; },
+    updateAnnotation: function (id, annId, patch) { var p = this.get(id); if (!p) return; var a = p.annotations.filter(function (x) { return x.id === annId; })[0]; if (!a) return; Object.assign(a, patch); persistWarm(); notify(); saveAnno(id, a); },
+    replyAnnotation: function (id, annId, authorId, body, extra) { var p = this.get(id); if (!p) return; var a = p.annotations.filter(function (x) { return x.id === annId; })[0]; if (!a) return; extra = extra || {}; a.replies.push({ id: uuid(), authorId: authorId, body: body, at: Date.now(), mentions: extra.mentions || [], attachments: extra.attachments || [] }); persistWarm(); notify(); saveAnno(id, a); },
+    deleteAnnotation: function (id, annId) { var p = this.get(id); if (!p) return; p.annotations = p.annotations.filter(function (x) { return x.id !== annId; }); persistWarm(); notify(); delAnno(id, annId); },
     listReview: function (id) { var p = this.get(id); return (p && p.annotations || []).filter(function (a) { return a.kind === 'review'; }); },
-    clearReview: function (id) { var p = this.get(id); if (!p) return; p.annotations = (p.annotations || []).filter(function (a) { return a.kind !== 'review'; }); this.save(p); },
+    clearReview: function (id) { var p = this.get(id); if (!p) return; var rm = (p.annotations || []).filter(function (a) { return a.kind === 'review'; }).map(function (a) { return a.id; }); p.annotations = (p.annotations || []).filter(function (a) { return a.kind !== 'review'; }); persistWarm(); notify(); rm.forEach(function (aid) { delAnno(id, aid); }); },
     importReview: function (id, findings, opts) {
       var p = this.get(id); if (!p) return { imported: 0, unanchored: 0, total: 0 };
       opts = opts || {}; p.annotations = p.annotations || [];
-      if (!opts.append) p.annotations = p.annotations.filter(function (a) { return a.kind !== 'review'; });
-      var r = importReviewInto(p, findings); this.save(p);
+      var removed = [];
+      if (!opts.append) { p.annotations.forEach(function (a) { if (a.kind === 'review') removed.push(a.id); }); p.annotations = p.annotations.filter(function (a) { return a.kind !== 'review'; }); }
+      var r = importReviewInto(p, findings);
+      persistWarm(); notify();
+      removed.forEach(function (aid) { delAnno(id, aid); });
+      p.annotations.forEach(function (a) { if (a.kind === 'review') saveAnno(id, a); });   // granular — survives the annotation-preserving project save
       this.logActivity(id, opts.actorId || me.id, 'imported AI review', r.imported + ' notes');
       return r;
     },
