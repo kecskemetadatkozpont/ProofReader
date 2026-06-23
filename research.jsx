@@ -80,16 +80,19 @@
         });
       });
     }
-    return h('div', { className: 'scrim', onClick: props.onClose },
+    // #3 — clicking outside the create-project box must not silently discard what you typed
+    function dirty() { return !!(form.title.trim() || form.field.trim() || form.keywords.trim() || form.goal.trim()); }
+    function tryClose() { if (dirty() && !window.confirm('Eldobod a beírt projekt-adatokat?')) return; props.onClose(); }
+    return h('div', { className: 'scrim', onClick: tryClose },
       h('div', { className: 'modal', onClick: function (e) { e.stopPropagation(); } },
-        h('div', { className: 'modal-h' }, h('b', null, 'New research project'), h('button', { className: 'x', onClick: props.onClose }, '×')),
+        h('div', { className: 'modal-h' }, h('b', null, 'New research project'), h('button', { className: 'x', onClick: tryClose }, '×')),
         h('div', { className: 'modal-b' },
           h('div', { className: 'field' }, h('label', null, 'Title *'), h('input', { value: form.title, onChange: function (e) { up('title', e.target.value); }, placeholder: 'e.g. Fisher fusion for LiDAR OOD detection' })),
           h('div', { className: 'field' }, h('label', null, 'Field'), h('input', { value: form.field, onChange: function (e) { up('field', e.target.value); }, placeholder: 'e.g. Computer vision, Robotics' })),
           h('div', { className: 'field' }, h('label', null, 'Keywords (comma-separated)'), h('input', { value: form.keywords, onChange: function (e) { up('keywords', e.target.value); }, placeholder: 'OOD, LiDAR, uncertainty' })),
           h('div', { className: 'field' }, h('label', null, 'Goal / expected output'), h('textarea', { rows: 3, value: form.goal, onChange: function (e) { up('goal', e.target.value); }, placeholder: 'What does success look like? (paper, thesis chapter, …)' }))
         ),
-        h('div', { className: 'modal-foot' }, h('button', { className: 'btn', onClick: props.onClose }, 'Cancel'), h('button', { className: 'btn pri', disabled: saving, onClick: save }, saving ? 'Creating…' : 'Create project'))
+        h('div', { className: 'modal-foot' }, h('button', { className: 'btn', onClick: tryClose }, 'Cancel'), h('button', { className: 'btn pri', disabled: saving, onClick: save }, saving ? 'Creating…' : 'Create project'))
       )
     );
   }
@@ -267,6 +270,17 @@
     return out;
   }
 
+  // #5 — lazy-load mammoth (Word .docx → markdown) only when a user actually imports a Word file
+  var _mammothP = null;
+  function loadMammoth() {
+    if (window.mammoth) return Promise.resolve(window.mammoth);
+    if (!_mammothP) _mammothP = new Promise(function (resolve, reject) {
+      var s = document.createElement('script'); s.src = 'https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js';
+      s.onload = function () { resolve(window.mammoth); }; s.onerror = reject; document.head.appendChild(s);
+    });
+    return _mammothP;
+  }
+
   // ---------- Session file browser (Antigravity-style): the project's file tree next to the chat ----------
   function SessionFileBrowser(props) {
     var fS = useState(null), files = fS[0], setFiles = fS[1];
@@ -281,12 +295,27 @@
     }
     function onUpload(e) {
       var f = e.target.files && e.target.files[0]; if (!f) return;
+      if (upRef.current) upRef.current.value = '';
+      if (/\.docx$/i.test(f.name)) { importDocx(f); return; }   // #5: Word import → editable markdown
       var sp = props.projectId + '/files/' + Date.now() + '_' + f.name.replace(/[^A-Za-z0-9._-]/g, '_');
       sb.storage.from('research-data').upload(sp, f).then(function (res) {
         if (res && res.error) { alert(res.error.message); return; }
         sb.from('research_files').upsert({ project_id: props.projectId, path: f.name, storage_path: sp, mime: f.type || 'application/octet-stream', size: f.size, source: 'upload', created_by: props.authorId, updated_by: props.authorId, updated_at: new Date().toISOString() }, { onConflict: 'project_id,path' }).then(load);
       });
-      if (upRef.current) upRef.current.value = '';
+    }
+    // #5 — Word (.docx) → markdown via mammoth, stored as an editable .md file
+    function importDocx(f) {
+      loadMammoth().then(function (m) {
+        var reader = new FileReader();
+        reader.onload = function () {
+          m.convertToMarkdown({ arrayBuffer: reader.result }).then(function (res) {
+            var md = (res && res.value) || '';
+            var name = f.name.replace(/\.docx$/i, '') + '.md';
+            sb.from('research_files').upsert({ project_id: props.projectId, path: name, content: md, mime: 'text/markdown', source: 'upload', created_by: props.authorId, updated_by: props.authorId, updated_at: new Date().toISOString() }, { onConflict: 'project_id,path' }).then(function (r) { if (r && r.error) { alert(r.error.message); return; } load(); });
+          }, function (er) { alert('Word import hiba: ' + ((er && er.message) || er)); });
+        };
+        reader.readAsArrayBuffer(f);
+      }, function () { alert('A Word-import könyvtár nem töltődött be (offline?).'); });
     }
     function del(f) { if (!window.confirm('Törlöd: ' + f.path + ' ?')) return; sb.from('research_files').delete().eq('id', f.id).then(function () { if (f.storage_path) { try { sb.storage.from('research-data').remove([f.storage_path]); } catch (e) { } } if (preview && preview.id === f.id) setPreview(null); load(); }); }
     function openSigned(path) { sb.storage.from('research-data').createSignedUrl(path, 3600).then(function (r) { if (r && r.data && r.data.signedUrl) window.open(r.data.signedUrl, '_blank'); }); }

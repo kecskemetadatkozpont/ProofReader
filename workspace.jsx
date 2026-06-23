@@ -104,7 +104,7 @@
       if (pane.docId) { // rendered "export to PDF" view of a document
         const c = ctx.getCompiled(pane.docId);
         return <div className="pdf-render">
-          <div className="pdf-render-bar"><span>Rendered PDF · {ctx.docLabel(pane.docId)}</span><button onClick={() => ctx.onPrint(pane.docId)}><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M4 6V2.5h8V6M4 11H3a1 1 0 01-1-1V7a1 1 0 011-1h10a1 1 0 011 1v3a1 1 0 01-1 1h-1M4 9h8v4.5H4z" strokeLinejoin="round" /></svg>Print / Save PDF</button></div>
+          <div className="pdf-render-bar"><span>Rendered PDF · {ctx.docLabel(pane.docId)}</span><span style={{ display: 'inline-flex', gap: 6 }}><button onClick={() => ctx.onWord && ctx.onWord(pane.docId)} title="Letöltés Word (.docx) formátumban">⬇ Word</button><button onClick={() => ctx.onPrint(pane.docId)}><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M4 6V2.5h8V6M4 11H3a1 1 0 01-1-1V7a1 1 0 011-1h10a1 1 0 011 1v3a1 1 0 01-1 1h-1M4 9h8v4.5H4z" strokeLinejoin="round" /></svg>Print / Save PDF</button></span></div>
           <div className="pdf-render-scroll"><div className="pdf-paper" dangerouslySetInnerHTML={{ __html: c ? c.html : '' }} /></div>
         </div>;
       }

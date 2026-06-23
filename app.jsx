@@ -1635,6 +1635,19 @@
         '</head><body><div class="paper">' + comp.html + '</div></body></html>');
       w.document.close(); w.focus(); setTimeout(() => { try { w.print(); } catch (e) { } }, 700);
     }, [getCompiled, docLabel, active]);
+    // #5 — export the compiled document to Word (.docx); html-docx-js is lazy-loaded on first use
+    const loadHtmlDocx = () => window.htmlDocx ? Promise.resolve(window.htmlDocx) : new Promise((res, rej) => { const s = document.createElement('script'); s.src = 'https://unpkg.com/html-docx-js/dist/html-docx.js'; s.onload = () => res(window.htmlDocx); s.onerror = rej; document.head.appendChild(s); });
+    const onWordDoc = useCallback((docId) => {
+      docId = docId || active;
+      const comp = getCompiled(docId); if (!comp) { alert('Nothing to export yet — open a document first.'); return; }
+      loadHtmlDocx().then((HD) => {
+        const html = '<!doctype html><html><head><meta charset="utf-8"><style>body{font-family:Georgia,serif;line-height:1.5}h1,h2,h3{font-family:inherit}</style></head><body>' + comp.html + '</body></html>';
+        const blob = HD.asBlob(html);
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href = url; a.download = (docLabel(docId) || 'document').replace(/\.[^.]+$/, '') + '.docx';
+        document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 2000);
+      }, () => alert('A Word-export könyvtár nem töltődött be (offline?).'));
+    }, [getCompiled, docLabel, active]);
     const myProjects = useCallback(() => (window.PRStore ? window.PRStore.listFor(me.id).filter((p) => p.id !== projectId) : []), [projectId]);
     const projTexFiles = useCallback((p) => Object.keys(p.files || {}).filter((f) => p.files[f] && p.files[f].type === 'tex'), []);
     const externalDocsList = useCallback(() => Object.keys(extDocs.current).map((docId) => ({ docId, label: docLabel(docId) })), [extTick]);
@@ -1960,7 +1973,7 @@
               onRebind: wsOnRebind, onEditSource: (docId, v) => { if (docId === active) handleEdit(v); },
               onCaret: (pane, off) => { if (pane.docId === active) onCaret(off); }, onJump: (pane, off) => { if (pane.docId === active) onEditorJump(off); },
               onSourceSel, onPreviewClick, onPreviewMouseUp, onPreviewScroll, registerPreview,
-              getFileURL, getFileData, onPrint: onPrintDoc, listFiles: listProjFiles, externalDocs: externalDocsList,
+              getFileURL, getFileData, onPrint: onPrintDoc, onWord: onWordDoc, listFiles: listProjFiles, externalDocs: externalDocsList,
               selPaneId, selQuote, selPos, onComment: () => startAnnotation('comment'), onTodo: () => startAnnotation('todo'), onCloseSel: () => { setSelQuote(''); setSelPaneId(null); }
             }} />
           </div>
@@ -2026,6 +2039,7 @@
           { group: 'Document', label: 'Share…', run: () => setShareOpen(true) },
           { group: 'Document', label: 'Render preview now', hint: '⌘⏎', run: renderNow },
           { group: 'Document', label: 'Print / Export PDF', run: () => onPrintDoc && onPrintDoc() },
+          { group: 'Document', label: 'Export to Word (.docx)', run: () => onWordDoc && onWordDoc() },
         ].concat(outline.map((o) => ({ group: 'Go to', label: o.title, hint: o.kind, run: () => gotoOffset(o.off) })))} />}
 
         <TweaksPanel>
