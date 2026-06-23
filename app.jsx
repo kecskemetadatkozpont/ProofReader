@@ -71,13 +71,31 @@
 
   function buildInitial() {
     const prefs = (window.PRStore && window.PRStore.prefs()) || {};
+    const cloud = !!(window.PR_BACKEND && window.PR_BACKEND.mode === 'cloud');
     let project = PROJECT_ID && window.PRStore ? window.PRStore.get(PROJECT_ID) : null;
+    if (project && PROJECT_ID) { try { sessionStorage.removeItem('pr_await_' + PROJECT_ID); } catch (e) { } }
+    // A SHARED project opened by direct link is often not in the warm cache yet (a collaborator's first visit).
+    // Hydrate and reload once it arrives — instead of dropping the user onto a Sample and overwriting the URL,
+    // which is why a collaborator could see a stale "Sample" instead of the shared project. Reload-loop guarded.
+    if (!project && PROJECT_ID && cloud && window.PRStore && window.PRStore._hydrate) {
+      const awKey = 'pr_await_' + PROJECT_ID;
+      let awaited = false; try { awaited = !!sessionStorage.getItem(awKey); } catch (e) { }
+      if (!awaited) {
+        try {
+          const off = window.PRStore.subscribe(function () {
+            if (window.PRStore.get(PROJECT_ID)) { try { off(); } catch (e) { } try { sessionStorage.setItem(awKey, '1'); } catch (e) { } location.reload(); }
+          });
+          window.PRStore._hydrate();
+          setTimeout(function () { try { off(); } catch (e) { } }, 12000);   // give up after 12s (invalid / no-access id)
+        } catch (e) { }
+      }
+    }
     if (!project && window.PRStore) {
-      // No (or unknown) project id: fall back to the persistent sample project so
-      // comments/to-dos/versions have a real project to save into.
+      // No (or not-yet-loaded) project: fall back to the persistent sample project so the editor still works.
       window.PRStore.seedIfEmpty();
       project = window.PRStore.get('sample') || (window.PRStore.list()[0]);
-      if (project) { try { history.replaceState(null, '', location.pathname + '?p=' + project.id); } catch (e) { } }
+      // only rewrite the URL when NO explicit project was requested — never clobber a direct link we're still loading
+      if (project && !PROJECT_ID) { try { history.replaceState(null, '', location.pathname + '?p=' + project.id); } catch (e) { } }
     }
     if (!project) {
       const seed = window.PR_SAMPLE;

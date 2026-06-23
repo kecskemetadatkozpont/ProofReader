@@ -86,7 +86,11 @@
     // A commenter cannot UPDATE the projects row (RLS = owner/editor), so a full upsert is rejected and
     // their comments/todos would be lost. Persist just the annotations via the SECURITY DEFINER RPC that
     // role_on allows for commenters too (migration-27).
-    if (myRoleOn(p) === 'commenter') {
+    var role = myRoleOn(p);
+    // owner/editor write the full projects row; everyone else (commenter, viewer, or a STALE/unknown local
+    // role from a not-yet-synced members list) persists annotations via the RPC the server gates by role_on —
+    // never a full upsert the RLS rejects and silently drops (the cause of "comments sometimes don't save").
+    if (role !== 'owner' && role !== 'editor') {
       sb.rpc('pr_save_annotations', { p_project: id, p_annotations: p.annotations || [] }).then(function (r) {
         if (r && r.error) { console.warn('[PR] comment save failed, will retry', r.error.message); pending[id] = p; clearTimeout(timers[id]); timers[id] = setTimeout(function () { flush(id); }, 4000); }
       }).catch(function (e) { console.warn('[PR] comment save error', e); });
@@ -135,7 +139,9 @@
           // reconcile the deleted_at column with the embedded flag (column is source of truth)
           if (row.deleted_at) { if (!p.deletedAt) p.deletedAt = Date.parse(row.deleted_at) || Date.now(); }
           else if (p.deletedAt) { delete p.deletedAt; }
-          seen[row.id] = 1; mergeRow(p);
+          seen[row.id] = 1;
+          if (pending[row.id]) return;   // a local edit (e.g. a just-added comment) is queued to flush — don't clobber it with the server copy
+          mergeRow(p);
         });
         CACHE = CACHE.filter(function (p) { return seen[p.id] || pending[p.id]; });
         persistWarm(); notify(); loadProfilesFor(CACHE);
