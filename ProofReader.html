@@ -396,6 +396,17 @@
 
     /* ---------- preview ---------- */
     .preview-scroll { flex: 1; min-height: 0; overflow: auto; background: var(--app-bg); padding: 30px 0 80px; position: relative; }
+    /* #6 — margin comment/to-do cards anchored beside their sentence, scrolling with the document */
+    .preview-scroll.has-anno-margin { padding-right: 248px; }
+    .anno-margin-card { position: absolute; right: 14px; width: 218px; background: var(--pane); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 9px; padding: 7px 9px; box-shadow: 0 2px 8px rgba(20,24,40,.08); cursor: pointer; z-index: 6; }
+    .anno-margin-card.todo { border-left-color: #d9760b; }
+    .anno-margin-card:hover { box-shadow: 0 6px 18px rgba(20,24,40,.16); border-color: var(--accent); }
+    .amc-head { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
+    .amc-head .anno-av { width: 18px; height: 18px; font-size: 9px; margin-left: 0; box-shadow: none; flex: none; }
+    .amc-head b { font-size: 11.5px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .amc-more { font-size: 10px; color: var(--muted); margin-left: auto; flex: none; }
+    .amc-body { font-size: 11.5px; color: var(--muted); line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    @media (max-width: 1180px) { .preview-scroll.has-anno-margin { padding-right: 0; } .anno-margin-card { display: none; } }
     .paper { background: var(--paper-bg); color: var(--ink); width: var(--paper-width); max-width: calc(100% - 48px);
       margin: 0 auto; padding: 56px 64px 64px; border-radius: 3px; box-shadow: 0 1px 3px rgba(0,0,0,.08), 0 12px 32px rgba(20,24,40,.10);
       font-family: 'Source Serif 4', Georgia, serif; font-size: var(--serif-size); line-height: 1.62; }

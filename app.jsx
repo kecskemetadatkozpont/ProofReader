@@ -1649,12 +1649,13 @@
         el.style.removeProperty('--anno-color');
         const t = el.querySelector(':scope > .anno-tag'); if (t) t.remove();
       }));
+      roots.forEach((root) => { root.querySelectorAll('.anno-margin-card').forEach((c) => c.remove()); root.classList.remove('has-anno-margin'); });
       roots.forEach((root) => {
         const docId = root.getAttribute('data-doc');
         if (!docId || docId[0] === '@') return;
         const comp = getCompiled(docId); if (!comp) return;
         const anns = docId === active ? displayAnns : annotations;
-        const bySent = {};
+        const bySent = {}, bySentAnns = {};
         anns.forEach((a) => {
           if (a.kind === 'review') return;
           if (!a.anchor || a.anchor.file !== docId || a.status === 'resolved' || a.status === 'done' || a._orphan) return;
@@ -1662,6 +1663,7 @@
             if (a.anchor.start < s.end && a.anchor.end > s.start) {
               const g = bySent[s.id] || (bySent[s.id] = { comment: [], todo: [] });
               g[a.kind === 'todo' ? 'todo' : 'comment'].push(a.authorId);
+              (bySentAnns[s.id] || (bySentAnns[s.id] = [])).push(a);
             }
           });
         });
@@ -1681,6 +1683,33 @@
           tag.addEventListener('click', (e) => { e.stopPropagation(); if (docId !== active && isCurProj(docId)) setActive(docId); setDrawer({ open: true, tab: hasC && !hasT ? 'comments' : hasT && !hasC ? 'todos' : 'comments' }); });
           el.appendChild(tag);
         });
+        // #6 — margin cards: persistent comment/to-do cards anchored beside their sentence, in a reserved
+        // right column INSIDE the scroll content, so they scroll together with the document.
+        const rr = root.getBoundingClientRect();
+        const cards = Object.keys(bySentAnns).map((sid) => {
+          const el = root.querySelector('.sent[data-sid="' + sid + '"]'); if (!el) return null;
+          const er = el.getBoundingClientRect();
+          return { top: er.top - rr.top + root.scrollTop, anns: bySentAnns[sid] };
+        }).filter(Boolean).sort((a, b) => a.top - b.top);
+        if (cards.length) {
+          root.classList.add('has-anno-margin');
+          let lastBottom = -999;
+          cards.forEach((c) => {
+            const top = Math.max(c.top, lastBottom + 8); lastBottom = top + 74;
+            const first = c.anns[0]; const todoOnly = c.anns.every((a) => a.kind === 'todo');
+            const au = A && A.byId(first.authorId);
+            const card = document.createElement('div');
+            card.className = 'anno-margin-card' + (todoOnly ? ' todo' : ''); card.style.top = top + 'px';
+            const head = document.createElement('div'); head.className = 'amc-head';
+            if (au) { const av = document.createElement('span'); av.className = 'anno-av'; av.style.background = au.color; av.textContent = A.initials(au.name); head.appendChild(av); const nm = document.createElement('b'); nm.textContent = au.name; head.appendChild(nm); }
+            if (c.anns.length > 1) { const more = document.createElement('span'); more.className = 'amc-more'; more.textContent = '+' + (c.anns.length - 1); head.appendChild(more); }
+            const body = document.createElement('div'); body.className = 'amc-body'; body.textContent = first.body || (todoOnly ? '(to-do)' : '(comment)');
+            card.appendChild(head); card.appendChild(body);
+            card.addEventListener('mousedown', (e) => { e.preventDefault(); });
+            card.addEventListener('click', (e) => { e.stopPropagation(); if (docId !== active && isCurProj(docId)) setActive(docId); setDrawer({ open: true, tab: todoOnly ? 'todos' : 'comments' }); onJumpAnn(first); });
+            root.appendChild(card);
+          });
+        }
       });
     }, [displayAnns, annotations, compiled, otherCompiled, active, layout, soloPaneId]);
 
