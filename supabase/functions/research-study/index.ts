@@ -50,8 +50,13 @@ function normWork(w: any) {
 }
 async function openalexSearch(question: string, config: any, page: number, perPage: number) {
   const f = config.filters || {};
-  const terms = [question, ...(config.keywords || [])].filter(Boolean).join(' ').trim();
-  let url = 'https://api.openalex.org/works?search=' + encodeURIComponent(terms || question || '')
+  // Build the search term from the (concise) keywords, falling back to the question. CRITICAL: OpenAlex's
+  // `search` parser REJECTS certain characters — notably '?' — returning "Invalid query parameters error"
+  // (HTTP 200 with 0 results), so a sentence-style research question silently found NOTHING. Strip those
+  // characters (quotes, brackets, boolean operators, '?') and cap the length.
+  const raw = (config.keywords && config.keywords.length ? config.keywords.join(' ') : String(question || ''));
+  const terms = raw.replace(/[?!"'`(){}\[\]:;^~*\\\/|&<>]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 350);
+  let url = 'https://api.openalex.org/works?search=' + encodeURIComponent(terms || 'research')
     + '&per-page=' + perPage + '&page=' + page + '&mailto=publify@example.com';
   const filters: string[] = [];
   if (f.fromYear) filters.push('from_publication_date:' + f.fromYear + '-01-01');
@@ -62,6 +67,7 @@ async function openalexSearch(question: string, config: any, page: number, perPa
   const r = await fetch(url, { headers: { 'User-Agent': 'Publify/1.0 (mailto:publify@example.com)' } });
   if (!r.ok) return { papers: [], total: 0 };
   const o = await r.json();
+  if (o && o.error) return { papers: [], total: 0 };   // bad query → nothing, don't crash the batch
   return { papers: (o.results || []).map(normWork), total: (o.meta && o.meta.count) || 0 };
 }
 

@@ -1004,7 +1004,7 @@
     var CFG = window.PR_CONFIG || {};
     return sb.auth.getSession().then(function (s) {
       var token = (s && s.data && s.data.session && s.data.session.access_token) || CFG.supabaseAnonKey;
-      return fetch(CFG.supabaseUrl + '/functions/v1/research-study', { method: 'POST', headers: { 'Content-Type': 'application/json', 'apikey': CFG.supabaseAnonKey, 'Authorization': 'Bearer ' + token }, body: JSON.stringify(body) }).then(function (r) { return r.json(); }, function () { return { error: 'network' }; });
+      return fetch(CFG.supabaseUrl + '/functions/v1/research-study', { method: 'POST', headers: { 'Content-Type': 'application/json', 'apikey': CFG.supabaseAnonKey, 'Authorization': 'Bearer ' + token }, body: JSON.stringify(body) }).then(function (r) { return r.json().catch(function () { return { error: 'A szerver válasza nem értelmezhető (lehet időtúllépés) — próbáld újra.' }; }); }, function () { return { error: 'network' }; });
     });
   }
   function LiteratureStudy(props) {
@@ -1096,7 +1096,7 @@
               setTitles(function (t) { var n2 = Object.assign({}, t); (d.results || []).forEach(function (x) { if (x.title) n2[x.source_id] = x.title; }); return n2; });
               loadStudy(selId);
               if (!d.done && alive.current && !stop.current) loop(d.next_offset);
-              else { setRunning(false); setProg(null); loadStudy(selId); props.onChanged(); }
+              else { setRunning(false); setProg(null); loadStudy(selId); props.onChanged(); if (n === 1 && !(d.total_estimate || d.new_sources || d.fetched)) setErr('0 találat az OpenAlex-en — próbálj tágabb/más kulcsszavakat, vagy lazább szűrőket (pl. töröld az „Évtől"-t vagy a „csak cikkek"-et), majd futtasd újra.'); }
             });
           })(0);
         });
@@ -1122,11 +1122,20 @@
     var grp = { include: [], maybe: [], exclude: [] }; stepPapers.forEach(function (p) { (grp[p.decision] || (grp[p.decision] = [])).push(p); });
     var cur = stepRow(curStep) || {};
     return h('div', null,
-      // study selector
-      h('div', { style: { display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' } },
-        h('select', { className: 'field', style: { width: 'auto', height: 32 }, value: selId || '', onChange: function (e) { setSelId(e.target.value); setCurStep(1); } }, studies.map(function (s) { return h('option', { key: s.id, value: s.id }, s.title + (s.status === 'done' ? ' ✓' : '')); })),
-        props.canEdit ? h('button', { className: 'btn', onClick: function () { newStudy(null); } }, '+ Új') : null,
-        sel ? h('span', { className: 'chip c-grey' }, sel.question ? sel.question.slice(0, 60) : '') : null),
+      // studies overview — every study with its progress + status; click to open one. Lets you follow several.
+      h('div', { style: { marginBottom: 12 } },
+        h('div', { style: { fontSize: 11.5, color: 'var(--faint)', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 5 } }, 'Tanulmányok (' + studies.length + ')'),
+        h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 6 } },
+          studies.map(function (s) {
+            var on = s.id === selId;
+            var st = s.status === 'done' ? '✓ kész' : ('lépés ' + (s.cur_step || 1) + '/4');
+            return h('button', { key: s.id, onClick: function () { setSelId(s.id); setCurStep(s.cur_step || 1); }, style: { textAlign: 'left', maxWidth: 260, border: '1.5px solid ' + (on ? 'var(--accent)' : 'var(--line)'), background: on ? 'var(--surface-2)' : 'var(--surface)', borderRadius: 8, padding: '6px 10px', cursor: 'pointer' } },
+              h('div', { style: { fontSize: 12.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } }, s.title),
+              h('div', { style: { fontSize: 11, color: (running && on) ? 'var(--accent)' : 'var(--muted)', marginTop: 2 } }, (running && on ? '⏳ fut… ' : '') + st)
+            );
+          }),
+          props.canEdit ? h('button', { onClick: function () { newStudy(null); }, style: { border: '1px dashed var(--line)', background: 'transparent', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontSize: 12.5, color: 'var(--muted)' } }, '+ Új tanulmány') : null
+        )),
       // funnel stepper
       h('div', { className: 'funnel' }, LS_STEPS.map(function (s) {
         return h('button', { key: s.step, className: 'funnel-step' + (curStep === s.step ? ' on' : '') + (((stepRow(s.step) || {}).status === 'done') ? ' done' : ''), onClick: function () { viewStep(s.step); } },
