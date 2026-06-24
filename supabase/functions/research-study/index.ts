@@ -83,6 +83,36 @@ async function openalexSearch(question: string, config: any, page: number, perPa
   if (res.total === 0 && page <= 1 && qClean && qClean !== primary) { res = await openalexFetch(qClean, [], page, perPage); res.relaxed = true; }
   return res;
 }
+// Per-keyword UNION sweep. Joining all keywords into ONE query is over-specific — OpenAlex relevance-matches
+// most terms, so e.g. 8 keywords return only ~7 papers. Searching EACH keyword separately and unioning (dedup
+// by ext_id) gives broad, thorough coverage (~190+ papers), matching a proper Elicit-style screen.
+async function openalexUnion(question: string, config: any, maxResults: number) {
+  const f = config.filters || {};
+  const filters: string[] = [];
+  if (f.fromYear) filters.push('from_publication_date:' + f.fromYear + '-01-01');
+  if (f.minCites) filters.push('cited_by_count:>' + (parseInt(f.minCites, 10) - 1));
+  if (f.oa) filters.push('is_oa:true');
+  if (f.journals) filters.push('type:article');
+  const kws = (config.keywords || []).map(cleanTerms).filter(Boolean);
+  const queries = kws.length ? kws : [cleanTerms(question)].filter(Boolean);
+  if (!queries.length) return { papers: [] as any[], relaxed: false };
+  const perKw = Math.max(10, Math.min(40, Math.ceil(maxResults / queries.length) + 6));
+  const seen = new Set<string>();
+  const out: any[] = [];
+  for (const q of queries) {
+    if (out.length >= maxResults) break;
+    let res = await openalexFetch(q, filters, 1, perKw);
+    if (res.total === 0 && filters.length) res = await openalexFetch(q, [], 1, perKw);   // relax filters for this keyword
+    for (const p of res.papers) {
+      if (!p.ext_id || seen.has(p.ext_id)) continue;
+      seen.add(p.ext_id); out.push(p);
+      if (out.length >= maxResults) break;
+    }
+  }
+  // ultimate fallback: nothing found per-keyword → the single-query relax path
+  if (!out.length) { const r = await openalexSearch(question, config, 1, Math.min(50, maxResults)); return { papers: r.papers, relaxed: true }; }
+  return { papers: out, relaxed: false };
+}
 
 async function fetchPdfBlock(url: string): Promise<any | null> {
   if (!url) return null;
@@ -215,29 +245,43 @@ Deno.serve(async (req) => {
     // ---------------- search_step1 ----------------
     if (action === 'search_step1') {
       const limit = Math.min(25, Math.max(5, parseInt(String(body.limit || '20'), 10)));
-      const page = Math.floor(offset / limit) + 1;
-      const maxResults = Math.min(300, parseInt(String(config.max_results || '150'), 10));
-      const searchRes = await openalexSearch(study.question || study.title, config, page, limit);
-      const { papers, total } = searchRes;
-      let newSources = 0;
-      const screenInputs: any[] = [];
-      for (const p of papers) {
-        const { data: srow } = await sb.from('research_sources').upsert({
-          project_id: study.project_id, source_api: config.source_adapter || 'openalex', ext_id: p.ext_id,
-          doi: p.doi, title: p.title, authors: p.authors.length ? p.authors : null, year: p.year, venue: p.venue,
-          abstract: p.abstract || null, cited_by: p.cited_by, url: p.url, oa_pdf_url: p.oa_pdf_url || null, screening: 'unscreened',
-        }, { onConflict: 'project_id,ext_id' }).select('id,created_at').maybeSingle();
-        if (!srow) continue;
-        await sb.from('research_study_papers').upsert({ study_id, source_id: srow.id, step: 1, decision: 'unscreened' }, { onConflict: 'study_id,source_id,step' });
-        if (!overridden.has(srow.id)) screenInputs.push({ source_id: srow.id, oa_pdf_url: p.oa_pdf_url, ...p });
-        newSources++;
+      const maxResults = Math.min(400, parseInt(String(config.max_results || '200'), 10));
+      let relaxed = false;
+      // First call: fetch the per-keyword UNION once and create the unscreened candidate rows (idempotent —
+      // ignoreDuplicates preserves any human-overridden/already-screened rows the run's delete kept).
+      if (offset === 0) {
+        const u = await openalexUnion(study.question || study.title, config, maxResults);
+        relaxed = !!u.relaxed;
+        const found = u.papers;
+        if (found.length) {
+          const srcRows = found.map((p: any) => ({
+            project_id: study.project_id, source_api: config.source_adapter || 'openalex', ext_id: p.ext_id,
+            doi: p.doi, title: p.title, authors: (p.authors && p.authors.length) ? p.authors : null, year: p.year,
+            venue: p.venue, abstract: p.abstract || null, cited_by: p.cited_by, url: p.url, oa_pdf_url: p.oa_pdf_url || null, screening: 'unscreened',
+          }));
+          const { data: ups } = await sb.from('research_sources').upsert(srcRows, { onConflict: 'project_id,ext_id' }).select('id,ext_id');
+          const byExt: Record<string, string> = {}; (ups || []).forEach((r: any) => { byExt[r.ext_id] = r.id; });
+          const spRows = found.map((p: any) => byExt[p.ext_id]).filter(Boolean).map((id: string) => ({ study_id, source_id: id, step: 1, decision: 'unscreened' }));
+          if (spRows.length) await sb.from('research_study_papers').upsert(spRows, { onConflict: 'study_id,source_id,step', ignoreDuplicates: true });
+        }
       }
-      const results = await screenAndWrite(sb, study, study_id, 1, config, model, screenInputs, false);
+      // Screen the next `limit` UNSCREENED step-1 candidates (join sources for title/abstract). Same response
+      // shape as before → the browser's batch loop is unchanged; it just iterates the union instead of pages.
+      const { data: pend } = await sb.from('research_study_papers').select('source_id').eq('study_id', study_id).eq('step', 1).eq('decision', 'unscreened').eq('overridden', false).order('source_id').limit(limit);
+      const pendIds = (pend || []).map((x: any) => x.source_id);
+      let results: any[] = [];
+      if (pendIds.length) {
+        const { data: srcs } = await sb.from('research_sources').select('id,title,year,venue,abstract,url,doi,oa_pdf_url').in('id', pendIds);
+        const inputs = (srcs || []).map((s: any) => ({ source_id: s.id, title: s.title, year: s.year, venue: s.venue, abstract: s.abstract, url: s.url, doi: s.doi, oa_pdf_url: s.oa_pdf_url }));
+        results = await screenAndWrite(sb, study, study_id, 1, config, model, inputs, false);
+      }
+      const { count: stepTotal } = await sb.from('research_study_papers').select('source_id', { count: 'exact', head: true }).eq('study_id', study_id).eq('step', 1);
       const total_count = await recount(sb, study_id, 1);
-      const nextOffset = offset + papers.length;
-      const done = papers.length < limit || nextOffset >= maxResults;
-      await finishBatch(sb, study_id, 1, nextOffset, total, done);
-      return json({ ok: true, step: 1, fetched: papers.length, new_sources: newSources, counts: total_count, results, next_offset: nextOffset, done, total_estimate: total, relaxed: !!searchRes.relaxed });
+      const screenedNow = pendIds.length;
+      const nextOffset = offset + screenedNow;
+      const done = screenedNow < limit;   // fewer than a full batch of unscreened left → finished
+      await finishBatch(sb, study_id, 1, nextOffset, stepTotal || 0, done);
+      return json({ ok: true, step: 1, fetched: stepTotal || 0, new_sources: offset === 0 ? (stepTotal || 0) : 0, counts: total_count, results, next_offset: nextOffset, done, total_estimate: stepTotal || 0, relaxed });
     }
 
     // ---------------- screen_batch (steps 2, 3) ----------------

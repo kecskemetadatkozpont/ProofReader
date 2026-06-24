@@ -1048,7 +1048,16 @@
     useEffect(function () { return function () { alive.current = false; }; }, []);
     // #12 — selId is seeded from studies[0] at mount; if the studies list loads AFTER mount it stays null
     // and a step run would POST an empty study_id ("study_id required"). Sync selId once studies arrive.
-    useEffect(function () { if (!selId && studies.length) setSelId(studies[0].id); }, [studies.length]);
+    // On (re)load restore the LAST-VIEWED study (localStorage) + its furthest step, so a completed run's
+    // results are shown again instead of jumping to studies[0]/step 1 and looking like they vanished.
+    useEffect(function () {
+      if (!selId && studies.length) {
+        var saved = null; try { saved = localStorage.getItem('pr-study-' + props.projectId); } catch (e) { }
+        var s = (saved && studies.filter(function (x) { return x.id === saved; })[0]) || studies[0];
+        setSelId(s.id); if (s.cur_step) setCurStep(s.cur_step);
+      }
+    }, [studies.length]);
+    useEffect(function () { if (selId) { try { localStorage.setItem('pr-study-' + props.projectId, selId); } catch (e) { } } }, [selId]);
     var sel = studies.filter(function (x) { return x.id === selId; })[0];
     var srcMap = {}; (props.sources || []).forEach(function (s) { srcMap[s.id] = s; });
 
@@ -1058,8 +1067,15 @@
         sb.from('research_study_steps').select('step,kind,config,status,cursor,total,counts').eq('study_id', id).order('step'),
         sb.from('research_study_papers').select('source_id,step,decision,reason,score,signals,overridden').eq('study_id', id)
       ]).then(function (r) {
-        var st = (r[0] && r[0].data) || []; setSteps(st); setPapers((r[1] && r[1].data) || []);
+        var st = (r[0] && r[0].data) || []; var pps = (r[1] && r[1].data) || []; setSteps(st); setPapers(pps);
         var cs = st.filter(function (x) { return x.step === curStep; })[0]; if (cs && cs.config) setCfg(cs.config);
+        // load titles for this study's papers directly, so reloaded results always show a title (even if the
+        // source isn't in the project-wide props.sources slice) — the transient run-time `titles` is gone on reload
+        var ids = []; var seen = {}; pps.forEach(function (p) { if (p.source_id && !seen[p.source_id]) { seen[p.source_id] = 1; ids.push(p.source_id); } });
+        if (ids.length) sb.from('research_sources').select('id,title').in('id', ids).then(function (sr) {
+          var tt = {}; ((sr && sr.data) || []).forEach(function (x) { tt[x.id] = x.title; });
+          setTitles(function (prev) { return Object.assign({}, tt, prev); });
+        });
       });
     }
     useEffect(function () { loadStudy(selId); }, [selId]);
