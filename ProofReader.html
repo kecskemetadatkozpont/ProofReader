@@ -277,6 +277,12 @@
     .ct-page canvas.ct-canvas { display: block; border-radius: 2px; }
     .ct-textlayer { position: absolute; left: 0; top: 0; overflow: hidden; line-height: 1; opacity: 1; }
     .ct-textlayer > span { color: transparent; position: absolute; white-space: pre; cursor: pointer; transform-origin: 0 0; border-radius: 2px; }
+    /* PDF.js selection helper — makes drag-selection precise (see workspace.jsx): a clean full-width boundary
+       the selection lands on, instead of snapping to far-away absolutely-positioned spans. */
+    .ct-textlayer .endOfContent { display: block; position: absolute; left: 0; top: 100%; right: 0; bottom: 0; z-index: -1; cursor: default; user-select: none; -webkit-user-select: none; }
+    .ct-textlayer .endOfContent.active { top: 0; }
+    .ct-textlayer > span::selection { background: rgba(79,70,229,.35); }
+    .ct-textlayer > span::-moz-selection { background: rgba(79,70,229,.35); }
     .ct-textlayer > span.sent:hover { background: rgba(79,70,229,.18); }
     .ct-textlayer > span.sent-cur { background: rgba(255,170,0,.42); box-shadow: 0 0 0 1px rgba(255,140,0,.35); }
     .ct-textlayer > span.sent-cursor { background: rgba(79,70,229,.26); box-shadow: 0 0 0 1px rgba(79,70,229,.3); }

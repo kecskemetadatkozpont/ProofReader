@@ -717,6 +717,15 @@
             await lib.renderTextLayer({ textContent: tc, container: tl, viewport: cssVp, textDivs: textDivs }).promise;
             const sids = st.sids[n] || [];
             textDivs.forEach((sp, i) => { const sid = sids[i]; if (sid != null) { sp.classList.add('sent'); sp.dataset.sid = sid; } });
+            // PDF.js v3.11's renderTextLayer (function API) omits the `endOfContent` helper the full
+            // TextLayerBuilder adds — without it, dragging a selection across the absolutely-positioned spans
+            // grabs whole paragraphs. Re-add it + the classic bindMouse: on mousedown the helper jumps to the
+            // pointer's vertical position, so the selection's lower bound lands on one clean full-width element
+            // → precise, character-level selection instead of snapping to far-away spans.
+            const eoc = document.createElement('div'); eoc.className = 'endOfContent'; tl.appendChild(eoc);
+            tl.addEventListener('mousedown', (e) => { const b = tl.getBoundingClientRect(); const r = b.height ? Math.max(0, Math.min(1, (e.clientY - b.top) / b.height)) : 0; eoc.style.top = (r * 100).toFixed(2) + '%'; eoc.classList.add('active'); });
+            const clearEoc = () => { eoc.style.top = ''; eoc.classList.remove('active'); };
+            tl.addEventListener('mouseup', clearEoc); tl.addEventListener('mouseleave', clearEoc);
             applyHighlight(root); applyAnno(root); applyVoiced(root); applyReview(root); applyMarginCards(root);
           };
           st.renderPage = renderPage;

@@ -977,10 +977,21 @@
       const comp = getCompiled(pane.docId); if (!comp || !isCurProj(pane.docId)) return;
       const sents = comp.sentences.filter((s) => { const el = root.querySelector('.sent[data-sid="' + s.id + '"]'); return el && range.intersectsNode(el); });
       if (!sents.length) { setSelPaneId(null); return; }
-      const start = Math.min.apply(null, sents.map((s) => s.start));
-      const end = Math.max.apply(null, sents.map((s) => s.end));
+      const spanStart = Math.min.apply(null, sents.map((s) => s.start));
+      const spanEnd = Math.max.apply(null, sents.map((s) => s.end));
+      // Narrow the anchor to the EXACT selected text so a comment covers ONLY what was selected — not the whole
+      // sentence(s) the selection happens to touch. Locate the selection's text inside the source span,
+      // whitespace-tolerantly; fall back to the full sentence span only when it can't be located (e.g. the
+      // selection spans LaTeX commands / math where rendered text ≠ source).
+      const src = getSource(pane.docId);
+      const selText = sel.toString().trim();
+      let start = spanStart, end = spanEnd;
+      if (selText && selText.length >= 2) {
+        const esc = selText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
+        try { const m = new RegExp(esc).exec(src.slice(spanStart, spanEnd)); if (m && m[0]) { start = spanStart + m.index; end = start + m[0].length; } } catch (e) { }
+      }
       selRange.current = { start: start, end: end }; selDocRef.current = pane.docId;
-      setSelQuote(getSource(pane.docId).slice(start, end).trim() || sel.toString().trim());
+      setSelQuote(src.slice(start, end).trim() || selText);
       const rr = range.getBoundingClientRect();
       const top = rr.top > 64 ? rr.top - 46 : rr.bottom + 8;
       setSelPos({ top: top, left: Math.max(130, Math.min(window.innerWidth - 130, rr.left + rr.width / 2)) });
