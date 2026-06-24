@@ -1065,7 +1065,7 @@
     var rvS = useState(''), renameVal = rvS[0], setRenameVal = rvS[1];
     var meS = useState({}), srcMeta = meS[0], setSrcMeta = meS[1];   // source_id -> {title,venue,cited_by,year,issn}
     var scS = useState(null), scimap = scS[0], setScimap = scS[1];   // SCImago ISSN→quartile map (lazy)
-    var soS = useState('score'), sortBy = soS[0], setSortBy = soS[1];   // results sort key
+    var soS = useState('decision'), sortBy = soS[0], setSortBy = soS[1];   // results sort key
     useEffect(function () { loadScimago().then(setScimap); }, []);
     var alive = useRef(true), stop = useRef(false);
     useEffect(function () { return function () { alive.current = false; }; }, []);
@@ -1209,14 +1209,17 @@
     // scientometrics + sorting for the results
     function metaOf(p) { return srcMeta[p.source_id] || srcMap[p.source_id] || {}; }
     function qOf(p) { return quartileFromIssn(scimap, metaOf(p).issn); }
+    var DEC_ORDER = { include: 0, maybe: 1, exclude: 2 };
     function sortKey(p) {
       var m = metaOf(p);
       if (sortBy === 'cites') return -(m.cited_by || 0);
       if (sortBy === 'year') return -(m.year || 0);
       if (sortBy === 'q') { var q = qOf(p); return q || 9; }   // Q1 first; unknown last
-      return -(p.score || 0);   // relevance (default)
+      if (sortBy === 'decision') return DEC_ORDER[p.decision] != null ? DEC_ORDER[p.decision] : 3;
+      return -(p.score || 0);   // relevance
     }
-    function sortPapers(arr) { return arr.slice().sort(function (a, b) { var d = sortKey(a) - sortKey(b); return d || ((metaOf(b).cited_by || 0) - (metaOf(a).cited_by || 0)); }); }
+    // secondary sort: keep includes/maybe/exclude grouped, then highest relevance, then most cited
+    function sortPapers(arr) { return arr.slice().sort(function (a, b) { return (sortKey(a) - sortKey(b)) || ((DEC_ORDER[a.decision] || 0) - (DEC_ORDER[b.decision] || 0)) || ((b.score || 0) - (a.score || 0)) || ((metaOf(b).cited_by || 0) - (metaOf(a).cited_by || 0)); }); }
     var cur = stepRow(curStep) || {};
     return h('div', null,
       // studies overview — every study with its progress + status; click to open one. Lets you follow several.
@@ -1297,42 +1300,46 @@
           h('h3', { style: { margin: 0 } }, 'Eredmények — ' + LS_STEPS[curStep - 1].label + ' (' + stepPapers.length + ' cikk)'),
           stepPapers.length ? h('label', { style: { marginLeft: 'auto', fontSize: 11.5, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 5 } }, 'Rendezés:',
             h('select', { className: 'num', style: { width: 'auto', height: 28 }, value: sortBy, onChange: function (e) { setSortBy(e.target.value); } },
+              h('option', { value: 'decision' }, 'Döntés szerint'),
               h('option', { value: 'score' }, 'Relevancia'),
               h('option', { value: 'cites' }, 'Idézettség'),
               h('option', { value: 'q' }, 'Kvartilis (Q1→Q4)'),
               h('option', { value: 'year' }, 'Év (újabb elöl)'))) : null),
         stepPapers.length === 0 ? h('div', { style: { fontSize: 13, color: 'var(--faint)' } }, 'Még nincs eredmény — futtasd a lépést.') :
-          ['include', 'maybe', 'exclude'].map(function (dec) {
-            var arr = grp[dec] || []; if (!arr.length) return null;
-            return h('div', { key: dec, style: { marginTop: 6 } },
-              h('div', { className: 'field-label' }, (dec === 'include' ? '✅ Beválogatva' : dec === 'maybe' ? '🟡 Talán' : '❌ Kizárva') + ' (' + arr.length + ')'),
-              sortPapers(arr).map(function (p) {
-                var m = metaOf(p); var s = srcMap[p.source_id]; var title = titles[p.source_id] || m.title || (s && s.title) || '(cikk)';
-                var url = (s && s.url) || m.url || (m.doi || null); var q = qOf(p);
-                return h('div', { className: 'src', key: p.source_id },
-                  h('div', { style: { flex: 1, minWidth: 0 } },
-                    h('div', { style: { fontSize: 12.5, fontWeight: 600 } }, url ? h('a', { href: url, target: '_blank', rel: 'noreferrer', style: { color: 'var(--ink)' } }, title) : title),
-                    p.reason ? h('div', { className: 'result-reason' }, p.reason) : null,
-                    (p.signals && p.signals.extract && (p.signals.extract.method || p.signals.extract.finding)) ? h('div', { style: { fontSize: 11.5, color: 'var(--muted)', marginTop: 2, lineHeight: 1.45 } },
-                      p.signals.extract.method ? h('span', { title: 'Módszer / megközelítés (absztraktból)' }, '🔬 ' + p.signals.extract.method + '   ') : null,
-                      (p.signals.extract.dataset && !/^none/i.test(p.signals.extract.dataset)) ? h('span', { title: 'Adathalmaz' }, '📊 ' + p.signals.extract.dataset + '   ') : null,
-                      p.signals.extract.finding ? h('span', { title: 'Fő eredmény / állítás' }, '→ ' + p.signals.extract.finding) : null) : null,
-                    (p.signals && p.signals.criteria && (((p.signals.criteria.inc || []).length) || ((p.signals.criteria.exc || []).length))) ? h('div', { style: { display: 'flex', gap: 4, marginTop: 3, flexWrap: 'wrap' } },
-                      (p.signals.criteria.inc || []).map(function (c, ci) { return h('span', { key: 'i' + ci, className: 'mtag', style: { background: 'rgba(22,163,74,.12)', color: '#15803d', border: '1px solid rgba(22,163,74,.35)' }, title: 'Teljesített beválogatási kritérium' }, '✓ ' + c); }),
-                      (p.signals.criteria.exc || []).map(function (c, ci) { return h('span', { key: 'e' + ci, className: 'mtag', style: { background: 'rgba(220,38,38,.1)', color: '#b91c1c', border: '1px solid rgba(220,38,38,.35)' }, title: 'Fennálló kizárási kritérium' }, '✗ ' + c); })) : null,
-                    h('div', { style: { display: 'flex', gap: 5, marginTop: 3, flexWrap: 'wrap', alignItems: 'center' } },
-                      q ? h('span', { className: 'mtag', style: { background: q <= 1 ? '#16a34a' : q === 2 ? '#65a30d' : q === 3 ? '#b45309' : '#6b7280', color: '#fff', fontWeight: 700, border: 'none' }, title: 'Scopus/SCImago kvartilis (SJR) — Q1 = a terület felső 25%-a' }, 'Q' + q) : null,
-                      m.cited_by != null ? h('span', { className: 'mtag', title: 'Idézettség (OpenAlex — a WoS/Scopus nyílt proxyja)' }, '📈 ' + m.cited_by) : null,
-                      m.venue ? h('span', { className: 'mtag', title: 'Folyóirat / venue: ' + m.venue }, String(m.venue).length > 46 ? String(m.venue).slice(0, 44) + '…' : m.venue) : null,
-                      m.year ? h('span', { className: 'mtag' }, m.year) : null,
-                      p.score != null ? h('span', { className: 'mtag', title: 'AI relevancia-pontszám' }, p.score + '%') : null,
-                      (p.signals && p.signals.has_github) ? h('span', { className: 'mtag ok' }, 'github') : null,
-                      (p.signals && p.signals.has_dataset) ? h('span', { className: 'mtag ok' }, 'dataset') : null,
-                      (p.signals && p.signals.screened_on) ? h('span', { className: 'mtag' }, p.signals.screened_on) : null,
-                      p.overridden ? h('span', { className: 'mtag warn' }, 'kézi') : null)),
-                  props.canEdit ? h('div', { className: 'seg', style: { flex: 'none' } }, ['include', 'maybe', 'exclude'].map(function (v) { return h('button', { key: v, className: p.decision === v ? 'on' : '', onClick: function () { override(p, v); } }, v); })) : null);
-              }));
-          })
+          h('div', { style: { overflowX: 'auto', marginTop: 8 } }, h('table', { style: { width: '100%', borderCollapse: 'collapse', fontSize: 12.5 } },
+            h('thead', null, h('tr', null,
+              [['Döntés', 'decision', 'left'], ['Cikk', null, 'left'], ['Q', 'q', 'center'], ['Idézet', 'cites', 'right'], ['Folyóirat', null, 'left'], ['Év', 'year', 'right'], ['Pont', 'score', 'right']].map(function (c, i) {
+                return h('th', { key: i, onClick: c[1] ? function () { setSortBy(c[1]); } : null, style: { textAlign: c[2], padding: '6px 8px', borderBottom: '2px solid var(--line)', fontSize: 11, color: 'var(--muted)', fontWeight: 700, whiteSpace: 'nowrap', cursor: c[1] ? 'pointer' : 'default', userSelect: 'none' }, title: c[1] ? 'Rendezés e szerint' : null }, c[0] + (c[1] && sortBy === c[1] ? ' ▾' : ''));
+              }),
+              props.canEdit ? h('th', { key: 'act', style: { borderBottom: '2px solid var(--line)' } }) : null)),
+            h('tbody', null, sortPapers(stepPapers).map(function (p) {
+              var m = metaOf(p); var s = srcMap[p.source_id]; var title = titles[p.source_id] || m.title || (s && s.title) || '(cikk)';
+              var url = (s && s.url) || m.url || (m.doi || null); var q = qOf(p);
+              var b = p.decision === 'include' ? { t: '✅ Beválogatva', c: '#15803d', bg: 'rgba(22,163,74,.12)' } : p.decision === 'maybe' ? { t: '🟡 Talán', c: '#b45309', bg: 'rgba(180,83,9,.1)' } : { t: '❌ Kizárva', c: '#b91c1c', bg: 'rgba(220,38,38,.08)' };
+              var ex = (p.signals && p.signals.extract) || {}; var cr = (p.signals && p.signals.criteria) || {};
+              return h('tr', { key: p.source_id, style: { borderBottom: '1px solid var(--line)', verticalAlign: 'top' } },
+                h('td', { style: { padding: '7px 8px', whiteSpace: 'nowrap' } }, h('span', { style: { fontSize: 11, fontWeight: 700, color: b.c, background: b.bg, borderRadius: 6, padding: '2px 6px' } }, b.t), p.overridden ? h('span', { className: 'mtag warn', style: { marginLeft: 4 } }, 'kézi') : null),
+                h('td', { style: { padding: '7px 8px', minWidth: 240 } },
+                  h('div', { style: { fontWeight: 600 } }, url ? h('a', { href: url, target: '_blank', rel: 'noreferrer', style: { color: 'var(--ink)' } }, title) : title),
+                  p.reason ? h('div', { className: 'result-reason' }, p.reason) : null,
+                  (ex.method || ex.finding) ? h('div', { style: { fontSize: 11.5, color: 'var(--muted)', marginTop: 2, lineHeight: 1.45 } },
+                    ex.method ? h('span', { title: 'Módszer / megközelítés (absztraktból)' }, '🔬 ' + ex.method + '   ') : null,
+                    (ex.dataset && !/^none/i.test(ex.dataset)) ? h('span', { title: 'Adathalmaz' }, '📊 ' + ex.dataset + '   ') : null,
+                    ex.finding ? h('span', { title: 'Fő eredmény / állítás' }, '→ ' + ex.finding) : null) : null,
+                  ((cr.inc || []).length || (cr.exc || []).length) ? h('div', { style: { display: 'flex', gap: 4, marginTop: 3, flexWrap: 'wrap' } },
+                    (cr.inc || []).map(function (c, ci) { return h('span', { key: 'i' + ci, className: 'mtag', style: { background: 'rgba(22,163,74,.12)', color: '#15803d', border: '1px solid rgba(22,163,74,.35)' }, title: 'Teljesített beválogatási kritérium' }, '✓ ' + c); }),
+                    (cr.exc || []).map(function (c, ci) { return h('span', { key: 'e' + ci, className: 'mtag', style: { background: 'rgba(220,38,38,.1)', color: '#b91c1c', border: '1px solid rgba(220,38,38,.35)' }, title: 'Fennálló kizárási kritérium' }, '✗ ' + c); })) : null,
+                  (p.signals && (p.signals.has_github || p.signals.has_dataset || p.signals.screened_on)) ? h('div', { style: { display: 'flex', gap: 4, marginTop: 3, flexWrap: 'wrap' } },
+                    p.signals.has_github ? h('span', { className: 'mtag ok' }, 'github') : null,
+                    p.signals.has_dataset ? h('span', { className: 'mtag ok' }, 'dataset') : null,
+                    p.signals.screened_on ? h('span', { className: 'mtag' }, p.signals.screened_on) : null) : null),
+                h('td', { style: { padding: '7px 8px', textAlign: 'center' } }, q ? h('span', { style: { fontSize: 11, fontWeight: 700, color: '#fff', background: q <= 1 ? '#16a34a' : q === 2 ? '#65a30d' : q === 3 ? '#b45309' : '#6b7280', borderRadius: 6, padding: '2px 6px' }, title: 'Scopus/SCImago kvartilis (SJR)' }, 'Q' + q) : h('span', { style: { color: 'var(--faint)' } }, '–')),
+                h('td', { style: { padding: '7px 8px', textAlign: 'right', whiteSpace: 'nowrap' }, title: 'Idézettség (OpenAlex — WoS/Scopus proxy)' }, m.cited_by != null ? m.cited_by : '–'),
+                h('td', { style: { padding: '7px 8px', maxWidth: 170 } }, m.venue ? h('span', { title: m.venue }, String(m.venue).length > 38 ? String(m.venue).slice(0, 36) + '…' : m.venue) : h('span', { style: { color: 'var(--faint)' } }, '–')),
+                h('td', { style: { padding: '7px 8px', textAlign: 'right' } }, m.year || '–'),
+                h('td', { style: { padding: '7px 8px', textAlign: 'right' } }, p.score != null ? p.score + '%' : '–'),
+                props.canEdit ? h('td', { style: { padding: '7px 8px' } }, h('div', { className: 'seg', style: { flex: 'none' } }, ['include', 'maybe', 'exclude'].map(function (v) { return h('button', { key: v, className: p.decision === v ? 'on' : '', title: v, onClick: function () { override(p, v); } }, v === 'include' ? '✓' : v === 'maybe' ? '?' : '✕'); }))) : null);
+            }))))
       ) : null,
       // 📚 studies manage modal — view all studies + delete (cascades to steps/papers)
       studiesOpen ? h('div', { style: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,.4)', zIndex: 1000, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '6vh 16px', overflow: 'auto' }, onClick: function () { setStudiesOpen(false); } },
