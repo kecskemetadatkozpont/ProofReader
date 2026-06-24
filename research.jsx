@@ -620,7 +620,9 @@
     return h('div', null,
       // 📌 separate "study basis" window — collects the ideas chosen (Select) as the study's foundation
       h('div', { className: 'panel', style: { marginBottom: 10, border: '1.5px solid var(--accent)' } },
-        h('h3', null, '📌 A tanulmány alapja' + (selected.length ? ' — ' + selected.length + ' ötlet' : '')),
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
+          h('h3', { style: { margin: 0 } }, '📌 A tanulmány alapja' + (selected.length ? ' — ' + selected.length + ' ötlet' : '')),
+          props.onGoStudy ? h('button', { className: 'btn', style: { marginLeft: 'auto', padding: '4px 10px', fontSize: 12, flex: 'none' }, title: 'Ugrás a meglévő tanulmányokhoz', onClick: function () { props.onGoStudy(); } }, '📚 Tanulmányok →') : null),
         selected.length ? h('div', null,
           selected.map(function (idea) {
             return h('div', { key: idea.id, style: { display: 'flex', gap: 8, alignItems: 'flex-start', padding: '7px 0', borderTop: '1px solid var(--line)' } },
@@ -1291,7 +1293,7 @@
     }
     var TABS = [['overview', 'Overview', null], ['ideas', 'Ideas', (props.ideas || []).length], ['literature', 'Literature', (props.sources || []).length], ['study', 'Lit. study', (props.studies || []).length], ['data', 'Data', (props.datasets || []).length], ['compute', 'Compute', (props.jobs || []).length], ['writing', 'Writing', null], ['canvas', 'Canvas', null], ['notes', 'Notes', null], ['log', 'Log', (props.log || []).length], ['tasks', 'Tasks', openTasks]];
     var content;
-    if (tab === 'ideas') content = h('div', null, h(ChatPanel, { projectId: p.id, supervised: !!p.student_id, canEdit: props.canEdit, authorId: props.authorId, fileOwnerId: props.fileOwnerId, sources: props.sources, onChanged: props.onChanged }), h(IdeasPanel, { projectId: p.id, ideas: props.ideas, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, onStartStudyMulti: function (ideas) { setAutoStudy(ideas || []); setTab('study'); } }));
+    if (tab === 'ideas') content = h('div', null, h(ChatPanel, { projectId: p.id, supervised: !!p.student_id, canEdit: props.canEdit, authorId: props.authorId, fileOwnerId: props.fileOwnerId, sources: props.sources, onChanged: props.onChanged }), h(IdeasPanel, { projectId: p.id, ideas: props.ideas, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, onStartStudyMulti: function (ideas) { setAutoStudy(ideas || []); setTab('study'); }, onGoStudy: function () { setTab('study'); } }));
     else if (tab === 'literature') content = h(LiteraturePanel, { projectId: p.id, sources: props.sources, canEdit: props.canEdit, myEmail: props.myEmail, onChanged: props.onChanged });
     else if (tab === 'study') content = null;   // #9: rendered persistently below so a running study survives tab switches
     else if (tab === 'data') content = h(DataPanel, { projectId: p.id, datasets: props.datasets, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
