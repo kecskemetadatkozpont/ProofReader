@@ -48,27 +48,40 @@ function normWork(w: any) {
     url: w.doi || w.id, oa_pdf_url: oa,
   };
 }
-async function openalexSearch(question: string, config: any, page: number, perPage: number) {
-  const f = config.filters || {};
-  // Build the search term from the (concise) keywords, falling back to the question. CRITICAL: OpenAlex's
-  // `search` parser REJECTS certain characters — notably '?' — returning "Invalid query parameters error"
-  // (HTTP 200 with 0 results), so a sentence-style research question silently found NOTHING. Strip those
-  // characters (quotes, brackets, boolean operators, '?') and cap the length.
-  const raw = (config.keywords && config.keywords.length ? config.keywords.join(' ') : String(question || ''));
-  const terms = raw.replace(/[?!"'`(){}\[\]:;^~*\\\/|&<>]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 350);
-  let url = 'https://api.openalex.org/works?search=' + encodeURIComponent(terms || 'research')
+// Strip characters the OpenAlex `search` parser rejects — notably '?' (a sentence question returns "Invalid
+// query parameters error" + 0 results), quotes, brackets, boolean operators, +, =, etc.
+function cleanTerms(s: string): string {
+  return String(s || '').replace(/[?!"'`(){}\[\]:;^~*\\\/|&<>+=#@%$]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 350);
+}
+async function openalexFetch(terms: string, filters: string[], page: number, perPage: number) {
+  if (!terms) return { papers: [], total: 0 };
+  let url = 'https://api.openalex.org/works?search=' + encodeURIComponent(terms)
     + '&per-page=' + perPage + '&page=' + page + '&mailto=publify@example.com';
-  const filters: string[] = [];
-  if (f.fromYear) filters.push('from_publication_date:' + f.fromYear + '-01-01');
-  if (f.minCites) filters.push('cited_by_count:>' + (parseInt(f.minCites, 10) - 1));
-  if (f.oa) filters.push('is_oa:true');
-  if (f.journals) filters.push('type:article');
   if (filters.length) url += '&filter=' + filters.join(',');
   const r = await fetch(url, { headers: { 'User-Agent': 'Publify/1.0 (mailto:publify@example.com)' } });
   if (!r.ok) return { papers: [], total: 0 };
   const o = await r.json();
   if (o && o.error) return { papers: [], total: 0 };   // bad query → nothing, don't crash the batch
   return { papers: (o.results || []).map(normWork), total: (o.meta && o.meta.count) || 0 };
+}
+async function openalexSearch(question: string, config: any, page: number, perPage: number) {
+  const f = config.filters || {};
+  const kws = (config.keywords || []).map(cleanTerms).filter(Boolean);
+  const qClean = cleanTerms(question);
+  const filters: string[] = [];
+  if (f.fromYear) filters.push('from_publication_date:' + f.fromYear + '-01-01');
+  if (f.minCites) filters.push('cited_by_count:>' + (parseInt(f.minCites, 10) - 1));
+  if (f.oa) filters.push('is_oa:true');
+  if (f.journals) filters.push('type:article');
+  const primary = kws.join(' ') || qClean || 'research';
+  // tier 1: keywords + filters
+  let res: any = await openalexFetch(primary, filters, page, perPage); res.relaxed = false;
+  // progressively RELAX (only worth retrying on the first page) so a too-narrow query/too-strict filter set
+  // doesn't silently return nothing: drop filters → fewer keywords → the question.
+  if (res.total === 0 && page <= 1 && filters.length) { res = await openalexFetch(primary, [], page, perPage); res.relaxed = true; }
+  if (res.total === 0 && page <= 1 && kws.length > 3) { res = await openalexFetch(kws.slice(0, 3).join(' '), [], page, perPage); res.relaxed = true; }
+  if (res.total === 0 && page <= 1 && qClean && qClean !== primary) { res = await openalexFetch(qClean, [], page, perPage); res.relaxed = true; }
+  return res;
 }
 
 async function fetchPdfBlock(url: string): Promise<any | null> {
@@ -204,7 +217,8 @@ Deno.serve(async (req) => {
       const limit = Math.min(25, Math.max(5, parseInt(String(body.limit || '20'), 10)));
       const page = Math.floor(offset / limit) + 1;
       const maxResults = Math.min(300, parseInt(String(config.max_results || '150'), 10));
-      const { papers, total } = await openalexSearch(study.question || study.title, config, page, limit);
+      const searchRes = await openalexSearch(study.question || study.title, config, page, limit);
+      const { papers, total } = searchRes;
       let newSources = 0;
       const screenInputs: any[] = [];
       for (const p of papers) {
@@ -223,7 +237,7 @@ Deno.serve(async (req) => {
       const nextOffset = offset + papers.length;
       const done = papers.length < limit || nextOffset >= maxResults;
       await finishBatch(sb, study_id, 1, nextOffset, total, done);
-      return json({ ok: true, step: 1, fetched: papers.length, new_sources: newSources, counts: total_count, results, next_offset: nextOffset, done, total_estimate: total });
+      return json({ ok: true, step: 1, fetched: papers.length, new_sources: newSources, counts: total_count, results, next_offset: nextOffset, done, total_estimate: total, relaxed: !!searchRes.relaxed });
     }
 
     // ---------------- screen_batch (steps 2, 3) ----------------

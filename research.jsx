@@ -1096,7 +1096,9 @@
               setTitles(function (t) { var n2 = Object.assign({}, t); (d.results || []).forEach(function (x) { if (x.title) n2[x.source_id] = x.title; }); return n2; });
               loadStudy(selId);
               if (!d.done && alive.current && !stop.current) loop(d.next_offset);
-              else { setRunning(false); setProg(null); loadStudy(selId); props.onChanged(); if (n === 1 && !(d.total_estimate || d.new_sources || d.fetched)) setErr('0 találat az OpenAlex-en — próbálj tágabb/más kulcsszavakat, vagy lazább szűrőket (pl. töröld az „Évtől"-t vagy a „csak cikkek"-et), majd futtasd újra.'); }
+              else { setRunning(false); setProg(null); loadStudy(selId); props.onChanged();
+                if (n === 1 && !(d.total_estimate || d.new_sources || d.fetched)) setErr('0 találat az OpenAlex-en — próbálj tágabb/más kulcsszavakat, vagy lazább szűrőket (pl. töröld az „Évtől"-t vagy a „csak cikkek"-et), majd futtasd újra.');
+                else if (n === 1 && d.relaxed) setErr('ℹ️ A megadott kulcsszavak/szűrők túl szűkek voltak — automatikusan lazítottam rajtuk (pl. szűrők nélkül kerestem), hogy találjak cikkeket. Finomíthatod a kulcsszavakat/szűrőket és újrafuttathatod.'); }
             });
           })(0);
         });
