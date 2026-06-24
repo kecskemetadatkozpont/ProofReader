@@ -974,6 +974,28 @@
 
   // ---------- Literature Study (Elicit-style 4-step funnel) ----------
   var LS_STEPS = [{ step: 1, kind: 'quick', label: '1. Gyors' }, { step: 2, kind: 'abstract', label: '2. Absztrakt' }, { step: 3, kind: 'fulltext', label: '3. Teljes szöveg' }, { step: 4, kind: 'review', label: '4. Review' }];
+  // criteria editor — each include/exclude criterion is its own small card (add / remove) instead of a lumped
+  // textarea. accent = green for inclusion, red for exclusion. To edit a criterion, remove it and add a new one.
+  function CritEditor(props) {
+    var nS = useState(''), nv = nS[0], setNv = nS[1];
+    var items = props.items || [];
+    function add() { var v = nv.trim(); if (!v) return; props.onChange(items.concat([v])); setNv(''); }
+    function rm(i) { props.onChange(items.filter(function (_, j) { return j !== i; })); }
+    return h('div', null,
+      items.length ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 5, marginBottom: 6 } },
+        items.map(function (it, i) {
+          return h('div', { key: i, style: { display: 'flex', gap: 6, alignItems: 'flex-start', background: 'var(--surface-2)', border: '1px solid var(--line)', borderLeft: '3px solid ' + (props.accent || 'var(--accent)'), borderRadius: 7, padding: '5px 9px' } },
+            h('span', { style: { flex: 1, minWidth: 0, fontSize: 12.5, lineHeight: 1.35, whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, it),
+            props.disabled ? null : h('button', { className: 'icon-x', style: { flex: 'none' }, title: 'Törlés', onClick: function () { rm(i); } }, '✕')
+          );
+        })
+      ) : h('div', { style: { fontSize: 11.5, color: 'var(--faint)', marginBottom: 6 } }, props.empty || 'Nincs kritérium.'),
+      props.disabled ? null : h('div', { style: { display: 'flex', gap: 6 } },
+        h('input', { className: 'field', style: { flex: 1, minWidth: 0, fontSize: 12.5 }, value: nv, placeholder: props.placeholder, onChange: function (e) { setNv(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter') { e.preventDefault(); add(); } } }),
+        h('button', { className: 'btn', style: { flex: 'none', padding: '4px 10px', fontSize: 12 }, onClick: add }, '+ Hozzáad')
+      )
+    );
+  }
   function lsDefaultConfig(step, project, idea) {
     if (step === 1) return { keywords: (project && project.keywords) || [], include: [], exclude: [], filters: { fromYear: '', minCites: '', oa: false, journals: true }, signals: ['has_github', 'has_dataset'], source_adapter: 'openalex', max_results: 150 };
     return { keywords: [], include: [], exclude: [], filters: {}, signals: ['has_github', 'has_dataset'] };
@@ -1119,8 +1141,8 @@
         h('div', { className: 'field-label' }, 'Kulcsszavak (vesszővel)'),
         h('input', { className: 'field', style: { width: '100%' }, disabled: !props.canEdit, value: (cfg.keywords || []).join(', '), placeholder: 'pl. out-of-distribution, LiDAR', onChange: function (e) { up('keywords', e.target.value.split(',').map(function (x) { return x.trim(); }).filter(Boolean)); } }),
         h('div', { style: { display: 'flex', gap: 12, marginTop: 8, flexWrap: 'wrap' } },
-          h('div', { style: { flex: 1, minWidth: 200 } }, h('div', { className: 'field-label' }, 'Beválogatási kritériumok (soronként egy)'), h('textarea', { rows: 3, style: { width: '100%', border: '1px solid var(--line)', borderRadius: 8, padding: '6px 9px', fontSize: 12.5 }, disabled: !props.canEdit, value: (cfg.include || []).join('\n'), placeholder: 'pl. van publikus github repo vagy dataset', onChange: function (e) { up('include', linesToArr(e.target.value)); } })),
-          h('div', { style: { flex: 1, minWidth: 200 } }, h('div', { className: 'field-label' }, 'Kizárási kritériumok (soronként egy)'), h('textarea', { rows: 3, style: { width: '100%', border: '1px solid var(--line)', borderRadius: 8, padding: '6px 9px', fontSize: 12.5 }, disabled: !props.canEdit, value: (cfg.exclude || []).join('\n'), placeholder: 'pl. nincs kvantitatív kiértékelés', onChange: function (e) { up('exclude', linesToArr(e.target.value)); } }))),
+          h('div', { style: { flex: 1, minWidth: 220 } }, h('div', { className: 'field-label' }, '✓ Beválogatási kritériumok'), h(CritEditor, { items: cfg.include || [], onChange: function (a) { up('include', a); }, disabled: !props.canEdit, accent: '#16a34a', placeholder: 'pl. van publikus github repo vagy dataset', empty: 'Még nincs beválogatási kritérium.' })),
+          h('div', { style: { flex: 1, minWidth: 220 } }, h('div', { className: 'field-label' }, '✕ Kizárási kritériumok'), h(CritEditor, { items: cfg.exclude || [], onChange: function (a) { up('exclude', a); }, disabled: !props.canEdit, accent: '#dc2626', placeholder: 'pl. nincs kvantitatív kiértékelés', empty: 'Még nincs kizárási kritérium.' }))),
         curStep === 1 ? h('div', { className: 'lfilters', style: { marginTop: 8 } },
           h('input', { className: 'num', type: 'number', disabled: !props.canEdit, placeholder: 'Évtől', value: (cfg.filters || {}).fromYear || '', onChange: function (e) { upFilter('fromYear', e.target.value); } }),
           h('input', { className: 'num', type: 'number', disabled: !props.canEdit, placeholder: 'Min. idézet', value: (cfg.filters || {}).minCites || '', onChange: function (e) { upFilter('minCites', e.target.value); } }),

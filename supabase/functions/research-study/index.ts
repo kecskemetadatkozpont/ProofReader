@@ -114,14 +114,14 @@ Project: "${(proj && proj.title) || study.title || ''}"${(proj && proj.field) ? 
 Research question(s) / ideas this study is based on:
 ${study.question || study.title || ''}
 
-Return ONLY JSON, no prose:
+Return ONLY JSON, no prose. EVERY step must have non-empty include AND exclude arrays (short, concrete, one line each):
 {
-  "step1": { "keywords": ["6-10 precise OpenAlex search terms/phrases"], "filters": { "fromYear": <int or null>, "oa": <bool>, "journals": <bool> } },
+  "step1": { "keywords": ["6-10 precise OpenAlex search terms/phrases"], "filters": { "fromYear": <int or null>, "oa": <bool>, "journals": <bool> }, "include": ["2-4 quick title/metadata-level inclusion criteria for fast screening"], "exclude": ["2-4 quick exclusion criteria (off-topic, wrong venue/type, etc.)"] },
   "step2": { "include": ["3-5 abstract-level inclusion criteria, one short line each"], "exclude": ["2-4 exclusion criteria"] },
   "step3": { "include": ["3-5 full-text inclusion criteria"], "exclude": ["2-4 exclusion criteria"], "signals": ["has_github","has_dataset"] }
 }`;
   let out = '';
-  try { out = await callClaude(model, '', prompt, false, 1500); } catch { return {}; }
+  try { out = await callClaude(model, '', prompt, false, 1800); } catch { return {}; }
   const m = out.match(/\{[\s\S]*\}/); if (!m) return {};
   try { return JSON.parse(m[0]); } catch { return {}; }
 }
