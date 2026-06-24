@@ -985,16 +985,28 @@
   var LS_STEPS = [{ step: 1, kind: 'quick', label: '1. Gyors' }, { step: 2, kind: 'abstract', label: '2. Absztrakt' }, { step: 3, kind: 'fulltext', label: '3. Teljes szöveg' }, { step: 4, kind: 'review', label: '4. Review' }];
   // Mirror of the server's screenSystem() — the exact screening prompt Claude gets for steps 1–3, built from
   // the question + the current keywords/criteria. Lets the user preview (and re-generate after editing) it.
-  function buildScreenPrompt(question, cfg) {
-    cfg = cfg || {};
+  function buildScreenPrompt(question, cfg, step) {
+    cfg = cfg || {}; step = step || 1;
     var kws = (cfg.keywords || []).filter(Boolean);
     var inc = (cfg.include || []).filter(Boolean);
     var exc = (cfg.exclude || []).filter(Boolean);
-    return 'You are screening papers for a systematic literature review.\n'
-      + 'Research question: ' + (question || '(none given)') + '\n'
+    var head = 'Research question: ' + (question || '(none given)') + '\n'
       + (kws.length ? 'Keywords: ' + kws.join(', ') + '\n' : '')
       + (inc.length ? 'Inclusion criteria (the paper should plausibly satisfy ALL): ' + inc.join('; ') + '\n' : '')
-      + (exc.length ? 'Exclusion criteria (exclude if ANY clearly holds): ' + exc.join('; ') + '\n' : '')
+      + (exc.length ? 'Exclusion criteria (exclude if ANY clearly holds): ' + exc.join('; ') + '\n' : '');
+    if (step >= 2) {
+      var basis = step === 3 ? 'the FULL TEXT (the attached PDF when present, otherwise the abstract)' : 'the ABSTRACT';
+      return 'You are doing RIGOROUS ' + (step === 3 ? 'full-text' : 'abstract') + ' screening for a systematic literature review. This step NARROWS the set — be DISCERNING, not inclusive.\n'
+        + head
+        + 'Judge each paper strictly from ' + basis + ':\n'
+        + '- "include" ONLY if the text gives EXPLICIT evidence it plausibly meets ALL inclusion criteria;\n'
+        + '- "exclude" if any exclusion criterion clearly holds, or it does not actually address the research question;\n'
+        + '- "maybe" only when the text is genuinely ambiguous (e.g. no abstract is available).\n'
+        + 'For each paper return: decision, score, the inclusion criteria it MEETS + any exclusion criteria that APPLY, '
+        + 'and a short extract (method, dataset, key finding) from the text, plus a one-line reason. Return ONLY a JSON array.';
+    }
+    return 'You are screening papers for a systematic literature review.\n'
+      + head
       + 'For each paper decide: "include" (relevant to the question and plausibly meets the inclusion criteria), '
       + '"maybe" (relevant but you are genuinely unsure it meets a criterion), or "exclude" (off-topic, or clearly '
       + 'violates an exclusion criterion). This is a screening FUNNEL — be inclusive here; later steps narrow '
@@ -1123,7 +1135,7 @@
       callStudy({ action: 'plan', study_id: selId }).then(function (d) { setPlanning(false); if (d && d.error) { setErr('AI-kitöltés: ' + d.error); return; } loadStudy(selId); }, function () { setPlanning(false); setErr('AI-kitöltés nem sikerült.'); });
     }
     // (re)generate the prompt preview from the CURRENT question + criteria (reflects manual edits)
-    function genPrompt() { setPromptText(buildScreenPrompt((sel && (sel.question || sel.title)) || '', cfg)); }
+    function genPrompt() { setPromptText(buildScreenPrompt((sel && (sel.question || sel.title)) || '', cfg, curStep)); }
     // delete a whole study (cascades to its steps + papers)
     function delStudy(s) {
       if (!window.confirm('Biztosan törlöd ezt a tanulmányt és minden lépését/eredményét?\n\n„' + (s.title || '') + '"')) return;
@@ -1301,6 +1313,13 @@
                   h('div', { style: { flex: 1, minWidth: 0 } },
                     h('div', { style: { fontSize: 12.5, fontWeight: 600 } }, url ? h('a', { href: url, target: '_blank', rel: 'noreferrer', style: { color: 'var(--ink)' } }, title) : title),
                     p.reason ? h('div', { className: 'result-reason' }, p.reason) : null,
+                    (p.signals && p.signals.extract && (p.signals.extract.method || p.signals.extract.finding)) ? h('div', { style: { fontSize: 11.5, color: 'var(--muted)', marginTop: 2, lineHeight: 1.45 } },
+                      p.signals.extract.method ? h('span', { title: 'Módszer / megközelítés (absztraktból)' }, '🔬 ' + p.signals.extract.method + '   ') : null,
+                      (p.signals.extract.dataset && !/^none/i.test(p.signals.extract.dataset)) ? h('span', { title: 'Adathalmaz' }, '📊 ' + p.signals.extract.dataset + '   ') : null,
+                      p.signals.extract.finding ? h('span', { title: 'Fő eredmény / állítás' }, '→ ' + p.signals.extract.finding) : null) : null,
+                    (p.signals && p.signals.criteria && (((p.signals.criteria.inc || []).length) || ((p.signals.criteria.exc || []).length))) ? h('div', { style: { display: 'flex', gap: 4, marginTop: 3, flexWrap: 'wrap' } },
+                      (p.signals.criteria.inc || []).map(function (c, ci) { return h('span', { key: 'i' + ci, className: 'mtag', style: { background: 'rgba(22,163,74,.12)', color: '#15803d', border: '1px solid rgba(22,163,74,.35)' }, title: 'Teljesített beválogatási kritérium' }, '✓ ' + c); }),
+                      (p.signals.criteria.exc || []).map(function (c, ci) { return h('span', { key: 'e' + ci, className: 'mtag', style: { background: 'rgba(220,38,38,.1)', color: '#b91c1c', border: '1px solid rgba(220,38,38,.35)' }, title: 'Fennálló kizárási kritérium' }, '✗ ' + c); })) : null,
                     h('div', { style: { display: 'flex', gap: 5, marginTop: 3, flexWrap: 'wrap', alignItems: 'center' } },
                       q ? h('span', { className: 'mtag', style: { background: q <= 1 ? '#16a34a' : q === 2 ? '#65a30d' : q === 3 ? '#b45309' : '#6b7280', color: '#fff', fontWeight: 700, border: 'none' }, title: 'Scopus/SCImago kvartilis (SJR) — Q1 = a terület felső 25%-a' }, 'Q' + q) : null,
                       m.cited_by != null ? h('span', { className: 'mtag', title: 'Idézettség (OpenAlex — a WoS/Scopus nyílt proxyja)' }, '📈 ' + m.cited_by) : null,

@@ -137,12 +137,31 @@ async function fetchPdfBlock(url: string): Promise<any | null> {
   } catch { return null; }
 }
 
-function screenSystem(question: string, config: any): string {
+function screenSystem(question: string, config: any, step: number): string {
   const inc = (config.include || []).filter(Boolean);
   const exc = (config.exclude || []).filter(Boolean);
+  const head = `Research question: ${question || '(none given)'}
+${(config.keywords || []).length ? 'Keywords: ' + (config.keywords || []).join(', ') + '\n' : ''}${inc.length ? 'Inclusion criteria (the paper should plausibly satisfy ALL): ' + inc.join('; ') + '\n' : ''}${exc.length ? 'Exclusion criteria (exclude if ANY clearly holds): ' + exc.join('; ') + '\n' : ''}`;
+  if (step >= 2) {
+    // Step 2 (abstract) / Step 3 (full text) — RIGOROUS screening that NARROWS the funnel (not inclusive).
+    const basis = step === 3 ? 'the FULL TEXT (the attached PDF when present, otherwise the abstract)' : 'the ABSTRACT';
+    return `You are doing RIGOROUS ${step === 3 ? 'full-text' : 'abstract'} screening for a systematic literature review. This step NARROWS the set — be DISCERNING, not inclusive.
+${head}
+Judge each paper strictly from ${basis}:
+- "include" ONLY if the text gives EXPLICIT evidence it plausibly meets ALL inclusion criteria;
+- "exclude" if any exclusion criterion clearly holds, or it does not actually address the research question;
+- "maybe" only when the text is genuinely ambiguous (e.g. no abstract is available).
+For each paper return, in order (score is an INTEGER 0–100):
+[{"i":0,"decision":"include|maybe|exclude","score":85,
+  "criteria":{"inc":["short labels of the inclusion criteria it MEETS"],"exc":["short labels of any exclusion criteria that APPLY"]},
+  "extract":{"method":"the paper's method/approach in <=12 words","dataset":"dataset(s) used, or 'none stated'","finding":"the key result/claim in <=15 words"},
+  "signals":{"has_github":false,"has_dataset":false},
+  "reason":"one-line justification"}]
+Return ONLY the JSON array.`;
+  }
+  // Step 1 — fast, inclusive triage (kept identical to the client-side preview, buildScreenPrompt).
   return `You are screening papers for a systematic literature review.
-Research question: ${question || '(none given)'}
-${(config.keywords || []).length ? 'Keywords: ' + (config.keywords || []).join(', ') + '\n' : ''}${inc.length ? 'Inclusion criteria (the paper should plausibly satisfy ALL): ' + inc.join('; ') + '\n' : ''}${exc.length ? 'Exclusion criteria (exclude if ANY clearly holds): ' + exc.join('; ') + '\n' : ''}For each paper decide: "include" (relevant to the question and plausibly meets the inclusion criteria), "maybe" (relevant but you are genuinely unsure it meets a criterion), or "exclude" (off-topic, or clearly violates an exclusion criterion). This is a screening FUNNEL — be inclusive here; later steps narrow further. Prefer "maybe" over "exclude" when uncertain. Give a one-line reason, a 0..100 relevance score, and detect signals has_github (a public code repo) and has_dataset (a public dataset).
+${head}For each paper decide: "include" (relevant to the question and plausibly meets the inclusion criteria), "maybe" (relevant but you are genuinely unsure it meets a criterion), or "exclude" (off-topic, or clearly violates an exclusion criterion). This is a screening FUNNEL — be inclusive here; later steps narrow further. Prefer "maybe" over "exclude" when uncertain. Give a one-line reason, a 0..100 relevance score, and detect signals has_github (a public code repo) and has_dataset (a public dataset).
 Return ONLY a JSON array, one object per paper in order: [{"i":0,"decision":"include|maybe|exclude","reason":"...","score":0,"signals":{"has_github":false,"has_dataset":false}}]`;
 }
 
@@ -320,7 +339,7 @@ Deno.serve(async (req) => {
 // Screen a batch of papers with one Claude call, write research_study_papers(step), return UI rows.
 async function screenAndWrite(sb: any, study: any, study_id: string, step: number, config: any, model: string, inputs: any[], fullText: boolean) {
   if (!inputs.length) return [];
-  const sys = screenSystem(study.question || study.title, config);
+  const sys = screenSystem(study.question || study.title, config, step);
   const content: any[] = [];
   const signalsBase: Record<string, any> = {};
   for (let i = 0; i < inputs.length; i++) {
@@ -340,8 +359,14 @@ async function screenAndWrite(sb: any, study: any, study_id: string, step: numbe
     const p = inputs[i]; const d = byIdx[i] || {};
     const decision = ['include', 'maybe', 'exclude'].includes(d.decision) ? d.decision : 'maybe';
     const signals = Object.assign({}, signalsBase[p.source_id], (d.signals && typeof d.signals === 'object') ? d.signals : {});
-    await sb.from('research_study_papers').upsert({ study_id, source_id: p.source_id, step, decision, reason: (d.reason || '').slice(0, 500), score: typeof d.score === 'number' ? Math.max(0, Math.min(100, d.score)) : null, signals, overridden: false }, { onConflict: 'study_id,source_id,step' });
-    out.push({ source_id: p.source_id, title: p.title, decision, reason: d.reason || '', score: d.score, signals });
+    if (d.criteria && typeof d.criteria === 'object') signals.criteria = { inc: (d.criteria.inc || []).slice(0, 6).map((x: any) => String(x).slice(0, 80)), exc: (d.criteria.exc || []).slice(0, 6).map((x: any) => String(x).slice(0, 80)) };
+    if (d.extract && typeof d.extract === 'object') signals.extract = { method: String(d.extract.method || '').slice(0, 160), dataset: String(d.extract.dataset || '').slice(0, 120), finding: String(d.extract.finding || '').slice(0, 200) };
+    // score column is INT — coerce to an integer 0–100 (and rescale a 0–1 fraction up), else the upsert
+    // silently fails and the whole batch writes nothing
+    let sc: number | null = null;
+    if (typeof d.score === 'number' && !isNaN(d.score)) { let v = (d.score > 0 && d.score <= 1) ? d.score * 100 : d.score; sc = Math.round(Math.max(0, Math.min(100, v))); }
+    await sb.from('research_study_papers').upsert({ study_id, source_id: p.source_id, step, decision, reason: (d.reason || '').slice(0, 500), score: sc, signals, overridden: false }, { onConflict: 'study_id,source_id,step' });
+    out.push({ source_id: p.source_id, title: p.title, decision, reason: d.reason || '', score: sc, signals });
   }
   return out;
 }
