@@ -385,21 +385,26 @@
     var atS = useState([]), attach = atS[0], setAttach = atS[1];          // pending attachments for the next message
     var pkS = useState(false), picker = pkS[0], setPicker = pkS[1];
     var enS = useState(false), enhancing = enS[0], setEnhancing = enS[1];   // #6: prompt enhancement in flight
-    var firstLoad = useRef(true), animated = useRef({}), alive = useRef(true), scrollRef = useRef(null), taRef = useRef(null), justStreamed = useRef(false), lastSuggestRef = useRef(0);
+    var firstLoad = useRef(true), animated = useRef({}), alive = useRef(true), scrollRef = useRef(null), taRef = useRef(null), justStreamed = useRef(false);
+    var sgS = useState(''), sgMsg = sgS[0], setSgMsg = sgS[1];
+    var sgB = useState(false), sgBusy = sgB[0], setSgBusy = sgB[1];
     useEffect(function () { return function () { alive.current = false; }; }, []);
-    // #2 — after each AI exchange, surface NEW research ideas from the conversation into the Ideas list as
-    // candidates (the user accepts/rejects). Throttled to ~once per exchange; deduped + capped server-side.
-    useEffect(function () {
-      if (!props.canEdit || msgs.length < 2) return;
-      var last = msgs[msgs.length - 1];
-      if (!last || last.role !== 'assistant') return;
-      if (msgs.length - lastSuggestRef.current < 2) return;
-      lastSuggestRef.current = msgs.length;
-      var transcript = msgs.slice(-12).map(function (m) { return (m.role === 'assistant' ? 'AI: ' : 'User: ') + String(m.content || ''); }).join('\n\n').slice(0, 9000);
+    // #3 — AI ideas are generated ON DEMAND (button), not continuously: pull NEW research ideas out of the
+    // current conversation into the Ideas list as candidates (deduped + capped server-side; user accepts/rejects).
+    function suggestIdeas() {
+      if (sgBusy) return;
+      if (!msgs.length) { setSgMsg('Előbb beszélgess a projektről — abból javaslok ötleteket.'); setTimeout(function () { setSgMsg(''); }, 3500); return; }
+      setSgBusy(true); setSgMsg('Ötletek generálása a beszélgetésből (AI)…');
+      var transcript = msgs.slice(-16).map(function (m) { return (m.role === 'assistant' ? 'AI: ' : 'User: ') + String(m.content || ''); }).join('\n\n').slice(0, 12000);
       sb.functions.invoke('research-ai', { body: { action: 'suggest', project_id: props.projectId, text: transcript } }).then(function (res) {
-        var d = res && res.data; if (d && d.count) { props.onChanged(); }
-      }, function () { });
-    }, [msgs.length]);
+        setSgBusy(false);
+        if (res && res.error) { setSgMsg('AI nincs beállítva (research-ai / ANTHROPIC_API_KEY).'); return; }
+        var d = res && res.data;
+        if (d && d.count) { setSgMsg('✓ ' + d.count + ' új ötlet az Ötletek listában.'); props.onChanged(); }
+        else setSgMsg('Nem találtam új ötletet ebben a beszélgetésben.');
+        setTimeout(function () { setSgMsg(''); }, 4500);
+      }, function () { setSgBusy(false); setSgMsg('AI hívás sikertelen.'); });
+    }
     function startTyping(id, full) {
       if (!full) return;
       // reveal word-by-word at a calm, readable pace (each word fades in) — clearly slower than a raw
@@ -532,6 +537,10 @@
     return h('div', { className: 'panel chatwrap' },
       h('div', { className: 'chat-col' },
       h('h3', null, 'Chat with Publify', h('span', { style: { fontWeight: 600, color: 'var(--faint)' } }, 'research assistant')),
+      props.canEdit ? h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' } },
+        h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12 }, disabled: sgBusy || !msgs.length, title: 'A mostani beszélgetés tartalmából ötleteket javasol az Ötletek listába (kézzel, nem folyamatosan)', onClick: suggestIdeas }, sgBusy ? '💡 Generálás…' : '💡 Ötletek generálása a beszélgetésből'),
+        sgMsg ? h('span', { style: { fontSize: 12, color: 'var(--muted)' } }, sgMsg) : null
+      ) : null,
       props.supervised ? h('div', { style: { fontSize: 12, color: 'var(--muted)', background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 8, padding: '7px 11px', marginBottom: 10, lineHeight: 1.45 } }, 'ℹ️ A kutatási beszélgetéseidből a témavezetőd napi összefoglalót kaphat (mit dolgoztál, milyen döntéseket hoztál).') : null,
       h('div', { className: 'chat-msgs', ref: scrollRef, onMouseUp: onChatMouseUp, onScroll: function () { if (selPop) setSelPop(null); } },
         msgs.length ? msgs.map(function (m) {
@@ -649,8 +658,7 @@
           props.canEdit ? h('div', { className: 'idea-foot' },
             h('button', { onClick: function () { setStatus(idea, 'selected'); } }, 'Select'),
             h('button', { onClick: function () { setStatus(idea, 'rejected'); } }, 'Reject'),
-            h('button', { onClick: function () { setStatus(idea, 'candidate'); } }, 'Reset'),
-            props.onStartStudy ? h('button', { style: { marginLeft: 'auto', color: 'var(--accent)' }, title: 'Elicit-szerű irodalmi szűrés indítása', onClick: function () { props.onStartStudy(idea); } }, '🔬 Tanulmány') : null
+            h('button', { onClick: function () { setStatus(idea, 'candidate'); } }, 'Reset')
           ) : null
         );
       }) : h('div', { style: { fontSize: 13, color: 'var(--faint)', padding: '8px 0' } }, selected.length ? 'Minden ötlet a tanulmány alapjába került — adj hozzá újat fent.' : 'No ideas yet — add your own or run a gap analysis.')
