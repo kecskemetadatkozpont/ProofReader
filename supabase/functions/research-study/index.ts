@@ -41,11 +41,17 @@ function venueOf(w: any): string {
 function normWork(w: any) {
   const authors = (w.authorships || []).slice(0, 8).map((a: any) => a.author && a.author.display_name).filter(Boolean);
   const oa = (w.open_access && w.open_access.oa_url) || (w.primary_location && w.primary_location.pdf_url) || '';
+  // journal ISSN(s) → the client maps these to the SCImago/Scopus quartile (Q1–Q4)
+  const src = (w.primary_location && w.primary_location.source) || {};
+  const issns: string[] = [];
+  if (src.issn_l) issns.push(src.issn_l);
+  if (Array.isArray(src.issn)) for (const i of src.issn) issns.push(i);
+  const issn = Array.from(new Set(issns.map((s: any) => String(s || '').replace(/[^0-9Xx]/g, '').toUpperCase()).filter((s: string) => s.length === 8))).join(',');
   return {
     ext_id: w.id, doi: w.doi || null, title: w.display_name || 'Untitled', authors,
     year: w.publication_year || null, venue: venueOf(w) || null,
     abstract: abstractFromInverted(w.abstract_inverted_index), cited_by: w.cited_by_count || 0,
-    url: w.doi || w.id, oa_pdf_url: oa,
+    url: w.doi || w.id, oa_pdf_url: oa, issn,
   };
 }
 // Strip characters the OpenAlex `search` parser rejects — notably '?' (a sentence question returns "Invalid
@@ -257,7 +263,7 @@ Deno.serve(async (req) => {
           const srcRows = found.map((p: any) => ({
             project_id: study.project_id, source_api: config.source_adapter || 'openalex', ext_id: p.ext_id,
             doi: p.doi, title: p.title, authors: (p.authors && p.authors.length) ? p.authors : null, year: p.year,
-            venue: p.venue, abstract: p.abstract || null, cited_by: p.cited_by, url: p.url, oa_pdf_url: p.oa_pdf_url || null, screening: 'unscreened',
+            venue: p.venue, abstract: p.abstract || null, cited_by: p.cited_by, url: p.url, oa_pdf_url: p.oa_pdf_url || null, issn: p.issn || null, screening: 'unscreened',
           }));
           const { data: ups } = await sb.from('research_sources').upsert(srcRows, { onConflict: 'project_id,ext_id' }).select('id,ext_id');
           const byExt: Record<string, string> = {}; (ups || []).forEach((r: any) => { byExt[r.ext_id] = r.id; });

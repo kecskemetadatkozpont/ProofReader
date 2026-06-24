@@ -688,6 +688,13 @@
     for (var i = 0; i < c.length; i++) { var n = String(c[i] || '').replace(/[^0-9Xx]/g, '').toUpperCase(); if (n.length === 8 && map[n]) return map[n]; }
     return null;
   }
+  // quartile (1–4) from a stored comma-joined ISSN string (research_sources.issn) + the SCImago map
+  function quartileFromIssn(map, issnStr) {
+    if (!map || !issnStr) return null;
+    var parts = String(issnStr).split(',');
+    for (var i = 0; i < parts.length; i++) { var n = parts[i].replace(/[^0-9Xx]/g, '').toUpperCase(); if (n && map[n]) return map[n]; }
+    return null;
+  }
   function metricTags(o) {
     var t = [];
     if (o.journal) t.push(h('span', { className: 'mtag j', key: 'j', title: 'Journal / venue' }, o.journal));
@@ -1044,6 +1051,10 @@
     var smS = useState(false), studiesOpen = smS[0], setStudiesOpen = smS[1];   // "Tanulmányok" manage modal
     var rnS = useState(null), renameId = rnS[0], setRenameId = rnS[1];   // study being renamed
     var rvS = useState(''), renameVal = rvS[0], setRenameVal = rvS[1];
+    var meS = useState({}), srcMeta = meS[0], setSrcMeta = meS[1];   // source_id -> {title,venue,cited_by,year,issn}
+    var scS = useState(null), scimap = scS[0], setScimap = scS[1];   // SCImago ISSN→quartile map (lazy)
+    var soS = useState('score'), sortBy = soS[0], setSortBy = soS[1];   // results sort key
+    useEffect(function () { loadScimago().then(setScimap); }, []);
     var alive = useRef(true), stop = useRef(false);
     useEffect(function () { return function () { alive.current = false; }; }, []);
     // #12 — selId is seeded from studies[0] at mount; if the studies list loads AFTER mount it stays null
@@ -1072,8 +1083,9 @@
         // load titles for this study's papers directly, so reloaded results always show a title (even if the
         // source isn't in the project-wide props.sources slice) — the transient run-time `titles` is gone on reload
         var ids = []; var seen = {}; pps.forEach(function (p) { if (p.source_id && !seen[p.source_id]) { seen[p.source_id] = 1; ids.push(p.source_id); } });
-        if (ids.length) sb.from('research_sources').select('id,title').in('id', ids).then(function (sr) {
-          var tt = {}; ((sr && sr.data) || []).forEach(function (x) { tt[x.id] = x.title; });
+        if (ids.length) sb.from('research_sources').select('id,title,venue,cited_by,year,issn,url,doi').in('id', ids).then(function (sr) {
+          var mm = {}, tt = {}; ((sr && sr.data) || []).forEach(function (x) { mm[x.id] = x; tt[x.id] = x.title; });
+          setSrcMeta(function (prev) { return Object.assign({}, mm, prev); });
           setTitles(function (prev) { return Object.assign({}, tt, prev); });
         });
       });
@@ -1182,6 +1194,17 @@
 
     var stepPapers = papers.filter(function (p) { return p.step === curStep; });
     var grp = { include: [], maybe: [], exclude: [] }; stepPapers.forEach(function (p) { (grp[p.decision] || (grp[p.decision] = [])).push(p); });
+    // scientometrics + sorting for the results
+    function metaOf(p) { return srcMeta[p.source_id] || srcMap[p.source_id] || {}; }
+    function qOf(p) { return quartileFromIssn(scimap, metaOf(p).issn); }
+    function sortKey(p) {
+      var m = metaOf(p);
+      if (sortBy === 'cites') return -(m.cited_by || 0);
+      if (sortBy === 'year') return -(m.year || 0);
+      if (sortBy === 'q') { var q = qOf(p); return q || 9; }   // Q1 first; unknown last
+      return -(p.score || 0);   // relevance (default)
+    }
+    function sortPapers(arr) { return arr.slice().sort(function (a, b) { var d = sortKey(a) - sortKey(b); return d || ((metaOf(b).cited_by || 0) - (metaOf(a).cited_by || 0)); }); }
     var cur = stepRow(curStep) || {};
     return h('div', null,
       // studies overview — every study with its progress + status; click to open one. Lets you follow several.
@@ -1258,20 +1281,32 @@
       ),
       // results list (steps 1-3)
       curStep < 4 ? h('div', { className: 'panel', style: { marginTop: 10 } },
-        h('h3', null, 'Eredmények — ' + LS_STEPS[curStep - 1].label + ' (' + stepPapers.length + ' cikk)'),
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
+          h('h3', { style: { margin: 0 } }, 'Eredmények — ' + LS_STEPS[curStep - 1].label + ' (' + stepPapers.length + ' cikk)'),
+          stepPapers.length ? h('label', { style: { marginLeft: 'auto', fontSize: 11.5, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 5 } }, 'Rendezés:',
+            h('select', { className: 'num', style: { width: 'auto', height: 28 }, value: sortBy, onChange: function (e) { setSortBy(e.target.value); } },
+              h('option', { value: 'score' }, 'Relevancia'),
+              h('option', { value: 'cites' }, 'Idézettség'),
+              h('option', { value: 'q' }, 'Kvartilis (Q1→Q4)'),
+              h('option', { value: 'year' }, 'Év (újabb elöl)'))) : null),
         stepPapers.length === 0 ? h('div', { style: { fontSize: 13, color: 'var(--faint)' } }, 'Még nincs eredmény — futtasd a lépést.') :
           ['include', 'maybe', 'exclude'].map(function (dec) {
             var arr = grp[dec] || []; if (!arr.length) return null;
             return h('div', { key: dec, style: { marginTop: 6 } },
               h('div', { className: 'field-label' }, (dec === 'include' ? '✅ Beválogatva' : dec === 'maybe' ? '🟡 Talán' : '❌ Kizárva') + ' (' + arr.length + ')'),
-              arr.map(function (p) {
-                var s = srcMap[p.source_id]; var title = titles[p.source_id] || (s && s.title) || '(cikk)';
+              sortPapers(arr).map(function (p) {
+                var m = metaOf(p); var s = srcMap[p.source_id]; var title = titles[p.source_id] || m.title || (s && s.title) || '(cikk)';
+                var url = (s && s.url) || m.url || (m.doi || null); var q = qOf(p);
                 return h('div', { className: 'src', key: p.source_id },
                   h('div', { style: { flex: 1, minWidth: 0 } },
-                    h('div', { style: { fontSize: 12.5, fontWeight: 600 } }, s && s.url ? h('a', { href: s.url, target: '_blank', rel: 'noreferrer', style: { color: 'var(--ink)' } }, title) : title),
+                    h('div', { style: { fontSize: 12.5, fontWeight: 600 } }, url ? h('a', { href: url, target: '_blank', rel: 'noreferrer', style: { color: 'var(--ink)' } }, title) : title),
                     p.reason ? h('div', { className: 'result-reason' }, p.reason) : null,
-                    h('div', { style: { display: 'flex', gap: 5, marginTop: 3, flexWrap: 'wrap' } },
-                      p.score != null ? h('span', { className: 'mtag' }, p.score + '%') : null,
+                    h('div', { style: { display: 'flex', gap: 5, marginTop: 3, flexWrap: 'wrap', alignItems: 'center' } },
+                      q ? h('span', { className: 'mtag', style: { background: q <= 1 ? '#16a34a' : q === 2 ? '#65a30d' : q === 3 ? '#b45309' : '#6b7280', color: '#fff', fontWeight: 700, border: 'none' }, title: 'Scopus/SCImago kvartilis (SJR) — Q1 = a terület felső 25%-a' }, 'Q' + q) : null,
+                      m.cited_by != null ? h('span', { className: 'mtag', title: 'Idézettség (OpenAlex — a WoS/Scopus nyílt proxyja)' }, '📈 ' + m.cited_by) : null,
+                      m.venue ? h('span', { className: 'mtag', title: 'Folyóirat / venue: ' + m.venue }, String(m.venue).length > 46 ? String(m.venue).slice(0, 44) + '…' : m.venue) : null,
+                      m.year ? h('span', { className: 'mtag' }, m.year) : null,
+                      p.score != null ? h('span', { className: 'mtag', title: 'AI relevancia-pontszám' }, p.score + '%') : null,
                       (p.signals && p.signals.has_github) ? h('span', { className: 'mtag ok' }, 'github') : null,
                       (p.signals && p.signals.has_dataset) ? h('span', { className: 'mtag ok' }, 'dataset') : null,
                       (p.signals && p.signals.screened_on) ? h('span', { className: 'mtag' }, p.signals.screened_on) : null,
@@ -1512,7 +1547,7 @@
         sb.from('research_log').select('id,type,summary,ts,profile_id').eq('project_id', projectId).order('ts', { ascending: false }),
         sb.from('research_tasks').select('id,title,status,stage,due').eq('project_id', projectId).order('sort', { ascending: true }),
         sb.from('research_ideas').select('id,source,question,hypothesis,rationale,novelty,status').eq('project_id', projectId).order('created_at', { ascending: false }),
-        sb.from('research_sources').select('id,source_api,ext_id,doi,title,authors,year,venue,cited_by,url,screening').eq('project_id', projectId).order('cited_by', { ascending: false, nullsFirst: false }),
+        sb.from('research_sources').select('id,source_api,ext_id,doi,title,authors,year,venue,cited_by,url,issn,screening').eq('project_id', projectId).order('cited_by', { ascending: false, nullsFirst: false }),
         sb.from('research_datasets').select('id,name,source,uri,size_bytes,license,status,local_path').eq('project_id', projectId).order('created_at', { ascending: false }),
         sb.from('research_jobs').select('id,type,title,status,progress,result,result_path,logs,created_at').eq('project_id', projectId).order('created_at', { ascending: false }),
         sb.from('research_studies').select('id,idea_id,title,question,status,cur_step,created_at').eq('project_id', projectId).order('created_at', { ascending: false })
