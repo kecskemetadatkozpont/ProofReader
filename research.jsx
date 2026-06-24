@@ -631,7 +631,8 @@
               props.canEdit ? h('button', { className: 'icon-x', title: 'Eltávolítás az alapból', style: { flex: 'none' }, onClick: function () { setStatus(idea, 'candidate'); } }, '✕') : null
             );
           }),
-          props.onGoStudy ? h('div', { style: { marginTop: 10 } }, h('button', { className: 'btn pri', onClick: function () { props.onGoStudy(); } }, '🔬 Tanulmány indítása ezekből az ötletekből →')) : null
+          props.onStartStudyMulti ? h('div', { style: { marginTop: 10 } }, h('button', { className: 'btn pri', onClick: function () { props.onStartStudyMulti(selected); } }, '🔬 Tanulmány indítása ezekből az ötletekből →'),
+            h('div', { style: { fontSize: 11.5, color: 'var(--faint)', marginTop: 5 } }, 'Claude kitölti a Step-1 mezőit (kulcsszavak, kritériumok, szűrők) az ötletek alapján — utána átírhatod.')) : null
         ) : h('div', { style: { fontSize: 12.5, color: 'var(--faint)' } }, 'Még üres. Lent egy ötletnél nyomd a „Select" gombot — ide kerül, és ezek lesznek a tanulmány alapjai.')
       ),
       h('div', { className: 'panel' },
@@ -1020,6 +1021,11 @@
     function incCount(n) { return papers.filter(function (p) { return p.step === n && p.decision === 'include'; }).length; }
 
     // create a study from one OR MORE selected ideas (or empty), then let Claude pre-fill the funnel config
+    // one-click from the Ideas "study basis" window: auto-create the study from the selected ideas and let
+    // Claude pre-fill step 1 (newStudy = create → plan → load). Consume the signal first so it can't re-fire.
+    useEffect(function () {
+      if (props.autoCreateFrom && props.autoCreateFrom.length) { var ids = props.autoCreateFrom; if (props.onAutoConsumed) props.onAutoConsumed(); newStudy(ids); }
+    }, [props.autoCreateFrom]);
     function newStudy(ideas) {
       var arr = Array.isArray(ideas) ? ideas : (ideas ? [ideas] : []);
       var q = arr.length ? arr.map(function (i) { return i.question + (i.hypothesis ? ' — hipotézis: ' + i.hypothesis : ''); }).join('\n\n') : props.project.title;
@@ -1077,6 +1083,7 @@
     function override(p, dec) { sb.from('research_study_papers').update({ decision: dec, overridden: true }).eq('study_id', selId).eq('source_id', p.source_id).eq('step', curStep).then(function () { loadStudy(selId); }); }
 
     if (!studies.length) {
+      if (planning) return h('div', { className: 'panel' }, h('h3', null, '🔬 Irodalmi tanulmány'), h('div', { style: { fontSize: 13, color: 'var(--muted)', padding: '12px 0' } }, '✨ Claude előkészíti a tanulmányt a kijelölt ötletek alapján — egy pillanat, töltöm a Step-1 adatait (kulcsszavak, kritériumok, szűrők)…'));
       var selIdeas = (props.ideas || []).filter(function (i) { return i.status === 'selected'; });
       return h('div', { className: 'panel' }, h('h3', null, '🔬 Irodalmi tanulmány'),
         h('p', { style: { fontSize: 13, color: 'var(--muted)' } }, 'Jelöld ki (Select) az Ötletek közül azokat, amik alapján a tanulmány menjen, majd indíts egy 4-lépéses szűrést: gyors screening → absztrakt → teljes szöveg → review. A lépéseket Claude előre kitölti (kulcsszavak, kritériumok, szűrők) az ötletek alapján — Te csak finomhangolsz.'),
@@ -1108,6 +1115,7 @@
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
           h('h3', { style: { margin: 0 } }, LS_STEPS[curStep - 1].label + ' — beállítások'),
           props.canEdit ? h('button', { className: 'btn', style: { padding: '3px 9px', fontSize: 11.5, marginLeft: 'auto', flex: 'none' }, disabled: planning, title: 'Claude (újra)tölti a kulcsszavakat, kritériumokat és szűrőket az ötletek alapján', onClick: runPlan }, planning ? '✨ Claude tölti…' : '✨ AI-kitöltés') : null),
+        props.canEdit ? h('div', { style: { fontSize: 11.5, color: 'var(--muted)', margin: '4px 0 8px', lineHeight: 1.4 } }, planning ? '✨ Claude éppen tölti a mezőket az ötleteid alapján…' : '✨ A mezőket Claude töltötte ki az ötleteid alapján — szabadon átírhatod, majd futtasd a lépést.') : null,
         h('div', { className: 'field-label' }, 'Kulcsszavak (vesszővel)'),
         h('input', { className: 'field', style: { width: '100%' }, disabled: !props.canEdit, value: (cfg.keywords || []).join(', '), placeholder: 'pl. out-of-distribution, LiDAR', onChange: function (e) { up('keywords', e.target.value.split(',').map(function (x) { return x.trim(); }).filter(Boolean)); } }),
         h('div', { style: { display: 'flex', gap: 12, marginTop: 8, flexWrap: 'wrap' } },
@@ -1164,6 +1172,7 @@
   function ProjectDetail(props) {
     var p = props.project;
     var tS = useState('overview'), tab = tS[0], setTab = tS[1];
+    var asS = useState(null), autoStudy = asS[0], setAutoStudy = asS[1];   // ideas to auto-create a study from (set by the Ideas "study basis" window → one-click create + Claude pre-fill)
     var edS = useState(false), editOpen = edS[0], setEditOpen = edS[1];   // #2: project settings editor
     function setStage(i) {
       sb.from('research_projects').update({ stage: i }).eq('id', p.id).then(function () {
@@ -1183,7 +1192,7 @@
     }
     var TABS = [['overview', 'Overview', null], ['ideas', 'Ideas', (props.ideas || []).length], ['literature', 'Literature', (props.sources || []).length], ['study', 'Lit. study', (props.studies || []).length], ['data', 'Data', (props.datasets || []).length], ['compute', 'Compute', (props.jobs || []).length], ['writing', 'Writing', null], ['canvas', 'Canvas', null], ['notes', 'Notes', null], ['log', 'Log', (props.log || []).length], ['tasks', 'Tasks', openTasks]];
     var content;
-    if (tab === 'ideas') content = h('div', null, h(ChatPanel, { projectId: p.id, supervised: !!p.student_id, canEdit: props.canEdit, authorId: props.authorId, fileOwnerId: props.fileOwnerId, sources: props.sources, onChanged: props.onChanged }), h(IdeasPanel, { projectId: p.id, ideas: props.ideas, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, onStartStudy: startStudyFromIdea, onGoStudy: function () { setTab('study'); } }));
+    if (tab === 'ideas') content = h('div', null, h(ChatPanel, { projectId: p.id, supervised: !!p.student_id, canEdit: props.canEdit, authorId: props.authorId, fileOwnerId: props.fileOwnerId, sources: props.sources, onChanged: props.onChanged }), h(IdeasPanel, { projectId: p.id, ideas: props.ideas, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, onStartStudyMulti: function (ideas) { setAutoStudy(ideas || []); setTab('study'); } }));
     else if (tab === 'literature') content = h(LiteraturePanel, { projectId: p.id, sources: props.sources, canEdit: props.canEdit, myEmail: props.myEmail, onChanged: props.onChanged });
     else if (tab === 'study') content = null;   // #9: rendered persistently below so a running study survives tab switches
     else if (tab === 'data') content = h(DataPanel, { projectId: p.id, datasets: props.datasets, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
@@ -1213,7 +1222,7 @@
       content,
       // #9 — persistent Lit. study: stays mounted (just hidden) on other tabs, so a running study keeps going
       // in the background while you use the Chat / other tabs.
-      h('div', { style: { display: tab === 'study' ? 'block' : 'none' } }, h(LiteratureStudy, { projectId: p.id, project: p, studies: props.studies, sources: props.sources, ideas: props.ideas, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged })),
+      h('div', { style: { display: tab === 'study' ? 'block' : 'none' } }, h(LiteratureStudy, { projectId: p.id, project: p, studies: props.studies, sources: props.sources, ideas: props.ideas, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, autoCreateFrom: autoStudy, onAutoConsumed: function () { setAutoStudy(null); } })),
       editOpen ? h(ProjectSettingsModal, { project: p, onClose: function () { setEditOpen(false); }, onSaved: function () { setEditOpen(false); props.onChanged(); } }) : null
     );
   }
