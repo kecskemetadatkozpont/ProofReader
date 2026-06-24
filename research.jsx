@@ -974,6 +974,25 @@
 
   // ---------- Literature Study (Elicit-style 4-step funnel) ----------
   var LS_STEPS = [{ step: 1, kind: 'quick', label: '1. Gyors' }, { step: 2, kind: 'abstract', label: '2. Absztrakt' }, { step: 3, kind: 'fulltext', label: '3. Teljes szöveg' }, { step: 4, kind: 'review', label: '4. Review' }];
+  // Mirror of the server's screenSystem() — the exact screening prompt Claude gets for steps 1–3, built from
+  // the question + the current keywords/criteria. Lets the user preview (and re-generate after editing) it.
+  function buildScreenPrompt(question, cfg) {
+    cfg = cfg || {};
+    var kws = (cfg.keywords || []).filter(Boolean);
+    var inc = (cfg.include || []).filter(Boolean);
+    var exc = (cfg.exclude || []).filter(Boolean);
+    return 'You are screening papers for a systematic literature review.\n'
+      + 'Research question: ' + (question || '(none given)') + '\n'
+      + (kws.length ? 'Keywords: ' + kws.join(', ') + '\n' : '')
+      + (inc.length ? 'Inclusion criteria (the paper should plausibly satisfy ALL): ' + inc.join('; ') + '\n' : '')
+      + (exc.length ? 'Exclusion criteria (exclude if ANY clearly holds): ' + exc.join('; ') + '\n' : '')
+      + 'For each paper decide: "include" (relevant to the question and plausibly meets the inclusion criteria), '
+      + '"maybe" (relevant but you are genuinely unsure it meets a criterion), or "exclude" (off-topic, or clearly '
+      + 'violates an exclusion criterion). This is a screening FUNNEL — be inclusive here; later steps narrow '
+      + 'further. Prefer "maybe" over "exclude" when uncertain. Give a one-line reason, a 0..100 relevance score, '
+      + 'and detect signals has_github (a public code repo) and has_dataset (a public dataset).\n'
+      + 'Return ONLY a JSON array, one object per paper.';
+  }
   // criteria editor — each include/exclude criterion is its own small card (add / remove) instead of a lumped
   // textarea. accent = green for inclusion, red for exclusion. To edit a criterion, remove it and add a new one.
   function CritEditor(props) {
@@ -1019,6 +1038,8 @@
     var ttS = useState({}), titles = ttS[0], setTitles = ttS[1];
     var erS = useState(''), err = erS[0], setErr = erS[1];
     var plS = useState(false), planning = plS[0], setPlanning = plS[1];   // Claude pre-filling the funnel config
+    var ppS = useState(''), promptText = ppS[0], setPromptText = ppS[1];   // previewed screening prompt
+    var smS = useState(false), studiesOpen = smS[0], setStudiesOpen = smS[1];   // "Tanulmányok" manage modal
     var alive = useRef(true), stop = useRef(false);
     useEffect(function () { return function () { alive.current = false; }; }, []);
     // #12 — selId is seeded from studies[0] at mount; if the studies list loads AFTER mount it stays null
@@ -1068,6 +1089,17 @@
       if (!selId || planning) return;
       setErr(''); setPlanning(true);
       callStudy({ action: 'plan', study_id: selId }).then(function (d) { setPlanning(false); if (d && d.error) { setErr('AI-kitöltés: ' + d.error); return; } loadStudy(selId); }, function () { setPlanning(false); setErr('AI-kitöltés nem sikerült.'); });
+    }
+    // (re)generate the prompt preview from the CURRENT question + criteria (reflects manual edits)
+    function genPrompt() { setPromptText(buildScreenPrompt((sel && (sel.question || sel.title)) || '', cfg)); }
+    // delete a whole study (cascades to its steps + papers)
+    function delStudy(s) {
+      if (!window.confirm('Biztosan törlöd ezt a tanulmányt és minden lépését/eredményét?\n\n„' + (s.title || '') + '"')) return;
+      sb.from('research_studies').delete().eq('id', s.id).then(function (r) {
+        if (r && r.error) { setErr('Törlés sikertelen: ' + r.error.message); return; }
+        if (selId === s.id) { setSelId(null); setSteps([]); setPapers([]); setCurStep(1); }
+        props.onChanged();
+      });
     }
     function up(k, v) { setCfg(Object.assign({}, cfg, (function () { var o = {}; o[k] = v; return o; })())); }
     function upFilter(k, v) { setCfg(Object.assign({}, cfg, { filters: Object.assign({}, cfg.filters || {}, (function () { var o = {}; o[k] = v; return o; })()) })); }
@@ -1126,7 +1158,9 @@
     return h('div', null,
       // studies overview — every study with its progress + status; click to open one. Lets you follow several.
       h('div', { style: { marginBottom: 12 } },
-        h('div', { style: { fontSize: 11.5, color: 'var(--faint)', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 5 } }, 'Tanulmányok (' + studies.length + ')'),
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5 } },
+          h('div', { style: { fontSize: 11.5, color: 'var(--faint)', textTransform: 'uppercase', letterSpacing: '.04em' } }, 'Tanulmányok (' + studies.length + ')'),
+          h('button', { className: 'btn', style: { marginLeft: 'auto', padding: '3px 9px', fontSize: 11.5, flex: 'none' }, onClick: function () { setStudiesOpen(true); } }, '📚 Tanulmányok megtekintése')),
         h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 6 } },
           studies.map(function (s) {
             var on = s.id === selId;
@@ -1167,7 +1201,17 @@
           (cur.status === 'done' && curStep < 4) ? h('span', { style: { fontSize: 11.5, color: 'var(--warn)' } }, 'Az újrafuttatás törli a későbbi lépéseket.') : null,
           prog ? h('span', { className: 'progress' }, h('i', { style: { width: (prog.total ? Math.round(prog.done / prog.total * 100) : 0) + '%' } }), h('span', { className: 'progress-t' }, prog.done + (prog.total ? '/' + prog.total : '') + ' · ✓' + ((prog.counts || {}).include || 0) + ' ✗' + ((prog.counts || {}).exclude || 0))) : null
         ) : null,
-        err ? h('div', { style: { color: 'var(--danger)', fontSize: 12.5, marginTop: 6 } }, err) : null
+        err ? h('div', { style: { color: 'var(--danger)', fontSize: 12.5, marginTop: 6 } }, err) : null,
+        // 📝 prompt preview — the exact screening prompt Claude gets, built from the current question + criteria
+        props.canEdit ? h('div', { style: { marginTop: 12, borderTop: '1px solid var(--line)', paddingTop: 8 } },
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
+            h('div', { style: { fontSize: 12, fontWeight: 600 } }, '📝 Claude screening-prompt'),
+            h('button', { className: 'btn', style: { padding: '3px 9px', fontSize: 11.5, flex: 'none' }, onClick: genPrompt }, promptText ? '🔄 Prompt újragenerálása' : '📝 Prompt megtekintése'),
+            promptText ? h('button', { className: 'btn', style: { padding: '3px 9px', fontSize: 11.5, flex: 'none' }, onClick: function () { try { navigator.clipboard.writeText(promptText); } catch (e) { } } }, 'Másolás') : null,
+            promptText ? h('button', { className: 'btn', style: { padding: '3px 9px', fontSize: 11.5, flex: 'none' }, onClick: function () { setPromptText(''); } }, 'Elrejtés') : null),
+          promptText ? h('div', { style: { fontSize: 11, color: 'var(--muted)', marginTop: 4 } }, 'Ez a rendszer-prompt megy a Claude-nak minden cikk megítélésekor (a kérdés + kulcsszavak + kritériumok alapján). Kulcsszó/kritérium módosítása után nyomd az „újragenerálás"-t.') : null,
+          promptText ? h('pre', { style: { marginTop: 6, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: 11.5, lineHeight: 1.45, background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 8, padding: '8px 10px', maxHeight: 280, overflow: 'auto', fontFamily: 'ui-monospace, monospace' } }, promptText) : null
+        ) : null
       ) : h('div', { className: 'panel', style: { marginTop: 10 } },
         h('h3', null, '4. Review cikk'),
         h('p', { style: { fontSize: 13, color: 'var(--muted)' } }, 'A 3. lépésben „include"-olt ' + incCount(3) + ' cikkből egy strukturált review-t generálunk (a Fájlok közé mentve). Consensus-grounding, ha be van kötve a token.'),
@@ -1197,6 +1241,28 @@
                   props.canEdit ? h('div', { className: 'seg', style: { flex: 'none' } }, ['include', 'maybe', 'exclude'].map(function (v) { return h('button', { key: v, className: p.decision === v ? 'on' : '', onClick: function () { override(p, v); } }, v); })) : null);
               }));
           })
+      ) : null,
+      // 📚 studies manage modal — view all studies + delete (cascades to steps/papers)
+      studiesOpen ? h('div', { style: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,.4)', zIndex: 1000, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '6vh 16px', overflow: 'auto' }, onClick: function () { setStudiesOpen(false); } },
+        h('div', { style: { background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 12, width: 'min(680px, 100%)', maxHeight: '88vh', overflow: 'auto', boxShadow: '0 12px 40px rgba(0,0,0,.25)' }, onClick: function (e) { e.stopPropagation(); } },
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, padding: '14px 16px', borderBottom: '1px solid var(--line)', position: 'sticky', top: 0, background: 'var(--surface)' } },
+            h('h3', { style: { margin: 0 } }, '📚 Tanulmányok (' + studies.length + ')'),
+            h('button', { className: 'icon-x', style: { marginLeft: 'auto' }, onClick: function () { setStudiesOpen(false); } }, '✕')),
+          h('div', { style: { padding: '4px 16px 16px' } },
+            studies.length ? studies.map(function (s) {
+              return h('div', { key: s.id, style: { display: 'flex', gap: 10, alignItems: 'flex-start', padding: '10px 0', borderBottom: '1px solid var(--line)' } },
+                h('div', { style: { flex: 1, minWidth: 0 } },
+                  h('div', { style: { fontSize: 13.5, fontWeight: 600, whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, s.title),
+                  s.question ? h('div', { style: { fontSize: 12, color: 'var(--muted)', marginTop: 2, whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 54, overflow: 'hidden' } }, s.question) : null,
+                  h('div', { style: { display: 'flex', gap: 6, marginTop: 5, flexWrap: 'wrap' } },
+                    h('span', { className: 'chip ' + (s.status === 'done' ? 'c-ok' : 'c-warn') }, s.status === 'done' ? '✓ kész' : 'lépés ' + (s.cur_step || 1) + '/4'),
+                    s.id === selId ? h('span', { className: 'chip c-acc' }, 'kiválasztva') : null)),
+                h('div', { style: { display: 'flex', flexDirection: 'column', gap: 5, flex: 'none' } },
+                  h('button', { className: 'btn', style: { padding: '3px 10px', fontSize: 12 }, onClick: function () { setSelId(s.id); setCurStep(s.cur_step || 1); setStudiesOpen(false); } }, 'Megnyitás'),
+                  props.canEdit ? h('button', { className: 'btn', style: { padding: '3px 10px', fontSize: 12, color: 'var(--danger)' }, onClick: function () { delStudy(s); } }, '🗑 Törlés') : null));
+            }) : h('div', { style: { fontSize: 13, color: 'var(--faint)', padding: '12px 0' } }, 'Nincs még tanulmány.')
+          )
+        )
       ) : null
     );
   }
