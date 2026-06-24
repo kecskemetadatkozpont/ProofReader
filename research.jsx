@@ -606,7 +606,26 @@
       }, function () { setBusy(false); setMsg('AI not configured yet — deploy the research-ai Edge function.'); });
     }
     var ideas = props.ideas || [];
-    return h('div', { className: 'panel' },
+    var selected = ideas.filter(function (i) { return i.status === 'selected'; });
+    var rest = ideas.filter(function (i) { return i.status !== 'selected'; });
+    return h('div', null,
+      // 📌 separate "study basis" window — collects the ideas chosen (Select) as the study's foundation
+      h('div', { className: 'panel', style: { marginBottom: 10, border: '1.5px solid var(--accent)' } },
+        h('h3', null, '📌 A tanulmány alapja' + (selected.length ? ' — ' + selected.length + ' ötlet' : '')),
+        selected.length ? h('div', null,
+          selected.map(function (idea) {
+            return h('div', { key: idea.id, style: { display: 'flex', gap: 8, alignItems: 'flex-start', padding: '7px 0', borderTop: '1px solid var(--line)' } },
+              h('div', { style: { flex: 1, minWidth: 0 } },
+                h('div', { style: { fontSize: 13, fontWeight: 600, whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, idea.question),
+                idea.hypothesis ? h('div', { style: { fontSize: 12, color: 'var(--muted)', marginTop: 2, whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, idea.hypothesis) : null
+              ),
+              props.canEdit ? h('button', { className: 'icon-x', title: 'Eltávolítás az alapból', style: { flex: 'none' }, onClick: function () { setStatus(idea, 'candidate'); } }, '✕') : null
+            );
+          }),
+          props.onGoStudy ? h('div', { style: { marginTop: 10 } }, h('button', { className: 'btn pri', onClick: function () { props.onGoStudy(); } }, '🔬 Tanulmány indítása ezekből az ötletekből →')) : null
+        ) : h('div', { style: { fontSize: 12.5, color: 'var(--faint)' } }, 'Még üres. Lent egy ötletnél nyomd a „Select" gombot — ide kerül, és ezek lesznek a tanulmány alapjai.')
+      ),
+      h('div', { className: 'panel' },
       h('h3', null, 'Research ideas', props.canEdit ? h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12 }, disabled: busy, onClick: gap }, '✨ Gap analysis (AI)') : null),
       msg ? h('div', { style: { fontSize: 12.5, color: 'var(--muted)', marginBottom: 8 } }, msg) : null,
       props.canEdit ? h('div', { style: { marginBottom: 10 } },
@@ -614,7 +633,7 @@
         h('textarea', { rows: 2, style: { width: '100%', minHeight: 40, marginTop: 6, border: '1px solid var(--line)', borderRadius: 8, padding: '8px 10px', fontFamily: 'inherit', fontSize: 13, lineHeight: 1.45, resize: 'vertical', boxSizing: 'border-box' }, value: form.hypothesis, placeholder: 'Hypothesis (optional)', onChange: function (e) { setForm(Object.assign({}, form, { hypothesis: e.target.value })); }, onKeyDown: onKey }),
         h('div', { style: { marginTop: 8 } }, h('button', { className: 'btn pri', onClick: add }, 'Add idea'))
       ) : null,
-      ideas.length ? ideas.map(function (idea) {
+      rest.length ? rest.map(function (idea) {
         var open = expanded[idea.id] !== false;   // #10: default open; click chevron / question to collapse
         return h('div', { className: 'idea', key: idea.id },
           h('div', { style: { display: 'flex', gap: 7, alignItems: 'center', marginBottom: 4 } },
@@ -634,7 +653,8 @@
             props.onStartStudy ? h('button', { style: { marginLeft: 'auto', color: 'var(--accent)' }, title: 'Elicit-szerű irodalmi szűrés indítása', onClick: function () { props.onStartStudy(idea); } }, '🔬 Tanulmány') : null
           ) : null
         );
-      }) : h('div', { style: { fontSize: 13, color: 'var(--faint)', padding: '8px 0' } }, 'No ideas yet — add your own or run a gap analysis.')
+      }) : h('div', { style: { fontSize: 13, color: 'var(--faint)', padding: '8px 0' } }, selected.length ? 'Minden ötlet a tanulmány alapjába került — adj hozzá újat fent.' : 'No ideas yet — add your own or run a gap analysis.')
+      )
     );
   }
 
@@ -1155,7 +1175,7 @@
     }
     var TABS = [['overview', 'Overview', null], ['ideas', 'Ideas', (props.ideas || []).length], ['literature', 'Literature', (props.sources || []).length], ['study', 'Lit. study', (props.studies || []).length], ['data', 'Data', (props.datasets || []).length], ['compute', 'Compute', (props.jobs || []).length], ['writing', 'Writing', null], ['canvas', 'Canvas', null], ['notes', 'Notes', null], ['log', 'Log', (props.log || []).length], ['tasks', 'Tasks', openTasks]];
     var content;
-    if (tab === 'ideas') content = h('div', null, h(ChatPanel, { projectId: p.id, supervised: !!p.student_id, canEdit: props.canEdit, authorId: props.authorId, fileOwnerId: props.fileOwnerId, sources: props.sources, onChanged: props.onChanged }), h(IdeasPanel, { projectId: p.id, ideas: props.ideas, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, onStartStudy: startStudyFromIdea }));
+    if (tab === 'ideas') content = h('div', null, h(ChatPanel, { projectId: p.id, supervised: !!p.student_id, canEdit: props.canEdit, authorId: props.authorId, fileOwnerId: props.fileOwnerId, sources: props.sources, onChanged: props.onChanged }), h(IdeasPanel, { projectId: p.id, ideas: props.ideas, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, onStartStudy: startStudyFromIdea, onGoStudy: function () { setTab('study'); } }));
     else if (tab === 'literature') content = h(LiteraturePanel, { projectId: p.id, sources: props.sources, canEdit: props.canEdit, myEmail: props.myEmail, onChanged: props.onChanged });
     else if (tab === 'study') content = null;   // #9: rendered persistently below so a running study survives tab switches
     else if (tab === 'data') content = h(DataPanel, { projectId: p.id, datasets: props.datasets, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
