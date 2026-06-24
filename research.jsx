@@ -1042,6 +1042,8 @@
     var plS = useState(false), planning = plS[0], setPlanning = plS[1];   // Claude pre-filling the funnel config
     var ppS = useState(''), promptText = ppS[0], setPromptText = ppS[1];   // previewed screening prompt
     var smS = useState(false), studiesOpen = smS[0], setStudiesOpen = smS[1];   // "Tanulmányok" manage modal
+    var rnS = useState(null), renameId = rnS[0], setRenameId = rnS[1];   // study being renamed
+    var rvS = useState(''), renameVal = rvS[0], setRenameVal = rvS[1];
     var alive = useRef(true), stop = useRef(false);
     useEffect(function () { return function () { alive.current = false; }; }, []);
     // #12 — selId is seeded from studies[0] at mount; if the studies list loads AFTER mount it stays null
@@ -1101,6 +1103,14 @@
         if (r && r.error) { setErr('Törlés sikertelen: ' + r.error.message); return; }
         if (selId === s.id) { setSelId(null); setSteps([]); setPapers([]); setCurStep(1); }
         props.onChanged();
+      });
+    }
+    // rename a study
+    function renameStudy(s) {
+      var t = (renameVal || '').trim(); if (!t) { setRenameId(null); return; }
+      sb.from('research_studies').update({ title: t.slice(0, 200), updated_at: new Date().toISOString() }).eq('id', s.id).then(function (r) {
+        if (r && r.error) { setErr('Átnevezés sikertelen: ' + r.error.message); return; }
+        setRenameId(null); props.onChanged();
       });
     }
     function up(k, v) { setCfg(Object.assign({}, cfg, (function () { var o = {}; o[k] = v; return o; })())); }
@@ -1254,7 +1264,14 @@
             studies.length ? studies.map(function (s) {
               return h('div', { key: s.id, style: { display: 'flex', gap: 10, alignItems: 'flex-start', padding: '10px 0', borderBottom: '1px solid var(--line)' } },
                 h('div', { style: { flex: 1, minWidth: 0 } },
-                  h('div', { style: { fontSize: 13.5, fontWeight: 600, whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, s.title),
+                  renameId === s.id
+                    ? h('div', { style: { display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' } },
+                        h('input', { className: 'field', style: { flex: 1, minWidth: 160, fontSize: 13 }, autoFocus: true, value: renameVal, placeholder: 'Tanulmány neve…', onChange: function (e) { setRenameVal(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter') { e.preventDefault(); renameStudy(s); } else if (e.key === 'Escape') { setRenameId(null); } } }),
+                        h('button', { className: 'btn pri', style: { padding: '3px 9px', fontSize: 12, flex: 'none' }, onClick: function () { renameStudy(s); } }, 'Mentés'),
+                        h('button', { className: 'btn', style: { padding: '3px 9px', fontSize: 12, flex: 'none' }, onClick: function () { setRenameId(null); } }, 'Mégse'))
+                    : h('div', { style: { display: 'flex', gap: 6, alignItems: 'center' } },
+                        h('div', { style: { fontSize: 13.5, fontWeight: 600, whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, s.title),
+                        props.canEdit ? h('button', { className: 'icon-x', title: 'Átnevezés', style: { flex: 'none' }, onClick: function () { setRenameId(s.id); setRenameVal(s.title || ''); } }, '✏️') : null),
                   s.question ? h('div', { style: { fontSize: 12, color: 'var(--muted)', marginTop: 2, whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 54, overflow: 'hidden' } }, s.question) : null,
                   h('div', { style: { display: 'flex', gap: 6, marginTop: 5, flexWrap: 'wrap' } },
                     h('span', { className: 'chip ' + (s.status === 'done' ? 'c-ok' : 'c-warn') }, s.status === 'done' ? '✓ kész' : 'lépés ' + (s.cur_step || 1) + '/4'),
