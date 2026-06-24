@@ -1177,9 +1177,19 @@
           studies.map(function (s) {
             var on = s.id === selId;
             var st = s.status === 'done' ? '✓ kész' : ('lépés ' + (s.cur_step || 1) + '/4');
-            return h('button', { key: s.id, onClick: function () { setSelId(s.id); setCurStep(s.cur_step || 1); }, style: { textAlign: 'left', maxWidth: 260, border: '1.5px solid ' + (on ? 'var(--accent)' : 'var(--line)'), background: on ? 'var(--surface-2)' : 'var(--surface)', borderRadius: 8, padding: '6px 10px', cursor: 'pointer' } },
-              h('div', { style: { fontSize: 12.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } }, s.title),
-              h('div', { style: { fontSize: 11, color: (running && on) ? 'var(--accent)' : 'var(--muted)', marginTop: 2 } }, (running && on ? '⏳ fut… ' : '') + st)
+            var editing = renameId === s.id;
+            return h('div', { key: s.id, onClick: editing ? null : function () { setSelId(s.id); setCurStep(s.cur_step || 1); }, style: { textAlign: 'left', maxWidth: 260, minWidth: 150, border: '1.5px solid ' + (on ? 'var(--accent)' : 'var(--line)'), background: on ? 'var(--surface-2)' : 'var(--surface)', borderRadius: 8, padding: '6px 10px', cursor: editing ? 'default' : 'pointer' } },
+              editing
+                ? h('div', { onClick: function (e) { e.stopPropagation(); }, style: { display: 'flex', flexDirection: 'column', gap: 4 } },
+                    h('input', { className: 'field', autoFocus: true, style: { fontSize: 12.5, width: '100%', boxSizing: 'border-box' }, value: renameVal, placeholder: 'Tanulmány neve…', onChange: function (e) { setRenameVal(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter') { e.preventDefault(); renameStudy(s); } else if (e.key === 'Escape') { setRenameId(null); } } }),
+                    h('div', { style: { display: 'flex', gap: 4 } },
+                      h('button', { className: 'btn pri', style: { padding: '2px 9px', fontSize: 11 }, onClick: function () { renameStudy(s); } }, 'Mentés'),
+                      h('button', { className: 'btn', style: { padding: '2px 9px', fontSize: 11 }, onClick: function () { setRenameId(null); } }, 'Mégse')))
+                : h('div', null,
+                    h('div', { style: { display: 'flex', gap: 4, alignItems: 'center' } },
+                      h('div', { style: { flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } }, s.title),
+                      props.canEdit ? h('button', { className: 'icon-x', title: 'Átnevezés', style: { flex: 'none', fontSize: 11 }, onClick: function (e) { e.stopPropagation(); setRenameId(s.id); setRenameVal(s.title || ''); } }, '✏️') : null),
+                    h('div', { style: { fontSize: 11, color: (running && on) ? 'var(--accent)' : 'var(--muted)', marginTop: 2 } }, (running && on ? '⏳ fut… ' : '') + st))
             );
           }),
           props.canEdit ? h('button', { onClick: function () { newStudy(null); }, style: { border: '1px dashed var(--line)', background: 'transparent', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontSize: 12.5, color: 'var(--muted)' } }, '+ Új tanulmány') : null
@@ -1264,14 +1274,7 @@
             studies.length ? studies.map(function (s) {
               return h('div', { key: s.id, style: { display: 'flex', gap: 10, alignItems: 'flex-start', padding: '10px 0', borderBottom: '1px solid var(--line)' } },
                 h('div', { style: { flex: 1, minWidth: 0 } },
-                  renameId === s.id
-                    ? h('div', { style: { display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' } },
-                        h('input', { className: 'field', style: { flex: 1, minWidth: 160, fontSize: 13 }, autoFocus: true, value: renameVal, placeholder: 'Tanulmány neve…', onChange: function (e) { setRenameVal(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter') { e.preventDefault(); renameStudy(s); } else if (e.key === 'Escape') { setRenameId(null); } } }),
-                        h('button', { className: 'btn pri', style: { padding: '3px 9px', fontSize: 12, flex: 'none' }, onClick: function () { renameStudy(s); } }, 'Mentés'),
-                        h('button', { className: 'btn', style: { padding: '3px 9px', fontSize: 12, flex: 'none' }, onClick: function () { setRenameId(null); } }, 'Mégse'))
-                    : h('div', { style: { display: 'flex', gap: 6, alignItems: 'center' } },
-                        h('div', { style: { fontSize: 13.5, fontWeight: 600, whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, s.title),
-                        props.canEdit ? h('button', { className: 'icon-x', title: 'Átnevezés', style: { flex: 'none' }, onClick: function () { setRenameId(s.id); setRenameVal(s.title || ''); } }, '✏️') : null),
+                  h('div', { style: { fontSize: 13.5, fontWeight: 600, whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, s.title),
                   s.question ? h('div', { style: { fontSize: 12, color: 'var(--muted)', marginTop: 2, whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 54, overflow: 'hidden' } }, s.question) : null,
                   h('div', { style: { display: 'flex', gap: 6, marginTop: 5, flexWrap: 'wrap' } },
                     h('span', { className: 'chip ' + (s.status === 'done' ? 'c-ok' : 'c-warn') }, s.status === 'done' ? '✓ kész' : 'lépés ' + (s.cur_step || 1) + '/4'),
