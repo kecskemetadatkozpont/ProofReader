@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="hu">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Publify — Médialejátszó</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root { --surface:#fff; --surface-2:#f5f6f9; --accent-tint:#eef0ff; --accent:#4f46e5; --accent-d:#4338ca; --ink:#1a2030; --muted:#5b6473; --faint:#8a92a0; --line:#e6e8ee; --soft:#f5f6f9; --softer:#fafbfc; --danger:#dc2626; --warn:#b45309; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; }
+    body { background: var(--softer); color: var(--ink); font-family: 'IBM Plex Sans', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+    a { color: var(--accent); }
+    .btn { border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 9px; padding: 7px 13px; font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+    .btn:hover { border-color: var(--accent); color: var(--accent); }
+    .btn.pri { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .btn.pri:hover { background: var(--accent-d); color: #fff; }
+    .btn:disabled { opacity: .6; cursor: default; }
+    .field { border: 1px solid var(--line); border-radius: 9px; padding: 8px 10px; font-family: inherit; font-size: 13.5px; background: var(--surface); color: var(--ink); }
+    .field:focus { outline: none; border-color: var(--accent); }
+    .chip { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 2px 8px; border-radius: 999px; background: var(--surface-2); color: var(--muted); }
+    .icon-x { border: 0; background: transparent; color: var(--faint); cursor: pointer; font-size: 15px; padding: 2px 4px; border-radius: 6px; }
+    .icon-x:hover { color: var(--danger); background: var(--soft); }
+    .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
+    .seg button { border: 0; background: var(--surface); color: var(--muted); padding: 6px 11px; font-family: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; border-right: 1px solid var(--line); }
+    .seg button:last-child { border-right: 0; }
+    .seg button.on { background: var(--accent); color: #fff; }
+    /* media player layout */
+    .mp-wrap { max-width: 1000px; margin: 0 auto; padding: 22px 20px 60px; }
+    .mp-head { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
+    .mp-head h1 { font-size: 23px; margin: 0; letter-spacing: -.3px; }
+    .mp-empty { text-align: center; color: var(--muted); padding: 60px 20px; }
+    .mp-empty h2 { color: var(--ink); }
+    .mp-card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 18px 18px; margin-bottom: 14px; }
+    .mp-card h3 { margin: 0 0 12px; font-size: 15px; }
+    .mp-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+    .mp-row > label { font-size: 12.5px; font-weight: 600; color: var(--muted); min-width: 58px; }
+    .mp-row .field { min-width: 160px; }
+    .mp-grid { display: flex; flex-direction: column; gap: 10px; }
+    .mp-item { display: flex; align-items: center; gap: 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; }
+    .mp-cover { width: 50px; height: 50px; border-radius: 12px; display: grid; place-items: center; font-size: 24px; background: linear-gradient(135deg, #6366f1, #d946ef); color: #fff; flex: none; cursor: pointer; }
+    .mp-title { font-size: 14.5px; font-weight: 700; cursor: pointer; }
+    .mp-title:hover { color: var(--accent); }
+    .mp-meta { display: flex; gap: 6px; margin-top: 5px; flex-wrap: wrap; }
+    /* player bar */
+    .mp-player { display: flex; align-items: center; gap: 12px; margin: 14px 0 6px; }
+    .mp-play { width: 48px; height: 48px; border-radius: 50%; border: 0; background: var(--accent); color: #fff; font-size: 17px; cursor: pointer; flex: none; }
+    .mp-play:hover { background: var(--accent-d); }
+    .mp-time { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; min-width: 38px; }
+    .mp-seek { flex: 1; accent-color: var(--accent); height: 5px; }
+    .mp-segs { max-height: 360px; overflow-y: auto; margin-top: 12px; border-top: 1px solid var(--line); }
+    .mp-seg { display: flex; gap: 10px; padding: 7px 8px; border-radius: 8px; cursor: pointer; font-size: 13px; line-height: 1.5; color: var(--muted); }
+    .mp-seg:hover { background: var(--soft); }
+    .mp-seg.on { background: var(--accent-tint); color: var(--ink); font-weight: 500; }
+    .mp-seg-t { flex: none; font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums; padding-top: 1px; }
+    textarea.field { resize: vertical; line-height: 1.5; }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script>if (window.pdfjsLib) { try { window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js'; } catch (e) { } }</script>
+  <script src="theme.js"></script>
+</head>
+<body>
+  <div id="root"></div>
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="backend/config.js"></script>
+  <script src="auth.js"></script>
+  <script src="backend.js"></script>
+  <script src="office.js"></script>
+  <script src="eleven.js"></script>
+  <script src="nav.js"></script>
+  <script type="text/babel" src="media.jsx"></script>
+  <script src="build.js"></script>
+  <script src="version-badge.js"></script>
+</body>
+</html>
