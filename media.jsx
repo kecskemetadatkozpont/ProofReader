@@ -16,6 +16,7 @@
   // split raw text into narratable segments (~1–3 sentences, capped) — strips bracketed citations + figure refs
   function toSegments(text) {
     var clean = String(text || '')
+      .replace(/^#{1,6}\s*/gm, '').replace(/\*\*([^*]+)\*\*/g, '$1').replace(/\*([^*]+)\*/g, '$1').replace(/^[\-*•]\s+/gm, '').replace(/`+/g, '')  // strip markdown
       .replace(/\[[0-9,\s\-]+\]/g, ' ')            // [12], [3,4]
       .replace(/\(([A-Z][a-z]+ (?:et al\.?,? )?\d{4}[a-z]?)\)/g, ' ')  // (Smith et al., 2020)
       .replace(/\bFig(?:ure)?\.?\s*\d+/gi, 'az ábra').replace(/\bTable\s*\d+/gi, 'a táblázat')
@@ -167,25 +168,50 @@
       extractFile(f).then(function (t) { setText(t || ''); if (!title) setTitle(f.name.replace(/\.[^.]+$/, '')); setProg((t || '').length + ' karakter kinyerve.'); }, function () { setErr('Nem sikerült a szöveget kinyerni a fájlból.'); setProg(''); });
     }
 
-    // build the source text for a study (abstracts | Claude summary | full text)
+    // POST to the tts-translate edge fn (translate | summarize | fulltext)
+    function callPrep(payload) {
+      return props.sb.auth.getSession().then(function (s) {
+        var tok = (s && s.data && s.data.session && s.data.session.access_token) || CFG.supabaseAnonKey;
+        return fetch(CFG.supabaseUrl + '/functions/v1/tts-translate', { method: 'POST', headers: { 'Content-Type': 'application/json', 'apikey': CFG.supabaseAnonKey, 'Authorization': 'Bearer ' + tok }, body: JSON.stringify(payload) }).then(function (r) { return r.json(); });
+      });
+    }
+
+    // build the source text for a study (abstracts | Claude overview | full text from OA PDFs)
     function studyText() {
       return props.sb.from('research_study_papers').select('source_id,step,decision').eq('study_id', studyId).eq('decision', 'include').then(function (r) {
         var rows = (r && r.data) || [];
         var maxStep = rows.reduce(function (a, b) { return Math.max(a, b.step); }, 0);
         var ids = rows.filter(function (x) { return x.step === maxStep; }).map(function (x) { return x.source_id; });
-        if (!ids.length) return { title: '', text: '' };
-        return props.sb.from('research_sources').select('title,abstract,authors,year,venue').in('id', ids).then(function (sr) {
+        if (!ids.length) return { title: '', text: '', preTranslated: false };
+        return props.sb.from('research_sources').select('title,abstract,oa_pdf_url').in('id', ids).then(function (sr) {
           var srcs = (sr && sr.data) || [];
           var st = (studies.filter(function (s) { return s.id === studyId; })[0] || {}).title || 'Tanulmány';
           if (depth === 'summary') {
-            // a flowing Hungarian/target overview via the existing study review generator is heavy; for now build a
-            // structured spoken overview from the abstracts (translated below if requested)
-            var body = srcs.map(function (s, i) { return (i + 1) + '. ' + (s.title || '') + '. ' + (s.abstract || '(nincs absztrakt)'); }).join('\n\n');
-            return { title: st + ' — áttekintés', text: 'A következő irodalmi áttekintés ' + srcs.length + ' kiválasztott publikációt foglal össze. ' + body };
+            // (a) a real, flowing Claude overview written directly in the target language
+            setProg('Claude áttekintőt ír a ' + srcs.length + ' cikkből…');
+            return callPrep({ mode: 'summarize', target_lang: translate ? lang : 'English', papers: srcs.map(function (s) { return { title: s.title, abstract: s.abstract }; }) })
+              .then(function (d) { if (d.error) throw new Error(d.error); return { title: st + ' — áttekintés', text: d.text || '', preTranslated: !!translate }; });
           }
-          // abstract (and fulltext falls back to abstract — full PDFs are not persisted)
-          var body2 = srcs.map(function (s) { return (s.title || '') + '. ' + (s.abstract || '(nincs absztrakt)'); }).join('\n\n');
-          return { title: st, text: body2 };
+          if (depth === 'fulltext') {
+            // (b) download + extract clean reading text from each OA PDF (server-side); abstract fallback per paper
+            var withPdf = srcs.filter(function (s) { return s.oa_pdf_url; }).slice(0, 8);   // cap (each ~60–80s)
+            var parts = []; var i = 0;
+            function nextPdf() {
+              if (i >= withPdf.length) {
+                srcs.filter(function (s) { return !s.oa_pdf_url; }).forEach(function (s) { parts.push((s.title || '') + '. ' + (s.abstract || '')); });   // no-PDF papers → abstract
+                return { title: st + ' — teljes szöveg', text: parts.join('\n\n'), preTranslated: false };
+              }
+              var s = withPdf[i]; setProg('Teljes szöveg kinyerése PDF-ből ' + (i + 1) + '/' + withPdf.length + ' (Claude, lassú)…');
+              return callPrep({ mode: 'fulltext', url: s.oa_pdf_url }).then(function (d) {
+                parts.push((d && d.text) ? d.text : ((s.title || '') + '. ' + (s.abstract || '')));   // fallback to abstract on no_pdf
+                i++; return nextPdf();
+              }, function () { parts.push((s.title || '') + '. ' + (s.abstract || '')); i++; return nextPdf(); });
+            }
+            return nextPdf();
+          }
+          // abstract
+          var body = srcs.map(function (s) { return (s.title || '') + '. ' + (s.abstract || '(nincs absztrakt)'); }).join('\n\n');
+          return { title: st, text: body, preTranslated: false };
         });
       });
     }
@@ -193,15 +219,15 @@
     function generate() {
       if (busy) return; if (!props.hasKey || !E) { setErr('Előbb add meg az ElevenLabs kulcsot (fent).'); return; }
       setErr(''); setBusy(true); setProg('Forrásszöveg előkészítése…');
-      var prep = src === 'study' ? studyText() : Promise.resolve({ title: title || (fileName || 'Hangoskönyv'), text: text });
+      var prep = src === 'study' ? studyText() : Promise.resolve({ title: title || (fileName || 'Hangoskönyv'), text: text, preTranslated: false });
       prep.then(function (s) {
         var srcText = (s.text || '').trim(); var ttl = (title || s.title || 'Hangoskönyv').slice(0, 120);
         if (!srcText) { setBusy(false); setErr('Nincs felolvasandó szöveg.'); return; }
         var segs = toSegments(srcText);
         if (!segs.length) { setBusy(false); setErr('A szövegből nem sikerült mondatokat képezni.'); return; }
-        if (segs.length > 400) { setBusy(false); setErr('Túl hosszú (' + segs.length + ' szakasz). Rövidítsd, vagy válassz absztrakt-mélységet.'); return; }
-        // optional translation (batched)
-        var doTr = translate ? translateSegs(segs, lang) : Promise.resolve(segs);
+        if (segs.length > 600) { setBusy(false); setErr('Túl hosszú (' + segs.length + ' szakasz). Rövidítsd, vagy válassz absztrakt/áttekintés-mélységet.'); return; }
+        // optional translation — but the "summary" overview is already written in the target language (preTranslated)
+        var doTr = (translate && !s.preTranslated) ? translateSegs(segs, lang) : Promise.resolve(segs);
         doTr.then(function (segs2) { synth(ttl, segs2); }, function (e) { setBusy(false); setErr('Fordítás sikertelen: ' + e); });
       }, function () { setBusy(false); setErr('A forrás betöltése sikertelen.'); });
     }
@@ -274,7 +300,8 @@
         h('div', { className: 'mp-row' }, h('label', null, 'Tanulmány'),
           h('select', { className: 'field', value: studyId, onChange: function (e) { setStudyId(e.target.value); } }, h('option', { value: '' }, '— válassz —'), studies.map(function (s) { return h('option', { key: s.id, value: s.id }, s.title); }))),
         h('div', { className: 'mp-row' }, h('label', null, 'Mélység'),
-          h('div', { className: 'seg' }, [['abstract', 'Absztrakt'], ['summary', 'Áttekintés'], ['fulltext', 'Teljes (→ absztrakt)']].map(function (o) { return h('button', { key: o[0], className: depth === o[0] ? 'on' : '', onClick: function () { setDepth(o[0]); } }, o[1]); })))) : null,
+          h('div', { className: 'seg' }, [['abstract', 'Absztrakt'], ['summary', 'Claude áttekintés'], ['fulltext', 'Teljes szöveg (PDF)']].map(function (o) { return h('button', { key: o[0], className: depth === o[0] ? 'on' : '', onClick: function () { setDepth(o[0]); } }, o[1]); })))) : null,
+      src === 'study' && depth === 'fulltext' ? h('div', { style: { fontSize: 11.5, color: 'var(--muted)', marginTop: -4, marginBottom: 8 } }, '⏳ A teljes szöveg az OA PDF-ekből készül (Claude, cikkenként ~1 perc, max 8 cikk) — lassú, de a legrészletesebb.') : null,
       h('div', { className: 'mp-row' }, h('label', null, 'Cím'), h('input', { className: 'field', style: { flex: 1 }, placeholder: '(automatikus, ha üres)', value: title, onChange: function (e) { setTitle(e.target.value); } })),
       h('div', { className: 'mp-row' }, h('label', null, 'Nyelv'),
         h('select', { className: 'field', value: lang, onChange: function (e) { setLang(e.target.value); } }, LANGS.map(function (l) { return h('option', { key: l, value: l }, l); })),

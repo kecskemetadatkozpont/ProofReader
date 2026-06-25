@@ -2,21 +2,60 @@ import { createClient } from 'jsr:@supabase/supabase-js@2';
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type', 'Access-Control-Allow-Methods': 'POST, OPTIONS' };
 const ANTHROPIC_KEY = Deno.env.get('ANTHROPIC_API_KEY');
 const MODEL = 'claude-haiku-4-5-20251001';
+const PDF_MAX = 14 * 1024 * 1024;
 function json(b: unknown, s = 200) { return new Response(JSON.stringify(b), { status: s, headers: { ...CORS, 'Content-Type': 'application/json' } }); }
-async function callClaude(system: string, content: string, maxTokens: number) {
+async function callClaude(system: string, content: any, maxTokens: number) {
   const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'x-api-key': ANTHROPIC_KEY!, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' }, body: JSON.stringify({ model: MODEL, max_tokens: maxTokens, system, messages: [{ role: 'user', content }] }) });
   const o = await r.json(); if (o.error) throw new Error(o.error.message || 'anthropic');
   return (o.content || []).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n');
+}
+async function fetchPdfBlock(url: string): Promise<any | null> {
+  if (!url) return null;
+  try {
+    const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 14000);
+    const r = await fetch(url, { signal: ctrl.signal, headers: { 'User-Agent': 'Publify/1.0' } }); clearTimeout(t);
+    if (!r.ok) return null;
+    const ct = r.headers.get('content-type') || '';
+    if (!/pdf/i.test(ct) && !/\.pdf($|\?)/i.test(url)) return null;
+    const buf = new Uint8Array(await r.arrayBuffer());
+    if (!buf.length || buf.length > PDF_MAX) return null;
+    let bin = ''; for (let i = 0; i < buf.length; i++) bin += String.fromCharCode(buf[i]);
+    return { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: btoa(bin) } };
+  } catch { return null; }
 }
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
   try {
     if (!ANTHROPIC_KEY) return json({ error: 'ANTHROPIC_API_KEY not set' }, 503);
-    // RLS gate: require a valid user (the function runs with the caller's JWT)
     const sb = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!, { global: { headers: { Authorization: req.headers.get('Authorization') || '' } } });
     const { data: ures } = await sb.auth.getUser();
     if (!ures || !ures.user) return json({ error: 'unauthorized' }, 401);
     const body = await req.json().catch(() => ({}));
+    const mode = String(body.mode || 'translate');
+
+    // (a) flowing literature OVERVIEW for an audiobook, written directly in the target language
+    if (mode === 'summarize') {
+      const papers = (Array.isArray(body.papers) ? body.papers : []).slice(0, 30);
+      const target = String(body.target_lang || 'English');
+      if (!papers.length) return json({ text: '' });
+      const list = papers.map((p: any, i: number) => `[${i + 1}] ${String(p.title || '').slice(0, 240)}\nAbstract: ${String(p.abstract || '(none)').slice(0, 1200)}`).join('\n\n');
+      const n = Math.min(70, 14 + papers.length * 4);
+      const sys = `You are writing the SCRIPT for a spoken literature-overview audiobook, in ${target}. You are given ${papers.length} papers (title + abstract). Write flowing, connected narration in ${target}: open with one or two framing sentences about the topic, then weave each paper's key contribution / method / finding into natural connected prose. NO bullet points, NO headings, NO citation markers like [12], NO "Paper 1:". Spell out unavoidable abbreviations naturally. Aim for about ${n} sentences, suitable to be read aloud. Output ONLY the narration text.`;
+      const text = await callClaude(sys, list, 4000);
+      return json({ text });
+    }
+
+    // (b) clean full-text reading copy extracted from an OA PDF
+    if (mode === 'fulltext') {
+      const url = String(body.url || '');
+      const pdf = await fetchPdfBlock(url);
+      if (!pdf) return json({ text: '', note: 'no_pdf' });
+      const sys = `Extract the clean READING TEXT (main body: introduction, methods, results, discussion, conclusion) from this paper so it can be read aloud as an audiobook. SKIP the references/bibliography list, figure and table captions, author affiliations, headers/footers, page numbers, and standalone equations that do not read aloud. Keep the paper's original language. Return ONLY the readable prose — no preamble.`;
+      const text = await callClaude(sys, [pdf, { type: 'text', text: 'Return the clean reading text now.' }], 8000);
+      return json({ text });
+    }
+
+    // default: TRANSLATE a batch of segments
     const segments = Array.isArray(body.segments) ? body.segments.map((x: any) => String(x || '')) : [];
     const target = String(body.target_lang || 'English');
     const source = body.source_lang ? String(body.source_lang) : '';
