@@ -1206,6 +1206,9 @@
 
     var stepPapers = papers.filter(function (p) { return p.step === curStep; });
     var grp = { include: [], maybe: [], exclude: [] }; stepPapers.forEach(function (p) { (grp[p.decision] || (grp[p.decision] = [])).push(p); });
+    // step-3 full-text download tally (which papers got the PDF vs fell back to the abstract)
+    var pdfN = stepPapers.filter(function (p) { return p.signals && p.signals.screened_on === 'pdf'; }).length;
+    var absN = stepPapers.filter(function (p) { return p.signals && p.signals.screened_on === 'abstract'; }).length;
     // scientometrics + sorting for the results
     function metaOf(p) { return srcMeta[p.source_id] || srcMap[p.source_id] || {}; }
     function qOf(p) { return quartileFromIssn(scimap, metaOf(p).issn); }
@@ -1271,6 +1274,7 @@
           h('button', { className: 'lchip' + ((cfg.filters || {}).journals ? ' on' : ''), disabled: !props.canEdit, onClick: function () { upFilter('journals', !(cfg.filters || {}).journals); } }, 'Csak cikkek')
         ) : null,
         curStep > 1 && incCount(curStep - 1) === 0 ? h('div', { style: { fontSize: 12.5, color: 'var(--warn)', marginTop: 8 } }, 'Az előző lépésben még nincs „include" cikk — futtasd előbb azt.') : null,
+        curStep === 3 ? h('div', { style: { fontSize: 12, color: 'var(--muted)', marginTop: 8, lineHeight: 1.45, background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 8, padding: '7px 10px' } }, '📄 A teljes-szöveges szűrés a 2. lépés „include" cikkein fut: letölti az elérhető nyílt hozzáférésű (OA) PDF-eket és a teljes szövegen szűr; ahol nincs letölthető PDF, az absztraktra esik vissza. Ezért lassabb (kötegenként 3–4 cikk) — a lenti táblázatban élőben látod, melyik cikknél „📄 teljes szöveg" és melyiknél „📝 csak absztrakt", a fejlécben pedig a letöltési arány.') : null,
         props.canEdit ? h('div', { className: 'runbar' },
           h('button', { className: 'btn pri', disabled: running || (curStep > 1 && incCount(curStep - 1) === 0), onClick: function () { runStep(curStep); } }, running ? 'Fut…' : ((cur.status === 'done' ? 'Újra: ' : 'Futtatás: ') + LS_STEPS[curStep - 1].label)),
           running ? h('button', { className: 'btn', onClick: function () { stop.current = true; } }, 'Mégse') : null,
@@ -1298,6 +1302,7 @@
       curStep < 4 ? h('div', { className: 'panel', style: { marginTop: 10 } },
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
           h('h3', { style: { margin: 0 } }, 'Eredmények — ' + LS_STEPS[curStep - 1].label + ' (' + stepPapers.length + ' cikk)'),
+          (curStep === 3 && stepPapers.length) ? h('span', { style: { fontSize: 11.5, color: 'var(--muted)', whiteSpace: 'nowrap' }, title: 'Hány cikknél sikerült a teljes szöveg (PDF) letöltése és elemzése, és hánynál maradt csak az absztrakt' }, '📄 ' + pdfN + ' teljes szöveg · 📝 ' + absN + ' absztrakt') : null,
           stepPapers.length ? h('label', { style: { marginLeft: 'auto', fontSize: 11.5, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 5 } }, 'Rendezés:',
             h('select', { className: 'num', style: { width: 'auto', height: 28 }, value: sortBy, onChange: function (e) { setSortBy(e.target.value); } },
               h('option', { value: 'decision' }, 'Döntés szerint'),
@@ -1332,7 +1337,9 @@
                   (p.signals && (p.signals.has_github || p.signals.has_dataset || p.signals.screened_on)) ? h('div', { style: { display: 'flex', gap: 4, marginTop: 3, flexWrap: 'wrap' } },
                     p.signals.has_github ? h('span', { className: 'mtag ok' }, 'github') : null,
                     p.signals.has_dataset ? h('span', { className: 'mtag ok' }, 'dataset') : null,
-                    p.signals.screened_on ? h('span', { className: 'mtag' }, p.signals.screened_on) : null) : null),
+                    p.signals.screened_on === 'pdf' ? h('span', { className: 'mtag', style: { background: 'rgba(22,163,74,.12)', color: '#15803d', border: '1px solid rgba(22,163,74,.3)' }, title: 'A teljes szöveg (PDF) letöltve és elemezve' }, '📄 teljes szöveg')
+                      : (p.signals.screened_on === 'abstract' && curStep >= 3) ? h('span', { className: 'mtag', style: { background: 'rgba(180,83,9,.1)', color: '#b45309', border: '1px solid rgba(180,83,9,.3)' }, title: 'A PDF nem volt elérhető/letölthető → az absztrakt alapján szűrve' }, '📝 csak absztrakt')
+                      : (p.signals.screened_on ? h('span', { className: 'mtag' }, p.signals.screened_on) : null)) : null),
                 h('td', { style: { padding: '7px 8px', textAlign: 'center' } }, q ? h('span', { style: { fontSize: 11, fontWeight: 700, color: '#fff', background: q <= 1 ? '#16a34a' : q === 2 ? '#65a30d' : q === 3 ? '#b45309' : '#6b7280', borderRadius: 6, padding: '2px 6px' }, title: 'Scopus/SCImago kvartilis (SJR)' }, 'Q' + q) : h('span', { style: { color: 'var(--faint)' } }, '–')),
                 h('td', { style: { padding: '7px 8px', textAlign: 'right', whiteSpace: 'nowrap' }, title: 'Idézettség (OpenAlex — WoS/Scopus proxy)' }, m.cited_by != null ? m.cited_by : '–'),
                 h('td', { style: { padding: '7px 8px', maxWidth: 170 } }, m.venue ? h('span', { title: m.venue }, String(m.venue).length > 38 ? String(m.venue).slice(0, 36) + '…' : m.venue) : h('span', { style: { color: 'var(--faint)' } }, '–')),
