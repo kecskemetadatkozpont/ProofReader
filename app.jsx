@@ -334,6 +334,39 @@
         });
       }).catch((e) => { if (!narrCancelRef.current) setNarr({ err: (e && e.message) || 'Export failed.' }); });
     }, [active, projectId, voicedKeys]);
+    // Download the whole project as a .zip: every source file (preserving folder paths) + a publify-data/
+    // database (annotations.json with all comments/to-dos/AI-review + versions/activity) and a readable .md.
+    function downloadProject() {
+      if (!window.JSZip) { alert('A letöltő motor (JSZip) nem érhető el — frissítsd az oldalt.'); return; }
+      const zip = new window.JSZip();
+      const addFile = (p) => { const f = files[p]; if (!f) return; if (f.content != null) zip.file(p, f.content); else if (f.dataURL) { try { zip.file(p, dataURLToBlob(f.dataURL)); } catch (e) { } } };
+      const seen = {};
+      (order && order.length ? order : []).forEach((p) => { seen[p] = 1; addFile(p); });
+      Object.keys(files).forEach((p) => { if (!seen[p]) addFile(p); });
+      const anns = annotations || [];
+      const byKind = (k) => anns.filter((a) => (a.kind || 'comment') === k);
+      const members = (projMeta && projMeta.members) || [];
+      const nm = (id) => { const m = members.filter((x) => x.id === id)[0]; return (m && (m.name || m.email)) || id || '—'; };
+      const db = {
+        format: 1, app: 'Publify', exportedAt: new Date().toISOString(),
+        project: { id: projectId || null, title: init.title || 'project', ownerId: projMeta && projMeta.ownerId, members: members },
+        counts: { comments: byKind('comment').length, todos: byKind('todo').length, review: byKind('review').length, total: anns.length },
+        annotations: anns, versions: versions || [], activity: (projMeta && projMeta.activity) || []
+      };
+      zip.file('publify-data/annotations.json', JSON.stringify(db, null, 2));
+      const fmtA = (a) => { const where = a.anchor ? (a.anchor.file + (a.anchor.quote ? ' — „' + String(a.anchor.quote).slice(0, 90) + '"' : '')) : ''; let s = '- **' + nm(a.authorId) + '**' + (a.status ? ' _(' + a.status + ')_' : '') + ': ' + String(a.body || a.comment || '').replace(/\n+/g, ' ') + (where ? '\n  - ' + where : ''); (a.replies || []).forEach((r) => { s += '\n  - ↳ **' + nm(r.authorId) + '**: ' + String(r.body || '').replace(/\n+/g, ' '); }); return s; };
+      let md = '# ' + (init.title || 'Projekt') + ' — annotációk\n\nExportálva: ' + db.exportedAt + '\n\n';
+      md += '## Kommentek (' + byKind('comment').length + ')\n\n' + (byKind('comment').map(fmtA).join('\n') || '_nincs_') + '\n\n';
+      md += '## To-dók (' + byKind('todo').length + ')\n\n' + (byKind('todo').map((a) => '- [' + (a.status === 'done' ? 'x' : ' ') + '] ' + String(a.body || '').replace(/\n+/g, ' ') + (a.assignee ? ' (felelős: ' + nm(a.assignee) + ')' : '') + (a.due ? ' — ' + a.due : '')).join('\n') || '_nincs_') + '\n\n';
+      md += '## AI review (' + byKind('review').length + ')\n\n' + (byKind('review').map(fmtA).join('\n') || '_nincs_') + '\n';
+      zip.file('publify-data/ANNOTATIONS.md', md);
+      zip.generateAsync({ type: 'blob' }).then((blob) => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href = url;
+        a.download = ((init.title || 'project').replace(/[^\w\s-]+/g, '').trim().replace(/\s+/g, '-') || 'project') + '-export.zip';
+        document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000);
+      }).catch((e) => alert('A letöltés nem sikerült: ' + ((e && e.message) || e)));
+    }
     const refreshVoiced = useCallback(() => { if (window.PREleven && window.PREleven.cachedKeys) window.PREleven.cachedKeys().then(setVoicedKeys).catch(() => {}); }, []);
     useEffect(() => { refreshVoiced(); const h = () => refreshVoiced(); window.addEventListener('pr-tts', h); return () => window.removeEventListener('pr-tts', h); }, [refreshVoiced]);
 
@@ -1921,6 +1954,9 @@
             </button>
             <button className="btn btn-icon" title="Upload folder" onClick={() => dirInput.current.click()}>
               <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"><path d="M1.8 5c0-.5.4-.9.9-.9h2.6c.3 0 .5.1.7.3l.7.8h5.6c.5 0 .9.4.9.9V12c0 .5-.4.9-.9.9H2.7c-.5 0-.9-.4-.9-.9z" /><path d="M8 11.6V7M8 7L6.4 8.6M8 7l1.6 1.6" /></svg>
+            </button>
+            <button className="btn btn-icon" title="Projekt letöltése (.zip — minden fájl + a kommentek/todók adatbázisa)" onClick={downloadProject}>
+              <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"><path d="M8 2.5v6.5M5.4 6.4L8 9l2.6-2.6M3 12.5h10" /></svg>
             </button>
             <div className="acct-mini">
               <button className="acct-btn" onClick={(e) => { e.stopPropagation(); setAcctOpen((v) => !v); }}><Collab.Avatar user={me} size={30} /></button>

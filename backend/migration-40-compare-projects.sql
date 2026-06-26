@@ -12,9 +12,11 @@ create table if not exists public.compare_projects (
   file_count  int    default 0,
   size_bytes  bigint default 0,
   zip_path    text,
+  reviewer_text text,
   created_at  timestamptz not null default now(),
   updated_at  timestamptz not null default now()
 );
+alter table public.compare_projects add column if not exists reviewer_text text;   -- added post-create
 create index if not exists compare_projects_owner_idx on public.compare_projects(owner, created_at desc);
 
 alter table public.compare_projects enable row level security;

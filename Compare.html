@@ -21,7 +21,8 @@
     .seg button:last-child { border-right: 0; }
     .seg button.on { background: var(--accent); color: #fff; }
     /* layout */
-    .cm-wrap { max-width: 1320px; margin: 0 auto; padding: 18px 18px 40px; }
+    .cm-wrap { max-width: none; margin: 0; padding: 14px 18px 34px; }
+    .cm-empty { max-width: 720px; margin: 0 auto; }
     .cm-empty { text-align: center; color: var(--muted); padding: 70px 20px; }
     .cm-empty h1 { color: var(--ink); }
     .cm-head { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
@@ -82,6 +83,10 @@
     .cm-arow label { font-size: 12px; font-weight: 600; color: var(--muted); }
     .cm-arow .field { width: auto; min-width: 200px; }
     .cm-key { background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 12px; margin: 12px 0; }
+    /* reviewers' raw text */
+    .cm-rev { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; }
+    .cm-rev-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+    .cm-revtext { width: 100%; min-height: calc(100vh - 240px); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; font-family: inherit; font-size: 14px; line-height: 1.6; resize: vertical; box-sizing: border-box; background: var(--surface); color: var(--ink); }
     /* saved projects */
     .cm-saved { max-width: 560px; margin: 26px auto 0; text-align: left; }
     .cm-saved-h { font-size: 12px; font-weight: 700; color: var(--faint); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 8px; }
