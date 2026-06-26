@@ -82,6 +82,15 @@
     '  font-family: "IBM Plex Sans", system-ui, sans-serif; box-sizing: border-box; }',
     '#pubnav .pn-left { display: flex; align-items: center; gap: 12px; min-width: 0; }',
     '#pubnav .pn-page { font-size: 13px; font-weight: 600; color: var(--muted, #5b6473); padding-left: 12px; border-left: 1px solid var(--line, #e6e8ee); white-space: nowrap; }',
+    '#pubnav .pn-right { display: flex; align-items: center; gap: 10px; min-width: 0; }',
+    '#pubnav .pn-nav { display: flex; align-items: center; gap: 2px; }',
+    '#pubnav .pn-nav a { padding: 7px 12px; border-radius: 9px; font-size: 13px; font-weight: 500; color: var(--muted, #5b6473); text-decoration: none; white-space: nowrap; transition: color .15s, background .15s; }',
+    '#pubnav .pn-nav a:hover { color: var(--ink, #1a2030); background: color-mix(in srgb, var(--ink, #1a2030) 7%, transparent); }',
+    '#pubnav .pn-nav a.on { color: var(--ink, #1a2030); background: var(--accent-tint, #eef0ff); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent, #4f46e5) 30%, transparent); }',
+    'html.dark #pubnav .pn-nav a.on { color: #fff; background: linear-gradient(135deg, rgba(99,102,241,.22), rgba(168,85,247,.20), rgba(34,211,238,.18)); box-shadow: inset 0 0 0 1px rgba(255,255,255,.14); }',
+    '#pubnav .pn-iconbtn { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 9px; border: 1px solid var(--line, #e6e8ee); background: var(--surface, #fff); color: var(--muted, #5b6473); cursor: pointer; font-size: 15px; line-height: 1; flex: none; }',
+    '#pubnav .pn-iconbtn:hover { color: var(--ink, #1a2030); border-color: var(--accent, #4f46e5); }',
+    '@media (max-width: 1080px) { #pubnav .pn-nav { display: none; } }',   // narrow screens fall back to the drawer nav
     '#pubnav .pn-as { font-size: 12px; font-weight: 700; color: var(--warn, #b45309); background: var(--warn-bg, #fdf6e3); border: 1px solid var(--warn, #b45309); border-radius: 999px; padding: 3px 10px; white-space: nowrap; }',
     '#pubnav .pn-brand { display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--ink, #1a2030); font-weight: 700; font-size: 15px; letter-spacing: -.2px; }',
     '#pubnav .pn-mk { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: linear-gradient(135deg, #6366f1, #d946ef); box-shadow: 0 3px 10px rgba(79,70,229,.34); }',
@@ -153,7 +162,10 @@
 
     if (here) document.documentElement.classList.add('pn-' + here);
     var bar = document.createElement('header'); bar.id = 'pubnav';
-    bar.innerHTML = '<div class="pn-left" id="pn-left"></div><button class="pn-prof" id="pn-prof" aria-label="Open menu"></button>';
+    bar.innerHTML = '<div class="pn-left" id="pn-left"></div>'
+      + '<div class="pn-right"><nav class="pn-nav" id="pn-nav" aria-label="Primary navigation"></nav>'
+      + '<button class="pn-iconbtn" id="pn-theme-top" aria-label="Toggle dark mode" title="Toggle dark mode">◐</button>'
+      + '<button class="pn-prof" id="pn-prof" aria-label="Open account menu"></button></div>';
 
     var scrim = document.createElement('div'); scrim.id = 'pn-scrim';
     var drawer = document.createElement('aside'); drawer.id = 'pn-drawer'; drawer.setAttribute('role', 'dialog'); drawer.setAttribute('aria-modal', 'true'); drawer.setAttribute('aria-label', 'Navigation');
@@ -169,8 +181,12 @@
       var du = av || curUser(), admin = isAdmin();
       document.documentElement.classList.toggle('pn-adminview', !!av);
       document.getElementById('pn-left').innerHTML = '<a class="pn-brand" href="' + withAv('Projects.html') + '" title="Home"><span class="pn-mk"><i></i></span>Publify</a>'
-        + (PAGE_NAME[here] ? '<span class="pn-page">' + PAGE_NAME[here] + '</span>' : '')
         + (av ? '<span class="pn-as">👁 ' + esc(av.name || av.email || '') + '</span>' : '');
+      var SHORT = { profile: 'Profile', research: 'Research', session: 'Chat', media: 'Media', compare: 'Compare', phd: 'Doctoral', publications: 'Publications', admin: 'Admin' };
+      var barNav = LINKS.filter(function (l) { return !l.adminOnly || admin; }).map(function (l) {
+        return '<a href="' + withAv(l.href) + '"' + (l.key === here ? ' class="on" aria-current="page"' : '') + '>' + esc(SHORT[l.key] || l.label) + '</a>';
+      }).join('');
+      var pnNav = document.getElementById('pn-nav'); if (pnNav) pnNav.innerHTML = barNav;
       document.getElementById('pn-prof').innerHTML = avHtml(du) + '<span class="pn-nm">' + esc((du && du.name) || 'Menu') + '</span><span class="pn-cv" aria-hidden="true">' + (av ? '👁' : '▾') + '</span>';
       var links = LINKS.filter(function (l) { return !l.adminOnly || admin; }).map(function (l) {
         return '<a href="' + withAv(l.href) + '"' + (l.key === here ? ' class="on"' : '') + '>' + (ICONS[l.key] || '') + esc(l.label) + '</a>';
@@ -202,6 +218,7 @@
     document.body.appendChild(bar); document.body.appendChild(scrim); document.body.appendChild(drawer);
     render();
     document.getElementById('pn-prof').onclick = open;
+    var ptt = document.getElementById('pn-theme-top'); if (ptt) ptt.onclick = function () { if (window.PRTheme) window.PRTheme.toggle(); render(); };
     scrim.onclick = close;
     window.addEventListener('pr-theme', render);
     window.addEventListener('pr-profile', render);
