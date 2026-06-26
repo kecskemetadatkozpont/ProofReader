@@ -9,6 +9,7 @@
 (function () {
   var h = React.createElement;
   var useState = React.useState, useRef = React.useRef, useEffect = React.useEffect;
+  var sb = (window.PR_BACKEND && window.PR_BACKEND.sb) || window.PR_SB || null;   // Supabase client (for saving)
 
   var CAT = {
     reframing: { c: '#4f46e5', t: 'átkeretezés' }, correction: { c: '#dc2626', t: 'javítás' },
@@ -115,6 +116,21 @@
     var aeS = useState(''), aErr = aeS[0], setAErr = aeS[1];
     var nkS = useState(false), needKey = nkS[0], setNeedKey = nkS[1];
     var keyS = useState(''), keyVal = keyS[0], setKeyVal = keyS[1];
+    // persistence (saved comparison packages)
+    var meS = useState(null), me = meS[0], setMe = meS[1];
+    var prjS = useState([]), projects = prjS[0], setProjects = prjS[1];
+    var rawS = useState(null), rawFiles = rawS[0], setRawFiles = rawS[1];       // {relPath: File|Blob} of the loaded package
+    var svS = useState(''), saving = svS[0], setSaving = svS[1];                 // '' | progress text
+    var sidS = useState(null), savedId = sidS[0], setSavedId = sidS[1];          // id of the currently-loaded saved project
+
+    useEffect(function () {
+      if (!sb) return;
+      sb.auth.getUser().then(function (r) { var u = r && r.data && r.data.user; if (u) { setMe(u); loadProjects(u.id); } });
+    }, []);
+    function loadProjects(uid) {
+      if (!sb) return;
+      sb.from('compare_projects').select('id,title,publication,stats,file_count,size_bytes,zip_path,created_at').eq('owner', uid).order('created_at', { ascending: false }).then(function (r) { setProjects((r && r.data) || []); });
+    }
 
     var rp = {}; ((db && db.review_points) || []).forEach(function (r) { rp[r.id] = r; });
     var changes = (db && db.changes) || [];
@@ -133,13 +149,11 @@
       out.pdfFile = pf ? pf.file : null;
       return out;
     }
-    function onFolder(e) {
-      var files = Array.prototype.slice.call(e.target.files || []); if (!files.length) return;
-      setErr(''); setLoading(true);
-      var byPath = {};
-      files.forEach(function (f) { var p = f.webkitRelativePath || f.name; var parts = p.split('/'); if (parts.length > 1) parts.shift(); byPath[parts.join('/')] = f; });
+    // shared loader — byPath = { relPathFromPackageRoot: File|Blob }
+    function loadPackage(byPath, opts) {
+      opts = opts || {};
       var dbKey = Object.keys(byPath).filter(function (k) { return /(^|\/)change_database\.json$/.test(k); }).sort(function (a, b) { return a.split('/').length - b.split('/').length; })[0];
-      if (!dbKey) { setErr('A kiválasztott mappában nincs change_database.json.'); setLoading(false); return; }
+      if (!dbKey) { setErr('A csomagban nincs change_database.json.'); setLoading(false); return; }
       byPath[dbKey].text().then(function (t) {
         var d; try { d = JSON.parse(t); } catch (x) { setErr('A change_database.json nem olvasható.'); setLoading(false); return; }
         if (!d || !Array.isArray(d.changes)) { setErr('Érvénytelen change_database.json.'); setLoading(false); return; }
@@ -147,10 +161,71 @@
         var of = (d.folders && d.folders.original) || { path: '01_original_v2' };
         var ff = (d.folders && d.folders.final) || { path: '02_final_v3' };
         var p = { v2: buildVer(byPath, base, of), v3: buildVer(byPath, base, ff) };
-        setDb(d); setPkg(p); setSelId((d.changes[0] || {}).id || null); setFilterP(''); setCompiledBytes(null); setTexSrc('');
+        setRawFiles(byPath); setSavedId(opts.savedId || null);
+        setDb(d); setPkg(p); setSelId((d.changes[0] || {}).id || null); setFilterP(''); setCompiledBytes(null); setTexSrc(''); setView('changes');
         Promise.all(['v2', 'v3'].map(function (kk) { var pf = p[kk].pdfFile; return pf ? pf.arrayBuffer().then(function (ab) { return new Uint8Array(ab); }) : Promise.resolve(null); }))
           .then(function (arr) { setPdfs({ v2: arr[0], v3: arr[1] }); setLoading(false); });
       });
+    }
+    function onFolder(e) {
+      var files = Array.prototype.slice.call(e.target.files || []); if (!files.length) return;
+      setErr(''); setLoading(true);
+      var byPath = {};
+      files.forEach(function (f) { var pp = f.webkitRelativePath || f.name; var parts = pp.split('/'); if (parts.length > 1) parts.shift(); byPath[parts.join('/')] = f; });
+      loadPackage(byPath);
+    }
+    function saveProject() {
+      if (!sb || !me) { setSaving('Mentéshez jelentkezz be.'); setTimeout(function () { setSaving(''); }, 3000); return; }
+      if (!rawFiles || !db || !window.JSZip) { setSaving('Nincs betöltött csomag.'); return; }
+      setSaving('Csomagolás…');
+      var zip = new window.JSZip();
+      Object.keys(rawFiles).forEach(function (k) { zip.file(k, rawFiles[k]); });
+      var meta = { title: (db.publication && db.publication.title) || 'Összehasonlítás', publication: db.publication || null, stats: db.stats || { changes: (db.changes || []).length }, file_count: Object.keys(rawFiles).length };
+      zip.generateAsync({ type: 'blob', compression: 'STORE' }).then(function (blob) {
+        meta.size_bytes = blob.size; setSaving('Mentés indítása…');
+        return sb.from('compare_projects').insert(Object.assign({ owner: me.id }, meta)).select('id').single().then(function (r) {
+          if (r.error || !r.data) throw new Error((r.error && r.error.message) || 'insert');
+          var id = r.data.id, path = me.id + '/' + id + '/package.zip';
+          setSaving('Feltöltés… (' + Math.round(blob.size / 1048576) + ' MB)');
+          return sb.storage.from('compare').upload(path, blob, { contentType: 'application/zip', upsert: true }).then(function (up) {
+            if (up.error) { sb.from('compare_projects').delete().eq('id', id); throw new Error(up.error.message || 'upload'); }
+            return sb.from('compare_projects').update({ zip_path: path }).eq('id', id).then(function () { setSavedId(id); setSaving('Mentve ✓'); loadProjects(me.id); setTimeout(function () { setSaving(''); }, 2500); });
+          });
+        });
+      }).catch(function (e) { setSaving('Hiba a mentésnél: ' + (e && e.message || e)); });
+    }
+    function loadProject(row) {
+      if (!sb || !window.JSZip) return; setErr(''); setLoading(true);
+      var path = row.zip_path || (me && (me.id + '/' + row.id + '/package.zip'));
+      sb.storage.from('compare').download(path).then(function (r) {
+        if (r.error || !r.data) { setErr('A mentett csomag nem tölthető le.'); setLoading(false); return; }
+        return window.JSZip.loadAsync(r.data).then(function (zip) {
+          var byPath = {}; var names = Object.keys(zip.files).filter(function (n) { return !zip.files[n].dir; });
+          return Promise.all(names.map(function (n) { return zip.files[n].async('blob').then(function (b) { byPath[n] = b; }); })).then(function () { loadPackage(byPath, { savedId: row.id }); });
+        });
+      }).catch(function (e) { setErr('Betöltési hiba: ' + e); setLoading(false); });
+    }
+    function deleteProject(row, ev) {
+      if (ev) ev.stopPropagation();
+      if (!sb || !window.confirm('Törlöd a mentett összehasonlítást?  „' + (row.title || '') + '"')) return;
+      var path = row.zip_path || (me && (me.id + '/' + row.id + '/package.zip'));
+      if (path) sb.storage.from('compare').remove([path]).then(function () { });
+      sb.from('compare_projects').delete().eq('id', row.id).then(function () { if (savedId === row.id) setSavedId(null); if (me) loadProjects(me.id); });
+    }
+    function savedListBlock() {
+      if (!sb) return null;
+      if (!me) return h('div', { style: { marginTop: 22, fontSize: 13, color: 'var(--faint)' } }, 'Jelentkezz be, hogy a feltöltött összehasonlításokat elmentsd és később egy kattintással visszatöltsd.');
+      if (!projects.length) return null;
+      return h('div', { className: 'cm-saved' },
+        h('div', { className: 'cm-saved-h' }, '💾 Mentett összehasonlítások (' + projects.length + ')'),
+        projects.map(function (row) {
+          var n = (row.stats && (row.stats.changes || row.stats.n_changes)) || '';
+          return h('div', { key: row.id, className: 'cm-saved-li', onClick: function () { loadProject(row); } },
+            h('div', { style: { minWidth: 0, textAlign: 'left' } },
+              h('div', { className: 'cm-saved-t' }, row.title || 'Összehasonlítás'),
+              h('div', { className: 'cm-saved-m' }, (n ? n + ' változás · ' : '') + (row.size_bytes ? Math.round(row.size_bytes / 1048576) + ' MB · ' : '') + (row.created_at ? String(row.created_at).slice(0, 10) : ''))),
+            h('button', { className: 'cm-saved-del', title: 'Törlés', onClick: function (ev) { deleteProject(row, ev); } }, '🗑'));
+        }));
     }
 
     function openEdit() {
@@ -205,14 +280,19 @@
         h('p', null, 'Töltsd be a teljes ', h('code', null, 'P1_review_compare'), ' mappát — a ', h('code', null, 'change_database.json'), ' + a két verzió almappáját (a .tex / .bib / ábrák / osztály + a fordított PDF). A böngésző csak olvassa, nem tölti fel sehova.'),
         h('input', { ref: function (el) { folderRef.current = el; if (el) { el.setAttribute('webkitdirectory', ''); el.setAttribute('directory', ''); el.setAttribute('mozdirectory', ''); } }, type: 'file', multiple: true, style: { display: 'none' }, onChange: onFolder }),
         h('div', { style: { marginTop: 14 } }, h('button', { className: 'btn pri', onClick: function () { folderRef.current && folderRef.current.click(); } }, loading ? 'Betöltés…' : '📁 Mappa kiválasztása')),
-        err ? h('div', { style: { color: 'var(--danger)', marginTop: 10 } }, err) : null));
+        err ? h('div', { style: { color: 'var(--danger)', marginTop: 10 } }, err) : null,
+        savedListBlock()));
 
     var TABS = [['changes', 'Változások'], ['pdf', 'PDF + kiemelés'], ['edit', 'Élő szerkesztés'], ['audio', '🎧 Hangoskönyv']];
     var header = h('div', { className: 'cm-head' },
       h('div', { style: { minWidth: 0 } },
         h('h1', null, (db.publication && db.publication.title) || 'Revízió-összehasonlítás'),
         h('div', { className: 'cm-sub' }, (db.publication && db.publication.venue ? db.publication.venue + ' · ' : '') + changes.length + ' változás · ' + ((db.review_points || []).length) + ' bírálói pont' + (pkg ? ' · ' + (pdfs.v2 ? 'v2✓' : 'v2✗') + ' ' + (pdfs.v3 ? 'v3✓' : 'v3✗') : ''))),
-      h('div', { className: 'seg', style: { marginLeft: 'auto' } }, TABS.map(function (t) { return h('button', { key: t[0], className: view === t[0] ? 'on' : '', onClick: function () { setView(t[0]); if (t[0] === 'edit' && !texSrc) openEdit(); } }, t[1]); })));
+      h('div', { style: { marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' } },
+        saving ? h('span', { style: { fontSize: 12.5, color: saving.indexOf('Hiba') >= 0 ? 'var(--danger)' : 'var(--muted)' } }, saving) : null,
+        sb ? h('button', { className: 'btn' + (savedId ? '' : ' pri'), onClick: saveProject, disabled: !!(saving && saving !== 'Mentve ✓' && saving.indexOf('Hiba') < 0 && saving.indexOf('jelentkezz') < 0) }, savedId ? '💾 Újramentés' : '💾 Mentés') : null,
+        h('button', { className: 'btn', onClick: function () { setDb(null); setPkg(null); setPdfs({}); setRawFiles(null); setSavedId(null); setErr(''); } }, '← Mappák'),
+        h('div', { className: 'seg' }, TABS.map(function (t) { return h('button', { key: t[0], className: view === t[0] ? 'on' : '', onClick: function () { setView(t[0]); if (t[0] === 'edit' && !texSrc) openEdit(); } }, t[1]); }))));
 
     function sidebar() {
       return h('div', { className: 'cm-side' },
