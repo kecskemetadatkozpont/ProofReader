@@ -39,56 +39,79 @@
     if (cur) out.push(cur); return out;
   }
 
+  // drag a vertical splitter; onMove(xWithinContainer, containerWidth)
+  function startDrag(e, containerEl, onMove) {
+    e.preventDefault(); if (!containerEl) return;
+    function mv(ev) { var r = containerEl.getBoundingClientRect(); onMove(ev.clientX - r.left, r.width); }
+    function up() { document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up); document.body.style.userSelect = ''; document.body.style.cursor = ''; }
+    document.addEventListener('mousemove', mv); document.addEventListener('mouseup', up); document.body.style.userSelect = 'none'; document.body.style.cursor = 'col-resize';
+  }
+
   // ---- a single PDF: render every page (canvas + text layer) and highlight the selected change ----
   function PdfDoc(props) {   // {bytes, change, side}  side = 'original' | 'final'
     var ref = useRef(null);
     var rdyS = useState(0), ready = rdyS[0], setReady = rdyS[1];
+    var locS = useState(1), located = locS[0], setLocated = locS[1];   // 1 = n/a, 2 = found, 0 = not found
     useEffect(function () {
       var cont = ref.current, cancelled = false; if (!cont) return;
       cont.innerHTML = ''; setReady(0);
-      if (!props.bytes || !window.pdfjsLib) { return; }
+      if (!props.bytes || !window.pdfjsLib) return;
+      var scale = 1.5, dpr = window.devicePixelRatio || 1;
       window.pdfjsLib.getDocument({ data: props.bytes.slice(0) }).promise.then(function (pdf) {
         var chain = Promise.resolve();
         for (var n = 1; n <= pdf.numPages; n++) (function (pn) {
           chain = chain.then(function () {
-            if (cancelled) return; return pdf.getPage(pn).then(function (page) {
-              var vp = page.getViewport({ scale: 1.4 });
-              var pageDiv = document.createElement('div'); pageDiv.className = 'cmp-page'; pageDiv.style.width = vp.width + 'px'; pageDiv.style.height = vp.height + 'px';
-              var canvas = document.createElement('canvas'); canvas.width = vp.width; canvas.height = vp.height; pageDiv.appendChild(canvas);
-              var tl = document.createElement('div'); tl.className = 'cmp-tl'; tl.style.width = vp.width + 'px'; tl.style.height = vp.height + 'px'; pageDiv.appendChild(tl);
-              cont.appendChild(pageDiv);
+            if (cancelled) return;
+            return pdf.getPage(pn).then(function (page) {
+              var cssVp = page.getViewport({ scale: scale }); var vp = page.getViewport({ scale: scale * dpr });
+              var pageDiv = document.createElement('div'); pageDiv.className = 'cmp-page'; pageDiv.style.width = Math.floor(cssVp.width) + 'px'; pageDiv.style.height = Math.floor(cssVp.height) + 'px';
+              var canvas = document.createElement('canvas'); canvas.width = vp.width; canvas.height = vp.height; canvas.style.width = Math.floor(cssVp.width) + 'px'; canvas.style.height = Math.floor(cssVp.height) + 'px'; pageDiv.appendChild(canvas);
+              var tl = document.createElement('div'); tl.className = 'cmp-tl'; tl.style.width = Math.floor(cssVp.width) + 'px'; tl.style.height = Math.floor(cssVp.height) + 'px';
+              tl.style.setProperty('--scale-factor', scale); tl.style.setProperty('--total-scale-factor', scale);   // pdf.js 3.11 text layer needs this or spans collapse/mis-size → highlights invisible
+              pageDiv.appendChild(tl); cont.appendChild(pageDiv);
               return page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise.then(function () {
-                return page.getTextContent().then(function (tc) { return window.pdfjsLib.renderTextLayer({ textContent: tc, container: tl, viewport: vp, textDivs: [] }).promise; });
-              });
-            });
+                return page.getTextContent().then(function (tc) { return window.pdfjsLib.renderTextLayer({ textContent: tc, container: tl, viewport: cssVp, textDivs: [] }).promise; });
+              }).catch(function () { });   // one bad page must not abort the whole document
+            }).catch(function () { });
           });
         })(n);
         chain.then(function () { if (!cancelled) setReady(function (x) { return x + 1; }); });
-      }).catch(function () { });
+      }).catch(function () { if (!cancelled) setReady(function (x) { return x + 1; }); });
       return function () { cancelled = true; };
     }, [props.bytes]);
 
     useEffect(function () {
       var cont = ref.current; if (!cont || !ready) return;
-      Array.prototype.forEach.call(cont.querySelectorAll('.cmp-hl'), function (s) { s.classList.remove('cmp-hl'); });
-      var ch = props.change; if (!ch) return; var side = ch[props.side]; if (!side || !side.text) return;
-      var words = norm(stripTex(side.text)); if (words.length < 3) return;
+      Array.prototype.forEach.call(cont.querySelectorAll('.cmp-hl, .cmp-hl-first'), function (s) { s.classList.remove('cmp-hl', 'cmp-hl-first'); });
+      var ch = props.change; if (!ch) { setLocated(1); return; }
+      var side = ch[props.side]; if (!side || !side.text) { setLocated(1); return; }   // nothing to find on this side (e.g. insert on v2) — no banner
+      var words = norm(stripTex(side.text)); if (words.length < 3) { setLocated(1); return; }
       var spans = Array.prototype.slice.call(cont.querySelectorAll('.cmp-tl > span'));
       var toks = []; spans.forEach(function (sp, si) { norm(sp.textContent).forEach(function (w) { toks.push({ w: w, si: si }); }); });
-      var T = toks.map(function (t) { return t.w; }); var L = Math.min(6, words.length); var found = null;
-      for (var s = 0; s + L <= words.length && !found; s++) {
-        for (var p = 0; p + L <= T.length; p++) {
-          var ok = true; for (var k = 0; k < L; k++) { if (T[p + k] !== words[s + k]) { ok = false; break; } }
-          if (ok) { var span = Math.min(words.length - s, T.length - p); found = { start: p, end: Math.min(T.length - 1, p + span - 1) }; break; }
+      var T = toks.map(function (t) { return t.w; }); var found = null;
+      for (var L = Math.min(6, words.length); L >= 3 && !found; L--) {
+        for (var s = 0; s + L <= words.length && !found; s++) {
+          for (var p = 0; p + L <= T.length; p++) {
+            var ok = true; for (var k = 0; k < L; k++) { if (T[p + k] !== words[s + k]) { ok = false; break; } }
+            if (ok) { var sp2 = Math.min(words.length - s, T.length - p); found = { start: p, end: Math.min(T.length - 1, p + sp2 - 1) }; break; }
+          }
         }
       }
       if (found) {
+        setLocated(2);
         for (var i = found.start; i <= found.end; i++) { var el = spans[toks[i].si]; if (el) el.classList.add('cmp-hl'); }
-        var first = spans[toks[found.start].si]; if (first && first.scrollIntoView) first.scrollIntoView({ block: 'center' });
-      }
+        var first = spans[toks[found.start].si];
+        if (first) {
+          first.classList.add('cmp-hl-first');
+          var cr = cont.getBoundingClientRect(), fr = first.getBoundingClientRect();
+          cont.scrollTop += (fr.top - cr.top) - cont.clientHeight * 0.32;
+        }
+      } else { setLocated(0); }
     }, [props.change, props.side, ready]);
 
-    return h('div', { className: 'cmp-pdfdoc', ref: ref });
+    return h('div', { className: 'cmp-pdfhost' },
+      (props.change && located === 0) ? h('div', { className: 'cmp-notfound' }, '⚠ Ezt a változást nem sikerült a PDF szövegében lokalizálni (pl. képlet, ábra, táblázat vagy hivatkozás) — a pontos szöveges eltérés a „Változások" fülön látszik.') : null,
+      h('div', { className: 'cmp-pdfdoc', ref: ref }));
   }
 
   function App() {
@@ -122,6 +145,11 @@
     var rawS = useState(null), rawFiles = rawS[0], setRawFiles = rawS[1];       // {relPath: File|Blob} of the loaded package
     var svS = useState(''), saving = svS[0], setSaving = svS[1];                 // '' | progress text
     var sidS = useState(null), savedId = sidS[0], setSavedId = sidS[1];          // id of the currently-loaded saved project
+    // resizable panes
+    var swS = useState(330), sideW = swS[0], setSideW = swS[1];
+    var pfS = useState(0.5), pdfFrac = pfS[0], setPdfFrac = pfS[1];
+    var efS = useState(0.5), editFrac = efS[0], setEditFrac = efS[1];
+    var bodyRef = useRef(null), pdfWrapRef = useRef(null), editRef = useRef(null);
 
     useEffect(function () {
       if (!sb) return;
@@ -332,12 +360,13 @@
     }
     function pdfPanes() {
       if (!pdfs.v2 && !pdfs.v3) return h('div', { className: 'cm-main' }, h('div', { style: { color: 'var(--muted)' } }, 'A PDF-ek nem töltődtek be a mappából. Töltsd be újra a teljes mappát (a két verzió fordított PDF-jét is tartalmaznia kell).'));
-      return h('div', { className: 'cm-pdfwrap' },
-        h('div', { className: 'cm-pdfcol' }, h('div', { className: 'cm-pdf-h' }, (pkg && pkg.v2 && pkg.v2.label) || 'v2 — beküldött', sel ? h('span', { className: 'cm-pdf-hint' }, ' — kiemelve: ' + sel.id) : null), pdfs.v2 ? h(PdfDoc, { bytes: pdfs.v2, change: sel, side: 'original' }) : h('div', { className: 'cm-pdf-empty' }, 'nincs v2 PDF')),
-        h('div', { className: 'cm-pdfcol' }, h('div', { className: 'cm-pdf-h' }, (pkg && pkg.v3 && pkg.v3.label) || 'v3 — revideált', sel ? h('span', { className: 'cm-pdf-hint' }, ' — kiemelve: ' + sel.id) : null), pdfs.v3 ? h(PdfDoc, { bytes: pdfs.v3, change: sel, side: 'final' }) : h('div', { className: 'cm-pdf-empty' }, 'nincs v3 PDF')));
+      return h('div', { className: 'cm-pdfwrap', ref: pdfWrapRef, style: { gridTemplateColumns: pdfFrac + 'fr 8px ' + (1 - pdfFrac) + 'fr' } },
+        h('div', { className: 'cm-pdfcol' }, h('div', { className: 'cm-pdf-h' }, (pkg && pkg.v2 && pkg.v2.label) || 'v2 — beküldött', sel ? h('span', { className: 'cm-pdf-hint' }, ' — ' + sel.id) : null), pdfs.v2 ? h(PdfDoc, { bytes: pdfs.v2, change: sel, side: 'original' }) : h('div', { className: 'cm-pdf-empty' }, 'nincs v2 PDF')),
+        h('div', { className: 'cm-split', onMouseDown: function (e) { startDrag(e, pdfWrapRef.current, function (x, w) { setPdfFrac(Math.max(0.18, Math.min(0.82, x / w))); }); } }),
+        h('div', { className: 'cm-pdfcol' }, h('div', { className: 'cm-pdf-h' }, (pkg && pkg.v3 && pkg.v3.label) || 'v3 — revideált', sel ? h('span', { className: 'cm-pdf-hint' }, ' — ' + sel.id) : null), pdfs.v3 ? h(PdfDoc, { bytes: pdfs.v3, change: sel, side: 'final' }) : h('div', { className: 'cm-pdf-empty' }, 'nincs v3 PDF')));
     }
     function editPanel() {
-      return h('div', { className: 'cm-edit' },
+      return h('div', { className: 'cm-edit', ref: editRef, style: { gridTemplateColumns: editFrac + 'fr 8px ' + (1 - editFrac) + 'fr' } },
         h('div', { className: 'cm-edit-l' },
           h('div', { className: 'cm-edit-bar' },
             h('div', { className: 'seg' }, [['v2', 'v2'], ['v3', 'v3']].map(function (o) { return h('button', { key: o[0], className: editVer === o[0] ? 'on' : '', onClick: function () { setEditVer(o[0]); setTexSrc(''); setCompiledBytes(null); setCompileLog(''); setTimeout(openEdit, 0); } }, o[1]); })),
@@ -345,6 +374,7 @@
             h('button', { className: 'btn pri', onClick: compile, disabled: compiling || !texSrc }, compiling ? 'Fordítás…' : '▶ Fordítás (PDF)')),
           h('textarea', { className: 'cm-tex', value: texSrc, spellCheck: false, onChange: function (e) { setTexSrc(e.target.value); }, placeholder: 'Válassz verziót, majd „Eredeti .tex" — ide töltődik a kézirat forrása…' }),
           compileLog ? h('pre', { className: 'cm-log' }, compileLog) : null),
+        h('div', { className: 'cm-split', onMouseDown: function (e) { startDrag(e, editRef.current, function (x, w) { setEditFrac(Math.max(0.2, Math.min(0.8, x / w))); }); } }),
         h('div', { className: 'cm-edit-r' },
           compiledBytes ? h(PdfDoc, { bytes: compiledBytes, change: null, side: 'final' })
             : h('div', { className: 'cm-pdf-empty', style: { height: '100%' } }, 'A lefordított PDF itt jelenik meg. (SwiftLaTeX, böngészőben — bibtex nincs, így a hivatkozások „?"-ek lehetnek; az élő szöveg/ábra-változások viszont látszanak.)')));
@@ -371,11 +401,17 @@
         h('details', { style: { marginTop: 14 } }, h('summary', { style: { cursor: 'pointer', fontSize: 13, color: 'var(--muted)' } }, 'Felolvasandó szöveg előnézete'), h('div', { style: { fontSize: 13, lineHeight: 1.55, marginTop: 8, whiteSpace: 'pre-wrap' } }, narration())));
     }
 
+    function withSide(mainEl) {
+      return h('div', { className: 'cm-body', ref: bodyRef, style: { gridTemplateColumns: sideW + 'px 8px minmax(0,1fr)' } },
+        sidebar(),
+        h('div', { className: 'cm-split', onMouseDown: function (e) { startDrag(e, bodyRef.current, function (x, w) { setSideW(Math.max(220, Math.min(w * 0.7, x))); }); } }),
+        mainEl);
+    }
     var body;
-    if (view === 'pdf') body = h('div', { className: 'cm-body' }, sidebar(), pdfPanes());
+    if (view === 'pdf') body = withSide(pdfPanes());
     else if (view === 'edit') body = editPanel();
     else if (view === 'audio') body = audioPanel();
-    else body = h('div', { className: 'cm-body' }, sidebar(), changeDetail());
+    else body = withSide(changeDetail());
 
     return h('div', { className: 'cm-wrap' }, header, body);
   }
