@@ -30,7 +30,7 @@
     .hist-item.on { background: var(--accent-tint); color: var(--accent); font-weight: 600; }
     .hist-item .ht { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .hist-item .hx { opacity: 0; border: 0; background: transparent; color: var(--faint); cursor: pointer; font-size: 14px; padding: 0 2px; }
-    .hist-item:hover .hx { opacity: 1; }
+    .hist-item:hover .hx, .hist-item:focus-within .hx, .hist-item .hx:focus, .hist-item .hx:focus-visible { opacity: 1; }
     .hist-item .hx:hover { color: var(--warn); }
     .side-foot { border-top: 1px solid var(--line); padding: 12px 14px; display: flex; align-items: center; gap: 9px; font-size: 12.5px; color: var(--muted); }
     .side-foot a { margin-left: auto; color: var(--faint); text-decoration: none; }

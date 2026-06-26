@@ -63,7 +63,7 @@ function Header(props) {
         {isDemo ? <div className="pf-tints" role="group" aria-label="Avatar colour">{TINTS.map(function (c) { return <button key={c} className={'pf-tint' + (me.color === c ? ' on' : '')} style={{ background: c }} title={'Avatar colour ' + c} aria-label={'Avatar colour ' + c} aria-pressed={me.color === c} onClick={function () { setTint(c); }} />; })}</div> : null}
       </div>
       <div className="pf-head-actions">
-        {isFree ? <button className="btn-ghost" onClick={function () { alert('Pro plans are a preview — billing is not yet enabled in this prototype.'); }}>Upgrade to Pro</button> : null}
+        {isFree ? <button className="btn-ghost" onClick={function () { window.PRUI.toast('Pro plans are a preview — billing is not yet enabled in this prototype.'); }}>Upgrade to Pro</button> : null}
         {isDemo && others.length ? <div className="acct" onClick={function (e) { e.stopPropagation(); }}>
           <button className="btn-ghost" onClick={function () { setMenu(function (m) { return !m; }); }}>Switch user ▾</button>
           {menu ? <div className="menu" style={{ right: 0, top: 42, minWidth: 200 }}>{others.map(function (u) { return <button key={u.id} className="mi" onClick={function () { Auth.signIn(u.id); location.reload(); }}><Avatar user={u} size={22} />{u.name}</button>; })}</div> : null}

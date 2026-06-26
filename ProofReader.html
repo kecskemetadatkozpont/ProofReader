@@ -134,7 +134,7 @@
     .folder-ico svg { color: #d9a300; opacity: 1; }
     .fp-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
     .row-actions { display: none; gap: 1px; flex: none; }
-    .tree-row:hover .row-actions { display: flex; }
+    .tree-row:hover .row-actions, .tree-row:focus-within .row-actions, .row-actions:focus-within { display: flex; }
     .row-actions button { width: 21px; height: 21px; border: 0; background: transparent; color: var(--muted); border-radius: 5px; display: grid; place-items: center; }
     .row-actions button:hover { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
     .row-actions button.del:hover { color: var(--danger); background: var(--danger-bg); }
@@ -1005,6 +1005,7 @@
     .diff-split .del { background: var(--danger-bg); } .diff-split .add { background: var(--ok-bg); }
   </style>
   <script src="theme.js"></script>
+  <script>window.PR_NAV_BARLESS = true;</script><!-- editor has its own full top bar; keep only the bug widget, no 2nd bar -->
   <script src="nav.js"></script>
 </head>
 

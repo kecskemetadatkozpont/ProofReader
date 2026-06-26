@@ -290,24 +290,24 @@
       setProfiles(function (list) { return list.map(function (u) { return u.id === uid ? Object.assign({}, u, { status: status }) : u; }); });
       setSelUser(function (u) { return u && u.id === uid ? Object.assign({}, u, { status: status }) : u; });
       sb.from('profiles').update({ status: status }).eq('id', uid).then(function (r) {
-        if (r && r.error) { alert('Update failed: ' + r.error.message); loadData(); }
+        if (r && r.error) { window.PRUI.toast('Update failed: ' + r.error.message, { kind: 'error' }); loadData(); }
       });
     }
     function setModel(uid, model) {
       var m = model || null;
       setProfiles(function (list) { return list.map(function (u) { return u.id === uid ? Object.assign({}, u, { ai_model: m }) : u; }); });
       setSelUser(function (u) { return u && u.id === uid ? Object.assign({}, u, { ai_model: m }) : u; });
-      sb.from('profiles').update({ ai_model: m }).eq('id', uid).then(function (r) { if (r && r.error) { alert('Model update failed: ' + r.error.message); loadData(); } });
+      sb.from('profiles').update({ ai_model: m }).eq('id', uid).then(function (r) { if (r && r.error) { window.PRUI.toast('Model update failed: ' + r.error.message, { kind: 'error' }); loadData(); } });
     }
     function setWorkflows(uid, on) {
       setProfiles(function (list) { return list.map(function (u) { return u.id === uid ? Object.assign({}, u, { can_workflows: on }) : u; }); });
       setSelUser(function (u) { return u && u.id === uid ? Object.assign({}, u, { can_workflows: on }) : u; });
-      sb.from('profiles').update({ can_workflows: on }).eq('id', uid).then(function (r) { if (r && r.error) { alert('Update failed: ' + r.error.message); loadData(); } });
+      sb.from('profiles').update({ can_workflows: on }).eq('id', uid).then(function (r) { if (r && r.error) { window.PRUI.toast('Update failed: ' + r.error.message, { kind: 'error' }); loadData(); } });
     }
     function setFigures(uid, on) {
       setProfiles(function (list) { return list.map(function (u) { return u.id === uid ? Object.assign({}, u, { can_figures: on }) : u; }); });
       setSelUser(function (u) { return u && u.id === uid ? Object.assign({}, u, { can_figures: on }) : u; });
-      sb.from('profiles').update({ can_figures: on }).eq('id', uid).then(function (r) { if (r && r.error) { alert('Update failed: ' + r.error.message); loadData(); } });
+      sb.from('profiles').update({ can_figures: on }).eq('id', uid).then(function (r) { if (r && r.error) { window.PRUI.toast('Update failed: ' + r.error.message, { kind: 'error' }); loadData(); } });
     }
     function loadPubs(uid) {
       if (pubsCache[uid] !== undefined) return;

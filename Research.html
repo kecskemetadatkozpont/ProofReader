@@ -217,7 +217,7 @@
     .fb-lbl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .fb-tag { flex: none; font-size: 9px; font-weight: 700; background: var(--accent-tint); color: var(--accent); padding: 1px 5px; border-radius: 999px; }
     .fb-acts { display: none; gap: 2px; flex: none; }
-    .fb-item:hover .fb-acts { display: flex; }
+    .fb-item:hover .fb-acts, .fb-item:focus-within .fb-acts, .fb-acts:focus-within { display: flex; }
     .fb-preview { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 10px; }
     .fb-pv-head { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
     .fb-pv-head .fb-lbl { flex: 1; font-weight: 700; font-size: 12px; }

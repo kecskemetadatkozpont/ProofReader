@@ -87,14 +87,16 @@
     function openAudiobook(row) {
       // signed URL for the saved MP3 → play without regenerating
       sb.storage.from('audiobooks').createSignedUrl(row.audio_path, 3600).then(function (r) {
-        var url = r && r.data && r.data.signedUrl; if (!url) { alert('Failed to load the audio file.'); return; }
+        var url = r && r.data && r.data.signedUrl; if (!url) { window.PRUI.toast('Failed to load the audio file.', { kind: 'error' }); return; }
         setCurrent({ row: row, url: url, segments: row.segments || [] }); setView('player');
       });
     }
     function delAudiobook(row) {
-      if (!window.confirm('Delete this audiobook?\n„' + row.title + '"')) return;
-      sb.storage.from('audiobooks').remove([row.audio_path]).then(function () { });
-      sb.from('audiobooks').delete().eq('id', row.id).then(function () { loadLibrary(me.id); if (current && current.row.id === row.id) { setCurrent(null); setView('library'); } });
+      window.PRUI.confirm({ title: 'Delete „' + row.title + '"', body: 'Delete this audiobook?', confirmLabel: 'Delete', danger: true }).then(function (ok) {
+        if (!ok) return;
+        sb.storage.from('audiobooks').remove([row.audio_path]).then(function () { });
+        sb.from('audiobooks').delete().eq('id', row.id).then(function () { loadLibrary(me.id); if (current && current.row.id === row.id) { setCurrent(null); setView('library'); } });
+      });
     }
 
     if (phase === 'loading') return h('div', { className: 'mp-wrap' }, h('div', { className: 'mp-empty' }, 'Loading…'));

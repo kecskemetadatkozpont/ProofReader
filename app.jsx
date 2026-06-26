@@ -339,7 +339,7 @@
     // live as bundled assets (.src) or cloud uploads (.storagePath, signed-URL fetched), not just inline dataURLs
     // — plus a publify-data/ database (annotations.json + a readable .md) and the comment/to-do image attachments.
     async function downloadProject() {
-      if (!window.JSZip) { alert('The download engine (JSZip) is unavailable — refresh the page.'); return; }
+      if (!window.JSZip) { window.PRUI.toast('The download engine (JSZip) is unavailable — refresh the page.', { kind: 'error' }); return; }
       setDlBusy(true);
       try {
         const zip = new window.JSZip();
@@ -388,7 +388,7 @@
         const a = document.createElement('a'); a.href = url;
         a.download = ((init.title || 'project').replace(/[^\w\s-]+/g, '').trim().replace(/\s+/g, '-') || 'project') + '-export.zip';
         document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000);
-      } catch (e) { alert('Download failed: ' + ((e && e.message) || e)); }
+      } catch (e) { window.PRUI.toast('Download failed: ' + ((e && e.message) || e), { kind: 'error' }); }
       finally { setDlBusy(false); }
     }
     const refreshVoiced = useCallback(() => { if (window.PREleven && window.PREleven.cachedKeys) window.PREleven.cachedKeys().then(setVoicedKeys).catch(() => {}); }, []);
@@ -544,7 +544,7 @@
     const onCompileExact = useCallback(async (docId) => {
       docId = docId || active;
       if (!window.AloudTeX) return;
-      if (!window.ALOUD_TEX_EXACT_ENDPOINT) { alert('The byte-identical "Exact PDF" needs an external TeX Live 2026 compile API.\nSet: window.ALOUD_TEX_EXACT_ENDPOINT = "https://…".'); return; }
+      if (!window.ALOUD_TEX_EXACT_ENDPOINT) { window.PRUI.toast('The byte-identical "Exact PDF" needs an external TeX Live 2026 compile API.\nSet: window.ALOUD_TEX_EXACT_ENDPOINT = "https://…".', { kind: 'error' }); return; }
       setPdfCompiled((s) => ({ ...s, [docId]: { ...(s[docId] || {}), busy: true, err: null } }));
       try {
         const input = await assembleTexFiles(docId);
@@ -1158,7 +1158,7 @@
         if (makeActive) firstTex = path;
         items.push({ file, path, isText, makeActive });
       });
-      const note = (n) => alert(n + ' file' + (n === 1 ? '' : 's') + ' skipped — only .tex, .bib, .bbl, .bst, .cls, .sty, .txt, .md, images and PDFs under 50 MB are imported.');
+      const note = (n) => window.PRUI.toast(n + ' file' + (n === 1 ? '' : 's') + ' skipped — only .tex, .bib, .bbl, .bst, .cls, .sty, .txt, .md, images and PDFs under 50 MB are imported.');
       if (!items.length) { if (skipped) note(skipped); return; }
       if (newFolders.size) setFolders((fs) => { const set = new Set(fs); newFolders.forEach((f) => set.add(f)); return Array.from(set); });
       setExpanded((s) => { const n = new Set(s); if (dir) n.add(dir); newFolders.forEach((f) => n.add(f)); return n; });
@@ -1395,7 +1395,7 @@
     function onInsertImagePicked(e) {
       const file = (e.target.files || [])[0]; e.target.value = '';
       if (!file || !/\.(png|jpe?g|gif|svg)$/i.test(file.name)) return;
-      if (file.size > SIZE_LIMIT) { alert('Image is larger than 50 MB.'); return; }
+      if (file.size > SIZE_LIMIT) { window.PRUI.toast('Image is larger than 50 MB.', { kind: 'error' }); return; }
       const path = uniquePath((p) => !!filesRef.current[p], pjoin(currentDir, file.name));
       filesRef.current = { ...filesRef.current, [path]: {} };
       putBinary(path, file, 'image', file.name, (name) => {
@@ -1630,12 +1630,12 @@
           const findings = Array.isArray(data) ? data : (data.findings || []);
           const res = window.PRStore.importReview(projectId, findings, { actorId: me.id });
           refreshCollab(); setReviewFocus(null); setDrawer({ open: true, tab: 'review' });
-          alert('AI review imported: ' + res.imported + ' note' + (res.imported === 1 ? '' : 's') + ' anchored to the text' + (res.unanchored ? ' (' + res.unanchored + ' could not be located)' : '') + '.');
-        } catch (err) { alert('Could not read the review file (expected JSON with a "findings" array): ' + (err && err.message)); }
+          window.PRUI.toast('AI review imported: ' + res.imported + ' note' + (res.imported === 1 ? '' : 's') + ' anchored to the text' + (res.unanchored ? ' (' + res.unanchored + ' could not be located)' : '') + '.', { kind: 'ok' });
+        } catch (err) { window.PRUI.toast('Could not read the review file (expected JSON with a "findings" array): ' + (err && err.message), { kind: 'error' }); }
       };
       r.readAsText(f);
     };
-    const onClearReview = () => { if (window.PRStore && window.PRStore.clearReview && window.confirm('Remove all AI review notes from this project?')) { window.PRStore.clearReview(projectId); refreshCollab(); } };
+    const onClearReview = () => { if (!(window.PRStore && window.PRStore.clearReview)) return; window.PRUI.confirm({ title: 'Remove AI review notes', body: 'Remove all AI review notes from this project?', confirmLabel: 'Remove', danger: true }).then(function (ok) { if (!ok) return; window.PRStore.clearReview(projectId); refreshCollab(); }); };
     const onSaveVersion = (label) => { window.PRStore.addVersion(projectId, label, me.id, true); refreshCollab(); };
     const onRestore = (v) => { const p = window.PRStore.restoreVersion(projectId, v.id); if (p) { setFiles(p.files); setOrder(p.order); if (!p.files[active]) setActive(p.active); } setDiffVersion(null); refreshCollab(); };
     const toggleDrawer = (tab) => setDrawer((d) => d.open && d.tab === tab ? { open: false, tab: tab } : { open: true, tab: tab });
@@ -1712,8 +1712,8 @@
     const wsOnUploadPdf = useCallback(() => { if (pdfInput.current) pdfInput.current.click(); }, []);
     function onPdfPicked(e) {
       const file = (e.target.files || [])[0]; e.target.value = '';
-      if (!file || !/\.pdf$/i.test(file.name)) { if (file) alert('Please choose a PDF file.'); return; }
-      if (file.size > SIZE_LIMIT) { alert('PDF is larger than 50 MB.'); return; }
+      if (!file || !/\.pdf$/i.test(file.name)) { if (file) window.PRUI.toast('Please choose a PDF file.', { kind: 'error' }); return; }
+      if (file.size > SIZE_LIMIT) { window.PRUI.toast('PDF is larger than 50 MB.', { kind: 'error' }); return; }
       const path = uniquePath((p) => !!filesRef.current[p], pjoin(currentDir, file.name));
       filesRef.current = { ...filesRef.current, [path]: {} };
       putBinary(path, file, 'pdf', file.name, () => { addPaneNextTo(WS.mkPane('pdf', null, path), 'row'); });
@@ -1732,8 +1732,8 @@
     const getFileData = useCallback((file) => { const f = files[file]; return f && f.dataURL ? f.dataURL : null; }, [files]);
     const onPrintDoc = useCallback((docId) => {
       docId = docId || active;
-      const comp = getCompiled(docId); if (!comp) { alert('Nothing to render yet — open a document first.'); return; }
-      const w = window.open('', '_blank'); if (!w) { alert('Please allow pop-ups to export the PDF.'); return; }
+      const comp = getCompiled(docId); if (!comp) { window.PRUI.toast('Nothing to render yet — open a document first.', { kind: 'error' }); return; }
+      const w = window.open('', '_blank'); if (!w) { window.PRUI.toast('Please allow pop-ups to export the PDF.', { kind: 'error' }); return; }
       w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>' + docLabel(docId) + '</title>' +
         '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">' +
         '<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&display=swap" rel="stylesheet">' +
@@ -1745,14 +1745,14 @@
     const loadHtmlDocx = () => window.htmlDocx ? Promise.resolve(window.htmlDocx) : new Promise((res, rej) => { const s = document.createElement('script'); s.src = 'https://unpkg.com/html-docx-js/dist/html-docx.js'; s.onload = () => res(window.htmlDocx); s.onerror = rej; document.head.appendChild(s); });
     const onWordDoc = useCallback((docId) => {
       docId = docId || active;
-      const comp = getCompiled(docId); if (!comp) { alert('Nothing to export yet — open a document first.'); return; }
+      const comp = getCompiled(docId); if (!comp) { window.PRUI.toast('Nothing to export yet — open a document first.', { kind: 'error' }); return; }
       loadHtmlDocx().then((HD) => {
         const html = '<!doctype html><html><head><meta charset="utf-8"><style>body{font-family:Georgia,serif;line-height:1.5}h1,h2,h3{font-family:inherit}</style></head><body>' + comp.html + '</body></html>';
         const blob = HD.asBlob(html);
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a'); a.href = url; a.download = (docLabel(docId) || 'document').replace(/\.[^.]+$/, '') + '.docx';
         document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 2000);
-      }, () => alert('The Word-export library could not be loaded (offline?).'));
+      }, () => window.PRUI.toast('The Word-export library could not be loaded (offline?).', { kind: 'error' }));
     }, [getCompiled, docLabel, active]);
     const myProjects = useCallback(() => (window.PRStore ? window.PRStore.listFor(me.id).filter((p) => p.id !== projectId) : []), [projectId]);
     const projTexFiles = useCallback((p) => Object.keys(p.files || {}).filter((f) => p.files[f] && p.files[f].type === 'tex'), []);

@@ -75,14 +75,17 @@
         if (sid) payload.student_id = sid;
         sb.from('research_projects').insert(payload).select().maybeSingle().then(function (r) {
           setSaving(false);
-          if (r && r.error) { alert('Could not create: ' + r.error.message); return; }
+          if (r && r.error) { window.PRUI.toast('Could not create: ' + r.error.message, { kind: 'error' }); return; }
           props.onSaved(r && r.data);
         });
       });
     }
     // #3 — clicking outside the create-project box must not silently discard what you typed
     function dirty() { return !!(form.title.trim() || form.field.trim() || form.keywords.trim() || form.goal.trim()); }
-    function tryClose() { if (dirty() && !window.confirm('Discard the project details you entered?')) return; props.onClose(); }
+    function tryClose() {
+      if (!dirty()) { props.onClose(); return; }
+      window.PRUI.confirm({ title: 'Discard the project details you entered?', confirmLabel: 'Discard', danger: true }).then(function (ok) { if (!ok) return; props.onClose(); });
+    }
     useEffect(function () { function onEsc(e) { if (e.key === 'Escape') tryClose(); } window.addEventListener('keydown', onEsc); return function () { window.removeEventListener('keydown', onEsc); }; });
     return h('div', { className: 'scrim', onClick: tryClose },
       h('div', { className: 'modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'New research project', onClick: function (e) { e.stopPropagation(); } },
@@ -113,7 +116,7 @@
         goal: form.goal.trim() || null
       }).eq('id', p.id).then(function (r) {
         setSaving(false);
-        if (r && r.error) { alert('Could not save: ' + r.error.message); return; }
+        if (r && r.error) { window.PRUI.toast('Could not save: ' + r.error.message, { kind: 'error' }); return; }
         props.onSaved();
       });
     }
@@ -158,7 +161,7 @@
       setBusy(true);
       sb.from('research_log').insert({ project_id: props.projectId, profile_id: props.authorId, type: type, summary: text.trim() }).then(function (r) {
         setBusy(false);
-        if (r && r.error) { alert(r.error.message); return; }
+        if (r && r.error) { window.PRUI.toast(r.error.message, { kind: 'error' }); return; }
         setText(''); props.onChanged();
       });
     }
@@ -185,7 +188,7 @@
   // ---------- Tasks ----------
   function TasksPanel(props) {
     var x = useState(''), text = x[0], setText = x[1];
-    function add() { if (!text.trim()) return; sb.from('research_tasks').insert({ project_id: props.projectId, title: text.trim(), status: 'todo' }).then(function (r) { if (r && r.error) { alert(r.error.message); return; } setText(''); props.onChanged(); }); }
+    function add() { if (!text.trim()) return; sb.from('research_tasks').insert({ project_id: props.projectId, title: text.trim(), status: 'todo' }).then(function (r) { if (r && r.error) { window.PRUI.toast(r.error.message, { kind: 'error' }); return; } setText(''); props.onChanged(); }); }
     function setStatus(tk, st) { sb.from('research_tasks').update({ status: st }).eq('id', tk.id).then(props.onChanged); }
     function del(tk) { sb.from('research_tasks').delete().eq('id', tk.id).then(props.onChanged); }
     var tasks = props.tasks || [];
@@ -317,7 +320,7 @@
     useEffect(load, [props.projectId, props.version]);
     function newFile() {
       var name = (window.prompt('New file name:', 'note.md') || '').trim(); if (!name) return;
-      sb.from('research_files').upsert({ project_id: props.projectId, path: name, content: '', mime: 'text/markdown', source: 'manual', created_by: props.authorId, updated_by: props.authorId, updated_at: new Date().toISOString() }, { onConflict: 'project_id,path' }).then(function (r) { if (r && r.error) { alert(r.error.message); return; } load(); });
+      sb.from('research_files').upsert({ project_id: props.projectId, path: name, content: '', mime: 'text/markdown', source: 'manual', created_by: props.authorId, updated_by: props.authorId, updated_at: new Date().toISOString() }, { onConflict: 'project_id,path' }).then(function (r) { if (r && r.error) { window.PRUI.toast(r.error.message, { kind: 'error' }); return; } load(); });
     }
     function onUpload(e) {
       var f = e.target.files && e.target.files[0]; if (!f) return;
@@ -325,7 +328,7 @@
       if (window.PROffice && window.PROffice.isOffice(f.name)) { importOffice(f); return; }   // Word/Excel/PowerPoint → editable text/markdown
       var sp = props.projectId + '/files/' + Date.now() + '_' + f.name.replace(/[^A-Za-z0-9._-]/g, '_');
       sb.storage.from('research-data').upload(sp, f).then(function (res) {
-        if (res && res.error) { alert(res.error.message); return; }
+        if (res && res.error) { window.PRUI.toast(res.error.message, { kind: 'error' }); return; }
         sb.from('research_files').upsert({ project_id: props.projectId, path: f.name, storage_path: sp, mime: f.type || 'application/octet-stream', size: f.size, source: 'upload', created_by: props.authorId, updated_by: props.authorId, updated_at: new Date().toISOString() }, { onConflict: 'project_id,path' }).then(load);
       });
     }
@@ -333,10 +336,15 @@
     function importOffice(f) {
       window.PROffice.extract(f).then(function (r) {
         var name = f.name.replace(/\.(docx|xlsx|xlsm|xls|pptx)$/i, '') + '.' + (r.ext || 'md');
-        sb.from('research_files').upsert({ project_id: props.projectId, path: name, content: r.text || '', mime: r.ext === 'csv' ? 'text/csv' : 'text/markdown', source: 'upload', created_by: props.authorId, updated_by: props.authorId, updated_at: new Date().toISOString() }, { onConflict: 'project_id,path' }).then(function (rr) { if (rr && rr.error) { alert(rr.error.message); return; } load(); });
-      }, function (er) { alert('Office processing error: ' + ((er && er.message) || er)); });
+        sb.from('research_files').upsert({ project_id: props.projectId, path: name, content: r.text || '', mime: r.ext === 'csv' ? 'text/csv' : 'text/markdown', source: 'upload', created_by: props.authorId, updated_by: props.authorId, updated_at: new Date().toISOString() }, { onConflict: 'project_id,path' }).then(function (rr) { if (rr && rr.error) { window.PRUI.toast(rr.error.message, { kind: 'error' }); return; } load(); });
+      }, function (er) { window.PRUI.toast('Office processing error: ' + ((er && er.message) || er), { kind: 'error' }); });
     }
-    function del(f) { if (!window.confirm('Delete: ' + f.path + ' ?')) return; sb.from('research_files').delete().eq('id', f.id).then(function () { if (f.storage_path) { try { sb.storage.from('research-data').remove([f.storage_path]); } catch (e) { } } if (preview && preview.id === f.id) setPreview(null); load(); }); }
+    function del(f) {
+      window.PRUI.confirm({ title: 'Delete “' + f.path + '”?', body: 'This file will be permanently removed.', confirmLabel: 'Delete', danger: true }).then(function (ok) {
+        if (!ok) return;
+        sb.from('research_files').delete().eq('id', f.id).then(function () { if (f.storage_path) { try { sb.storage.from('research-data').remove([f.storage_path]); } catch (e) { } } if (preview && preview.id === f.id) setPreview(null); load(); });
+      });
+    }
     function openSigned(path) { sb.storage.from('research-data').createSignedUrl(path, 3600).then(function (r) { if (r && r.data && r.data.signedUrl) window.open(r.data.signedUrl, '_blank'); }); }
     function dlBlob(name, url) { var a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove(); }
     function download(f) {   // #1: download a file (inline content as a blob; binary via a forced-download signed URL)
@@ -516,8 +524,8 @@
     function copy(m) { try { navigator.clipboard.writeText(m.content || ''); } catch (e) { } }
     function onTaKey(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }
     function onTaInput(e) { setInput(e.target.value); e.target.style.height = 'auto'; e.target.style.height = Math.min(e.target.scrollHeight, 160) + 'px'; }
-    function saveIdea(m) { sb.from('research_ideas').insert({ project_id: props.projectId, source: 'consensus', question: (m.content || '').slice(0, 8000), created_by: props.authorId, status: 'candidate' }).then(function (r) { if (r && r.error) { alert(r.error.message); return; } props.onChanged(); }); }
-    function saveIdeaText(text) { sb.from('research_ideas').insert({ project_id: props.projectId, source: 'own', question: (text || '').slice(0, 8000), created_by: props.authorId, status: 'candidate' }).then(function (r) { if (r && r.error) { alert(r.error.message); return; } props.onChanged(); }); }
+    function saveIdea(m) { sb.from('research_ideas').insert({ project_id: props.projectId, source: 'consensus', question: (m.content || '').slice(0, 8000), created_by: props.authorId, status: 'candidate' }).then(function (r) { if (r && r.error) { window.PRUI.toast(r.error.message, { kind: 'error' }); return; } props.onChanged(); }); }
+    function saveIdeaText(text) { sb.from('research_ideas').insert({ project_id: props.projectId, source: 'own', question: (text || '').slice(0, 8000), created_by: props.authorId, status: 'candidate' }).then(function (r) { if (r && r.error) { window.PRUI.toast(r.error.message, { kind: 'error' }); return; } props.onChanged(); }); }
     // drag the divider to resize the file browser (the chat takes the rest); persisted in localStorage
     function startResize(e) {
       e.preventDefault();
@@ -781,7 +789,7 @@
     var q = useState(''), query = q[0], setQuery = q[1];
     var pm = useState(false), pubsOpen = pm[0], setPubsOpen = pm[1];
     var myPubs = (PUBS && props.myEmail) ? ((PUBS.forUser({ email: props.myEmail }) || {}).publications || []) : [];
-    function addPub(p) { sb.from('research_sources').insert({ project_id: props.projectId, source_api: 'mtmt', ext_id: 'mtmt:' + p.mtid, doi: p.doi || null, title: p.title || 'Untitled', authors: p.firstAuthor ? [p.firstAuthor + (p.authorCount > 1 ? ' et al.' : '')] : null, year: p.year || null, venue: p.journal || null, cited_by: p.citations, url: p.doi ? 'https://doi.org/' + p.doi : p.mtmtUrl, screening: 'unscreened' }).then(function (res) { if (res && res.error) { if (!/duplicate|unique/i.test(res.error.message)) alert(res.error.message); return; } props.onChanged(); }); }
+    function addPub(p) { sb.from('research_sources').insert({ project_id: props.projectId, source_api: 'mtmt', ext_id: 'mtmt:' + p.mtid, doi: p.doi || null, title: p.title || 'Untitled', authors: p.firstAuthor ? [p.firstAuthor + (p.authorCount > 1 ? ' et al.' : '')] : null, year: p.year || null, venue: p.journal || null, cited_by: p.citations, url: p.doi ? 'https://doi.org/' + p.doi : p.mtmtUrl, screening: 'unscreened' }).then(function (res) { if (res && res.error) { if (!/duplicate|unique/i.test(res.error.message)) window.PRUI.toast(res.error.message, { kind: 'error' }); return; } props.onChanged(); }); }
     var r = useState(null), results = r[0], setResults = r[1];
     var b = useState(false), busy = b[0], setBusy = b[1];
     var fl = useState({ minCites: '', fromYear: '', indexed: false, oa: false, journals: false }), flt = fl[0], setFlt = fl[1];
@@ -812,7 +820,7 @@
     function venueOf(w) { return (w.primary_location && w.primary_location.source && w.primary_location.source.display_name) || ''; }
     function add(w) {
       var authors = (w.authorships || []).slice(0, 8).map(function (a) { return a.author && a.author.display_name; }).filter(Boolean);
-      sb.from('research_sources').insert({ project_id: props.projectId, source_api: 'openalex', ext_id: w.id, doi: w.doi || null, title: w.display_name || 'Untitled', authors: authors.length ? authors : null, year: w.publication_year || null, venue: venueOf(w) || null, abstract: abstractFromInverted(w.abstract_inverted_index), cited_by: w.cited_by_count, url: w.doi || w.id, screening: 'unscreened' }).then(function (res) { if (res && res.error) { if (!/duplicate|unique/i.test(res.error.message)) alert(res.error.message); return; } props.onChanged(); });
+      sb.from('research_sources').insert({ project_id: props.projectId, source_api: 'openalex', ext_id: w.id, doi: w.doi || null, title: w.display_name || 'Untitled', authors: authors.length ? authors : null, year: w.publication_year || null, venue: venueOf(w) || null, abstract: abstractFromInverted(w.abstract_inverted_index), cited_by: w.cited_by_count, url: w.doi || w.id, screening: 'unscreened' }).then(function (res) { if (res && res.error) { if (!/duplicate|unique/i.test(res.error.message)) window.PRUI.toast(res.error.message, { kind: 'error' }); return; } props.onChanged(); });
     }
     function setScreen(s, v) { sb.from('research_sources').update({ screening: v }).eq('id', s.id).then(props.onChanged); }
     function del(s) { sb.from('research_sources').delete().eq('id', s.id).then(props.onChanged); }
@@ -878,7 +886,7 @@
     function up(k, v) { var o = {}; o[k] = v; setForm(Object.assign({}, form, o)); }
     function register() {
       if (!form.name.trim()) return;
-      sb.from('research_datasets').insert({ project_id: props.projectId, name: form.name.trim(), source: form.source, uri: form.uri.trim() || null, license: form.license.trim() || null, status: 'registered', created_by: props.authorId }).then(function (r) { if (r && r.error) { alert(r.error.message); return; } setForm({ name: '', source: 'url', uri: '', license: '' }); props.onChanged(); });
+      sb.from('research_datasets').insert({ project_id: props.projectId, name: form.name.trim(), source: form.source, uri: form.uri.trim() || null, license: form.license.trim() || null, status: 'registered', created_by: props.authorId }).then(function (r) { if (r && r.error) { window.PRUI.toast(r.error.message, { kind: 'error' }); return; } setForm({ name: '', source: 'url', uri: '', license: '' }); props.onChanged(); });
     }
     function onFile(e) {
       var file = e.target.files && e.target.files[0]; if (!file) return;
@@ -886,7 +894,7 @@
       var path = props.projectId + '/' + Date.now() + '_' + file.name.replace(/[^A-Za-z0-9._-]/g, '_');
       sb.storage.from('research-data').upload(path, file).then(function (res) {
         if (res.error) { setMsg('Upload failed: ' + res.error.message); return; }
-        sb.from('research_datasets').insert({ project_id: props.projectId, name: file.name, source: 'upload', uri: path, size_bytes: file.size, status: 'ready', created_by: props.authorId }).then(function (r) { setMsg(''); if (r && r.error) { alert(r.error.message); return; } props.onChanged(); });
+        sb.from('research_datasets').insert({ project_id: props.projectId, name: file.name, source: 'upload', uri: path, size_bytes: file.size, status: 'ready', created_by: props.authorId }).then(function (r) { setMsg(''); if (r && r.error) { window.PRUI.toast(r.error.message, { kind: 'error' }); return; } props.onChanged(); });
       });
     }
     function del(d) { if (d.source === 'upload' && d.uri) sb.storage.from('research-data').remove([d.uri]); sb.from('research_datasets').delete().eq('id', d.id).then(props.onChanged); }
@@ -926,8 +934,8 @@
     var ex = useState(null), exp = ex[0], setExp = ex[1];
     function submit() {
       var spec = type === 'python' ? { code: code } : { dataset_id: datasetId };
-      if (type !== 'python' && !datasetId) { alert('Pick a dataset.'); return; }
-      sb.from('research_jobs').insert({ project_id: props.projectId, type: type, title: title.trim() || (type + ' job'), spec: spec, status: 'queued', created_by: props.authorId }).then(function (r) { if (r && r.error) { alert(r.error.message); return; } setTitle(''); props.onChanged(); });
+      if (type !== 'python' && !datasetId) { window.PRUI.toast('Pick a dataset.', { kind: 'error' }); return; }
+      sb.from('research_jobs').insert({ project_id: props.projectId, type: type, title: title.trim() || (type + ' job'), spec: spec, status: 'queued', created_by: props.authorId }).then(function (r) { if (r && r.error) { window.PRUI.toast(r.error.message, { kind: 'error' }); return; } setTitle(''); props.onChanged(); });
     }
     function cancel(j) { sb.from('research_jobs').update({ status: 'canceled' }).eq('id', j.id).then(props.onChanged); }
     function del(j) { sb.from('research_jobs').delete().eq('id', j.id).then(props.onChanged); }
@@ -1145,11 +1153,13 @@
     function genPrompt() { setPromptText(buildScreenPrompt((sel && (sel.question || sel.title)) || '', cfg, curStep)); }
     // delete a whole study (cascades to its steps + papers)
     function delStudy(s) {
-      if (!window.confirm('Are you sure you want to delete this study and all its steps/results?\n\n“' + (s.title || '') + '”')) return;
-      sb.from('research_studies').delete().eq('id', s.id).then(function (r) {
-        if (r && r.error) { setErr('Delete failed: ' + r.error.message); return; }
-        if (selId === s.id) { setSelId(null); setSteps([]); setPapers([]); setCurStep(1); }
-        props.onChanged();
+      window.PRUI.confirm({ title: 'Delete “' + (s.title || '') + '”?', body: 'This study and all its steps and results will be permanently deleted.', confirmLabel: 'Delete', danger: true }).then(function (ok) {
+        if (!ok) return;
+        sb.from('research_studies').delete().eq('id', s.id).then(function (r) {
+          if (r && r.error) { setErr('Delete failed: ' + r.error.message); return; }
+          if (selId === s.id) { setSelId(null); setSteps([]); setPapers([]); setCurStep(1); }
+          props.onChanged();
+        });
       });
     }
     // rename a study
@@ -1173,7 +1183,7 @@
           callStudy({ action: 'generate_review', study_id: selId }).then(function (d) {
             setRunning(false); setProg(null);
             if (!d || d.error) { setErr((d && d.error) || 'Error generating the review.'); return; }
-            loadStudy(selId); props.onChanged(); window.alert('Review ready: ' + d.file_path + ' (in Files).');
+            loadStudy(selId); props.onChanged(); window.PRUI.toast('Review ready: ' + d.file_path + ' (in Files).', { kind: 'ok' });
           });
           return;
         }
@@ -1343,7 +1353,7 @@
               [['Decision', 'decision', 'left'], ['Paper', null, 'left'], ['Q', 'q', 'center'], ['Cites', 'cites', 'right'], ['Journal', null, 'left'], ['Year', 'year', 'right'], ['Score', 'score', 'right']].map(function (c, i) {
                 return h('th', { key: i, onClick: c[1] ? function () { setSortBy(c[1]); } : null, role: c[1] ? 'button' : null, 'aria-label': c[1] ? ('Sort by ' + c[0]) : null, 'aria-sort': (c[1] && sortBy === c[1]) ? 'descending' : null, style: { textAlign: c[2], padding: '6px 8px', borderBottom: '2px solid var(--line)', fontSize: 11, color: 'var(--muted)', fontWeight: 700, whiteSpace: 'nowrap', cursor: c[1] ? 'pointer' : 'default', userSelect: 'none' }, title: c[1] ? 'Sort by this' : null }, c[0] + (c[1] && sortBy === c[1] ? ' ▾' : ''));
               }),
-              props.canEdit ? h('th', { key: 'act', style: { borderBottom: '2px solid var(--line)' } }) : null)),
+              props.canEdit ? h('th', { key: 'act', style: { textAlign: 'center', padding: '6px 8px', borderBottom: '2px solid var(--line)', fontSize: 11, color: 'var(--muted)', fontWeight: 700, whiteSpace: 'nowrap' }, title: 'Override the AI screening decision' }, 'Your decision') : null)),
             h('tbody', null, sortPapers(stepPapers).map(function (p) {
               var m = metaOf(p); var s = srcMap[p.source_id]; var title = titles[p.source_id] || m.title || (s && s.title) || '(paper)';
               var url = (s && s.url) || m.url || (m.doi || null); var q = qOf(p);
@@ -1372,7 +1382,9 @@
                 h('td', { style: { padding: '7px 8px', maxWidth: 170 } }, m.venue ? h('span', { title: m.venue }, String(m.venue).length > 38 ? String(m.venue).slice(0, 36) + '…' : m.venue) : h('span', { style: { color: 'var(--faint)' } }, '–')),
                 h('td', { style: { padding: '7px 8px', textAlign: 'right' } }, m.year || '–'),
                 h('td', { style: { padding: '7px 8px', textAlign: 'right' } }, p.score != null ? p.score + '%' : '–'),
-                props.canEdit ? h('td', { style: { padding: '7px 8px' } }, h('div', { className: 'seg', role: 'group', 'aria-label': 'Override decision', style: { flex: 'none' } }, ['include', 'maybe', 'exclude'].map(function (v) { return h('button', { key: v, className: p.decision === v ? 'on' : '', 'aria-pressed': p.decision === v, 'aria-label': v, title: v, onClick: function () { override(p, v); } }, v === 'include' ? '✓' : v === 'maybe' ? '?' : '✕'); }))) : null);
+                props.canEdit ? h('td', { style: { padding: '7px 8px' } },
+                  h('div', { style: { fontSize: 10, color: 'var(--muted)', fontWeight: 600, marginBottom: 3, textAlign: 'center' }, title: 'Click to override the AI decision' }, 'Your decision'),
+                  h('div', { className: 'seg', role: 'group', 'aria-label': 'Your decision — override the AI screening', style: { flex: 'none' } }, ['include', 'maybe', 'exclude'].map(function (v) { return h('button', { key: v, className: p.decision === v ? 'on' : '', 'aria-pressed': p.decision === v, 'aria-label': v, title: v, onClick: function () { override(p, v); } }, v === 'include' ? '✓' : v === 'maybe' ? '?' : '✕'); }))) : null);
             }))))
       ) : null,
       // 📚 studies manage modal — view all studies + delete (cascades to steps/papers)

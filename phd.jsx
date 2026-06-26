@@ -87,7 +87,7 @@
           rec ? h('div', { style: { fontSize: 13 } }, h('b', null, rec.pubCount), ' publications · ', h('a', { href: 'https://m2.mtmt.hu/gui2/?mode=browse&params=author;' + rec.mtmtId, target: '_blank' }, 'MTMT')) : h('div', { style: { fontSize: 13, color: 'var(--faint)' } }, 'No publication record.'),
           props.myStudent ? (function () {
             var ex = (props.mySupervisions || []).filter(function (v) { return v.supervisor_id === s.id; })[0];
-            function request(kind) { sb.from('phd_supervisions').insert({ student_id: props.myStudent.id, supervisor_id: s.id, kind: kind, status: 'pending' }).then(function (r) { if (r && r.error) { alert(r.error.message); return; } props.onChanged && props.onChanged(); }); }
+            function request(kind) { sb.from('phd_supervisions').insert({ student_id: props.myStudent.id, supervisor_id: s.id, kind: kind, status: 'pending' }).then(function (r) { if (r && r.error) { window.PRUI.toast(r.error.message, { kind: 'error' }); return; } props.onChanged && props.onChanged(); }); }
             function cancel() { sb.from('phd_supervisions').delete().eq('id', ex.id).then(function () { props.onChanged && props.onChanged(); }); }
             return h('div', null, h('div', { className: 'sec-t' }, 'Supervision'),
               ex ? h('div', { style: { fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 } }, h('span', { className: 'chip ' + stCls(ex.status) }, ex.status), h('span', { style: { color: 'var(--muted)' } }, ex.kind === 'co' ? 'co-supervisor' : 'primary'), ex.status === 'pending' ? h('button', { className: 'btn', onClick: cancel }, 'Cancel') : null)
@@ -122,8 +122,12 @@
     var byStudent = {}; props.students.forEach(function (s) { byStudent[s.id] = s; });
     var reqs = props.requests;
     function decide(req, status) {
-      if (status === 'accepted' && props.capacityFull && !window.confirm('You are at capacity. Accept anyway?')) return;
-      sb.from('phd_supervisions').update({ status: status, decided_at: new Date().toISOString() }).eq('id', req.id).then(function (r) { if (r && r.error) { alert(r.error.message); return; } props.onChanged(); });
+      function apply() { sb.from('phd_supervisions').update({ status: status, decided_at: new Date().toISOString() }).eq('id', req.id).then(function (r) { if (r && r.error) { window.PRUI.toast(r.error.message, { kind: 'error' }); return; } props.onChanged(); }); }
+      if (status === 'accepted' && props.capacityFull) {
+        window.PRUI.confirm({ title: 'At capacity', body: 'You are at capacity. Accept anyway?', confirmLabel: 'Accept' }).then(function (ok) { if (!ok) return; apply(); });
+        return;
+      }
+      apply();
     }
     if (!reqs.length) return h('div', { className: 'empty' }, 'No pending supervision requests.');
     return h('div', { className: 'panel' }, h('h3', null, 'Pending requests (' + reqs.length + ')'),
@@ -151,7 +155,7 @@
         name: form.name.trim(), email: form.email.trim() || null, topic: form.topic.trim() || null,
         enrollment_year: form.enrollment_year ? Number(form.enrollment_year) : null,
         supervisor_id: form.supervisor_id || props.me.id, required_credits: Number(form.required_credits) || 240, status: 'Aktív'
-      }).select().maybeSingle().then(function (r) { setSaving(false); if (r && r.error) { alert('Could not add: ' + r.error.message); return; } props.onSaved(); });
+      }).select().maybeSingle().then(function (r) { setSaving(false); if (r && r.error) { window.PRUI.toast('Could not add: ' + r.error.message, { kind: 'error' }); return; } props.onSaved(); });
     }
     useEffect(function () { var onKey = function (e) { if (e.key === 'Escape') props.onClose(); }; window.addEventListener('keydown', onKey); return function () { window.removeEventListener('keydown', onKey); }; }, []);
     return h('div', { className: 'scrim', onMouseDown: props.onClose },
@@ -305,7 +309,7 @@
     function set(k, v) { var o = {}; o[k] = v; setForm(Object.assign({}, form, o)); }
     function save() {
       if (!form.title.trim()) return; setSaving(true);
-      sb.from('phd_topics').insert({ title: form.title.trim(), description: form.description.trim() || null, tags: form.tags ? form.tags.split(',').map(function (x) { return x.trim(); }).filter(Boolean) : null, supervisor_id: form.supervisor_id || props.me.id, status: 'OPEN' }).select().maybeSingle().then(function (r) { setSaving(false); if (r && r.error) { alert('Could not add: ' + r.error.message); return; } props.onSaved(); });
+      sb.from('phd_topics').insert({ title: form.title.trim(), description: form.description.trim() || null, tags: form.tags ? form.tags.split(',').map(function (x) { return x.trim(); }).filter(Boolean) : null, supervisor_id: form.supervisor_id || props.me.id, status: 'OPEN' }).select().maybeSingle().then(function (r) { setSaving(false); if (r && r.error) { window.PRUI.toast('Could not add: ' + r.error.message, { kind: 'error' }); return; } props.onSaved(); });
     }
     useEffect(function () { var onKey = function (e) { if (e.key === 'Escape') props.onClose(); }; window.addEventListener('keydown', onKey); return function () { window.removeEventListener('keydown', onKey); }; }, []);
     return h('div', { className: 'scrim', onMouseDown: props.onClose },
@@ -324,7 +328,7 @@
   function Topics(props) {
     var add = useState(false), adding = add[0], setAdding = add[1];
     function toggle(t) { sb.from('phd_topics').update({ status: t.status === 'OPEN' ? 'CLOSED' : 'OPEN' }).eq('id', t.id).then(props.onChanged); }
-    function del(t) { if (!window.confirm('Delete this topic?')) return; sb.from('phd_topics').delete().eq('id', t.id).then(props.onChanged); }
+    function del(t) { window.PRUI.confirm({ title: 'Delete ' + (t.title ? '“' + t.title + '”' : 'topic'), body: 'Delete this topic?', confirmLabel: 'Delete', danger: true }).then(function (ok) { if (!ok) return; sb.from('phd_topics').delete().eq('id', t.id).then(props.onChanged); }); }
     return h(React.Fragment, null,
       props.canPost ? h('div', { className: 'toolbar' }, h('div', { style: { flex: 1 } }), h('button', { className: 'btn pri', onClick: function () { setAdding(true); } }, '+ New topic')) : null,
       props.topics.length ? h('div', { className: 'grid' }, props.topics.map(function (t) {
@@ -394,9 +398,9 @@
     var sp = useState({ department: me.department || '', capacity_max: me.capacity_max || '', research_interests: (me.research_interests || []).join(', '), accepting_students: me.accepting_students !== false }), sup = sp[0], setSup = sp[1];
     var rg = useState({ topic: '', enrollment_year: '', required_credits: 240 }), reg = rg[0], setReg = rg[1];
     function flash(m) { setMsg(m); setTimeout(function () { setMsg(''); }, 2500); }
-    function setRoleFlag(field, val) { var p = {}; p[field] = val; sb.from('profiles').update(p).eq('id', me.id).then(function (r) { if (r && r.error) { alert(r.error.message); return; } flash('Saved.'); props.onChanged(); }); }
-    function saveSup() { sb.from('profiles').update({ department: sup.department.trim() || null, capacity_max: sup.capacity_max ? Number(sup.capacity_max) : null, research_interests: sup.research_interests ? sup.research_interests.split(',').map(function (x) { return x.trim(); }).filter(Boolean) : null, accepting_students: !!sup.accepting_students }).eq('id', me.id).then(function (r) { if (r && r.error) { alert(r.error.message); return; } flash('Supervisor profile saved.'); props.onChanged(); }); }
-    function registerStudent() { sb.from('phd_students').insert({ profile_id: me.id, name: me.name, email: (BE.user && BE.user.email) || null, topic: reg.topic.trim() || null, enrollment_year: reg.enrollment_year ? Number(reg.enrollment_year) : null, required_credits: Number(reg.required_credits) || 240, status: 'Aktív' }).then(function (r) { if (r && r.error) { alert(r.error.message); return; } flash('Registered.'); props.onChanged(); }); }
+    function setRoleFlag(field, val) { var p = {}; p[field] = val; sb.from('profiles').update(p).eq('id', me.id).then(function (r) { if (r && r.error) { window.PRUI.toast(r.error.message, { kind: 'error' }); return; } flash('Saved.'); props.onChanged(); }); }
+    function saveSup() { sb.from('profiles').update({ department: sup.department.trim() || null, capacity_max: sup.capacity_max ? Number(sup.capacity_max) : null, research_interests: sup.research_interests ? sup.research_interests.split(',').map(function (x) { return x.trim(); }).filter(Boolean) : null, accepting_students: !!sup.accepting_students }).eq('id', me.id).then(function (r) { if (r && r.error) { window.PRUI.toast(r.error.message, { kind: 'error' }); return; } flash('Supervisor profile saved.'); props.onChanged(); }); }
+    function registerStudent() { sb.from('phd_students').insert({ profile_id: me.id, name: me.name, email: (BE.user && BE.user.email) || null, topic: reg.topic.trim() || null, enrollment_year: reg.enrollment_year ? Number(reg.enrollment_year) : null, required_credits: Number(reg.required_credits) || 240, status: 'Aktív' }).then(function (r) { if (r && r.error) { window.PRUI.toast(r.error.message, { kind: 'error' }); return; } flash('Registered.'); props.onChanged(); }); }
     return h('div', null,
       h('div', { className: 'panel' }, h('h3', null, 'My role'),
         h('div', { className: 'toggle-row' }, h('div', { className: 'tl' }, h('b', null, 'PhD Supervisor'), h('span', null, 'Appear in the directory and accept students')), h('label', { className: 'switch' }, h('input', { type: 'checkbox', checked: !!me.is_supervisor, onChange: function (e) { setRoleFlag('is_supervisor', e.target.checked); } }), h('span', { className: 'sl' }))),
@@ -428,19 +432,18 @@
     var pr = useState(null), profiles = pr[0], setProfiles = pr[1];
     var asg = useState({ student_id: '', supervisor_id: '', kind: 'primary' }), assign = asg[0], setAssign = asg[1];
     useEffect(function () { sb.from('profiles').select('id,name,email,role,is_supervisor,is_student').order('name').then(function (r) { setProfiles((r && r.data) || []); }); }, []);
-    function toggleRole(p, field) { var patch = {}; patch[field] = !p[field]; sb.from('profiles').update(patch).eq('id', p.id).then(function (r) { if (r && r.error) { alert(r.error.message); return; } setProfiles(function (list) { return list.map(function (x) { return x.id === p.id ? Object.assign({}, x, patch) : x; }); }); props.onChanged(); }); }
+    function toggleRole(p, field) { var patch = {}; patch[field] = !p[field]; sb.from('profiles').update(patch).eq('id', p.id).then(function (r) { if (r && r.error) { window.PRUI.toast(r.error.message, { kind: 'error' }); return; } setProfiles(function (list) { return list.map(function (x) { return x.id === p.id ? Object.assign({}, x, patch) : x; }); }); props.onChanged(); }); }
     function localFlag(id, field, val) { var patch = {}; patch[field] = val; setProfiles(function (l) { return l.map(function (x) { return x.id === id ? Object.assign({}, x, patch) : x; }); }); }
     // "Student" = has a phd_students record (= appears in the Students list); toggling manages the record
     function toggleStudentRecord(p) {
       var rec = props.students.filter(function (s) { return s.profile_id === p.id; })[0];
       if (rec) {
-        if (!window.confirm('Remove ' + (p.name || 'this user') + ' from the Students list? Their progress record will be deleted.')) return;
-        sb.from('phd_students').delete().eq('id', rec.id).then(function () { sb.from('profiles').update({ is_student: false }).eq('id', p.id).then(function () { localFlag(p.id, 'is_student', false); props.onChanged(); }); });
+        window.PRUI.confirm({ title: 'Remove ' + (p.name || 'this user'), body: 'Remove ' + (p.name || 'this user') + ' from the Students list? Their progress record will be deleted.', confirmLabel: 'Delete', danger: true }).then(function (ok) { if (!ok) return; sb.from('phd_students').delete().eq('id', rec.id).then(function () { sb.from('profiles').update({ is_student: false }).eq('id', p.id).then(function () { localFlag(p.id, 'is_student', false); props.onChanged(); }); }); });
       } else {
-        sb.from('phd_students').insert({ profile_id: p.id, name: p.name || 'Student', status: 'Aktív' }).then(function (r) { if (r && r.error) { alert(r.error.message); return; } sb.from('profiles').update({ is_student: true }).eq('id', p.id).then(function () { localFlag(p.id, 'is_student', true); props.onChanged(); }); });
+        sb.from('phd_students').insert({ profile_id: p.id, name: p.name || 'Student', status: 'Aktív' }).then(function (r) { if (r && r.error) { window.PRUI.toast(r.error.message, { kind: 'error' }); return; } sb.from('profiles').update({ is_student: true }).eq('id', p.id).then(function () { localFlag(p.id, 'is_student', true); props.onChanged(); }); });
       }
     }
-    function doAssign() { if (!assign.student_id || !assign.supervisor_id) return; sb.from('phd_supervisions').insert({ student_id: assign.student_id, supervisor_id: assign.supervisor_id, kind: assign.kind, status: 'accepted', decided_at: new Date().toISOString() }).then(function (r) { if (r && r.error) { alert(r.error.message); return; } setAssign({ student_id: '', supervisor_id: '', kind: 'primary' }); props.onChanged(); }); }
+    function doAssign() { if (!assign.student_id || !assign.supervisor_id) return; sb.from('phd_supervisions').insert({ student_id: assign.student_id, supervisor_id: assign.supervisor_id, kind: assign.kind, status: 'accepted', decided_at: new Date().toISOString() }).then(function (r) { if (r && r.error) { window.PRUI.toast(r.error.message, { kind: 'error' }); return; } setAssign({ student_id: '', supervisor_id: '', kind: 'primary' }); props.onChanged(); }); }
     function setStatus(v, status) { sb.from('phd_supervisions').update({ status: status, decided_at: new Date().toISOString() }).eq('id', v.id).then(props.onChanged); }
     function del(v) { sb.from('phd_supervisions').delete().eq('id', v.id).then(props.onChanged); }
     var byStu = {}; props.students.forEach(function (s) { byStu[s.id] = s; });

@@ -131,15 +131,15 @@
       var f = e.target.files && e.target.files[0]; if (!f) return;
       var mime = f.type || '', name = f.name, ext = (name.split('.').pop() || '').toLowerCase();
       var type = mime.indexOf('image') === 0 ? 'image' : (mime === 'application/pdf' || ext === 'pdf') ? 'pdf' : mime.indexOf('video') === 0 ? 'video' : (ext === 'md' || ext === 'markdown' || mime === 'text/markdown') ? 'markdown' : null;
-      if (!type) { alert('Unsupported type. You can upload: image, PDF, video, .md.'); return; }
+      if (!type) { window.PRUI.toast('Unsupported type. You can upload: image, PDF, video, .md.', { kind: 'error' }); return; }
       setUploading(true);
       var path = props.projectId + '/canvas/' + Date.now() + '_' + name.replace(/[^A-Za-z0-9._-]/g, '_');
       sb.storage.from('research-data').upload(path, f).then(function (res) {
-        if (res && res.error) { setUploading(false); alert('Upload failed: ' + res.error.message); return; }
+        if (res && res.error) { setUploading(false); window.PRUI.toast('Upload failed: ' + res.error.message, { kind: 'error' }); return; }
         var sz = MEDIA_SIZE[type];
         if (type === 'markdown') { f.text().then(function (txt) { setUploading(false); addNode('markdown', { path: path, name: name, mime: mime, text: String(txt).slice(0, 60000), w: sz.w, h: sz.h }); }); }
         else { setUploading(false); addNode(type, { path: path, name: name, mime: mime, w: sz.w, h: sz.h }); signPath(path); }
-      }, function () { setUploading(false); alert('Upload failed.'); });
+      }, function () { setUploading(false); window.PRUI.toast('Upload failed.', { kind: 'error' }); });
     }
     function addLink() {
       var url = window.prompt('Link URL (website, YouTube, Vimeo, image…):'); if (!url) return;

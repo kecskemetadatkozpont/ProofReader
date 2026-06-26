@@ -147,6 +147,8 @@
 
   function build() {
     if (document.getElementById('pubnav') || !document.body) return;
+    // barless mode (e.g. the editor, which has its own full top bar): keep ONLY the bug/feedback widget, no second bar
+    if (window.PR_NAV_BARLESS) { buildBugWidget(); return; }
     var here = pageKey();
 
     if (here) document.documentElement.classList.add('pn-' + here);
@@ -316,7 +318,9 @@
     };
   }
 
-  var st = document.createElement('style'); st.id = 'pn-style'; st.textContent = CSS;
-  (document.head || document.documentElement).appendChild(st);
+  if (!window.PR_NAV_BARLESS) {   // skip the bar/drawer CSS (incl. body padding-top) when only the bug widget is wanted
+    var st = document.createElement('style'); st.id = 'pn-style'; st.textContent = CSS;
+    (document.head || document.documentElement).appendChild(st);
+  }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', build); else build();
 })();

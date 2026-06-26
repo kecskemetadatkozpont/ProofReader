@@ -198,7 +198,7 @@
       orcid: orc || null,
       status: 'pending'
     }).eq('id', me.id).then(function (r) {
-      if (r && r.error) { btn.disabled = false; btn.textContent = 'Submit for approval'; alert('Could not save: ' + r.error.message); return; }
+      if (r && r.error) { btn.disabled = false; btn.textContent = 'Submit for approval'; window.PRUI.toast('Could not save: ' + r.error.message, { kind: 'error' }); return; }
       me.status = 'pending'; pending();
     }, function () { btn.disabled = false; btn.textContent = 'Submit for approval'; });
   }

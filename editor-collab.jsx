@@ -69,7 +69,7 @@
     const files = Array.from(fileList || []);
     let n = files.length; const out = []; if (!n) { cb([]); return; }
     files.forEach((file) => {
-      if (file.size > 50 * 1024 * 1024) { alert('“' + file.name + '” is larger than 50 MB and was skipped.'); if (--n === 0) cb(out); return; }
+      if (file.size > 50 * 1024 * 1024) { window.PRUI.toast('“' + file.name + '” is larger than 50 MB and was skipped.', { kind: 'error' }); if (--n === 0) cb(out); return; }
       const isImg = /^image\//.test(file.type);
       const r = new FileReader();
       r.onload = () => { out.push({ id: Math.random().toString(36).slice(2), name: file.name, type: isImg ? 'image' : 'file', mime: file.type, size: file.size, dataURL: String(r.result) }); if (--n === 0) cb(out); };
@@ -793,8 +793,8 @@
       const e = email.trim(); if (!e) return;
       if (sugg[0]) { add(sugg[0]); return; }
       const cached = Auth.byEmail(e); if (cached) { add(cached); return; }
-      if (BE && BE.findUserByEmail) { BE.findUserByEmail(e).then((u) => { if (u) add(u); else alert('No registered user with that address: ' + e); }); }
-      else alert('No such registered user.');
+      if (BE && BE.findUserByEmail) { BE.findUserByEmail(e).then((u) => { if (u) add(u); else window.PRUI.toast('No registered user with that address: ' + e, { kind: 'error' }); }); }
+      else window.PRUI.toast('No such registered user.', { kind: 'error' });
     };
     const link = location.href.split('#')[0];
     return <div className="overlay" onClick={p.onClose} onKeyDown={(e) => { if (e.key === 'Escape') p.onClose(); }}><div className="modal" role="dialog" aria-modal="true" aria-label={'Share ' + project.title} onClick={(e) => e.stopPropagation()}>
