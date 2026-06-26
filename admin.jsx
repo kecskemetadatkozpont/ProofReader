@@ -150,7 +150,7 @@
             h('div', { style: { marginBottom: 16 } },
               h('label', { style: { display: 'flex', alignItems: 'flex-start', gap: 9, fontSize: 13, cursor: 'pointer' } },
                 h('input', { type: 'checkbox', checked: !!u.can_workflows, style: { marginTop: 2 }, onChange: function (e) { onSetWorkflows(u.id, e.target.checked); } }),
-                h('span', null, h('b', null, 'Run Claude Workflows'), h('span', { style: { display: 'block', fontSize: 11.5, color: 'var(--faint)', marginTop: 1 } }, 'Allows the user to run multi-step Claude workflows in the session.')))
+                h('span', null, h('b', null, 'Run Publify Workflows'), h('span', { style: { display: 'block', fontSize: 11.5, color: 'var(--faint)', marginTop: 1 } }, 'Allows the user to run multi-step Publify workflows in the session.')))
             ),
             h('div', { style: { marginBottom: 16 } },
               h('label', { style: { display: 'flex', alignItems: 'flex-start', gap: 9, fontSize: 13, cursor: 'pointer' } },

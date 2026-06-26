@@ -1,5 +1,5 @@
 /* Publify — Médialejátszó / Hangoskönyv. Generates ElevenLabs audiobooks from pasted text, uploaded
- * documents (PDF/DOCX/PPTX), or a study's selected publications; optional Claude translation to a target
+ * documents (PDF/DOCX/PPTX), or a study's selected publications; optional Publify translation to a target
  * language; saves the final MP3 to Storage + a row in `audiobooks` so it never needs regenerating. No bundler. */
 (function () {
   var h = React.createElement;
@@ -191,14 +191,14 @@
       });
     }
 
-    // build the source text from the SELECTED study papers (abstracts | Claude overview | full text from OA PDFs)
+    // build the source text from the SELECTED study papers (abstracts | Publify overview | full text from OA PDFs)
     function studyText() {
       var srcs = papers.filter(function (s) { return picked[s.id]; });
       var st = (studies.filter(function (s) { return s.id === studyId; })[0] || {}).title || 'Study';
       if (!srcs.length) return Promise.resolve({ title: '', text: '', preTranslated: false });
       if (depth === 'summary') {
-        // (a) a real, flowing Claude overview written directly in the target language
-        setProg('Claude is writing an overview from ' + srcs.length + ' papers…');
+        // (a) a real, flowing Publify overview written directly in the target language
+        setProg('Publify is writing an overview from ' + srcs.length + ' papers…');
         return callPrep({ mode: 'summarize', target_lang: translate ? lang : 'English', papers: srcs.map(function (s) { return { title: s.title, abstract: s.abstract }; }) })
           .then(function (d) { if (d.error) throw new Error(d.error); return { title: st + ' — overview', text: d.text || '', preTranslated: !!translate }; });
       }
@@ -211,7 +211,7 @@
             srcs.filter(function (s) { return !s.oa_pdf_url; }).forEach(function (s) { parts.push((s.title || '') + '. ' + (s.abstract || '')); });   // no-PDF papers → abstract
             return { title: st + ' — full text', text: parts.join('\n\n'), preTranslated: false };
           }
-          var s = withPdf[i]; setProg('Extracting full text from PDF ' + (i + 1) + '/' + withPdf.length + ' (Claude, slow; large PDF → abstract)…');
+          var s = withPdf[i]; setProg('Extracting full text from PDF ' + (i + 1) + '/' + withPdf.length + ' (Publify, slow; large PDF → abstract)…');
           return callPrep({ mode: 'fulltext', url: s.oa_pdf_url }).then(function (d) {
             parts.push((d && d.text) ? d.text : ((s.title || '') + '. ' + (s.abstract || '')));   // fallback to abstract on no_pdf / error
             i++; return nextPdf();
@@ -241,7 +241,7 @@
     }
 
     function translateSegs(segs, target) {
-      setProg('Translating to ' + target + ' (Claude)…');
+      setProg('Translating to ' + target + ' (Publify)…');
       var out = []; var i = 0; var BATCH = 25;
       return props.sb.auth.getSession().then(function (s) {
         var tok = (s && s.data && s.data.session && s.data.session.access_token) || CFG.supabaseAnonKey;
@@ -308,7 +308,7 @@
         h('div', { className: 'mp-row' }, h('label', null, 'Study'),
           h('select', { className: 'field', value: studyId, onChange: function (e) { setStudyId(e.target.value); } }, h('option', { value: '' }, '— select —'), studies.map(function (s) { return h('option', { key: s.id, value: s.id }, s.title); }))),
         h('div', { className: 'mp-row' }, h('label', null, 'Depth'),
-          h('div', { className: 'seg' }, [['abstract', 'Abstract'], ['summary', 'Claude overview'], ['fulltext', 'Full text (PDF)']].map(function (o) { return h('button', { key: o[0], className: depth === o[0] ? 'on' : '', onClick: function () { setDepth(o[0]); } }, o[1]); })))) : null,
+          h('div', { className: 'seg' }, [['abstract', 'Abstract'], ['summary', 'Publify overview'], ['fulltext', 'Full text (PDF)']].map(function (o) { return h('button', { key: o[0], className: depth === o[0] ? 'on' : '', onClick: function () { setDepth(o[0]); } }, o[1]); })))) : null,
       src === 'study' && studyId ? (papers.length ? h('div', { style: { marginTop: 6, marginBottom: 6 } },
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 } },
           h('div', { className: 'field-label', style: { margin: 0 } }, 'Papers — ' + papers.filter(function (s) { return picked[s.id]; }).length + '/' + papers.length + ' selected'),
@@ -321,11 +321,11 @@
               h('span', null, s.title || '(paper)', s.oa_pdf_url ? h('span', { style: { color: 'var(--faint)', fontSize: 11 } }, '  · PDF') : null));
           })))
         : h('div', { style: { fontSize: 12.5, color: 'var(--warn)', marginTop: 4, marginBottom: 6 } }, 'This study has no „include" papers at the last step — run the screening in the Research module first (Lit. study).')) : null,
-      src === 'study' && depth === 'fulltext' ? h('div', { style: { fontSize: 11.5, color: 'var(--muted)', marginTop: -4, marginBottom: 8 } }, '⏳ Full text is built from the OA PDFs (Claude, ~1 minute per paper, max 8 papers; large PDF → abstract) — slow, but the most detailed.') : null,
+      src === 'study' && depth === 'fulltext' ? h('div', { style: { fontSize: 11.5, color: 'var(--muted)', marginTop: -4, marginBottom: 8 } }, '⏳ Full text is built from the OA PDFs (Publify, ~1 minute per paper, max 8 papers; large PDF → abstract) — slow, but the most detailed.') : null,
       h('div', { className: 'mp-row' }, h('label', null, 'Title'), h('input', { className: 'field', style: { flex: 1 }, placeholder: '(automatic if empty)', value: title, onChange: function (e) { setTitle(e.target.value); } })),
       h('div', { className: 'mp-row' }, h('label', null, 'Language'),
         h('select', { className: 'field', value: lang, onChange: function (e) { setLang(e.target.value); } }, LANGS.map(function (l) { return h('option', { key: l, value: l }, l); })),
-        h('label', { style: { display: 'flex', alignItems: 'center', gap: 5, fontSize: 13, marginLeft: 6 } }, h('input', { type: 'checkbox', checked: translate, onChange: function (e) { setTranslate(e.target.checked); } }), 'Translate to this language (Claude)')),
+        h('label', { style: { display: 'flex', alignItems: 'center', gap: 5, fontSize: 13, marginLeft: 6 } }, h('input', { type: 'checkbox', checked: translate, onChange: function (e) { setTranslate(e.target.checked); } }), 'Translate to this language (Publify)')),
       h('div', { className: 'mp-row' }, h('label', null, 'Voice'),
         h('select', { className: 'field', value: voice, onChange: function (e) { setVoice(e.target.value); } }, props.voices.map(function (v) { return h('option', { key: v.id, value: v.id }, v.name + (v.mine ? ' (mine)' : '')); })),
         h('label', null, 'Model'),
@@ -334,7 +334,7 @@
       h('div', { style: { display: 'flex', alignItems: 'center', gap: 10, marginTop: 12 } },
         h('button', { className: 'btn pri', disabled: busy, onClick: generate }, busy ? '⏳ Generating…' : '🎙 Generate audiobook'),
         prog ? h('span', { style: { fontSize: 13, color: 'var(--muted)' } }, prog) : null),
-      h('p', { style: { fontSize: 12, color: 'var(--faint)', marginTop: 8 } }, 'After generation the audiobook is saved to your library — next time it plays instantly, with no need to regenerate. (ElevenLabs bills per character; translation uses Claude.)'));
+      h('p', { style: { fontSize: 12, color: 'var(--faint)', marginTop: 8 } }, 'After generation the audiobook is saved to your library — next time it plays instantly, with no need to regenerate. (ElevenLabs bills per character; translation uses Publify.)'));
   }
 
   function Player(props) {

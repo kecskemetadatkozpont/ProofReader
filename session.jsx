@@ -1,4 +1,4 @@
-/* Publify — Claude Session. A plain full Claude chat (Zola-style) with a left history sidebar.
+/* Publify — Session. A plain full Publify chat (Zola-style) with a left history sidebar.
  * Streams via the claude-session Edge function; conversations live in user_chats / user_chat_messages
  * (migration-25), owner-scoped. Uses the user's per-user model. No bundler — React.createElement. */
 (function () {
@@ -68,7 +68,7 @@
         }, function () { setBusy(false); });
       });
     }
-    // workflow (agentic) run: Claude works multi-step with file tools, then we reload the chat + files
+    // workflow (agentic) run: Publify works multi-step with file tools, then we reload the chat + files
     function runWorkflow(id) {
       sb.auth.getSession().then(function (s) {
         var token = (s && s.data && s.data.session && s.data.session.access_token) || CFG.supabaseAnonKey;

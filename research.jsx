@@ -634,7 +634,7 @@
             );
           }),
           props.onStartStudyMulti ? h('div', { style: { marginTop: 10 } }, h('button', { className: 'btn pri', onClick: function () { props.onStartStudyMulti(selected); } }, '🔬 Start a study from these ideas →'),
-            h('div', { style: { fontSize: 11.5, color: 'var(--faint)', marginTop: 5 } }, 'Claude fills in the Step-1 fields (keywords, criteria, filters) based on the ideas — you can edit them afterwards.')) : null
+            h('div', { style: { fontSize: 11.5, color: 'var(--faint)', marginTop: 5 } }, 'Publify fills in the Step-1 fields (keywords, criteria, filters) based on the ideas — you can edit them afterwards.')) : null
         ) : h('div', { style: { fontSize: 12.5, color: 'var(--faint)' } }, 'Still empty. Press the “Select” button on an idea below — it moves here, and these become the study basis.')
       ),
       h('div', { className: 'panel' },
@@ -983,7 +983,7 @@
 
   // ---------- Literature Study (Elicit-style 4-step funnel) ----------
   var LS_STEPS = [{ step: 1, kind: 'quick', label: '1. Quick' }, { step: 2, kind: 'abstract', label: '2. Abstract' }, { step: 3, kind: 'fulltext', label: '3. Full text' }, { step: 4, kind: 'review', label: '4. Review' }];
-  // Mirror of the server's screenSystem() — the exact screening prompt Claude gets for steps 1–3, built from
+  // Mirror of the server's screenSystem() — the exact screening prompt Publify gets for steps 1–3, built from
   // the question + the current keywords/criteria. Lets the user preview (and re-generate after editing) it.
   function buildScreenPrompt(question, cfg, step) {
     cfg = cfg || {}; step = step || 1;
@@ -1058,7 +1058,7 @@
     var pgS = useState(null), prog = pgS[0], setProg = pgS[1];
     var ttS = useState({}), titles = ttS[0], setTitles = ttS[1];
     var erS = useState(''), err = erS[0], setErr = erS[1];
-    var plS = useState(false), planning = plS[0], setPlanning = plS[1];   // Claude pre-filling the funnel config
+    var plS = useState(false), planning = plS[0], setPlanning = plS[1];   // Publify pre-filling the funnel config
     var ppS = useState(''), promptText = ppS[0], setPromptText = ppS[1];   // previewed screening prompt
     var smS = useState(false), studiesOpen = smS[0], setStudiesOpen = smS[1];   // "Tanulmányok" manage modal
     var rnS = useState(null), renameId = rnS[0], setRenameId = rnS[1];   // study being renamed
@@ -1107,9 +1107,9 @@
     function viewStep(n) { setCurStep(n); var cs = stepRow(n); setCfg((cs && cs.config) || lsDefaultConfig(n, props.project)); }
     function incCount(n) { return papers.filter(function (p) { return p.step === n && p.decision === 'include'; }).length; }
 
-    // create a study from one OR MORE selected ideas (or empty), then let Claude pre-fill the funnel config
+    // create a study from one OR MORE selected ideas (or empty), then let Publify pre-fill the funnel config
     // one-click from the Ideas "study basis" window: auto-create the study from the selected ideas and let
-    // Claude pre-fill step 1 (newStudy = create → plan → load). Consume the signal first so it can't re-fire.
+    // Publify pre-fill step 1 (newStudy = create → plan → load). Consume the signal first so it can't re-fire.
     useEffect(function () {
       if (props.autoCreateFrom && props.autoCreateFrom.length) { var ids = props.autoCreateFrom; if (props.onAutoConsumed) props.onAutoConsumed(); newStudy(ids); }
     }, [props.autoCreateFrom]);
@@ -1123,12 +1123,12 @@
         var rows = LS_STEPS.map(function (s) { return { study_id: id, step: s.step, kind: s.kind, config: lsDefaultConfig(s.step, props.project, arr[0]) }; });
         sb.from('research_study_steps').insert(rows).then(function () {
           setSelId(id); setCurStep(1); props.onChanged();
-          // dynamically pre-fill keywords + criteria + filters with Claude; the user only fine-tunes
+          // dynamically pre-fill keywords + criteria + filters with Publify; the user only fine-tunes
           callStudy({ action: 'plan', study_id: id }).then(function (d) { setPlanning(false); loadStudy(id); if (d && d.error) setErr('AI fill-in: ' + d.error); }, function () { setPlanning(false); });
         });
       });
     }
-    // re-run the AI pre-fill for the current study (Claude regenerates keywords/criteria/filters)
+    // re-run the AI pre-fill for the current study (Publify regenerates keywords/criteria/filters)
     function runPlan() {
       if (!selId || planning) return;
       setErr(''); setPlanning(true);
@@ -1191,13 +1191,13 @@
     function override(p, dec) { sb.from('research_study_papers').update({ decision: dec, overridden: true }).eq('study_id', selId).eq('source_id', p.source_id).eq('step', curStep).then(function () { loadStudy(selId); }); }
 
     if (!studies.length) {
-      if (planning) return h('div', { className: 'panel' }, h('h3', null, '🔬 Literature study'), h('div', { style: { fontSize: 13, color: 'var(--muted)', padding: '12px 0' } }, '✨ Claude is preparing the study from the selected ideas — one moment, loading the Step-1 data (keywords, criteria, filters)…'));
+      if (planning) return h('div', { className: 'panel' }, h('h3', null, '🔬 Literature study'), h('div', { style: { fontSize: 13, color: 'var(--muted)', padding: '12px 0' } }, '✨ Publify is preparing the study from the selected ideas — one moment, loading the Step-1 data (keywords, criteria, filters)…'));
       var selIdeas = (props.ideas || []).filter(function (i) { return i.status === 'selected'; });
       return h('div', { className: 'panel' }, h('h3', null, '🔬 Literature study'),
-        h('p', { style: { fontSize: 13, color: 'var(--muted)' } }, 'Select (Select) the Ideas the study should be based on, then start a 4-step screening: quick screening → abstract → full text → review. Claude pre-fills the steps (keywords, criteria, filters) based on the ideas — you only fine-tune.'),
+        h('p', { style: { fontSize: 13, color: 'var(--muted)' } }, 'Select (Select) the Ideas the study should be based on, then start a 4-step screening: quick screening → abstract → full text → review. Publify pre-fills the steps (keywords, criteria, filters) based on the ideas — you only fine-tune.'),
         props.canEdit ? h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginTop: 10 } },
           selIdeas.length
-            ? h('button', { className: 'btn pri', disabled: planning, onClick: function () { newStudy(selIdeas); } }, planning ? '✨ Claude is planning…' : ('🔬 Study from the selected ' + selIdeas.length + ' idea(s)'))
+            ? h('button', { className: 'btn pri', disabled: planning, onClick: function () { newStudy(selIdeas); } }, planning ? '✨ Publify is planning…' : ('🔬 Study from the selected ' + selIdeas.length + ' idea(s)'))
             : h('span', { style: { fontSize: 12.5, color: 'var(--warn)' } }, 'Select at least one idea (Select) on the Ideas tab.'),
           h('button', { className: 'btn', disabled: planning, onClick: function () { newStudy(null); } }, '+ Empty study')
         ) : h('div', { style: { fontSize: 13, color: 'var(--faint)' } }, 'Read-only view.'),
@@ -1260,8 +1260,8 @@
       curStep < 4 ? h('div', { className: 'panel', style: { marginTop: 10 } },
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
           h('h3', { style: { margin: 0 } }, LS_STEPS[curStep - 1].label + ' — settings'),
-          props.canEdit ? h('button', { className: 'btn', style: { padding: '3px 9px', fontSize: 11.5, marginLeft: 'auto', flex: 'none' }, disabled: planning, title: 'Claude (re)fills the keywords, criteria and filters based on the ideas', onClick: runPlan }, planning ? '✨ Claude is filling…' : '✨ AI fill-in') : null),
-        props.canEdit ? h('div', { style: { fontSize: 11.5, color: 'var(--muted)', margin: '4px 0 8px', lineHeight: 1.4 } }, planning ? '✨ Claude is filling the fields based on your ideas…' : '✨ The fields were filled by Claude based on your ideas — edit them freely, then run the step.') : null,
+          props.canEdit ? h('button', { className: 'btn', style: { padding: '3px 9px', fontSize: 11.5, marginLeft: 'auto', flex: 'none' }, disabled: planning, title: 'Publify (re)fills the keywords, criteria and filters based on the ideas', onClick: runPlan }, planning ? '✨ Publify is filling…' : '✨ AI fill-in') : null),
+        props.canEdit ? h('div', { style: { fontSize: 11.5, color: 'var(--muted)', margin: '4px 0 8px', lineHeight: 1.4 } }, planning ? '✨ Publify is filling the fields based on your ideas…' : '✨ The fields were filled by Publify based on your ideas — edit them freely, then run the step.') : null,
         h('div', { className: 'field-label' }, 'Keywords (comma-separated)'),
         h('input', { className: 'field', style: { width: '100%' }, disabled: !props.canEdit, value: (cfg.keywords || []).join(', '), placeholder: 'e.g. out-of-distribution, LiDAR', onChange: function (e) { up('keywords', e.target.value.split(',').map(function (x) { return x.trim(); }).filter(Boolean)); } }),
         h('div', { style: { display: 'flex', gap: 12, marginTop: 8, flexWrap: 'wrap' } },
@@ -1282,14 +1282,14 @@
           prog ? h('span', { className: 'progress' }, h('i', { style: { width: (prog.total ? Math.round(prog.done / prog.total * 100) : 0) + '%' } }), h('span', { className: 'progress-t' }, prog.done + (prog.total ? '/' + prog.total : '') + ' · ✓' + ((prog.counts || {}).include || 0) + ' ✗' + ((prog.counts || {}).exclude || 0))) : null
         ) : null,
         err ? h('div', { style: { color: 'var(--danger)', fontSize: 12.5, marginTop: 6 } }, err) : null,
-        // 📝 prompt preview — the exact screening prompt Claude gets, built from the current question + criteria
+        // 📝 prompt preview — the exact screening prompt Publify gets, built from the current question + criteria
         props.canEdit ? h('div', { style: { marginTop: 12, borderTop: '1px solid var(--line)', paddingTop: 8 } },
           h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
-            h('div', { style: { fontSize: 12, fontWeight: 600 } }, '📝 Claude screening-prompt'),
+            h('div', { style: { fontSize: 12, fontWeight: 600 } }, '📝 Publify screening-prompt'),
             h('button', { className: 'btn', style: { padding: '3px 9px', fontSize: 11.5, flex: 'none' }, onClick: genPrompt }, promptText ? '🔄 Regenerate prompt' : '📝 View prompt'),
             promptText ? h('button', { className: 'btn', style: { padding: '3px 9px', fontSize: 11.5, flex: 'none' }, onClick: function () { try { navigator.clipboard.writeText(promptText); } catch (e) { } } }, 'Copy') : null,
             promptText ? h('button', { className: 'btn', style: { padding: '3px 9px', fontSize: 11.5, flex: 'none' }, onClick: function () { setPromptText(''); } }, 'Hide') : null),
-          promptText ? h('div', { style: { fontSize: 11, color: 'var(--muted)', marginTop: 4 } }, 'This is the system prompt Claude gets when judging each paper (based on the question + keywords + criteria). After changing a keyword/criterion, press “regenerate”.') : null,
+          promptText ? h('div', { style: { fontSize: 11, color: 'var(--muted)', marginTop: 4 } }, 'This is the system prompt Publify gets when judging each paper (based on the question + keywords + criteria). After changing a keyword/criterion, press “regenerate”.') : null,
           promptText ? h('pre', { style: { marginTop: 6, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: 11.5, lineHeight: 1.45, background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 8, padding: '8px 10px', maxHeight: 280, overflow: 'auto', fontFamily: 'ui-monospace, monospace' } }, promptText) : null
         ) : null
       ) : h('div', { className: 'panel', style: { marginTop: 10 } },
@@ -1377,7 +1377,7 @@
   function ProjectDetail(props) {
     var p = props.project;
     var tS = useState('overview'), tab = tS[0], setTab = tS[1];
-    var asS = useState(null), autoStudy = asS[0], setAutoStudy = asS[1];   // ideas to auto-create a study from (set by the Ideas "study basis" window → one-click create + Claude pre-fill)
+    var asS = useState(null), autoStudy = asS[0], setAutoStudy = asS[1];   // ideas to auto-create a study from (set by the Ideas "study basis" window → one-click create + Publify pre-fill)
     var edS = useState(false), editOpen = edS[0], setEditOpen = edS[1];   // #2: project settings editor
     function setStage(i) {
       sb.from('research_projects').update({ stage: i }).eq('id', p.id).then(function () {
