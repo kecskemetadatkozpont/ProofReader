@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Publify — Animated cursor concepts</title>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root { --bg:#0a0c12; --panel:rgba(22,26,38,.62); --line:rgba(255,255,255,.09); --ink:#f2f4fb; --muted:#aab2c8; --faint:#7b8499; --accent:#8b93f8; --aurora:linear-gradient(135deg,#6366f1,#a855f7,#22d3ee); }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body { background: radial-gradient(900px 520px at 80% -8%, rgba(168,85,247,.22), transparent 60%), radial-gradient(720px 460px at 10% 2%, rgba(99,102,241,.20), transparent 60%), radial-gradient(820px 600px at 60% 118%, rgba(34,211,238,.11), transparent 62%), var(--bg); background-attachment: fixed; color: var(--ink); font-family: 'Plus Jakarta Sans', system-ui, sans-serif; -webkit-font-smoothing: antialiased; overflow-x: hidden; }
+    body.cc, body.cc * { cursor: none !important; }
+    .wrap { max-width: 1080px; margin: 0 auto; padding: 46px 24px 90px; position: relative; z-index: 2; }
+    .eyebrow { font-size: 12px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; color: var(--accent); }
+    h1 { font-size: clamp(30px, 5vw, 46px); font-weight: 800; letter-spacing: -.02em; margin: 12px 0 10px; }
+    .lede { font-size: 16px; color: var(--muted); max-width: 640px; line-height: 1.6; margin: 0; }
+    .pick { display: flex; flex-wrap: wrap; gap: 10px; margin: 30px 0 8px; }
+    .pick button { border: 1px solid var(--line); background: var(--panel); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); color: var(--ink); border-radius: 12px; padding: 11px 16px; font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer; transition: .15s; }
+    .pick button:hover { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); transform: translateY(-2px); }
+    .pick button.on { background: var(--aurora); border-color: transparent; color: #fff; box-shadow: 0 8px 22px -8px rgba(129,92,240,.6); }
+    .hint { font-size: 12.5px; color: var(--faint); margin-top: 4px; }
+    .desc { margin: 26px 0 30px; padding: 16px 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); font-size: 14px; color: var(--muted); min-height: 52px; line-height: 1.55; }
+    .desc b { color: var(--ink); }
+    .play { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+    .demo { border: 1px solid var(--line); border-radius: 16px; background: var(--panel); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); padding: 20px; }
+    .demo h3 { margin: 0 0 12px; font-size: 15px; }
+    .demo p { font-size: 13.5px; color: var(--muted); line-height: 1.6; }
+    .row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+    .btn { border: 1px solid var(--line); background: rgba(255,255,255,.04); color: var(--ink); border-radius: 10px; padding: 9px 15px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; transition: .15s; }
+    .btn:hover { border-color: var(--accent); }
+    .btn.pri { background: var(--aurora); border-color: transparent; color: #fff; }
+    a.lnk { color: var(--accent); font-weight: 600; }
+    .chips { display: flex; gap: 7px; flex-wrap: wrap; margin-top: 12px; }
+    .chip { font-size: 12px; border: 1px solid var(--line); border-radius: 999px; padding: 4px 11px; color: var(--muted); background: rgba(255,255,255,.03); }
+    .field { width: 100%; margin-top: 12px; border: 1px solid var(--line); border-radius: 10px; background: rgba(0,0,0,.2); color: var(--ink); padding: 10px 12px; font: inherit; font-size: 13.5px; }
+    /* ---- custom cursor layers ---- */
+    #cur-root { position: fixed; inset: 0; pointer-events: none; z-index: 9999; }
+    .cur { position: fixed; top: 0; left: 0; pointer-events: none; will-change: transform; }
+    .cur-dot { width: 7px; height: 7px; border-radius: 50%; background: #fff; margin: -3.5px 0 0 -3.5px; mix-blend-mode: difference; }
+    .cur-glow { width: 46px; height: 46px; border-radius: 50%; margin: -23px 0 0 -23px; background: var(--aurora); filter: blur(11px); opacity: .55; }
+    .cur-ring { width: 38px; height: 38px; border-radius: 50%; margin: -19px 0 0 -19px; border: 1.5px solid var(--accent); box-shadow: 0 0 16px -2px rgba(129,92,240,.55); transition: width .18s, height .18s, margin .18s, border-color .18s, background .18s; }
+    .cur-ring.snap { background: rgba(139,147,248,.14); border-color: #a855f7; }
+    .cur-spot { width: 380px; height: 380px; border-radius: 50%; margin: -190px 0 0 -190px; background: radial-gradient(circle, rgba(139,147,248,.16), rgba(168,85,247,.07) 45%, transparent 70%); }
+    .cur-blob { width: 34px; height: 34px; border-radius: 50%; margin: -17px 0 0 -17px; background: var(--aurora); filter: blur(2px); opacity: .85; will-change: transform; }
+    .trail { position: fixed; top: 0; left: 0; width: 9px; height: 9px; border-radius: 50%; margin: -4.5px 0 0 -4.5px; pointer-events: none; will-change: transform, opacity; }
+  </style>
+</head>
+<body>
+  <div id="cur-root"></div>
+  <div class="wrap">
+    <div class="eyebrow">Publify · cursor concepts</div>
+    <h1>Pick an animated cursor.</h1>
+    <p class="lede">Move your mouse around — switch between the styles below and feel each one over the buttons, links and cards. Tell me which you like (or mix), and I'll wire the chosen one across the whole app.</p>
+
+    <div class="pick" id="pick">
+      <button data-c="off">Off (default)</button>
+      <button data-c="glow">1 · Aurora Glow</button>
+      <button data-c="comet">2 · Comet Trail</button>
+      <button data-c="magnetic">3 · Magnetic Ring</button>
+      <button data-c="spotlight">4 · Spotlight</button>
+      <button data-c="blob">5 · Liquid Blob</button>
+    </div>
+    <div class="hint">Tip: hover the buttons/links — concepts 3 (Magnetic) react to interactive elements.</div>
+    <div class="desc" id="desc">Choose a cursor above to preview it.</div>
+
+    <div class="play">
+      <div class="demo">
+        <h3>Buttons &amp; actions</h3>
+        <p>Hover and click — see how the cursor reacts to interactive targets.</p>
+        <div class="row"><button class="btn pri">Primary</button><button class="btn">Secondary</button><button class="btn">Tertiary</button></div>
+      </div>
+      <div class="demo">
+        <h3>Links &amp; text</h3>
+        <p>Read this paragraph and run the cursor across an <a class="lnk" href="#">inline link</a> and the words. Notice the blend over light/dark.</p>
+        <div class="chips"><span class="chip">OOD</span><span class="chip">LiDAR</span><span class="chip">conformal</span></div>
+      </div>
+      <div class="demo">
+        <h3>Input &amp; fields</h3>
+        <p>Try the field — magnetic cursors snap onto it.</p>
+        <input class="field" placeholder="Type something…" />
+        <div class="row"><button class="btn">Save</button><button class="btn">Cancel</button></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      var reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+      var root = document.getElementById('cur-root');
+      var mx = innerWidth / 2, my = innerHeight / 2, px = mx, py = my, lastMx = mx, lastMy = my;
+      var mode = 'off', layers = [], trail = [], rafId = null;
+      var snapTarget = null;
+      document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+
+      var DESCS = {
+        off: 'The normal system cursor — no effect.',
+        glow: '<b>Aurora Glow</b> — a crisp white dot for precision, trailed by a soft aurora-gradient glow that springs after it. Premium and on-brand, subtle enough for everyday use.',
+        comet: '<b>Comet Trail</b> — a stream of aurora particles that fade behind the pointer as it moves, like a shooting star. Playful and eye-catching.',
+        magnetic: '<b>Magnetic Ring</b> — a precise dot plus a ring that lags with spring physics and <i>snaps onto</i> buttons, links and fields on hover. Feels tactile and responsive.',
+        spotlight: '<b>Spotlight</b> — a soft radial aurora light follows the pointer, gently illuminating the dark UI around it. Atmospheric; great for the dark theme.',
+        blob: '<b>Liquid Blob</b> — a gooey aurora blob that squashes and stretches in the direction you move (and relaxes when still). Fluid and characterful.'
+      };
+
+      function clear() { root.innerHTML = ''; layers = []; trail = []; snapTarget = null; }
+      function make(cls) { var d = document.createElement('div'); d.className = 'cur ' + cls; root.appendChild(d); return d; }
+      function lerp(a, b, t) { return a + (b - a) * t; }
+
+      // magnetic: track hover over interactive elements
+      function onOver(e) { var t = e.target.closest('button, a, input, .btn, .chip, [data-cursor]'); snapTarget = t || null; }
+      function onOut() { snapTarget = null; }
+
+      var modes = {
+        glow: {
+          init: function () { this.dot = make('cur-dot'); this.glow = make('cur-glow'); },
+          frame: function () {
+            px = lerp(px, mx, reduce ? 1 : 0.16); py = lerp(py, my, reduce ? 1 : 0.16);
+            this.dot.style.transform = 'translate(' + mx + 'px,' + my + 'px)';
+            this.glow.style.transform = 'translate(' + px + 'px,' + py + 'px)';
+          }
+        },
+        comet: {
+          init: function () { for (var i = 0; i < 20; i++) { var t = document.createElement('div'); t.className = 'trail'; t.style.background = ['#6366f1', '#a855f7', '#22d3ee'][i % 3]; root.appendChild(t); trail.push({ el: t, x: mx, y: my }); } },
+          frame: function () {
+            var prevX = mx, prevY = my;
+            for (var i = 0; i < trail.length; i++) {
+              var p = trail[i]; var k = reduce ? 1 : 0.34;
+              p.x = lerp(p.x, prevX, k); p.y = lerp(p.y, prevY, k);
+              var s = 1 - i / trail.length;
+              p.el.style.opacity = (s * 0.9).toFixed(2);
+              p.el.style.transform = 'translate(' + p.x + 'px,' + p.y + 'px) scale(' + (s * 1.1 + 0.15).toFixed(2) + ')';
+              prevX = p.x; prevY = p.y;
+            }
+          }
+        },
+        magnetic: {
+          init: function () { this.dot = make('cur-dot'); this.ring = make('cur-ring'); document.addEventListener('mouseover', onOver); document.addEventListener('mouseout', onOut); },
+          destroy: function () { document.removeEventListener('mouseover', onOver); document.removeEventListener('mouseout', onOut); },
+          frame: function () {
+            var tx = mx, ty = my, snap = false;
+            if (snapTarget) { var r = snapTarget.getBoundingClientRect(); tx = r.left + r.width / 2; ty = r.top + r.height / 2; snap = true; }
+            px = lerp(px, tx, reduce ? 1 : 0.2); py = lerp(py, ty, reduce ? 1 : 0.2);
+            this.dot.style.transform = 'translate(' + mx + 'px,' + my + 'px)';
+            this.ring.style.transform = 'translate(' + px + 'px,' + py + 'px)';
+            this.ring.classList.toggle('snap', snap);
+            var sz = snap ? Math.max(snapTarget.getBoundingClientRect().width, 44) + 16 : 38;
+            this.ring.style.width = this.ring.style.height = sz + 'px';
+            this.ring.style.margin = (-sz / 2) + 'px 0 0 ' + (-sz / 2) + 'px';
+          }
+        },
+        spotlight: {
+          init: function () { this.dot = make('cur-dot'); this.spot = make('cur-spot'); },
+          frame: function () {
+            px = lerp(px, mx, reduce ? 1 : 0.12); py = lerp(py, my, reduce ? 1 : 0.12);
+            this.dot.style.transform = 'translate(' + mx + 'px,' + my + 'px)';
+            this.spot.style.transform = 'translate(' + px + 'px,' + py + 'px)';
+          }
+        },
+        blob: {
+          init: function () { this.blob = make('cur-blob'); },
+          frame: function () {
+            px = lerp(px, mx, reduce ? 1 : 0.22); py = lerp(py, my, reduce ? 1 : 0.22);
+            var vx = mx - lastMx, vy = my - lastMy; lastMx = mx; lastMy = my;
+            var speed = Math.min(Math.sqrt(vx * vx + vy * vy), 60);
+            var ang = Math.atan2(vy, vx) * 180 / Math.PI;
+            var stretch = reduce ? 1 : 1 + speed / 42, squash = reduce ? 1 : 1 - speed / 130;
+            this.blob.style.transform = 'translate(' + px + 'px,' + py + 'px) rotate(' + ang + 'deg) scale(' + stretch.toFixed(2) + ',' + squash.toFixed(2) + ')';
+          }
+        }
+      };
+
+      function loop() { if (modes[mode]) modes[mode].frame(); rafId = requestAnimationFrame(loop); }
+
+      function setMode(m) {
+        if (modes[mode] && modes[mode].destroy) modes[mode].destroy();
+        if (rafId) cancelAnimationFrame(rafId), rafId = null;
+        clear(); mode = m;
+        document.body.classList.toggle('cc', m !== 'off');
+        document.getElementById('desc').innerHTML = DESCS[m] || '';
+        Array.prototype.forEach.call(document.querySelectorAll('#pick button'), function (b) { b.classList.toggle('on', b.dataset.c === m); });
+        if (modes[m]) { px = mx; py = my; modes[m].init(); loop(); }
+      }
+
+      document.getElementById('pick').addEventListener('click', function (e) { var b = e.target.closest('button'); if (b) setMode(b.dataset.c); });
+      setMode('glow');   // start on Aurora Glow
+    })();
+  </script>
+</body>
+</html>
