@@ -85,6 +85,7 @@
     }
 
     function openAudiobook(row) {
+      if (!row.audio_path) { window.PRUI.toast('This audiobook has no audio file (it failed to save) — please delete it and regenerate.', { kind: 'error', duration: 6000 }); return; }
       // signed URL for the saved MP3 → play without regenerating
       sb.storage.from('audiobooks').createSignedUrl(row.audio_path, 3600).then(function (r) {
         var url = r && r.data && r.data.signedUrl; if (!url) { window.PRUI.toast('Failed to load the audio file.', { kind: 'error' }); return; }
@@ -94,7 +95,7 @@
     function delAudiobook(row) {
       window.PRUI.confirm({ title: 'Delete „' + row.title + '"', body: 'Delete this audiobook?', confirmLabel: 'Delete', danger: true }).then(function (ok) {
         if (!ok) return;
-        sb.storage.from('audiobooks').remove([row.audio_path]).then(function () { });
+        if (row.audio_path) sb.storage.from('audiobooks').remove([row.audio_path]).then(function () { });
         sb.from('audiobooks').delete().eq('id', row.id).then(function () { loadLibrary(me.id); if (current && current.row.id === row.id) { setCurrent(null); setView('library'); } });
       });
     }
@@ -303,7 +304,7 @@
         if (up && up.error) { setBusy(false); setErr('Save failed: ' + up.error.message); return; }
         var chars = segs.reduce(function (a, s) { return a + s.length; }, 0);
         props.sb.from('audiobooks').insert({
-          owner_id: props.me.id, project_id: null, title: ttl, source_kind: src, source_ref: src === 'study' ? studyId : (fileName || null),
+          owner_id: props.me.id, project_id: null, audio_path: path, title: ttl, source_kind: src, source_ref: src === 'study' ? studyId : (fileName || null),
           language: lang, translated: !!translate, voice_id: voice, voice_name: (props.voices.filter(function (v) { return v.id === voice; })[0] || {}).name || voice,
           model: model, settings: { rate: rate, stability: 50, similarity: 75 }, segments: meta, duration_sec: Math.round(meta.reduce(function (a, m) { return a + (m.dur || 0); }, 0)), chars: chars, status: 'ready'
         }).select('*').maybeSingle().then(function (r) {
