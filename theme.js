@@ -13,8 +13,10 @@
   var saved = null; try { saved = localStorage.getItem(KEY); } catch (e) { }
   apply(saved === null ? 'dark' : saved);
 
-  // 2. inject the dark palette: re-point every shared variable to a dark value
+  // 2. inject the dark palette + the Aurora Pro design language
   var css = [
+    '@import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap");',   // must stay first
+    'body, button, input, select, textarea, h1, h2, h3, h4, h5 { font-family: "Plus Jakarta Sans", system-ui, -apple-system, "Segoe UI", sans-serif; }',
     'html.dark { color-scheme: dark;',
     '  --ink: #e7e9ee; --muted: #a3acbd; --faint: #7b8494; --dim: #8a92a0;',
     '  --reading: #6e5612;',  // read-aloud highlight is a BACKGROUND (amber), not a text colour — keep it dark so light text stays legible
@@ -32,6 +34,18 @@
     'html.dark #pr-ob, html.dark .signin, html.dark #pr-signin, html.dark #pr-splash { background: radial-gradient(120% 120% at 50% -10%, #1b1d2e 0%, #0f1115 60%) !important; }',
     'html.dark .hero { background: radial-gradient(120% 90% at 80% -10%, #1b1d2e 0%, var(--bg) 70%) !important; }',
     'html.dark .thumb, html.dark .pf-viewer-img { background: var(--surface-2) !important; }',
+    // ═══ AURORA PRO — the chosen design language (dark-first) ═══
+    // deeper, bluer canvas + the aurora gradient token (overrides the values above)
+    'html.dark { --bg: #0a0c12; --app-bg: #090b11; --softer: #0c0e15; --soft: #1a1e2b; --surface: #161a26; --surface-2: #1c2233; --surface-3: #0f131d; --pane: #161a26; --paper: #161a26; --paper-bg: #161a26; --line: #262b3a; --be: #262b3a; --grey-bg: #1c2233; --accent: #8b93f8; --accent-tint: #241c4d; --aurora: linear-gradient(135deg,#6366f1 0%,#a855f7 50%,#22d3ee 100%); --grad: linear-gradient(135deg,#6366f1 0%,#a855f7 50%,#22d3ee 100%); }',
+    // ambient aurora glow on the page canvas (fixed so it stays while scrolling)
+    'html.dark body { background: radial-gradient(900px 520px at 80% -8%, rgba(168,85,247,.20), transparent 60%), radial-gradient(720px 460px at 10% 2%, rgba(99,102,241,.18), transparent 60%), radial-gradient(820px 600px at 60% 118%, rgba(34,211,238,.10), transparent 62%), var(--app-bg, #090b11) !important; background-attachment: fixed !important; }',
+    // primary actions → the aurora gradient + a soft glow
+    'html.dark .btn.pri, html.dark .btn-primary, html.dark .btn.primary, html.dark button.pri, html.dark .pri.btn, html.dark .btn--primary { background-image: linear-gradient(135deg,#6366f1,#a855f7,#22d3ee) !important; background-color: transparent !important; border-color: transparent !important; color: #fff !important; box-shadow: 0 8px 22px -8px rgba(129,92,240,.6) !important; }',
+    'html.dark .btn.pri:hover, html.dark .btn-primary:hover, html.dark button.pri:hover, html.dark .btn--primary:hover { filter: brightness(1.07); }',
+    // active segmented / tab states → gradient accent
+    'html.dark .seg button.on, html.dark .seg .on, html.dark .seg button[aria-current], html.dark .seg button[aria-selected="true"] { background-image: linear-gradient(135deg,#6366f1,#a855f7) !important; background-color: transparent !important; color: #fff !important; }',
+    // accent-tinted selection chips read better on the deep canvas
+    'html.dark ::selection { background: rgba(168,85,247,.32); }',
     // ── accessibility baseline (both themes) — one canonical keyboard-focus ring app-wide ──
     ':focus-visible { outline: 2px solid var(--accent, #4f46e5) !important; outline-offset: 2px; border-radius: inherit; }',
     'a:focus-visible, button:focus-visible, [role="button"]:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent, #4f46e5) !important; outline-offset: 2px; }',
