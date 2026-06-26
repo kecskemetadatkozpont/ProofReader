@@ -148,6 +148,8 @@
     var studiesS = useState([]), studies = studiesS[0], setStudies = studiesS[1];
     var studyIdS = useState(''), studyId = studyIdS[0], setStudyId = studyIdS[1];
     var depthS = useState('abstract'), depth = depthS[0], setDepth = depthS[1];   // abstract | summary | fulltext
+    var papsS = useState([]), papers = papsS[0], setPapers = papsS[1];            // the study's include-papers (with title/abstract/oa_pdf_url)
+    var pickS = useState({}), picked = pickS[0], setPicked = pickS[1];            // source_id -> bool (which papers to narrate)
     var langS = useState('Magyar'), lang = langS[0], setLang = langS[1];
     var translS = useState(true), translate = translS[0], setTranslate = translS[1];
     var voiceS = useState((props.voices[0] && props.voices[0].id) || '21m00Tcm4TlvDq8ikWAM'), voice = voiceS[0], setVoice = voiceS[1];
@@ -161,6 +163,19 @@
     useEffect(function () {
       props.sb.from('research_studies').select('id,title').order('created_at', { ascending: false }).then(function (r) { setStudies((r && r.data) || []); });
     }, []);
+    // load the selected study's include-papers (furthest step) so the user can pick WHICH papers to narrate
+    useEffect(function () {
+      setPapers([]); setPicked({}); if (!studyId) return;
+      props.sb.from('research_study_papers').select('source_id,step').eq('study_id', studyId).eq('decision', 'include').then(function (r) {
+        var rows = (r && r.data) || []; var maxStep = rows.reduce(function (a, b) { return Math.max(a, b.step); }, 0);
+        var ids = rows.filter(function (x) { return x.step === maxStep; }).map(function (x) { return x.source_id; });
+        if (!ids.length) return;
+        props.sb.from('research_sources').select('id,title,abstract,oa_pdf_url').in('id', ids).then(function (sr) {
+          var srcs = (sr && sr.data) || []; setPapers(srcs);
+          var p = {}; srcs.forEach(function (s) { p[s.id] = true; }); setPicked(p);
+        });
+      });
+    }, [studyId]);
 
     function onFile(e) {
       var f = e.target.files && e.target.files[0]; if (!f) return;
@@ -172,48 +187,41 @@
     function callPrep(payload) {
       return props.sb.auth.getSession().then(function (s) {
         var tok = (s && s.data && s.data.session && s.data.session.access_token) || CFG.supabaseAnonKey;
-        return fetch(CFG.supabaseUrl + '/functions/v1/tts-translate', { method: 'POST', headers: { 'Content-Type': 'application/json', 'apikey': CFG.supabaseAnonKey, 'Authorization': 'Bearer ' + tok }, body: JSON.stringify(payload) }).then(function (r) { return r.json(); });
+        return fetch(CFG.supabaseUrl + '/functions/v1/tts-translate', { method: 'POST', headers: { 'Content-Type': 'application/json', 'apikey': CFG.supabaseAnonKey, 'Authorization': 'Bearer ' + tok }, body: JSON.stringify(payload) }).then(function (r) { return r.json().catch(function () { return { error: 'edge_error' }; }); }, function () { return { error: 'network' }; });
       });
     }
 
-    // build the source text for a study (abstracts | Claude overview | full text from OA PDFs)
+    // build the source text from the SELECTED study papers (abstracts | Claude overview | full text from OA PDFs)
     function studyText() {
-      return props.sb.from('research_study_papers').select('source_id,step,decision').eq('study_id', studyId).eq('decision', 'include').then(function (r) {
-        var rows = (r && r.data) || [];
-        var maxStep = rows.reduce(function (a, b) { return Math.max(a, b.step); }, 0);
-        var ids = rows.filter(function (x) { return x.step === maxStep; }).map(function (x) { return x.source_id; });
-        if (!ids.length) return { title: '', text: '', preTranslated: false };
-        return props.sb.from('research_sources').select('title,abstract,oa_pdf_url').in('id', ids).then(function (sr) {
-          var srcs = (sr && sr.data) || [];
-          var st = (studies.filter(function (s) { return s.id === studyId; })[0] || {}).title || 'Tanulmány';
-          if (depth === 'summary') {
-            // (a) a real, flowing Claude overview written directly in the target language
-            setProg('Claude áttekintőt ír a ' + srcs.length + ' cikkből…');
-            return callPrep({ mode: 'summarize', target_lang: translate ? lang : 'English', papers: srcs.map(function (s) { return { title: s.title, abstract: s.abstract }; }) })
-              .then(function (d) { if (d.error) throw new Error(d.error); return { title: st + ' — áttekintés', text: d.text || '', preTranslated: !!translate }; });
+      var srcs = papers.filter(function (s) { return picked[s.id]; });
+      var st = (studies.filter(function (s) { return s.id === studyId; })[0] || {}).title || 'Tanulmány';
+      if (!srcs.length) return Promise.resolve({ title: '', text: '', preTranslated: false });
+      if (depth === 'summary') {
+        // (a) a real, flowing Claude overview written directly in the target language
+        setProg('Claude áttekintőt ír a ' + srcs.length + ' cikkből…');
+        return callPrep({ mode: 'summarize', target_lang: translate ? lang : 'English', papers: srcs.map(function (s) { return { title: s.title, abstract: s.abstract }; }) })
+          .then(function (d) { if (d.error) throw new Error(d.error); return { title: st + ' — áttekintés', text: d.text || '', preTranslated: !!translate }; });
+      }
+      if (depth === 'fulltext') {
+        // (b) download + extract clean reading text from each OA PDF (server-side); abstract fallback per paper
+        var withPdf = srcs.filter(function (s) { return s.oa_pdf_url; }).slice(0, 8);   // cap (each ~60–80s)
+        var parts = []; var i = 0;
+        function nextPdf() {
+          if (i >= withPdf.length) {
+            srcs.filter(function (s) { return !s.oa_pdf_url; }).forEach(function (s) { parts.push((s.title || '') + '. ' + (s.abstract || '')); });   // no-PDF papers → abstract
+            return { title: st + ' — teljes szöveg', text: parts.join('\n\n'), preTranslated: false };
           }
-          if (depth === 'fulltext') {
-            // (b) download + extract clean reading text from each OA PDF (server-side); abstract fallback per paper
-            var withPdf = srcs.filter(function (s) { return s.oa_pdf_url; }).slice(0, 8);   // cap (each ~60–80s)
-            var parts = []; var i = 0;
-            function nextPdf() {
-              if (i >= withPdf.length) {
-                srcs.filter(function (s) { return !s.oa_pdf_url; }).forEach(function (s) { parts.push((s.title || '') + '. ' + (s.abstract || '')); });   // no-PDF papers → abstract
-                return { title: st + ' — teljes szöveg', text: parts.join('\n\n'), preTranslated: false };
-              }
-              var s = withPdf[i]; setProg('Teljes szöveg kinyerése PDF-ből ' + (i + 1) + '/' + withPdf.length + ' (Claude, lassú)…');
-              return callPrep({ mode: 'fulltext', url: s.oa_pdf_url }).then(function (d) {
-                parts.push((d && d.text) ? d.text : ((s.title || '') + '. ' + (s.abstract || '')));   // fallback to abstract on no_pdf
-                i++; return nextPdf();
-              }, function () { parts.push((s.title || '') + '. ' + (s.abstract || '')); i++; return nextPdf(); });
-            }
-            return nextPdf();
-          }
-          // abstract
-          var body = srcs.map(function (s) { return (s.title || '') + '. ' + (s.abstract || '(nincs absztrakt)'); }).join('\n\n');
-          return { title: st, text: body, preTranslated: false };
-        });
-      });
+          var s = withPdf[i]; setProg('Teljes szöveg kinyerése PDF-ből ' + (i + 1) + '/' + withPdf.length + ' (Claude, lassú; nagy PDF → absztrakt)…');
+          return callPrep({ mode: 'fulltext', url: s.oa_pdf_url }).then(function (d) {
+            parts.push((d && d.text) ? d.text : ((s.title || '') + '. ' + (s.abstract || '')));   // fallback to abstract on no_pdf / error
+            i++; return nextPdf();
+          }, function () { parts.push((s.title || '') + '. ' + (s.abstract || '')); i++; return nextPdf(); });
+        }
+        return Promise.resolve().then(nextPdf);
+      }
+      // abstract
+      var body = srcs.map(function (s) { return (s.title || '') + '. ' + (s.abstract || '(nincs absztrakt)'); }).join('\n\n');
+      return Promise.resolve({ title: st, text: body, preTranslated: false });
     }
 
     function generate() {
@@ -301,7 +309,19 @@
           h('select', { className: 'field', value: studyId, onChange: function (e) { setStudyId(e.target.value); } }, h('option', { value: '' }, '— válassz —'), studies.map(function (s) { return h('option', { key: s.id, value: s.id }, s.title); }))),
         h('div', { className: 'mp-row' }, h('label', null, 'Mélység'),
           h('div', { className: 'seg' }, [['abstract', 'Absztrakt'], ['summary', 'Claude áttekintés'], ['fulltext', 'Teljes szöveg (PDF)']].map(function (o) { return h('button', { key: o[0], className: depth === o[0] ? 'on' : '', onClick: function () { setDepth(o[0]); } }, o[1]); })))) : null,
-      src === 'study' && depth === 'fulltext' ? h('div', { style: { fontSize: 11.5, color: 'var(--muted)', marginTop: -4, marginBottom: 8 } }, '⏳ A teljes szöveg az OA PDF-ekből készül (Claude, cikkenként ~1 perc, max 8 cikk) — lassú, de a legrészletesebb.') : null,
+      src === 'study' && studyId ? (papers.length ? h('div', { style: { marginTop: 6, marginBottom: 6 } },
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 } },
+          h('div', { className: 'field-label', style: { margin: 0 } }, 'Cikkek — ' + papers.filter(function (s) { return picked[s.id]; }).length + '/' + papers.length + ' kiválasztva'),
+          h('button', { className: 'btn', style: { padding: '2px 8px', fontSize: 11 }, onClick: function () { var p = {}; papers.forEach(function (s) { p[s.id] = true; }); setPicked(p); } }, 'Mind'),
+          h('button', { className: 'btn', style: { padding: '2px 8px', fontSize: 11 }, onClick: function () { setPicked({}); } }, 'Egyik sem')),
+        h('div', { style: { maxHeight: 190, overflowY: 'auto', border: '1px solid var(--line)', borderRadius: 8, padding: '5px 9px' } },
+          papers.map(function (s) {
+            return h('label', { key: s.id, style: { display: 'flex', gap: 7, alignItems: 'flex-start', padding: '3px 0', fontSize: 12.5, cursor: 'pointer', lineHeight: 1.4 } },
+              h('input', { type: 'checkbox', checked: !!picked[s.id], style: { marginTop: 2, flex: 'none' }, onChange: function (e) { var c = e.target.checked; setPicked(function (pp) { var n = Object.assign({}, pp); n[s.id] = c; return n; }); } }),
+              h('span', null, s.title || '(cikk)', s.oa_pdf_url ? h('span', { style: { color: 'var(--faint)', fontSize: 11 } }, '  · PDF') : null));
+          })))
+        : h('div', { style: { fontSize: 12.5, color: 'var(--warn)', marginTop: 4, marginBottom: 6 } }, 'Ebben a tanulmányban nincs „include" cikk a legutolsó lépésen — előbb futtasd a szűrést a Research modulban (Lit. study).')) : null,
+      src === 'study' && depth === 'fulltext' ? h('div', { style: { fontSize: 11.5, color: 'var(--muted)', marginTop: -4, marginBottom: 8 } }, '⏳ A teljes szöveg az OA PDF-ekből készül (Claude, cikkenként ~1 perc, max 8 cikk; nagy PDF → absztrakt) — lassú, de a legrészletesebb.') : null,
       h('div', { className: 'mp-row' }, h('label', null, 'Cím'), h('input', { className: 'field', style: { flex: 1 }, placeholder: '(automatikus, ha üres)', value: title, onChange: function (e) { setTitle(e.target.value); } })),
       h('div', { className: 'mp-row' }, h('label', null, 'Nyelv'),
         h('select', { className: 'field', value: lang, onChange: function (e) { setLang(e.target.value); } }, LANGS.map(function (l) { return h('option', { key: l, value: l }, l); })),

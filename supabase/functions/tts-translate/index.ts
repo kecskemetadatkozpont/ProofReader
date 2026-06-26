@@ -1,8 +1,9 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2';
+import { encodeBase64 } from 'jsr:@std/encoding@1/base64';
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type', 'Access-Control-Allow-Methods': 'POST, OPTIONS' };
 const ANTHROPIC_KEY = Deno.env.get('ANTHROPIC_API_KEY');
 const MODEL = 'claude-haiku-4-5-20251001';
-const PDF_MAX = 14 * 1024 * 1024;
+const PDF_MAX = 4 * 1024 * 1024;   // edge isolate OOMs (HTTP 546) base64-ing + sending larger PDFs to Claude; bigger ones fall back to the abstract
 function json(b: unknown, s = 200) { return new Response(JSON.stringify(b), { status: s, headers: { ...CORS, 'Content-Type': 'application/json' } }); }
 async function callClaude(system: string, content: any, maxTokens: number) {
   const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'x-api-key': ANTHROPIC_KEY!, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' }, body: JSON.stringify({ model: MODEL, max_tokens: maxTokens, system, messages: [{ role: 'user', content }] }) });
@@ -13,14 +14,23 @@ async function fetchPdfBlock(url: string): Promise<any | null> {
   if (!url) return null;
   try {
     const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 14000);
-    const r = await fetch(url, { signal: ctrl.signal, headers: { 'User-Agent': 'Publify/1.0' } }); clearTimeout(t);
-    if (!r.ok) return null;
+    const r = await fetch(url, { signal: ctrl.signal, headers: { 'User-Agent': 'Publify/1.0', 'Range': 'bytes=0-' + (PDF_MAX - 1) } }); clearTimeout(t);
+    if (!r.ok || !r.body) { try { await r.body?.cancel(); } catch (e) { } return null; }
     const ct = r.headers.get('content-type') || '';
-    if (!/pdf/i.test(ct) && !/\.pdf($|\?)/i.test(url)) return null;
-    const buf = new Uint8Array(await r.arrayBuffer());
-    if (!buf.length || buf.length > PDF_MAX) return null;
-    let bin = ''; for (let i = 0; i < buf.length; i++) bin += String.fromCharCode(buf[i]);
-    return { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: btoa(bin) } };
+    if (!/pdf/i.test(ct) && !/\.pdf($|\?)/i.test(url)) { try { await r.body.cancel(); } catch (e) { } return null; }
+    const clen = parseInt(r.headers.get('content-length') || '0', 10);
+    if (clen && clen > PDF_MAX) { try { await r.body.cancel(); } catch (e) { } return null; }
+    // STREAM with a hard size cap — a huge PDF (incl. chunked / redirected, where content-length is absent) would
+    // otherwise OOM the isolate (HTTP 546) when arrayBuffer() loads it all. Stop + bail the moment we exceed the cap.
+    const reader = r.body.getReader(); const chunks: Uint8Array[] = []; let total = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) { total += value.length; if (total > PDF_MAX) { try { await reader.cancel(); } catch (e) { } return null; } chunks.push(value); }
+    }
+    if (!total) return null;
+    const buf = new Uint8Array(total); let off = 0; for (const c of chunks) { buf.set(c, off); off += c.length; }
+    return { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: encodeBase64(buf) } };   // native base64 (the old per-byte concat was O(n²))
   } catch { return null; }
 }
 Deno.serve(async (req) => {
