@@ -298,8 +298,8 @@
     function finalize(ttl, segs, blobs, meta) {
       if (!blobs.length) { setBusy(false); setErr('No audio was produced.'); return; }
       setProg('Assembling audio file + saving…'); setPct(null);
-      var mp3 = E.concatMp3(blobs);
       var path = props.me.id + '/' + uuid() + '.mp3';
+      E.concatMp3(blobs).then(function (mp3) {   // concatMp3 is async — uploading the Promise produced a 16-byte "[object Promise]" file
       props.sb.storage.from('audiobooks').upload(path, mp3, { contentType: 'audio/mpeg', upsert: false }).then(function (up) {
         if (up && up.error) { setBusy(false); setErr('Save failed: ' + up.error.message); return; }
         var chars = segs.reduce(function (a, s) { return a + s.length; }, 0);
@@ -313,6 +313,7 @@
           props.onCreated(r.data);
         });
       });
+      }).catch(function (e) { setBusy(false); setErr('Audio assembly failed: ' + e); });
     }
 
     return h('div', { className: 'mp-card' },
