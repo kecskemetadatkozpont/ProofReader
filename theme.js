@@ -54,6 +54,12 @@
     'html.dark #pubnav { background: rgba(13,16,24,.72) !important; backdrop-filter: blur(16px) saturate(1.2); -webkit-backdrop-filter: blur(16px) saturate(1.2); border-bottom: 1px solid rgba(255,255,255,.08) !important; }',
     // inputs: a subtle aurora focus glow (complements the global focus ring)
     'html.dark .field:focus, html.dark input:focus, html.dark textarea:focus, html.dark select:focus { border-color: var(--accent) !important; box-shadow: 0 0 0 3px rgba(124,92,240,.20) !important; }',
+    // thin, dark, aurora-tinted scrollbars
+    'html.dark { scrollbar-color: #333c52 transparent; scrollbar-width: thin; }',
+    'html.dark ::-webkit-scrollbar { width: 11px; height: 11px; }',
+    'html.dark ::-webkit-scrollbar-track { background: transparent; }',
+    'html.dark ::-webkit-scrollbar-thumb { background: #2e3650; border-radius: 999px; border: 3px solid transparent; background-clip: content-box; }',
+    'html.dark ::-webkit-scrollbar-thumb:hover { background: #41496b; border-width: 2px; }',
     // ── accessibility baseline (both themes) — one canonical keyboard-focus ring app-wide ──
     ':focus-visible { outline: 2px solid var(--accent, #4f46e5) !important; outline-offset: 2px; border-radius: inherit; }',
     'a:focus-visible, button:focus-visible, [role="button"]:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent, #4f46e5) !important; outline-offset: 2px; }',
