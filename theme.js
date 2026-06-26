@@ -60,6 +60,14 @@
     'html.dark ::-webkit-scrollbar-track { background: transparent; }',
     'html.dark ::-webkit-scrollbar-thumb { background: #2e3650; border-radius: 999px; border: 3px solid transparent; background-clip: content-box; }',
     'html.dark ::-webkit-scrollbar-thumb:hover { background: #41496b; border-width: 2px; }',
+    // ── Magnetic Ring cursor (desktop/mouse only; the JS that drives it is below) ──
+    'html.pr-cursor, html.pr-cursor * { cursor: none !important; }',
+    'html.pr-cursor textarea, html.pr-cursor [contenteditable], html.pr-cursor .cm-tex, html.pr-cursor .cm-revtext, html.pr-cursor pre, html.pr-cursor code, html.pr-cursor input:is([type=text],[type=search],[type=email],[type=url],[type=password],[type=number],[type=tel]), html.pr-cursor input:not([type]) { cursor: text !important; }',
+    '#pr-cur { position: fixed; inset: 0; pointer-events: none; z-index: 2147483646; opacity: 1; transition: opacity .2s; }',
+    '#pr-cur.hide { opacity: 0; }',
+    '#pr-cur .pr-cur-dot { position: fixed; left: 0; top: 0; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%; background: #fff; mix-blend-mode: difference; will-change: transform; }',
+    '#pr-cur .pr-cur-ring { position: fixed; left: 0; top: 0; width: 34px; height: 34px; margin: -17px 0 0 -17px; border-radius: 50%; border: 1.6px solid var(--accent, #8b93f8); box-shadow: 0 0 14px -3px rgba(129,92,240,.5); will-change: transform; transition: width .18s, height .18s, margin .18s, border-radius .18s, background .18s, border-color .18s; }',
+    '#pr-cur .pr-cur-ring.snap { background: rgba(139,147,248,.12); border-color: #a855f7; }',
     // ── accessibility baseline (both themes) — one canonical keyboard-focus ring app-wide ──
     ':focus-visible { outline: 2px solid var(--accent, #4f46e5) !important; outline-offset: 2px; border-radius: inherit; }',
     'a:focus-visible, button:focus-visible, [role="button"]:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent, #4f46e5) !important; outline-offset: 2px; }',
@@ -139,4 +147,48 @@
   // 3. public API — used by the nav drawer's dark-mode switch
   function set(t) { apply(t); try { localStorage.setItem(KEY, t); } catch (e) { } window.dispatchEvent(new CustomEvent('pr-theme', { detail: { dark: isDark() } })); }
   window.PRTheme = { isDark: isDark, set: set, toggle: function () { set(isDark() ? 'light' : 'dark'); } };
+
+  // ── Magnetic Ring cursor: a precise dot + a spring ring that snaps onto interactive targets ──
+  (function () {
+    if (window.PR_NO_CURSOR || !window.matchMedia || !matchMedia('(pointer: fine)').matches) return;   // mouse only; opt-out via window.PR_NO_CURSOR
+    var reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    function start() {
+      if (document.getElementById('pr-cur') || !document.body) return;
+      var root = document.createElement('div'); root.id = 'pr-cur'; root.className = 'hide';
+      var ring = document.createElement('div'); ring.className = 'pr-cur-ring';
+      var dot = document.createElement('div'); dot.className = 'pr-cur-dot';
+      root.appendChild(ring); root.appendChild(dot); document.body.appendChild(root);
+      document.documentElement.classList.add('pr-cursor');
+      var mx = window.innerWidth / 2, my = window.innerHeight / 2, rx = mx, ry = my, snap = null, txt = false;
+      var HIT = 'a,button,[role="button"],.btn,.seg button,.chip,.tab,.ca,.pc-chip,.pf-pub-files,label,summary,[data-cursor],.cm-rp-item,.cm-li,.cm-saved-li,.pn-nav a';
+      var TEXT = 'textarea,[contenteditable],.cm-tex,.cm-revtext,.ct-textlayer,pre,code,input:is([type=text],[type=search],[type=email],[type=url],[type=password],[type=number],[type=tel]),input:not([type])';
+      function lerp(a, b, t) { return a + (b - a) * t; }
+      document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; if (!txt) root.classList.remove('hide'); }, { passive: true });
+      document.addEventListener('mouseover', function (e) {
+        var el = e.target; if (!el || !el.closest) return;
+        var isTxt = !!el.closest(TEXT) && !el.closest('button,a,[role="button"],.btn');
+        var hit = el.closest(HIT);
+        txt = isTxt;
+        if (isTxt) { root.classList.add('hide'); snap = null; } else { root.classList.remove('hide'); snap = hit || null; }
+      }, { passive: true });
+      document.addEventListener('mouseleave', function () { root.classList.add('hide'); });
+      window.addEventListener('blur', function () { root.classList.add('hide'); });
+      (function frame() {
+        var tx = mx, ty = my;
+        if (snap && snap.isConnected) { var r = snap.getBoundingClientRect(); tx = r.left + r.width / 2; ty = r.top + r.height / 2; } else snap = null;
+        rx = lerp(rx, tx, reduce ? 1 : 0.22); ry = lerp(ry, ty, reduce ? 1 : 0.22);
+        dot.style.transform = 'translate(' + mx + 'px,' + my + 'px)';
+        ring.style.transform = 'translate(' + rx + 'px,' + ry + 'px)';
+        if (snap) {
+          var rr = snap.getBoundingClientRect(), w = rr.width + 12, hh = rr.height + 12, br = parseFloat(getComputedStyle(snap).borderRadius) || 8;
+          ring.style.width = w + 'px'; ring.style.height = hh + 'px'; ring.style.margin = (-hh / 2) + 'px 0 0 ' + (-w / 2) + 'px'; ring.style.borderRadius = Math.min(br + 6, 999) + 'px';
+          ring.classList.add('snap');
+        } else if (ring.classList.contains('snap')) {
+          ring.style.width = ring.style.height = '34px'; ring.style.margin = '-17px 0 0 -17px'; ring.style.borderRadius = '50%'; ring.classList.remove('snap');
+        }
+        requestAnimationFrame(frame);
+      })();
+    }
+    if (document.body) start(); else document.addEventListener('DOMContentLoaded', start);
+  })();
 })();
