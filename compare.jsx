@@ -112,7 +112,7 @@
               return h('div', { key: id, className: 'cm-rp' }, h('b', null, id + (r ? ' · ' + r.reviewer : '')), r ? h('div', { className: 'cm-rp-c' }, '„' + r.comment + '"') : null);
             }),
             sel.reason ? h('div', { className: 'cm-reason' }, h('b', null, 'Indok: '), sel.reason) : null))
-        : h('div', { className: 'cm-main' }, h('div', { style: { color: 'var(--muted)' } }, 'Nincs változás ehhez a szűrőhöz.')));
+        : h('div', { className: 'cm-main' }, h('div', { style: { color: 'var(--muted)' } }, 'Nincs változás ehhez a szűrőhöz.'))));
   }
 
   var root = document.getElementById('root');
