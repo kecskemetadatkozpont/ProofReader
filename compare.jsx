@@ -10,6 +10,8 @@
   var h = React.createElement;
   var useState = React.useState, useRef = React.useRef, useEffect = React.useEffect;
   var sb = (window.PR_BACKEND && window.PR_BACKEND.sb) || window.PR_SB || null;   // Supabase client (for saving)
+  var shareToken = (function () { try { return new URLSearchParams(location.search).get('share') || ''; } catch (e) { return ''; } })();   // ?share=<token> → read-only public view
+  function shareLinkFor(token) { return location.origin + location.pathname + '?share=' + token; }
 
   var CAT = {
     reframing: { c: '#4f46e5', t: 'átkeretezés' }, correction: { c: '#dc2626', t: 'javítás' },
@@ -165,20 +167,55 @@
     var rvsS = useState(''), revSaving = rvsS[0], setRevSaving = rvsS[1];
     var npS = useState(false), notePanel = npS[0], setNotePanel = npS[1];        // floating reviewer-note overlay
     var posS = useState(null), notePos = posS[0], setNotePos = posS[1];          // {top,left} once dragged
+    // public sharing
+    var sharedMode = !!shareToken, ro = sharedMode;                              // read-only public view
+    var shoS = useState(false), shareOpen = shoS[0], setShareOpen = shoS[1];
+    var shbS = useState(false), shareBusy = shbS[0], setShareBusy = shbS[1];
+    var shcS = useState(false), shareCopied = shcS[0], setShareCopied = shcS[1];
 
     useEffect(function () {
-      if (!sb) return;
+      if (!sb || sharedMode) return;
       sb.auth.getUser().then(function (r) { var u = r && r.data && r.data.user; if (u) { setMe(u); loadProjects(u.id); } });
     }, []);
+    useEffect(function () { if (sharedMode && sb && window.JSZip) loadShared(shareToken); }, []);
+    function loadShared(token) {
+      setLoading(true); setErr('');
+      sb.rpc('compare_shared', { p_token: token }).then(function (r) {
+        var row = r && r.data && r.data[0];
+        if ((r && r.error) || !row) { setErr('A megosztott összehasonlítás nem érhető el — lehet, hogy a megosztást visszavonták.'); setLoading(false); return; }
+        setReviewerText(row.reviewer_text || '');
+        if (!row.zip_public_url) { setErr('A megosztott csomag nem elérhető.'); setLoading(false); return; }
+        fetch(row.zip_public_url).then(function (resp) { return resp.blob(); }).then(function (blob) {
+          return window.JSZip.loadAsync(blob).then(function (zip) {
+            var byPath = {}; var names = Object.keys(zip.files).filter(function (n) { return !zip.files[n].dir; });
+            return Promise.all(names.map(function (n) { return zip.files[n].async('blob').then(function (b) { byPath[n] = b; }); })).then(function () { loadPackage(byPath); });
+          });
+        }).catch(function (e) { setErr('Betöltési hiba: ' + e); setLoading(false); });
+      });
+    }
+    function shareProject(makePublic) {
+      if (!sb || !me || !savedId) return;
+      var row = projects.filter(function (p) { return p.id === savedId; })[0]; if (!row) return;
+      setShareBusy(true);
+      if (!makePublic) { sb.from('compare_projects').update({ is_public: false }).eq('id', savedId).then(function () { setShareBusy(false); if (me) loadProjects(me.id); }); return; }
+      var token = row.share_token || ((window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID().replace(/-/g, '') : ('t' + Date.now().toString(36) + Math.round(Math.random() * 1e9).toString(36)));
+      var zpath = row.zip_path || (me.id + '/' + savedId + '/package.zip');
+      sb.storage.from('compare').createSignedUrl(zpath, 31536000).then(function (r) {
+        var url = (r && r.data && r.data.signedUrl) || null;
+        if (!url) { setShareBusy(false); setErr('A megosztó link nem hozható létre — mentsd újra a projektet.'); return; }
+        sb.from('compare_projects').update({ is_public: true, share_token: token, zip_public_url: url, shared_at: new Date().toISOString() }).eq('id', savedId).then(function () { setShareBusy(false); if (me) loadProjects(me.id); });
+      });
+    }
     function loadProjects(uid) {
       if (!sb) return;
-      sb.from('compare_projects').select('id,title,publication,stats,file_count,size_bytes,zip_path,reviewer_text,created_at').eq('owner', uid).order('created_at', { ascending: false }).then(function (r) { setProjects((r && r.data) || []); });
+      sb.from('compare_projects').select('id,title,publication,stats,file_count,size_bytes,zip_path,reviewer_text,is_public,share_token,created_at').eq('owner', uid).order('created_at', { ascending: false }).then(function (r) { setProjects((r && r.data) || []); });
     }
 
     var rp = {}; ((db && db.review_points) || []).forEach(function (r) { rp[r.id] = r; });
     var changes = (db && db.changes) || [];
     var shown = filterP ? changes.filter(function (c) { return (c.review_points || []).indexOf(filterP) >= 0; }) : changes;
     var sel = changes.filter(function (c) { return c.id === selId; })[0] || shown[0];
+    var curRow = (projects || []).filter(function (p) { return p.id === savedId; })[0] || {};
 
     function buildVer(byPath, base, folder) {
       var prefix = base + (folder.path || '') + '/';
@@ -267,9 +304,9 @@
         h('div', { className: 'cm-rev-bar' },
           h('h3', { style: { margin: 0 } }, '📝 Bírálók szövege'),
           h('span', { className: 'cm-sub', style: { flex: 1 } }, 'Másold ide a bírálók eredeti (natív) szövegét — a mentett projekttel együtt megmarad.'),
-          sb ? h('button', { className: 'btn pri', onClick: saveReviewerText, disabled: revSaving === 'mentés…' }, '💾 Mentés') : null,
+          (!ro && sb) ? h('button', { className: 'btn pri', onClick: saveReviewerText, disabled: revSaving === 'mentés…' }, '💾 Mentés') : null,
           revSaving ? h('span', { style: { fontSize: 12.5, color: revSaving.indexOf('Hiba') >= 0 ? 'var(--danger)' : 'var(--muted)' } }, revSaving) : null),
-        h('textarea', { className: 'cm-revtext', value: reviewerText, spellCheck: false, placeholder: 'Reviewer 1\n1. ...\n2. ...\n\nReviewer 2\n1. ...', onChange: function (e) { setReviewerText(e.target.value); } }));
+        h('textarea', { className: 'cm-revtext', value: reviewerText, spellCheck: false, readOnly: ro, placeholder: 'Reviewer 1\n1. ...\n2. ...\n\nReviewer 2\n1. ...', onChange: function (e) { setReviewerText(e.target.value); } }));
     }
     function savedListBlock() {
       if (!sb) return null;
@@ -333,14 +370,19 @@
     function saveKey() { if (window.PREleven && keyVal.trim()) { window.PREleven.setKey(keyVal); setNeedKey(false); setKeyVal(''); genAudio(); } }
 
     // ---------- render ----------
-    if (!db) return h('div', { className: 'cm-wrap' },
-      h('div', { className: 'cm-empty' },
-        h('h1', null, '🔀 Revízió-összehasonlítás'),
-        h('p', null, 'Töltsd be a teljes ', h('code', null, 'P1_review_compare'), ' mappát — a ', h('code', null, 'change_database.json'), ' + a két verzió almappáját (a .tex / .bib / ábrák / osztály + a fordított PDF). A betöltés helyben történik; ha rákattintasz a Mentésre, a teljes csomag a fiókodhoz tárolódik, hogy legközelebb ne kelljen újra feltöltened.'),
-        h('input', { ref: function (el) { folderRef.current = el; if (el) { el.setAttribute('webkitdirectory', ''); el.setAttribute('directory', ''); el.setAttribute('mozdirectory', ''); } }, type: 'file', multiple: true, style: { display: 'none' }, onChange: onFolder }),
-        h('div', { style: { marginTop: 14 } }, h('button', { className: 'btn pri', onClick: function () { folderRef.current && folderRef.current.click(); } }, loading ? 'Betöltés…' : '📁 Mappa kiválasztása')),
-        err ? h('div', { style: { color: 'var(--danger)', marginTop: 10 } }, err) : null,
-        savedListBlock()));
+    if (!db) {
+      if (sharedMode) return h('div', { className: 'cm-wrap' }, h('div', { className: 'cm-empty' },
+        h('h1', null, '🔀 Megosztott összehasonlítás'),
+        err ? h('div', { style: { color: 'var(--danger)', marginTop: 10 } }, err) : h('p', null, 'Betöltés… (a megosztott csomag letöltése folyamatban)')));
+      return h('div', { className: 'cm-wrap' },
+        h('div', { className: 'cm-empty' },
+          h('h1', null, '🔀 Revízió-összehasonlítás'),
+          h('p', null, 'Töltsd be a teljes ', h('code', null, 'P1_review_compare'), ' mappát — a ', h('code', null, 'change_database.json'), ' + a két verzió almappáját (a .tex / .bib / ábrák / osztály + a fordított PDF). A betöltés helyben történik; ha rákattintasz a Mentésre, a teljes csomag a fiókodhoz tárolódik, hogy legközelebb ne kelljen újra feltöltened.'),
+          h('input', { ref: function (el) { folderRef.current = el; if (el) { el.setAttribute('webkitdirectory', ''); el.setAttribute('directory', ''); el.setAttribute('mozdirectory', ''); } }, type: 'file', multiple: true, style: { display: 'none' }, onChange: onFolder }),
+          h('div', { style: { marginTop: 14 } }, h('button', { className: 'btn pri', onClick: function () { folderRef.current && folderRef.current.click(); } }, loading ? 'Betöltés…' : '📁 Mappa kiválasztása')),
+          err ? h('div', { style: { color: 'var(--danger)', marginTop: 10 } }, err) : null,
+          savedListBlock()));
+    }
 
     var TABS = [['workspace', '⊞ Áttekintés'], ['changes', 'Változások'], ['pdf', 'PDF + kiemelés'], ['edit', 'Élő szerkesztés'], ['reviewers', '📝 Bírálók'], ['audio', '🎧 Hangoskönyv']];
     var header = h('div', { className: 'cm-head' },
@@ -348,10 +390,12 @@
         h('h1', null, (db.publication && db.publication.title) || 'Revízió-összehasonlítás'),
         h('div', { className: 'cm-sub' }, (db.publication && db.publication.venue ? db.publication.venue + ' · ' : '') + changes.length + ' változás · ' + ((db.review_points || []).length) + ' bírálói pont' + (pkg ? ' · ' + (pdfs.v2 ? 'v2✓' : 'v2✗') + ' ' + (pdfs.v3 ? 'v3✓' : 'v3✗') : ''))),
       h('div', { style: { marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' } },
-        saving ? h('span', { style: { fontSize: 12.5, color: saving.indexOf('Hiba') >= 0 ? 'var(--danger)' : 'var(--muted)' } }, saving) : null,
-        sb ? h('button', { className: 'btn' + (savedId ? '' : ' pri'), onClick: saveProject, disabled: !!(saving && saving !== 'Mentve ✓' && saving.indexOf('Hiba') < 0 && saving.indexOf('jelentkezz') < 0) }, savedId ? '💾 Újramentés' : '💾 Mentés') : null,
-        h('button', { className: 'btn' + (notePanel ? ' pri' : ''), title: 'Bírálók jegyzete lebegő panelként az összehasonlító felületen', onClick: function () { var show = !notePanel; if (show && !notePos) setNotePos({ top: 66, left: Math.max(8, window.innerWidth - 404) }); setNotePanel(show); } }, '📝 Jegyzet'),
-        h('button', { className: 'btn', onClick: function () { setDb(null); setPkg(null); setPdfs({}); setRawFiles(null); setSavedId(null); setErr(''); } }, '← Mappák'),
+        ro ? h('span', { className: 'cm-robadge' }, '🔗 Megosztott nézet — csak olvasható') : null,
+        (!ro && saving) ? h('span', { style: { fontSize: 12.5, color: saving.indexOf('Hiba') >= 0 ? 'var(--danger)' : 'var(--muted)' } }, saving) : null,
+        (!ro && sb) ? h('button', { className: 'btn' + (savedId ? '' : ' pri'), onClick: saveProject, disabled: !!(saving && saving !== 'Mentve ✓' && saving.indexOf('Hiba') < 0 && saving.indexOf('jelentkezz') < 0) }, savedId ? '💾 Újramentés' : '💾 Mentés') : null,
+        (!ro && sb && savedId) ? h('button', { className: 'btn' + (curRow.is_public ? ' pri' : ''), title: 'Publikus link a bírálóknak', onClick: function () { setShareOpen(true); } }, curRow.is_public ? '🔗 Megosztva' : '🔗 Megosztás') : null,
+        h('button', { className: 'btn' + (notePanel ? ' pri' : ''), title: 'Bírálók jegyzete lebegő panelként', onClick: function () { var show = !notePanel; if (show && !notePos) setNotePos({ top: 66, left: Math.max(8, window.innerWidth - 404) }); setNotePanel(show); } }, '📝 Jegyzet'),
+        (!ro) ? h('button', { className: 'btn', onClick: function () { setDb(null); setPkg(null); setPdfs({}); setRawFiles(null); setSavedId(null); setErr(''); } }, '← Mappák') : null,
         h('div', { className: 'seg' }, TABS.map(function (t) { return h('button', { key: t[0], className: view === t[0] ? 'on' : '', onClick: function () { setView(t[0]); if (t[0] === 'edit' && !texSrc) openEdit(); } }, t[1]); }))));
 
     function sidebar() {
@@ -481,12 +525,26 @@
     var notePanelEl = notePanel ? h('div', { className: 'cm-note', style: notePos ? { top: notePos.top + 'px', left: notePos.left + 'px', right: 'auto', bottom: 'auto' } : null },
       h('div', { className: 'cm-note-h', onMouseDown: function (e) { startMove(e, setNotePos); } },
         h('span', { className: 'cm-note-title' }, '📝 Bírálók jegyzete'),
-        (sb && savedId) ? h('button', { className: 'cm-note-btn', title: 'Mentés', onMouseDown: function (e) { e.stopPropagation(); }, onClick: saveReviewerText }, '💾') : null,
+        (!ro && sb && savedId) ? h('button', { className: 'cm-note-btn', title: 'Mentés', onMouseDown: function (e) { e.stopPropagation(); }, onClick: saveReviewerText }, '💾') : null,
         h('button', { className: 'cm-note-x', title: 'Bezárás', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function () { setNotePanel(false); } }, '×')),
       revSaving ? h('div', { className: 'cm-note-status' }, revSaving) : null,
-      h('textarea', { className: 'cm-note-t', value: reviewerText, spellCheck: false, placeholder: 'Másold ide / szerkeszd a bírálók szövegét — a mentett projekttel megmarad…', onChange: function (e) { setReviewerText(e.target.value); } })) : null;
+      h('textarea', { className: 'cm-note-t', value: reviewerText, spellCheck: false, readOnly: ro, placeholder: 'Másold ide / szerkeszd a bírálók szövegét — a mentett projekttel megmarad…', onChange: function (e) { setReviewerText(e.target.value); } })) : null;
 
-    return h('div', { className: 'cm-wrap' }, header, body, notePanelEl);
+    var shareLink = curRow.share_token ? shareLinkFor(curRow.share_token) : '';
+    var shareModalEl = (shareOpen && !ro) ? h('div', { className: 'cm-modal-scrim', onClick: function () { setShareOpen(false); } },
+      h('div', { className: 'cm-modal', onClick: function (e) { e.stopPropagation(); } },
+        h('div', { className: 'cm-modal-h' }, h('b', null, '🔗 Megosztás a bírálókkal'), h('button', { className: 'cm-note-x', onClick: function () { setShareOpen(false); } }, '×')),
+        h('p', { style: { fontSize: 13, color: 'var(--muted)', margin: '2px 0 12px' } }, 'Publikus link: bárki, akinek elküldöd, megnézheti ezt az összehasonlítást (a két PDF, a végrehajtott változások, a bírálói észrevételek) — bejelentkezés nélkül, csak olvasható módban.'),
+        h('label', { className: 'cm-share-toggle' },
+          h('input', { type: 'checkbox', checked: !!curRow.is_public, disabled: shareBusy, onChange: function (e) { shareProject(e.target.checked); } }),
+          h('span', null, shareBusy ? 'Frissítés…' : (curRow.is_public ? 'Publikus link bekapcsolva' : 'Publikus link bekapcsolása'))),
+        (curRow.is_public && shareLink) ? h('div', { style: { marginTop: 12 } },
+          h('div', { style: { display: 'flex', gap: 8 } },
+            h('input', { className: 'field', readOnly: true, value: shareLink, onFocus: function (e) { e.target.select(); }, style: { flex: 1, fontSize: 12 } }),
+            h('button', { className: 'btn pri', onClick: function () { try { navigator.clipboard.writeText(shareLink); setShareCopied(true); setTimeout(function () { setShareCopied(false); }, 1800); } catch (e) { } } }, shareCopied ? 'Másolva ✓' : 'Másolás')),
+          h('div', { style: { fontSize: 11.5, color: 'var(--faint)', marginTop: 8 } }, 'A link ~1 évig érvényes. Visszavonáshoz kapcsold ki a fenti kapcsolót — onnantól a link nem nyílik meg.')) : null)) : null;
+
+    return h('div', { className: 'cm-wrap' }, header, body, notePanelEl, shareModalEl);
   }
 
   var root = document.getElementById('root');
