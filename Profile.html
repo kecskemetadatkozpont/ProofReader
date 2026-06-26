@@ -125,8 +125,9 @@
     .pf-nav.on .pf-count { color: var(--accent); }
     .pf-pub-sum { display: flex; gap: 26px; }
     .pf-pub-sum b { font-size: 22px; display: block; } .pf-pub-sum span { font-size: 11.5px; color: var(--muted); }
-    .pf-pub { background: var(--pane); border: 1px solid var(--line); border-radius: 11px; padding: 13px 15px; margin-bottom: 9px; display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start; }
-    .pf-pub.open { border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
+    .pf-pub { background: var(--pane); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; margin-bottom: 10px; display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start; transition: border-color .14s, box-shadow .14s, transform .14s; }
+    .pf-pub:hover { border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); transform: translateY(-2px); box-shadow: 0 14px 32px -18px rgba(99,102,241,.4); }
+    .pf-pub.open { border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); transform: none; }
     .pf-pub-main { min-width: 0; flex: 1; }
     .pf-pub-t { font-size: 14px; font-weight: 600; line-height: 1.35; }
     .pf-pub-cite { font-size: 11.5px; color: var(--muted); margin-top: 3px; line-height: 1.4; }
