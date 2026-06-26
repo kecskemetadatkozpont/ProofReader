@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="hu">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Publify — Revízió-összehasonlítás</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root { --surface:#fff; --surface-2:#f5f6f9; --accent-tint:#eef0ff; --accent:#4f46e5; --accent-d:#4338ca; --ink:#1a2030; --muted:#5b6473; --faint:#8a92a0; --line:#e6e8ee; --soft:#f5f6f9; --softer:#fafbfc; --danger:#dc2626; --warn:#b45309; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; }
+    body { background: var(--softer); color: var(--ink); font-family: 'IBM Plex Sans', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+    code { background: var(--surface-2); padding: 1px 5px; border-radius: 5px; font-size: 12.5px; }
+    .btn { border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 9px; padding: 7px 13px; font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+    .btn:hover { border-color: var(--accent); color: var(--accent); }
+    .btn.pri { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .field { border: 1px solid var(--line); border-radius: 9px; padding: 7px 10px; font-family: inherit; font-size: 13px; background: var(--surface); color: var(--ink); width: 100%; }
+    .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
+    .seg button { border: 0; background: var(--surface); color: var(--muted); padding: 6px 11px; font-family: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; border-right: 1px solid var(--line); }
+    .seg button:last-child { border-right: 0; }
+    .seg button.on { background: var(--accent); color: #fff; }
+    /* layout */
+    .cm-wrap { max-width: 1320px; margin: 0 auto; padding: 18px 18px 40px; }
+    .cm-empty { text-align: center; color: var(--muted); padding: 70px 20px; }
+    .cm-empty h1 { color: var(--ink); }
+    .cm-head { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
+    .cm-head h1 { font-size: 19px; margin: 0; letter-spacing: -.2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 60vw; }
+    .cm-sub { font-size: 12.5px; color: var(--muted); margin-top: 3px; }
+    .cm-body { display: grid; grid-template-columns: 340px 1fr; gap: 14px; align-items: start; }
+    .cm-side { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 12px; position: sticky; top: 12px; max-height: calc(100vh - 90px); display: flex; flex-direction: column; }
+    .cm-filter label { font-size: 11px; font-weight: 700; color: var(--faint); text-transform: uppercase; letter-spacing: .04em; display: block; margin-bottom: 4px; }
+    .cm-rpcomment { font-size: 12px; color: var(--muted); font-style: italic; margin: 8px 2px; line-height: 1.45; }
+    .cm-list { overflow-y: auto; margin-top: 8px; }
+    .cm-li { padding: 8px 9px; border-radius: 9px; cursor: pointer; border: 1px solid transparent; margin-bottom: 3px; }
+    .cm-li:hover { background: var(--soft); }
+    .cm-li.on { background: var(--accent-tint); border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
+    .cm-op { font-size: 10.5px; font-weight: 700; text-transform: uppercase; }
+    .cm-cat { font-size: 10px; font-weight: 700; color: #fff; padding: 1px 6px; border-radius: 999px; }
+    .cm-sec { font-size: 11px; color: var(--faint); margin-left: auto; }
+    .cm-li-sum { font-size: 12.5px; line-height: 1.4; color: var(--ink); }
+    .cm-main { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; min-height: 300px; }
+    .cm-ch-head { display: flex; align-items: center; gap: 8px; }
+    .cm-conf { font-size: 10.5px; color: var(--faint); margin-left: auto; text-transform: uppercase; }
+    .cm-diff { font-size: 14px; line-height: 1.7; background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; white-space: pre-wrap; word-break: break-word; }
+    .d-add { background: rgba(22,163,74,.16); color: #15803d; border-radius: 3px; }
+    .d-del { background: rgba(220,38,38,.13); color: #b91c1c; text-decoration: line-through; border-radius: 3px; }
+    .cm-why { margin-top: 14px; }
+    .cm-why-h { font-size: 12px; font-weight: 700; color: var(--muted); margin-bottom: 6px; }
+    .cm-rp { background: var(--surface-2); border-left: 3px solid var(--accent); border-radius: 8px; padding: 8px 11px; margin-bottom: 7px; font-size: 13px; }
+    .cm-rp-c { color: var(--muted); font-style: italic; margin-top: 3px; line-height: 1.45; }
+    .cm-reason { font-size: 13px; color: var(--ink); margin-top: 6px; line-height: 1.5; }
+    /* pdfs */
+    .cm-pdfs { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; height: calc(100vh - 110px); }
+    .cm-pdf { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--surface); }
+    .cm-pdf-h { font-size: 12.5px; font-weight: 700; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+    .cm-pdf iframe { flex: 1; border: 0; width: 100%; }
+    .cm-pdf-empty { flex: 1; display: grid; place-items: center; color: var(--faint); font-size: 13px; }
+    @media (max-width: 820px) { .cm-body { grid-template-columns: 1fr; } .cm-side { position: static; max-height: none; } }
+  </style>
+  <script src="theme.js"></script>
+</head>
+<body>
+  <div id="root"></div>
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/diff@5.2.0/dist/diff.min.js"></script>
+  <script src="backend/config.js"></script>
+  <script src="auth.js"></script>
+  <script src="backend.js"></script>
+  <script src="nav.js"></script>
+  <script type="text/babel" src="compare.jsx"></script>
+  <script src="build.js"></script>
+  <script src="version-badge.js"></script>
+</body>
+</html>

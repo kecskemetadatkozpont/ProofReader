@@ -14,6 +14,7 @@
     { key: 'research', label: 'Research', href: 'Research.html' },
     { key: 'session', label: 'Publify Chat', href: 'Session.html' },
     { key: 'media', label: 'Médialejátszó', href: 'Media.html' },
+    { key: 'compare', label: 'Verzió-összehasonlítás', href: 'Compare.html' },
     { key: 'phd', label: 'Doctoral School', href: 'PhD.html' },
     { key: 'publications', label: 'Publications', href: 'Projects.html' },
     { key: 'admin', label: 'Admin', href: 'Admin.html', adminOnly: true }
