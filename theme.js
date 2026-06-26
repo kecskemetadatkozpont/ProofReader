@@ -46,6 +46,14 @@
     'html.dark .seg button.on, html.dark .seg .on, html.dark .seg button[aria-current], html.dark .seg button[aria-selected="true"] { background-image: linear-gradient(135deg,#6366f1,#a855f7) !important; background-color: transparent !important; color: #fff !important; }',
     // accent-tinted selection chips read better on the deep canvas
     'html.dark ::selection { background: rgba(168,85,247,.32); }',
+    // ── Aurora glass (phase 2): translucent panels over the glowing canvas ──
+    'html.dark .card, html.dark .panel, html.dark .pf-card, html.dark .pf-panel, html.dark .pf-pub, html.dark .pf-stat, html.dark .mp-card, html.dark .mp-item, html.dark .cm-main, html.dark .cm-side, html.dark .cm-ws-col, html.dark .cm-pdfcol, html.dark .cm-rev, html.dark .cm-audio, html.dark .stat, html.dark .kpi { background: rgba(23,27,40,.66) !important; backdrop-filter: blur(11px) saturate(1.15); -webkit-backdrop-filter: blur(11px) saturate(1.15); border: 1px solid rgba(255,255,255,.085) !important; box-shadow: 0 18px 48px -26px rgba(0,0,0,.7), inset 0 1px 0 rgba(255,255,255,.05) !important; }',
+    // overlays / popovers / drawers / dialogs → stronger glass
+    'html.dark .modal, html.dark .menu, html.dark .notif-pop, html.dark .voice-pop, html.dark .mention-menu, html.dark .ws-menu, html.dark .ws-add-menu, html.dark .wm-ins-menu, html.dark .up-modal, html.dark .pv-modal, html.dark .fig-modal, html.dark .diag-pop, html.dark .pn-drawer, html.dark .acct-drawer, html.dark .cm-modal, html.dark .cm-note, html.dark .pr-cfm { background: rgba(20,24,36,.84) !important; backdrop-filter: blur(20px) saturate(1.3); -webkit-backdrop-filter: blur(20px) saturate(1.3); border: 1px solid rgba(255,255,255,.10) !important; }',
+    // global nav bar → glass
+    'html.dark #pubnav { background: rgba(13,16,24,.72) !important; backdrop-filter: blur(16px) saturate(1.2); -webkit-backdrop-filter: blur(16px) saturate(1.2); border-bottom: 1px solid rgba(255,255,255,.08) !important; }',
+    // inputs: a subtle aurora focus glow (complements the global focus ring)
+    'html.dark .field:focus, html.dark input:focus, html.dark textarea:focus, html.dark select:focus { border-color: var(--accent) !important; box-shadow: 0 0 0 3px rgba(124,92,240,.20) !important; }',
     // ── accessibility baseline (both themes) — one canonical keyboard-focus ring app-wide ──
     ':focus-visible { outline: 2px solid var(--accent, #4f46e5) !important; outline-offset: 2px; border-radius: inherit; }',
     'a:focus-visible, button:focus-visible, [role="button"]:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent, #4f46e5) !important; outline-offset: 2px; }',
