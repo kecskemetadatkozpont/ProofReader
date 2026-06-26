@@ -396,7 +396,7 @@
         (!ro && sb && savedId) ? h('button', { className: 'btn' + (curRow.is_public ? ' pri' : ''), title: 'Public link for the reviewers', onClick: function () { setShareOpen(true); } }, curRow.is_public ? '🔗 Shared' : '🔗 Share') : null,
         h('button', { className: 'btn' + (notePanel ? ' pri' : ''), title: 'Reviewer note as a floating panel', onClick: function () { var show = !notePanel; if (show && !notePos) setNotePos({ top: 66, left: Math.max(8, window.innerWidth - 404) }); setNotePanel(show); } }, '📝 Note'),
         (!ro) ? h('button', { className: 'btn', onClick: function () { setDb(null); setPkg(null); setPdfs({}); setRawFiles(null); setSavedId(null); setErr(''); } }, '← Folders') : null,
-        h('div', { className: 'seg' }, TABS.map(function (t) { return h('button', { key: t[0], className: view === t[0] ? 'on' : '', onClick: function () { setView(t[0]); if (t[0] === 'edit' && !texSrc) openEdit(); } }, t[1]); }))));
+        (!ro) ? h('div', { className: 'seg' }, TABS.map(function (t) { return h('button', { key: t[0], className: view === t[0] ? 'on' : '', onClick: function () { setView(t[0]); if (t[0] === 'edit' && !texSrc) openEdit(); } }, t[1]); })) : null));
 
     function sidebar() {
       return h('div', { className: 'cm-side' },
@@ -515,11 +515,12 @@
         mainEl);
     }
     var body;
-    if (view === 'workspace') body = workspaceView();
-    else if (view === 'pdf') body = withSide(pdfPanes());
-    else if (view === 'edit') body = editPanel();
-    else if (view === 'reviewers') body = reviewersPanel();
-    else if (view === 'audio') body = audioPanel();
+    var eview = ro ? 'workspace' : view;   // shared/public view is locked to the 4-pane Overview
+    if (eview === 'workspace') body = workspaceView();
+    else if (eview === 'pdf') body = withSide(pdfPanes());
+    else if (eview === 'edit') body = editPanel();
+    else if (eview === 'reviewers') body = reviewersPanel();
+    else if (eview === 'audio') body = audioPanel();
     else body = withSide(changeDetail());
 
     var notePanelEl = notePanel ? h('div', { className: 'cm-note', style: notePos ? { top: notePos.top + 'px', left: notePos.left + 'px', right: 'auto', bottom: 'auto' } : null },
