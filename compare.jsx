@@ -277,7 +277,7 @@
     if (!db) return h('div', { className: 'cm-wrap' },
       h('div', { className: 'cm-empty' },
         h('h1', null, '🔀 Revízió-összehasonlítás'),
-        h('p', null, 'Töltsd be a teljes ', h('code', null, 'P1_review_compare'), ' mappát — a ', h('code', null, 'change_database.json'), ' + a két verzió almappáját (a .tex / .bib / ábrák / osztály + a fordított PDF). A böngésző csak olvassa, nem tölti fel sehova.'),
+        h('p', null, 'Töltsd be a teljes ', h('code', null, 'P1_review_compare'), ' mappát — a ', h('code', null, 'change_database.json'), ' + a két verzió almappáját (a .tex / .bib / ábrák / osztály + a fordított PDF). A betöltés helyben történik; ha rákattintasz a Mentésre, a teljes csomag a fiókodhoz tárolódik, hogy legközelebb ne kelljen újra feltöltened.'),
         h('input', { ref: function (el) { folderRef.current = el; if (el) { el.setAttribute('webkitdirectory', ''); el.setAttribute('directory', ''); el.setAttribute('mozdirectory', ''); } }, type: 'file', multiple: true, style: { display: 'none' }, onChange: onFolder }),
         h('div', { style: { marginTop: 14 } }, h('button', { className: 'btn pri', onClick: function () { folderRef.current && folderRef.current.click(); } }, loading ? 'Betöltés…' : '📁 Mappa kiválasztása')),
         err ? h('div', { style: { color: 'var(--danger)', marginTop: 10 } }, err) : null,
