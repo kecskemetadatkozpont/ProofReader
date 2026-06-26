@@ -373,10 +373,16 @@ function Card({ project, me, onOpen, onRename, onDuplicate, onDelete, onShare })
   const members = [Auth.byId(project.ownerId)].concat(project.members.map((m) => Auth.byId(m.userId))).filter(Boolean);
   const commit = () => { onRename(val.trim() || project.title); setRenaming(false); };
   return (
-    <div className="card" onClick={() => { if (!renaming) onOpen(); }}>
-      <div className="thumb">
-        {project._shared && <span className="shared-badge"><Avatar user={Auth.byId(project.ownerId)} size={16} />Shared</span>}
-        <MiniPage project={project} />
+    <div className="card proj-card" onClick={() => { if (!renaming) onOpen(); }}>
+      <div className="pc-head" onClick={(e) => { if (renaming) e.stopPropagation(); }}>
+        <span className="pc-ico" aria-hidden="true">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M4 2.2h4.6L12.4 6V13a.6.6 0 0 1-.6.6H4a.6.6 0 0 1-.6-.6V2.8A.6.6 0 0 1 4 2.2z" /><path d="M8.4 2.4v3.4h3.6" /><path d="M5.6 9h4.8M5.6 11h3.2" /></svg>
+        </span>
+        <div className="pc-chips">
+          {project._shared
+            ? <span className="pc-chip shared"><Avatar user={Auth.byId(project.ownerId)} size={15} />Shared</span>
+            : <span className="pc-chip">{isOwner ? 'Draft' : 'Editor'}</span>}
+        </div>
       </div>
       <div className="card-foot" onClick={(e) => { if (renaming) e.stopPropagation(); }}>
         {renaming
