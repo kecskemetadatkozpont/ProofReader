@@ -46,6 +46,14 @@
     function up() { document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up); document.body.style.userSelect = ''; document.body.style.cursor = ''; }
     document.addEventListener('mousemove', mv); document.addEventListener('mouseup', up); document.body.style.userSelect = 'none'; document.body.style.cursor = 'col-resize';
   }
+  // drag a floating panel by its header
+  function startMove(e, setPos) {
+    var card = e.currentTarget && e.currentTarget.closest ? e.currentTarget.closest('.cm-note') : null; if (!card) return;
+    e.preventDefault(); var r = card.getBoundingClientRect(); var ox = e.clientX - r.left, oy = e.clientY - r.top;
+    function mv(ev) { setPos({ left: Math.max(4, Math.min(window.innerWidth - 80, ev.clientX - ox)), top: Math.max(54, Math.min(window.innerHeight - 60, ev.clientY - oy)) }); }
+    function up() { document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up); document.body.style.userSelect = ''; }
+    document.addEventListener('mousemove', mv); document.addEventListener('mouseup', up); document.body.style.userSelect = 'none';
+  }
 
   // ---- a single PDF: render every page (canvas + text layer) and highlight the selected change ----
   function PdfDoc(props) {   // {bytes, change, side}  side = 'original' | 'final'
@@ -153,6 +161,8 @@
     // reviewers' raw text (free reference, persisted with the saved project)
     var rtS = useState(''), reviewerText = rtS[0], setReviewerText = rtS[1];
     var rvsS = useState(''), revSaving = rvsS[0], setRevSaving = rvsS[1];
+    var npS = useState(false), notePanel = npS[0], setNotePanel = npS[1];        // floating reviewer-note overlay
+    var posS = useState(null), notePos = posS[0], setNotePos = posS[1];          // {top,left} once dragged
 
     useEffect(function () {
       if (!sb) return;
@@ -338,6 +348,7 @@
       h('div', { style: { marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' } },
         saving ? h('span', { style: { fontSize: 12.5, color: saving.indexOf('Hiba') >= 0 ? 'var(--danger)' : 'var(--muted)' } }, saving) : null,
         sb ? h('button', { className: 'btn' + (savedId ? '' : ' pri'), onClick: saveProject, disabled: !!(saving && saving !== 'Mentve ✓' && saving.indexOf('Hiba') < 0 && saving.indexOf('jelentkezz') < 0) }, savedId ? '💾 Újramentés' : '💾 Mentés') : null,
+        h('button', { className: 'btn' + (notePanel ? ' pri' : ''), title: 'Bírálók jegyzete lebegő panelként az összehasonlító felületen', onClick: function () { var show = !notePanel; if (show && !notePos) setNotePos({ top: 66, left: Math.max(8, window.innerWidth - 404) }); setNotePanel(show); } }, '📝 Jegyzet'),
         h('button', { className: 'btn', onClick: function () { setDb(null); setPkg(null); setPdfs({}); setRawFiles(null); setSavedId(null); setErr(''); } }, '← Mappák'),
         h('div', { className: 'seg' }, TABS.map(function (t) { return h('button', { key: t[0], className: view === t[0] ? 'on' : '', onClick: function () { setView(t[0]); if (t[0] === 'edit' && !texSrc) openEdit(); } }, t[1]); }))));
 
@@ -433,7 +444,15 @@
     else if (view === 'audio') body = audioPanel();
     else body = withSide(changeDetail());
 
-    return h('div', { className: 'cm-wrap' }, header, body);
+    var notePanelEl = notePanel ? h('div', { className: 'cm-note', style: notePos ? { top: notePos.top + 'px', left: notePos.left + 'px', right: 'auto', bottom: 'auto' } : null },
+      h('div', { className: 'cm-note-h', onMouseDown: function (e) { startMove(e, setNotePos); } },
+        h('span', { className: 'cm-note-title' }, '📝 Bírálók jegyzete'),
+        (sb && savedId) ? h('button', { className: 'cm-note-btn', title: 'Mentés', onMouseDown: function (e) { e.stopPropagation(); }, onClick: saveReviewerText }, '💾') : null,
+        h('button', { className: 'cm-note-x', title: 'Bezárás', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function () { setNotePanel(false); } }, '×')),
+      revSaving ? h('div', { className: 'cm-note-status' }, revSaving) : null,
+      h('textarea', { className: 'cm-note-t', value: reviewerText, spellCheck: false, placeholder: 'Másold ide / szerkeszd a bírálók szövegét — a mentett projekttel megmarad…', onChange: function (e) { setReviewerText(e.target.value); } })) : null;
+
+    return h('div', { className: 'cm-wrap' }, header, body, notePanelEl);
   }
 
   var root = document.getElementById('root');
