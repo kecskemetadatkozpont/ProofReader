@@ -138,6 +138,7 @@
     profile: svg('<circle cx="8" cy="5.5" r="2.6"/><path d="M3 13c.6-2.4 2.5-3.6 5-3.6S12.4 10.6 13 13"/>'),
     session: svg('<path d="M14 8c0 2.5-2.7 4.5-6 4.5-.9 0-1.7-.1-2.5-.4L2 13l.9-2.6C2.3 9.7 2 8.9 2 8c0-2.5 2.7-4.5 6-4.5S14 5.5 14 8z"/>'),
     media: svg('<path d="M3 9V8.2a5 5 0 0 1 10 0V9"/><rect x="2.2" y="9" width="2.9" height="4.2" rx="1.1"/><rect x="10.9" y="9" width="2.9" height="4.2" rx="1.1"/>'),
+    compare: svg('<rect x="2" y="2.8" width="4.8" height="10.4" rx="1"/><rect x="9.2" y="2.8" width="4.8" height="10.4" rx="1"/><path d="M8 1.5v13"/>'),
     research: svg('<path d="M6 2v4.5L3 12.5A1 1 0 0 0 4 14h8a1 1 0 0 0 .9-1.5L10 6.5V2"/><path d="M5 2h6"/>'),
     phd: svg('<path d="M8 2L1.5 5.5 8 9l6.5-3.5z"/><path d="M4 7v3.2c0 .9 1.8 1.8 4 1.8s4-.9 4-1.8V7"/>'),
     publications: svg('<path d="M3 2.5h7l3 3V13a.5.5 0 0 1-.5.5H3a.5.5 0 0 1-.5-.5V3a.5.5 0 0 1 .5-.5z"/><path d="M5 7h6M5 9.5h6"/>'),
