@@ -128,7 +128,7 @@
     var pdfS = useState({}), pdfs = pdfS[0], setPdfs = pdfS[1];          // {v2:Uint8Array, v3:Uint8Array}
     var selS = useState(null), selId = selS[0], setSelId = selS[1];
     var fpS = useState(''), filterP = fpS[0], setFilterP = fpS[1];
-    var viewS = useState('changes'), view = viewS[0], setView = viewS[1];
+    var viewS = useState('workspace'), view = viewS[0], setView = viewS[1];
     var loadS = useState(false), loading = loadS[0], setLoading = loadS[1];
     var errS = useState(''), err = errS[0], setErr = errS[1];
     var folderRef = useRef(null);
@@ -157,7 +157,9 @@
     var swS = useState(330), sideW = swS[0], setSideW = swS[1];
     var pfS = useState(0.5), pdfFrac = pfS[0], setPdfFrac = pfS[1];
     var efS = useState(0.5), editFrac = efS[0], setEditFrac = efS[1];
-    var bodyRef = useRef(null), pdfWrapRef = useRef(null), editRef = useRef(null);
+    var rwS = useState(310), revW = rwS[0], setRevW = rwS[1];
+    var cwS = useState(330), chgW = cwS[0], setChgW = cwS[1];
+    var bodyRef = useRef(null), pdfWrapRef = useRef(null), editRef = useRef(null), wsRef = useRef(null);
     // reviewers' raw text (free reference, persisted with the saved project)
     var rtS = useState(''), reviewerText = rtS[0], setReviewerText = rtS[1];
     var rvsS = useState(''), revSaving = rvsS[0], setRevSaving = rvsS[1];
@@ -203,7 +205,7 @@
         var ff = (d.folders && d.folders.final) || { path: '02_final_v3' };
         var p = { v2: buildVer(byPath, base, of), v3: buildVer(byPath, base, ff) };
         setRawFiles(byPath); setSavedId(opts.savedId || null);
-        setDb(d); setPkg(p); setSelId((d.changes[0] || {}).id || null); setFilterP(''); setCompiledBytes(null); setTexSrc(''); setView('changes');
+        setDb(d); setPkg(p); setSelId((d.changes[0] || {}).id || null); setFilterP(''); setCompiledBytes(null); setTexSrc(''); setView('workspace');
         Promise.all(['v2', 'v3'].map(function (kk) { var pf = p[kk].pdfFile; return pf ? pf.arrayBuffer().then(function (ab) { return new Uint8Array(ab); }) : Promise.resolve(null); }))
           .then(function (arr) { setPdfs({ v2: arr[0], v3: arr[1] }); setLoading(false); });
       });
@@ -340,7 +342,7 @@
         err ? h('div', { style: { color: 'var(--danger)', marginTop: 10 } }, err) : null,
         savedListBlock()));
 
-    var TABS = [['changes', 'Változások'], ['pdf', 'PDF + kiemelés'], ['edit', 'Élő szerkesztés'], ['reviewers', '📝 Bírálók'], ['audio', '🎧 Hangoskönyv']];
+    var TABS = [['workspace', '⊞ Áttekintés'], ['changes', 'Változások'], ['pdf', 'PDF + kiemelés'], ['edit', 'Élő szerkesztés'], ['reviewers', '📝 Bírálók'], ['audio', '🎧 Hangoskönyv']];
     var header = h('div', { className: 'cm-head' },
       h('div', { style: { minWidth: 0 } },
         h('h1', null, (db.publication && db.publication.title) || 'Revízió-összehasonlítás'),
@@ -360,15 +362,46 @@
             h('option', { value: '' }, 'Minden változás (' + changes.length + ')'),
             (db.review_points || []).map(function (r) { var n = (db.index_by_review_point && db.index_by_review_point[r.id] || []).length; return h('option', { key: r.id, value: r.id }, r.id + ' (' + n + ') — ' + r.reviewer); }))),
         filterP && rp[filterP] ? h('div', { className: 'cm-rpcomment' }, '„' + rp[filterP].comment + '"') : null,
-        h('div', { className: 'cm-list' }, shown.map(function (c) {
-          var cat = CAT[c.category] || { c: '#6b7280', t: c.category };
-          return h('div', { key: c.id, className: 'cm-li' + (c.id === (sel && sel.id) ? ' on' : ''), onClick: function () { setSelId(c.id); } },
-            h('div', { style: { display: 'flex', gap: 6, alignItems: 'center', marginBottom: 2 } },
-              h('span', { className: 'cm-op', style: { color: (OP[c.op] || {}).c } }, (OP[c.op] || {}).t || c.op),
-              h('span', { className: 'cm-cat', style: { background: cat.c } }, cat.t),
-              h('span', { className: 'cm-sec' }, c.section)),
-            h('div', { className: 'cm-li-sum' }, c.change_summary));
-        })));
+        h('div', { className: 'cm-list' }, shown.map(changeLi)));
+    }
+    function changeLi(c) {
+      var cat = CAT[c.category] || { c: '#6b7280', t: c.category };
+      return h('div', { key: c.id, className: 'cm-li' + (c.id === (sel && sel.id) ? ' on' : ''), onClick: function () { setSelId(c.id); } },
+        h('div', { style: { display: 'flex', gap: 6, alignItems: 'center', marginBottom: 2 } },
+          h('span', { className: 'cm-op', style: { color: (OP[c.op] || {}).c } }, (OP[c.op] || {}).t || c.op),
+          h('span', { className: 'cm-cat', style: { background: cat.c } }, cat.t),
+          h('span', { className: 'cm-sec' }, c.section)),
+        h('div', { className: 'cm-li-sum' }, c.change_summary));
+    }
+    function selectRp(id) {
+      setFilterP(id);
+      var ids = id ? ((db.index_by_review_point && db.index_by_review_point[id]) || []) : changes.map(function (c) { return c.id; });
+      if (ids.length) setSelId(ids[0]);
+    }
+    // default 4-pane workspace: reviewer observation → its changes → the change on both PDFs
+    function workspaceView() {
+      var rps = db.review_points || [];
+      return h('div', { className: 'cm-ws', ref: wsRef },
+        h('div', { className: 'cm-ws-col', style: { width: revW + 'px', flex: 'none' } },
+          h('div', { className: 'cm-ws-h' }, '📝 Bírálók észrevételei (' + rps.length + ')'),
+          h('div', { className: 'cm-ws-scroll' },
+            h('div', { className: 'cm-rp-item' + (filterP === '' ? ' on' : ''), onClick: function () { selectRp(''); } }, h('div', { className: 'cm-rp-top' }, h('span', { className: 'cm-rp-id' }, 'Minden változás'), h('span', { className: 'cm-rp-cnt' }, changes.length))),
+            rps.map(function (r) {
+              var n = (db.index_by_review_point && db.index_by_review_point[r.id] || []).length;
+              return h('div', { key: r.id, className: 'cm-rp-item' + (filterP === r.id ? ' on' : ''), onClick: function () { selectRp(r.id); } },
+                h('div', { className: 'cm-rp-top' }, h('span', { className: 'cm-rp-id' }, r.id), h('span', { className: 'cm-rp-rev' }, r.reviewer), h('span', { className: 'cm-rp-cnt' }, n)),
+                h('div', { className: 'cm-rp-text' }, r.comment));
+            }))),
+        h('div', { className: 'cm-split', onMouseDown: function (e) { startDrag(e, wsRef.current, function (x, w) { setRevW(Math.max(190, Math.min(w - 470, x))); }); } }),
+        h('div', { className: 'cm-ws-col', style: { width: chgW + 'px', flex: 'none' } },
+          h('div', { className: 'cm-ws-h' }, 'Végrehajtott változások' + (filterP ? ' · ' + filterP : '') + ' (' + shown.length + ')'),
+          h('div', { className: 'cm-ws-scroll' }, shown.length ? shown.map(changeLi) : h('div', { style: { padding: 12, color: 'var(--muted)', fontSize: 13 } }, 'Nincs változás ehhez az észrevételhez.')),
+          sel ? h('div', { className: 'cm-ws-detail' }, h('div', { className: 'cm-ws-detail-sum' }, sel.change_summary), sel.reason ? h('div', { className: 'cm-ws-detail-reason' }, sel.reason) : null) : null),
+        h('div', { className: 'cm-split', onMouseDown: function (e) { startDrag(e, wsRef.current, function (x, w) { setChgW(Math.max(220, Math.min(w - revW - 340, x - revW - 8))); }); } }),
+        h('div', { className: 'cm-ws-pdfs', ref: pdfWrapRef, style: { gridTemplateColumns: pdfFrac + 'fr 8px ' + (1 - pdfFrac) + 'fr' } },
+          h('div', { className: 'cm-pdfcol' }, h('div', { className: 'cm-pdf-h' }, (pkg && pkg.v2 && pkg.v2.label) || 'Eredeti (v2)', sel ? h('span', { className: 'cm-pdf-hint' }, ' — ' + sel.id) : null), pdfs.v2 ? h(PdfDoc, { bytes: pdfs.v2, change: sel, side: 'original' }) : h('div', { className: 'cm-pdf-empty' }, 'nincs eredeti PDF — tölts be mappát/projektet')),
+          h('div', { className: 'cm-split', onMouseDown: function (e) { startDrag(e, pdfWrapRef.current, function (x, w) { setPdfFrac(Math.max(0.18, Math.min(0.82, x / w))); }); } }),
+          h('div', { className: 'cm-pdfcol' }, h('div', { className: 'cm-pdf-h' }, (pkg && pkg.v3 && pkg.v3.label) || 'Módosított (v3)', sel ? h('span', { className: 'cm-pdf-hint' }, ' — ' + sel.id) : null), pdfs.v3 ? h(PdfDoc, { bytes: pdfs.v3, change: sel, side: 'final' }) : h('div', { className: 'cm-pdf-empty' }, 'nincs módosított PDF'))));
     }
     function changeDetail() {
       if (!sel) return h('div', { className: 'cm-main' }, h('div', { style: { color: 'var(--muted)' } }, 'Nincs változás ehhez a szűrőhöz.'));
@@ -438,7 +471,8 @@
         mainEl);
     }
     var body;
-    if (view === 'pdf') body = withSide(pdfPanes());
+    if (view === 'workspace') body = workspaceView();
+    else if (view === 'pdf') body = withSide(pdfPanes());
     else if (view === 'edit') body = editPanel();
     else if (view === 'reviewers') body = reviewersPanel();
     else if (view === 'audio') body = audioPanel();

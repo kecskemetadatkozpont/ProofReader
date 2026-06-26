@@ -29,9 +29,27 @@
     .cm-head h1 { font-size: 19px; margin: 0; letter-spacing: -.2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 60vw; }
     .cm-sub { font-size: 12.5px; color: var(--muted); margin-top: 3px; }
     .cm-body { display: grid; grid-template-columns: 330px 8px minmax(0,1fr); gap: 0; align-items: start; }
-    .cm-split { cursor: col-resize; align-self: stretch; min-height: 60px; }
+    .cm-split { cursor: col-resize; align-self: stretch; min-height: 60px; flex: none; width: 8px; }
     .cm-split::after { content: ''; display: block; width: 3px; height: 100%; min-height: 60px; margin: 0 auto; background: var(--line); border-radius: 3px; transition: background .12s; }
     .cm-split:hover::after { background: var(--accent); }
+    /* 4-pane workspace */
+    .cm-ws { display: flex; align-items: stretch; height: calc(100vh - 98px); }
+    .cm-ws-col { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); overflow: hidden; min-width: 0; }
+    .cm-ws-h { font-size: 12px; font-weight: 700; padding: 9px 12px; border-bottom: 1px solid var(--line); color: var(--muted); flex: none; }
+    .cm-ws-scroll { overflow-y: auto; flex: 1; padding: 7px; min-height: 0; }
+    .cm-ws-pdfs { flex: 1; display: grid; min-width: 0; }
+    .cm-rp-item { padding: 8px 10px; border-radius: 9px; cursor: pointer; border: 1px solid transparent; margin-bottom: 4px; }
+    .cm-rp-item:hover { background: var(--soft); }
+    .cm-rp-item.on { background: var(--accent-tint); border-color: color-mix(in srgb, var(--accent) 32%, transparent); }
+    .cm-rp-top { display: flex; align-items: center; gap: 7px; margin-bottom: 3px; }
+    .cm-rp-id { font-size: 12px; font-weight: 700; color: var(--accent); }
+    .cm-rp-rev { font-size: 11px; color: var(--faint); }
+    .cm-rp-cnt { margin-left: auto; font-size: 11px; font-weight: 700; background: var(--accent); color: #fff; border-radius: 999px; padding: 0 7px; min-width: 18px; text-align: center; }
+    .cm-rp-text { font-size: 12px; line-height: 1.45; color: var(--ink); }
+    .cm-ws-detail { border-top: 1px solid var(--line); padding: 9px 12px; flex: none; max-height: 34%; overflow-y: auto; background: var(--surface-2); }
+    .cm-ws-detail-sum { font-size: 12.5px; font-weight: 600; margin-bottom: 4px; }
+    .cm-ws-detail-reason { font-size: 12px; line-height: 1.5; color: var(--muted); }
+    .cmp-pdfhost { flex: 1; }
     .cm-side { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 12px; position: sticky; top: 12px; max-height: calc(100vh - 90px); display: flex; flex-direction: column; }
     .cm-filter label { font-size: 11px; font-weight: 700; color: var(--faint); text-transform: uppercase; letter-spacing: .04em; display: block; margin-bottom: 4px; }
     .cm-rpcomment { font-size: 12px; color: var(--muted); font-style: italic; margin: 8px 2px; line-height: 1.45; }
@@ -60,7 +78,7 @@
     .cm-pdf-h { font-size: 12.5px; font-weight: 700; padding: 8px 12px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--surface); z-index: 2; }
     .cm-pdf-hint { font-weight: 500; color: var(--accent); }
     .cm-pdf-empty { display: grid; place-items: center; color: var(--faint); font-size: 13px; padding: 30px; text-align: center; }
-    .cmp-pdfdoc { overflow: auto; max-height: calc(100vh - 150px); padding: 10px; background: var(--surface-2); flex: 1; }
+    .cmp-pdfdoc { overflow: auto; max-height: calc(100vh - 112px); padding: 10px; background: var(--surface-2); flex: 1; }
     .cmp-page { position: relative; margin: 0 auto 10px; box-shadow: 0 1px 6px rgba(20,24,40,.14); background: #fff; }
     .cmp-page canvas { display: block; }
     .cmp-tl { position: absolute; left: 0; top: 0; overflow: hidden; line-height: 1; }
