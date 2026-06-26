@@ -19,7 +19,7 @@
   // Egyetem" + "John von Neumann University" → one group); unknown affiliations keep their raw value.
   function canonAff(a) {
     var s = String(a == null ? '' : a).trim();
-    if (!s) return '— Nincs megadva —';
+    if (!s) return '— Not provided —';
     var l = s.toLowerCase();
     if (/neumann/.test(l)) return 'John von Neumann University';
     if (/sz[eé]chenyi/.test(l)) return 'Széchenyi István University';
@@ -34,7 +34,7 @@
   }
   function colorFor(id) { var p = ['#4f46e5', '#0e9f6e', '#d9760b', '#db2777', '#0891b2', '#7c3aed', '#ca8a04', '#dc2626']; var x = 0; id = String(id || ''); for (var i = 0; i < id.length; i++) x = (x * 31 + id.charCodeAt(i)) >>> 0; return p[x % p.length]; }
   // models an admin can assign per user (profiles.ai_model); '' = system default. Must match the Edge whitelist.
-  var AI_MODELS = [['', 'Alapértelmezett (rendszerbeállítás)'], ['claude-opus-4-8', 'Opus 4.8 — legjobb minőség'], ['claude-sonnet-4-6', 'Sonnet 4.6 — kiegyensúlyozott'], ['claude-haiku-4-5-20251001', 'Haiku 4.5 — leggyorsabb / olcsó']];
+  var AI_MODELS = [['', 'Default (system setting)'], ['claude-opus-4-8', 'Opus 4.8 — best quality'], ['claude-sonnet-4-6', 'Sonnet 4.6 — balanced'], ['claude-haiku-4-5-20251001', 'Haiku 4.5 — fastest / cheapest']];
   function Avatar(props) {
     var u = props.u, sz = props.size || 32;
     var st = { width: sz, height: sz, fontSize: sz * 0.38 };
@@ -143,19 +143,19 @@
               (u.status === 'suspended' || u.status === 'rejected') && h('button', { className: 'btn ok', onClick: function () { onAction(u.id, 'approved'); } }, 'Reactivate')
             ),
             h('div', { style: { marginBottom: 16 } },
-              h('div', { style: { fontSize: 12, fontWeight: 700, color: 'var(--muted)', marginBottom: 5 } }, 'AI modell — research chat + elemzés'),
+              h('div', { style: { fontSize: 12, fontWeight: 700, color: 'var(--muted)', marginBottom: 5 } }, 'AI model — research chat + analysis'),
               h('select', { value: u.ai_model || '', onChange: function (e) { onSetModel(u.id, e.target.value); }, style: { width: '100%', height: 36, border: '1px solid var(--line)', borderRadius: 8, padding: '0 10px', fontFamily: 'inherit', fontSize: 13, background: 'var(--surface)', color: 'inherit' } },
                 AI_MODELS.map(function (m) { return h('option', { key: m[0], value: m[0] }, m[1]); }))
             ),
             h('div', { style: { marginBottom: 16 } },
               h('label', { style: { display: 'flex', alignItems: 'flex-start', gap: 9, fontSize: 13, cursor: 'pointer' } },
                 h('input', { type: 'checkbox', checked: !!u.can_workflows, style: { marginTop: 2 }, onChange: function (e) { onSetWorkflows(u.id, e.target.checked); } }),
-                h('span', null, h('b', null, 'Claude Workflow-k indítása'), h('span', { style: { display: 'block', fontSize: 11.5, color: 'var(--faint)', marginTop: 1 } }, 'Engedélyezi, hogy a felhasználó több-lépéses Claude workflow-kat futtasson a session-ben.')))
+                h('span', null, h('b', null, 'Run Claude Workflows'), h('span', { style: { display: 'block', fontSize: 11.5, color: 'var(--faint)', marginTop: 1 } }, 'Allows the user to run multi-step Claude workflows in the session.')))
             ),
             h('div', { style: { marginBottom: 16 } },
               h('label', { style: { display: 'flex', alignItems: 'flex-start', gap: 9, fontSize: 13, cursor: 'pointer' } },
                 h('input', { type: 'checkbox', checked: !!u.can_figures, style: { marginTop: 2 }, onChange: function (e) { onSetFigures(u.id, e.target.checked); } }),
-                h('span', null, h('b', null, 'Ábra-generálás (PaperBanana)'), h('span', { style: { display: 'block', fontSize: 11.5, color: 'var(--faint)', marginTop: 1 } }, 'Engedélyezi, hogy a felhasználó AI-val publikációs ábrákat generáljon a LaTeX editorban.')))
+                h('span', null, h('b', null, 'Figure generation (PaperBanana)'), h('span', { style: { display: 'block', fontSize: 11.5, color: 'var(--faint)', marginTop: 1 } }, 'Allows the user to generate publication figures with AI in the LaTeX editor.')))
             ),
             h('div', { className: 'kv' },
               h('div', { className: 'c' }, h('div', { className: 'l' }, 'Projects'), h('div', { className: 'v' }, agg.projCount), agg.researchCount ? h('div', { className: 's' }, agg.projects.length + ' LaTeX + ' + agg.researchCount + ' research') : null),
@@ -216,7 +216,7 @@
               h('div', { style: { fontSize: 13, marginTop: 6, whiteSpace: 'pre-wrap' } }, b.body),
               b.image_data ? h('img', { src: b.image_data, alt: 'screenshot', style: { maxWidth: 300, maxHeight: 190, borderRadius: 8, border: '1px solid var(--line)', marginTop: 8, cursor: 'zoom-in' }, onClick: function () { setImgOpen(b.image_data); } }) : null,
               h('div', { style: { display: 'flex', gap: 8, marginTop: 8 } },
-                h('textarea', { rows: 2, value: draft, placeholder: 'Válasz az ügyfélnek (a bejelentő látja a „Korábbi jelentéseim" alatt)…', style: { flex: 1, border: '1px solid var(--line)', borderRadius: 8, padding: '6px 9px', fontSize: 13, fontFamily: 'inherit', resize: 'vertical' }, onChange: function (e) { var v = e.target.value; setReplies(function (p) { var n = Object.assign({}, p); n[b.id] = v; return n; }); } }),
+                h('textarea', { rows: 2, value: draft, placeholder: 'Reply to the user (the reporter sees it under “My previous reports”)…', style: { flex: 1, border: '1px solid var(--line)', borderRadius: 8, padding: '6px 9px', fontSize: 13, fontFamily: 'inherit', resize: 'vertical' }, onChange: function (e) { var v = e.target.value; setReplies(function (p) { var n = Object.assign({}, p); n[b.id] = v; return n; }); } }),
                 h('button', { className: 'btn pri', style: { flex: 'none' }, onClick: function () { sendReply(b); } }, b.reply ? 'Update reply' : 'Reply')
               ),
               b.replied_at ? h('div', { style: { fontSize: 11.5, color: 'var(--muted)', marginTop: 4 } }, '✓ Replied · ' + fmtDate(b.replied_at)) : null

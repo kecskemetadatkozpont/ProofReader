@@ -42,7 +42,7 @@
     if (!enginePromise) {
       enginePromise = (async function () {
         if (!PdfTeXEngineCtor()) {
-          if (onProgress) onProgress('engine betöltése…');
+          if (onProgress) onProgress('loading engine…');
           await loadScriptOnce(ENGINE_SCRIPT);
         }
         var Ctor = PdfTeXEngineCtor();
@@ -86,7 +86,7 @@
 
       // create folders, then write every file
       dirsOf(files.map(function (f) { return f.path; })).forEach(function (d) { eng.makeMemFSFolder(d); });
-      onProgress('fájlok írása (' + files.length + ')…');
+      onProgress('writing files (' + files.length + ')…');
       files.forEach(function (f) {
         if (f.bytes != null) eng.writeMemFSFile(f.path, f.bytes);
         else eng.writeMemFSFile(f.path, f.text != null ? f.text : '');
@@ -96,7 +96,7 @@
 
       var r = null;
       for (var i = 1; i <= passes; i++) {
-        onProgress('fordítás ' + i + '/' + passes + '…');
+        onProgress('compiling ' + i + '/' + passes + '…');
         r = await eng.compileLaTeX();
         // if a pass yields no pdf and a fatal status, stop early
         if (r && r.status !== 0 && !r.pdf) break;
@@ -116,13 +116,13 @@
   function compileReason(log, status) {
     log = String(log || '');
     if (/No pages of output/.test(log) || status === -253) {
-      return 'A fordító 0 oldalt produkált — a fordított .tex valószínűleg töredék vagy üres ' +
-        '(hiányzik a \\documentclass / \\begin{document}…\\end{document} keret). Kösd a panelt a fő dokumentumra.';
+      return 'The compiler produced 0 pages — the compiled .tex is probably a fragment or empty ' +
+        '(missing the \\documentclass / \\begin{document}…\\end{document} frame). Point the panel at the main document.';
     }
     var miss = /(LaTeX Error: File `[^']+' not found|! Package [^\n]+ Error:[^\n]+|! Undefined control sequence[\s\S]{0,80}|! LaTeX Error:[^\n]+|! Emergency stop|Fatal error occurred)/.exec(log);
     if (miss) return miss[1].replace(/\s+/g, ' ').slice(0, 220);
-    if (status !== 0) return 'Fordítási hiba (status ' + status + ').';
-    return 'A fordítás nem készített PDF-et (ismeretlen ok).';
+    if (status !== 0) return 'Compilation error (status ' + status + ').';
+    return 'The compilation did not produce a PDF (unknown reason).';
   }
 
   // External TeX Live API (byte-identical). Contract: POST JSON
@@ -130,7 +130,7 @@
   async function compileExact(opts, endpoint) {
     opts = opts || {};
     endpoint = endpoint || window.ALOUD_TEX_EXACT_ENDPOINT;
-    if (!endpoint) throw new Error('compileExact: nincs beállítva endpoint (window.ALOUD_TEX_EXACT_ENDPOINT)');
+    if (!endpoint) throw new Error('compileExact: no endpoint configured (window.ALOUD_TEX_EXACT_ENDPOINT)');
     var t0 = Date.now();
     var payloadFiles = (opts.files || []).map(function (f) {
       if (f.bytes != null) {

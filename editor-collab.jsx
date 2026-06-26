@@ -59,7 +59,7 @@
           {it.when ? <span className="anno-pop2-when">{it.when}</span> : null}
         </div>
         {it.due ? <div className="anno-pop2-due">⏷ {it.due}</div> : null}
-        <div className="anno-pop2-body">{it.body ? it.body : <i className="anno-pop2-empty">(nincs szöveg)</i>}</div>
+        <div className="anno-pop2-body">{it.body ? it.body : <i className="anno-pop2-empty">(no text)</i>}</div>
       </div>)}
     </div>;
   }
@@ -267,11 +267,11 @@
     const comments = anns.filter((a) => a.kind !== 'todo');
     const todos = anns.filter((a) => a.kind === 'todo');
     return <div className="bubble-pop" ref={ref} style={{ left: left, top: top, width: W }}>
-      <div className="bubble-pop-head"><span>{[comments.length ? 'Megjegyzés' : '', todos.length ? 'Teendő' : ''].filter(Boolean).join(' · ')}</span><button className="bubble-pop-x" onClick={p.onClose} title="Bezárás">✕</button></div>
+      <div className="bubble-pop-head"><span>{[comments.length ? 'Comment' : '', todos.length ? 'To-do' : ''].filter(Boolean).join(' · ')}</span><button className="bubble-pop-x" onClick={p.onClose} title="Close">✕</button></div>
       <div className="bubble-pop-body">
         {comments.map((a) => <Thread key={a.id} ann={a} me={p.me} members={p.members} canEdit={p.canEdit} onReply={p.onReply} onResolve={p.onResolve} onDelete={p.onDelete} onJump={p.onJump} onEdit={p.onEdit} />)}
         {todos.map((a) => <TodoItem key={a.id} ann={a} me={p.me} members={p.members} canEdit={p.canEdit} onToggle={p.onToggleTodo} onJump={p.onJump} onDelete={p.onDelete} onEdit={p.onEdit} />)}
-        {!anns.length && <div className="bubble-empty">Ehhez a mondathoz nincs nyitott megjegyzés.</div>}
+        {!anns.length && <div className="bubble-empty">No open notes for this sentence.</div>}
       </div>
     </div>;
   }
@@ -793,8 +793,8 @@
       const e = email.trim(); if (!e) return;
       if (sugg[0]) { add(sugg[0]); return; }
       const cached = Auth.byEmail(e); if (cached) { add(cached); return; }
-      if (BE && BE.findUserByEmail) { BE.findUserByEmail(e).then((u) => { if (u) add(u); else alert('Nincs ilyen regisztrált felhasználó: ' + e); }); }
-      else alert('Nincs ilyen regisztrált felhasználó.');
+      if (BE && BE.findUserByEmail) { BE.findUserByEmail(e).then((u) => { if (u) add(u); else alert('No registered user with that address: ' + e); }); }
+      else alert('No such registered user.');
     };
     const link = location.href.split('#')[0];
     return <div className="overlay" onClick={p.onClose}><div className="modal" onClick={(e) => e.stopPropagation()}>
@@ -803,7 +803,7 @@
         <div className="field-label">Invite by email</div>
         <div style={{ display: 'flex', gap: 8 }}>
           <div style={{ flex: 1, position: 'relative' }}>
-            <input className="text-input" value={email} placeholder="Név vagy e-mail — kezdj el gépelni…" autoComplete="off" onChange={(e) => search(e.target.value)} onFocus={() => { if (sugg.length) setOpen(true); }} onKeyDown={(e) => { if (e.key === 'Enter') invite(); if (e.key === 'Escape') setOpen(false); }} style={{ width: '100%' }} />
+            <input className="text-input" value={email} placeholder="Name or email — start typing…" autoComplete="off" onChange={(e) => search(e.target.value)} onFocus={() => { if (sugg.length) setOpen(true); }} onKeyDown={(e) => { if (e.key === 'Enter') invite(); if (e.key === 'Escape') setOpen(false); }} style={{ width: '100%' }} />
             {open && sugg.length > 0 ? <div className="share-sugg">{sugg.map((u) => <button key={u.id} className="share-sugg-it" onMouseDown={(e) => e.preventDefault()} onClick={() => add(u)}><Avatar user={u} size={24} /><span className="ss-t"><b>{u.name}</b><small>{u.email}</small></span></button>)}</div> : null}
           </div>
           <select className="sel" value={role} onChange={(e) => setRole(e.target.value)}>{ROLES.map((r) => <option key={r} value={r}>{r}</option>)}</select>
@@ -812,8 +812,8 @@
         <div className="field-label" style={{ marginTop: 16 }}>People with access</div>
         <div className="member-row"><Avatar user={owner} size={30} /><span className="mname">{owner ? owner.name : project.ownerId}{owner && owner.id === me.id ? ' (you)' : ''}</span><span className="role-pill">Owner</span></div>
         {project.members.map((m) => { const u = Auth.byId(m.userId); const acc = accept[m.userId]; const pending = acc == null; return <div key={m.userId} className="member-row"><Avatar user={u} size={30} /><span className="mname">{u ? u.name : m.userId}</span>
-          {isOwnerView && cloud ? <span className={'inv-pill ' + (pending ? 'pending' : 'ok')} title={pending ? 'A meghívott még nem fogadta el a meghívást' : ('Elfogadva: ' + new Date(acc).toLocaleString())}>{pending ? 'Függőben' : 'Elfogadva'}</span> : null}
-          {project.ownerId === me.id ? <>{pending && cloud ? <button className="link" title="Meghívó-értesítés újraküldése" onClick={() => { Store.resendInvite(project.id, m.userId, m.role, project.title); setResent((s) => Object.assign({}, s, { [m.userId]: true })); }}>{resent[m.userId] ? 'Elküldve ✓' : 'Resend'}</button> : null}<select className="sel" value={m.role} onChange={(e) => { Store.setRole(project.id, m.userId, e.target.value); p.onChange(); }}>{ROLES.map((r) => <option key={r} value={r}>{r}</option>)}</select><button className="link" style={{ color: '#dc2626' }} onClick={() => { Store.removeMember(project.id, m.userId); p.onChange(); }}>Remove</button></> : <span className="role-pill">{m.role}</span>}
+          {isOwnerView && cloud ? <span className={'inv-pill ' + (pending ? 'pending' : 'ok')} title={pending ? 'The invitee has not yet accepted the invitation' : ('Accepted: ' + new Date(acc).toLocaleString())}>{pending ? 'Pending' : 'Accepted'}</span> : null}
+          {project.ownerId === me.id ? <>{pending && cloud ? <button className="link" title="Resend invitation notification" onClick={() => { Store.resendInvite(project.id, m.userId, m.role, project.title); setResent((s) => Object.assign({}, s, { [m.userId]: true })); }}>{resent[m.userId] ? 'Sent ✓' : 'Resend'}</button> : null}<select className="sel" value={m.role} onChange={(e) => { Store.setRole(project.id, m.userId, e.target.value); p.onChange(); }}>{ROLES.map((r) => <option key={r} value={r}>{r}</option>)}</select><button className="link" style={{ color: '#dc2626' }} onClick={() => { Store.removeMember(project.id, m.userId); p.onChange(); }}>Remove</button></> : <span className="role-pill">{m.role}</span>}
         </div>; })}
         <div className="field-label" style={{ marginTop: 16 }}>Public link</div>
         <label style={{ display: 'flex', alignItems: 'center', gap: 9, fontSize: 13 }}>

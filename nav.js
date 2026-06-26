@@ -13,8 +13,8 @@
     { key: 'profile', label: 'Open Profile', href: 'Profile.html' },
     { key: 'research', label: 'Research', href: 'Research.html' },
     { key: 'session', label: 'Publify Chat', href: 'Session.html' },
-    { key: 'media', label: 'Médialejátszó', href: 'Media.html' },
-    { key: 'compare', label: 'Verzió-összehasonlítás', href: 'Compare.html' },
+    { key: 'media', label: 'Media player', href: 'Media.html' },
+    { key: 'compare', label: 'Version comparison', href: 'Compare.html' },
     { key: 'phd', label: 'Doctoral School', href: 'PhD.html' },
     { key: 'publications', label: 'Publications', href: 'Projects.html' },
     { key: 'admin', label: 'Admin', href: 'Admin.html', adminOnly: true }
@@ -166,7 +166,7 @@
       var av = adminView();
       var du = av || curUser(), admin = isAdmin();
       document.documentElement.classList.toggle('pn-adminview', !!av);
-      document.getElementById('pn-left').innerHTML = '<a class="pn-brand" href="' + withAv('Projects.html') + '" title="Főoldal"><span class="pn-mk"><i></i></span>Publify</a>'
+      document.getElementById('pn-left').innerHTML = '<a class="pn-brand" href="' + withAv('Projects.html') + '" title="Home"><span class="pn-mk"><i></i></span>Publify</a>'
         + (PAGE_NAME[here] ? '<span class="pn-page">' + PAGE_NAME[here] + '</span>' : '')
         + (av ? '<span class="pn-as">👁 ' + esc(av.name || av.email || '') + '</span>' : '');
       document.getElementById('pn-prof').innerHTML = avHtml(du) + '<span class="pn-nm">' + esc((du && du.name) || 'Menu') + '</span><span class="pn-cv">' + (av ? '👁' : '▾') + '</span>';
@@ -214,7 +214,7 @@
     if (document.getElementById('pn-bug-btn')) return;
     var category = 'bug', imageData = null;
     var btn = document.createElement('button');
-    btn.id = 'pn-bug-btn'; btn.title = 'Hibajelentés / visszajelzés'; btn.textContent = '🐞';
+    btn.id = 'pn-bug-btn'; btn.title = 'Bug report / feedback'; btn.textContent = '🐞';
     btn.setAttribute('style', 'position:fixed;right:16px;bottom:16px;z-index:90;width:42px;height:42px;border-radius:50%;border:1px solid var(--line,#e4e7ec);background:var(--pane,#fff);box-shadow:0 4px 14px rgba(20,24,40,.18);font-size:18px;cursor:pointer;line-height:1;padding:0');
     var modal = document.createElement('div');
     modal.id = 'pn-bug-modal';
@@ -223,14 +223,14 @@
     card.setAttribute('style', 'background:var(--pane,#fff);color:var(--ink,#111);width:min(480px,94vw);max-height:90vh;overflow:auto;border-radius:14px;box-shadow:0 20px 60px rgba(15,20,40,.35);padding:16px 18px');
     var iSt = 'width:100%;box-sizing:border-box;border:1px solid var(--line,#e4e7ec);border-radius:8px;padding:8px 10px;font-size:13px;background:var(--app-bg,#fff);color:inherit';
     var catSt = 'flex:1;border:1px solid var(--line,#e4e7ec);background:var(--app-bg,#f7f8fa);color:inherit;border-radius:8px;padding:7px 8px;font-size:12.5px;cursor:pointer';
-    card.innerHTML = '<div style="font-weight:700;font-size:15px;margin-bottom:8px">🐞 Visszajelzés</div>'
-      + '<div id="pn-bug-cats" style="display:flex;gap:6px;margin-bottom:10px"><button data-cat="bug" style="' + catSt + '">🐞 Hiba</button><button data-cat="feature" style="' + catSt + '">💡 Feature request</button></div>'
-      + '<input id="pn-bug-title" placeholder="Rövid cím (opcionális)" style="' + iSt + ';margin-bottom:8px">'
-      + '<textarea id="pn-bug-body" rows="5" placeholder="Mit tapasztaltál? (az oldal és a verzió automatikusan rögzül)" style="' + iSt + ';font-family:inherit;resize:vertical"></textarea>'
-      + '<div style="display:flex;align-items:center;gap:8px;margin-top:8px"><button id="pn-bug-img-btn" style="border:1px solid var(--line,#e4e7ec);background:var(--app-bg,#f7f8fa);color:inherit;border-radius:8px;padding:6px 10px;font-size:12.5px;cursor:pointer">📎 Kép csatolása</button><span id="pn-bug-img-name" style="font-size:12px;color:var(--muted,#667)"></span><input id="pn-bug-img" type="file" accept="image/*" style="display:none"></div>'
+    card.innerHTML = '<div style="font-weight:700;font-size:15px;margin-bottom:8px">🐞 Feedback</div>'
+      + '<div id="pn-bug-cats" style="display:flex;gap:6px;margin-bottom:10px"><button data-cat="bug" style="' + catSt + '">🐞 Bug</button><button data-cat="feature" style="' + catSt + '">💡 Feature request</button></div>'
+      + '<input id="pn-bug-title" placeholder="Short title (optional)" style="' + iSt + ';margin-bottom:8px">'
+      + '<textarea id="pn-bug-body" rows="5" placeholder="What did you experience? (the page and version are recorded automatically)" style="' + iSt + ';font-family:inherit;resize:vertical"></textarea>'
+      + '<div style="display:flex;align-items:center;gap:8px;margin-top:8px"><button id="pn-bug-img-btn" style="border:1px solid var(--line,#e4e7ec);background:var(--app-bg,#f7f8fa);color:inherit;border-radius:8px;padding:6px 10px;font-size:12.5px;cursor:pointer">📎 Attach image</button><span id="pn-bug-img-name" style="font-size:12px;color:var(--muted,#667)"></span><input id="pn-bug-img" type="file" accept="image/*" style="display:none"></div>'
       + '<div id="pn-bug-img-prev" style="margin-top:8px"></div>'
       + '<div id="pn-bug-msg" style="font-size:12px;margin-top:6px;min-height:16px"></div>'
-      + '<div style="display:flex;gap:8px;justify-content:space-between;align-items:center;margin-top:8px"><button id="pn-bug-mine" style="border:0;background:transparent;color:var(--accent,#4f46e5);font-size:12.5px;cursor:pointer;padding:6px 0">Korábbi jelentéseim ▾</button><div style="display:flex;gap:8px"><button id="pn-bug-cancel" style="border:1px solid var(--line,#e4e7ec);background:var(--app-bg,#f7f8fa);color:inherit;border-radius:8px;padding:7px 12px;font-size:13px;cursor:pointer">Mégse</button><button id="pn-bug-send" style="border:0;background:var(--accent,#4f46e5);color:#fff;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:600;cursor:pointer">Küldés</button></div></div>'
+      + '<div style="display:flex;gap:8px;justify-content:space-between;align-items:center;margin-top:8px"><button id="pn-bug-mine" style="border:0;background:transparent;color:var(--accent,#4f46e5);font-size:12.5px;cursor:pointer;padding:6px 0">My previous reports ▾</button><div style="display:flex;gap:8px"><button id="pn-bug-cancel" style="border:1px solid var(--line,#e4e7ec);background:var(--app-bg,#f7f8fa);color:inherit;border-radius:8px;padding:7px 12px;font-size:13px;cursor:pointer">Cancel</button><button id="pn-bug-send" style="border:0;background:var(--accent,#4f46e5);color:#fff;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:600;cursor:pointer">Send</button></div></div>'
       + '<div id="pn-bug-list" style="display:none;margin-top:10px;max-height:260px;overflow:auto;border-top:1px solid var(--line,#e4e7ec);padding-top:8px"></div>';
     modal.appendChild(card);
     document.body.appendChild(btn); document.body.appendChild(modal);
@@ -276,20 +276,20 @@
     var listEl = document.getElementById('pn-bug-list');
     document.getElementById('pn-bug-mine').onclick = function () {
       if (listEl.style.display === 'block') { listEl.style.display = 'none'; return; }
-      listEl.style.display = 'block'; listEl.innerHTML = '<div style="font-size:12px;color:var(--muted,#667)">Betöltés…</div>';
+      listEl.style.display = 'block'; listEl.innerHTML = '<div style="font-size:12px;color:var(--muted,#667)">Loading…</div>';
       var BE = window.PR_BACKEND, u = curUser();
-      if (!(BE && BE.sb && u)) { listEl.innerHTML = '<div style="font-size:12px;color:var(--muted,#667)">Bejelentkezés szükséges.</div>'; return; }
+      if (!(BE && BE.sb && u)) { listEl.innerHTML = '<div style="font-size:12px;color:var(--muted,#667)">Sign-in required.</div>'; return; }
       BE.sb.from('bug_reports').select('id,category,title,body,status,reply,created_at').eq('reporter_id', u.id).order('created_at', { ascending: false }).then(function (r) {
         if (r && r.error) { listEl.innerHTML = '<div style="font-size:12px;color:var(--danger,#b42318)">' + esc(r.error.message) + '</div>'; return; }
         var rows = (r && r.data) || [];
-        if (!rows.length) { listEl.innerHTML = '<div style="font-size:12px;color:var(--muted,#667)">Még nincs jelentésed.</div>'; return; }
+        if (!rows.length) { listEl.innerHTML = '<div style="font-size:12px;color:var(--muted,#667)">You have no reports yet.</div>'; return; }
         listEl.innerHTML = rows.map(function (b) {
           var stColor = b.status === 'fixed' ? '#0f766e' : (b.status === 'wontfix' ? '#b42318' : 'var(--muted,#667)');
           return '<div style="border:1px solid var(--line,#e4e7ec);border-radius:8px;padding:8px 10px;margin-bottom:6px">'
             + '<div style="display:flex;gap:6px;align-items:center;font-size:11px;color:var(--muted,#667)"><span>' + (b.category === 'feature' ? '💡 Feature' : '🐞 Bug') + '</span><span style="margin-left:auto;font-weight:700;color:' + stColor + '">' + esc(b.status || 'open') + '</span></div>'
             + (b.title ? '<div style="font-weight:600;font-size:12.5px;margin-top:2px">' + esc(b.title) + '</div>' : '')
             + '<div style="font-size:12px;margin-top:2px;white-space:pre-wrap">' + esc((b.body || '').slice(0, 240)) + '</div>'
-            + (b.reply ? '<div style="font-size:12px;margin-top:6px;padding:6px 8px;background:var(--app-bg,#f7f8fa);border-radius:6px"><b>Válasz:</b> ' + esc(b.reply) + '</div>' : '')
+            + (b.reply ? '<div style="font-size:12px;margin-top:6px;padding:6px 8px;background:var(--app-bg,#f7f8fa);border-radius:6px"><b>Reply:</b> ' + esc(b.reply) + '</div>' : '')
             + '</div>';
         }).join('');
       });
@@ -299,14 +299,14 @@
       var msg = document.getElementById('pn-bug-msg');
       var body = (document.getElementById('pn-bug-body').value || '').trim();
       var title = (document.getElementById('pn-bug-title').value || '').trim();
-      if (!body) { msg.style.color = 'var(--danger,#b42318)'; msg.textContent = 'Írd le röviden.'; return; }
+      if (!body) { msg.style.color = 'var(--danger,#b42318)'; msg.textContent = 'Please describe it briefly.'; return; }
       var BE = window.PR_BACKEND, u = curUser();
-      if (!(BE && BE.sb && u)) { msg.style.color = 'var(--danger,#b42318)'; msg.textContent = 'Bejelentkezés szükséges a küldéshez.'; return; }
+      if (!(BE && BE.sb && u)) { msg.style.color = 'var(--danger,#b42318)'; msg.textContent = 'Sign-in required to send.'; return; }
       var ver = ''; try { ver = (document.getElementById('pr-ver-slot') && document.getElementById('pr-ver-slot').textContent) || ''; } catch (e) { }
-      msg.style.color = 'var(--muted,#667)'; msg.textContent = 'Küldés…';
+      msg.style.color = 'var(--muted,#667)'; msg.textContent = 'Sending…';
       BE.sb.from('bug_reports').insert({ reporter_id: u.id, category: category, title: title || null, body: body, image_data: imageData || null, page: location.pathname, app_version: String(ver || '').slice(0, 60) }).then(function (r) {
-        if (r && r.error) { msg.style.color = 'var(--danger,#b42318)'; msg.textContent = 'Hiba: ' + r.error.message; return; }
-        msg.style.color = 'var(--accent,#4f46e5)'; msg.textContent = '✓ Köszönjük! Elküldve.';
+        if (r && r.error) { msg.style.color = 'var(--danger,#b42318)'; msg.textContent = 'Error: ' + r.error.message; return; }
+        msg.style.color = 'var(--accent,#4f46e5)'; msg.textContent = '✓ Thank you! Sent.';
         document.getElementById('pn-bug-body').value = ''; document.getElementById('pn-bug-title').value = '';
         imageData = null; document.getElementById('pn-bug-img-name').textContent = ''; document.getElementById('pn-bug-img-prev').innerHTML = '';
         setTimeout(hide, 1100);

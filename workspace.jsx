@@ -104,7 +104,7 @@
       if (pane.docId) { // rendered "export to PDF" view of a document
         const c = ctx.getCompiled(pane.docId);
         return <div className="pdf-render">
-          <div className="pdf-render-bar"><span>Rendered PDF · {ctx.docLabel(pane.docId)}</span><span style={{ display: 'inline-flex', gap: 6 }}><button onClick={() => ctx.onWord && ctx.onWord(pane.docId)} title="Letöltés Word (.docx) formátumban">⬇ Word</button><button onClick={() => ctx.onPrint(pane.docId)}><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M4 6V2.5h8V6M4 11H3a1 1 0 01-1-1V7a1 1 0 011-1h10a1 1 0 011 1v3a1 1 0 01-1 1h-1M4 9h8v4.5H4z" strokeLinejoin="round" /></svg>Print / Save PDF</button></span></div>
+          <div className="pdf-render-bar"><span>Rendered PDF · {ctx.docLabel(pane.docId)}</span><span style={{ display: 'inline-flex', gap: 6 }}><button onClick={() => ctx.onWord && ctx.onWord(pane.docId)} title="Download as Word (.docx)">⬇ Word</button><button onClick={() => ctx.onPrint(pane.docId)}><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M4 6V2.5h8V6M4 11H3a1 1 0 01-1-1V7a1 1 0 011-1h10a1 1 0 011 1v3a1 1 0 01-1 1h-1M4 9h8v4.5H4z" strokeLinejoin="round" /></svg>Print / Save PDF</button></span></div>
           <div className="pdf-render-scroll"><div className="pdf-paper" dangerouslySetInnerHTML={{ __html: c ? c.html : '' }} /></div>
         </div>;
       }
@@ -636,7 +636,7 @@
         const av = document.createElement('span'); av.className = 'anno-av'; av.style.background = first.color; av.textContent = first.initials; head.appendChild(av);
         const nm = document.createElement('b'); nm.textContent = first.author; head.appendChild(nm);
         if (c.anns.length > 1) { const more = document.createElement('span'); more.className = 'amc-more'; more.textContent = '+' + (c.anns.length - 1); head.appendChild(more); }
-        const body = document.createElement('div'); body.className = 'amc-body'; body.textContent = first.body || (todoOnly ? '(teendő)' : '(komment)');
+        const body = document.createElement('div'); body.className = 'amc-body'; body.textContent = first.body || (todoOnly ? '(to-do)' : '(comment)');
         card.appendChild(head); card.appendChild(body);
         card.addEventListener('mousedown', (e) => e.preventDefault());
         card.addEventListener('click', (e) => { e.stopPropagation(); if (ctx.onOpenBubble) ctx.onOpenBubble(docId, c.sid, card.getBoundingClientRect()); });
@@ -758,8 +758,8 @@
       <div className="ct-scroll" ref={ref} data-doc={docId}
         onClick={(e) => ctx.onPreviewClick && ctx.onPreviewClick(pane, e)}
         onMouseUp={(e) => ctx.onPreviewMouseUp && ctx.onPreviewMouseUp(pane, e)} />
-      {state === 'loading' && <div className="pdf-status">Renderelés…</div>}
-      {state === 'error' && <div className="pdf-status">Nem sikerült megjeleníteni.</div>}
+      {state === 'loading' && <div className="pdf-status">Rendering…</div>}
+      {state === 'error' && <div className="pdf-status">Could not render.</div>}
     </React.Fragment>;
   }
 
@@ -774,19 +774,19 @@
     // debounced recompile when the source changes (Version B auto-recompile)
     useEffect(() => { if (ctx.requestCompile) ctx.requestCompile(docId, false); }, [src]);
     const busy = !!(st && st.busy), pending = !!(st && st.pending), phase = (st && st.phase) || null, pdf = st && st.pdf, err = st && st.err;
-    const modeLabel = st && st.mode === 'exact' ? 'pontos (TeX Live 2026)' : 'böngésző (pdfTeX)';
+    const modeLabel = st && st.mode === 'exact' ? 'exact (TeX Live 2026)' : 'browser (pdfTeX)';
     return <div className="pdf-render">
       <div className="pdf-render-bar">
-        <span>{busy ? <span className="cspin" /> : null}Compiled · {ctx.docLabel(docId)}{st && st.pages ? ' · ' + st.pages + ' o.' : ''} · {modeLabel}{busy ? (' · ' + (phase || 'fordítás…')) : (pending ? ' · ⏳ változások — fordításra vár' : (err ? ' · ⚠ fordítási hiba' : ''))}</span>
+        <span>{busy ? <span className="cspin" /> : null}Compiled · {ctx.docLabel(docId)}{st && st.pages ? ' · ' + st.pages + ' p.' : ''} · {modeLabel}{busy ? (' · ' + (phase || 'compiling…')) : (pending ? ' · ⏳ changes — waiting to compile' : (err ? ' · ⚠ compile error' : ''))}</span>
         <span style={{ display: 'inline-flex', gap: 6 }}>
-          <button onClick={() => ctx.requestCompile && ctx.requestCompile(docId, true)} disabled={busy}>Újrafordítás</button>
-          <button onClick={() => ctx.onCompileExact && ctx.onCompileExact(docId)} disabled={busy} title="Byte-azonos PDF külső TeX Live 2026 API-val">Pontos PDF</button>
+          <button onClick={() => ctx.requestCompile && ctx.requestCompile(docId, true)} disabled={busy}>Recompile</button>
+          <button onClick={() => ctx.onCompileExact && ctx.onCompileExact(docId)} disabled={busy} title="Byte-identical PDF via an external TeX Live 2026 API">Exact PDF</button>
         </span>
       </div>
       <div className="pdf-view-wrap" style={{ flex: 1, minHeight: 0 }}>
         {err && !pdf ? <div className="pdf-status" style={{ maxWidth: '82%', whiteSpace: 'normal', lineHeight: 1.45, textAlign: 'center', background: 'rgba(120,30,30,.55)' }}>⚠️ {String(err)}</div>
           : pdf ? <CompiledPdfView pane={pane} ctx={ctx} bytes={pdf} />
-          : <div className="pdf-status">{busy ? (phase || 'Fordítás folyamatban…') : (pending ? 'Változások — fordításra vár…' : 'Várakozás a fordításra…')}</div>}
+          : <div className="pdf-status">{busy ? (phase || 'Compiling…') : (pending ? 'Changes — waiting to compile…' : 'Waiting to compile…')}</div>}
       </div>
     </div>;
   }

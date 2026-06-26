@@ -508,35 +508,35 @@
     var dateInput = h('input', { type: 'date', value: day, max: today, onChange: function (e) { if (e.target.value) setDay(e.target.value); }, style: { height: 34, border: '1px solid var(--line)', borderRadius: 8, padding: '0 10px', fontFamily: 'inherit', fontSize: 13, background: 'var(--surface)', color: 'inherit' } });
     return h('div', null,
       h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14, flexWrap: 'wrap' } },
-        h('button', { className: 'btn' + (day === today ? ' pri' : ''), onClick: function () { setDay(today); } }, 'Ma'),
-        h('button', { className: 'btn' + (day === yday ? ' pri' : ''), onClick: function () { setDay(yday); } }, 'Tegnap'),
+        h('button', { className: 'btn' + (day === today ? ' pri' : ''), onClick: function () { setDay(today); } }, 'Today'),
+        h('button', { className: 'btn' + (day === yday ? ' pri' : ''), onClick: function () { setDay(yday); } }, 'Yesterday'),
         dateInput),
-      !students.length ? h('div', { className: 'empty' }, 'Nincs diákod, akiről riport készülhetne.') :
-        loading ? h('div', { className: 'empty' }, 'Betöltés…') :
+      !students.length ? h('div', { className: 'empty' }, 'You have no students to report on.') :
+        loading ? h('div', { className: 'empty' }, 'Loading…') :
           students.map(function (s) {
             var rep = reports[s.id], sm = (rep && rep.summary) || null, g = gen[s.id], ex = expanded[s.id];
             return h('div', { className: 'panel', key: s.id, style: { marginBottom: 12 } },
               h('div', { style: { display: 'flex', alignItems: 'center', gap: 11 } },
                 h(Avatar, { u: s, size: 34 }),
                 h('div', { style: { flex: 1, minWidth: 0 } }, h('b', null, s.name), h('span', { style: { display: 'block', fontSize: 12, color: 'var(--muted)' } }, s.topic || '—')),
-                rep ? h('span', { className: 'chip c-grey' }, (rep.chat_msgs || 0) + ' chat · ' + (rep.ideas || 0) + ' ötlet · ' + (rep.log_entries || 0) + ' napló') : null,
-                h('a', { className: 'btn', style: { textDecoration: 'none' }, href: 'Research.html?student=' + s.id, title: 'A diák kutatási projektjei (csak olvasható)' }, 'Kutatás →'),
-                h('button', { className: 'btn' + (rep ? '' : ' pri'), disabled: g, onClick: function () { generate(s.id); } }, g ? 'Készül…' : (rep ? 'Frissítés' : 'Generálás'))),
-              !rep ? h('div', { style: { fontSize: 13, color: 'var(--muted)', marginTop: 8 } }, 'Erre a napra még nincs riport. A „Generálás" összefoglalja a diák aznapi kutatási aktivitását (AI-chat, napló, ötletek, irodalom, adat/compute).') :
+                rep ? h('span', { className: 'chip c-grey' }, (rep.chat_msgs || 0) + ' chat · ' + (rep.ideas || 0) + ' idea · ' + (rep.log_entries || 0) + ' log') : null,
+                h('a', { className: 'btn', style: { textDecoration: 'none' }, href: 'Research.html?student=' + s.id, title: 'The student\'s research projects (read-only)' }, 'Research →'),
+                h('button', { className: 'btn' + (rep ? '' : ' pri'), disabled: g, onClick: function () { generate(s.id); } }, g ? 'Generating…' : (rep ? 'Refresh' : 'Generate'))),
+              !rep ? h('div', { style: { fontSize: 13, color: 'var(--muted)', marginTop: 8 } }, 'No report for this day yet. “Generate” summarizes the student\'s research activity for the day (AI chat, log, ideas, literature, data/compute).') :
                 h('div', { style: { marginTop: 10 } },
                   sm.work_summary ? h('p', { style: { margin: '0 0 6px', fontSize: 13.5, lineHeight: 1.55 } }, sm.work_summary) : null,
-                  blk('Döntések', sm.decisions),
-                  blk('Nyitott kérdések', sm.open_questions),
-                  blk('Új ötletek', sm.ideas),
-                  (sm.blockers && sm.blockers.length) ? blk('⚠ Elakadás / iránymutatás kell', sm.blockers) : null,
+                  blk('Decisions', sm.decisions),
+                  blk('Open questions', sm.open_questions),
+                  blk('New ideas', sm.ideas),
+                  (sm.blockers && sm.blockers.length) ? blk('⚠ Blocked / needs guidance', sm.blockers) : null,
                   (sm.topics && sm.topics.length) ? h('div', { style: { marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 6 } }, sm.topics.map(function (t, i) { return h('span', { key: i, className: 'chip c-grey' }, t); })) : null,
                   h('div', { style: { marginTop: 12, display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' } },
-                    rep.chat_msgs ? h('button', { className: 'btn', style: { padding: '5px 10px', fontSize: 12.5 }, onClick: function () { toggleChat(s.id); } }, (ex && ex.open) ? 'Beszélgetés elrejtése' : 'Beszélgetés megnyitása (' + rep.chat_msgs + ')') : null,
-                    h('span', { style: { fontSize: 11.5, color: 'var(--faint)' } }, 'Generálva: ' + (rep.generated_at || '').slice(0, 16).replace('T', ' '))),
+                    rep.chat_msgs ? h('button', { className: 'btn', style: { padding: '5px 10px', fontSize: 12.5 }, onClick: function () { toggleChat(s.id); } }, (ex && ex.open) ? 'Hide conversation' : 'Show conversation (' + rep.chat_msgs + ')') : null,
+                    h('span', { style: { fontSize: 11.5, color: 'var(--faint)' } }, 'Generated: ' + (rep.generated_at || '').slice(0, 16).replace('T', ' '))),
                   (ex && ex.open) ? h('div', { style: { marginTop: 10, borderTop: '1px solid var(--line)', paddingTop: 10, maxHeight: 320, overflowY: 'auto' } },
                     (ex.msgs && ex.msgs.length) ? ex.msgs.map(function (m, i) {
                       return h('div', { key: i, style: { fontSize: 12.5, lineHeight: 1.5, marginBottom: 8 } }, h('b', { style: { color: m.role === 'user' ? 'var(--accent)' : 'var(--muted)' } }, (m.role === 'user' ? s.name : 'AI') + ': '), m.content);
-                    }) : h('div', { style: { fontSize: 12.5, color: 'var(--faint)' } }, 'Nincs aznapi üzenet.')) : null));
+                    }) : h('div', { style: { fontSize: 12.5, color: 'var(--faint)' } }, 'No messages for this day.')) : null));
           }));
   }
 
@@ -551,7 +551,7 @@
     function markAll() { var ids = notes.filter(function (n) { return !n.read_at; }).map(function (n) { return n.id; }); if (!ids.length) return; sb.from('notifications').update({ read_at: new Date().toISOString() }).in('id', ids).then(load); }
     var unread = notes.filter(function (n) { return !n.read_at; }).length;
     function ttl(n) { return n.kind === 'digest' ? 'Daily research digest' : n.kind === 'student_report' ? 'Student daily report' : ((n.payload && n.payload.title) || n.kind); }
-    function summ(n) { var p = n.payload || {}; if (n.kind === 'digest') return (p.day || '') + ' · ' + (p.students || 0) + ' student' + (p.students === 1 ? '' : 's') + ', ' + (p.entries || 0) + ' update' + (p.entries === 1 ? '' : 's'); if (n.kind === 'student_report') return (p.student || 'Student') + ' · ' + (p.day || '') + ' · ' + (p.msgs || 0) + ' chat, ' + (p.decisions || 0) + ' döntés'; return p.body || ''; }
+    function summ(n) { var p = n.payload || {}; if (n.kind === 'digest') return (p.day || '') + ' · ' + (p.students || 0) + ' student' + (p.students === 1 ? '' : 's') + ', ' + (p.entries || 0) + ' update' + (p.entries === 1 ? '' : 's'); if (n.kind === 'student_report') return (p.student || 'Student') + ' · ' + (p.day || '') + ' · ' + (p.msgs || 0) + ' chat, ' + (p.decisions || 0) + ' decision'; return p.body || ''; }
     return h('div', { className: 'notif-wrap' },
       h('button', { className: 'bell', onClick: function () { setOpen(!open); if (!open) load(); } },
         h('svg', { viewBox: '0 0 16 16', fill: 'none', stroke: 'var(--muted)', strokeWidth: 1.5 }, h('path', { d: 'M8 2a3.5 3.5 0 0 0-3.5 3.5c0 3-1.5 4-1.5 4h10s-1.5-1-1.5-4A3.5 3.5 0 0 0 8 2z', strokeLinejoin: 'round' }), h('path', { d: 'M6.6 12.4a1.5 1.5 0 0 0 2.8 0', strokeLinecap: 'round' })),
@@ -654,7 +654,7 @@
     var cur = allowed.indexOf(view) >= 0 ? view : allowed[0];
     var nStu = effStudents.length;
     var titles = { dashboard: 'Dashboard', students: 'Students', reports: 'Student reports', supervisors: 'Supervisors', topics: 'Research topics', mine: 'My progress', account: 'My account', requests: 'Requests', admin: 'Admin' };
-    var subs = { reports: 'Napi összefoglaló a diákok kutatómunkájáról · ' + nStu + ' diák', supervisors: data.sups.length + ' supervisors · ' + nStu + ' student' + (nStu === 1 ? '' : 's'), topics: data.topics.length + ' topics', students: nStu + ' student' + (nStu === 1 ? '' : 's'), dashboard: (isAdmin ? 'Institution-wide' : 'Your students') + ' · ' + nStu + ' student' + (nStu === 1 ? '' : 's'), mine: myStudent ? (myStudent.topic || '') : '', account: 'Set your role and profile', requests: incoming.length + ' pending', admin: 'Roles & supervision relationships' };
+    var subs = { reports: 'Daily summary of students\' research work · ' + nStu + ' student' + (nStu === 1 ? '' : 's'), supervisors: data.sups.length + ' supervisors · ' + nStu + ' student' + (nStu === 1 ? '' : 's'), topics: data.topics.length + ' topics', students: nStu + ' student' + (nStu === 1 ? '' : 's'), dashboard: (isAdmin ? 'Institution-wide' : 'Your students') + ' · ' + nStu + ' student' + (nStu === 1 ? '' : 's'), mine: myStudent ? (myStudent.topic || '') : '', account: 'Set your role and profile', requests: incoming.length + ' pending', admin: 'Roles & supervision relationships' };
     function canEditStudent(s) { return isAdmin || (s && s.supervisor_id === me.id); }
 
     var body;

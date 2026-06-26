@@ -45,8 +45,8 @@ function useNotifications(uid) {
   const unread = notes.filter((n) => !n.read_at).length;
   return { notes, unread, markRead, markAll, reload: load };
 }
-function notifTitle(n) { const p = n.payload || {}; if (n.kind === 'share') return p.title || 'Megosztott dokumentum'; if (n.kind === 'digest') return 'Napi kutatási összefoglaló'; return p.title || n.kind; }
-function notifSumm(n) { const p = n.payload || {}; if (n.kind === 'share') return (p.by ? p.by + ' ' : '') + 'megosztott veled egy dokumentumot · ' + (p.role || 'editor'); if (n.kind === 'digest') return (p.day || '') + ' · ' + (p.students || 0) + ' diák'; return p.body || ''; }
+function notifTitle(n) { const p = n.payload || {}; if (n.kind === 'share') return p.title || 'Shared document'; if (n.kind === 'digest') return 'Daily research summary'; return p.title || n.kind; }
+function notifSumm(n) { const p = n.payload || {}; if (n.kind === 'share') return (p.by ? p.by + ' ' : '') + 'shared a document with you · ' + (p.role || 'editor'); if (n.kind === 'digest') return (p.day || '') + ' · ' + (p.students || 0) + ' students'; return p.body || ''; }
 // Where a notification's "View" link goes (null → no link). Share → open the shared document.
 function notifTarget(n) { const p = n.payload || {}; if (n.kind === 'share' && p.project_id) return 'ProofReader.html?p=' + p.project_id; return null; }
 
@@ -58,21 +58,21 @@ function NotifBell({ notif }) {
   const accept = (n) => { const p = n.payload || {}; if (p.project_id && Store.acceptInvitation) Store.acceptInvitation(p.project_id); notif.markRead(n); };
   const view = (n) => { notif.markRead(n); const t = notifTarget(n); if (t) location.href = t; };
   return <div className="notif-wrap">
-    <button className="bell" title="Értesítések" onClick={(e) => { e.stopPropagation(); const o = !open; setOpen(o); if (o) notif.reload(); }}>
+    <button className="bell" title="Notifications" onClick={(e) => { e.stopPropagation(); const o = !open; setOpen(o); if (o) notif.reload(); }}>
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M8 2a3.5 3.5 0 0 0-3.5 3.5c0 3-1.5 4-1.5 4h10s-1.5-1-1.5-4A3.5 3.5 0 0 0 8 2z" strokeLinejoin="round" /><path d="M6.6 12.4a1.5 1.5 0 0 0 2.8 0" strokeLinecap="round" /></svg>
       {notif.unread ? <i className="nb">{notif.unread > 9 ? '9+' : notif.unread}</i> : null}
     </button>
     {open ? <div className="notif-pop" onClick={(e) => e.stopPropagation()}>
-      <div className="nh">Értesítések{notif.unread ? <button className="back-btn" onClick={notif.markAll}>Mind olvasott</button> : null}</div>
+      <div className="nh">Notifications{notif.unread ? <button className="back-btn" onClick={notif.markAll}>Mark all read</button> : null}</div>
       {notif.notes.length ? notif.notes.slice(0, 20).map((n) => { const tgt = notifTarget(n); return (
         <div key={n.id} className={'notif-item' + (n.read_at ? '' : ' unread')}>
           <b>{notifTitle(n)}</b><div className="nx">{notifSumm(n)}</div>
           <div className="ni-actions">
-            {n.kind === 'share' ? <button className="adr-accept" onClick={() => accept(n)}>Elfogad</button> : null}
-            {tgt ? <button className="adr-view" onClick={() => view(n)}>Megnyit →</button> : null}
+            {n.kind === 'share' ? <button className="adr-accept" onClick={() => accept(n)}>Accept</button> : null}
+            {tgt ? <button className="adr-view" onClick={() => view(n)}>Open →</button> : null}
           </div>
         </div>
-      ); }) : <div className="adr-notif-empty" style={{ textAlign: 'center' }}>Nincs értesítés.</div>}
+      ); }) : <div className="adr-notif-empty" style={{ textAlign: 'center' }}>No notifications.</div>}
     </div> : null}
   </div>;
 }
@@ -246,11 +246,11 @@ function ShareModal({ project, me, onClose, onChange }) {
                 <Avatar user={u} size={32} />
                 <span className="mname">{u ? u.name : m.userId}{u && u.id === me.id ? ' (you)' : ''}<small>{u && u.email}</small></span>
                 {isOwnerView && isCloudMode()
-                  ? <span className={'inv-pill ' + (pending ? 'pending' : 'ok')} title={pending ? 'A meghívott még nem fogadta el a meghívást' : ('Elfogadva: ' + new Date(acc).toLocaleString())}>{pending ? 'Függőben' : 'Elfogadva'}</span>
+                  ? <span className={'inv-pill ' + (pending ? 'pending' : 'ok')} title={pending ? 'The invitee has not accepted the invitation yet' : ('Accepted: ' + new Date(acc).toLocaleString())}>{pending ? 'Pending' : 'Accepted'}</span>
                   : null}
                 {project.ownerId === me.id
                   ? <>
-                      {pending && isCloudMode() ? <button className="btn-text" title="Meghívó-értesítés újraküldése" onClick={() => { Store.resendInvite(project.id, m.userId, m.role, project.title); setResent((s) => Object.assign({}, s, { [m.userId]: true })); }}>{resent[m.userId] ? 'Elküldve ✓' : 'Resend'}</button> : null}
+                      {pending && isCloudMode() ? <button className="btn-text" title="Resend invitation notification" onClick={() => { Store.resendInvite(project.id, m.userId, m.role, project.title); setResent((s) => Object.assign({}, s, { [m.userId]: true })); }}>{resent[m.userId] ? 'Sent ✓' : 'Resend'}</button> : null}
                       <select className="sel" value={m.role} onChange={(e) => { Store.setRole(project.id, m.userId, e.target.value); onChange(); }}>{ROLES.map((r) => <option key={r} value={r}>{r}</option>)}</select>
                       <button className="btn-text danger" style={{ color: '#dc2626' }} onClick={() => { Store.removeMember(project.id, m.userId); onChange(); }}>Remove</button>
                     </>
@@ -517,7 +517,7 @@ function App() {
           {!preview && <button className="btn-primary" onClick={() => setModal('new')}><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M8 3v10M3 8h10" /></svg>New publication</button>}
           {isCloudMode() && <NotifBell notif={notif} />}
           <div className="acct">
-            <button className="acct-btn" title="Fiók" onClick={(e) => { e.stopPropagation(); setAcctOpen((v) => !v); }}><Avatar user={me} size={34} /></button>
+            <button className="acct-btn" title="Account" onClick={(e) => { e.stopPropagation(); setAcctOpen((v) => !v); }}><Avatar user={me} size={34} /></button>
             {acctOpen && <AccountMenu me={me}
               onUsage={() => { setAcctOpen(false); setModal('usage'); }}
               onSwitch={(id) => { Auth.signIn(id); setMe(Auth.byId(id)); setAcctOpen(false); }}

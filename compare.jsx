@@ -14,12 +14,12 @@
   function shareLinkFor(token) { return location.origin + location.pathname + '?share=' + token; }
 
   var CAT = {
-    reframing: { c: '#4f46e5', t: 'átkeretezés' }, correction: { c: '#dc2626', t: 'javítás' },
-    'number-update': { c: '#0891b2', t: 'szám-frissítés' }, 'new-content': { c: '#16a34a', t: 'új tartalom' },
-    notation: { c: '#7c3aed', t: 'jelölés' }, figure: { c: '#b45309', t: 'ábra' },
-    citation: { c: '#0d9488', t: 'hivatkozás' }, editorial: { c: '#6b7280', t: 'szerkesztői' }
+    reframing: { c: '#4f46e5', t: 'reframing' }, correction: { c: '#dc2626', t: 'correction' },
+    'number-update': { c: '#0891b2', t: 'number update' }, 'new-content': { c: '#16a34a', t: 'new content' },
+    notation: { c: '#7c3aed', t: 'notation' }, figure: { c: '#b45309', t: 'figure' },
+    citation: { c: '#0d9488', t: 'citation' }, editorial: { c: '#6b7280', t: 'editorial' }
   };
-  var OP = { replace: { t: 'módosítva', c: '#b45309' }, insert: { t: 'új', c: '#16a34a' }, delete: { t: 'törölve', c: '#dc2626' } };
+  var OP = { replace: { t: 'modified', c: '#b45309' }, insert: { t: 'new', c: '#16a34a' }, delete: { t: 'deleted', c: '#dc2626' } };
 
   function diffWords(a, b) {
     if (window.Diff && window.Diff.diffWords) return window.Diff.diffWords(a || '', b || '');
@@ -120,7 +120,7 @@
     }, [props.change, props.side, ready]);
 
     return h('div', { className: 'cmp-pdfhost' },
-      (props.change && located === 0) ? h('div', { className: 'cmp-notfound' }, '⚠ Ezt a változást nem sikerült a PDF szövegében lokalizálni (pl. képlet, ábra, táblázat vagy hivatkozás) — a pontos szöveges eltérés a „Változások" fülön látszik.') : null,
+      (props.change && located === 0) ? h('div', { className: 'cmp-notfound' }, '⚠ This change could not be located in the PDF text (e.g. a formula, figure, table or citation) — the exact text difference is shown on the „Changes" tab.') : null,
       h('div', { className: 'cmp-pdfdoc', ref: ref }));
   }
 
@@ -182,15 +182,15 @@
       setLoading(true); setErr('');
       sb.rpc('compare_shared', { p_token: token }).then(function (r) {
         var row = r && r.data && r.data[0];
-        if ((r && r.error) || !row) { setErr('A megosztott összehasonlítás nem érhető el — lehet, hogy a megosztást visszavonták.'); setLoading(false); return; }
+        if ((r && r.error) || !row) { setErr('The shared comparison is not available — the share may have been revoked.'); setLoading(false); return; }
         setReviewerText(row.reviewer_text || '');
-        if (!row.zip_public_url) { setErr('A megosztott csomag nem elérhető.'); setLoading(false); return; }
+        if (!row.zip_public_url) { setErr('The shared package is not available.'); setLoading(false); return; }
         fetch(row.zip_public_url).then(function (resp) { return resp.blob(); }).then(function (blob) {
           return window.JSZip.loadAsync(blob).then(function (zip) {
             var byPath = {}; var names = Object.keys(zip.files).filter(function (n) { return !zip.files[n].dir; });
             return Promise.all(names.map(function (n) { return zip.files[n].async('blob').then(function (b) { byPath[n] = b; }); })).then(function () { loadPackage(byPath); });
           });
-        }).catch(function (e) { setErr('Betöltési hiba: ' + e); setLoading(false); });
+        }).catch(function (e) { setErr('Loading error: ' + e); setLoading(false); });
       });
     }
     function shareProject(makePublic) {
@@ -202,7 +202,7 @@
       var zpath = row.zip_path || (me.id + '/' + savedId + '/package.zip');
       sb.storage.from('compare').createSignedUrl(zpath, 31536000).then(function (r) {
         var url = (r && r.data && r.data.signedUrl) || null;
-        if (!url) { setShareBusy(false); setErr('A megosztó link nem hozható létre — mentsd újra a projektet.'); return; }
+        if (!url) { setShareBusy(false); setErr('The share link could not be created — re-save the project.'); return; }
         sb.from('compare_projects').update({ is_public: true, share_token: token, zip_public_url: url, shared_at: new Date().toISOString() }).eq('id', savedId).then(function () { setShareBusy(false); if (me) loadProjects(me.id); });
       });
     }
@@ -233,10 +233,10 @@
     function loadPackage(byPath, opts) {
       opts = opts || {};
       var dbKey = Object.keys(byPath).filter(function (k) { return /(^|\/)change_database\.json$/.test(k); }).sort(function (a, b) { return a.split('/').length - b.split('/').length; })[0];
-      if (!dbKey) { setErr('A csomagban nincs change_database.json.'); setLoading(false); return; }
+      if (!dbKey) { setErr('The package does not contain change_database.json.'); setLoading(false); return; }
       byPath[dbKey].text().then(function (t) {
-        var d; try { d = JSON.parse(t); } catch (x) { setErr('A change_database.json nem olvasható.'); setLoading(false); return; }
-        if (!d || !Array.isArray(d.changes)) { setErr('Érvénytelen change_database.json.'); setLoading(false); return; }
+        var d; try { d = JSON.parse(t); } catch (x) { setErr('change_database.json could not be read.'); setLoading(false); return; }
+        if (!d || !Array.isArray(d.changes)) { setErr('Invalid change_database.json.'); setLoading(false); return; }
         var base = dbKey.indexOf('/') >= 0 ? dbKey.slice(0, dbKey.lastIndexOf('/') + 1) : '';
         var of = (d.folders && d.folders.original) || { path: '01_original_v2' };
         var ff = (d.folders && d.folders.final) || { path: '02_final_v3' };
@@ -256,82 +256,82 @@
       loadPackage(byPath);
     }
     function saveProject() {
-      if (!sb || !me) { setSaving('Mentéshez jelentkezz be.'); setTimeout(function () { setSaving(''); }, 3000); return; }
-      if (!rawFiles || !db || !window.JSZip) { setSaving('Nincs betöltött csomag.'); return; }
-      setSaving('Csomagolás…');
+      if (!sb || !me) { setSaving('Sign in to save.'); setTimeout(function () { setSaving(''); }, 3000); return; }
+      if (!rawFiles || !db || !window.JSZip) { setSaving('No package loaded.'); return; }
+      setSaving('Packaging…');
       var zip = new window.JSZip();
       Object.keys(rawFiles).forEach(function (k) { zip.file(k, rawFiles[k]); });
-      var meta = { title: (db.publication && db.publication.title) || 'Összehasonlítás', publication: db.publication || null, stats: db.stats || { changes: (db.changes || []).length }, file_count: Object.keys(rawFiles).length, reviewer_text: reviewerText || null };
+      var meta = { title: (db.publication && db.publication.title) || 'Comparison', publication: db.publication || null, stats: db.stats || { changes: (db.changes || []).length }, file_count: Object.keys(rawFiles).length, reviewer_text: reviewerText || null };
       zip.generateAsync({ type: 'blob', compression: 'STORE' }).then(function (blob) {
-        meta.size_bytes = blob.size; setSaving('Mentés indítása…');
+        meta.size_bytes = blob.size; setSaving('Starting save…');
         return sb.from('compare_projects').insert(Object.assign({ owner: me.id }, meta)).select('id').single().then(function (r) {
           if (r.error || !r.data) throw new Error((r.error && r.error.message) || 'insert');
           var id = r.data.id, path = me.id + '/' + id + '/package.zip';
-          setSaving('Feltöltés… (' + Math.round(blob.size / 1048576) + ' MB)');
+          setSaving('Uploading… (' + Math.round(blob.size / 1048576) + ' MB)');
           return sb.storage.from('compare').upload(path, blob, { contentType: 'application/zip', upsert: true }).then(function (up) {
             if (up.error) { sb.from('compare_projects').delete().eq('id', id); throw new Error(up.error.message || 'upload'); }
-            return sb.from('compare_projects').update({ zip_path: path }).eq('id', id).then(function () { setSavedId(id); setSaving('Mentve ✓'); loadProjects(me.id); setTimeout(function () { setSaving(''); }, 2500); });
+            return sb.from('compare_projects').update({ zip_path: path }).eq('id', id).then(function () { setSavedId(id); setSaving('Saved ✓'); loadProjects(me.id); setTimeout(function () { setSaving(''); }, 2500); });
           });
         });
-      }).catch(function (e) { setSaving('Hiba a mentésnél: ' + (e && e.message || e)); });
+      }).catch(function (e) { setSaving('Error while saving: ' + (e && e.message || e)); });
     }
     function loadProject(row) {
       if (!sb || !window.JSZip) return; setErr(''); setLoading(true); setReviewerText(row.reviewer_text || '');
       var path = row.zip_path || (me && (me.id + '/' + row.id + '/package.zip'));
       sb.storage.from('compare').download(path).then(function (r) {
-        if (r.error || !r.data) { setErr('A mentett csomag nem tölthető le.'); setLoading(false); return; }
+        if (r.error || !r.data) { setErr('The saved package could not be downloaded.'); setLoading(false); return; }
         return window.JSZip.loadAsync(r.data).then(function (zip) {
           var byPath = {}; var names = Object.keys(zip.files).filter(function (n) { return !zip.files[n].dir; });
           return Promise.all(names.map(function (n) { return zip.files[n].async('blob').then(function (b) { byPath[n] = b; }); })).then(function () { loadPackage(byPath, { savedId: row.id }); });
         });
-      }).catch(function (e) { setErr('Betöltési hiba: ' + e); setLoading(false); });
+      }).catch(function (e) { setErr('Loading error: ' + e); setLoading(false); });
     }
     function deleteProject(row, ev) {
       if (ev) ev.stopPropagation();
-      if (!sb || !window.confirm('Törlöd a mentett összehasonlítást?  „' + (row.title || '') + '"')) return;
+      if (!sb || !window.confirm('Delete the saved comparison?  „' + (row.title || '') + '"')) return;
       var path = row.zip_path || (me && (me.id + '/' + row.id + '/package.zip'));
       if (path) sb.storage.from('compare').remove([path]).then(function () { });
       sb.from('compare_projects').delete().eq('id', row.id).then(function () { if (savedId === row.id) setSavedId(null); if (me) loadProjects(me.id); });
     }
     function saveReviewerText() {
-      if (!sb || !me) { setRevSaving('Mentéshez jelentkezz be.'); setTimeout(function () { setRevSaving(''); }, 3000); return; }
-      if (!savedId) { setRevSaving('Előbb mentsd a projektet (💾 Mentés a fejlécben), utána a bírálói szöveg külön is menthető.'); setTimeout(function () { setRevSaving(''); }, 4500); return; }
-      setRevSaving('mentés…');
-      sb.from('compare_projects').update({ reviewer_text: reviewerText || null }).eq('id', savedId).then(function (r) { setRevSaving((r && r.error) ? 'Hiba' : 'Mentve ✓'); setTimeout(function () { setRevSaving(''); }, 2500); });
+      if (!sb || !me) { setRevSaving('Sign in to save.'); setTimeout(function () { setRevSaving(''); }, 3000); return; }
+      if (!savedId) { setRevSaving('Save the project first (💾 Save in the header), then the reviewer text can also be saved separately.'); setTimeout(function () { setRevSaving(''); }, 4500); return; }
+      setRevSaving('saving…');
+      sb.from('compare_projects').update({ reviewer_text: reviewerText || null }).eq('id', savedId).then(function (r) { setRevSaving((r && r.error) ? 'Error' : 'Saved ✓'); setTimeout(function () { setRevSaving(''); }, 2500); });
     }
     function reviewersPanel() {
       return h('div', { className: 'cm-rev' },
         h('div', { className: 'cm-rev-bar' },
-          h('h3', { style: { margin: 0 } }, '📝 Bírálók szövege'),
-          h('span', { className: 'cm-sub', style: { flex: 1 } }, 'Másold ide a bírálók eredeti (natív) szövegét — a mentett projekttel együtt megmarad.'),
-          (!ro && sb) ? h('button', { className: 'btn pri', onClick: saveReviewerText, disabled: revSaving === 'mentés…' }, '💾 Mentés') : null,
-          revSaving ? h('span', { style: { fontSize: 12.5, color: revSaving.indexOf('Hiba') >= 0 ? 'var(--danger)' : 'var(--muted)' } }, revSaving) : null),
+          h('h3', { style: { margin: 0 } }, '📝 Reviewers\' text'),
+          h('span', { className: 'cm-sub', style: { flex: 1 } }, 'Paste the reviewers\' original (native) text here — it is preserved together with the saved project.'),
+          (!ro && sb) ? h('button', { className: 'btn pri', onClick: saveReviewerText, disabled: revSaving === 'saving…' }, '💾 Save') : null,
+          revSaving ? h('span', { style: { fontSize: 12.5, color: revSaving.indexOf('Error') >= 0 ? 'var(--danger)' : 'var(--muted)' } }, revSaving) : null),
         h('textarea', { className: 'cm-revtext', value: reviewerText, spellCheck: false, readOnly: ro, placeholder: 'Reviewer 1\n1. ...\n2. ...\n\nReviewer 2\n1. ...', onChange: function (e) { setReviewerText(e.target.value); } }));
     }
     function savedListBlock() {
       if (!sb) return null;
-      if (!me) return h('div', { style: { marginTop: 22, fontSize: 13, color: 'var(--faint)' } }, 'Jelentkezz be, hogy a feltöltött összehasonlításokat elmentsd és később egy kattintással visszatöltsd.');
+      if (!me) return h('div', { style: { marginTop: 22, fontSize: 13, color: 'var(--faint)' } }, 'Sign in to save your uploaded comparisons and reload them later with a single click.');
       if (!projects.length) return null;
       return h('div', { className: 'cm-saved' },
-        h('div', { className: 'cm-saved-h' }, '💾 Mentett összehasonlítások (' + projects.length + ')'),
+        h('div', { className: 'cm-saved-h' }, '💾 Saved comparisons (' + projects.length + ')'),
         projects.map(function (row) {
           var n = (row.stats && (row.stats.changes || row.stats.n_changes)) || '';
           return h('div', { key: row.id, className: 'cm-saved-li', onClick: function () { loadProject(row); } },
             h('div', { style: { minWidth: 0, textAlign: 'left' } },
-              h('div', { className: 'cm-saved-t' }, row.title || 'Összehasonlítás'),
-              h('div', { className: 'cm-saved-m' }, (n ? n + ' változás · ' : '') + (row.size_bytes ? Math.round(row.size_bytes / 1048576) + ' MB · ' : '') + (row.created_at ? String(row.created_at).slice(0, 10) : ''))),
-            h('button', { className: 'cm-saved-del', title: 'Törlés', onClick: function (ev) { deleteProject(row, ev); } }, '🗑'));
+              h('div', { className: 'cm-saved-t' }, row.title || 'Comparison'),
+              h('div', { className: 'cm-saved-m' }, (n ? n + ' changes · ' : '') + (row.size_bytes ? Math.round(row.size_bytes / 1048576) + ' MB · ' : '') + (row.created_at ? String(row.created_at).slice(0, 10) : ''))),
+            h('button', { className: 'cm-saved-del', title: 'Delete', onClick: function (ev) { deleteProject(row, ev); } }, '🗑'));
         }));
     }
 
     function openEdit() {
-      var v = pkg && pkg[editVer]; if (!v || !v.main) { setCompileLog('Nincs .tex ehhez a verzióhoz.'); return; }
-      var mf = v.files.filter(function (f) { return f.inner === v.main; })[0]; if (!mf) { setCompileLog('A fő .tex nem található.'); return; }
+      var v = pkg && pkg[editVer]; if (!v || !v.main) { setCompileLog('No .tex for this version.'); return; }
+      var mf = v.files.filter(function (f) { return f.inner === v.main; })[0]; if (!mf) { setCompileLog('The main .tex was not found.'); return; }
       mf.file.text().then(function (t) { setTexSrc(t); setCompiledBytes(null); setCompileLog(''); });
     }
     function compile() {
-      var v = pkg && pkg[editVer]; if (!v || !window.AloudTeX) { setCompileLog('A LaTeX-motor nem érhető el.'); return; }
-      setCompiling(true); setCompileLog('Fájlok betöltése…');
+      var v = pkg && pkg[editVer]; if (!v || !window.AloudTeX) { setCompileLog('The LaTeX engine is not available.'); return; }
+      setCompiling(true); setCompileLog('Loading files…');
       Promise.all(v.files.map(function (f) {
         var isText = /\.(tex|bib|cls|bst|clo|sty|def|cfg|ltx|txt|bbl|aux)$/i.test(f.inner);
         if (f.inner === v.main) return Promise.resolve({ path: f.inner, text: texSrc });
@@ -340,14 +340,14 @@
         return window.AloudTeX.compile({ mainFile: v.main, files: filesArr, passes: 3, onProgress: function (m) { setCompileLog(m); } });
       }).then(function (r) {
         setCompiling(false);
-        if (r && r.ok && r.pdf) { setCompiledBytes(r.pdf); setCompileLog('Kész — ' + (r.pages || '?') + ' oldal' + (r.ms ? ', ' + Math.round(r.ms / 1000) + 's' : '')); }
-        else { setCompileLog('Fordítási hiba (a hivatkozások bibtex nélkül „?" lehetnek):\n' + ((r && r.log) || '').slice(-1600)); }
-      }).catch(function (e) { setCompiling(false); setCompileLog('Hiba: ' + e); });
+        if (r && r.ok && r.pdf) { setCompiledBytes(r.pdf); setCompileLog('Done — ' + (r.pages || '?') + ' pages' + (r.ms ? ', ' + Math.round(r.ms / 1000) + 's' : '')); }
+        else { setCompileLog('Compile error (without bibtex, citations may be „?"):\n' + ((r && r.log) || '').slice(-1600)); }
+      }).catch(function (e) { setCompiling(false); setCompileLog('Error: ' + e); });
     }
 
     function narration() {
       var lines = [];
-      if (db.publication && db.publication.title) lines.push('A „' + db.publication.title + '" című kézirat bírálatra adott válaszának összefoglalója.');
+      if (db.publication && db.publication.title) lines.push('Summary of the response to peer review for the manuscript „' + db.publication.title + '".');
       shown.forEach(function (c) {
         var pts = (c.review_points || []).join(', ');
         lines.push((pts ? pts + '. ' : '') + stripTex(c.change_summary || '') + (c.reason ? ' ' + stripTex(c.reason) : ''));
@@ -355,16 +355,16 @@
       return lines.join(' ');
     }
     function genAudio() {
-      if (!window.PREleven) { setAErr('A hangmotor nem érhető el.'); return; }
+      if (!window.PREleven) { setAErr('The audio engine is not available.'); return; }
       if (!window.PREleven.hasKey()) { setNeedKey(true); return; }
-      var segs = toSegs(narration()); if (!segs.length) { setAErr('Nincs felolvasandó változás.'); return; }
+      var segs = toSegs(narration()); if (!segs.length) { setAErr('No changes to narrate.'); return; }
       setABusy(true); setAErr(''); setAudioUrl(''); setAProg('0 / ' + segs.length);
       var cfg = { elevenVoice: voice, model: model, stability: 50, similarity: 75 };
       var blobs = []; var i = 0;
       (function next() {
         if (i >= segs.length) { window.PREleven.concatMp3(blobs).then(function (mp3) { setAudioUrl(URL.createObjectURL(mp3)); setABusy(false); setAProg(''); }); return; }
         setAProg((i + 1) + ' / ' + segs.length);
-        window.PREleven.getBlob(segs[i], cfg, null, null).then(function (b) { if (b) blobs.push(b); i++; next(); }, function (e) { setAErr('Hangszintézis hiba: ' + e); setABusy(false); });
+        window.PREleven.getBlob(segs[i], cfg, null, null).then(function (b) { if (b) blobs.push(b); i++; next(); }, function (e) { setAErr('Speech synthesis error: ' + e); setABusy(false); });
       })();
     }
     function saveKey() { if (window.PREleven && keyVal.trim()) { window.PREleven.setKey(keyVal); setNeedKey(false); setKeyVal(''); genAudio(); } }
@@ -372,38 +372,38 @@
     // ---------- render ----------
     if (!db) {
       if (sharedMode) return h('div', { className: 'cm-wrap' }, h('div', { className: 'cm-empty' },
-        h('h1', null, '🔀 Megosztott összehasonlítás'),
-        err ? h('div', { style: { color: 'var(--danger)', marginTop: 10 } }, err) : h('p', null, 'Betöltés… (a megosztott csomag letöltése folyamatban)')));
+        h('h1', null, '🔀 Shared comparison'),
+        err ? h('div', { style: { color: 'var(--danger)', marginTop: 10 } }, err) : h('p', null, 'Loading… (downloading the shared package)')));
       return h('div', { className: 'cm-wrap' },
         h('div', { className: 'cm-empty' },
-          h('h1', null, '🔀 Revízió-összehasonlítás'),
-          h('p', null, 'Töltsd be a teljes ', h('code', null, 'P1_review_compare'), ' mappát — a ', h('code', null, 'change_database.json'), ' + a két verzió almappáját (a .tex / .bib / ábrák / osztály + a fordított PDF). A betöltés helyben történik; ha rákattintasz a Mentésre, a teljes csomag a fiókodhoz tárolódik, hogy legközelebb ne kelljen újra feltöltened.'),
+          h('h1', null, '🔀 Revision comparison'),
+          h('p', null, 'Load the entire ', h('code', null, 'P1_review_compare'), ' folder — the ', h('code', null, 'change_database.json'), ' + the two version subfolders (the .tex / .bib / figures / class + the compiled PDF). Loading happens locally; if you click Save, the entire package is stored to your account so you don\'t have to upload it again next time.'),
           h('input', { ref: function (el) { folderRef.current = el; if (el) { el.setAttribute('webkitdirectory', ''); el.setAttribute('directory', ''); el.setAttribute('mozdirectory', ''); } }, type: 'file', multiple: true, style: { display: 'none' }, onChange: onFolder }),
-          h('div', { style: { marginTop: 14 } }, h('button', { className: 'btn pri', onClick: function () { folderRef.current && folderRef.current.click(); } }, loading ? 'Betöltés…' : '📁 Mappa kiválasztása')),
+          h('div', { style: { marginTop: 14 } }, h('button', { className: 'btn pri', onClick: function () { folderRef.current && folderRef.current.click(); } }, loading ? 'Loading…' : '📁 Choose folder')),
           err ? h('div', { style: { color: 'var(--danger)', marginTop: 10 } }, err) : null,
           savedListBlock()));
     }
 
-    var TABS = [['workspace', '⊞ Áttekintés'], ['changes', 'Változások'], ['pdf', 'PDF + kiemelés'], ['edit', 'Élő szerkesztés'], ['reviewers', '📝 Bírálók'], ['audio', '🎧 Hangoskönyv']];
+    var TABS = [['workspace', '⊞ Overview'], ['changes', 'Changes'], ['pdf', 'PDF + highlight'], ['edit', 'Live editing'], ['reviewers', '📝 Reviewers'], ['audio', '🎧 Audiobook']];
     var header = h('div', { className: 'cm-head' },
       h('div', { style: { minWidth: 0 } },
-        h('h1', null, (db.publication && db.publication.title) || 'Revízió-összehasonlítás'),
-        h('div', { className: 'cm-sub' }, (db.publication && db.publication.venue ? db.publication.venue + ' · ' : '') + changes.length + ' változás · ' + ((db.review_points || []).length) + ' bírálói pont' + (pkg ? ' · ' + (pdfs.v2 ? 'v2✓' : 'v2✗') + ' ' + (pdfs.v3 ? 'v3✓' : 'v3✗') : ''))),
+        h('h1', null, (db.publication && db.publication.title) || 'Revision comparison'),
+        h('div', { className: 'cm-sub' }, (db.publication && db.publication.venue ? db.publication.venue + ' · ' : '') + changes.length + ' changes · ' + ((db.review_points || []).length) + ' reviewer points' + (pkg ? ' · ' + (pdfs.v2 ? 'v2✓' : 'v2✗') + ' ' + (pdfs.v3 ? 'v3✓' : 'v3✗') : ''))),
       h('div', { style: { marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' } },
-        ro ? h('span', { className: 'cm-robadge' }, '🔗 Megosztott nézet — csak olvasható') : null,
-        (!ro && saving) ? h('span', { style: { fontSize: 12.5, color: saving.indexOf('Hiba') >= 0 ? 'var(--danger)' : 'var(--muted)' } }, saving) : null,
-        (!ro && sb) ? h('button', { className: 'btn' + (savedId ? '' : ' pri'), onClick: saveProject, disabled: !!(saving && saving !== 'Mentve ✓' && saving.indexOf('Hiba') < 0 && saving.indexOf('jelentkezz') < 0) }, savedId ? '💾 Újramentés' : '💾 Mentés') : null,
-        (!ro && sb && savedId) ? h('button', { className: 'btn' + (curRow.is_public ? ' pri' : ''), title: 'Publikus link a bírálóknak', onClick: function () { setShareOpen(true); } }, curRow.is_public ? '🔗 Megosztva' : '🔗 Megosztás') : null,
-        h('button', { className: 'btn' + (notePanel ? ' pri' : ''), title: 'Bírálók jegyzete lebegő panelként', onClick: function () { var show = !notePanel; if (show && !notePos) setNotePos({ top: 66, left: Math.max(8, window.innerWidth - 404) }); setNotePanel(show); } }, '📝 Jegyzet'),
-        (!ro) ? h('button', { className: 'btn', onClick: function () { setDb(null); setPkg(null); setPdfs({}); setRawFiles(null); setSavedId(null); setErr(''); } }, '← Mappák') : null,
+        ro ? h('span', { className: 'cm-robadge' }, '🔗 Shared view — read-only') : null,
+        (!ro && saving) ? h('span', { style: { fontSize: 12.5, color: saving.indexOf('Error') >= 0 ? 'var(--danger)' : 'var(--muted)' } }, saving) : null,
+        (!ro && sb) ? h('button', { className: 'btn' + (savedId ? '' : ' pri'), onClick: saveProject, disabled: !!(saving && saving !== 'Saved ✓' && saving.indexOf('Error') < 0 && saving.indexOf('Sign in') < 0) }, savedId ? '💾 Re-save' : '💾 Save') : null,
+        (!ro && sb && savedId) ? h('button', { className: 'btn' + (curRow.is_public ? ' pri' : ''), title: 'Public link for the reviewers', onClick: function () { setShareOpen(true); } }, curRow.is_public ? '🔗 Shared' : '🔗 Share') : null,
+        h('button', { className: 'btn' + (notePanel ? ' pri' : ''), title: 'Reviewer note as a floating panel', onClick: function () { var show = !notePanel; if (show && !notePos) setNotePos({ top: 66, left: Math.max(8, window.innerWidth - 404) }); setNotePanel(show); } }, '📝 Note'),
+        (!ro) ? h('button', { className: 'btn', onClick: function () { setDb(null); setPkg(null); setPdfs({}); setRawFiles(null); setSavedId(null); setErr(''); } }, '← Folders') : null,
         h('div', { className: 'seg' }, TABS.map(function (t) { return h('button', { key: t[0], className: view === t[0] ? 'on' : '', onClick: function () { setView(t[0]); if (t[0] === 'edit' && !texSrc) openEdit(); } }, t[1]); }))));
 
     function sidebar() {
       return h('div', { className: 'cm-side' },
         h('div', { className: 'cm-filter' },
-          h('label', null, 'Bírálói észrevétel'),
+          h('label', null, 'Reviewer comment'),
           h('select', { className: 'field', value: filterP, onChange: function (e) { setFilterP(e.target.value); } },
-            h('option', { value: '' }, 'Minden változás (' + changes.length + ')'),
+            h('option', { value: '' }, 'All changes (' + changes.length + ')'),
             (db.review_points || []).map(function (r) { var n = (db.index_by_review_point && db.index_by_review_point[r.id] || []).length; return h('option', { key: r.id, value: r.id }, r.id + ' (' + n + ') — ' + r.reviewer); }))),
         filterP && rp[filterP] ? h('div', { className: 'cm-rpcomment' }, '„' + rp[filterP].comment + '"') : null,
         h('div', { className: 'cm-list' }, shown.map(changeLi)));
@@ -427,9 +427,9 @@
       var rps = db.review_points || [];
       return h('div', { className: 'cm-ws', ref: wsRef },
         h('div', { className: 'cm-ws-col', style: { width: revW + 'px', flex: 'none' } },
-          h('div', { className: 'cm-ws-h' }, '📝 Bírálók észrevételei (' + rps.length + ')'),
+          h('div', { className: 'cm-ws-h' }, '📝 Reviewer comments (' + rps.length + ')'),
           h('div', { className: 'cm-ws-scroll' },
-            h('div', { className: 'cm-rp-item' + (filterP === '' ? ' on' : ''), onClick: function () { selectRp(''); } }, h('div', { className: 'cm-rp-top' }, h('span', { className: 'cm-rp-id' }, 'Minden változás'), h('span', { className: 'cm-rp-cnt' }, changes.length))),
+            h('div', { className: 'cm-rp-item' + (filterP === '' ? ' on' : ''), onClick: function () { selectRp(''); } }, h('div', { className: 'cm-rp-top' }, h('span', { className: 'cm-rp-id' }, 'All changes'), h('span', { className: 'cm-rp-cnt' }, changes.length))),
             rps.map(function (r) {
               var n = (db.index_by_review_point && db.index_by_review_point[r.id] || []).length;
               return h('div', { key: r.id, className: 'cm-rp-item' + (filterP === r.id ? ' on' : ''), onClick: function () { selectRp(r.id); } },
@@ -438,74 +438,74 @@
             }))),
         h('div', { className: 'cm-split', onMouseDown: function (e) { startDrag(e, wsRef.current, function (x, w) { setRevW(Math.max(190, Math.min(w - 470, x))); }); } }),
         h('div', { className: 'cm-ws-col', style: { width: chgW + 'px', flex: 'none' } },
-          h('div', { className: 'cm-ws-h' }, 'Végrehajtott változások' + (filterP ? ' · ' + filterP : '') + ' (' + shown.length + ')'),
-          h('div', { className: 'cm-ws-scroll' }, shown.length ? shown.map(changeLi) : h('div', { style: { padding: 12, color: 'var(--muted)', fontSize: 13 } }, 'Nincs változás ehhez az észrevételhez.')),
+          h('div', { className: 'cm-ws-h' }, 'Applied changes' + (filterP ? ' · ' + filterP : '') + ' (' + shown.length + ')'),
+          h('div', { className: 'cm-ws-scroll' }, shown.length ? shown.map(changeLi) : h('div', { style: { padding: 12, color: 'var(--muted)', fontSize: 13 } }, 'No changes for this comment.')),
           sel ? h('div', { className: 'cm-ws-detail' }, h('div', { className: 'cm-ws-detail-sum' }, sel.change_summary), sel.reason ? h('div', { className: 'cm-ws-detail-reason' }, sel.reason) : null) : null),
         h('div', { className: 'cm-split', onMouseDown: function (e) { startDrag(e, wsRef.current, function (x, w) { setChgW(Math.max(220, Math.min(w - revW - 340, x - revW - 8))); }); } }),
         h('div', { className: 'cm-ws-pdfs', ref: pdfWrapRef, style: { gridTemplateColumns: pdfFrac + 'fr 8px ' + (1 - pdfFrac) + 'fr' } },
-          h('div', { className: 'cm-pdfcol' }, h('div', { className: 'cm-pdf-h' }, (pkg && pkg.v2 && pkg.v2.label) || 'Eredeti (v2)', sel ? h('span', { className: 'cm-pdf-hint' }, ' — ' + sel.id) : null), pdfs.v2 ? h(PdfDoc, { bytes: pdfs.v2, change: sel, side: 'original' }) : h('div', { className: 'cm-pdf-empty' }, 'nincs eredeti PDF — tölts be mappát/projektet')),
+          h('div', { className: 'cm-pdfcol' }, h('div', { className: 'cm-pdf-h' }, (pkg && pkg.v2 && pkg.v2.label) || 'Original (v2)', sel ? h('span', { className: 'cm-pdf-hint' }, ' — ' + sel.id) : null), pdfs.v2 ? h(PdfDoc, { bytes: pdfs.v2, change: sel, side: 'original' }) : h('div', { className: 'cm-pdf-empty' }, 'no original PDF — load a folder/project')),
           h('div', { className: 'cm-split', onMouseDown: function (e) { startDrag(e, pdfWrapRef.current, function (x, w) { setPdfFrac(Math.max(0.18, Math.min(0.82, x / w))); }); } }),
-          h('div', { className: 'cm-pdfcol' }, h('div', { className: 'cm-pdf-h' }, (pkg && pkg.v3 && pkg.v3.label) || 'Módosított (v3)', sel ? h('span', { className: 'cm-pdf-hint' }, ' — ' + sel.id) : null), pdfs.v3 ? h(PdfDoc, { bytes: pdfs.v3, change: sel, side: 'final' }) : h('div', { className: 'cm-pdf-empty' }, 'nincs módosított PDF'))));
+          h('div', { className: 'cm-pdfcol' }, h('div', { className: 'cm-pdf-h' }, (pkg && pkg.v3 && pkg.v3.label) || 'Revised (v3)', sel ? h('span', { className: 'cm-pdf-hint' }, ' — ' + sel.id) : null), pdfs.v3 ? h(PdfDoc, { bytes: pdfs.v3, change: sel, side: 'final' }) : h('div', { className: 'cm-pdf-empty' }, 'no revised PDF'))));
     }
     function changeDetail() {
-      if (!sel) return h('div', { className: 'cm-main' }, h('div', { style: { color: 'var(--muted)' } }, 'Nincs változás ehhez a szűrőhöz.'));
+      if (!sel) return h('div', { className: 'cm-main' }, h('div', { style: { color: 'var(--muted)' } }, 'No changes for this filter.'));
       return h('div', { className: 'cm-main' },
         h('div', { className: 'cm-ch-head' },
           h('span', { className: 'cm-cat', style: { background: (CAT[sel.category] || {}).c } }, (CAT[sel.category] || {}).t || sel.category),
           h('span', { className: 'cm-op', style: { color: (OP[sel.op] || {}).c, fontSize: 13 } }, (OP[sel.op] || {}).t),
           h('span', { style: { fontSize: 13, color: 'var(--muted)' } }, sel.section),
-          sel.confidence ? h('span', { className: 'cm-conf', title: 'megbízhatóság' }, sel.confidence) : null),
+          sel.confidence ? h('span', { className: 'cm-conf', title: 'confidence' }, sel.confidence) : null),
         h('h3', { style: { margin: '4px 0 10px' } }, sel.change_summary),
         h('div', { className: 'cm-diff' },
           sel.op === 'insert' ? h('span', { className: 'd-add' }, (sel.final && sel.final.text) || '')
             : sel.op === 'delete' ? h('span', { className: 'd-del' }, (sel.original && sel.original.text) || '')
               : diffWords((sel.original && sel.original.text) || '', (sel.final && sel.final.text) || '').map(function (p, i) { return h('span', { key: i, className: p.added ? 'd-add' : p.removed ? 'd-del' : '' }, p.value); })),
         h('div', { className: 'cm-why' },
-          h('div', { className: 'cm-why-h' }, '💬 Miért változott?'),
+          h('div', { className: 'cm-why-h' }, '💬 Why did it change?'),
           (sel.review_points || []).map(function (id) { var r = rp[id]; return h('div', { key: id, className: 'cm-rp' }, h('b', null, id + (r ? ' · ' + r.reviewer : '')), r ? h('div', { className: 'cm-rp-c' }, '„' + r.comment + '"') : null); }),
-          sel.reason ? h('div', { className: 'cm-reason' }, h('b', null, 'Indok: '), sel.reason) : null));
+          sel.reason ? h('div', { className: 'cm-reason' }, h('b', null, 'Reason: '), sel.reason) : null));
     }
     function pdfPanes() {
-      if (!pdfs.v2 && !pdfs.v3) return h('div', { className: 'cm-main' }, h('div', { style: { color: 'var(--muted)' } }, 'A PDF-ek nem töltődtek be a mappából. Töltsd be újra a teljes mappát (a két verzió fordított PDF-jét is tartalmaznia kell).'));
+      if (!pdfs.v2 && !pdfs.v3) return h('div', { className: 'cm-main' }, h('div', { style: { color: 'var(--muted)' } }, 'The PDFs did not load from the folder. Reload the entire folder (it must also contain the compiled PDF for both versions).'));
       return h('div', { className: 'cm-pdfwrap', ref: pdfWrapRef, style: { gridTemplateColumns: pdfFrac + 'fr 8px ' + (1 - pdfFrac) + 'fr' } },
-        h('div', { className: 'cm-pdfcol' }, h('div', { className: 'cm-pdf-h' }, (pkg && pkg.v2 && pkg.v2.label) || 'v2 — beküldött', sel ? h('span', { className: 'cm-pdf-hint' }, ' — ' + sel.id) : null), pdfs.v2 ? h(PdfDoc, { bytes: pdfs.v2, change: sel, side: 'original' }) : h('div', { className: 'cm-pdf-empty' }, 'nincs v2 PDF')),
+        h('div', { className: 'cm-pdfcol' }, h('div', { className: 'cm-pdf-h' }, (pkg && pkg.v2 && pkg.v2.label) || 'v2 — submitted', sel ? h('span', { className: 'cm-pdf-hint' }, ' — ' + sel.id) : null), pdfs.v2 ? h(PdfDoc, { bytes: pdfs.v2, change: sel, side: 'original' }) : h('div', { className: 'cm-pdf-empty' }, 'no v2 PDF')),
         h('div', { className: 'cm-split', onMouseDown: function (e) { startDrag(e, pdfWrapRef.current, function (x, w) { setPdfFrac(Math.max(0.18, Math.min(0.82, x / w))); }); } }),
-        h('div', { className: 'cm-pdfcol' }, h('div', { className: 'cm-pdf-h' }, (pkg && pkg.v3 && pkg.v3.label) || 'v3 — revideált', sel ? h('span', { className: 'cm-pdf-hint' }, ' — ' + sel.id) : null), pdfs.v3 ? h(PdfDoc, { bytes: pdfs.v3, change: sel, side: 'final' }) : h('div', { className: 'cm-pdf-empty' }, 'nincs v3 PDF')));
+        h('div', { className: 'cm-pdfcol' }, h('div', { className: 'cm-pdf-h' }, (pkg && pkg.v3 && pkg.v3.label) || 'v3 — revised', sel ? h('span', { className: 'cm-pdf-hint' }, ' — ' + sel.id) : null), pdfs.v3 ? h(PdfDoc, { bytes: pdfs.v3, change: sel, side: 'final' }) : h('div', { className: 'cm-pdf-empty' }, 'no v3 PDF')));
     }
     function editPanel() {
       return h('div', { className: 'cm-edit', ref: editRef, style: { gridTemplateColumns: editFrac + 'fr 8px ' + (1 - editFrac) + 'fr' } },
         h('div', { className: 'cm-edit-l' },
           h('div', { className: 'cm-edit-bar' },
             h('div', { className: 'seg' }, [['v2', 'v2'], ['v3', 'v3']].map(function (o) { return h('button', { key: o[0], className: editVer === o[0] ? 'on' : '', onClick: function () { setEditVer(o[0]); setTexSrc(''); setCompiledBytes(null); setCompileLog(''); setTimeout(openEdit, 0); } }, o[1]); })),
-            h('button', { className: 'btn', onClick: openEdit }, '↻ Eredeti .tex'),
-            h('button', { className: 'btn pri', onClick: compile, disabled: compiling || !texSrc }, compiling ? 'Fordítás…' : '▶ Fordítás (PDF)')),
-          h('textarea', { className: 'cm-tex', value: texSrc, spellCheck: false, onChange: function (e) { setTexSrc(e.target.value); }, placeholder: 'Válassz verziót, majd „Eredeti .tex" — ide töltődik a kézirat forrása…' }),
+            h('button', { className: 'btn', onClick: openEdit }, '↻ Original .tex'),
+            h('button', { className: 'btn pri', onClick: compile, disabled: compiling || !texSrc }, compiling ? 'Compiling…' : '▶ Compile (PDF)')),
+          h('textarea', { className: 'cm-tex', value: texSrc, spellCheck: false, onChange: function (e) { setTexSrc(e.target.value); }, placeholder: 'Choose a version, then „Original .tex" — the manuscript source loads here…' }),
           compileLog ? h('pre', { className: 'cm-log' }, compileLog) : null),
         h('div', { className: 'cm-split', onMouseDown: function (e) { startDrag(e, editRef.current, function (x, w) { setEditFrac(Math.max(0.2, Math.min(0.8, x / w))); }); } }),
         h('div', { className: 'cm-edit-r' },
           compiledBytes ? h(PdfDoc, { bytes: compiledBytes, change: null, side: 'final' })
-            : h('div', { className: 'cm-pdf-empty', style: { height: '100%' } }, 'A lefordított PDF itt jelenik meg. (SwiftLaTeX, böngészőben — bibtex nincs, így a hivatkozások „?"-ek lehetnek; az élő szöveg/ábra-változások viszont látszanak.)')));
+            : h('div', { className: 'cm-pdf-empty', style: { height: '100%' } }, 'The compiled PDF appears here. (SwiftLaTeX, in the browser — no bibtex, so citations may be „?"; live text/figure changes, however, are visible.)')));
     }
     function audioPanel() {
       var V = (window.PREleven && window.PREleven.voices) || [{ id: voice, name: voice }];
       var M = (window.PREleven && window.PREleven.models) || [{ id: model, name: model }];
       var nSeg = toSegs(narration()).length;
       return h('div', { className: 'cm-audio' },
-        h('h3', { style: { marginTop: 0 } }, '🎧 Revízió-hangoskönyv'),
-        h('p', { className: 'cm-sub' }, 'A ' + (filterP ? 'szűrt ' : '') + shown.length + ' változás története (összefoglaló + indok) felolvasva' + (filterP && rp[filterP] ? ' — ' + filterP : '') + '. ~' + nSeg + ' szegmens.'),
+        h('h3', { style: { marginTop: 0 } }, '🎧 Revision audiobook'),
+        h('p', { className: 'cm-sub' }, 'The story of the ' + (filterP ? 'filtered ' : '') + shown.length + ' changes (summary + reason) read aloud' + (filterP && rp[filterP] ? ' — ' + filterP : '') + '. ~' + nSeg + ' segments.'),
         needKey ? h('div', { className: 'cm-key' },
-          h('div', { style: { fontSize: 13, marginBottom: 6 } }, 'Add meg az ElevenLabs API-kulcsod (csak ebben a böngészőben tárolódik):'),
+          h('div', { style: { fontSize: 13, marginBottom: 6 } }, 'Enter your ElevenLabs API key (stored only in this browser):'),
           h('div', { style: { display: 'flex', gap: 8 } },
             h('input', { className: 'field', type: 'password', value: keyVal, placeholder: 'xi-...', onChange: function (e) { setKeyVal(e.target.value); }, style: { flex: 1 } }),
-            h('button', { className: 'btn pri', onClick: saveKey }, 'Mentés + indítás'))) : null,
+            h('button', { className: 'btn pri', onClick: saveKey }, 'Save + start'))) : null,
         h('div', { className: 'cm-arow' },
-          h('label', null, 'Hang'), h('select', { className: 'field', value: voice, onChange: function (e) { setVoice(e.target.value); } }, V.map(function (v) { return h('option', { key: v.id, value: v.id }, v.name); })),
-          h('label', null, 'Modell'), h('select', { className: 'field', value: model, onChange: function (e) { setModel(e.target.value); } }, M.map(function (m) { return h('option', { key: m.id, value: m.id }, m.name); }))),
+          h('label', null, 'Voice'), h('select', { className: 'field', value: voice, onChange: function (e) { setVoice(e.target.value); } }, V.map(function (v) { return h('option', { key: v.id, value: v.id }, v.name); })),
+          h('label', null, 'Model'), h('select', { className: 'field', value: model, onChange: function (e) { setModel(e.target.value); } }, M.map(function (m) { return h('option', { key: m.id, value: m.id }, m.name); }))),
         h('div', { style: { marginTop: 12 } },
-          h('button', { className: 'btn pri', onClick: genAudio, disabled: aBusy || !nSeg }, aBusy ? 'Generálás… ' + aProg : '🎙️ Hangoskönyv generálása')),
+          h('button', { className: 'btn pri', onClick: genAudio, disabled: aBusy || !nSeg }, aBusy ? 'Generating… ' + aProg : '🎙️ Generate audiobook')),
         aErr ? h('div', { style: { color: 'var(--danger)', marginTop: 8, fontSize: 13 } }, aErr) : null,
-        audioUrl ? h('div', { style: { marginTop: 14 } }, h('audio', { src: audioUrl, controls: true, style: { width: '100%' } }), h('div', { style: { marginTop: 6 } }, h('a', { className: 'btn', href: audioUrl, download: 'revizio-hangoskonyv.mp3' }, '⬇ Letöltés (MP3)'))) : null,
-        h('details', { style: { marginTop: 14 } }, h('summary', { style: { cursor: 'pointer', fontSize: 13, color: 'var(--muted)' } }, 'Felolvasandó szöveg előnézete'), h('div', { style: { fontSize: 13, lineHeight: 1.55, marginTop: 8, whiteSpace: 'pre-wrap' } }, narration())));
+        audioUrl ? h('div', { style: { marginTop: 14 } }, h('audio', { src: audioUrl, controls: true, style: { width: '100%' } }), h('div', { style: { marginTop: 6 } }, h('a', { className: 'btn', href: audioUrl, download: 'revizio-hangoskonyv.mp3' }, '⬇ Download (MP3)'))) : null,
+        h('details', { style: { marginTop: 14 } }, h('summary', { style: { cursor: 'pointer', fontSize: 13, color: 'var(--muted)' } }, 'Preview of the text to be read'), h('div', { style: { fontSize: 13, lineHeight: 1.55, marginTop: 8, whiteSpace: 'pre-wrap' } }, narration())));
     }
 
     function withSide(mainEl) {
@@ -524,25 +524,25 @@
 
     var notePanelEl = notePanel ? h('div', { className: 'cm-note', style: notePos ? { top: notePos.top + 'px', left: notePos.left + 'px', right: 'auto', bottom: 'auto' } : null },
       h('div', { className: 'cm-note-h', onMouseDown: function (e) { startMove(e, setNotePos); } },
-        h('span', { className: 'cm-note-title' }, '📝 Bírálók jegyzete'),
-        (!ro && sb && savedId) ? h('button', { className: 'cm-note-btn', title: 'Mentés', onMouseDown: function (e) { e.stopPropagation(); }, onClick: saveReviewerText }, '💾') : null,
-        h('button', { className: 'cm-note-x', title: 'Bezárás', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function () { setNotePanel(false); } }, '×')),
+        h('span', { className: 'cm-note-title' }, '📝 Reviewer note'),
+        (!ro && sb && savedId) ? h('button', { className: 'cm-note-btn', title: 'Save', onMouseDown: function (e) { e.stopPropagation(); }, onClick: saveReviewerText }, '💾') : null,
+        h('button', { className: 'cm-note-x', title: 'Close', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function () { setNotePanel(false); } }, '×')),
       revSaving ? h('div', { className: 'cm-note-status' }, revSaving) : null,
-      h('textarea', { className: 'cm-note-t', value: reviewerText, spellCheck: false, readOnly: ro, placeholder: 'Másold ide / szerkeszd a bírálók szövegét — a mentett projekttel megmarad…', onChange: function (e) { setReviewerText(e.target.value); } })) : null;
+      h('textarea', { className: 'cm-note-t', value: reviewerText, spellCheck: false, readOnly: ro, placeholder: 'Paste / edit the reviewers\' text here — it is preserved together with the saved project…', onChange: function (e) { setReviewerText(e.target.value); } })) : null;
 
     var shareLink = curRow.share_token ? shareLinkFor(curRow.share_token) : '';
     var shareModalEl = (shareOpen && !ro) ? h('div', { className: 'cm-modal-scrim', onClick: function () { setShareOpen(false); } },
       h('div', { className: 'cm-modal', onClick: function (e) { e.stopPropagation(); } },
-        h('div', { className: 'cm-modal-h' }, h('b', null, '🔗 Megosztás a bírálókkal'), h('button', { className: 'cm-note-x', onClick: function () { setShareOpen(false); } }, '×')),
-        h('p', { style: { fontSize: 13, color: 'var(--muted)', margin: '2px 0 12px' } }, 'Publikus link: bárki, akinek elküldöd, megnézheti ezt az összehasonlítást (a két PDF, a végrehajtott változások, a bírálói észrevételek) — bejelentkezés nélkül, csak olvasható módban.'),
+        h('div', { className: 'cm-modal-h' }, h('b', null, '🔗 Share with the reviewers'), h('button', { className: 'cm-note-x', onClick: function () { setShareOpen(false); } }, '×')),
+        h('p', { style: { fontSize: 13, color: 'var(--muted)', margin: '2px 0 12px' } }, 'Public link: anyone you send it to can view this comparison (the two PDFs, the applied changes, the reviewer comments) — without signing in, in read-only mode.'),
         h('label', { className: 'cm-share-toggle' },
           h('input', { type: 'checkbox', checked: !!curRow.is_public, disabled: shareBusy, onChange: function (e) { shareProject(e.target.checked); } }),
-          h('span', null, shareBusy ? 'Frissítés…' : (curRow.is_public ? 'Publikus link bekapcsolva' : 'Publikus link bekapcsolása'))),
+          h('span', null, shareBusy ? 'Updating…' : (curRow.is_public ? 'Public link enabled' : 'Enable public link'))),
         (curRow.is_public && shareLink) ? h('div', { style: { marginTop: 12 } },
           h('div', { style: { display: 'flex', gap: 8 } },
             h('input', { className: 'field', readOnly: true, value: shareLink, onFocus: function (e) { e.target.select(); }, style: { flex: 1, fontSize: 12 } }),
-            h('button', { className: 'btn pri', onClick: function () { try { navigator.clipboard.writeText(shareLink); setShareCopied(true); setTimeout(function () { setShareCopied(false); }, 1800); } catch (e) { } } }, shareCopied ? 'Másolva ✓' : 'Másolás')),
-          h('div', { style: { fontSize: 11.5, color: 'var(--faint)', marginTop: 8 } }, 'A link ~1 évig érvényes. Visszavonáshoz kapcsold ki a fenti kapcsolót — onnantól a link nem nyílik meg.')) : null)) : null;
+            h('button', { className: 'btn pri', onClick: function () { try { navigator.clipboard.writeText(shareLink); setShareCopied(true); setTimeout(function () { setShareCopied(false); }, 1800); } catch (e) { } } }, shareCopied ? 'Copied ✓' : 'Copy')),
+          h('div', { style: { fontSize: 11.5, color: 'var(--faint)', marginTop: 8 } }, 'The link is valid for ~1 year. To revoke, turn off the toggle above — after that the link will not open.')) : null)) : null;
 
     return h('div', { className: 'cm-wrap' }, header, body, notePanelEl, shareModalEl);
   }

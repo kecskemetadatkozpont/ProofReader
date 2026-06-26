@@ -41,7 +41,7 @@
   function plain() { chip.classList.remove('stale'); txt.textContent = 'v ' + (B.built || 'dev'); chip.title = 'Running build ' + B.build + ' (' + (B.built || 'dev') + ')'; }
   function ok() { plain(); chip.title = 'Latest version ✓ — build ' + B.build + ' (' + (B.built || 'dev') + ')'; }
   function stale(v) {
-    chip.classList.add('stale'); txt.textContent = 'Új verzió elérhető — kattints a frissítéshez';
+    chip.classList.add('stale'); txt.textContent = 'New version available — click to refresh';
     chip.title = 'Deployed: ' + (v && v.built) + '\nYou are seeing (cached): ' + (B.built || 'dev') + '\nClick to hard-refresh.';
   }
   plain();

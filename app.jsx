@@ -142,31 +142,31 @@
       });
     }
     function generate() {
-      if (!caption.trim() && !method.trim()) { setErr('Adj meg legalább egy feliratot (caption).'); return; }
+      if (!caption.trim() && !method.trim()) { setErr('Enter at least a caption.'); return; }
       setBusy(true); setErr(''); setCands(null);
       (window.PR_SB ? window.PR_SB.auth.getSession() : Promise.resolve({})).then((s) => {
         const token = (s && s.data && s.data.session && s.data.session.access_token) || CFG.supabaseAnonKey;
         fetch(CFG.supabaseUrl + '/functions/v1/paper-figure', { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: CFG.supabaseAnonKey, Authorization: 'Bearer ' + token }, body: JSON.stringify({ method: method, caption: caption, task: 'diagram', n: n }) })
-          .then((r) => r.json()).then((out) => { setBusy(false); if (!out || out.error) { setErr((out && out.error) || 'Hiba.'); return; } setCands(out.candidates || []); setMode(out.mode || ''); }, () => { setBusy(false); setErr('A generálás nem sikerült (paper-figure Edge function elérhető?).'); });
+          .then((r) => r.json()).then((out) => { setBusy(false); if (!out || out.error) { setErr((out && out.error) || 'Error.'); return; } setCands(out.candidates || []); setMode(out.mode || ''); }, () => { setBusy(false); setErr('Generation failed (is the paper-figure Edge function available?).'); });
       });
     }
-    function pick(c) { rasterize(c.dataUrl).then((blob) => { if (!blob) { setErr('A kép feldolgozása nem sikerült.'); return; } onPick(blob, caption); }); }
+    function pick(c) { rasterize(c.dataUrl).then((blob) => { if (!blob) { setErr('Image processing failed.'); return; } onPick(blob, caption); }); }
     return <div className="overlay" onClick={onClose}>
       <div className="fig-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="fig-h"><b>✨ Ábra generálása (AI)</b><button className="fig-x" onClick={onClose}>✕</button></div>
-        <label className="fig-l">Felirat (caption)</label>
-        <input className="fig-in" value={caption} placeholder="Pl. A Fisher Fusion pipeline architektúrája." onChange={(e) => setCaption(e.target.value)} />
-        <label className="fig-l">Method-szöveg — opcionális, jobb ábráért</label>
-        <textarea className="fig-ta" value={method} placeholder="Illeszd be a method-szekció releváns részét (markdown ajánlott)…" onChange={(e) => setMethod(e.target.value)} />
+        <div className="fig-h"><b>✨ Generate figure (AI)</b><button className="fig-x" onClick={onClose}>✕</button></div>
+        <label className="fig-l">Caption</label>
+        <input className="fig-in" value={caption} placeholder="E.g. The architecture of the Fisher Fusion pipeline." onChange={(e) => setCaption(e.target.value)} />
+        <label className="fig-l">Method text — optional, for a better figure</label>
+        <textarea className="fig-ta" value={method} placeholder="Paste the relevant part of the method section (markdown recommended)…" onChange={(e) => setMethod(e.target.value)} />
         <div className="fig-row">
-          <span className="fig-l" style={{ margin: 0 }}>Jelöltek: {n}</span>
+          <span className="fig-l" style={{ margin: 0 }}>Candidates: {n}</span>
           <input type="range" min="1" max="8" value={n} onChange={(e) => setN(+e.target.value)} />
-          <button className="fig-gen" disabled={busy} onClick={generate}>{busy ? 'Generálás…' : 'Generálás'}</button>
+          <button className="fig-gen" disabled={busy} onClick={generate}>{busy ? 'Generating…' : 'Generate'}</button>
         </div>
         {err ? <div className="fig-err">{err}</div> : null}
-        {mode === 'placeholder' && cands ? <div className="fig-note">Placeholder ábrák — állítsd be a <code>PAPERBANANA_ENDPOINT</code> secretet a valódi generáláshoz.</div> : null}
-        {busy ? <div className="fig-busy">Az AI dolgozik a jelölteken… (a valódi pipeline több lépés, eltarthat egy ideig)</div> : null}
-        {cands ? <div className="fig-grid">{cands.map((c, i) => <button className="fig-cand" key={i} title="Beszúrás a dokumentumba" onClick={() => pick(c)}><img src={c.dataUrl} alt={c.label || ('cand ' + i)} /><span>{c.label || ('Jelölt ' + (i + 1))}</span></button>)}</div> : null}
+        {mode === 'placeholder' && cands ? <div className="fig-note">Placeholder figures — set the <code>PAPERBANANA_ENDPOINT</code> secret for real generation.</div> : null}
+        {busy ? <div className="fig-busy">The AI is working on the candidates… (the real pipeline is multi-step and may take a while)</div> : null}
+        {cands ? <div className="fig-grid">{cands.map((c, i) => <button className="fig-cand" key={i} title="Insert into the document" onClick={() => pick(c)}><img src={c.dataUrl} alt={c.label || ('cand ' + i)} /><span>{c.label || ('Candidate ' + (i + 1))}</span></button>)}</div> : null}
       </div>
     </div>;
   }
@@ -339,7 +339,7 @@
     // live as bundled assets (.src) or cloud uploads (.storagePath, signed-URL fetched), not just inline dataURLs
     // — plus a publify-data/ database (annotations.json + a readable .md) and the comment/to-do image attachments.
     async function downloadProject() {
-      if (!window.JSZip) { alert('A letöltő motor (JSZip) nem érhető el — frissítsd az oldalt.'); return; }
+      if (!window.JSZip) { alert('The download engine (JSZip) is unavailable — refresh the page.'); return; }
       setDlBusy(true);
       try {
         const zip = new window.JSZip();
@@ -375,20 +375,20 @@
         // comment / to-do image (and file) attachments → publify-data/attachments/
         anns.forEach((a) => {
           const atts = (a.attachments || []).slice(); (a.replies || []).forEach((r) => { (r.attachments || []).forEach((x) => atts.push(x)); });
-          atts.forEach((att, i) => { if (att && att.dataURL) { try { zip.file('publify-data/attachments/' + a.id + '-' + (att.name || ('melleklet-' + (i + 1))), dataURLToBlob(att.dataURL)); } catch (e) { } } });
+          atts.forEach((att, i) => { if (att && att.dataURL) { try { zip.file('publify-data/attachments/' + a.id + '-' + (att.name || ('attachment-' + (i + 1))), dataURLToBlob(att.dataURL)); } catch (e) { } } });
         });
         const fmtA = (a) => { const where = a.anchor ? (a.anchor.file + (a.anchor.quote ? ' — „' + String(a.anchor.quote).slice(0, 90) + '"' : '')) : ''; let s = '- **' + nm(a.authorId) + '**' + (a.status ? ' _(' + a.status + ')_' : '') + ': ' + String(a.body || a.comment || '').replace(/\n+/g, ' ') + (where ? '\n  - ' + where : ''); (a.replies || []).forEach((r) => { s += '\n  - ↳ **' + nm(r.authorId) + '**: ' + String(r.body || '').replace(/\n+/g, ' '); }); return s; };
-        let md = '# ' + (init.title || 'Projekt') + ' — annotációk\n\nExportálva: ' + db.exportedAt + '\n\n';
-        md += '## Kommentek (' + byKind('comment').length + ')\n\n' + (byKind('comment').map(fmtA).join('\n') || '_nincs_') + '\n\n';
-        md += '## To-dók (' + byKind('todo').length + ')\n\n' + (byKind('todo').map((a) => '- [' + (a.status === 'done' ? 'x' : ' ') + '] ' + String(a.body || '').replace(/\n+/g, ' ') + (a.assignee ? ' (felelős: ' + nm(a.assignee) + ')' : '') + (a.due ? ' — ' + a.due : '')).join('\n') || '_nincs_') + '\n\n';
-        md += '## AI review (' + byKind('review').length + ')\n\n' + (byKind('review').map(fmtA).join('\n') || '_nincs_') + '\n';
+        let md = '# ' + (init.title || 'Project') + ' — annotations\n\nExported: ' + db.exportedAt + '\n\n';
+        md += '## Comments (' + byKind('comment').length + ')\n\n' + (byKind('comment').map(fmtA).join('\n') || '_none_') + '\n\n';
+        md += '## To-dos (' + byKind('todo').length + ')\n\n' + (byKind('todo').map((a) => '- [' + (a.status === 'done' ? 'x' : ' ') + '] ' + String(a.body || '').replace(/\n+/g, ' ') + (a.assignee ? ' (assignee: ' + nm(a.assignee) + ')' : '') + (a.due ? ' — ' + a.due : '')).join('\n') || '_none_') + '\n\n';
+        md += '## AI review (' + byKind('review').length + ')\n\n' + (byKind('review').map(fmtA).join('\n') || '_none_') + '\n';
         zip.file('publify-data/ANNOTATIONS.md', md);
         const blob = await zip.generateAsync({ type: 'blob' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a'); a.href = url;
         a.download = ((init.title || 'project').replace(/[^\w\s-]+/g, '').trim().replace(/\s+/g, '-') || 'project') + '-export.zip';
         document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000);
-      } catch (e) { alert('A letöltés nem sikerült: ' + ((e && e.message) || e)); }
+      } catch (e) { alert('Download failed: ' + ((e && e.message) || e)); }
       finally { setDlBusy(false); }
     }
     const refreshVoiced = useCallback(() => { if (window.PREleven && window.PREleven.cachedKeys) window.PREleven.cachedKeys().then(setVoicedKeys).catch(() => {}); }, []);
@@ -512,7 +512,7 @@
       clearTimeout(pdfCompileTimers.current[docId]);
       // Flip the UI synchronously the instant this runs — otherwise busy is only set deep inside run()
       // (after the setTimeout + await assembleTexFiles), so the button felt inert for hundreds of ms.
-      setPdfCompiled((s) => ({ ...s, [docId]: { ...(s[docId] || {}), err: null, pending: !force, busy: force ? true : (s[docId] || {}).busy, phase: force ? 'fordításra vár…' : (s[docId] || {}).phase } }));
+      setPdfCompiled((s) => ({ ...s, [docId]: { ...(s[docId] || {}), err: null, pending: !force, busy: force ? true : (s[docId] || {}).busy, phase: force ? 'waiting to compile…' : (s[docId] || {}).phase } }));
       const run = async () => {
         if (window.AloudTeX.isBusy && window.AloudTeX.isBusy()) { pdfCompileTimers.current[docId] = setTimeout(run, 700); return; }
         let input;
@@ -523,7 +523,7 @@
         const cur = pdfCompiledRef.current[docId];
         // (1) content unchanged since the last browser compile → keep the current PDF, skip recompiling
         if (!force && hash && cur && cur.hash === hash && cur.pdf) { setPdfCompiled((s) => ({ ...s, [docId]: { ...(s[docId] || {}), busy: false, pending: false, phase: null } })); return; }
-        setPdfCompiled((s) => ({ ...s, [docId]: { ...(s[docId] || {}), busy: true, pending: false, phase: 'fordítás előkészítése…', err: null } }));
+        setPdfCompiled((s) => ({ ...s, [docId]: { ...(s[docId] || {}), busy: true, pending: false, phase: 'preparing compile…', err: null } }));
         // (2) persistent cache hit → load the stored PDF instantly, no compile (but never replace a
         // current exact-mode "Pontos PDF" with a cached browser PDF unless the user forced it)
         if (!force && hash && C && !(cur && cur.mode === 'exact')) {
@@ -533,7 +533,7 @@
         try {
           const r = await window.AloudTeX.compile({ mainFile: input.mainFile, files: input.files, passes: 3, onProgress: (m) => setPdfCompiled((s) => ({ ...s, [docId]: { ...(s[docId] || {}), phase: m } })) });
           if (r.ok && hash && C) { try { C.put(hash, { pdf: r.pdf, pages: r.pages, ts: Date.now() }); } catch (e) { } }
-          setPdfCompiled((s) => ({ ...s, [docId]: { busy: false, pending: false, phase: null, pdf: r.ok ? r.pdf : ((s[docId] || {}).pdf || null), log: r.log, pages: r.pages, status: r.status, mode: 'browser', err: r.ok ? null : (r.reason || ('Fordítás nem sikerült (status ' + r.status + ')')), ms: r.ms, hash: r.ok ? hash : ((s[docId] || {}).hash), ts: Date.now() } }));
+          setPdfCompiled((s) => ({ ...s, [docId]: { busy: false, pending: false, phase: null, pdf: r.ok ? r.pdf : ((s[docId] || {}).pdf || null), log: r.log, pages: r.pages, status: r.status, mode: 'browser', err: r.ok ? null : (r.reason || ('Compile failed (status ' + r.status + ')')), ms: r.ms, hash: r.ok ? hash : ((s[docId] || {}).hash), ts: Date.now() } }));
         } catch (e) {
           setPdfCompiled((s) => ({ ...s, [docId]: { ...(s[docId] || {}), busy: false, pending: false, phase: null, err: String((e && e.message) || e), mode: 'browser', ts: Date.now() } }));
         }
@@ -544,7 +544,7 @@
     const onCompileExact = useCallback(async (docId) => {
       docId = docId || active;
       if (!window.AloudTeX) return;
-      if (!window.ALOUD_TEX_EXACT_ENDPOINT) { alert('A byte-azonos „Pontos PDF"-hez külső TeX Live 2026 compile-API kell.\nÁllítsd be: window.ALOUD_TEX_EXACT_ENDPOINT = "https://…".'); return; }
+      if (!window.ALOUD_TEX_EXACT_ENDPOINT) { alert('The byte-identical "Exact PDF" needs an external TeX Live 2026 compile API.\nSet: window.ALOUD_TEX_EXACT_ENDPOINT = "https://…".'); return; }
       setPdfCompiled((s) => ({ ...s, [docId]: { ...(s[docId] || {}), busy: true, err: null } }));
       try {
         const input = await assembleTexFiles(docId);
@@ -1506,7 +1506,7 @@
       const anns = docId === active ? displayAnns : annotations;
       const A = window.PRAuth;
       return anns.filter((a) => a.kind !== 'review' && a.anchor && a.anchor.file === docId && !a._orphan && a.status !== 'resolved' && a.status !== 'done' && a.anchor.start < s.end && a.anchor.end > s.start)
-        .map((a) => { const au = A && A.byId(a.authorId); return { kind: a.kind, body: a.body, due: a.due, author: au ? au.name : 'Valaki', color: (au && au.color) ? au.color : '#8a8f98', initials: (au && A.initials) ? A.initials(au.name) : '•' }; });
+        .map((a) => { const au = A && A.byId(a.authorId); return { kind: a.kind, body: a.body, due: a.due, author: au ? au.name : 'Someone', color: (au && au.color) ? au.color : '#8a8f98', initials: (au && A.initials) ? A.initials(au.name) : '•' }; });
     }, [getCompiled, displayAnns, annotations, active]);
 
     // raw annotation objects (id, replies, status…) overlapping a sentence — for the bubble thread popover
@@ -1752,7 +1752,7 @@
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a'); a.href = url; a.download = (docLabel(docId) || 'document').replace(/\.[^.]+$/, '') + '.docx';
         document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 2000);
-      }, () => alert('A Word-export könyvtár nem töltődött be (offline?).'));
+      }, () => alert('The Word-export library could not be loaded (offline?).'));
     }, [getCompiled, docLabel, active]);
     const myProjects = useCallback(() => (window.PRStore ? window.PRStore.listFor(me.id).filter((p) => p.id !== projectId) : []), [projectId]);
     const projTexFiles = useCallback((p) => Object.keys(p.files || {}).filter((f) => p.files[f] && p.files[f].type === 'tex'), []);
@@ -1979,7 +1979,7 @@
             <button className="btn btn-icon" title="Upload folder" onClick={() => dirInput.current.click()}>
               <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"><path d="M1.8 5c0-.5.4-.9.9-.9h2.6c.3 0 .5.1.7.3l.7.8h5.6c.5 0 .9.4.9.9V12c0 .5-.4.9-.9.9H2.7c-.5 0-.9-.4-.9-.9z" /><path d="M8 11.6V7M8 7L6.4 8.6M8 7l1.6 1.6" /></svg>
             </button>
-            <button className="btn btn-icon" title={dlBusy ? 'Projekt letöltése…' : 'Projekt letöltése (.zip — minden fájl + képek + a kommentek/todók adatbázisa)'} onClick={downloadProject} disabled={dlBusy} style={dlBusy ? { opacity: .6 } : null}>
+            <button className="btn btn-icon" title={dlBusy ? 'Downloading project…' : 'Download project (.zip — all files + images + the comments/to-dos database)'} onClick={downloadProject} disabled={dlBusy} style={dlBusy ? { opacity: .6 } : null}>
               <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"><path d="M8 2.5v6.5M5.4 6.4L8 9l2.6-2.6M3 12.5h10" /></svg>
             </button>
             <div className="acct-mini">
@@ -2033,7 +2033,7 @@
             <div className="ws-toolbar">
               <window.Workspace.Presets ctx={{ preset, onPreset: wsOnPreset }} />
               <span className="ws-tb-sp" />
-              {canFigures ? <button className="ws-tb-btn" title="AI ábra generálása (PaperBanana)" onClick={() => setFigOpen(true)}>✨ Ábra</button> : null}
+              {canFigures ? <button className="ws-tb-btn" title="Generate AI figure (PaperBanana)" onClick={() => setFigOpen(true)}>✨ Figure</button> : null}
               {diags.length > 0
                 ? <div className="diag-wrap">
                     <button className={'diag-chip' + (diagOpen ? ' on' : '')} title="Rendering issues" onClick={(e) => { e.stopPropagation(); setDiagOpen((o) => !o); }}>
@@ -2371,9 +2371,9 @@
         <div className="tp-right">
           <button className={'tp-toggle' + (props.showVoiced ? ' on' : ' off')} title={props.showVoiced ? 'Hide ♪ voiced-sentence highlights' : 'Show ♪ voiced-sentence highlights'} onClick={(e) => { e.stopPropagation(); props.onToggleVoiced && props.onToggleVoiced(); }}><span className="tp-glyph">♪</span></button>
           {props.hasReview ? <button className={'tp-toggle' + (props.showReview ? ' on' : ' off')} title={props.showReview ? 'Hide AI review markers' : 'Show AI review markers'} onClick={(e) => { e.stopPropagation(); props.onToggleReview && props.onToggleReview(); }}><span className="tp-glyph">✦</span></button> : null}
-          {props.hlShow ? <button className={'tp-toggle' + (props.hlShow.comment ? ' on' : ' off')} title={(props.hlShow.comment ? 'Elrejt' : 'Mutat') + ': komment-kiemelések a kódban'} onClick={(e) => { e.stopPropagation(); props.onToggleHl && props.onToggleHl('comment'); }}><span className="tp-glyph">✎</span></button> : null}
-          {props.hlShow ? <button className={'tp-toggle' + (props.hlShow.todo ? ' on' : ' off')} title={(props.hlShow.todo ? 'Elrejt' : 'Mutat') + ': javítandó (to-do) kiemelések a kódban'} onClick={(e) => { e.stopPropagation(); props.onToggleHl && props.onToggleHl('todo'); }}><span className="tp-glyph">✓</span></button> : null}
-          {props.hlShow ? <button className={'tp-toggle' + (props.hlShow.spell ? ' on' : ' off')} title={(props.hlShow.spell ? 'Elrejt' : 'Mutat') + ': helyesírás-kiemelések a kódban'} onClick={(e) => { e.stopPropagation(); props.onToggleHl && props.onToggleHl('spell'); }}><span className="tp-glyph">∿</span></button> : null}
+          {props.hlShow ? <button className={'tp-toggle' + (props.hlShow.comment ? ' on' : ' off')} title={(props.hlShow.comment ? 'Hide' : 'Show') + ': comment highlights in the code'} onClick={(e) => { e.stopPropagation(); props.onToggleHl && props.onToggleHl('comment'); }}><span className="tp-glyph">✎</span></button> : null}
+          {props.hlShow ? <button className={'tp-toggle' + (props.hlShow.todo ? ' on' : ' off')} title={(props.hlShow.todo ? 'Hide' : 'Show') + ': to-do highlights in the code'} onClick={(e) => { e.stopPropagation(); props.onToggleHl && props.onToggleHl('todo'); }}><span className="tp-glyph">✓</span></button> : null}
+          {props.hlShow ? <button className={'tp-toggle' + (props.hlShow.spell ? ' on' : ' off')} title={(props.hlShow.spell ? 'Hide' : 'Show') + ': spelling highlights in the code'} onClick={(e) => { e.stopPropagation(); props.onToggleHl && props.onToggleHl('spell'); }}><span className="tp-glyph">∿</span></button> : null}
           <button className={'tp-gear' + (props.engine === 'eleven' ? ' on' : '')} title="Voice engine" onClick={(e) => { e.stopPropagation(); props.onVoice && props.onVoice(); }}>
             <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="10" cy="10" r="2.6" /><path d="M10 2.5v2M10 15.5v2M2.5 10h2M15.5 10h2M4.7 4.7l1.4 1.4M13.9 13.9l1.4 1.4M4.7 15.3l1.4-1.4M13.9 6.1l1.4-1.4" strokeLinecap="round" /></svg>
             {props.engine === 'eleven' ? <span className="gear-tag">EL</span> : null}

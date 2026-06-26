@@ -48,7 +48,7 @@ function Header(props) {
   function setTint(c) { if (isDemo) { Auth.updateUser(me.id, { color: c }); props.setMe(Auth.byId(me.id)); } }
   var isFree = /free/i.test(usage.planLabel || '');
   return <header className="pf-head">
-    <div className="pf-head-top"><a className="pf-back" href="Projects.html">← Publications</a><a className="pf-back" href="Landing.html" style={{ marginLeft: 14 }}>Kezdőlap ↗</a><span id="pr-ver-slot" className="pf-ver" /></div>
+    <div className="pf-head-top"><a className="pf-back" href="Projects.html">← Publications</a><a className="pf-back" href="Landing.html" style={{ marginLeft: 14 }}>Home ↗</a><span id="pr-ver-slot" className="pf-ver" /></div>
     <div className="pf-id">
       <Avatar user={me} size={68} />
       <div className="pf-id-main">
@@ -178,24 +178,24 @@ function ResearchIds(props) {
   function save(e) {
     if (e) e.preventDefault();
     var orc = v.orcid.trim();
-    if (orc && !/^\d{4}-\d{4}-\d{4}-\d{3}[\dXx]$/.test(orc)) { setMsg(['err', 'Az ORCID formátuma: 0000-0000-0000-0000.']); return; }
+    if (orc && !/^\d{4}-\d{4}-\d{4}-\d{3}[\dXx]$/.test(orc)) { setMsg(['err', 'ORCID format: 0000-0000-0000-0000.']); return; }
     var B = window.PR_BACKEND;
-    if (!(B && B.sb)) { setMsg(['err', 'Csak bejelentkezve menthető.']); return; }
+    if (!(B && B.sb)) { setMsg(['err', 'You must be signed in to save.']); return; }
     setBusy(true); setMsg(null);
     B.sb.from('profiles').update({ mtmt_id: v.mtmt.trim() || null, orcid: orc || null }).eq('id', props.id).then(function (r) {
       setBusy(false);
       if (r && r.error) { setMsg(['err', r.error.message]); return; }
-      setMsg(['ok', 'Mentve.']);
+      setMsg(['ok', 'Saved.']);
     });
   }
   return <div className="pf-panel">
-    <div className="pf-set-h">Kutatói azonosítók</div>
+    <div className="pf-set-h">Researcher IDs</div>
     <form className="pf-pw" onSubmit={save}>
-      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 3 }}>MTMT azonosító</div>
-      <input className="pf-login-in" value={v.mtmt} placeholder="pl. 10012345" onChange={function (e) { setV(Object.assign({}, v, { mtmt: e.target.value })); }} aria-label="MTMT azonosító" />
+      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 3 }}>MTMT ID</div>
+      <input className="pf-login-in" value={v.mtmt} placeholder="e.g. 10012345" onChange={function (e) { setV(Object.assign({}, v, { mtmt: e.target.value })); }} aria-label="MTMT ID" />
       <div style={{ fontSize: 12, color: 'var(--muted)', margin: '6px 0 3px' }}>ORCID</div>
       <input className="pf-login-in" value={v.orcid} placeholder="0000-0000-0000-0000" onChange={function (e) { setV(Object.assign({}, v, { orcid: e.target.value })); }} aria-label="ORCID" />
-      <div className="pf-pw-acts"><button className="btn-primary" type="submit" disabled={busy}>{busy ? 'Mentés…' : 'Mentés'}</button></div>
+      <div className="pf-pw-acts"><button className="btn-primary" type="submit" disabled={busy}>{busy ? 'Saving…' : 'Save'}</button></div>
     </form>
     {msg ? <div className={'pf-note ' + (msg[0] === 'ok' ? 'ok' : 'err')}>{msg[1]}</div> : null}
   </div>;
@@ -300,16 +300,16 @@ function Publications(props) {
   // refresh: pull the latest from MTMT (by the user's mtmt_id) via the mtmt-sync edge function
   function syncMtmt() {
     var B = window.PR_BACKEND;
-    if (!(B && B.sb)) { setSyncMsg(['err', 'Csak bejelentkezve frissíthető.']); return; }
+    if (!(B && B.sb)) { setSyncMsg(['err', 'You must be signed in to refresh.']); return; }
     setSyncing(true); setSyncMsg(null);
     B.sb.functions.invoke('mtmt-sync').then(function (res) {
       setSyncing(false);
-      if (res && res.error) { setSyncMsg(['err', 'A frissítés nem sikerült (mtmt-sync edge function nincs telepítve?).']); return; }
+      if (res && res.error) { setSyncMsg(['err', 'The refresh failed (is the mtmt-sync edge function not installed?).']); return; }
       var d = res && res.data;
-      if (d && d.error) { setSyncMsg(['err', d.error === 'no_mtmt_id' ? 'Előbb állítsd be az MTMT azonosítód a Beállításokban.' : ('Hiba: ' + d.error)]); return; }
+      if (d && d.error) { setSyncMsg(['err', d.error === 'no_mtmt_id' ? 'Set your MTMT ID in Settings first.' : ('Error: ' + d.error)]); return; }
       setLiveRows((d && d.publications) || []);
-      setSyncMsg(['ok', '✓ Frissítve — ' + ((d && d.count) || 0) + ' publikáció az MTMT-ből.']);
-    }, function () { setSyncing(false); setSyncMsg(['err', 'A frissítés nem sikerült.']); });
+      setSyncMsg(['ok', '✓ Refreshed — ' + ((d && d.count) || 0) + ' publications from MTMT.']);
+    }, function () { setSyncing(false); setSyncMsg(['err', 'The refresh failed.']); });
   }
   var PF = window.PRPubFiles;
   var keyOf = function (p) { return me.email + ':' + p.mtid; };
@@ -341,7 +341,7 @@ function Publications(props) {
     }).then(function (r) { setSaving(false); if (r && r.error) { setErr(r.error.message); return; } location.reload(); });
   }
   var isCloud = !!(window.PR_BACKEND && window.PR_BACKEND.sb && window.PR_BACKEND.user);
-  var refreshBtn = (isCloud && !preview) ? <button className="btn-ghost" disabled={syncing} onClick={syncMtmt} title="A publikációs lista frissítése az MTMT-ből (az MTMT azonosítód alapján)">{syncing ? 'Frissítés…' : '🔄 Frissítés MTMT-ből'}</button> : null;
+  var refreshBtn = (isCloud && !preview) ? <button className="btn-ghost" disabled={syncing} onClick={syncMtmt} title="Refresh the publication list from MTMT (by your MTMT ID)">{syncing ? 'Refreshing…' : '🔄 Refresh from MTMT'}</button> : null;
   var syncNote = syncMsg ? <div className={'pf-note ' + (syncMsg[0] === 'ok' ? 'ok' : 'err')} style={{ margin: '6px 0 0' }}>{syncMsg[1]}</div> : null;
   var pin = { width: '100%', height: 36, border: '1px solid var(--pf-line, #e6e8ee)', borderRadius: 8, padding: '0 10px', marginBottom: 6, fontFamily: 'inherit', fontSize: 13.5, boxSizing: 'border-box', background: 'var(--pf-paper, #fff)', color: 'inherit' };
   var addUI = preview ? null : <div className="pf-panel" style={{ marginBottom: 14 }}>
@@ -381,7 +381,7 @@ function Publications(props) {
         <div><b>{totalCites}</b><span>citations (MTMT)</span></div>
         <div><b>{pubs.filter(function (p) { return p.doi; }).length}</b><span>with a DOI</span></div>
       </div>
-      <div className="pf-note">Imported from <a href={'https://m2.mtmt.hu/gui2/?mode=browse&params=author;' + rec.mtmtId} target="_blank" rel="noopener">MTMT</a> {synced ? '(frissítve MTMT-ből)' : '(as of 19 June 2026)'}{rec.orcid ? <span> · ORCID <a href={'https://orcid.org/' + rec.orcid} target="_blank" rel="noopener">{rec.orcid}</a></span> : null}. Citation counts are a snapshot. {preview ? <span><b>Admin:</b> you can upload or manage PDFs on behalf of {me.name} — files are stored in their account.</span> : <span>Attach the PDF or data files for each item below — {(window.PRPubFiles && window.PRPubFiles.cloud) ? 'they are stored securely in your cloud account (Supabase Storage), available on any device.' : 'they are stored in this browser.'}</span>}</div>
+      <div className="pf-note">Imported from <a href={'https://m2.mtmt.hu/gui2/?mode=browse&params=author;' + rec.mtmtId} target="_blank" rel="noopener">MTMT</a> {synced ? '(refreshed from MTMT)' : '(as of 19 June 2026)'}{rec.orcid ? <span> · ORCID <a href={'https://orcid.org/' + rec.orcid} target="_blank" rel="noopener">{rec.orcid}</a></span> : null}. Citation counts are a snapshot. {preview ? <span><b>Admin:</b> you can upload or manage PDFs on behalf of {me.name} — files are stored in their account.</span> : <span>Attach the PDF or data files for each item below — {(window.PRPubFiles && window.PRPubFiles.cloud) ? 'they are stored securely in your cloud account (Supabase Storage), available on any device.' : 'they are stored in this browser.'}</span>}</div>
     </div>
     {err ? <div className="pf-note err" style={{ margin: '0 0 10px' }}>{err}</div> : null}
     {years.map(function (y) { return <div key={y}>
@@ -785,7 +785,7 @@ function ChatPrompt(props) {
     {!loaded ? <div className="pf-empty">Loading…</div> : <div className="pf-panel">
       <textarea value={prompt} onChange={function (e) { setPrompt(e.target.value); }} rows={18} spellCheck={false}
         style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'inherit', fontSize: 13.5, lineHeight: 1.6, padding: '12px 14px', border: '1px solid var(--line)', borderRadius: 10, background: 'var(--surface, #fff)', color: 'inherit', resize: 'vertical' }}
-        placeholder="Te egy világszínvonalú kutatótárs vagy a … területén. Segíts ötletelni, réseket találni, és falszifikálható kutatási kérdéseket javasolni…" />
+        placeholder="You are a world-class research collaborator in the field of … . Help me brainstorm, find gaps, and propose falsifiable research questions…" />
       <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 10, flexWrap: 'wrap' }}>
         <button className="btn-primary" disabled={saving} onClick={save}>{saving ? 'Saving…' : 'Save prompt'}</button>
         <span style={{ fontSize: 12.5, color: 'var(--faint)' }}>{words} words</span>

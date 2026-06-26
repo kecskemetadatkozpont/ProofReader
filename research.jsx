@@ -82,7 +82,7 @@
     }
     // #3 — clicking outside the create-project box must not silently discard what you typed
     function dirty() { return !!(form.title.trim() || form.field.trim() || form.keywords.trim() || form.goal.trim()); }
-    function tryClose() { if (dirty() && !window.confirm('Eldobod a beírt projekt-adatokat?')) return; props.onClose(); }
+    function tryClose() { if (dirty() && !window.confirm('Discard the project details you entered?')) return; props.onClose(); }
     return h('div', { className: 'scrim', onClick: tryClose },
       h('div', { className: 'modal', onClick: function (e) { e.stopPropagation(); } },
         h('div', { className: 'modal-h' }, h('b', null, 'New research project'), h('button', { className: 'x', onClick: tryClose }, '×')),
@@ -118,7 +118,7 @@
     }
     return h('div', { className: 'scrim', onClick: props.onClose },
       h('div', { className: 'modal', onClick: function (e) { e.stopPropagation(); } },
-        h('div', { className: 'modal-h' }, h('b', null, 'Projekt beállításai'), h('button', { className: 'x', onClick: props.onClose }, '×')),
+        h('div', { className: 'modal-h' }, h('b', null, 'Project settings'), h('button', { className: 'x', onClick: props.onClose }, '×')),
         h('div', { className: 'modal-b' },
           h('div', { className: 'field' }, h('label', null, 'Title *'), h('input', { value: form.title, onChange: function (e) { up('title', e.target.value); } })),
           h('div', { className: 'field' }, h('label', null, 'Field'), h('input', { value: form.field, onChange: function (e) { up('field', e.target.value); }, placeholder: 'e.g. Computer vision, Robotics' })),
@@ -139,7 +139,7 @@
       var cls = 'step' + (i === cur ? ' cur' : (i < cur ? ' done' : ''));
       kids.push(h('button', {
         key: i, className: cls,
-        title: name + (props.canEdit ? ' — megnyitás / szakasz beállítása' : ' — megnyitás'),
+        title: name + (props.canEdit ? ' — open / set stage' : ' — open'),
         onClick: function () { if (props.onNav) props.onNav(i); if (props.canEdit && i !== cur && props.onSet) props.onSet(i); }
       }, h('span', { className: 'dot' }, STAGE_ICONS[i] || (i + 1)), name));
     });
@@ -221,7 +221,7 @@
       setUpMsg('Uploading…');
       // Office files → extract text and attach THAT (so the AI reads the content, not an opaque binary)
       if (window.PROffice && window.PROffice.isOffice(f.name)) {
-        setUpMsg('Office-fájl feldolgozása…');
+        setUpMsg('Processing Office file…');
         window.PROffice.extract(f).then(function (r) {
           var name = f.name.replace(/\.(docx|xlsx|xlsm|xls|pptx)$/i, '') + '.' + (r.ext || 'md');
           var path = props.projectId + '/' + Date.now() + '_' + name.replace(/[^A-Za-z0-9._-]/g, '_');
@@ -229,7 +229,7 @@
             if (res.error) { setUpMsg('Upload failed: ' + res.error.message); return; }
             props.onPick({ kind: 'file', bucket: 'research-data', path: path, name: name, mime: 'text/markdown', label: name }); props.onClose();
           });
-        }, function (er) { setUpMsg('Office-feldolgozás hiba: ' + ((er && er.message) || er)); });
+        }, function (er) { setUpMsg('Office processing error: ' + ((er && er.message) || er)); });
         return;
       }
       var path = props.projectId + '/' + Date.now() + '_' + f.name.replace(/[^A-Za-z0-9._-]/g, '_');
@@ -247,11 +247,11 @@
           h('div', { className: 'sec-t' }, 'Project library'),
           srcs.length ? srcs.map(function (s) { return row('s' + s.id, s.title, [s.year, s.venue].filter(Boolean).join(' · '), function () { props.onPick({ kind: 'source', source_id: s.id, title: s.title, label: s.title }); props.onClose(); }); }) : h('div', { style: { fontSize: 12.5, color: 'var(--faint)' } }, 'No library sources yet — add some on the Literature tab.'),
           h('div', { className: 'sec-t', style: { display: 'flex', alignItems: 'center', gap: 8 } }, h('span', null, 'My publication files'),
-            (files && files.length > 1) ? h('button', { className: 'btn', style: { padding: '2px 8px', fontSize: 11, marginLeft: 'auto', flex: 'none' }, onClick: function () { files.forEach(function (f) { props.onPick({ kind: 'file', bucket: 'publication-files', path: f.storage_path, name: f.name, mime: f.mime, label: f.name }); }); props.onClose(); } }, '📎 Összes csatolása') : null),
+            (files && files.length > 1) ? h('button', { className: 'btn', style: { padding: '2px 8px', fontSize: 11, marginLeft: 'auto', flex: 'none' }, onClick: function () { files.forEach(function (f) { props.onPick({ kind: 'file', bucket: 'publication-files', path: f.storage_path, name: f.name, mime: f.mime, label: f.name }); }); props.onClose(); } }, '📎 Attach all') : null),
           files === null ? h('div', { style: { fontSize: 12.5, color: 'var(--faint)' } }, 'Loading…') : (files.length ? files.map(function (f) { return row('f' + f.id, f.name, (f.mime || '') + (f.size ? ' · ' + fmtBytes(f.size) : ''), function () { props.onPick({ kind: 'file', bucket: 'publication-files', path: f.storage_path, name: f.name, mime: f.mime, label: f.name }); props.onClose(); }); }) : h('div', { style: { fontSize: 12.5, color: 'var(--faint)' } }, 'No files uploaded to your profile yet.')),
           h('div', { className: 'sec-t', style: { display: 'flex', alignItems: 'center', gap: 8 } }, h('span', null, 'My LaTeX publications'),
-            (latexProjects && latexProjects.length > 1) ? h('button', { className: 'btn', style: { padding: '2px 8px', fontSize: 11, marginLeft: 'auto', flex: 'none' }, onClick: function () { latexProjects.forEach(function (p) { props.onPick({ kind: 'project', project_id: p.id, title: p.title, label: p.title || 'LaTeX' }); }); props.onClose(); } }, '📎 Összes csatolása') : null),
-          latexProjects === null ? h('div', { style: { fontSize: 12.5, color: 'var(--faint)' } }, 'Loading…') : (latexProjects.length ? latexProjects.map(function (p) { return row('p' + p.id, p.title || 'Untitled', 'LaTeX projekt — a teljes szöveg csatolva lesz', function () { props.onPick({ kind: 'project', project_id: p.id, title: p.title, label: p.title || 'LaTeX' }); props.onClose(); }); }) : h('div', { style: { fontSize: 12.5, color: 'var(--faint)' } }, 'Nincs LaTeX publikációd (Editor-projekt) még.')),
+            (latexProjects && latexProjects.length > 1) ? h('button', { className: 'btn', style: { padding: '2px 8px', fontSize: 11, marginLeft: 'auto', flex: 'none' }, onClick: function () { latexProjects.forEach(function (p) { props.onPick({ kind: 'project', project_id: p.id, title: p.title, label: p.title || 'LaTeX' }); }); props.onClose(); } }, '📎 Attach all') : null),
+          latexProjects === null ? h('div', { style: { fontSize: 12.5, color: 'var(--faint)' } }, 'Loading…') : (latexProjects.length ? latexProjects.map(function (p) { return row('p' + p.id, p.title || 'Untitled', 'LaTeX project — the full text will be attached', function () { props.onPick({ kind: 'project', project_id: p.id, title: p.title, label: p.title || 'LaTeX' }); props.onClose(); }); }) : h('div', { style: { fontSize: 12.5, color: 'var(--faint)' } }, 'No LaTeX publications (Editor project) yet.')),
           h('div', { className: 'sec-t' }, 'Upload a file'),
           h('div', null, h('input', { type: 'file', onChange: onUpload }), upMsg ? h('span', { style: { marginLeft: 8, fontSize: 12 } }, upMsg) : null)
         )
@@ -268,14 +268,14 @@
   // wrap each rendered code block in a collapsible <details> so the AI's code stays folded until expanded
   function foldCode(html) {
     if (!html) return html;
-    return html.replace(/<pre>/g, '<details class="code-fold"><summary>⟨⟩ Kód — kinyitás / összecsukás</summary><pre>').replace(/<\/pre>/g, '</pre></details>');
+    return html.replace(/<pre>/g, '<details class="code-fold"><summary>⟨⟩ Code — expand / collapse</summary><pre>').replace(/<\/pre>/g, '</pre></details>');
   }
   var CHAT_SUGGEST = ['What are the open problems in this field?', 'Summarize the key methods used so far.', 'Suggest 3 testable research questions for my goal.', 'What evidence would support or refute my hypothesis?'];
   // In a chat reply, the AI saves files via fenced ```file:<path> … ``` blocks. For DISPLAY we collapse
   // those to a compact chip (the full content lives in the file browser, not inline in the chat).
   function stripFiles(text) {
     if (!text) return text;
-    return text.replace(/```file:([^\n`]+)\n[\s\S]*?```/g, function (_, p) { return '\n📄 **' + p.trim() + '** _(elmentve a fájlokhoz)_\n'; });
+    return text.replace(/```file:([^\n`]+)\n[\s\S]*?```/g, function (_, p) { return '\n📄 **' + p.trim() + '** _(saved to files)_\n'; });
   }
   function extractFiles(text) {
     var out = [], re = /```file:([^\n`]+)\n([\s\S]*?)```/g, m;
@@ -313,7 +313,7 @@
     function load() { sb.from('research_files').select('id,path,content,storage_path,mime,size,source,updated_at').eq('project_id', props.projectId).order('updated_at', { ascending: false }).then(function (r) { setFiles((r && r.data) || []); }); }
     useEffect(load, [props.projectId, props.version]);
     function newFile() {
-      var name = (window.prompt('Új fájl neve:', 'jegyzet.md') || '').trim(); if (!name) return;
+      var name = (window.prompt('New file name:', 'note.md') || '').trim(); if (!name) return;
       sb.from('research_files').upsert({ project_id: props.projectId, path: name, content: '', mime: 'text/markdown', source: 'manual', created_by: props.authorId, updated_by: props.authorId, updated_at: new Date().toISOString() }, { onConflict: 'project_id,path' }).then(function (r) { if (r && r.error) { alert(r.error.message); return; } load(); });
     }
     function onUpload(e) {
@@ -331,9 +331,9 @@
       window.PROffice.extract(f).then(function (r) {
         var name = f.name.replace(/\.(docx|xlsx|xlsm|xls|pptx)$/i, '') + '.' + (r.ext || 'md');
         sb.from('research_files').upsert({ project_id: props.projectId, path: name, content: r.text || '', mime: r.ext === 'csv' ? 'text/csv' : 'text/markdown', source: 'upload', created_by: props.authorId, updated_by: props.authorId, updated_at: new Date().toISOString() }, { onConflict: 'project_id,path' }).then(function (rr) { if (rr && rr.error) { alert(rr.error.message); return; } load(); });
-      }, function (er) { alert('Office-feldolgozás hiba: ' + ((er && er.message) || er)); });
+      }, function (er) { alert('Office processing error: ' + ((er && er.message) || er)); });
     }
-    function del(f) { if (!window.confirm('Törlöd: ' + f.path + ' ?')) return; sb.from('research_files').delete().eq('id', f.id).then(function () { if (f.storage_path) { try { sb.storage.from('research-data').remove([f.storage_path]); } catch (e) { } } if (preview && preview.id === f.id) setPreview(null); load(); }); }
+    function del(f) { if (!window.confirm('Delete: ' + f.path + ' ?')) return; sb.from('research_files').delete().eq('id', f.id).then(function () { if (f.storage_path) { try { sb.storage.from('research-data').remove([f.storage_path]); } catch (e) { } } if (preview && preview.id === f.id) setPreview(null); load(); }); }
     function openSigned(path) { sb.storage.from('research-data').createSignedUrl(path, 3600).then(function (r) { if (r && r.data && r.data.signedUrl) window.open(r.data.signedUrl, '_blank'); }); }
     function dlBlob(name, url) { var a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove(); }
     function download(f) {   // #1: download a file (inline content as a blob; binary via a forced-download signed URL)
@@ -344,29 +344,29 @@
     function icon(f) { var p = (f.path || '').toLowerCase(); if (/\.md$|\.txt$/.test(p)) return '📄'; if (/\.(png|jpe?g|gif|webp|svg)$/.test(p)) return '🖼'; if (/\.pdf$/.test(p)) return '📕'; if (/\.(csv|tsv|xlsx?)$/.test(p)) return '📊'; return '📎'; }
     return h('div', { className: 'filebrowser', style: { width: (props.width || 256) } },
       h('div', { className: 'fb-head' }, h('b', null, 'Files'), h('span', { style: { flex: 1 } }),
-        props.canEdit ? h('button', { className: 'fb-mini', title: 'Új fájl', onClick: newFile }, '+') : null,
-        props.canEdit ? h('button', { className: 'fb-mini', title: 'Feltöltés', onClick: function () { if (upRef.current) upRef.current.click(); } }, '⤒') : null,
+        props.canEdit ? h('button', { className: 'fb-mini', title: 'New file', onClick: newFile }, '+') : null,
+        props.canEdit ? h('button', { className: 'fb-mini', title: 'Upload', onClick: function () { if (upRef.current) upRef.current.click(); } }, '⤒') : null,
         h('input', { ref: upRef, type: 'file', style: { display: 'none' }, onChange: onUpload })
       ),
-      files === null ? h('div', { className: 'fb-empty' }, 'Betöltés…')
+      files === null ? h('div', { className: 'fb-empty' }, 'Loading…')
         : (files.length ? h('div', { className: 'fb-list' }, files.map(function (f) {
           return h('div', { className: 'fb-item' + (preview && preview.id === f.id ? ' on' : ''), key: f.id },
             h('button', { className: 'fb-name', title: f.path, onClick: function () { setPreview(f); } }, h('span', { className: 'fb-ic' }, icon(f)), h('span', { className: 'fb-lbl' }, f.path), f.source === 'ai' ? h('span', { className: 'fb-tag' }, 'AI') : null),
             h('span', { className: 'fb-acts' },
-              h('button', { className: 'fb-mini', title: 'Letöltés', onClick: function () { download(f); } }, '⬇'),
-              props.canEdit ? h('button', { className: 'fb-mini', title: 'Csatolás a chathez', onClick: function () { attach(f); } }, '📎') : null,
-              props.canEdit ? h('button', { className: 'fb-mini', title: 'Törlés', onClick: function () { del(f); } }, '×') : null));
-        })) : h('div', { className: 'fb-empty' }, 'Még nincs fájl. Kérd a chatben: „írd ki egy fájlba…", vagy tölts fel egyet.')),
+              h('button', { className: 'fb-mini', title: 'Download', onClick: function () { download(f); } }, '⬇'),
+              props.canEdit ? h('button', { className: 'fb-mini', title: 'Attach to chat', onClick: function () { attach(f); } }, '📎') : null,
+              props.canEdit ? h('button', { className: 'fb-mini', title: 'Delete', onClick: function () { del(f); } }, '×') : null));
+        })) : h('div', { className: 'fb-empty' }, 'No files yet. Ask in the chat: “write this to a file…”, or upload one.')),
       preview ? h('div', { className: 'fb-preview' },
         h('div', { className: 'fb-pv-head' }, h('span', { className: 'fb-lbl' }, preview.path),
-          (props.canEdit && props.onAddIdea && preview.content != null) ? h('button', { className: 'fb-mini', style: { width: 'auto', padding: '0 7px', fontSize: 11, color: 'var(--accent)' }, title: 'A fájl tartalmának hozzáadása ötletként', onClick: function () { props.onAddIdea(preview.content); setAdded(true); setTimeout(function () { setAdded(false); }, 1800); } }, added ? '✓ Hozzáadva' : '✚ Ötlethez') : null,
+          (props.canEdit && props.onAddIdea && preview.content != null) ? h('button', { className: 'fb-mini', style: { width: 'auto', padding: '0 7px', fontSize: 11, color: 'var(--accent)' }, title: 'Add the file content as an idea', onClick: function () { props.onAddIdea(preview.content); setAdded(true); setTimeout(function () { setAdded(false); }, 1800); } }, added ? '✓ Added' : '✚ To idea') : null,
           h('button', { className: 'fb-mini', onClick: function () { setPreview(null); } }, '×')),
         preview.content != null
           ? h('div', { className: 'btxt md', style: { fontSize: 12.5 }, onMouseUp: onPreviewMouseUp, onScroll: function () { if (selPop) setSelPop(null); }, dangerouslySetInnerHTML: { __html: mdHtml(preview.content) } })
-          : h('button', { className: 'btn', style: { fontSize: 12 }, onClick: function () { openSigned(preview.storage_path); } }, 'Megnyitás / letöltés →')
+          : h('button', { className: 'btn', style: { fontSize: 12 }, onClick: function () { openSigned(preview.storage_path); } }, 'Open / download →')
       ) : null,
       // #1 — floating "add the selected passage to a research idea" button, popped on a text selection in the preview
-      selPop ? h('button', { className: 'sel-idea-btn', style: { position: 'fixed', left: selPop.x, top: selPop.y - 40, transform: 'translateX(-50%)', zIndex: 60 }, onMouseDown: function (e) { e.preventDefault(); }, onClick: function () { props.onAddIdea(selPop.text); setSelPop(null); try { window.getSelection().removeAllRanges(); } catch (e) { } } }, '✚ Ötlethez') : null
+      selPop ? h('button', { className: 'sel-idea-btn', style: { position: 'fixed', left: selPop.x, top: selPop.y - 40, transform: 'translateX(-50%)', zIndex: 60 }, onMouseDown: function (e) { e.preventDefault(); }, onClick: function () { props.onAddIdea(selPop.text); setSelPop(null); try { window.getSelection().removeAllRanges(); } catch (e) { } } }, '✚ To idea') : null
     );
   }
 
@@ -393,17 +393,17 @@
     // current conversation into the Ideas list as candidates (deduped + capped server-side; user accepts/rejects).
     function suggestIdeas() {
       if (sgBusy) return;
-      if (!msgs.length) { setSgMsg('Előbb beszélgess a projektről — abból javaslok ötleteket.'); setTimeout(function () { setSgMsg(''); }, 3500); return; }
-      setSgBusy(true); setSgMsg('Ötletek generálása a beszélgetésből (AI)…');
+      if (!msgs.length) { setSgMsg('Chat about the project first — I suggest ideas from that.'); setTimeout(function () { setSgMsg(''); }, 3500); return; }
+      setSgBusy(true); setSgMsg('Generating ideas from the conversation (AI)…');
       var transcript = msgs.slice(-16).map(function (m) { return (m.role === 'assistant' ? 'AI: ' : 'User: ') + String(m.content || ''); }).join('\n\n').slice(0, 12000);
       sb.functions.invoke('research-ai', { body: { action: 'suggest', project_id: props.projectId, text: transcript } }).then(function (res) {
         setSgBusy(false);
-        if (res && res.error) { setSgMsg('AI nincs beállítva (research-ai / ANTHROPIC_API_KEY).'); return; }
+        if (res && res.error) { setSgMsg('AI is not configured (research-ai / ANTHROPIC_API_KEY).'); return; }
         var d = res && res.data;
-        if (d && d.count) { setSgMsg('✓ ' + d.count + ' új ötlet az Ötletek listában.'); props.onChanged(); }
-        else setSgMsg('Nem találtam új ötletet ebben a beszélgetésben.');
+        if (d && d.count) { setSgMsg('✓ ' + d.count + ' new idea(s) in the Ideas list.'); props.onChanged(); }
+        else setSgMsg('No new ideas found in this conversation.');
         setTimeout(function () { setSgMsg(''); }, 4500);
-      }, function () { setSgBusy(false); setSgMsg('AI hívás sikertelen.'); });
+      }, function () { setSgBusy(false); setSgMsg('AI call failed.'); });
     }
     function startTyping(id, full) {
       if (!full) return;
@@ -505,10 +505,10 @@
       setEnhancing(true); setErr('');
       sb.functions.invoke('research-ai', { body: { action: 'enhance', project_id: props.projectId, text: txt } }).then(function (res) {
         setEnhancing(false);
-        if (res && res.error) { setErr('A prompt-feljavítás nem elérhető (research-ai / ANTHROPIC_API_KEY).'); return; }
+        if (res && res.error) { setErr('Prompt enhancement is unavailable (research-ai / ANTHROPIC_API_KEY).'); return; }
         var d = res && res.data;
         if (d && d.text) { setInput(d.text); var ta = taRef.current; if (ta) { setTimeout(function () { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 160) + 'px'; ta.focus(); }, 0); } }
-      }, function () { setEnhancing(false); setErr('A prompt-feljavítás nem elérhető.'); });
+      }, function () { setEnhancing(false); setErr('Prompt enhancement is unavailable.'); });
     }
     function copy(m) { try { navigator.clipboard.writeText(m.content || ''); } catch (e) { } }
     function onTaKey(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }
@@ -538,10 +538,10 @@
       h('div', { className: 'chat-col' },
       h('h3', null, 'Chat with Publify', h('span', { style: { fontWeight: 600, color: 'var(--faint)' } }, 'research assistant')),
       props.canEdit ? h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' } },
-        h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12 }, disabled: sgBusy || !msgs.length, title: 'A mostani beszélgetés tartalmából ötleteket javasol az Ötletek listába (kézzel, nem folyamatosan)', onClick: suggestIdeas }, sgBusy ? '💡 Generálás…' : '💡 Ötletek generálása a beszélgetésből'),
+        h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12 }, disabled: sgBusy || !msgs.length, title: 'Suggests ideas for the Ideas list from the current conversation (manually, not continuously)', onClick: suggestIdeas }, sgBusy ? '💡 Generating…' : '💡 Generate ideas from the conversation'),
         sgMsg ? h('span', { style: { fontSize: 12, color: 'var(--muted)' } }, sgMsg) : null
       ) : null,
-      props.supervised ? h('div', { style: { fontSize: 12, color: 'var(--muted)', background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 8, padding: '7px 11px', marginBottom: 10, lineHeight: 1.45 } }, 'ℹ️ A kutatási beszélgetéseidből a témavezetőd napi összefoglalót kaphat (mit dolgoztál, milyen döntéseket hoztál).') : null,
+      props.supervised ? h('div', { style: { fontSize: 12, color: 'var(--muted)', background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 8, padding: '7px 11px', marginBottom: 10, lineHeight: 1.45 } }, 'ℹ️ Your supervisor may receive a daily summary of your research conversations (what you worked on, what decisions you made).') : null,
       h('div', { className: 'chat-msgs', ref: scrollRef, onMouseUp: onChatMouseUp, onScroll: function () { if (selPop) setSelPop(null); } },
         msgs.length ? msgs.map(function (m) {
           var isTyping = typing && typing.id === m.id;
@@ -575,15 +575,15 @@
         })) : null,
         h('div', { className: 'chat-input' },
           h('button', { className: 'attach-btn', title: 'Attach a library source, publication or file', disabled: busy, onClick: function () { setPicker(true); } }, '📎'),
-          h('button', { className: 'attach-btn', title: 'Prompt feljavítása (AI) — érthetőbbé, konkrétabbá teszi a beírt szöveget', disabled: busy || enhancing || !input.trim(), onClick: enhance }, enhancing ? '⏳' : '✨'),
+          h('button', { className: 'attach-btn', title: 'Enhance the prompt (AI) — makes the text you entered clearer and more specific', disabled: busy || enhancing || !input.trim(), onClick: enhance }, enhancing ? '⏳' : '✨'),
           h('textarea', { ref: taRef, value: input, rows: 1, placeholder: 'Message Publify…  (Enter to send · Shift+Enter newline)', disabled: busy, onChange: onTaInput, onKeyDown: onTaKey }),
           h('button', { className: 'btn pri', disabled: busy, onClick: send }, 'Send')
         )
       ) : null
       ),
-      h('div', { className: 'fb-resizer', onMouseDown: startResize, title: 'Húzd az ablakok átméretezéséhez' }),
+      h('div', { className: 'fb-resizer', onMouseDown: startResize, title: 'Drag to resize the panels' }),
       h(SessionFileBrowser, { projectId: props.projectId, authorId: props.authorId, canEdit: props.canEdit, version: filesVersion, width: fbWidth, onAttach: function (a) { setAttach(function (p) { return p.concat([a]); }); }, onAddIdea: function (text) { saveIdeaText(text); } }),
-      selPop ? h('button', { className: 'sel-idea-btn', style: { position: 'fixed', left: selPop.x, top: selPop.y - 40, transform: 'translateX(-50%)', zIndex: 60 }, onMouseDown: function (e) { e.preventDefault(); }, onClick: function () { saveIdeaText(selPop.text); setSelPop(null); try { window.getSelection().removeAllRanges(); } catch (e) { } } }, '✚ Ötlethez') : null,
+      selPop ? h('button', { className: 'sel-idea-btn', style: { position: 'fixed', left: selPop.x, top: selPop.y - 40, transform: 'translateX(-50%)', zIndex: 60 }, onMouseDown: function (e) { e.preventDefault(); }, onClick: function () { saveIdeaText(selPop.text); setSelPop(null); try { window.getSelection().removeAllRanges(); } catch (e) { } } }, '✚ To idea') : null,
       picker ? h(AttachModal, { projectId: props.projectId, authorId: props.authorId, fileOwnerId: props.fileOwnerId, sources: props.sources, onPick: function (a) { setAttach(function (p) { return p.concat([a]); }); }, onClose: function () { setPicker(false); } }) : null
     );
   }
@@ -599,9 +599,9 @@
       var q = form.question.trim();
       if (!q) { setMsg('Type a research question first.'); return; }
       // #11 — tell the user instead of silently storing a duplicate
-      if ((props.ideas || []).some(function (i) { return (i.question || '').trim().toLowerCase() === q.toLowerCase(); })) { setMsg('⚠️ Ez az ötlet már szerepel a listában.'); return; }
+      if ((props.ideas || []).some(function (i) { return (i.question || '').trim().toLowerCase() === q.toLowerCase(); })) { setMsg('⚠️ This idea is already in the list.'); return; }
       setMsg('');
-      sb.from('research_ideas').insert({ project_id: props.projectId, source: 'own', question: q, hypothesis: form.hypothesis.trim() || null, created_by: props.authorId, status: 'candidate' }).then(function (r) { if (r && r.error) { setMsg('Could not add: ' + r.error.message); return; } setForm({ question: '', hypothesis: '' }); setMsg('✓ Ötlet hozzáadva.'); setTimeout(function () { setMsg(''); }, 2500); props.onChanged(); });
+      sb.from('research_ideas').insert({ project_id: props.projectId, source: 'own', question: q, hypothesis: form.hypothesis.trim() || null, created_by: props.authorId, status: 'candidate' }).then(function (r) { if (r && r.error) { setMsg('Could not add: ' + r.error.message); return; } setForm({ question: '', hypothesis: '' }); setMsg('✓ Idea added.'); setTimeout(function () { setMsg(''); }, 2500); props.onChanged(); });
     }
     function onKey(e) { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); add(); } }
     function setStatus(idea, st) { sb.from('research_ideas').update({ status: st }).eq('id', idea.id).then(props.onChanged); }
@@ -621,8 +621,8 @@
       // 📌 separate "study basis" window — collects the ideas chosen (Select) as the study's foundation
       h('div', { className: 'panel', style: { marginBottom: 10, border: '1.5px solid var(--accent)' } },
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
-          h('h3', { style: { margin: 0 } }, '📌 A tanulmány alapja' + (selected.length ? ' — ' + selected.length + ' ötlet' : '')),
-          props.onGoStudy ? h('button', { className: 'btn', style: { marginLeft: 'auto', padding: '4px 10px', fontSize: 12, flex: 'none' }, title: 'Ugrás a meglévő tanulmányokhoz', onClick: function () { props.onGoStudy(); } }, '📚 Tanulmányok →') : null),
+          h('h3', { style: { margin: 0 } }, '📌 Study basis' + (selected.length ? ' — ' + selected.length + ' idea(s)' : '')),
+          props.onGoStudy ? h('button', { className: 'btn', style: { marginLeft: 'auto', padding: '4px 10px', fontSize: 12, flex: 'none' }, title: 'Go to existing studies', onClick: function () { props.onGoStudy(); } }, '📚 Studies →') : null),
         selected.length ? h('div', null,
           selected.map(function (idea) {
             return h('div', { key: idea.id, style: { display: 'flex', gap: 8, alignItems: 'flex-start', padding: '7px 0', borderTop: '1px solid var(--line)' } },
@@ -630,18 +630,18 @@
                 h('div', { style: { fontSize: 13, fontWeight: 600, whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, idea.question),
                 idea.hypothesis ? h('div', { style: { fontSize: 12, color: 'var(--muted)', marginTop: 2, whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, idea.hypothesis) : null
               ),
-              props.canEdit ? h('button', { className: 'icon-x', title: 'Eltávolítás az alapból', style: { flex: 'none' }, onClick: function () { setStatus(idea, 'candidate'); } }, '✕') : null
+              props.canEdit ? h('button', { className: 'icon-x', title: 'Remove from basis', style: { flex: 'none' }, onClick: function () { setStatus(idea, 'candidate'); } }, '✕') : null
             );
           }),
-          props.onStartStudyMulti ? h('div', { style: { marginTop: 10 } }, h('button', { className: 'btn pri', onClick: function () { props.onStartStudyMulti(selected); } }, '🔬 Tanulmány indítása ezekből az ötletekből →'),
-            h('div', { style: { fontSize: 11.5, color: 'var(--faint)', marginTop: 5 } }, 'Claude kitölti a Step-1 mezőit (kulcsszavak, kritériumok, szűrők) az ötletek alapján — utána átírhatod.')) : null
-        ) : h('div', { style: { fontSize: 12.5, color: 'var(--faint)' } }, 'Még üres. Lent egy ötletnél nyomd a „Select" gombot — ide kerül, és ezek lesznek a tanulmány alapjai.')
+          props.onStartStudyMulti ? h('div', { style: { marginTop: 10 } }, h('button', { className: 'btn pri', onClick: function () { props.onStartStudyMulti(selected); } }, '🔬 Start a study from these ideas →'),
+            h('div', { style: { fontSize: 11.5, color: 'var(--faint)', marginTop: 5 } }, 'Claude fills in the Step-1 fields (keywords, criteria, filters) based on the ideas — you can edit them afterwards.')) : null
+        ) : h('div', { style: { fontSize: 12.5, color: 'var(--faint)' } }, 'Still empty. Press the “Select” button on an idea below — it moves here, and these become the study basis.')
       ),
       h('div', { className: 'panel' },
       h('h3', null, 'Research ideas', props.canEdit ? h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12 }, disabled: busy, onClick: gap }, '✨ Gap analysis (AI)') : null),
       msg ? h('div', { style: { fontSize: 12.5, color: 'var(--muted)', marginBottom: 8 } }, msg) : null,
       props.canEdit ? h('div', { style: { marginBottom: 10 } },
-        h('textarea', { rows: 2, style: { width: '100%', minHeight: 40, border: '1px solid var(--line)', borderRadius: 8, padding: '8px 10px', fontFamily: 'inherit', fontSize: 13, lineHeight: 1.45, resize: 'vertical', boxSizing: 'border-box' }, value: form.question, placeholder: 'A research question…  (Ctrl/⌘+Enter = hozzáadás)', onChange: function (e) { setForm(Object.assign({}, form, { question: e.target.value })); }, onKeyDown: onKey }),
+        h('textarea', { rows: 2, style: { width: '100%', minHeight: 40, border: '1px solid var(--line)', borderRadius: 8, padding: '8px 10px', fontFamily: 'inherit', fontSize: 13, lineHeight: 1.45, resize: 'vertical', boxSizing: 'border-box' }, value: form.question, placeholder: 'A research question…  (Ctrl/⌘+Enter = add)', onChange: function (e) { setForm(Object.assign({}, form, { question: e.target.value })); }, onKeyDown: onKey }),
         h('textarea', { rows: 2, style: { width: '100%', minHeight: 40, marginTop: 6, border: '1px solid var(--line)', borderRadius: 8, padding: '8px 10px', fontFamily: 'inherit', fontSize: 13, lineHeight: 1.45, resize: 'vertical', boxSizing: 'border-box' }, value: form.hypothesis, placeholder: 'Hypothesis (optional)', onChange: function (e) { setForm(Object.assign({}, form, { hypothesis: e.target.value })); }, onKeyDown: onKey }),
         h('div', { style: { marginTop: 8 } }, h('button', { className: 'btn pri', onClick: add }, 'Add idea'))
       ) : null,
@@ -649,8 +649,8 @@
         var open = expanded[idea.id] !== false;   // #10: default open; click chevron / question to collapse
         return h('div', { className: 'idea', key: idea.id },
           h('div', { style: { display: 'flex', gap: 7, alignItems: 'center', marginBottom: 4 } },
-            h('button', { className: 'icon-x', title: open ? 'Összecsukás' : 'Kinyitás', style: { marginRight: 1, flex: 'none' }, onClick: function () { toggle(idea.id); } }, open ? '▾' : '▸'),
-            h('span', { className: 'chip ' + (idea.source === 'gap' || idea.source === 'chat' ? 'c-acc' : 'c-grey') }, idea.source === 'chat' ? '💡 AI (chat)' : idea.source === 'gap' ? '💡 AI (gap)' : idea.source === 'own' ? 'saját' : idea.source),
+            h('button', { className: 'icon-x', title: open ? 'Collapse' : 'Expand', style: { marginRight: 1, flex: 'none' }, onClick: function () { toggle(idea.id); } }, open ? '▾' : '▸'),
+            h('span', { className: 'chip ' + (idea.source === 'gap' || idea.source === 'chat' ? 'c-acc' : 'c-grey') }, idea.source === 'chat' ? '💡 AI (chat)' : idea.source === 'gap' ? '💡 AI (gap)' : idea.source === 'own' ? 'own' : idea.source),
             idea.novelty != null ? h('span', { className: 'chip c-ok' }, 'novelty ' + idea.novelty) : null,
             h('span', { className: 'chip ' + (idea.status === 'selected' ? 'c-ok' : (idea.status === 'rejected' ? 'c-grey' : 'c-warn')) }, idea.status),
             props.canEdit ? h('button', { className: 'icon-x', style: { marginLeft: 'auto' }, onClick: function () { del(idea); } }, '✕') : null
@@ -664,7 +664,7 @@
             h('button', { onClick: function () { setStatus(idea, 'candidate'); } }, 'Reset')
           ) : null
         );
-      }) : h('div', { style: { fontSize: 13, color: 'var(--faint)', padding: '8px 0' } }, selected.length ? 'Minden ötlet a tanulmány alapjába került — adj hozzá újat fent.' : 'No ideas yet — add your own or run a gap analysis.')
+      }) : h('div', { style: { fontSize: 13, color: 'var(--faint)', padding: '8px 0' } }, selected.length ? 'All ideas moved to the study basis — add a new one above.' : 'No ideas yet — add your own or run a gap analysis.')
       )
     );
   }
@@ -982,7 +982,7 @@
   }
 
   // ---------- Literature Study (Elicit-style 4-step funnel) ----------
-  var LS_STEPS = [{ step: 1, kind: 'quick', label: '1. Gyors' }, { step: 2, kind: 'abstract', label: '2. Absztrakt' }, { step: 3, kind: 'fulltext', label: '3. Teljes szöveg' }, { step: 4, kind: 'review', label: '4. Review' }];
+  var LS_STEPS = [{ step: 1, kind: 'quick', label: '1. Quick' }, { step: 2, kind: 'abstract', label: '2. Abstract' }, { step: 3, kind: 'fulltext', label: '3. Full text' }, { step: 4, kind: 'review', label: '4. Review' }];
   // Mirror of the server's screenSystem() — the exact screening prompt Claude gets for steps 1–3, built from
   // the question + the current keywords/criteria. Lets the user preview (and re-generate after editing) it.
   function buildScreenPrompt(question, cfg, step) {
@@ -1026,13 +1026,13 @@
         items.map(function (it, i) {
           return h('div', { key: i, style: { display: 'flex', gap: 6, alignItems: 'flex-start', background: 'var(--surface-2)', border: '1px solid var(--line)', borderLeft: '3px solid ' + (props.accent || 'var(--accent)'), borderRadius: 7, padding: '5px 9px' } },
             h('span', { style: { flex: 1, minWidth: 0, fontSize: 12.5, lineHeight: 1.35, whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, it),
-            props.disabled ? null : h('button', { className: 'icon-x', style: { flex: 'none' }, title: 'Törlés', onClick: function () { rm(i); } }, '✕')
+            props.disabled ? null : h('button', { className: 'icon-x', style: { flex: 'none' }, title: 'Delete', onClick: function () { rm(i); } }, '✕')
           );
         })
-      ) : h('div', { style: { fontSize: 11.5, color: 'var(--faint)', marginBottom: 6 } }, props.empty || 'Nincs kritérium.'),
+      ) : h('div', { style: { fontSize: 11.5, color: 'var(--faint)', marginBottom: 6 } }, props.empty || 'No criteria.'),
       props.disabled ? null : h('div', { style: { display: 'flex', gap: 6 } },
         h('input', { className: 'field', style: { flex: 1, minWidth: 0, fontSize: 12.5 }, value: nv, placeholder: props.placeholder, onChange: function (e) { setNv(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter') { e.preventDefault(); add(); } } }),
-        h('button', { className: 'btn', style: { flex: 'none', padding: '4px 10px', fontSize: 12 }, onClick: add }, '+ Hozzáad')
+        h('button', { className: 'btn', style: { flex: 'none', padding: '4px 10px', fontSize: 12 }, onClick: add }, '+ Add')
       )
     );
   }
@@ -1044,7 +1044,7 @@
     var CFG = window.PR_CONFIG || {};
     return sb.auth.getSession().then(function (s) {
       var token = (s && s.data && s.data.session && s.data.session.access_token) || CFG.supabaseAnonKey;
-      return fetch(CFG.supabaseUrl + '/functions/v1/research-study', { method: 'POST', headers: { 'Content-Type': 'application/json', 'apikey': CFG.supabaseAnonKey, 'Authorization': 'Bearer ' + token }, body: JSON.stringify(body) }).then(function (r) { return r.json().catch(function () { return { error: 'A szerver válasza nem értelmezhető (lehet időtúllépés) — próbáld újra.' }; }); }, function () { return { error: 'network' }; });
+      return fetch(CFG.supabaseUrl + '/functions/v1/research-study', { method: 'POST', headers: { 'Content-Type': 'application/json', 'apikey': CFG.supabaseAnonKey, 'Authorization': 'Bearer ' + token }, body: JSON.stringify(body) }).then(function (r) { return r.json().catch(function () { return { error: 'The server response could not be parsed (possibly a timeout) — try again.' }; }); }, function () { return { error: 'network' }; });
     });
   }
   function LiteratureStudy(props) {
@@ -1115,16 +1115,16 @@
     }, [props.autoCreateFrom]);
     function newStudy(ideas) {
       var arr = Array.isArray(ideas) ? ideas : (ideas ? [ideas] : []);
-      var q = arr.length ? arr.map(function (i) { return i.question + (i.hypothesis ? ' — hipotézis: ' + i.hypothesis : ''); }).join('\n\n') : props.project.title;
-      var title = String(arr.length ? (arr.length > 1 ? (props.project.title + ' — ' + arr.length + ' ötlet') : arr[0].question) : (props.project.title + ' — irodalom')).slice(0, 80);
+      var q = arr.length ? arr.map(function (i) { return i.question + (i.hypothesis ? ' — hypothesis: ' + i.hypothesis : ''); }).join('\n\n') : props.project.title;
+      var title = String(arr.length ? (arr.length > 1 ? (props.project.title + ' — ' + arr.length + ' ideas') : arr[0].question) : (props.project.title + ' — literature')).slice(0, 80);
       setErr(''); setPlanning(true);
       sb.from('research_studies').insert({ project_id: props.projectId, idea_id: arr[0] ? arr[0].id : null, title: title, question: String(q).slice(0, 4000), created_by: props.authorId }).select('id').maybeSingle().then(function (r) {
-        var id = r && r.data && r.data.id; if (!id) { setPlanning(false); setErr('Nem sikerült létrehozni a tanulmányt.'); return; }
+        var id = r && r.data && r.data.id; if (!id) { setPlanning(false); setErr('Could not create the study.'); return; }
         var rows = LS_STEPS.map(function (s) { return { study_id: id, step: s.step, kind: s.kind, config: lsDefaultConfig(s.step, props.project, arr[0]) }; });
         sb.from('research_study_steps').insert(rows).then(function () {
           setSelId(id); setCurStep(1); props.onChanged();
           // dynamically pre-fill keywords + criteria + filters with Claude; the user only fine-tunes
-          callStudy({ action: 'plan', study_id: id }).then(function (d) { setPlanning(false); loadStudy(id); if (d && d.error) setErr('AI-kitöltés: ' + d.error); }, function () { setPlanning(false); });
+          callStudy({ action: 'plan', study_id: id }).then(function (d) { setPlanning(false); loadStudy(id); if (d && d.error) setErr('AI fill-in: ' + d.error); }, function () { setPlanning(false); });
         });
       });
     }
@@ -1132,15 +1132,15 @@
     function runPlan() {
       if (!selId || planning) return;
       setErr(''); setPlanning(true);
-      callStudy({ action: 'plan', study_id: selId }).then(function (d) { setPlanning(false); if (d && d.error) { setErr('AI-kitöltés: ' + d.error); return; } loadStudy(selId); }, function () { setPlanning(false); setErr('AI-kitöltés nem sikerült.'); });
+      callStudy({ action: 'plan', study_id: selId }).then(function (d) { setPlanning(false); if (d && d.error) { setErr('AI fill-in: ' + d.error); return; } loadStudy(selId); }, function () { setPlanning(false); setErr('AI fill-in failed.'); });
     }
     // (re)generate the prompt preview from the CURRENT question + criteria (reflects manual edits)
     function genPrompt() { setPromptText(buildScreenPrompt((sel && (sel.question || sel.title)) || '', cfg, curStep)); }
     // delete a whole study (cascades to its steps + papers)
     function delStudy(s) {
-      if (!window.confirm('Biztosan törlöd ezt a tanulmányt és minden lépését/eredményét?\n\n„' + (s.title || '') + '"')) return;
+      if (!window.confirm('Are you sure you want to delete this study and all its steps/results?\n\n“' + (s.title || '') + '”')) return;
       sb.from('research_studies').delete().eq('id', s.id).then(function (r) {
-        if (r && r.error) { setErr('Törlés sikertelen: ' + r.error.message); return; }
+        if (r && r.error) { setErr('Delete failed: ' + r.error.message); return; }
         if (selId === s.id) { setSelId(null); setSteps([]); setPapers([]); setCurStep(1); }
         props.onChanged();
       });
@@ -1149,7 +1149,7 @@
     function renameStudy(s) {
       var t = (renameVal || '').trim(); if (!t) { setRenameId(null); return; }
       sb.from('research_studies').update({ title: t.slice(0, 200), updated_at: new Date().toISOString() }).eq('id', s.id).then(function (r) {
-        if (r && r.error) { setErr('Átnevezés sikertelen: ' + r.error.message); return; }
+        if (r && r.error) { setErr('Rename failed: ' + r.error.message); return; }
         setRenameId(null); props.onChanged();
       });
     }
@@ -1159,14 +1159,14 @@
 
     function runStep(n) {
       if (running) return;
-      if (!selId) { setErr('Nincs kiválasztott tanulmány — válassz egyet a listából.'); return; }   // #12 guard
+      if (!selId) { setErr('No study selected — choose one from the list.'); return; }   // #12 guard
       setErr(''); stop.current = false; setRunning(true); setProg({ done: 0, total: 0, counts: {} }); setTitles({});
       sb.from('research_study_steps').update({ config: cfg, status: 'running' }).eq('study_id', selId).eq('step', n).then(function () {
         if (n === 4) {
           callStudy({ action: 'generate_review', study_id: selId }).then(function (d) {
             setRunning(false); setProg(null);
-            if (!d || d.error) { setErr((d && d.error) || 'Hiba a review generálásnál.'); return; }
-            loadStudy(selId); props.onChanged(); window.alert('Review elkészült: ' + d.file_path + ' (a Fájlok közt).');
+            if (!d || d.error) { setErr((d && d.error) || 'Error generating the review.'); return; }
+            loadStudy(selId); props.onChanged(); window.alert('Review ready: ' + d.file_path + ' (in Files).');
           });
           return;
         }
@@ -1175,14 +1175,14 @@
           (function loop(offset) {
             if (!alive.current || stop.current) { setRunning(false); setProg(null); loadStudy(selId); return; }
             callStudy({ action: action, study_id: selId, step: n, offset: offset }).then(function (d) {
-              if (!d || d.error) { setRunning(false); setProg(null); setErr((d && d.error) || 'A lépés hibázott.'); loadStudy(selId); return; }
+              if (!d || d.error) { setRunning(false); setProg(null); setErr((d && d.error) || 'The step failed.'); loadStudy(selId); return; }
               setProg({ done: d.next_offset, total: d.total_estimate || d.next_offset, counts: d.counts });
               setTitles(function (t) { var n2 = Object.assign({}, t); (d.results || []).forEach(function (x) { if (x.title) n2[x.source_id] = x.title; }); return n2; });
               loadStudy(selId);
               if (!d.done && alive.current && !stop.current) loop(d.next_offset);
               else { setRunning(false); setProg(null); loadStudy(selId); props.onChanged();
-                if (n === 1 && !(d.total_estimate || d.new_sources || d.fetched)) setErr('0 találat az OpenAlex-en — próbálj tágabb/más kulcsszavakat, vagy lazább szűrőket (pl. töröld az „Évtől"-t vagy a „csak cikkek"-et), majd futtasd újra.');
-                else if (n === 1 && d.relaxed) setErr('ℹ️ A megadott kulcsszavak/szűrők túl szűkek voltak — automatikusan lazítottam rajtuk (pl. szűrők nélkül kerestem), hogy találjak cikkeket. Finomíthatod a kulcsszavakat/szűrőket és újrafuttathatod.'); }
+                if (n === 1 && !(d.total_estimate || d.new_sources || d.fetched)) setErr('0 results on OpenAlex — try broader/different keywords, or looser filters (e.g. clear “From year” or “Journals only”), then run again.');
+                else if (n === 1 && d.relaxed) setErr('ℹ️ The keywords/filters you gave were too narrow — I relaxed them automatically (e.g. searched without filters) to find papers. You can refine the keywords/filters and run again.'); }
             });
           })(0);
         });
@@ -1191,16 +1191,16 @@
     function override(p, dec) { sb.from('research_study_papers').update({ decision: dec, overridden: true }).eq('study_id', selId).eq('source_id', p.source_id).eq('step', curStep).then(function () { loadStudy(selId); }); }
 
     if (!studies.length) {
-      if (planning) return h('div', { className: 'panel' }, h('h3', null, '🔬 Irodalmi tanulmány'), h('div', { style: { fontSize: 13, color: 'var(--muted)', padding: '12px 0' } }, '✨ Claude előkészíti a tanulmányt a kijelölt ötletek alapján — egy pillanat, töltöm a Step-1 adatait (kulcsszavak, kritériumok, szűrők)…'));
+      if (planning) return h('div', { className: 'panel' }, h('h3', null, '🔬 Literature study'), h('div', { style: { fontSize: 13, color: 'var(--muted)', padding: '12px 0' } }, '✨ Claude is preparing the study from the selected ideas — one moment, loading the Step-1 data (keywords, criteria, filters)…'));
       var selIdeas = (props.ideas || []).filter(function (i) { return i.status === 'selected'; });
-      return h('div', { className: 'panel' }, h('h3', null, '🔬 Irodalmi tanulmány'),
-        h('p', { style: { fontSize: 13, color: 'var(--muted)' } }, 'Jelöld ki (Select) az Ötletek közül azokat, amik alapján a tanulmány menjen, majd indíts egy 4-lépéses szűrést: gyors screening → absztrakt → teljes szöveg → review. A lépéseket Claude előre kitölti (kulcsszavak, kritériumok, szűrők) az ötletek alapján — Te csak finomhangolsz.'),
+      return h('div', { className: 'panel' }, h('h3', null, '🔬 Literature study'),
+        h('p', { style: { fontSize: 13, color: 'var(--muted)' } }, 'Select (Select) the Ideas the study should be based on, then start a 4-step screening: quick screening → abstract → full text → review. Claude pre-fills the steps (keywords, criteria, filters) based on the ideas — you only fine-tune.'),
         props.canEdit ? h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginTop: 10 } },
           selIdeas.length
-            ? h('button', { className: 'btn pri', disabled: planning, onClick: function () { newStudy(selIdeas); } }, planning ? '✨ Claude tervez…' : ('🔬 Tanulmány a kijelölt ' + selIdeas.length + ' ötletből'))
-            : h('span', { style: { fontSize: 12.5, color: 'var(--warn)' } }, 'Jelölj ki legalább egy ötletet (Select) az Ötletek fülön.'),
-          h('button', { className: 'btn', disabled: planning, onClick: function () { newStudy(null); } }, '+ Üres tanulmány')
-        ) : h('div', { style: { fontSize: 13, color: 'var(--faint)' } }, 'Csak olvasható nézet.'),
+            ? h('button', { className: 'btn pri', disabled: planning, onClick: function () { newStudy(selIdeas); } }, planning ? '✨ Claude is planning…' : ('🔬 Study from the selected ' + selIdeas.length + ' idea(s)'))
+            : h('span', { style: { fontSize: 12.5, color: 'var(--warn)' } }, 'Select at least one idea (Select) on the Ideas tab.'),
+          h('button', { className: 'btn', disabled: planning, onClick: function () { newStudy(null); } }, '+ Empty study')
+        ) : h('div', { style: { fontSize: 13, color: 'var(--faint)' } }, 'Read-only view.'),
         err ? h('div', { style: { color: 'var(--danger)', fontSize: 12.5, marginTop: 8 } }, err) : null);
     }
 
@@ -1228,57 +1228,57 @@
       // studies overview — every study with its progress + status; click to open one. Lets you follow several.
       h('div', { style: { marginBottom: 12 } },
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5 } },
-          h('div', { style: { fontSize: 11.5, color: 'var(--faint)', textTransform: 'uppercase', letterSpacing: '.04em' } }, 'Tanulmányok (' + studies.length + ')'),
-          h('button', { className: 'btn', style: { marginLeft: 'auto', padding: '3px 9px', fontSize: 11.5, flex: 'none' }, onClick: function () { setStudiesOpen(true); } }, '📚 Tanulmányok megtekintése')),
+          h('div', { style: { fontSize: 11.5, color: 'var(--faint)', textTransform: 'uppercase', letterSpacing: '.04em' } }, 'Studies (' + studies.length + ')'),
+          h('button', { className: 'btn', style: { marginLeft: 'auto', padding: '3px 9px', fontSize: 11.5, flex: 'none' }, onClick: function () { setStudiesOpen(true); } }, '📚 View studies')),
         h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 6 } },
           studies.map(function (s) {
             var on = s.id === selId;
-            var st = s.status === 'done' ? '✓ kész' : ('lépés ' + (s.cur_step || 1) + '/4');
+            var st = s.status === 'done' ? '✓ done' : ('step ' + (s.cur_step || 1) + '/4');
             var editing = renameId === s.id;
             return h('div', { key: s.id, onClick: editing ? null : function () { setSelId(s.id); setCurStep(s.cur_step || 1); }, style: { textAlign: 'left', maxWidth: 260, minWidth: 150, border: '1.5px solid ' + (on ? 'var(--accent)' : 'var(--line)'), background: on ? 'var(--surface-2)' : 'var(--surface)', borderRadius: 8, padding: '6px 10px', cursor: editing ? 'default' : 'pointer' } },
               editing
                 ? h('div', { onClick: function (e) { e.stopPropagation(); }, style: { display: 'flex', flexDirection: 'column', gap: 4 } },
-                    h('input', { className: 'field', autoFocus: true, style: { fontSize: 12.5, width: '100%', boxSizing: 'border-box' }, value: renameVal, placeholder: 'Tanulmány neve…', onChange: function (e) { setRenameVal(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter') { e.preventDefault(); renameStudy(s); } else if (e.key === 'Escape') { setRenameId(null); } } }),
+                    h('input', { className: 'field', autoFocus: true, style: { fontSize: 12.5, width: '100%', boxSizing: 'border-box' }, value: renameVal, placeholder: 'Study name…', onChange: function (e) { setRenameVal(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter') { e.preventDefault(); renameStudy(s); } else if (e.key === 'Escape') { setRenameId(null); } } }),
                     h('div', { style: { display: 'flex', gap: 4 } },
-                      h('button', { className: 'btn pri', style: { padding: '2px 9px', fontSize: 11 }, onClick: function () { renameStudy(s); } }, 'Mentés'),
-                      h('button', { className: 'btn', style: { padding: '2px 9px', fontSize: 11 }, onClick: function () { setRenameId(null); } }, 'Mégse')))
+                      h('button', { className: 'btn pri', style: { padding: '2px 9px', fontSize: 11 }, onClick: function () { renameStudy(s); } }, 'Save'),
+                      h('button', { className: 'btn', style: { padding: '2px 9px', fontSize: 11 }, onClick: function () { setRenameId(null); } }, 'Cancel')))
                 : h('div', null,
                     h('div', { style: { display: 'flex', gap: 4, alignItems: 'center' } },
                       h('div', { style: { flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } }, s.title),
-                      props.canEdit ? h('button', { className: 'icon-x', title: 'Átnevezés', style: { flex: 'none', fontSize: 11 }, onClick: function (e) { e.stopPropagation(); setRenameId(s.id); setRenameVal(s.title || ''); } }, '✏️') : null),
-                    h('div', { style: { fontSize: 11, color: (running && on) ? 'var(--accent)' : 'var(--muted)', marginTop: 2 } }, (running && on ? '⏳ fut… ' : '') + st))
+                      props.canEdit ? h('button', { className: 'icon-x', title: 'Rename', style: { flex: 'none', fontSize: 11 }, onClick: function (e) { e.stopPropagation(); setRenameId(s.id); setRenameVal(s.title || ''); } }, '✏️') : null),
+                    h('div', { style: { fontSize: 11, color: (running && on) ? 'var(--accent)' : 'var(--muted)', marginTop: 2 } }, (running && on ? '⏳ running… ' : '') + st))
             );
           }),
-          props.canEdit ? h('button', { onClick: function () { newStudy(null); }, style: { border: '1px dashed var(--line)', background: 'transparent', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontSize: 12.5, color: 'var(--muted)' } }, '+ Új tanulmány') : null
+          props.canEdit ? h('button', { onClick: function () { newStudy(null); }, style: { border: '1px dashed var(--line)', background: 'transparent', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontSize: 12.5, color: 'var(--muted)' } }, '+ New study') : null
         )),
       // funnel stepper
       h('div', { className: 'funnel' }, LS_STEPS.map(function (s) {
         return h('button', { key: s.step, className: 'funnel-step' + (curStep === s.step ? ' on' : '') + (((stepRow(s.step) || {}).status === 'done') ? ' done' : ''), onClick: function () { viewStep(s.step); } },
-          h('b', null, s.label), s.step < 4 ? h('span', { className: 'funnel-count' }, incCount(s.step) + ' include') : h('span', { className: 'funnel-count' }, (stepRow(4) || {}).status === 'done' ? 'kész' : 'review'));
+          h('b', null, s.label), s.step < 4 ? h('span', { className: 'funnel-count' }, incCount(s.step) + ' include') : h('span', { className: 'funnel-count' }, (stepRow(4) || {}).status === 'done' ? 'done' : 'review'));
       })),
       // config panel (steps 1-3) or review panel (step 4)
       curStep < 4 ? h('div', { className: 'panel', style: { marginTop: 10 } },
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
-          h('h3', { style: { margin: 0 } }, LS_STEPS[curStep - 1].label + ' — beállítások'),
-          props.canEdit ? h('button', { className: 'btn', style: { padding: '3px 9px', fontSize: 11.5, marginLeft: 'auto', flex: 'none' }, disabled: planning, title: 'Claude (újra)tölti a kulcsszavakat, kritériumokat és szűrőket az ötletek alapján', onClick: runPlan }, planning ? '✨ Claude tölti…' : '✨ AI-kitöltés') : null),
-        props.canEdit ? h('div', { style: { fontSize: 11.5, color: 'var(--muted)', margin: '4px 0 8px', lineHeight: 1.4 } }, planning ? '✨ Claude éppen tölti a mezőket az ötleteid alapján…' : '✨ A mezőket Claude töltötte ki az ötleteid alapján — szabadon átírhatod, majd futtasd a lépést.') : null,
-        h('div', { className: 'field-label' }, 'Kulcsszavak (vesszővel)'),
-        h('input', { className: 'field', style: { width: '100%' }, disabled: !props.canEdit, value: (cfg.keywords || []).join(', '), placeholder: 'pl. out-of-distribution, LiDAR', onChange: function (e) { up('keywords', e.target.value.split(',').map(function (x) { return x.trim(); }).filter(Boolean)); } }),
+          h('h3', { style: { margin: 0 } }, LS_STEPS[curStep - 1].label + ' — settings'),
+          props.canEdit ? h('button', { className: 'btn', style: { padding: '3px 9px', fontSize: 11.5, marginLeft: 'auto', flex: 'none' }, disabled: planning, title: 'Claude (re)fills the keywords, criteria and filters based on the ideas', onClick: runPlan }, planning ? '✨ Claude is filling…' : '✨ AI fill-in') : null),
+        props.canEdit ? h('div', { style: { fontSize: 11.5, color: 'var(--muted)', margin: '4px 0 8px', lineHeight: 1.4 } }, planning ? '✨ Claude is filling the fields based on your ideas…' : '✨ The fields were filled by Claude based on your ideas — edit them freely, then run the step.') : null,
+        h('div', { className: 'field-label' }, 'Keywords (comma-separated)'),
+        h('input', { className: 'field', style: { width: '100%' }, disabled: !props.canEdit, value: (cfg.keywords || []).join(', '), placeholder: 'e.g. out-of-distribution, LiDAR', onChange: function (e) { up('keywords', e.target.value.split(',').map(function (x) { return x.trim(); }).filter(Boolean)); } }),
         h('div', { style: { display: 'flex', gap: 12, marginTop: 8, flexWrap: 'wrap' } },
-          h('div', { style: { flex: 1, minWidth: 220 } }, h('div', { className: 'field-label' }, '✓ Beválogatási kritériumok'), h(CritEditor, { items: cfg.include || [], onChange: function (a) { up('include', a); }, disabled: !props.canEdit, accent: '#16a34a', placeholder: 'pl. van publikus github repo vagy dataset', empty: 'Még nincs beválogatási kritérium.' })),
-          h('div', { style: { flex: 1, minWidth: 220 } }, h('div', { className: 'field-label' }, '✕ Kizárási kritériumok'), h(CritEditor, { items: cfg.exclude || [], onChange: function (a) { up('exclude', a); }, disabled: !props.canEdit, accent: '#dc2626', placeholder: 'pl. nincs kvantitatív kiértékelés', empty: 'Még nincs kizárási kritérium.' }))),
+          h('div', { style: { flex: 1, minWidth: 220 } }, h('div', { className: 'field-label' }, '✓ Inclusion criteria'), h(CritEditor, { items: cfg.include || [], onChange: function (a) { up('include', a); }, disabled: !props.canEdit, accent: '#16a34a', placeholder: 'e.g. has a public github repo or dataset', empty: 'No inclusion criteria yet.' })),
+          h('div', { style: { flex: 1, minWidth: 220 } }, h('div', { className: 'field-label' }, '✕ Exclusion criteria'), h(CritEditor, { items: cfg.exclude || [], onChange: function (a) { up('exclude', a); }, disabled: !props.canEdit, accent: '#dc2626', placeholder: 'e.g. no quantitative evaluation', empty: 'No exclusion criteria yet.' }))),
         curStep === 1 ? h('div', { className: 'lfilters', style: { marginTop: 8 } },
-          h('input', { className: 'num', type: 'number', disabled: !props.canEdit, placeholder: 'Évtől', value: (cfg.filters || {}).fromYear || '', onChange: function (e) { upFilter('fromYear', e.target.value); } }),
-          h('input', { className: 'num', type: 'number', disabled: !props.canEdit, placeholder: 'Min. idézet', value: (cfg.filters || {}).minCites || '', onChange: function (e) { upFilter('minCites', e.target.value); } }),
-          h('button', { className: 'lchip' + ((cfg.filters || {}).oa ? ' on' : ''), disabled: !props.canEdit, onClick: function () { upFilter('oa', !(cfg.filters || {}).oa); } }, 'Csak open access'),
-          h('button', { className: 'lchip' + ((cfg.filters || {}).journals ? ' on' : ''), disabled: !props.canEdit, onClick: function () { upFilter('journals', !(cfg.filters || {}).journals); } }, 'Csak cikkek')
+          h('input', { className: 'num', type: 'number', disabled: !props.canEdit, placeholder: 'From year', value: (cfg.filters || {}).fromYear || '', onChange: function (e) { upFilter('fromYear', e.target.value); } }),
+          h('input', { className: 'num', type: 'number', disabled: !props.canEdit, placeholder: 'Min. cites', value: (cfg.filters || {}).minCites || '', onChange: function (e) { upFilter('minCites', e.target.value); } }),
+          h('button', { className: 'lchip' + ((cfg.filters || {}).oa ? ' on' : ''), disabled: !props.canEdit, onClick: function () { upFilter('oa', !(cfg.filters || {}).oa); } }, 'Open access only'),
+          h('button', { className: 'lchip' + ((cfg.filters || {}).journals ? ' on' : ''), disabled: !props.canEdit, onClick: function () { upFilter('journals', !(cfg.filters || {}).journals); } }, 'Journals only')
         ) : null,
-        curStep > 1 && incCount(curStep - 1) === 0 ? h('div', { style: { fontSize: 12.5, color: 'var(--warn)', marginTop: 8 } }, 'Az előző lépésben még nincs „include" cikk — futtasd előbb azt.') : null,
-        curStep === 3 ? h('div', { style: { fontSize: 12, color: 'var(--muted)', marginTop: 8, lineHeight: 1.45, background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 8, padding: '7px 10px' } }, '📄 A teljes-szöveges szűrés a 2. lépés „include" cikkein fut: letölti az elérhető nyílt hozzáférésű (OA) PDF-eket és a teljes szövegen szűr; ahol nincs letölthető PDF, az absztraktra esik vissza. Ezért lassabb (kötegenként 3–4 cikk) — a lenti táblázatban élőben látod, melyik cikknél „📄 teljes szöveg" és melyiknél „📝 csak absztrakt", a fejlécben pedig a letöltési arány.') : null,
+        curStep > 1 && incCount(curStep - 1) === 0 ? h('div', { style: { fontSize: 12.5, color: 'var(--warn)', marginTop: 8 } }, 'There is no “include” paper in the previous step yet — run that first.') : null,
+        curStep === 3 ? h('div', { style: { fontSize: 12, color: 'var(--muted)', marginTop: 8, lineHeight: 1.45, background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 8, padding: '7px 10px' } }, '📄 Full-text screening runs on step 2’s “include” papers: it downloads the available open access (OA) PDFs and screens on the full text; where no PDF is downloadable, it falls back to the abstract. This is therefore slower (3–4 papers per batch) — in the table below you can see live which paper got “📄 full text” and which got “📝 abstract only”, and the download ratio in the header.') : null,
         props.canEdit ? h('div', { className: 'runbar' },
-          h('button', { className: 'btn pri', disabled: running || (curStep > 1 && incCount(curStep - 1) === 0), onClick: function () { runStep(curStep); } }, running ? 'Fut…' : ((cur.status === 'done' ? 'Újra: ' : 'Futtatás: ') + LS_STEPS[curStep - 1].label)),
-          running ? h('button', { className: 'btn', onClick: function () { stop.current = true; } }, 'Mégse') : null,
-          (cur.status === 'done' && curStep < 4) ? h('span', { style: { fontSize: 11.5, color: 'var(--warn)' } }, 'Az újrafuttatás törli a későbbi lépéseket.') : null,
+          h('button', { className: 'btn pri', disabled: running || (curStep > 1 && incCount(curStep - 1) === 0), onClick: function () { runStep(curStep); } }, running ? 'Running…' : ((cur.status === 'done' ? 'Rerun: ' : 'Run: ') + LS_STEPS[curStep - 1].label)),
+          running ? h('button', { className: 'btn', onClick: function () { stop.current = true; } }, 'Cancel') : null,
+          (cur.status === 'done' && curStep < 4) ? h('span', { style: { fontSize: 11.5, color: 'var(--warn)' } }, 'Rerunning deletes the later steps.') : null,
           prog ? h('span', { className: 'progress' }, h('i', { style: { width: (prog.total ? Math.round(prog.done / prog.total * 100) : 0) + '%' } }), h('span', { className: 'progress-t' }, prog.done + (prog.total ? '/' + prog.total : '') + ' · ✓' + ((prog.counts || {}).include || 0) + ' ✗' + ((prog.counts || {}).exclude || 0))) : null
         ) : null,
         err ? h('div', { style: { color: 'var(--danger)', fontSize: 12.5, marginTop: 6 } }, err) : null,
@@ -1286,62 +1286,62 @@
         props.canEdit ? h('div', { style: { marginTop: 12, borderTop: '1px solid var(--line)', paddingTop: 8 } },
           h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
             h('div', { style: { fontSize: 12, fontWeight: 600 } }, '📝 Claude screening-prompt'),
-            h('button', { className: 'btn', style: { padding: '3px 9px', fontSize: 11.5, flex: 'none' }, onClick: genPrompt }, promptText ? '🔄 Prompt újragenerálása' : '📝 Prompt megtekintése'),
-            promptText ? h('button', { className: 'btn', style: { padding: '3px 9px', fontSize: 11.5, flex: 'none' }, onClick: function () { try { navigator.clipboard.writeText(promptText); } catch (e) { } } }, 'Másolás') : null,
-            promptText ? h('button', { className: 'btn', style: { padding: '3px 9px', fontSize: 11.5, flex: 'none' }, onClick: function () { setPromptText(''); } }, 'Elrejtés') : null),
-          promptText ? h('div', { style: { fontSize: 11, color: 'var(--muted)', marginTop: 4 } }, 'Ez a rendszer-prompt megy a Claude-nak minden cikk megítélésekor (a kérdés + kulcsszavak + kritériumok alapján). Kulcsszó/kritérium módosítása után nyomd az „újragenerálás"-t.') : null,
+            h('button', { className: 'btn', style: { padding: '3px 9px', fontSize: 11.5, flex: 'none' }, onClick: genPrompt }, promptText ? '🔄 Regenerate prompt' : '📝 View prompt'),
+            promptText ? h('button', { className: 'btn', style: { padding: '3px 9px', fontSize: 11.5, flex: 'none' }, onClick: function () { try { navigator.clipboard.writeText(promptText); } catch (e) { } } }, 'Copy') : null,
+            promptText ? h('button', { className: 'btn', style: { padding: '3px 9px', fontSize: 11.5, flex: 'none' }, onClick: function () { setPromptText(''); } }, 'Hide') : null),
+          promptText ? h('div', { style: { fontSize: 11, color: 'var(--muted)', marginTop: 4 } }, 'This is the system prompt Claude gets when judging each paper (based on the question + keywords + criteria). After changing a keyword/criterion, press “regenerate”.') : null,
           promptText ? h('pre', { style: { marginTop: 6, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: 11.5, lineHeight: 1.45, background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 8, padding: '8px 10px', maxHeight: 280, overflow: 'auto', fontFamily: 'ui-monospace, monospace' } }, promptText) : null
         ) : null
       ) : h('div', { className: 'panel', style: { marginTop: 10 } },
-        h('h3', null, '4. Review cikk'),
-        h('p', { style: { fontSize: 13, color: 'var(--muted)' } }, 'A 3. lépésben „include"-olt ' + incCount(3) + ' cikkből egy strukturált review-t generálunk (a Fájlok közé mentve). Consensus-grounding, ha be van kötve a token.'),
-        props.canEdit ? h('div', { className: 'runbar' }, h('button', { className: 'btn pri', disabled: running || incCount(3) === 0, onClick: function () { runStep(4); } }, running ? 'Generálás…' : 'Review generálása'), (stepRow(4) || {}).status === 'done' ? h('span', { className: 'chip c-ok' }, 'Kész — lásd a Fájlokat') : null) : null,
+        h('h3', null, '4. Review paper'),
+        h('p', { style: { fontSize: 13, color: 'var(--muted)' } }, 'We generate a structured review from the ' + incCount(3) + ' paper(s) “include”-d in step 3 (saved to Files). Consensus grounding if the token is connected.'),
+        props.canEdit ? h('div', { className: 'runbar' }, h('button', { className: 'btn pri', disabled: running || incCount(3) === 0, onClick: function () { runStep(4); } }, running ? 'Generating…' : 'Generate review'), (stepRow(4) || {}).status === 'done' ? h('span', { className: 'chip c-ok' }, 'Done — see Files') : null) : null,
         err ? h('div', { style: { color: 'var(--danger)', fontSize: 12.5, marginTop: 6 } }, err) : null
       ),
       // results list (steps 1-3)
       curStep < 4 ? h('div', { className: 'panel', style: { marginTop: 10 } },
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
-          h('h3', { style: { margin: 0 } }, 'Eredmények — ' + LS_STEPS[curStep - 1].label + ' (' + stepPapers.length + ' cikk)'),
-          (curStep === 3 && stepPapers.length) ? h('span', { style: { fontSize: 11.5, color: 'var(--muted)', whiteSpace: 'nowrap' }, title: 'Hány cikknél sikerült a teljes szöveg (PDF) letöltése és elemzése, és hánynál maradt csak az absztrakt' }, '📄 ' + pdfN + ' teljes szöveg · 📝 ' + absN + ' absztrakt') : null,
-          stepPapers.length ? h('label', { style: { marginLeft: 'auto', fontSize: 11.5, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 5 } }, 'Rendezés:',
+          h('h3', { style: { margin: 0 } }, 'Results — ' + LS_STEPS[curStep - 1].label + ' (' + stepPapers.length + ' paper(s))'),
+          (curStep === 3 && stepPapers.length) ? h('span', { style: { fontSize: 11.5, color: 'var(--muted)', whiteSpace: 'nowrap' }, title: 'How many papers had their full text (PDF) downloaded and analyzed, and how many were left with only the abstract' }, '📄 ' + pdfN + ' full text · 📝 ' + absN + ' abstract') : null,
+          stepPapers.length ? h('label', { style: { marginLeft: 'auto', fontSize: 11.5, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 5 } }, 'Sort:',
             h('select', { className: 'num', style: { width: 'auto', height: 28 }, value: sortBy, onChange: function (e) { setSortBy(e.target.value); } },
-              h('option', { value: 'decision' }, 'Döntés szerint'),
-              h('option', { value: 'score' }, 'Relevancia'),
-              h('option', { value: 'cites' }, 'Idézettség'),
-              h('option', { value: 'q' }, 'Kvartilis (Q1→Q4)'),
-              h('option', { value: 'year' }, 'Év (újabb elöl)'))) : null),
-        stepPapers.length === 0 ? h('div', { style: { fontSize: 13, color: 'var(--faint)' } }, 'Még nincs eredmény — futtasd a lépést.') :
+              h('option', { value: 'decision' }, 'By decision'),
+              h('option', { value: 'score' }, 'Relevance'),
+              h('option', { value: 'cites' }, 'Citations'),
+              h('option', { value: 'q' }, 'Quartile (Q1→Q4)'),
+              h('option', { value: 'year' }, 'Year (newest first)'))) : null),
+        stepPapers.length === 0 ? h('div', { style: { fontSize: 13, color: 'var(--faint)' } }, 'No results yet — run the step.') :
           h('div', { style: { overflowX: 'auto', marginTop: 8 } }, h('table', { style: { width: '100%', borderCollapse: 'collapse', fontSize: 12.5 } },
             h('thead', null, h('tr', null,
-              [['Döntés', 'decision', 'left'], ['Cikk', null, 'left'], ['Q', 'q', 'center'], ['Idézet', 'cites', 'right'], ['Folyóirat', null, 'left'], ['Év', 'year', 'right'], ['Pont', 'score', 'right']].map(function (c, i) {
-                return h('th', { key: i, onClick: c[1] ? function () { setSortBy(c[1]); } : null, style: { textAlign: c[2], padding: '6px 8px', borderBottom: '2px solid var(--line)', fontSize: 11, color: 'var(--muted)', fontWeight: 700, whiteSpace: 'nowrap', cursor: c[1] ? 'pointer' : 'default', userSelect: 'none' }, title: c[1] ? 'Rendezés e szerint' : null }, c[0] + (c[1] && sortBy === c[1] ? ' ▾' : ''));
+              [['Decision', 'decision', 'left'], ['Paper', null, 'left'], ['Q', 'q', 'center'], ['Cites', 'cites', 'right'], ['Journal', null, 'left'], ['Year', 'year', 'right'], ['Score', 'score', 'right']].map(function (c, i) {
+                return h('th', { key: i, onClick: c[1] ? function () { setSortBy(c[1]); } : null, style: { textAlign: c[2], padding: '6px 8px', borderBottom: '2px solid var(--line)', fontSize: 11, color: 'var(--muted)', fontWeight: 700, whiteSpace: 'nowrap', cursor: c[1] ? 'pointer' : 'default', userSelect: 'none' }, title: c[1] ? 'Sort by this' : null }, c[0] + (c[1] && sortBy === c[1] ? ' ▾' : ''));
               }),
               props.canEdit ? h('th', { key: 'act', style: { borderBottom: '2px solid var(--line)' } }) : null)),
             h('tbody', null, sortPapers(stepPapers).map(function (p) {
-              var m = metaOf(p); var s = srcMap[p.source_id]; var title = titles[p.source_id] || m.title || (s && s.title) || '(cikk)';
+              var m = metaOf(p); var s = srcMap[p.source_id]; var title = titles[p.source_id] || m.title || (s && s.title) || '(paper)';
               var url = (s && s.url) || m.url || (m.doi || null); var q = qOf(p);
-              var b = p.decision === 'include' ? { t: '✅ Beválogatva', c: '#15803d', bg: 'rgba(22,163,74,.12)' } : p.decision === 'maybe' ? { t: '🟡 Talán', c: '#b45309', bg: 'rgba(180,83,9,.1)' } : { t: '❌ Kizárva', c: '#b91c1c', bg: 'rgba(220,38,38,.08)' };
+              var b = p.decision === 'include' ? { t: '✅ Included', c: '#15803d', bg: 'rgba(22,163,74,.12)' } : p.decision === 'maybe' ? { t: '🟡 Maybe', c: '#b45309', bg: 'rgba(180,83,9,.1)' } : { t: '❌ Excluded', c: '#b91c1c', bg: 'rgba(220,38,38,.08)' };
               var ex = (p.signals && p.signals.extract) || {}; var cr = (p.signals && p.signals.criteria) || {};
               return h('tr', { key: p.source_id, style: { borderBottom: '1px solid var(--line)', verticalAlign: 'top' } },
-                h('td', { style: { padding: '7px 8px', whiteSpace: 'nowrap' } }, h('span', { style: { fontSize: 11, fontWeight: 700, color: b.c, background: b.bg, borderRadius: 6, padding: '2px 6px' } }, b.t), p.overridden ? h('span', { className: 'mtag warn', style: { marginLeft: 4 } }, 'kézi') : null),
+                h('td', { style: { padding: '7px 8px', whiteSpace: 'nowrap' } }, h('span', { style: { fontSize: 11, fontWeight: 700, color: b.c, background: b.bg, borderRadius: 6, padding: '2px 6px' } }, b.t), p.overridden ? h('span', { className: 'mtag warn', style: { marginLeft: 4 } }, 'manual') : null),
                 h('td', { style: { padding: '7px 8px', minWidth: 240 } },
                   h('div', { style: { fontWeight: 600 } }, url ? h('a', { href: url, target: '_blank', rel: 'noreferrer', style: { color: 'var(--ink)' } }, title) : title),
                   p.reason ? h('div', { className: 'result-reason' }, p.reason) : null,
                   (ex.method || ex.finding) ? h('div', { style: { fontSize: 11.5, color: 'var(--muted)', marginTop: 2, lineHeight: 1.45 } },
-                    ex.method ? h('span', { title: 'Módszer / megközelítés (absztraktból)' }, '🔬 ' + ex.method + '   ') : null,
-                    (ex.dataset && !/^none/i.test(ex.dataset)) ? h('span', { title: 'Adathalmaz' }, '📊 ' + ex.dataset + '   ') : null,
-                    ex.finding ? h('span', { title: 'Fő eredmény / állítás' }, '→ ' + ex.finding) : null) : null,
+                    ex.method ? h('span', { title: 'Method / approach (from the abstract)' }, '🔬 ' + ex.method + '   ') : null,
+                    (ex.dataset && !/^none/i.test(ex.dataset)) ? h('span', { title: 'Dataset' }, '📊 ' + ex.dataset + '   ') : null,
+                    ex.finding ? h('span', { title: 'Key finding / claim' }, '→ ' + ex.finding) : null) : null,
                   ((cr.inc || []).length || (cr.exc || []).length) ? h('div', { style: { display: 'flex', gap: 4, marginTop: 3, flexWrap: 'wrap' } },
-                    (cr.inc || []).map(function (c, ci) { return h('span', { key: 'i' + ci, className: 'mtag', style: { background: 'rgba(22,163,74,.12)', color: '#15803d', border: '1px solid rgba(22,163,74,.35)' }, title: 'Teljesített beválogatási kritérium' }, '✓ ' + c); }),
-                    (cr.exc || []).map(function (c, ci) { return h('span', { key: 'e' + ci, className: 'mtag', style: { background: 'rgba(220,38,38,.1)', color: '#b91c1c', border: '1px solid rgba(220,38,38,.35)' }, title: 'Fennálló kizárási kritérium' }, '✗ ' + c); })) : null,
+                    (cr.inc || []).map(function (c, ci) { return h('span', { key: 'i' + ci, className: 'mtag', style: { background: 'rgba(22,163,74,.12)', color: '#15803d', border: '1px solid rgba(22,163,74,.35)' }, title: 'Inclusion criterion met' }, '✓ ' + c); }),
+                    (cr.exc || []).map(function (c, ci) { return h('span', { key: 'e' + ci, className: 'mtag', style: { background: 'rgba(220,38,38,.1)', color: '#b91c1c', border: '1px solid rgba(220,38,38,.35)' }, title: 'Exclusion criterion that applies' }, '✗ ' + c); })) : null,
                   (p.signals && (p.signals.has_github || p.signals.has_dataset || p.signals.screened_on)) ? h('div', { style: { display: 'flex', gap: 4, marginTop: 3, flexWrap: 'wrap' } },
                     p.signals.has_github ? h('span', { className: 'mtag ok' }, 'github') : null,
                     p.signals.has_dataset ? h('span', { className: 'mtag ok' }, 'dataset') : null,
-                    p.signals.screened_on === 'pdf' ? h('span', { className: 'mtag', style: { background: 'rgba(22,163,74,.12)', color: '#15803d', border: '1px solid rgba(22,163,74,.3)' }, title: 'A teljes szöveg (PDF) letöltve és elemezve' }, '📄 teljes szöveg')
-                      : (p.signals.screened_on === 'abstract' && curStep >= 3) ? h('span', { className: 'mtag', style: { background: 'rgba(180,83,9,.1)', color: '#b45309', border: '1px solid rgba(180,83,9,.3)' }, title: 'A PDF nem volt elérhető/letölthető → az absztrakt alapján szűrve' }, '📝 csak absztrakt')
+                    p.signals.screened_on === 'pdf' ? h('span', { className: 'mtag', style: { background: 'rgba(22,163,74,.12)', color: '#15803d', border: '1px solid rgba(22,163,74,.3)' }, title: 'Full text (PDF) downloaded and analyzed' }, '📄 full text')
+                      : (p.signals.screened_on === 'abstract' && curStep >= 3) ? h('span', { className: 'mtag', style: { background: 'rgba(180,83,9,.1)', color: '#b45309', border: '1px solid rgba(180,83,9,.3)' }, title: 'The PDF was not available/downloadable → screened on the abstract' }, '📝 abstract only')
                       : (p.signals.screened_on ? h('span', { className: 'mtag' }, p.signals.screened_on) : null)) : null),
-                h('td', { style: { padding: '7px 8px', textAlign: 'center' } }, q ? h('span', { style: { fontSize: 11, fontWeight: 700, color: '#fff', background: q <= 1 ? '#16a34a' : q === 2 ? '#65a30d' : q === 3 ? '#b45309' : '#6b7280', borderRadius: 6, padding: '2px 6px' }, title: 'Scopus/SCImago kvartilis (SJR)' }, 'Q' + q) : h('span', { style: { color: 'var(--faint)' } }, '–')),
-                h('td', { style: { padding: '7px 8px', textAlign: 'right', whiteSpace: 'nowrap' }, title: 'Idézettség (OpenAlex — WoS/Scopus proxy)' }, m.cited_by != null ? m.cited_by : '–'),
+                h('td', { style: { padding: '7px 8px', textAlign: 'center' } }, q ? h('span', { style: { fontSize: 11, fontWeight: 700, color: '#fff', background: q <= 1 ? '#16a34a' : q === 2 ? '#65a30d' : q === 3 ? '#b45309' : '#6b7280', borderRadius: 6, padding: '2px 6px' }, title: 'Scopus/SCImago quartile (SJR)' }, 'Q' + q) : h('span', { style: { color: 'var(--faint)' } }, '–')),
+                h('td', { style: { padding: '7px 8px', textAlign: 'right', whiteSpace: 'nowrap' }, title: 'Citations (OpenAlex — WoS/Scopus proxy)' }, m.cited_by != null ? m.cited_by : '–'),
                 h('td', { style: { padding: '7px 8px', maxWidth: 170 } }, m.venue ? h('span', { title: m.venue }, String(m.venue).length > 38 ? String(m.venue).slice(0, 36) + '…' : m.venue) : h('span', { style: { color: 'var(--faint)' } }, '–')),
                 h('td', { style: { padding: '7px 8px', textAlign: 'right' } }, m.year || '–'),
                 h('td', { style: { padding: '7px 8px', textAlign: 'right' } }, p.score != null ? p.score + '%' : '–'),
@@ -1352,7 +1352,7 @@
       studiesOpen ? h('div', { style: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,.4)', zIndex: 1000, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '6vh 16px', overflow: 'auto' }, onClick: function () { setStudiesOpen(false); } },
         h('div', { style: { background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 12, width: 'min(680px, 100%)', maxHeight: '88vh', overflow: 'auto', boxShadow: '0 12px 40px rgba(0,0,0,.25)' }, onClick: function (e) { e.stopPropagation(); } },
           h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, padding: '14px 16px', borderBottom: '1px solid var(--line)', position: 'sticky', top: 0, background: 'var(--surface)' } },
-            h('h3', { style: { margin: 0 } }, '📚 Tanulmányok (' + studies.length + ')'),
+            h('h3', { style: { margin: 0 } }, '📚 Studies (' + studies.length + ')'),
             h('button', { className: 'icon-x', style: { marginLeft: 'auto' }, onClick: function () { setStudiesOpen(false); } }, '✕')),
           h('div', { style: { padding: '4px 16px 16px' } },
             studies.length ? studies.map(function (s) {
@@ -1361,12 +1361,12 @@
                   h('div', { style: { fontSize: 13.5, fontWeight: 600, whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, s.title),
                   s.question ? h('div', { style: { fontSize: 12, color: 'var(--muted)', marginTop: 2, whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 54, overflow: 'hidden' } }, s.question) : null,
                   h('div', { style: { display: 'flex', gap: 6, marginTop: 5, flexWrap: 'wrap' } },
-                    h('span', { className: 'chip ' + (s.status === 'done' ? 'c-ok' : 'c-warn') }, s.status === 'done' ? '✓ kész' : 'lépés ' + (s.cur_step || 1) + '/4'),
-                    s.id === selId ? h('span', { className: 'chip c-acc' }, 'kiválasztva') : null)),
+                    h('span', { className: 'chip ' + (s.status === 'done' ? 'c-ok' : 'c-warn') }, s.status === 'done' ? '✓ done' : 'step ' + (s.cur_step || 1) + '/4'),
+                    s.id === selId ? h('span', { className: 'chip c-acc' }, 'selected') : null)),
                 h('div', { style: { display: 'flex', flexDirection: 'column', gap: 5, flex: 'none' } },
-                  h('button', { className: 'btn', style: { padding: '3px 10px', fontSize: 12 }, onClick: function () { setSelId(s.id); setCurStep(s.cur_step || 1); setStudiesOpen(false); } }, 'Megnyitás'),
-                  props.canEdit ? h('button', { className: 'btn', style: { padding: '3px 10px', fontSize: 12, color: 'var(--danger)' }, onClick: function () { delStudy(s); } }, '🗑 Törlés') : null));
-            }) : h('div', { style: { fontSize: 13, color: 'var(--faint)', padding: '12px 0' } }, 'Nincs még tanulmány.')
+                  h('button', { className: 'btn', style: { padding: '3px 10px', fontSize: 12 }, onClick: function () { setSelId(s.id); setCurStep(s.cur_step || 1); setStudiesOpen(false); } }, 'Open'),
+                  props.canEdit ? h('button', { className: 'btn', style: { padding: '3px 10px', fontSize: 12, color: 'var(--danger)' }, onClick: function () { delStudy(s); } }, '🗑 Delete') : null));
+            }) : h('div', { style: { fontSize: 13, color: 'var(--faint)', padding: '12px 0' } }, 'No studies yet.')
           )
         )
       ) : null
@@ -1388,7 +1388,7 @@
     function setStatus(e) { sb.from('research_projects').update({ status: e.target.value }).eq('id', p.id).then(props.onChanged); }
     var openTasks = (props.tasks || []).filter(function (t) { return t.status !== 'done'; }).length;
     function startStudyFromIdea(idea) {
-      var title = String((idea && idea.question) || 'Irodalom').slice(0, 80);
+      var title = String((idea && idea.question) || 'Literature').slice(0, 80);
       sb.from('research_studies').insert({ project_id: p.id, idea_id: idea ? idea.id : null, title: title, question: idea ? idea.question : p.title, created_by: props.authorId }).select('id').maybeSingle().then(function (r) {
         var id = r && r.data && r.data.id; if (!id) return;
         var rows = LS_STEPS.map(function (s) { return { study_id: id, step: s.step, kind: s.kind, config: lsDefaultConfig(s.step, p, idea) }; });
@@ -1403,21 +1403,21 @@
     else if (tab === 'data') content = h(DataPanel, { projectId: p.id, datasets: props.datasets, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
     else if (tab === 'compute') content = h(ComputePanel, { projectId: p.id, jobs: props.jobs, datasets: props.datasets, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
     else if (tab === 'writing') content = h(WritingPanel, { project: p, sources: props.sources, ideas: props.ideas, jobs: props.jobs });
-    else if (tab === 'canvas') content = window.PRCanvas ? h(window.PRCanvas, { projectId: p.id, canEdit: props.canEdit, authorId: props.authorId }) : h('div', { className: 'empty' }, 'Canvas betöltése…');
-    else if (tab === 'notes') content = window.PRNotes ? h(window.PRNotes, { projectId: p.id, canEdit: props.canEdit, authorId: props.authorId }) : h('div', { className: 'empty' }, 'Notes betöltése…');
+    else if (tab === 'canvas') content = window.PRCanvas ? h(window.PRCanvas, { projectId: p.id, canEdit: props.canEdit, authorId: props.authorId }) : h('div', { className: 'empty' }, 'Loading Canvas…');
+    else if (tab === 'notes') content = window.PRNotes ? h(window.PRNotes, { projectId: p.id, canEdit: props.canEdit, authorId: props.authorId }) : h('div', { className: 'empty' }, 'Loading Notes…');
     else if (tab === 'log') content = h(LogPanel, { projectId: p.id, authorId: props.authorId, entries: props.log, canEdit: props.canEdit, onChanged: props.onChanged });
     else if (tab === 'tasks') content = h(TasksPanel, { projectId: p.id, tasks: props.tasks, canEdit: props.canEdit, onChanged: props.onChanged });
     else content = p.goal ? h('div', { className: 'panel' }, h('h3', null, 'Goal'), h('div', { style: { fontSize: 13.5 } }, p.goal)) : h('div', { className: 'soon' }, 'No goal set yet.');
     return h('div', null,
       h('button', { className: 'back-btn', onClick: props.onBack }, '← All projects'),
-      (!props.canEdit && props.viewerId && p.owner_id !== props.viewerId) ? h('div', { className: 'ro-banner' }, '👁 Témavezetői nézet — ' + (props.studentName ? props.studentName + ' projektje' : 'diák projektje') + '. Csak olvasható.') : null,
+      (!props.canEdit && props.viewerId && p.owner_id !== props.viewerId) ? h('div', { className: 'ro-banner' }, '👁 Supervisor view — ' + (props.studentName ? props.studentName + '’s project' : 'student’s project') + '. Read-only.') : null,
       h('div', { className: 'dhead' },
         h('div', { className: 'dt' }, h('h1', null, p.title), h('p', null, (p.field || 'No field set') + (p.keywords && p.keywords.length ? ' · ' + p.keywords.join(', ') : ''))),
         h('div', { style: { display: 'flex', gap: 8, alignItems: 'center' } },
           props.canEdit
             ? h('select', { className: 'field', style: { width: 'auto', height: 32 }, value: p.status, onChange: setStatus }, Object.keys(STATUS_LABEL).map(function (k) { return h('option', { key: k, value: k }, STATUS_LABEL[k]); }))
             : h('span', { className: 'chip c-grey' }, STATUS_LABEL[p.status] || p.status),
-          props.canEdit ? h('button', { className: 'btn', style: { height: 32, flex: 'none' }, title: 'Projekt alapbeállításai (cím, terület, kulcsszavak, cél)', onClick: function () { setEditOpen(true); } }, '✎ Beállítások') : null
+          props.canEdit ? h('button', { className: 'btn', style: { height: 32, flex: 'none' }, title: 'Project base settings (title, field, keywords, goal)', onClick: function () { setEditOpen(true); } }, '✎ Settings') : null
         )
       ),
       h(Stepper, { stage: p.stage, canEdit: props.canEdit, onSet: setStage, onNav: function (i) { setTab(STAGE_TAB[i] || 'overview'); } }),
@@ -1438,8 +1438,8 @@
     var openTasks = p._openTasks;
     // explicit author attribution so a student's (or a test's) project can never read as the viewer's own
     var badge;
-    if (props.meId && p.owner_id === props.meId) badge = h('span', { className: 'chip c-grey author-badge' }, 'Saját');
-    else { var st = props.studentById && props.studentById[p.student_id]; badge = h('span', { className: 'chip ' + (st ? 'c-acc' : 'c-warn') + ' author-badge' }, st ? 'Diák: ' + st.name : 'Diák munkája'); }
+    if (props.meId && p.owner_id === props.meId) badge = h('span', { className: 'chip c-grey author-badge' }, 'Mine');
+    else { var st = props.studentById && props.studentById[p.student_id]; badge = h('span', { className: 'chip ' + (st ? 'c-acc' : 'c-warn') + ' author-badge' }, st ? 'Student: ' + st.name : 'Student’s work'); }
     return h('div', { className: 'card', onClick: function () { props.onOpen(p); } },
       h('div', { className: 'ch' }, h('div', null, h('b', null, p.title), h('span', null, p.field || '—')), badge),
       p.keywords && p.keywords.length ? h('div', { className: 'tags' }, p.keywords.slice(0, 4).map(function (k, i) { return h('span', { className: 'tag', key: i }, k); })) : null,
@@ -1504,7 +1504,7 @@
     var known = {}; students.forEach(function (s) { known[s.id] = 1; });
     var orphans = projects.filter(function (p) { return !known[p.student_id]; });
     function card(p) { return h(ProjectCard, { key: p.id, project: p, meId: null, studentById: props.studentById, onOpen: props.onOpen }); }
-    if (!students.length && !projects.length) return h('div', { className: 'soon' }, h('b', null, 'Még nincs diákod kutatási projekttel. '), 'Amikor egy diákod kutatási projektet hoz létre, itt jelenik meg — diákonként és összesítve.');
+    if (!students.length && !projects.length) return h('div', { className: 'soon' }, h('b', null, 'No student has a research project yet. '), 'When one of your students creates a research project, it appears here — per student and aggregated.');
     return h('div', null,
       students.map(function (s) {
         var ps = byStudent[s.id] || [];
@@ -1513,15 +1513,15 @@
           h('div', { className: 'sup-head' },
             h(Avatar, { u: s, size: 30 }),
             h('div', { style: { flex: 1, minWidth: 0 } }, h('b', null, s.name), h('span', { className: 'sup-topic' }, s.topic || '—')),
-            rep ? h('span', { className: 'chip c-grey' }, (rep.chat_msgs || 0) + ' chat · ' + (rep.ideas || 0) + ' ötlet · ' + (rep.log_entries || 0) + ' napló') : null,
-            h('button', { className: 'btn' + (rep ? '' : ' pri'), style: { padding: '5px 10px', fontSize: 12 }, disabled: g, onClick: function () { generate(s.id); } }, g ? 'Készül…' : (rep ? 'Riport frissítése' : 'Riport generálása')),
-            h('a', { className: 'btn', style: { padding: '5px 10px', fontSize: 12, textDecoration: 'none' }, href: 'PhD.html?view=reports', title: 'Napi AI-összefoglaló a Doctoral School-ban' }, 'Napi riport →')
+            rep ? h('span', { className: 'chip c-grey' }, (rep.chat_msgs || 0) + ' chat · ' + (rep.ideas || 0) + ' idea(s) · ' + (rep.log_entries || 0) + ' log') : null,
+            h('button', { className: 'btn' + (rep ? '' : ' pri'), style: { padding: '5px 10px', fontSize: 12 }, disabled: g, onClick: function () { generate(s.id); } }, g ? 'Working…' : (rep ? 'Refresh report' : 'Generate report')),
+            h('a', { className: 'btn', style: { padding: '5px 10px', fontSize: 12, textDecoration: 'none' }, href: 'PhD.html?view=reports', title: 'Daily AI summary in the Doctoral School' }, 'Daily report →')
           ),
-          ps.length ? h('div', { className: 'grid' }, ps.map(card)) : h('div', { className: 'sup-empty' }, 'Nincs aktív kutatási projekt.')
+          ps.length ? h('div', { className: 'grid' }, ps.map(card)) : h('div', { className: 'sup-empty' }, 'No active research project.')
         );
       }),
       orphans.length ? h('div', { className: 'sup-student' },
-        h('div', { className: 'sup-head' }, h('b', null, 'Egyéb diák-projektek')),
+        h('div', { className: 'sup-head' }, h('b', null, 'Other student projects')),
         h('div', { className: 'grid' }, orphans.map(card))
       ) : null
     );
@@ -1629,11 +1629,11 @@
     var vw = useState(props.initStudent ? 'supervised' : 'mine'), view = vw[0], setView = vw[1];
     if (!isSup && view === 'supervised') view = 'mine';
     var roleLabel = me.role === 'admin' ? 'Administrator' : (isSup ? 'Supervisor' : 'Researcher');
-    var sub = sel ? STAGES[sel.stage || 0] + ' stage' : (view === 'supervised' ? (studentList.length + ' diák') : (mineProjects.length + ' project' + (mineProjects.length === 1 ? '' : 's')));
+    var sub = sel ? STAGES[sel.stage || 0] + ' stage' : (view === 'supervised' ? (studentList.length + ' student(s)') : (mineProjects.length + ' project' + (mineProjects.length === 1 ? '' : 's')));
 
     var seg = (isSup && !sel) ? h('div', { className: 'segctl' },
-      h('button', { className: view === 'mine' ? 'on' : '', onClick: function () { setView('mine'); } }, 'Saját kutatásom (' + mineProjects.length + ')'),
-      h('button', { className: view === 'supervised' ? 'on' : '', onClick: function () { setView('supervised'); } }, 'Diákjaim kutatása (' + supProjects.length + ')')
+      h('button', { className: view === 'mine' ? 'on' : '', onClick: function () { setView('mine'); } }, 'My research (' + mineProjects.length + ')'),
+      h('button', { className: view === 'supervised' ? 'on' : '', onClick: function () { setView('supervised'); } }, 'My students’ research (' + supProjects.length + ')')
     ) : null;
     var body;
     if (sel) {
