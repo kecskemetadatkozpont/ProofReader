@@ -775,6 +775,15 @@
     useEffect(() => { if (ctx.requestCompile) ctx.requestCompile(docId, false); }, [src]);
     const busy = !!(st && st.busy), pending = !!(st && st.pending), phase = (st && st.phase) || null, pdf = st && st.pdf, err = st && st.err;
     const modeLabel = st && st.mode === 'exact' ? 'exact (TeX Live 2026)' : 'browser (pdfTeX)';
+    // Parse a determinate pass fraction from phase strings like 'compiling 2/3…'; otherwise indeterminate.
+    const passMatch = phase ? String(phase).match(/(\d+)\s*\/\s*(\d+)/) : null;
+    const passPct = passMatch && +passMatch[2] > 0 ? Math.max(0, Math.min(100, Math.round((+passMatch[1] / +passMatch[2]) * 100))) : null;
+    const showBar = busy || pending;
+    const progressBar = showBar
+      ? (passPct != null
+        ? <div className="pr-bar" style={{ flex: 1, minWidth: 80 }}><i style={{ width: passPct + '%' }} /></div>
+        : <div className="pr-bar pr-bar--indet" style={{ flex: 1, minWidth: 80 }}><i /></div>)
+      : null;
     return <div className="pdf-render">
       <div className="pdf-render-bar">
         <span>{busy ? <span className="cspin" /> : null}Compiled · {ctx.docLabel(docId)}{st && st.pages ? ' · ' + st.pages + ' p.' : ''} · {modeLabel}{busy ? (' · ' + (phase || 'compiling…')) : (pending ? ' · ⏳ changes — waiting to compile' : (err ? ' · ⚠ compile error' : ''))}</span>
@@ -783,9 +792,13 @@
           <button onClick={() => ctx.onCompileExact && ctx.onCompileExact(docId)} disabled={busy} title="Byte-identical PDF via an external TeX Live 2026 API">Exact PDF</button>
         </span>
       </div>
+      {showBar ? <div className="pdf-render-progress" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px' }}>
+        {progressBar}
+        <span style={{ flex: '0 0 auto', fontSize: 11, opacity: .8 }}>{busy ? (phase || 'Compiling…') : 'Changes — waiting to compile…'}</span>
+      </div> : null}
       <div className="pdf-view-wrap" style={{ flex: 1, minHeight: 0 }}>
         {err && !pdf ? <div className="pdf-status" style={{ maxWidth: '82%', whiteSpace: 'normal', lineHeight: 1.45, textAlign: 'center', background: 'rgba(120,30,30,.55)' }}>⚠️ {String(err)}</div>
-          : pdf ? <CompiledPdfView pane={pane} ctx={ctx} bytes={pdf} />
+          : pdf ? <div style={{ height: '100%', opacity: showBar ? .45 : 1, transition: 'opacity .2s ease' }}><CompiledPdfView pane={pane} ctx={ctx} bytes={pdf} /></div>
           : <div className="pdf-status">{busy ? (phase || 'Compiling…') : (pending ? 'Changes — waiting to compile…' : 'Waiting to compile…')}</div>}
       </div>
     </div>;

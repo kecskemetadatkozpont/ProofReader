@@ -152,6 +152,7 @@
     // persistence (saved comparison packages)
     var meS = useState(null), me = meS[0], setMe = meS[1];
     var prjS = useState([]), projects = prjS[0], setProjects = prjS[1];
+    var plS = useState(false), projLoading = plS[0], setProjLoading = plS[1];   // true until the first loadProjects resolves (skeleton)
     var rawS = useState(null), rawFiles = rawS[0], setRawFiles = rawS[1];       // {relPath: File|Blob} of the loaded package
     var svS = useState(''), saving = svS[0], setSaving = svS[1];                 // '' | progress text
     var sidS = useState(null), savedId = sidS[0], setSavedId = sidS[1];          // id of the currently-loaded saved project
@@ -213,7 +214,8 @@
     }
     function loadProjects(uid) {
       if (!sb) return;
-      sb.from('compare_projects').select('id,title,publication,stats,file_count,size_bytes,zip_path,reviewer_text,is_public,share_token,created_at').eq('owner', uid).order('created_at', { ascending: false }).then(function (r) { setProjects((r && r.data) || []); });
+      setProjLoading(true);
+      sb.from('compare_projects').select('id,title,publication,stats,file_count,size_bytes,zip_path,reviewer_text,is_public,share_token,created_at').eq('owner', uid).order('created_at', { ascending: false }).then(function (r) { setProjects((r && r.data) || []); setProjLoading(false); });
     }
 
     var rp = {}; ((db && db.review_points) || []).forEach(function (r) { rp[r.id] = r; });
@@ -221,6 +223,9 @@
     var shown = filterP ? changes.filter(function (c) { return (c.review_points || []).indexOf(filterP) >= 0; }) : changes;
     var sel = changes.filter(function (c) { return c.id === selId; })[0] || shown[0];
     var curRow = (projects || []).filter(function (p) { return p.id === savedId; })[0] || {};
+    // staged save progress: a save is "active" while the saving text is set but not yet done/error/transient-notice
+    var saveActive = !!(saving && saving !== 'Saved ✓' && saving.indexOf('Error') < 0 && saving.indexOf('Sign in') < 0 && saving.indexOf('No package') < 0);
+    var savePct = saving.indexOf('Uploading') >= 0 ? 80 : (saving.indexOf('Starting') >= 0 ? 45 : (saving.indexOf('Packaging') >= 0 ? 18 : 5));
 
     function buildVer(byPath, base, folder) {
       var prefix = base + (folder.path || '') + '/';
@@ -316,6 +321,9 @@
     function savedListBlock() {
       if (!sb) return null;
       if (!me) return h('div', { style: { marginTop: 22, fontSize: 13, color: 'var(--faint)' } }, 'Sign in to save your uploaded comparisons and reload them later with a single click.');
+      if (projLoading && !projects.length) return h('div', { className: 'cm-saved' },
+        h('div', { className: 'cm-saved-h' }, '💾 Saved comparisons'),
+        [0, 1, 2, 3].map(function (i) { return h('div', { key: i, className: 'cm-saved-li', 'aria-hidden': 'true', style: { pointerEvents: 'none' } }, h('div', { className: 'pr-skel pr-skel-row', style: { width: (62 - i * 7) + '%' } })); }));
       if (!projects.length) return null;
       return h('div', { className: 'cm-saved' },
         h('div', { className: 'cm-saved-h' }, '💾 Saved comparisons (' + projects.length + ')'),
@@ -397,6 +405,7 @@
       h('div', { style: { marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' } },
         ro ? h('span', { className: 'cm-robadge' }, '🔗 Shared view — read-only') : null,
         (!ro && saving) ? h('span', { style: { fontSize: 12.5, color: saving.indexOf('Error') >= 0 ? 'var(--danger)' : 'var(--muted)' } }, saving) : null,
+        (!ro && saveActive) ? h('div', { className: 'pr-bar', style: { width: 90, flex: 'none' }, role: 'progressbar', 'aria-label': 'Save progress' }, h('i', { style: { width: savePct + '%' } })) : null,
         (!ro && sb) ? h('button', { className: 'btn' + (savedId ? '' : ' pri'), onClick: saveProject, disabled: !!(saving && saving !== 'Saved ✓' && saving.indexOf('Error') < 0 && saving.indexOf('Sign in') < 0) }, savedId ? '💾 Re-save' : '💾 Save') : null,
         (!ro && sb && savedId) ? h('button', { className: 'btn' + (curRow.is_public ? ' pri' : ''), title: 'Public link for the reviewers', onClick: function () { setShareOpen(true); } }, curRow.is_public ? '🔗 Shared' : '🔗 Share') : null,
         h('button', { className: 'btn' + (notePanel ? ' pri' : ''), title: 'Reviewer note as a floating panel', onClick: function () { var show = !notePanel; if (show && !notePos) setNotePos({ top: 66, left: Math.max(8, window.innerWidth - 404) }); setNotePanel(show); } }, '📝 Note'),

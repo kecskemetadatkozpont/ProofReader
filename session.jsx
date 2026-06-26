@@ -7,6 +7,17 @@
   var BE = window.PR_BACKEND, sb = BE && BE.sb;
   var CFG = window.PR_CONFIG || {};
 
+  // Local indeterminate variant of the shared .pr-bar: its <i> slides instead of being width-driven,
+  // so a multi-minute agent/streaming run shows live motion (reduced-motion is handled by theme.js).
+  (function () {
+    if (document.getElementById('pr-bar-indet-style')) return;
+    var s = document.createElement('style'); s.id = 'pr-bar-indet-style';
+    s.textContent = '.pr-bar.indet { width: 120px; max-width: 40vw; }' +
+      '.pr-bar.indet > i { width: 40%; transition: none; animation: pr-bar-indet 1.2s ease-in-out infinite; }' +
+      '@keyframes pr-bar-indet { 0% { transform: translateX(-110%); } 100% { transform: translateX(280%); } }';
+    (document.head || document.documentElement).appendChild(s);
+  })();
+
   function mdHtml(t) { var s = String(t == null ? '' : t); try { if (window.marked && window.DOMPurify) return window.DOMPurify.sanitize(window.marked.parse(s, { breaks: true })); } catch (e) { } return s.replace(/[&<>]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]; }).replace(/\n/g, '<br>'); }
   function foldCode(html) { if (!html) return html; return html.replace(/<pre>/g, '<details class="code-fold"><summary>⟨⟩ Code — expand / collapse</summary><pre>').replace(/<\/pre>/g, '</pre></details>'); }
   var SUGGEST = ['Explain Fisher information simply.', 'Write a short research abstract on OOD detection.', 'Give me 5 ideas for a dissertation chapter.', 'Help me structure a presentation.'];
@@ -27,6 +38,7 @@
     var atS = useState(false), atOpen = atS[0], setAtOpen = atS[1];        // attach menu open
     var pkS = useState(null), picker = pkS[0], setPicker = pkS[1];         // {kind, items} for the browse pickers
     var dgS = useState(false), dragOver = dgS[0], setDragOver = dgS[1];
+    var hlS = useState(true), histLoading = hlS[0], setHistLoading = hlS[1];   // true until the first chat list resolves
     var alive = useRef(true), scrollRef = useRef(null), taRef = useRef(null), fileRef = useRef(null);
     useEffect(function () { return function () { alive.current = false; }; }, []);
     useEffect(function () { boot(); }, []);
@@ -41,9 +53,9 @@
       sb.auth.getSession().then(function () {
         sb.from('profiles').select('can_workflows').eq('id', BE.user.id).maybeSingle().then(function (r) { setCanWf(!!(r && r.data && r.data.can_workflows)); });
         loadChats(function (list) { if (list && list.length) openChat(list[0].id); setPhase('ready'); });
-      }, function () { setPhase('ready'); });
+      }, function () { setHistLoading(false); setPhase('ready'); });
     }
-    function loadChats(done) { sb.from('user_chats').select('id,title,updated_at').order('updated_at', { ascending: false }).then(function (r) { var list = (r && r.data) || []; setChats(list); if (done) done(list); }); }
+    function loadChats(done) { sb.from('user_chats').select('id,title,updated_at').order('updated_at', { ascending: false }).then(function (r) { var list = (r && r.data) || []; setChats(list); setHistLoading(false); if (done) done(list); }, function () { setHistLoading(false); }); }
     function loadMsgs(id) { sb.from('user_chat_messages').select('id,role,content,created_at').eq('chat_id', id).order('created_at', { ascending: true }).then(function (r) { setMsgs((r && r.data) || []); }); }
     function loadFiles(id) { if (!id) { setFiles([]); return; } sb.from('user_chat_files').select('id,path,content').eq('chat_id', id).order('path', { ascending: true }).then(function (r) { setFiles((r && r.data) || []); }); }
     function openChat(id) { setCid(id); setStreaming(null); setPreview(null); loadMsgs(id); loadFiles(id); }
@@ -182,7 +194,9 @@
       h('div', { className: 'side-brand' }, h('div', { className: 'mk' }, h('span')), h('div', null, h('b', null, 'Publify'), h('i', null, 'Chat with Publify'))),
       h('button', { className: 'newchat', 'aria-label': 'New conversation', onClick: newChat }, h('span', { 'aria-hidden': 'true' }, '➕'), '  New conversation'),
       h('div', { className: 'hist-h' }, 'History'),
-      h('div', { className: 'hist', role: 'list' }, chats.length ? chats.map(function (c) {
+      h('div', { className: 'hist', role: 'list' }, histLoading ? [0, 1, 2, 3, 4].map(function (i) {
+        return h('div', { className: 'pr-skel pr-skel-row', key: 'sk' + i, 'aria-hidden': 'true', style: { margin: '7px 9px' } });
+      }) : chats.length ? chats.map(function (c) {
         return h('div', { className: 'hist-item' + (c.id === cid ? ' on' : ''), role: 'listitem', key: c.id, onClick: function () { openChat(c.id); } },
           h('span', { className: 'ht' }, c.title || 'Conversation'),
           h('button', { className: 'hx', title: 'Delete', 'aria-label': 'Delete conversation', onClick: function (e) { delChat(c.id, e); } }, '×'));
@@ -198,7 +212,9 @@
           ai ? h('div', { className: 'bmeta' }, h('button', { 'aria-label': 'Copy message', onClick: function () { copy(m); } }, 'Copy')) : null);
       }),
       streaming ? h('div', { className: 'bubble ai', key: 'stream', 'aria-live': 'polite' }, h('div', { className: 'btxt' }, streaming.text || '', h('span', { className: 'tw-cursor', 'aria-hidden': 'true' }, '▌')))
-        : busy ? h('div', { className: 'bubble ai', 'aria-live': 'polite' }, h('div', { className: 'btxt', style: { color: 'var(--faint)' } }, wf ? '🛠 Publify is working on the task (multiple steps, with files)…' : 'Publify is thinking…')) : null
+        : busy ? h('div', { className: 'bubble ai', 'aria-live': 'polite' }, h('div', { className: 'btxt', style: { color: 'var(--faint)' } },
+          h('div', null, wf ? '🛠 Publify is working on the task (multiple steps, with files)…' : 'Publify is thinking…'),
+          h('div', { className: 'pr-bar indet', style: { marginTop: 8 }, role: 'progressbar', 'aria-label': wf ? 'Workflow run in progress' : 'Generating reply' }, h('i')))) : null
     )) : h('div', { className: 'empty' }, h('h1', null, 'How can I help?'), h('p', null, 'Ask Publify — ask anything about your research; attach files, LaTeX/research projects or publications (📎).'),
       h('div', { className: 'suggest' }, SUGGEST.map(function (s, i) { return h('button', { key: i, onClick: function () { sendText(s); } }, s); })));
 

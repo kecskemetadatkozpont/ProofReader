@@ -1056,6 +1056,7 @@
     var seS = useState((studies[0] && studies[0].id) || null), selId = seS[0], setSelId = seS[1];
     var stS = useState([]), steps = stS[0], setSteps = stS[1];
     var paS = useState([]), papers = paS[0], setPapers = paS[1];
+    var plpS = useState(true), papersLoading = plpS[0], setPapersLoading = plpS[1];   // #5: true until the study's papers fetch resolves
     var cuS = useState(1), curStep = cuS[0], setCurStep = cuS[1];
     var cfS = useState(lsDefaultConfig(1, props.project)), cfg = cfS[0], setCfg = cfS[1];
     var rnS = useState(false), running = rnS[0], setRunning = rnS[1];
@@ -1091,12 +1092,12 @@
     var srcMap = {}; (props.sources || []).forEach(function (s) { srcMap[s.id] = s; });
 
     function loadStudy(id) {
-      if (!id) { setSteps([]); setPapers([]); return; }
+      if (!id) { setSteps([]); setPapers([]); setPapersLoading(false); return; }
       Promise.all([
         sb.from('research_study_steps').select('step,kind,config,status,cursor,total,counts').eq('study_id', id).order('step'),
         sb.from('research_study_papers').select('source_id,step,decision,reason,score,signals,overridden').eq('study_id', id)
       ]).then(function (r) {
-        var st = (r[0] && r[0].data) || []; var pps = (r[1] && r[1].data) || []; setSteps(st); setPapers(pps);
+        var st = (r[0] && r[0].data) || []; var pps = (r[1] && r[1].data) || []; setSteps(st); setPapers(pps); setPapersLoading(false);
         var cs = st.filter(function (x) { return x.step === curStep; })[0]; if (cs && cs.config) setCfg(cs.config);
         // load titles for this study's papers directly, so reloaded results always show a title (even if the
         // source isn't in the project-wide props.sources slice) — the transient run-time `titles` is gone on reload
@@ -1108,7 +1109,7 @@
         });
       });
     }
-    useEffect(function () { loadStudy(selId); }, [selId]);
+    useEffect(function () { if (selId) setPapersLoading(true); loadStudy(selId); }, [selId]);
     function stepRow(n) { return steps.filter(function (x) { return x.step === n; })[0]; }
     function viewStep(n) { setCurStep(n); var cs = stepRow(n); setCfg((cs && cs.config) || lsDefaultConfig(n, props.project)); }
     function incCount(n) { return papers.filter(function (p) { return p.step === n && p.decision === 'include'; }).length; }
@@ -1196,6 +1197,14 @@
     }
     function override(p, dec) { sb.from('research_study_papers').update({ decision: dec, overridden: true }).eq('study_id', selId).eq('source_id', p.source_id).eq('step', curStep).then(function () { loadStudy(selId); }); }
 
+    // #5 — until the first fetch resolves, show skeleton rows instead of the "select ideas" empty state,
+    // so returning users (who DO have studies) don't see a false-empty flash on (re)open.
+    if (props.loading && !studies.length && !planning) {
+      return h('div', { className: 'panel' }, h('h3', null, '🔬 Literature study'),
+        h('div', { style: { marginTop: 10 } }, [0, 1, 2, 3, 4].map(function (i) {
+          return h('div', { key: i, className: 'pr-skel pr-skel-row', style: { width: (90 - i * 8) + '%' } });
+        })));
+    }
     if (!studies.length) {
       if (planning) return h('div', { className: 'panel' }, h('h3', null, '🔬 Literature study'), h('div', { style: { fontSize: 13, color: 'var(--muted)', padding: '12px 0' } }, '✨ Publify is preparing the study from the selected ideas — one moment, loading the Step-1 data (keywords, criteria, filters)…'));
       var selIdeas = (props.ideas || []).filter(function (i) { return i.status === 'selected'; });
@@ -1285,7 +1294,16 @@
           h('button', { className: 'btn pri', disabled: running || (curStep > 1 && incCount(curStep - 1) === 0), onClick: function () { runStep(curStep); } }, running ? 'Running…' : ((cur.status === 'done' ? 'Rerun: ' : 'Run: ') + LS_STEPS[curStep - 1].label)),
           running ? h('button', { className: 'btn', onClick: function () { stop.current = true; } }, 'Cancel') : null,
           (cur.status === 'done' && curStep < 4) ? h('span', { style: { fontSize: 11.5, color: 'var(--warn)' } }, 'Rerunning deletes the later steps.') : null,
-          prog ? h('span', { className: 'progress' }, h('i', { style: { width: (prog.total ? Math.round(prog.done / prog.total * 100) : 0) + '%' } }), h('span', { className: 'progress-t' }, prog.done + (prog.total ? '/' + prog.total : '') + ' · ✓' + ((prog.counts || {}).include || 0) + ' ✗' + ((prog.counts || {}).exclude || 0))) : null
+          prog ? (function () {
+            var pct = prog.total ? Math.min(100, Math.round(prog.done / prog.total * 100)) : 0;
+            var indet = !prog.total;   // total not known yet → indeterminate slide
+            return h('div', { style: { flex: '1 1 240px', minWidth: 200, display: 'flex', flexDirection: 'column', gap: 4 } },
+              h('div', { style: { display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, fontSize: 11.5 } },
+                h('span', { style: { color: 'var(--ink)', fontWeight: 600 } }, prog.total ? ('Screening paper ' + Math.min(prog.done + 1, prog.total) + ' of ~' + prog.total) : ('Screening paper ' + (prog.done + 1) + '…')),
+                h('span', { style: { color: 'var(--muted)' } }, '✓' + ((prog.counts || {}).include || 0) + ' ✗' + ((prog.counts || {}).exclude || 0) + (prog.total ? ' · ' + pct + '%' : ''))),
+              h('div', { className: 'pr-bar' + (indet ? ' pr-bar--indet' : ''), role: 'progressbar', 'aria-valuenow': indet ? null : pct, 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-label': 'Screening progress' },
+                h('i', { style: indet ? null : { width: pct + '%' } })));
+          })() : null
         ) : null,
         err ? h('div', { style: { color: 'var(--danger)', fontSize: 12.5, marginTop: 6 } }, err) : null,
         // 📝 prompt preview — the exact screening prompt Publify gets, built from the current question + criteria
@@ -1316,6 +1334,9 @@
               h('option', { value: 'cites' }, 'Citations'),
               h('option', { value: 'q' }, 'Quartile (Q1→Q4)'),
               h('option', { value: 'year' }, 'Year (newest first)'))) : null),
+        (stepPapers.length === 0 && papersLoading && !running) ? h('div', { style: { marginTop: 8 } }, [0, 1, 2, 3, 4].map(function (i) {
+            return h('div', { key: i, className: 'pr-skel pr-skel-row', style: { width: (92 - i * 7) + '%' } });
+          })) :
         stepPapers.length === 0 ? h('div', { style: { fontSize: 13, color: 'var(--faint)' } }, 'No results yet — run the step.') :
           h('div', { style: { overflowX: 'auto', marginTop: 8 } }, h('table', { style: { width: '100%', borderCollapse: 'collapse', fontSize: 12.5 } },
             h('thead', null, h('tr', null,
@@ -1433,7 +1454,7 @@
       content,
       // #9 — persistent Lit. study: stays mounted (just hidden) on other tabs, so a running study keeps going
       // in the background while you use the Chat / other tabs.
-      h('div', { style: { display: tab === 'study' ? 'block' : 'none' } }, h(LiteratureStudy, { projectId: p.id, project: p, studies: props.studies, sources: props.sources, ideas: props.ideas, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, autoCreateFrom: autoStudy, onAutoConsumed: function () { setAutoStudy(null); } })),
+      h('div', { style: { display: tab === 'study' ? 'block' : 'none' } }, h(LiteratureStudy, { projectId: p.id, project: p, studies: props.studies, sources: props.sources, ideas: props.ideas, loading: props.loading, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, autoCreateFrom: autoStudy, onAutoConsumed: function () { setAutoStudy(null); } })),
       editOpen ? h(ProjectSettingsModal, { project: p, onClose: function () { setEditOpen(false); }, onSaved: function () { setEditOpen(false); props.onChanged(); } }) : null
     );
   }
@@ -1539,7 +1560,7 @@
     var meS = useState(null), me = meS[0], setMe = meS[1];
     var pjS = useState([]), projects = pjS[0], setProjects = pjS[1];
     var selS = useState(null), sel = selS[0], setSel = selS[1];
-    var dS = useState({ log: [], tasks: [], ideas: [], sources: [], datasets: [], jobs: [] }), detail = dS[0], setDetail = dS[1];
+    var dS = useState({ log: [], tasks: [], ideas: [], sources: [], datasets: [], jobs: [], studies: [], loading: true }), detail = dS[0], setDetail = dS[1];
     var stuS = useState({ byId: {}, list: [] }), supStudents = stuS[0], setSupStudents = stuS[1];   // this supervisor's students (for the "Diákjaim kutatása" view + author badges)
 
     useEffect(function () { boot(); }, []);
@@ -1592,7 +1613,7 @@
         sb.from('research_studies').select('id,idea_id,title,question,status,cur_step,created_at').eq('project_id', projectId).order('created_at', { ascending: false })
       ]).then(function (res) {
         var log = (res[0] && res[0].data) || [];
-        var base = { log: log, tasks: (res[1] && res[1].data) || [], ideas: (res[2] && res[2].data) || [], sources: (res[3] && res[3].data) || [], datasets: (res[4] && res[4].data) || [], jobs: (res[5] && res[5].data) || [], studies: (res[6] && res[6].data) || [] };
+        var base = { log: log, tasks: (res[1] && res[1].data) || [], ideas: (res[2] && res[2].data) || [], sources: (res[3] && res[3].data) || [], datasets: (res[4] && res[4].data) || [], jobs: (res[5] && res[5].data) || [], studies: (res[6] && res[6].data) || [], loading: false };
         // resolve log author names via profiles_public (base profiles is own/admin-only now), keeping the
         // e.profiles.name shape the renderer expects.
         var ids = {}; log.forEach(function (e) { if (e.profile_id) ids[e.profile_id] = 1; });
@@ -1602,7 +1623,7 @@
         else done({});
       });
     }
-    function openProject(p) { setSel(p); loadDetail(p.id); }
+    function openProject(p) { setSel(p); setDetail(function (d) { return Object.assign({}, d, { loading: true }); }); loadDetail(p.id); }
     function refreshAll() { reloadProjects(); if (sel) loadDetail(sel.id); }
 
     if (phase === 'loading') return h('div', { className: 'center' }, h('div', { className: 'box' }, h('div', { className: 'mk' }, h('span')), h('h1', null, 'Research'), h('p', null, 'Loading…')));
@@ -1643,7 +1664,7 @@
     ) : null;
     var body;
     if (sel) {
-      body = h(ProjectDetail, { project: sel, log: props.detail.log, tasks: props.detail.tasks, ideas: props.detail.ideas, sources: props.detail.sources, datasets: props.detail.datasets, jobs: props.detail.jobs, studies: props.detail.studies, canEdit: props.canEdit(sel), viewerId: meId, fileOwnerId: meId, studentName: (studentById[sel.student_id] && studentById[sel.student_id].name) || null, authorId: props.authorId, myEmail: props.me.email, onBack: props.onBack, onChanged: props.refreshAll });
+      body = h(ProjectDetail, { project: sel, log: props.detail.log, tasks: props.detail.tasks, ideas: props.detail.ideas, sources: props.detail.sources, datasets: props.detail.datasets, jobs: props.detail.jobs, studies: props.detail.studies, loading: props.detail.loading, canEdit: props.canEdit(sel), viewerId: meId, fileOwnerId: meId, studentName: (studentById[sel.student_id] && studentById[sel.student_id].name) || null, authorId: props.authorId, myEmail: props.me.email, onBack: props.onBack, onChanged: props.refreshAll });
     } else if (view === 'supervised') {
       body = h('div', null, seg, h(SupervisedView, { students: props.students, projects: supProjects, studentById: studentById, onOpen: props.openProject }));
     } else if (!mineProjects.length) {

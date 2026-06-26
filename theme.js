@@ -36,7 +36,21 @@
     ':focus-visible { outline: 2px solid var(--accent, #4f46e5) !important; outline-offset: 2px; border-radius: inherit; }',
     'a:focus-visible, button:focus-visible, [role="button"]:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent, #4f46e5) !important; outline-offset: 2px; }',
     // respect users who ask for less motion (vestibular safety)
-    '@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; scroll-behavior: auto !important; } }'
+    '@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; scroll-behavior: auto !important; } }',
+    // ── shared skeleton/shimmer primitive (kills the false-empty flash while data loads) ──
+    '.pr-skel { position: relative; overflow: hidden; background: var(--surface-2, #eef0f3); border-radius: 8px; }',
+    '.pr-skel::after { content: ""; position: absolute; inset: 0; transform: translateX(-100%); background: linear-gradient(90deg, transparent, rgba(120,140,180,.18), transparent); animation: pr-shimmer 1.3s infinite; }',
+    'html.dark .pr-skel { background: var(--surface-2, #232733); } html.dark .pr-skel::after { background: linear-gradient(90deg, transparent, rgba(255,255,255,.06), transparent); }',
+    '@keyframes pr-shimmer { 100% { transform: translateX(100%); } }',
+    '.pr-skel-row { height: 14px; margin: 7px 0; border-radius: 6px; }',
+    // ── shared determinate progress bar ──
+    '.pr-bar { height: 7px; border-radius: 999px; background: var(--surface-2, #e6e8ee); overflow: hidden; }',
+    '.pr-bar > i { display: block; height: 100%; background: var(--accent, #4f46e5); border-radius: 999px; transition: width .25s ease; }',
+    // ── indeterminate variant: <i> slides back and forth while progress is unknown ──
+    '.pr-bar.pr-bar--indet > i { width: 40%; transition: none; animation: pr-indet 1.1s ease-in-out infinite; }',
+    '@keyframes pr-indet { 0% { transform: translateX(-110%); } 100% { transform: translateX(260%); } }',
+    // ── touch: minimum ~40px tap target on coarse pointers (no effect on mouse/desktop) ──
+    '@media (pointer: coarse) { button, [role="button"], a.btn, summary, .seg > button { min-height: 38px; } input[type="checkbox"], input[type="radio"] { min-width: 20px; min-height: 20px; } }'
   ].join('\n');
   var st = document.createElement('style'); st.id = 'pr-theme-style'; st.textContent = css;
   (document.head || document.documentElement).appendChild(st);

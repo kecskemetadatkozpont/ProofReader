@@ -63,6 +63,7 @@
     var phS = useState('loading'), phase = phS[0], setPhase = phS[1];
     var meS = useState(null), me = meS[0], setMe = meS[1];
     var libS = useState([]), library = libS[0], setLibrary = libS[1];
+    var libLoadingS = useState(true), libLoading = libLoadingS[0], setLibLoading = libLoadingS[1];   // true until first loadLibrary resolves (kills false-empty flash)
     var viewS = useState('library'), view = viewS[0], setView = viewS[1];   // library | create | player
     var curS = useState(null), current = curS[0], setCurrent = curS[1];     // audiobook being played {row, url, segments}
     var voicesS = useState([]), voices = voicesS[0], setVoices = voicesS[1];
@@ -80,7 +81,7 @@
     }, []);
 
     function loadLibrary(uid) {
-      sb.from('audiobooks').select('id,title,language,translated,voice_name,model,duration_sec,chars,audio_path,segments,settings,status,created_at,source_kind').eq('owner_id', uid).order('created_at', { ascending: false }).then(function (r) { setLibrary((r && r.data) || []); });
+      sb.from('audiobooks').select('id,title,language,translated,voice_name,model,duration_sec,chars,audio_path,segments,settings,status,created_at,source_kind').eq('owner_id', uid).order('created_at', { ascending: false }).then(function (r) { setLibrary((r && r.data) || []); setLibLoading(false); });
     }
 
     function openAudiobook(row) {
@@ -106,7 +107,7 @@
           h('button', { className: 'btn' + (view === 'library' ? ' pri' : ''), onClick: function () { setView('library'); } }, '📚 My audiobooks'),
           h('button', { className: 'btn' + (view === 'create' ? ' pri' : ''), onClick: function () { setView('create'); } }, '＋ New audiobook'))),
       !hasKey ? h(KeyPanel, { onSaved: function () { setHasKey(true); if (E) E.listAccountVoices().then(function (vs) { setVoices((E.voices || []).concat(vs || [])); }, function () { }); } }) : null,
-      view === 'library' ? h(Library, { rows: library, onOpen: openAudiobook, onDelete: delAudiobook, onNew: function () { setView('create'); } }) : null,
+      view === 'library' ? h(Library, { rows: library, loading: libLoading, onOpen: openAudiobook, onDelete: delAudiobook, onNew: function () { setView('create'); } }) : null,
       view === 'create' ? h(Creator, { me: me, sb: sb, voices: voices, hasKey: hasKey, onCreated: function (row) { loadLibrary(me.id); openAudiobook(row); } }) : null,
       view === 'player' && current ? h(Player, { item: current, onBack: function () { setView('library'); } }) : null
     );
@@ -123,6 +124,14 @@
   }
 
   function Library(props) {
+    // first load not resolved yet → shimmer placeholders (never flash the false-empty state to a returning user)
+    if (props.loading) return h('div', { className: 'mp-grid' }, [0, 1, 2, 3, 4].map(function (n) {
+      return h('div', { className: 'mp-item', key: 'sk' + n },
+        h('div', { className: 'pr-skel', style: { width: 56, height: 56, flex: 'none', borderRadius: 12 } }),
+        h('div', { style: { flex: 1, minWidth: 0 } },
+          h('div', { className: 'pr-skel pr-skel-row', style: { width: '55%' } }),
+          h('div', { className: 'pr-skel pr-skel-row', style: { width: '35%' } })));
+    }));
     if (!props.rows.length) return h('div', { className: 'mp-empty' }, h('p', null, 'You don\'t have any audiobooks yet.'), h('button', { className: 'btn pri', onClick: props.onNew }, '＋ Create one'));
     return h('div', { className: 'mp-grid' }, props.rows.map(function (r) {
       return h('div', { className: 'mp-item', key: r.id },
@@ -157,8 +166,13 @@
     var rateS = useState(1), rate = rateS[0], setRate = rateS[1];
     var busyS = useState(false), busy = busyS[0], setBusy = busyS[1];
     var progS = useState(''), prog = progS[0], setProg = progS[1];
+    var pctS = useState(null), pct = pctS[0], setPct = pctS[1];   // determinate progress 0–100 (null = no bar)
     var errS = useState(''), err = errS[0], setErr = errS[1];
     var fileRef = useRef(null);
+    var abortRef = useRef(false);   // set true by Cancel → synth/PDF/translate loops bail out
+
+    // stop an in-flight generation and restore the idle UI
+    function cancelGen() { abortRef.current = true; setBusy(false); setProg(''); setPct(null); }
 
     useEffect(function () {
       props.sb.from('research_studies').select('id,title').order('created_at', { ascending: false }).then(function (r) { setStudies((r && r.data) || []); });
@@ -207,11 +221,12 @@
         var withPdf = srcs.filter(function (s) { return s.oa_pdf_url; }).slice(0, 8);   // cap (each ~60–80s)
         var parts = []; var i = 0;
         function nextPdf() {
+          if (abortRef.current) return { title: '', text: '', preTranslated: false };   // cancelled
           if (i >= withPdf.length) {
             srcs.filter(function (s) { return !s.oa_pdf_url; }).forEach(function (s) { parts.push((s.title || '') + '. ' + (s.abstract || '')); });   // no-PDF papers → abstract
             return { title: st + ' — full text', text: parts.join('\n\n'), preTranslated: false };
           }
-          var s = withPdf[i]; setProg('Extracting full text from PDF ' + (i + 1) + '/' + withPdf.length + ' (Publify, slow; large PDF → abstract)…');
+          var s = withPdf[i]; setProg('Extracting full text from PDF ' + (i + 1) + '/' + withPdf.length + ' (Publify, slow; large PDF → abstract)…'); setPct(Math.round(i / withPdf.length * 100));
           return callPrep({ mode: 'fulltext', url: s.oa_pdf_url }).then(function (d) {
             parts.push((d && d.text) ? d.text : ((s.title || '') + '. ' + (s.abstract || '')));   // fallback to abstract on no_pdf / error
             i++; return nextPdf();
@@ -226,9 +241,10 @@
 
     function generate() {
       if (busy) return; if (!props.hasKey || !E) { setErr('Please enter the ElevenLabs key first (above).'); return; }
-      setErr(''); setBusy(true); setProg('Preparing source text…');
+      abortRef.current = false; setErr(''); setBusy(true); setProg('Preparing source text…'); setPct(null);
       var prep = src === 'study' ? studyText() : Promise.resolve({ title: title || (fileName || 'Audiobook'), text: text, preTranslated: false });
       prep.then(function (s) {
+        if (abortRef.current) return;   // cancelled during prep
         var srcText = (s.text || '').trim(); var ttl = (title || s.title || 'Audiobook').slice(0, 120);
         if (!srcText) { setBusy(false); setErr('No text to narrate.'); return; }
         var segs = toSegments(srcText);
@@ -246,12 +262,13 @@
       return props.sb.auth.getSession().then(function (s) {
         var tok = (s && s.data && s.data.session && s.data.session.access_token) || CFG.supabaseAnonKey;
         function batch() {
+          if (abortRef.current) return Promise.resolve(out);   // cancelled
           if (i >= segs.length) return Promise.resolve(out);
           var chunk = segs.slice(i, i + BATCH);
           return fetch(CFG.supabaseUrl + '/functions/v1/tts-translate', { method: 'POST', headers: { 'Content-Type': 'application/json', 'apikey': CFG.supabaseAnonKey, 'Authorization': 'Bearer ' + tok }, body: JSON.stringify({ segments: chunk, target_lang: target }) })
             .then(function (r) { return r.json(); }).then(function (d) {
               if (d.error) throw new Error(d.error);
-              out = out.concat(d.segments || chunk); i += BATCH; setProg('Translating… ' + Math.min(i, segs.length) + '/' + segs.length);
+              out = out.concat(d.segments || chunk); i += BATCH; setProg('Translating… ' + Math.min(i, segs.length) + '/' + segs.length); setPct(Math.round(Math.min(i, segs.length) / segs.length * 100));
               return batch();
             });
         }
@@ -263,19 +280,21 @@
       var cfg = { elevenVoice: voice, model: model, stability: 50, similarity: 75 };
       var blobs = []; var meta = []; var t = 0; var idx = 0;
       function next() {
+        if (abortRef.current) return;   // cancelled — drop everything, idle UI already restored by cancelGen
         if (idx >= segs.length) return finalize(ttl, segs, blobs, meta);
-        setProg('Voice synthesis ' + (idx + 1) + '/' + segs.length + '…');
+        setProg('Voice synthesis ' + (idx + 1) + '/' + segs.length + '…'); setPct(Math.round(idx / segs.length * 100));
         E.getBlob(segs[idx], cfg, props.me.id, null).then(function (blob) {
+          if (abortRef.current) return;   // cancelled while a segment was synthesizing
           if (!blob) { idx++; return next(); }
           return blobDuration(blob).then(function (d) { blobs.push(blob); meta.push({ text: segs[idx], start: t, dur: d, kind: 'sentence' }); t += d; idx++; return next(); });
-        }, function () { setBusy(false); setErr('Voice synthesis failed (segment ' + (idx + 1) + '). Check your ElevenLabs key/quota.'); });
+        }, function () { if (abortRef.current) return; setBusy(false); setErr('Voice synthesis failed (segment ' + (idx + 1) + '). Check your ElevenLabs key/quota.'); });
       }
       next();
     }
 
     function finalize(ttl, segs, blobs, meta) {
       if (!blobs.length) { setBusy(false); setErr('No audio was produced.'); return; }
-      setProg('Assembling audio file + saving…');
+      setProg('Assembling audio file + saving…'); setPct(null);
       var mp3 = E.concatMp3(blobs);
       var path = props.me.id + '/' + uuid() + '.mp3';
       props.sb.storage.from('audiobooks').upload(path, mp3, { contentType: 'audio/mpeg', upsert: false }).then(function (up) {
@@ -286,7 +305,7 @@
           language: lang, translated: !!translate, voice_id: voice, voice_name: (props.voices.filter(function (v) { return v.id === voice; })[0] || {}).name || voice,
           model: model, settings: { rate: rate, stability: 50, similarity: 75 }, segments: meta, duration_sec: Math.round(meta.reduce(function (a, m) { return a + (m.dur || 0); }, 0)), chars: chars, status: 'ready'
         }).select('*').maybeSingle().then(function (r) {
-          setBusy(false); setProg('');
+          setBusy(false); setProg(''); setPct(null);
           if (r && r.error) { setErr('Database save failed: ' + r.error.message); return; }
           props.onCreated(r.data);
         });
@@ -333,7 +352,9 @@
       err ? h('div', { style: { color: 'var(--danger)', fontSize: 13, marginTop: 8 } }, err) : null,
       h('div', { style: { display: 'flex', alignItems: 'center', gap: 10, marginTop: 12 } },
         h('button', { className: 'btn pri', disabled: busy, onClick: generate }, busy ? '⏳ Generating…' : '🎙 Generate audiobook'),
+        busy ? h('button', { className: 'btn', onClick: cancelGen }, 'Cancel') : null,
         prog ? h('span', { style: { fontSize: 13, color: 'var(--muted)' } }, prog) : null),
+      busy && pct != null ? h('div', { className: 'pr-bar', style: { marginTop: 8 } }, h('i', { style: { width: pct + '%' } })) : null,
       h('p', { style: { fontSize: 12, color: 'var(--faint)', marginTop: 8 } }, 'After generation the audiobook is saved to your library — next time it plays instantly, with no need to regenerate. (ElevenLabs bills per character; translation uses Publify.)'));
   }
 
