@@ -205,7 +205,7 @@ function NewModal({ me, onClose, onCreate }) {
 
 function ShareModal({ project, me, onClose, onChange }) {
   const [email, setEmail] = useState(''); const [role, setRole] = useState('editor'); const [err, setErr] = useState('');
-  const [accept, setAccept] = useState({}); const [resent, setResent] = useState({});
+  const [accept, setAccept] = useState({}); const [resent, setResent] = useState({}); const [copied, setCopied] = useState(false);
   const owner = Auth.byId(project.ownerId);
   const isOwnerView = project.ownerId === me.id;
   useEffect(() => { if (isOwnerView && isCloudMode() && Store.loadAcceptance) Store.loadAcceptance(project.id).then(setAccept); }, [project.id, project.members.length]);
@@ -265,7 +265,7 @@ function ShareModal({ project, me, onClose, onChange }) {
             Anyone with the link can
             <select className="sel" value={project.link.role} disabled={!project.link.enabled || project.ownerId !== me.id} onChange={(e) => { Store.setLink(project.id, true, e.target.value); onChange(); }}>{ROLES.map((r) => <option key={r} value={r}>{r}</option>)}</select>
           </label>
-          {project.link.enabled && <div className="link-box"><input readOnly value={link} /><button className="btn-ghost" onClick={() => { navigator.clipboard && navigator.clipboard.writeText(link); }}>Copy</button></div>}
+          {project.link.enabled && <div className="link-box"><input readOnly value={link} /><button className="btn-ghost" onClick={() => { navigator.clipboard && navigator.clipboard.writeText(link); setCopied(true); setTimeout(() => setCopied(false), 1800); }}>{copied ? 'Copied ✓' : 'Copy'}</button></div>}
         </div>
         <div className="modal-foot"><button className="btn-primary" onClick={onClose}>Done</button></div>
       </div>

@@ -31,7 +31,12 @@
     // hardcoded light gradient backgrounds the variable pass cannot reach (full-screen scrims first)
     'html.dark #pr-ob, html.dark .signin, html.dark #pr-signin, html.dark #pr-splash { background: radial-gradient(120% 120% at 50% -10%, #1b1d2e 0%, #0f1115 60%) !important; }',
     'html.dark .hero { background: radial-gradient(120% 90% at 80% -10%, #1b1d2e 0%, var(--bg) 70%) !important; }',
-    'html.dark .thumb, html.dark .pf-viewer-img { background: var(--surface-2) !important; }'
+    'html.dark .thumb, html.dark .pf-viewer-img { background: var(--surface-2) !important; }',
+    // ── accessibility baseline (both themes) — one canonical keyboard-focus ring app-wide ──
+    ':focus-visible { outline: 2px solid var(--accent, #4f46e5) !important; outline-offset: 2px; border-radius: inherit; }',
+    'a:focus-visible, button:focus-visible, [role="button"]:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent, #4f46e5) !important; outline-offset: 2px; }',
+    // respect users who ask for less motion (vestibular safety)
+    '@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; scroll-behavior: auto !important; } }'
   ].join('\n');
   var st = document.createElement('style'); st.id = 'pr-theme-style'; st.textContent = css;
   (document.head || document.documentElement).appendChild(st);

@@ -339,6 +339,7 @@
 
   function Player(props) {
     var aRef = useRef(null);
+    var segRef = useRef(null);
     var playingS = useState(false), playing = playingS[0], setPlaying = playingS[1];
     var tS = useState(0), t = tS[0], setT = tS[1];
     var durS = useState(props.item.row.duration_sec || 0), dur = durS[0], setDur = durS[1];
@@ -347,6 +348,8 @@
     var curSeg = -1; for (var i = 0; i < segs.length; i++) { if (t >= segs[i].start && (i === segs.length - 1 || t < segs[i + 1].start)) { curSeg = i; break; } }
 
     useEffect(function () { if (aRef.current) aRef.current.playbackRate = rate; }, [rate, props.item.url]);
+    // keep the active read-along segment scrolled into view during playback (reduced-motion is honored globally)
+    useEffect(function () { if (segRef.current) segRef.current.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }, [curSeg]);
 
     function toggle() { var a = aRef.current; if (!a) return; if (a.paused) { a.play(); setPlaying(true); } else { a.pause(); setPlaying(false); } }
     function seekTo(sec) { var a = aRef.current; if (a) { a.currentTime = sec; setT(sec); } }
@@ -368,7 +371,7 @@
         h('span', { className: 'mp-time' }, fmtT(dur)),
         h('select', { className: 'field', style: { width: 'auto' }, value: rate, onChange: function (e) { setRate(parseFloat(e.target.value)); } }, [0.75, 1, 1.25, 1.5, 1.75, 2].map(function (r) { return h('option', { key: r, value: r }, r + '×'); }))),
       segs.length ? h('div', { className: 'mp-segs' }, segs.map(function (s, i) {
-        return h('div', { key: i, className: 'mp-seg' + (i === curSeg ? ' on' : ''), onClick: function () { seekTo(s.start); if (aRef.current && aRef.current.paused) { aRef.current.play(); } } },
+        return h('div', { key: i, ref: i === curSeg ? segRef : null, className: 'mp-seg' + (i === curSeg ? ' on' : ''), onClick: function () { seekTo(s.start); if (aRef.current && aRef.current.paused) { aRef.current.play(); } } },
           h('span', { className: 'mp-seg-t' }, fmtT(s.start)), h('span', { className: 'mp-seg-x' }, s.text));
       })) : null);
   }

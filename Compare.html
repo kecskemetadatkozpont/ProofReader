@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <style>
-    :root { --surface:#fff; --surface-2:#f5f6f9; --accent-tint:#eef0ff; --accent:#4f46e5; --accent-d:#4338ca; --ink:#1a2030; --muted:#5b6473; --faint:#8a92a0; --line:#e6e8ee; --soft:#f5f6f9; --softer:#fafbfc; --danger:#dc2626; --warn:#b45309; }
+    :root { --surface:#fff; --surface-2:#f5f6f9; --accent-tint:#eef0ff; --accent:#4f46e5; --accent-d:#4338ca; --ink:#1a2030; --muted:#5b6473; --faint:#8a92a0; --line:#e6e8ee; --soft:#f5f6f9; --softer:#fafbfc; --danger:#dc2626; --warn:#b45309; --warn-bg: #fff7ed; }
     * { box-sizing: border-box; }
     html, body { margin: 0; height: 100%; }
     body { background: var(--softer); color: var(--ink); font-family: 'IBM Plex Sans', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
@@ -86,7 +86,7 @@
     .cmp-tl > span.cmp-hl { background: rgba(255,184,0,.5); box-shadow: 0 0 0 1px rgba(190,95,0,.4); border-radius: 2px; }
     .cmp-tl > span.cmp-hl-first { box-shadow: -5px 0 0 0 var(--accent), 0 0 0 1px rgba(190,95,0,.45); }
     .cmp-pdfhost { display: flex; flex-direction: column; min-height: 0; }
-    .cmp-notfound { font-size: 12px; color: var(--warn); background: #fff7ed; border: 1px solid #fed7aa; border-radius: 8px; padding: 7px 10px; margin: 8px; }
+    .cmp-notfound { font-size: 12px; color: var(--warn); background: var(--warn-bg); border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent); border-radius: 8px; padding: 7px 10px; margin: 8px; }
     /* SwiftLaTeX live edit */
     .cm-edit { display: grid; grid-template-columns: 1fr 8px 1fr; gap: 0; align-items: start; }
     .cm-edit-l, .cm-edit-r { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--surface); }

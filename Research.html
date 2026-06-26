@@ -97,7 +97,10 @@
     .addrow input.grow { flex: 1; min-width: 140px; }
     .field label { display: block; font-size: 12px; font-weight: 600; color: var(--muted); margin: 12px 0 4px; }
     .field input, .field select, .field textarea { width: 100%; border: 1px solid var(--line); border-radius: 9px; padding: 9px 11px; font-family: inherit; font-size: 13.5px; }
+    /* element-level .field (input/select/textarea that ARE .field, not a container) — mirror the .field input look */
+    input.field, select.field, textarea.field { width: 100%; border: 1px solid var(--line); border-radius: 9px; padding: 9px 11px; font-family: inherit; font-size: 13.5px; background: var(--surface); color: var(--ink); }
     .field input, .field select { height: 38px; }
+    input.field, select.field { height: 38px; }
     .icon-x { border: 0; background: transparent; color: var(--faint); cursor: pointer; font-size: 14px; padding: 2px 4px; }
     .icon-x:hover { color: var(--danger); }
     /* research stepper */

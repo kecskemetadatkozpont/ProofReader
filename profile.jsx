@@ -830,8 +830,8 @@ function App() {
   var curRoute = allowed.indexOf(route) >= 0 ? route : 'overview';
 
   return <div className="pf">
-    {preview ? <div style={{ background: 'var(--warn-bg)', color: '#92400e', padding: '9px 16px', fontSize: 13, textAlign: 'center', fontWeight: 600 }}>
-      👁 Admin preview — viewing <b>{me.name}</b>’s profile read-only. <a href="PhD.html?adminView=1" style={{ color: '#92400e' }}>Doctoral School</a> · <a href="Admin.html" style={{ color: '#92400e' }}>← Back to admin</a>
+    {preview ? <div style={{ background: 'var(--warn-bg)', color: 'var(--warn)', padding: '9px 16px', fontSize: 13, textAlign: 'center', fontWeight: 600 }}>
+      👁 Admin preview — viewing <b>{me.name}</b>’s profile read-only. <a href="PhD.html?adminView=1" style={{ color: 'var(--warn)' }}>Doctoral School</a> · <a href="Admin.html" style={{ color: 'var(--warn)' }}>← Back to admin</a>
     </div> : null}
     <Header me={me} setMe={setMe} mode={mode} usage={usage} />
     <div className="pf-body">

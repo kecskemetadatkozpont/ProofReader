@@ -34,6 +34,22 @@
   function pubRec(email) { try { return (PUBS && PUBS.forEmail && PUBS.forEmail(email)) || null; } catch (e) { return null; } }
   function pubCount(email) { var r = pubRec(email); return r ? (r.pubCount || (r.publications || []).length) : 0; }
 
+  // Display-only English labels for Hungarian status/type keys. The Hungarian strings remain the
+  // stored DB values and comparison keys — this map is applied ONLY at the point of display so the
+  // visible UI is English while state, writes, and === comparisons keep the original key.
+  var HU_LABEL = {
+    // student status (STU_STATUS)
+    'Aktív': 'Active', 'Passzív': 'Paused', 'Inaktív': 'Inactive', 'Abszolutórium': 'Absolutorium',
+    'Fokozatot szerzett': 'Graduated', 'Lemorzsolódott': 'Dropped out',
+    // milestone lifecycle (MS_CYCLE) + outcome
+    'Tervezett': 'Planned', 'Folyamatban': 'In progress', 'Teljesítve': 'Completed',
+    'Elmaradt': 'Overdue', 'Sikertelen': 'Failed', 'Lezárt': 'Closed',
+    // milestone types (MS_TYPES)
+    'Publikáció': 'Publication', 'Tanegység': 'Course unit', 'Vizsga': 'Exam',
+    'Oktatás': 'Teaching', 'Disszertáció': 'Dissertation'
+  };
+  function huLabel(v) { return (v != null && HU_LABEL[v]) || v; }
+
   // status → chip colour class
   function stCls(s) {
     s = String(s || '');
@@ -65,7 +81,7 @@
           h('div', { className: 'sec-t' }, 'Capacity'),
           h('div', { style: { fontSize: 13 } }, students.length + ' / ' + (s.capacity_max || '—') + ' students'),
           h('div', { className: 'sec-t' }, 'Students (' + students.length + ')'),
-          students.length ? students.map(function (st) { return h('div', { className: 'row', key: st.id }, h(Avatar, { u: st, size: 26 }), h('div', { style: { flex: 1 } }, h('b', null, st.name), h('div', { style: { fontSize: 11.5, color: 'var(--muted)' } }, st.topic || '—')), h('span', { className: 'badge' }, st.status)); }) : h('div', { style: { fontSize: 13, color: 'var(--faint)' } }, 'No students assigned.'),
+          students.length ? students.map(function (st) { return h('div', { className: 'row', key: st.id }, h(Avatar, { u: st, size: 26 }), h('div', { style: { flex: 1 } }, h('b', null, st.name), h('div', { style: { fontSize: 11.5, color: 'var(--muted)' } }, st.topic || '—')), h('span', { className: 'badge' }, huLabel(st.status))); }) : h('div', { style: { fontSize: 13, color: 'var(--faint)' } }, 'No students assigned.'),
           h('div', { className: 'sec-t' }, 'Publications (MTMT)'),
           rec ? h('div', { style: { fontSize: 13 } }, h('b', null, rec.pubCount), ' publications · ', h('a', { href: 'https://m2.mtmt.hu/gui2/?mode=browse&params=author;' + rec.mtmtId, target: '_blank' }, 'MTMT')) : h('div', { style: { fontSize: 13, color: 'var(--faint)' } }, 'No publication record.'),
           props.myStudent ? (function () {
@@ -93,7 +109,7 @@
           (s.research_interests && s.research_interests.length) ? h('div', { className: 'tags' }, s.research_interests.slice(0, 3).map(function (t, i) { return h('span', { className: 'tag', key: i }, t); })) : null,
           h('div', { className: 'kv' }, h('span', null, 'Capacity'), h('span', null, n + ' / ' + (cap || '—'))),
           h('div', { className: 'meter' }, h('i', { style: { width: (cap ? Math.min(100, n / cap * 100) : 0) + '%', background: (cap && n >= cap) ? 'var(--danger)' : 'var(--accent)' } })),
-          h('div', { className: 'kv' }, h('span', null, pubCount(s.email) + ' publications'), my ? h('span', { className: 'chip ' + stCls(my.status), style: { height: 18 } }, 'you: ' + my.status) : h('span', null, n ? n + ' student' + (n === 1 ? '' : 's') : 'open'))
+          h('div', { className: 'kv' }, h('span', null, pubCount(s.email) + ' publications'), my ? h('span', { className: 'chip ' + stCls(my.status), style: { height: 18 } }, 'you: ' + huLabel(my.status)) : h('span', null, n ? n + ' student' + (n === 1 ? '' : 's') : 'open'))
         );
       })),
       open ? h(SupervisorModal, { sup: open, students: props.students, myStudent: props.myStudent, mySupervisions: props.mySupervisions, onChanged: props.onChanged, onClose: function () { setOpen(null); } }) : null
@@ -172,7 +188,7 @@
         return h('div', { className: 'stu-row', key: s.id, onClick: function () { props.onOpen(s); } },
           h(Avatar, { u: s, size: 38 }),
           h('div', { className: 'stu-main' }, h('b', null, s.name), h('span', null, (s.topic || 'No topic') + (sup ? ' · ' + sup.name : ''))),
-          h('span', { className: 'chip ' + stCls(s.status) }, s.status),
+          h('span', { className: 'chip ' + stCls(s.status) }, huLabel(s.status)),
           h('div', { className: 'stu-cred' }, h('div', { className: 'meter' }, h('i', { style: { width: Math.min(100, pct) + '%', background: pct >= 100 ? 'var(--ok)' : 'var(--accent)' } })), h('div', { style: { fontSize: 11, color: 'var(--muted)', marginTop: 3 } }, (s.total_credits || 0) + '/' + s.required_credits + ' cr'))
         );
       }) : h('div', { className: 'empty' }, query ? 'No students match.' : 'No students yet — add one to get started.'),
@@ -217,7 +233,7 @@
       h('div', { className: 'dhead' },
         h(Avatar, { u: stu, size: 52 }),
         h('div', { className: 'dt' }, h('h1', null, stu.name), h('p', null, (stu.topic || 'No topic set') + (sup ? ' · ' + sup.name : '') + (stu.enrollment_year ? ' · enrolled ' + stu.enrollment_year : ''))),
-        canEdit ? h('select', { className: 'mini', style: { height: 30 }, value: stu.status, onChange: function (e) { setField('status', e.target.value); } }, STU_STATUS.map(function (s) { return h('option', { key: s, value: s }, s); })) : h('span', { className: 'chip ' + stCls(stu.status) }, stu.status)
+        canEdit ? h('select', { className: 'mini', style: { height: 30 }, value: stu.status, onChange: function (e) { setField('status', e.target.value); } }, STU_STATUS.map(function (s) { return h('option', { key: s, value: s }, huLabel(s)); })) : h('span', { className: 'chip ' + stCls(stu.status) }, huLabel(stu.status))
       ),
       // credits + exam + ethics
       h('div', { className: 'panel' },
@@ -248,14 +264,14 @@
         h('h3', null, 'Milestones', h('span', { style: { color: 'var(--muted)', fontWeight: 600, textTransform: 'none', letterSpacing: 0 } }, mil.length + ' total')),
         mil.length ? mil.map(function (m) {
           return h('div', { className: 'ms', key: m.id },
-            h('div', { className: 'mt' }, h('b', null, m.title), h('span', null, [m.type, m.credits ? m.credits + ' cr' : null, m.deadline].filter(Boolean).join(' · '))),
-            canEdit ? h('button', { className: 'chip ' + stCls(m.status), title: 'Click to advance', onClick: function () { cycleMs(m); } }, m.status) : h('span', { className: 'chip ' + stCls(m.status) }, m.status),
+            h('div', { className: 'mt' }, h('b', null, m.title), h('span', null, [huLabel(m.type), m.credits ? m.credits + ' cr' : null, m.deadline].filter(Boolean).join(' · '))),
+            canEdit ? h('button', { className: 'chip ' + stCls(m.status), title: 'Click to advance', onClick: function () { cycleMs(m); } }, huLabel(m.status)) : h('span', { className: 'chip ' + stCls(m.status) }, huLabel(m.status)),
             canEdit ? h('button', { className: 'icon-x', onClick: function () { delMil(m); } }, '✕') : null
           );
         }) : h('div', { style: { fontSize: 13, color: 'var(--faint)' } }, 'No milestones yet.'),
         canEdit ? h('div', { className: 'addrow' },
           h('input', { className: 'grow', placeholder: 'New milestone…', value: newMil.title, onChange: function (e) { setNewMil(Object.assign({}, newMil, { title: e.target.value })); } }),
-          h('select', { value: newMil.type, onChange: function (e) { setNewMil(Object.assign({}, newMil, { type: e.target.value })); } }, MS_TYPES.map(function (t) { return h('option', { key: t, value: t }, t); })),
+          h('select', { value: newMil.type, onChange: function (e) { setNewMil(Object.assign({}, newMil, { type: e.target.value })); } }, MS_TYPES.map(function (t) { return h('option', { key: t, value: t }, huLabel(t)); })),
           h('input', { type: 'number', style: { width: 70 }, placeholder: 'cr', value: newMil.credits, onChange: function (e) { setNewMil(Object.assign({}, newMil, { credits: e.target.value })); } }),
           h('input', { type: 'date', value: newMil.deadline, onChange: function (e) { setNewMil(Object.assign({}, newMil, { deadline: e.target.value })); } }),
           h('button', { className: 'btn pri', onClick: addMil }, 'Add')
@@ -355,13 +371,13 @@
         h('div', { className: 'panel' }, h('h3', null, 'Students by status'),
           total ? STAT.map(function (st) {
             var c = students.filter(function (x) { return x.status === st; }).length;
-            return h('div', { className: 'barrow', key: st }, h('span', { className: 'bl' }, st), h('span', { className: 'bt' }, h('i', { style: { width: (c / maxStat * 100) + '%', background: statColor[st] } })), h('span', { className: 'bv' }, c));
+            return h('div', { className: 'barrow', key: st }, h('span', { className: 'bl' }, huLabel(st)), h('span', { className: 'bt' }, h('i', { style: { width: (c / maxStat * 100) + '%', background: statColor[st] } })), h('span', { className: 'bv' }, c));
           }) : h('div', { style: { fontSize: 13, color: 'var(--faint)' } }, 'No students yet.')
         ),
         h('div', { className: 'panel' }, h('h3', null, 'Upcoming milestone deadlines'),
           upcoming.length ? upcoming.map(function (m) {
             var st = byId[m.student_id], d = days(m.deadline);
-            return h('div', { className: 'dl', key: m.id }, h('div', { className: 'dd' }, h('b', null, m.title), h('span', null, (st ? st.name : '—') + ' · ' + (m.type || ''))), h('span', { className: 'when', style: { color: d != null && d < 0 ? 'var(--danger)' : (d != null && d < 30 ? 'var(--warn)' : 'var(--muted)') } }, d == null ? m.deadline : (d < 0 ? Math.abs(d) + 'd overdue' : 'in ' + d + 'd')));
+            return h('div', { className: 'dl', key: m.id }, h('div', { className: 'dd' }, h('b', null, m.title), h('span', null, (st ? st.name : '—') + ' · ' + (huLabel(m.type) || ''))), h('span', { className: 'when', style: { color: d != null && d < 0 ? 'var(--danger)' : (d != null && d < 30 ? 'var(--warn)' : 'var(--muted)') } }, d == null ? m.deadline : (d < 0 ? Math.abs(d) + 'd overdue' : 'in ' + d + 'd')));
           }) : h('div', { style: { fontSize: 13, color: 'var(--faint)' } }, 'No upcoming deadlines.')
         )
       )
@@ -679,7 +695,7 @@
         h('div', { className: 'side-foot' }, h(Avatar, { u: me, size: 32 }), h('div', { className: 'who' }, h('b', null, me.name), h('span', null, roleLabel)), h('a', { className: 'exit', href: 'Projects.html', title: 'Back to Publify' }, '←'))
       ),
       h('div', { className: 'main' },
-        preview ? h('div', { style: { background: 'var(--warn-bg)', color: '#92400e', padding: '9px 14px', fontSize: 13, fontWeight: 600, borderRadius: 10, marginBottom: 14 } }, '👁 Admin preview — viewing ', h('b', null, me.name), '’s Doctoral School (', roleLabel, '). ', h('a', { href: 'Profile.html?adminView=1', style: { color: '#92400e' } }, 'Profile view'), ' · ', h('a', { href: 'Admin.html', style: { color: '#92400e' } }, '← Back to admin')) : null,
+        preview ? h('div', { style: { background: 'var(--warn-bg)', color: 'var(--warn)', padding: '9px 14px', fontSize: 13, fontWeight: 600, borderRadius: 10, marginBottom: 14 } }, '👁 Admin preview — viewing ', h('b', null, me.name), '’s Doctoral School (', roleLabel, '). ', h('a', { href: 'Profile.html?adminView=1', style: { color: 'var(--warn)' } }, 'Profile view'), ' · ', h('a', { href: 'Admin.html', style: { color: 'var(--warn)' } }, '← Back to admin')) : null,
         (!hasRole && cur !== 'account') ? h('div', { className: 'panel', style: { background: 'var(--accent-tint)', borderColor: '#c7cdf5' } }, h('b', null, 'Welcome to the Doctoral School! '), 'Set whether you are a supervisor or a student to get started — ', h('a', { href: '#', onClick: function (e) { e.preventDefault(); setView('account'); } }, 'open My account')) : null,
         ((cur === 'students' && sel) || (cur === 'mine' && myStudent)) ? null : h('div', { className: 'head' }, h('div', null, h('h1', null, titles[cur]), h('div', { className: 'sub' }, subs[cur] || '')), h('div', { style: { display: 'flex', gap: 10, alignItems: 'center' } }, h(NotifBell, null), isAdmin ? h('span', { className: 'badge role' }, 'admin view') : null)),
         body
