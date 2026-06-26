@@ -1,0 +1,818 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Publify — Soft Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    /* Canvas & surfaces */
+    --bg: #fbf9f7;
+    --bg-2: #f6f2ee;
+    --card: #fffdfb;
+    --card-2: #fbf7f3;
+    --line: #efe7df;
+    --line-soft: #f3ece5;
+
+    /* Ink */
+    --ink: #2f2a26;
+    --ink-2: #6b625a;
+    --ink-3: #a59a90;
+
+    /* Pastel palette */
+    --sage: #7fa98a;
+    --sage-soft: #e4efe6;
+    --sage-ink: #3f6a4d;
+
+    --lav: #8b86d6;
+    --lav-soft: #ebe9fb;
+    --lav-ink: #534da3;
+
+    --peach: #f0a988;
+    --peach-soft: #fbe9df;
+    --peach-ink: #b9663f;
+
+    --sky: #88b6d6;
+    --sky-soft: #e4eff7;
+    --sky-ink: #3f6d92;
+
+    --rose: #e08fa6;
+    --rose-soft: #f9e6ec;
+    --rose-ink: #a8506a;
+
+    /* Accent (primary) */
+    --accent: #f0a988;
+    --accent-deep: #e98f66;
+
+    /* Radii */
+    --r-xl: 28px;
+    --r-lg: 22px;
+    --r-md: 18px;
+    --r-pill: 999px;
+
+    /* Shadows — gentle, diffuse */
+    --sh-sm: 0 1px 2px rgba(86, 66, 50, 0.04), 0 4px 12px rgba(86, 66, 50, 0.05);
+    --sh-md: 0 2px 6px rgba(86, 66, 50, 0.05), 0 12px 28px rgba(86, 66, 50, 0.07);
+    --sh-lg: 0 6px 18px rgba(86, 66, 50, 0.06), 0 24px 56px rgba(86, 66, 50, 0.10);
+    --ring: 0 0 0 4px rgba(240, 169, 136, 0.40);
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    color: var(--ink);
+    background: var(--bg);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* subtle warm texture wash behind everything */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background:
+      radial-gradient(900px 600px at 88% -8%, rgba(240, 169, 136, 0.10), transparent 60%),
+      radial-gradient(700px 520px at -6% 8%, rgba(139, 134, 214, 0.08), transparent 55%),
+      radial-gradient(800px 560px at 50% 120%, rgba(127, 169, 138, 0.07), transparent 60%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .wrap {
+    position: relative;
+    z-index: 1;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 22px clamp(16px, 4vw, 40px) 64px;
+  }
+
+  a { color: inherit; text-decoration: none; }
+
+  :focus-visible {
+    outline: none;
+    box-shadow: var(--ring);
+    border-radius: 14px;
+  }
+
+  /* ---------------- Top bar ---------------- */
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 14px 20px;
+    background: rgba(255, 253, 251, 0.78);
+    backdrop-filter: blur(14px) saturate(1.1);
+    border: 1px solid var(--line);
+    border-radius: var(--r-pill);
+    box-shadow: var(--sh-sm);
+    position: sticky;
+    top: 14px;
+    z-index: 20;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-weight: 800;
+    font-size: 19px;
+    letter-spacing: -0.02em;
+  }
+  .logo {
+    width: 40px;
+    height: 40px;
+    border-radius: 14px;
+    display: grid;
+    place-items: center;
+    background: linear-gradient(140deg, #f7c5a6, #f0a988 48%, #e29bd9 120%);
+    box-shadow: var(--sh-sm), inset 0 1px 0 rgba(255,255,255,0.5);
+    color: #fff;
+  }
+  .logo svg { width: 21px; height: 21px; display: block; }
+
+  .nav {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: auto;
+  }
+  .nav a {
+    padding: 9px 16px;
+    border-radius: var(--r-pill);
+    font-size: 14.5px;
+    font-weight: 600;
+    color: var(--ink-2);
+    transition: background .18s ease, color .18s ease, transform .18s ease;
+  }
+  .nav a:hover { background: var(--bg-2); color: var(--ink); transform: translateY(-1px); }
+  .nav a.active { background: var(--lav-soft); color: var(--lav-ink); }
+
+  .avatar {
+    width: 42px;
+    height: 42px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    font-weight: 700;
+    font-size: 14px;
+    color: var(--sage-ink);
+    background: radial-gradient(circle at 30% 25%, #eef6ef, var(--sage-soft));
+    border: 1.5px solid #fff;
+    box-shadow: var(--sh-sm);
+    margin-left: 8px;
+    cursor: pointer;
+    transition: transform .18s ease;
+  }
+  .avatar:hover { transform: translateY(-1px) scale(1.04); }
+
+  /* ---------------- Hero ---------------- */
+  .hero {
+    position: relative;
+    margin-top: 30px;
+    padding: clamp(28px, 4vw, 48px) clamp(24px, 4vw, 52px);
+    border-radius: var(--r-xl);
+    background:
+      linear-gradient(120deg, rgba(255,253,251,0.92), rgba(251,247,243,0.86));
+    border: 1px solid var(--line);
+    box-shadow: var(--sh-md);
+    overflow: hidden;
+  }
+  .blob {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(8px);
+    opacity: 0.85;
+    pointer-events: none;
+  }
+  .blob.b1 {
+    width: 360px; height: 360px;
+    right: -90px; top: -120px;
+    background: radial-gradient(circle at 35% 35%, #f8cdb1, #f0a988 55%, rgba(240,169,136,0) 72%);
+  }
+  .blob.b2 {
+    width: 300px; height: 300px;
+    right: 120px; bottom: -160px;
+    background: radial-gradient(circle at 50% 40%, #cbc6f4, #8b86d6 55%, rgba(139,134,214,0) 72%);
+    opacity: 0.55;
+  }
+  .blob.b3 {
+    width: 220px; height: 220px;
+    right: 250px; top: 30px;
+    background: radial-gradient(circle at 50% 40%, #d6ead9, #7fa98a 60%, rgba(127,169,138,0) 75%);
+    opacity: 0.4;
+  }
+  .hero-inner { position: relative; z-index: 2; max-width: 640px; }
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12.5px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--peach-ink);
+    background: var(--peach-soft);
+    padding: 7px 14px;
+    border-radius: var(--r-pill);
+    margin-bottom: 18px;
+  }
+  .eyebrow .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent-deep); }
+  .hero h1 {
+    margin: 0 0 10px;
+    font-size: clamp(40px, 6vw, 60px);
+    line-height: 1.02;
+    letter-spacing: -0.035em;
+    font-weight: 800;
+  }
+  .hero p.sub {
+    margin: 0 0 26px;
+    font-size: clamp(16px, 2vw, 19px);
+    color: var(--ink-2);
+    max-width: 460px;
+  }
+  .hero p.sub strong { color: var(--ink); font-weight: 700; }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    font-family: inherit;
+    font-weight: 700;
+    font-size: 15px;
+    border: none;
+    cursor: pointer;
+    border-radius: var(--r-pill);
+    transition: transform .16s ease, box-shadow .18s ease, background .18s ease;
+  }
+  .btn-primary {
+    padding: 14px 26px;
+    color: #fff;
+    background: linear-gradient(135deg, #f3b694, var(--accent) 55%, var(--accent-deep));
+    box-shadow: 0 8px 22px rgba(233, 143, 102, 0.32), inset 0 1px 0 rgba(255,255,255,0.35);
+  }
+  .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 12px 30px rgba(233, 143, 102, 0.40), inset 0 1px 0 rgba(255,255,255,0.4); }
+  .btn-primary:active { transform: translateY(0); }
+
+  .btn-soft {
+    padding: 12px 22px;
+    color: var(--ink);
+    background: var(--card);
+    border: 1px solid var(--line);
+    box-shadow: var(--sh-sm);
+  }
+  .btn-soft:hover { transform: translateY(-2px); box-shadow: var(--sh-md); background: #fff; }
+
+  /* ---------------- Stat strip ---------------- */
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    margin-top: 22px;
+  }
+  .stat {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 18px 20px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--r-lg);
+    box-shadow: var(--sh-sm);
+    transition: transform .18s ease, box-shadow .18s ease;
+  }
+  .stat:hover { transform: translateY(-3px); box-shadow: var(--sh-md); }
+  .stat .ico {
+    width: 46px; height: 46px;
+    border-radius: 14px;
+    display: grid; place-items: center;
+    flex: 0 0 auto;
+  }
+  .stat .ico svg { width: 22px; height: 22px; }
+  .stat:nth-child(1) .ico { background: var(--peach-soft); color: var(--peach-ink); }
+  .stat:nth-child(2) .ico { background: var(--lav-soft); color: var(--lav-ink); }
+  .stat:nth-child(3) .ico { background: var(--sage-soft); color: var(--sage-ink); }
+  .stat:nth-child(4) .ico { background: var(--sky-soft); color: var(--sky-ink); }
+  .stat .num { font-size: 22px; font-weight: 800; line-height: 1.05; letter-spacing: -0.02em; }
+  .stat .lbl { font-size: 13px; color: var(--ink-2); font-weight: 500; }
+
+  /* ---------------- Section heading ---------------- */
+  .sec-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin: 40px 4px 16px;
+  }
+  .sec-head h2 {
+    margin: 0;
+    font-size: 22px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+  }
+  .sec-head .muted { font-size: 14px; color: var(--ink-3); font-weight: 600; }
+
+  /* ---------------- Feature cards ---------------- */
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+  }
+  .card {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--r-xl);
+    padding: 24px;
+    box-shadow: var(--sh-md);
+    transition: transform .2s ease, box-shadow .2s ease;
+  }
+  .card:hover { transform: translateY(-4px); box-shadow: var(--sh-lg); }
+  .card-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .kicker {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+  .kicker .k-ico {
+    width: 30px; height: 30px;
+    border-radius: 10px;
+    display: grid; place-items: center;
+  }
+  .kicker .k-ico svg { width: 16px; height: 16px; }
+  .card.c-ms .k-ico { background: var(--peach-soft); color: var(--peach-ink); }
+  .card.c-lit .k-ico { background: var(--lav-soft); color: var(--lav-ink); }
+  .card.c-rev .k-ico { background: var(--sage-soft); color: var(--sage-ink); }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 6px 12px;
+    border-radius: var(--r-pill);
+    white-space: nowrap;
+  }
+  .chip .pip { width: 7px; height: 7px; border-radius: 50%; background: currentColor; opacity: 0.85; }
+  .chip.peach { background: var(--peach-soft); color: var(--peach-ink); }
+  .chip.lav   { background: var(--lav-soft);   color: var(--lav-ink); }
+  .chip.sage  { background: var(--sage-soft);  color: var(--sage-ink); }
+  .chip.sky   { background: var(--sky-soft);   color: var(--sky-ink); }
+  .chip.rose  { background: var(--rose-soft);  color: var(--rose-ink); }
+
+  .card h3 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 700;
+    line-height: 1.28;
+    letter-spacing: -0.015em;
+  }
+
+  /* progress */
+  .progress {
+    height: 9px;
+    border-radius: var(--r-pill);
+    background: var(--line-soft);
+    overflow: hidden;
+  }
+  .progress > i {
+    display: block;
+    height: 100%;
+    border-radius: var(--r-pill);
+  }
+  .progress.peach > i { background: linear-gradient(90deg, #f4bd9c, var(--accent-deep)); }
+  .progress.lav > i   { background: linear-gradient(90deg, #aaa6e6, var(--lav)); }
+  .progress.sage > i  { background: linear-gradient(90deg, #9cc4a8, var(--sage)); }
+
+  .meta-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 13.5px;
+    color: var(--ink-2);
+    font-weight: 500;
+  }
+  .meta-row .open {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-weight: 700; color: var(--peach-ink);
+    transition: gap .18s ease;
+  }
+  .meta-row .open:hover { gap: 9px; }
+
+  .spacer { flex: 1; }
+
+  /* funnel */
+  .funnel {
+    display: flex;
+    align-items: stretch;
+    gap: 6px;
+  }
+  .funnel .step {
+    flex: 1;
+    text-align: center;
+    padding: 10px 4px;
+    border-radius: 14px;
+    background: var(--card-2);
+    border: 1px solid var(--line);
+  }
+  .funnel .step.done { background: var(--lav-soft); border-color: transparent; }
+  .funnel .step.current { background: linear-gradient(140deg, #efedfd, #e1ddf9); border-color: transparent; box-shadow: var(--sh-sm); }
+  .funnel .step .s-num { font-size: 17px; font-weight: 800; color: var(--lav-ink); letter-spacing: -0.02em; }
+  .funnel .step .s-lbl { font-size: 10.5px; font-weight: 600; color: var(--ink-2); margin-top: 2px; }
+  .funnel .arrow { align-self: center; color: var(--ink-3); font-size: 12px; }
+
+  /* diff line */
+  .diff {
+    background: var(--card-2);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 14px 16px;
+    font-family: 'Plus Jakarta Sans', monospace;
+    font-size: 13px;
+    line-height: 1.7;
+  }
+  .diff .row { display: flex; gap: 8px; align-items: baseline; }
+  .diff .gutter { font-weight: 800; flex: 0 0 auto; width: 14px; }
+  .diff .del { color: var(--rose-ink); }
+  .diff .del .gutter { color: var(--rose-ink); }
+  .diff .del s { text-decoration: line-through; text-decoration-color: rgba(168,80,106,0.6); }
+  .diff .del { background: var(--rose-soft); border-radius: 8px; padding: 2px 6px; margin: 0 -2px; }
+  .diff .add { color: var(--sage-ink); background: var(--sage-soft); border-radius: 8px; padding: 2px 6px; margin: 3px -2px 0; }
+  .diff .add .gutter { color: var(--sage-ink); }
+
+  /* ---------------- Table ---------------- */
+  .panel {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--r-xl);
+    box-shadow: var(--sh-md);
+    overflow: hidden;
+  }
+  .table-scroll { overflow-x: auto; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 640px;
+  }
+  thead th {
+    text-align: left;
+    font-size: 11.5px;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    padding: 18px 20px 12px;
+    background: var(--card-2);
+    border-bottom: 1px solid var(--line);
+  }
+  thead th.num, tbody td.num { text-align: right; }
+  tbody td {
+    padding: 16px 20px;
+    font-size: 14.5px;
+    border-bottom: 1px solid var(--line-soft);
+    color: var(--ink);
+    vertical-align: middle;
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr { transition: background .16s ease; }
+  tbody tr:hover { background: var(--bg-2); }
+  td.paper { font-weight: 600; max-width: 360px; }
+  td.journal, td.year { color: var(--ink-2); font-weight: 500; }
+  td.num { font-variant-numeric: tabular-nums; color: var(--ink-2); font-weight: 600; }
+
+  .badge-q {
+    display: inline-grid;
+    place-items: center;
+    min-width: 34px;
+    padding: 4px 10px;
+    font-size: 12px;
+    font-weight: 800;
+    border-radius: 10px;
+  }
+  .badge-q.q1 { background: var(--sage-soft); color: var(--sage-ink); }
+  .badge-q.q2 { background: var(--sky-soft); color: var(--sky-ink); }
+
+  .dec {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 12.5px;
+    font-weight: 700;
+    padding: 6px 13px;
+    border-radius: var(--r-pill);
+  }
+  .dec .pip { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+  .dec.inc { background: var(--sage-soft); color: var(--sage-ink); }
+  .dec.maybe { background: var(--peach-soft); color: var(--peach-ink); }
+  .dec.exc { background: var(--rose-soft); color: var(--rose-ink); }
+
+  /* ---------------- Bottom strip ---------------- */
+  .bottom {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 16px;
+    margin-top: 26px;
+    padding: 20px 22px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--r-xl);
+    box-shadow: var(--sh-md);
+  }
+  .segmented {
+    display: inline-flex;
+    padding: 5px;
+    background: var(--bg-2);
+    border-radius: var(--r-pill);
+    border: 1px solid var(--line);
+  }
+  .segmented button {
+    font-family: inherit;
+    font-size: 13.5px;
+    font-weight: 700;
+    color: var(--ink-2);
+    background: transparent;
+    border: none;
+    padding: 9px 18px;
+    border-radius: var(--r-pill);
+    cursor: pointer;
+    transition: background .18s ease, color .18s ease, box-shadow .18s ease;
+  }
+  .segmented button:hover { color: var(--ink); }
+  .segmented button.active {
+    background: var(--card);
+    color: var(--ink);
+    box-shadow: var(--sh-sm);
+  }
+
+  .tagset { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+  .tag {
+    font-size: 12.5px;
+    font-weight: 600;
+    padding: 7px 14px;
+    border-radius: var(--r-pill);
+    background: var(--card-2);
+    border: 1px solid var(--line);
+    color: var(--ink-2);
+    transition: transform .16s ease, background .16s ease;
+  }
+  .tag::before { content: "#"; color: var(--ink-3); margin-right: 1px; }
+  .tag:hover { transform: translateY(-1px); background: var(--lav-soft); color: var(--lav-ink); border-color: transparent; }
+
+  .bottom .push { margin-left: auto; }
+
+  /* ---------------- Footer ---------------- */
+  .foot {
+    margin-top: 34px;
+    text-align: center;
+    font-size: 12.5px;
+    color: var(--ink-3);
+  }
+  .foot .heart { color: var(--rose); }
+
+  /* ---------------- Responsive ---------------- */
+  @media (max-width: 960px) {
+    .stats { grid-template-columns: repeat(2, 1fr); }
+    .cards { grid-template-columns: 1fr; }
+    .nav a:not(.active) { display: none; }
+  }
+  @media (max-width: 560px) {
+    .stats { grid-template-columns: 1fr; }
+    .topbar { flex-wrap: wrap; border-radius: var(--r-lg); }
+    .nav { width: 100%; order: 3; justify-content: center; }
+    .nav a { display: inline-block; }
+    .bottom .push { margin-left: 0; }
+    .segmented, .btn-soft { width: 100%; justify-content: center; }
+    .segmented button { flex: 1; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- 1. Top bar -->
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 3c-3.5 2-6 5.5-6 9a6 6 0 0 0 12 0c0-3.5-2.5-7-6-9Z"/>
+          <path d="M12 12v6"/>
+        </svg>
+      </span>
+      <span>Publify</span>
+    </div>
+    <nav class="nav" aria-label="Primary">
+      <a href="#" class="active" aria-current="page">Projects</a>
+      <a href="#">Research</a>
+      <a href="#">Compare</a>
+      <a href="#">Chat</a>
+    </nav>
+    <button class="avatar" aria-label="Lóránt Szabó — account">LS</button>
+  </header>
+
+  <!-- 2. Hero -->
+  <section class="hero" aria-labelledby="hero-title">
+    <span class="blob b1" aria-hidden="true"></span>
+    <span class="blob b2" aria-hidden="true"></span>
+    <span class="blob b3" aria-hidden="true"></span>
+    <div class="hero-inner">
+      <span class="eyebrow"><span class="dot"></span> Workspace</span>
+      <h1 id="hero-title">Workspace</h1>
+      <p class="sub">Good afternoon, <strong>Lóránt</strong> — 3 projects in progress.</p>
+      <button class="btn btn-primary">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+        New project
+      </button>
+    </div>
+  </section>
+
+  <!-- 3. Stat strip -->
+  <section class="stats" aria-label="Workspace summary">
+    <div class="stat">
+      <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg></span>
+      <div><div class="num">12</div><div class="lbl">Projects</div></div>
+    </div>
+    <div class="stat">
+      <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h11l5 5v11H4Z"/><path d="M15 4v5h5"/><path d="M8 13h7M8 17h7"/></svg></span>
+      <div><div class="num">248</div><div class="lbl">Papers screened</div></div>
+    </div>
+    <div class="stat">
+      <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V6l10-2v12"/><circle cx="6" cy="18" r="3"/><circle cx="16" cy="16" r="3"/></svg></span>
+      <div><div class="num">5</div><div class="lbl">Audiobooks</div></div>
+    </div>
+    <div class="stat">
+      <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><path d="M3 20a6 6 0 0 1 12 0"/><circle cx="17" cy="9" r="2.4"/><path d="M16 20a5 5 0 0 1 5-5"/></svg></span>
+      <div><div class="num">2</div><div class="lbl">Shared reviews</div></div>
+    </div>
+  </section>
+
+  <!-- 4. Feature cards -->
+  <div class="sec-head">
+    <h2>In progress</h2>
+    <span class="muted">3 active</span>
+  </div>
+  <section class="cards" aria-label="Active projects">
+
+    <!-- (a) Manuscript -->
+    <article class="card c-ms">
+      <div class="card-top">
+        <span class="kicker">
+          <span class="k-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h9l5 5v11H5Z"/><path d="M14 4v5h5"/></svg></span>
+          Manuscript
+        </span>
+        <span class="chip peach"><span class="pip"></span> In review</span>
+      </div>
+      <h3>Conformally Certified OOD Detection for Camera &amp; LiDAR Sensors</h3>
+      <div class="spacer"></div>
+      <div class="progress peach"><i style="width:72%"></i></div>
+      <div class="meta-row">
+        <span>Edited 2h ago</span>
+        <a href="#" class="open">Open <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+      </div>
+    </article>
+
+    <!-- (b) Literature study -->
+    <article class="card c-lit">
+      <div class="card-top">
+        <span class="kicker">
+          <span class="k-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4-4"/></svg></span>
+          Literature study
+        </span>
+        <span class="chip lav"><span class="pip"></span> Step 3 of 4</span>
+      </div>
+      <h3>OOD detection — sensor fusion</h3>
+      <div class="funnel" role="list" aria-label="Screening funnel">
+        <div class="step done" role="listitem"><div class="s-num">150</div><div class="s-lbl">Quick</div></div>
+        <span class="arrow" aria-hidden="true">→</span>
+        <div class="step done" role="listitem"><div class="s-num">48</div><div class="s-lbl">Abstract</div></div>
+        <span class="arrow" aria-hidden="true">→</span>
+        <div class="step current" role="listitem"><div class="s-num">21</div><div class="s-lbl">Full text</div></div>
+        <span class="arrow" aria-hidden="true">→</span>
+        <div class="step" role="listitem"><div class="s-num">1</div><div class="s-lbl">Review</div></div>
+      </div>
+      <div class="spacer"></div>
+      <div class="progress lav"><i style="width:75%"></i></div>
+      <div class="meta-row"><span>Step 3 of 4</span><a href="#" class="open">Continue <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a></div>
+    </article>
+
+    <!-- (c) Revision compare -->
+    <article class="card c-rev">
+      <div class="card-top">
+        <span class="kicker">
+          <span class="k-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4v12a3 3 0 0 0 3 3h5"/><circle cx="8" cy="4" r="2"/><circle cx="16" cy="19" r="2"/><path d="M16 8a3 3 0 0 1-3-3"/></svg></span>
+          Revision compare
+        </span>
+        <span class="chip sage"><span class="pip"></span> v2 → v3</span>
+      </div>
+      <h3>Sensors v2 → v3</h3>
+      <div class="meta-row" style="margin-top:-4px"><span><strong style="color:var(--ink)">34 changes</strong> · 18 reviewer points</span></div>
+      <div class="diff" aria-label="Diff preview">
+        <div class="row del"><span class="gutter">−</span><span><s>…via Fisher Score Fusion</s></span></div>
+        <div class="row add"><span class="gutter">+</span><span>When Does Score Fusion Help? …</span></div>
+      </div>
+      <div class="spacer"></div>
+      <button class="btn btn-soft" style="align-self:flex-start; padding:11px 18px; font-size:13.5px">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7"/><path d="M16 6l-4-4-4 4"/><path d="M12 2v13"/></svg>
+        Share with reviewers
+      </button>
+    </article>
+  </section>
+
+  <!-- 5. Screening results table -->
+  <div class="sec-head">
+    <h2>Screening results</h2>
+    <span class="muted">4 of 248</span>
+  </div>
+  <section class="panel" aria-label="Screening results">
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">Decision</th>
+            <th scope="col">Paper</th>
+            <th scope="col">Quartile</th>
+            <th scope="col" class="num">Cites</th>
+            <th scope="col">Journal</th>
+            <th scope="col" class="num">Year</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="dec inc"><span class="pip"></span> Include</span></td>
+            <td class="paper">Out-of-distribution detection via Mahalanobis distance</td>
+            <td><span class="badge-q q1">Q1</span></td>
+            <td class="num">412</td>
+            <td class="journal">IEEE TPAMI</td>
+            <td class="num year">2023</td>
+          </tr>
+          <tr>
+            <td><span class="dec maybe"><span class="pip"></span> Maybe</span></td>
+            <td class="paper">Conformal prediction for open-set recognition</td>
+            <td><span class="badge-q q1">Q1</span></td>
+            <td class="num">88</td>
+            <td class="journal">NeurIPS</td>
+            <td class="num year">2024</td>
+          </tr>
+          <tr>
+            <td><span class="dec exc"><span class="pip"></span> Exclude</span></td>
+            <td class="paper">A survey of anomaly detection</td>
+            <td><span class="badge-q q2">Q2</span></td>
+            <td class="num">1503</td>
+            <td class="journal">ACM CSUR</td>
+            <td class="num year">2021</td>
+          </tr>
+          <tr>
+            <td><span class="dec inc"><span class="pip"></span> Include</span></td>
+            <td class="paper">Fisher information and OOD</td>
+            <td><span class="badge-q q2">Q2</span></td>
+            <td class="num">27</td>
+            <td class="journal">Sensors</td>
+            <td class="num year">2024</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 6. Bottom strip -->
+  <section class="bottom" aria-label="View controls">
+    <div class="segmented" role="tablist" aria-label="Document view">
+      <button role="tab" aria-selected="true" class="active">Overview</button>
+      <button role="tab" aria-selected="false">Changes</button>
+      <button role="tab" aria-selected="false">PDF</button>
+    </div>
+    <div class="tagset" aria-label="Tags">
+      <span class="tag">OOD</span>
+      <span class="tag">LiDAR</span>
+      <span class="tag">conformal</span>
+    </div>
+    <button class="btn btn-soft push">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4Z"/></svg>
+      Open editor
+    </button>
+  </section>
+
+  <p class="foot">Crafted with <span class="heart">♥</span> in the Soft Studio · Publify</p>
+
+</div>
+</body>
+</html>

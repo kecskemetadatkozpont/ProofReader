@@ -1,0 +1,877 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Publify — Workspace</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  /* ===================================================================
+     AURORA PRO — dark-first premium workspace concept for Publify
+     =================================================================== */
+
+  :root {
+    /* Aurora accent */
+    --aurora: linear-gradient(135deg, #6366f1 0%, #a855f7 50%, #22d3ee 100%);
+    --aurora-soft: linear-gradient(135deg, rgba(99,102,241,.18), rgba(168,85,247,.16), rgba(34,211,238,.16));
+
+    /* Indigo / violet / cyan singles */
+    --indigo: #6366f1;
+    --violet: #a855f7;
+    --cyan: #22d3ee;
+
+    /* Surfaces (dark) */
+    --bg: #0a0c12;
+    --bg-2: #0d1018;
+    --panel: rgba(22, 26, 38, 0.55);
+    --panel-2: rgba(28, 33, 48, 0.65);
+    --hairline: rgba(255, 255, 255, 0.08);
+    --hairline-strong: rgba(255, 255, 255, 0.14);
+    --inner-hi: rgba(255, 255, 255, 0.06);
+
+    /* Text */
+    --ink: #f2f4fb;
+    --ink-2: #b7bdd0;
+    --ink-3: #7e859b;
+
+    /* Semantic */
+    --ok: #34d399;
+    --ok-bg: rgba(52, 211, 153, .12);
+    --warn: #fbbf24;
+    --warn-bg: rgba(251, 191, 36, .12);
+    --bad: #fb7185;
+    --bad-bg: rgba(251, 113, 133, .12);
+
+    --radius: 18px;
+    --radius-sm: 12px;
+    --shadow-lg: 0 24px 60px -20px rgba(0,0,0,.7), 0 8px 24px -12px rgba(0,0,0,.6);
+    --ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--violet);
+
+    --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    --sans: "Plus Jakarta Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+
+  /* Light theme (optional toggle) */
+  [data-theme="light"] {
+    --bg: #eef1f8;
+    --bg-2: #e6eaf4;
+    --panel: rgba(255, 255, 255, 0.72);
+    --panel-2: rgba(255, 255, 255, 0.85);
+    --hairline: rgba(15, 23, 42, 0.10);
+    --hairline-strong: rgba(15, 23, 42, 0.16);
+    --inner-hi: rgba(255, 255, 255, 0.9);
+    --ink: #141a2b;
+    --ink-2: #475069;
+    --ink-3: #6b7591;
+    --ok-bg: rgba(16, 185, 129, .14);
+    --warn-bg: rgba(217, 119, 6, .14);
+    --bad-bg: rgba(225, 29, 72, .12);
+    --ok: #059669;
+    --warn: #b45309;
+    --bad: #e11d48;
+    --shadow-lg: 0 24px 60px -24px rgba(40,46,80,.35), 0 8px 24px -14px rgba(40,46,80,.25);
+  }
+
+  * { box-sizing: border-box; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    margin: 0;
+    font-family: var(--sans);
+    color: var(--ink);
+    background: var(--bg);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    line-height: 1.5;
+    min-height: 100vh;
+    position: relative;
+    overflow-x: hidden;
+  }
+
+  /* ---- Ambient background: aurora blur + grid + dotted texture ---- */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -2;
+    background:
+      radial-gradient(900px 520px at 78% -8%, rgba(168, 85, 247, .28), transparent 60%),
+      radial-gradient(720px 460px at 12% 4%, rgba(99, 102, 241, .26), transparent 60%),
+      radial-gradient(820px 600px at 60% 110%, rgba(34, 211, 238, .14), transparent 60%),
+      var(--bg);
+    filter: saturate(1.05);
+  }
+  [data-theme="light"] body::before {
+    background:
+      radial-gradient(900px 520px at 78% -8%, rgba(168, 85, 247, .20), transparent 60%),
+      radial-gradient(720px 460px at 12% 4%, rgba(99, 102, 241, .20), transparent 60%),
+      radial-gradient(820px 600px at 60% 110%, rgba(34, 211, 238, .14), transparent 60%),
+      var(--bg);
+  }
+  body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background-image:
+      linear-gradient(to right, rgba(255,255,255,.035) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255,255,255,.035) 1px, transparent 1px),
+      radial-gradient(rgba(255,255,255,.05) 1px, transparent 1.2px);
+    background-size: 64px 64px, 64px 64px, 22px 22px;
+    background-position: center, center, center;
+    mask-image: radial-gradient(120% 90% at 50% 0%, #000 35%, transparent 92%);
+    -webkit-mask-image: radial-gradient(120% 90% at 50% 0%, #000 35%, transparent 92%);
+  }
+  [data-theme="light"] body::after {
+    background-image:
+      linear-gradient(to right, rgba(20,26,43,.05) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(20,26,43,.05) 1px, transparent 1px),
+      radial-gradient(rgba(20,26,43,.06) 1px, transparent 1.2px);
+  }
+
+  .shell {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 22px 28px 80px;
+  }
+
+  a { color: inherit; text-decoration: none; }
+
+  /* ---------- Focus visibility (real rings) ---------- */
+  a:focus-visible,
+  button:focus-visible,
+  [tabindex]:focus-visible,
+  .chip:focus-visible,
+  .seg button:focus-visible {
+    outline: none;
+    box-shadow: var(--ring);
+    border-radius: 10px;
+  }
+
+  /* =====================  GLASS PANEL  ===================== */
+  .glass {
+    position: relative;
+    background: var(--panel);
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius);
+    backdrop-filter: blur(18px) saturate(1.3);
+    -webkit-backdrop-filter: blur(18px) saturate(1.3);
+    box-shadow: var(--shadow-lg), inset 0 1px 0 var(--inner-hi);
+  }
+  /* faint top highlight line */
+  .glass::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(180deg, rgba(255,255,255,.18), transparent 40%);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+    opacity: .8;
+  }
+
+  /* =====================  TOP BAR  ===================== */
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 12px 18px;
+    margin-bottom: 30px;
+  }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .logo {
+    width: 34px; height: 34px;
+    border-radius: 10px;
+    background: var(--aurora);
+    position: relative;
+    box-shadow: 0 6px 20px -6px rgba(168,85,247,.7), inset 0 1px 0 rgba(255,255,255,.4);
+    flex: none;
+  }
+  .logo::after {
+    content: "";
+    position: absolute;
+    inset: 6px;
+    border-radius: 6px;
+    background: var(--bg-2);
+    background: radial-gradient(circle at 35% 30%, rgba(255,255,255,.25), transparent 60%), var(--bg-2);
+  }
+  .brand-name { font-weight: 800; font-size: 1.05rem; letter-spacing: -.02em; }
+
+  .nav { display: flex; align-items: center; gap: 4px; }
+  .nav a {
+    padding: 8px 13px;
+    border-radius: 9px;
+    font-size: .9rem;
+    font-weight: 500;
+    color: var(--ink-2);
+    transition: color .15s, background .15s;
+  }
+  .nav a:hover { color: var(--ink); background: rgba(255,255,255,.06); }
+  .nav a[aria-current="page"] {
+    color: var(--ink);
+    background: var(--aurora-soft);
+    box-shadow: inset 0 0 0 1px var(--hairline-strong);
+  }
+  .nav-right { display: flex; align-items: center; gap: 14px; }
+
+  .icon-btn {
+    width: 36px; height: 36px;
+    display: grid; place-items: center;
+    border-radius: 10px;
+    border: 1px solid var(--hairline);
+    background: var(--panel);
+    color: var(--ink-2);
+    cursor: pointer;
+    transition: .15s;
+    backdrop-filter: blur(8px);
+  }
+  .icon-btn:hover { color: var(--ink); border-color: var(--hairline-strong); transform: translateY(-1px); }
+
+  .avatar {
+    width: 38px; height: 38px;
+    border-radius: 50%;
+    display: grid; place-items: center;
+    font-weight: 700;
+    font-size: .82rem;
+    letter-spacing: .02em;
+    color: #fff;
+    background: var(--aurora);
+    box-shadow: 0 4px 16px -4px rgba(99,102,241,.6), inset 0 0 0 1px rgba(255,255,255,.25);
+    cursor: pointer;
+  }
+
+  /* =====================  HERO  ===================== */
+  .hero {
+    position: relative;
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 24px;
+    flex-wrap: wrap;
+    padding: 14px 6px 30px;
+    margin-bottom: 26px;
+  }
+  .hero::before {
+    content: "";
+    position: absolute;
+    left: -40px; top: -60px;
+    width: 460px; height: 320px;
+    background: radial-gradient(closest-side, rgba(168,85,247,.45), transparent 70%);
+    filter: blur(40px);
+    z-index: -1;
+    pointer-events: none;
+  }
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-size: .72rem; font-weight: 600;
+    text-transform: uppercase; letter-spacing: .14em;
+    color: var(--ink-3);
+    margin-bottom: 14px;
+  }
+  .eyebrow .dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--cyan);
+    box-shadow: 0 0 10px var(--cyan);
+  }
+  h1 {
+    margin: 0;
+    font-size: clamp(2.4rem, 6vw, 3.5rem);
+    font-weight: 800;
+    letter-spacing: -.035em;
+    line-height: 1.02;
+    background: linear-gradient(180deg, var(--ink), color-mix(in srgb, var(--ink) 65%, var(--violet)));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .subtitle {
+    margin: 12px 0 0;
+    font-size: 1.05rem;
+    color: var(--ink-2);
+    max-width: 46ch;
+  }
+  .subtitle strong { color: var(--ink); font-weight: 600; }
+
+  /* primary CTA — glowing aurora */
+  .btn-primary {
+    position: relative;
+    display: inline-flex; align-items: center; gap: 9px;
+    padding: 13px 22px;
+    border: none;
+    border-radius: 13px;
+    font-family: inherit;
+    font-size: .95rem;
+    font-weight: 700;
+    color: #fff;
+    cursor: pointer;
+    background: var(--aurora);
+    box-shadow:
+      0 10px 30px -8px rgba(124, 92, 246, .65),
+      0 0 0 1px rgba(255,255,255,.12) inset,
+      0 1px 0 rgba(255,255,255,.4) inset;
+    transition: transform .18s ease, box-shadow .18s ease, filter .18s;
+  }
+  .btn-primary::after {
+    content: "";
+    position: absolute; inset: -2px;
+    border-radius: 15px;
+    background: var(--aurora);
+    filter: blur(16px);
+    opacity: .5;
+    z-index: -1;
+    transition: opacity .18s;
+  }
+  .btn-primary:hover { transform: translateY(-2px); filter: brightness(1.06); }
+  .btn-primary:hover::after { opacity: .8; }
+  .btn-primary:active { transform: translateY(0); }
+  .btn-primary .plus { font-size: 1.15rem; line-height: 1; margin-top: -1px; }
+
+  /* =====================  STAT STRIP  ===================== */
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1px;
+    overflow: hidden;
+    margin-bottom: 30px;
+  }
+  .stat { padding: 22px 24px; position: relative; }
+  .stat + .stat::before {
+    content: "";
+    position: absolute; left: 0; top: 18%; bottom: 18%;
+    width: 1px;
+    background: var(--hairline);
+  }
+  .stat .num {
+    font-family: var(--mono);
+    font-size: 1.9rem;
+    font-weight: 600;
+    letter-spacing: -.02em;
+    line-height: 1;
+    background: var(--aurora);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .stat .label {
+    margin-top: 9px;
+    font-size: .82rem;
+    color: var(--ink-3);
+    font-weight: 500;
+  }
+
+  /* =====================  FEATURE CARDS  ===================== */
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 18px;
+    margin-bottom: 30px;
+  }
+  .card { padding: 22px; display: flex; flex-direction: column; min-height: 218px; }
+  .card-head {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 10px; margin-bottom: 14px;
+  }
+  .card-kicker {
+    font-size: .7rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .12em; color: var(--ink-3);
+  }
+  .card h3 {
+    margin: 0 0 4px;
+    font-size: 1.04rem;
+    font-weight: 700;
+    letter-spacing: -.01em;
+    line-height: 1.3;
+  }
+  .card-foot {
+    margin-top: auto;
+    padding-top: 16px;
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: .82rem; color: var(--ink-3);
+  }
+  .open-link {
+    font-weight: 600; color: var(--ink);
+    display: inline-flex; align-items: center; gap: 5px;
+    transition: gap .15s, color .15s;
+  }
+  .open-link:hover { gap: 9px; color: var(--violet); }
+
+  /* chips / pills */
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: .72rem;
+    font-weight: 600;
+    border: 1px solid var(--hairline-strong);
+    background: rgba(255,255,255,.04);
+    color: var(--ink-2);
+    white-space: nowrap;
+  }
+  .chip-review { color: var(--cyan); border-color: rgba(34,211,238,.35); background: rgba(34,211,238,.1); }
+  .chip-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+  /* progress bar */
+  .prog {
+    height: 6px;
+    border-radius: 999px;
+    background: rgba(255,255,255,.07);
+    overflow: hidden;
+    margin: 14px 0 6px;
+  }
+  [data-theme="light"] .prog { background: rgba(20,26,43,.08); }
+  .prog > span {
+    display: block; height: 100%;
+    border-radius: inherit;
+    background: var(--aurora);
+    box-shadow: 0 0 14px -2px var(--violet);
+  }
+  .prog-meta { display: flex; justify-content: space-between; font-size: .74rem; color: var(--ink-3); }
+  .prog-meta .pct { font-family: var(--mono); color: var(--ink-2); }
+
+  /* funnel (literature study) */
+  .funnel { display: flex; align-items: stretch; gap: 6px; margin: 4px 0 12px; }
+  .step {
+    flex: 1;
+    padding: 9px 8px;
+    border-radius: 10px;
+    border: 1px solid var(--hairline);
+    background: rgba(255,255,255,.03);
+    text-align: center;
+    position: relative;
+  }
+  .step .s-label { font-size: .6rem; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-3); }
+  .step .s-num { font-family: var(--mono); font-weight: 600; font-size: 1.02rem; margin-top: 2px; }
+  .step.active {
+    border-color: rgba(168,85,247,.5);
+    background: var(--aurora-soft);
+    box-shadow: 0 0 0 1px rgba(168,85,247,.18), 0 6px 18px -10px rgba(168,85,247,.6);
+  }
+  .step.active .s-num {
+    background: var(--aurora);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .step.done .s-num { color: var(--ink-2); }
+  .step .arrow {
+    position: absolute; right: -6px; top: 50%; transform: translateY(-50%);
+    color: var(--ink-3); font-size: .7rem; z-index: 1;
+  }
+  .step:last-child .arrow { display: none; }
+
+  /* diff (revision compare) */
+  .diffbox {
+    border: 1px solid var(--hairline);
+    border-radius: 10px;
+    padding: 10px 12px;
+    background: rgba(0,0,0,.18);
+    font-family: var(--mono);
+    font-size: .76rem;
+    line-height: 1.7;
+    margin: 6px 0 12px;
+  }
+  [data-theme="light"] .diffbox { background: rgba(20,26,43,.04); }
+  .diff-del {
+    display: block;
+    color: var(--bad);
+    text-decoration: line-through;
+    text-decoration-color: rgba(251,113,133,.7);
+    opacity: .85;
+  }
+  .diff-add { display: block; color: var(--ok); }
+  .diff-del::before { content: "− "; }
+  .diff-add::before { content: "+ "; }
+  .meta-line { font-size: .82rem; color: var(--ink-2); margin: 2px 0 0; }
+  .meta-line b { color: var(--ink); font-weight: 700; }
+
+  .pill-share {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 7px 13px;
+    border-radius: 999px;
+    font-size: .78rem; font-weight: 600;
+    color: var(--ink);
+    cursor: pointer;
+    border: 1px solid var(--hairline-strong);
+    background: var(--aurora-soft);
+    transition: .15s;
+  }
+  .pill-share:hover { border-color: rgba(168,85,247,.5); transform: translateY(-1px); }
+
+  /* =====================  TABLE  ===================== */
+  .table-wrap { padding: 6px 6px 8px; margin-bottom: 30px; }
+  .table-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 18px 12px;
+  }
+  .table-title { font-weight: 700; font-size: 1rem; letter-spacing: -.01em; }
+  .table-sub { font-size: .8rem; color: var(--ink-3); }
+
+  table { width: 100%; border-collapse: collapse; font-size: .88rem; }
+  thead th {
+    text-align: left;
+    font-size: .7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .1em;
+    color: var(--ink-3);
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--hairline);
+  }
+  th.num, td.num { text-align: right; font-family: var(--mono); }
+  tbody td {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--hairline);
+    color: var(--ink-2);
+    vertical-align: middle;
+  }
+  tbody tr { transition: background .15s; }
+  tbody tr:hover { background: rgba(255,255,255,.035); }
+  [data-theme="light"] tbody tr:hover { background: rgba(20,26,43,.035); }
+  tbody tr:last-child td { border-bottom: none; }
+  .paper-title { color: var(--ink); font-weight: 500; }
+  td .journal { color: var(--ink-2); }
+
+  /* decision chips */
+  .dchip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 10px 4px 8px;
+    border-radius: 999px;
+    font-size: .74rem; font-weight: 700;
+    white-space: nowrap;
+  }
+  .dchip .chip-dot { width: 7px; height: 7px; }
+  .d-include { color: var(--ok); background: var(--ok-bg); box-shadow: inset 0 0 0 1px rgba(52,211,153,.3); }
+  .d-maybe   { color: var(--warn); background: var(--warn-bg); box-shadow: inset 0 0 0 1px rgba(251,191,36,.3); }
+  .d-exclude { color: var(--bad); background: var(--bad-bg); box-shadow: inset 0 0 0 1px rgba(251,113,133,.3); }
+
+  /* quartile badge */
+  .q-badge {
+    display: inline-grid; place-items: center;
+    min-width: 30px; height: 22px;
+    padding: 0 6px;
+    border-radius: 6px;
+    font-family: var(--mono);
+    font-size: .72rem; font-weight: 600;
+    color: var(--ink);
+    border: 1px solid var(--hairline-strong);
+    background: rgba(255,255,255,.05);
+  }
+  .q1 { color: var(--cyan); border-color: rgba(34,211,238,.4); background: rgba(34,211,238,.1); }
+  .q2 { color: var(--indigo); border-color: rgba(99,102,241,.4); background: rgba(99,102,241,.12); }
+
+  .data-label { display: none; }
+
+  /* =====================  BOTTOM STRIP  ===================== */
+  .bottom {
+    display: flex; align-items: center; justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 16px;
+    padding: 16px 20px;
+  }
+  .bottom-left { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+
+  /* segmented control */
+  .seg {
+    display: inline-flex;
+    padding: 4px;
+    border-radius: 12px;
+    border: 1px solid var(--hairline);
+    background: rgba(0,0,0,.2);
+  }
+  [data-theme="light"] .seg { background: rgba(20,26,43,.05); }
+  .seg button {
+    position: relative;
+    padding: 7px 16px;
+    border: none;
+    background: transparent;
+    color: var(--ink-3);
+    font-family: inherit;
+    font-size: .82rem; font-weight: 600;
+    border-radius: 9px;
+    cursor: pointer;
+    transition: color .15s;
+  }
+  .seg button:hover { color: var(--ink-2); }
+  .seg button[aria-selected="true"] {
+    color: var(--ink);
+    background: var(--aurora-soft);
+    box-shadow: inset 0 0 0 1px var(--hairline-strong);
+  }
+  .seg button[aria-selected="true"]::after {
+    content: "";
+    position: absolute;
+    left: 14px; right: 14px; bottom: 3px;
+    height: 2px; border-radius: 2px;
+    background: var(--aurora);
+    box-shadow: 0 0 8px var(--violet);
+  }
+
+  .tagset { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .tag {
+    padding: 5px 11px;
+    border-radius: 999px;
+    font-size: .76rem; font-weight: 500;
+    color: var(--ink-2);
+    border: 1px solid var(--hairline);
+    background: rgba(255,255,255,.03);
+    cursor: pointer;
+    transition: .15s;
+  }
+  .tag:hover { color: var(--ink); border-color: rgba(168,85,247,.4); background: var(--aurora-soft); }
+  .tag::before { content: "#"; color: var(--ink-3); margin-right: 1px; }
+
+  .btn-ghost {
+    padding: 11px 18px;
+    border-radius: 12px;
+    font-family: inherit;
+    font-size: .88rem; font-weight: 600;
+    color: var(--ink);
+    cursor: pointer;
+    border: 1px solid var(--hairline-strong);
+    background: var(--panel);
+    backdrop-filter: blur(8px);
+    transition: .15s;
+  }
+  .btn-ghost:hover { border-color: var(--violet); background: var(--aurora-soft); transform: translateY(-1px); }
+
+  /* =====================  RESPONSIVE  ===================== */
+  @media (max-width: 920px) {
+    .cards { grid-template-columns: 1fr; }
+    .stats { grid-template-columns: repeat(2, 1fr); }
+    .stat:nth-child(3)::before, .stat:nth-child(1)::before { display: none; }
+    .stat:nth-child(odd) { border-top: 1px solid var(--hairline); }
+    .stat:nth-child(1), .stat:nth-child(2) { border-top: none; }
+  }
+  @media (max-width: 680px) {
+    .shell { padding: 16px 16px 64px; }
+    .nav { display: none; }
+    .stats { grid-template-columns: 1fr 1fr; }
+    .hero { padding-bottom: 18px; }
+
+    /* stack the table into cards */
+    table, thead, tbody, th, td, tr { display: block; }
+    thead { display: none; }
+    tbody tr {
+      border: 1px solid var(--hairline);
+      border-radius: 14px;
+      padding: 12px 14px;
+      margin: 0 10px 12px;
+      background: rgba(255,255,255,.02);
+    }
+    tbody td { border: none; padding: 6px 0; display: flex; justify-content: space-between; align-items: center; gap: 12px; text-align: right; }
+    tbody td.num { text-align: right; justify-content: space-between; }
+    .data-label {
+      display: inline; font-size: .7rem; text-transform: uppercase; letter-spacing: .08em;
+      color: var(--ink-3); font-weight: 600; font-family: var(--sans);
+    }
+    .paper-title { text-align: right; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; }
+  }
+</style>
+</head>
+<body>
+  <div class="shell">
+
+    <!-- ============ TOP BAR ============ -->
+    <header class="topbar glass">
+      <div class="brand">
+        <span class="logo" aria-hidden="true"></span>
+        <span class="brand-name">Publify</span>
+      </div>
+
+      <div class="nav-right">
+        <nav class="nav" aria-label="Primary">
+          <a href="#" aria-current="page">Projects</a>
+          <a href="#">Research</a>
+          <a href="#">Compare</a>
+          <a href="#">Chat</a>
+        </nav>
+        <button class="icon-btn" id="themeToggle" type="button" aria-label="Toggle theme" title="Toggle theme">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/>
+          </svg>
+        </button>
+        <button class="avatar" type="button" aria-label="Account: Lóránt Szabó">LS</button>
+      </div>
+    </header>
+
+    <!-- ============ HERO ============ -->
+    <section class="hero" aria-labelledby="page-title">
+      <div>
+        <span class="eyebrow"><span class="dot"></span> Workspace</span>
+        <h1 id="page-title">Workspace</h1>
+        <p class="subtitle">Good afternoon, <strong>Lóránt</strong> — 3 projects in progress.</p>
+      </div>
+      <button class="btn-primary" type="button">
+        <span class="plus" aria-hidden="true">+</span> New project
+      </button>
+    </section>
+
+    <!-- ============ STAT STRIP ============ -->
+    <section class="stats glass" aria-label="Workspace statistics">
+      <div class="stat"><div class="num">12</div><div class="label">Projects</div></div>
+      <div class="stat"><div class="num">248</div><div class="label">Papers screened</div></div>
+      <div class="stat"><div class="num">5</div><div class="label">Audiobooks</div></div>
+      <div class="stat"><div class="num">2</div><div class="label">Shared reviews</div></div>
+    </section>
+
+    <!-- ============ FEATURE CARDS ============ -->
+    <section class="cards" aria-label="Active work">
+
+      <!-- (a) Manuscript -->
+      <article class="card glass">
+        <div class="card-head">
+          <span class="card-kicker">Manuscript</span>
+          <span class="chip chip-review"><span class="chip-dot"></span>In review</span>
+        </div>
+        <h3>Conformally Certified OOD Detection for Camera &amp; LiDAR Sensors</h3>
+        <div class="prog" role="progressbar" aria-valuenow="72" aria-valuemin="0" aria-valuemax="100" aria-label="Manuscript progress">
+          <span style="width:72%"></span>
+        </div>
+        <div class="prog-meta"><span>Draft → submission</span><span class="pct">72%</span></div>
+        <div class="card-foot">
+          <span>Edited 2h ago</span>
+          <a class="open-link" href="#">Open <span aria-hidden="true">→</span></a>
+        </div>
+      </article>
+
+      <!-- (b) Literature study -->
+      <article class="card glass">
+        <div class="card-head">
+          <span class="card-kicker">Literature study</span>
+          <span class="chip">Funnel</span>
+        </div>
+        <h3>OOD detection — sensor fusion</h3>
+        <div class="funnel" aria-label="Screening funnel">
+          <div class="step done"><div class="s-label">Quick</div><div class="s-num">150</div><span class="arrow">→</span></div>
+          <div class="step done"><div class="s-label">Abstract</div><div class="s-num">48</div><span class="arrow">→</span></div>
+          <div class="step active"><div class="s-label">Full text</div><div class="s-num">21</div><span class="arrow">→</span></div>
+          <div class="step"><div class="s-label">Review</div><div class="s-num">1</div></div>
+        </div>
+        <div class="prog" role="progressbar" aria-valuenow="75" aria-valuemin="0" aria-valuemax="100" aria-label="Study progress">
+          <span style="width:75%"></span>
+        </div>
+        <div class="card-foot">
+          <span>Step 3 of 4</span>
+          <a class="open-link" href="#">Open <span aria-hidden="true">→</span></a>
+        </div>
+      </article>
+
+      <!-- (c) Revision compare -->
+      <article class="card glass">
+        <div class="card-head">
+          <span class="card-kicker">Revision compare</span>
+          <span class="chip">Sensors v2 → v3</span>
+        </div>
+        <h3>34 changes · 18 reviewer points</h3>
+        <div class="diffbox" aria-label="Diff preview">
+          <span class="diff-del">…via Fisher Score Fusion</span>
+          <span class="diff-add">When Does Score Fusion Help? …</span>
+        </div>
+        <div class="card-foot">
+          <button class="pill-share" type="button">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
+              <path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/>
+            </svg>
+            Share with reviewers
+          </button>
+          <a class="open-link" href="#">Open <span aria-hidden="true">→</span></a>
+        </div>
+      </article>
+    </section>
+
+    <!-- ============ TABLE ============ -->
+    <section class="table-wrap glass" aria-labelledby="screening-title">
+      <div class="table-head">
+        <span class="table-title" id="screening-title">Screening results</span>
+        <span class="table-sub">4 papers · last run 18 min ago</span>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">Decision</th>
+            <th scope="col">Paper</th>
+            <th scope="col">Quartile</th>
+            <th scope="col" class="num">Cites</th>
+            <th scope="col">Journal</th>
+            <th scope="col" class="num">Year</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="data-label">Decision</span><span class="dchip d-include"><span class="chip-dot"></span>Include</span></td>
+            <td><span class="data-label">Paper</span><span class="paper-title">Out-of-distribution detection via Mahalanobis distance</span></td>
+            <td><span class="data-label">Quartile</span><span class="q-badge q1">Q1</span></td>
+            <td class="num"><span class="data-label">Cites</span>412</td>
+            <td><span class="data-label">Journal</span><span class="journal">IEEE TPAMI</span></td>
+            <td class="num"><span class="data-label">Year</span>2023</td>
+          </tr>
+          <tr>
+            <td><span class="data-label">Decision</span><span class="dchip d-maybe"><span class="chip-dot"></span>Maybe</span></td>
+            <td><span class="data-label">Paper</span><span class="paper-title">Conformal prediction for open-set recognition</span></td>
+            <td><span class="data-label">Quartile</span><span class="q-badge q1">Q1</span></td>
+            <td class="num"><span class="data-label">Cites</span>88</td>
+            <td><span class="data-label">Journal</span><span class="journal">NeurIPS</span></td>
+            <td class="num"><span class="data-label">Year</span>2024</td>
+          </tr>
+          <tr>
+            <td><span class="data-label">Decision</span><span class="dchip d-exclude"><span class="chip-dot"></span>Exclude</span></td>
+            <td><span class="data-label">Paper</span><span class="paper-title">A survey of anomaly detection</span></td>
+            <td><span class="data-label">Quartile</span><span class="q-badge q2">Q2</span></td>
+            <td class="num"><span class="data-label">Cites</span>1503</td>
+            <td><span class="data-label">Journal</span><span class="journal">ACM CSUR</span></td>
+            <td class="num"><span class="data-label">Year</span>2021</td>
+          </tr>
+          <tr>
+            <td><span class="data-label">Decision</span><span class="dchip d-include"><span class="chip-dot"></span>Include</span></td>
+            <td><span class="data-label">Paper</span><span class="paper-title">Fisher information and OOD</span></td>
+            <td><span class="data-label">Quartile</span><span class="q-badge q2">Q2</span></td>
+            <td class="num"><span class="data-label">Cites</span>27</td>
+            <td><span class="data-label">Journal</span><span class="journal">Sensors</span></td>
+            <td class="num"><span class="data-label">Year</span>2024</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- ============ BOTTOM STRIP ============ -->
+    <section class="bottom glass" aria-label="View controls">
+      <div class="bottom-left">
+        <div class="seg" role="tablist" aria-label="View mode">
+          <button role="tab" aria-selected="true" type="button">Overview</button>
+          <button role="tab" aria-selected="false" type="button">Changes</button>
+          <button role="tab" aria-selected="false" type="button">PDF</button>
+        </div>
+        <div class="tagset" aria-label="Tags">
+          <span class="tag" tabindex="0">OOD</span>
+          <span class="tag" tabindex="0">LiDAR</span>
+          <span class="tag" tabindex="0">conformal</span>
+        </div>
+      </div>
+      <button class="btn-ghost" type="button">Open editor</button>
+    </section>
+
+  </div>
+
+  <!-- Optional tiny theme toggle (no framework, fully static otherwise) -->
+  <script>
+    (function () {
+      var btn = document.getElementById('themeToggle');
+      if (!btn) return;
+      btn.addEventListener('click', function () {
+        var root = document.documentElement;
+        root.setAttribute('data-theme', root.getAttribute('data-theme') === 'light' ? 'dark' : 'light');
+      });
+    })();
+  </script>
+</body>
+</html>

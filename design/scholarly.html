@@ -1,0 +1,1029 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Publify — Workspace</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;0,6..72,700;1,6..72,400;1,6..72,500&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  /* ============================================================
+     PUBLIFY — "Scholarly Press" concept
+     Editorial / academic / premium print. Ink on cream.
+     ============================================================ */
+
+  :root {
+    /* Paper & ink */
+    --paper:        #faf7f0;
+    --paper-2:      #f4efe6;
+    --paper-sunk:   #efe9dd;
+    --card:         #fffdf8;
+    --ink:          #1b1a17;
+    --ink-2:        #44423c;
+    --ink-3:        #6b6760;
+    --ink-4:        #8a857b;
+    --rule:         #d9d2c4;
+    --rule-soft:    #e6e0d4;
+
+    /* Single restrained accent — refined oxblood */
+    --accent:       #7c2d2d;
+    --accent-deep:  #5e2121;
+    --accent-tint:  #f3e7e3;
+
+    /* Semantic (kept low-chroma, print-ledger feel) */
+    --include:      #2f5d3a;
+    --include-bg:   #e6efe6;
+    --maybe:        #8a6d1f;
+    --maybe-bg:     #f3ecd8;
+    --exclude:      #8a3030;
+    --exclude-bg:   #f1e3e1;
+
+    --del:          #9a2f2f;
+    --del-bg:       #f6e6e4;
+    --add:          #2f6440;
+    --add-bg:       #e5efe6;
+
+    /* Type */
+    --serif: "Newsreader", Georgia, "Times New Roman", serif;
+    --sans:  "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+
+    --maxw: 1120px;
+    --radius: 4px;
+    --radius-lg: 7px;
+
+    --shadow-card: 0 1px 0 rgba(27,26,23,0.04), 0 12px 28px -22px rgba(27,26,23,0.45);
+  }
+
+  [data-theme="dark"] {
+    --paper:        #16140f;
+    --paper-2:      #1c1a14;
+    --paper-sunk:   #211e17;
+    --card:         #1f1c15;
+    --ink:          #f1ece0;
+    --ink-2:        #d2ccbd;
+    --ink-3:        #a8a294;
+    --ink-4:        #847f72;
+    --rule:         #36322a;
+    --rule-soft:    #2b2820;
+
+    --accent:       #d98b7e;
+    --accent-deep:  #e6a89c;
+    --accent-tint:  #2e211d;
+
+    --include:      #8fc79b;
+    --include-bg:   #1d2a20;
+    --maybe:        #d6b96a;
+    --maybe-bg:     #2b2616;
+    --exclude:      #e09a93;
+    --exclude-bg:   #2c1c1a;
+
+    --del:          #e69b94;
+    --del-bg:       #2c1c1a;
+    --add:          #8fc79b;
+    --add-bg:       #1d2a20;
+
+    --shadow-card: 0 1px 0 rgba(0,0,0,0.2), 0 16px 34px -24px rgba(0,0,0,0.8);
+  }
+
+  * { box-sizing: border-box; }
+
+  html { -webkit-text-size-adjust: 100%; }
+
+  body {
+    margin: 0;
+    font-family: var(--sans);
+    background-color: var(--paper);
+    color: var(--ink);
+    line-height: 1.55;
+    font-size: 15px;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    /* faint paper texture via stacked gradients */
+    background-image:
+      radial-gradient(1200px 600px at 80% -10%, rgba(124,45,45,0.035), transparent 60%),
+      linear-gradient(180deg, var(--paper) 0%, var(--paper-2) 100%);
+    background-attachment: fixed;
+    transition: background-color .35s ease, color .35s ease;
+  }
+
+  /* ---- focus rings (real, visible, on-brand) ---- */
+  a, button, input, [tabindex] { outline: none; }
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 3px;
+  }
+
+  .wrap {
+    max-width: var(--maxw);
+    margin: 0 auto;
+    padding: 0 32px;
+  }
+
+  /* small-caps / letterspaced editorial labels */
+  .eyebrow {
+    font-family: var(--sans);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-4);
+  }
+
+  /* ============================================================
+     TOP BAR
+     ============================================================ */
+  .topbar {
+    border-bottom: 1px solid var(--rule);
+    background:
+      linear-gradient(180deg, var(--paper) 0%, color-mix(in srgb, var(--paper) 88%, transparent) 100%);
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    backdrop-filter: saturate(120%) blur(6px);
+  }
+  /* thin top rule (the "press" hairline) */
+  .topbar::before {
+    content: "";
+    display: block;
+    height: 3px;
+    background: var(--accent);
+  }
+  .topbar__inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 64px;
+    gap: 24px;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    text-decoration: none;
+    color: var(--ink);
+  }
+  .logomark {
+    width: 30px;
+    height: 30px;
+    border-radius: 6px;
+    background: var(--ink);
+    color: var(--paper);
+    display: grid;
+    place-items: center;
+    font-family: var(--serif);
+    font-weight: 600;
+    font-size: 19px;
+    line-height: 1;
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.06), 0 2px 0 var(--accent-deep);
+  }
+  [data-theme="dark"] .logomark { background: var(--paper-sunk); color: var(--accent); box-shadow: inset 0 0 0 1px var(--rule); }
+  .wordmark {
+    font-family: var(--serif);
+    font-size: 23px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+  .wordmark .dot { color: var(--accent); }
+
+  .nav {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .nav a {
+    position: relative;
+    text-decoration: none;
+    color: var(--ink-2);
+    font-size: 13.5px;
+    font-weight: 500;
+    padding: 8px 12px;
+    border-radius: 5px;
+    transition: color .18s ease, background-color .18s ease;
+  }
+  .nav a:hover { color: var(--ink); background: var(--paper-sunk); }
+  .nav a[aria-current="page"] { color: var(--ink); }
+  .nav a[aria-current="page"]::after {
+    content: "";
+    position: absolute;
+    left: 12px; right: 12px; bottom: 2px;
+    height: 1.5px;
+    background: var(--accent);
+  }
+  .nav .sep { color: var(--rule); font-size: 13px; padding: 0 1px; user-select: none; }
+
+  .topbar__right { display: flex; align-items: center; gap: 16px; }
+
+  .iconbtn {
+    appearance: none;
+    border: 1px solid var(--rule);
+    background: var(--card);
+    color: var(--ink-2);
+    width: 34px; height: 34px;
+    border-radius: 50%;
+    display: grid; place-items: center;
+    cursor: pointer;
+    font-size: 15px;
+    transition: border-color .18s ease, color .18s ease, transform .1s ease;
+  }
+  .iconbtn:hover { color: var(--ink); border-color: var(--ink-4); }
+  .iconbtn:active { transform: translateY(1px); }
+
+  .avatar {
+    width: 34px; height: 34px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #fff;
+    display: grid; place-items: center;
+    font-family: var(--sans);
+    font-weight: 600;
+    font-size: 12.5px;
+    letter-spacing: 0.03em;
+    box-shadow: 0 0 0 1px rgba(27,26,23,0.08), inset 0 0 0 1.5px rgba(255,255,255,0.18);
+    cursor: pointer;
+  }
+
+  /* ============================================================
+     HERO
+     ============================================================ */
+  .hero {
+    padding: 56px 0 30px;
+    border-bottom: 1px solid var(--rule);
+  }
+  .hero__inner {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 32px;
+    flex-wrap: wrap;
+  }
+  .hero h1 {
+    font-family: var(--serif);
+    font-weight: 600;
+    font-size: clamp(46px, 7vw, 78px);
+    line-height: 0.98;
+    letter-spacing: -0.02em;
+    margin: 12px 0 14px;
+  }
+  .hero__sub {
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 18px;
+    color: var(--ink-3);
+    margin: 0;
+    max-width: 46ch;
+  }
+  .hero__sub b { font-style: normal; font-weight: 500; color: var(--ink-2); }
+
+  /* ---- buttons ---- */
+  .btn {
+    appearance: none;
+    font-family: var(--sans);
+    font-size: 14px;
+    font-weight: 600;
+    border-radius: var(--radius);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
+    transition: background-color .18s ease, border-color .18s ease, color .18s ease, transform .1s ease, box-shadow .18s ease;
+  }
+  .btn:active { transform: translateY(1px); }
+  .btn--primary {
+    background: var(--ink);
+    color: var(--paper);
+    border: 1px solid var(--ink);
+    padding: 12px 20px;
+    box-shadow: 0 2px 0 var(--accent-deep), 0 10px 22px -16px rgba(27,26,23,0.9);
+  }
+  .btn--primary:hover { background: var(--accent); border-color: var(--accent); box-shadow: 0 2px 0 var(--accent-deep), 0 12px 26px -14px rgba(124,45,45,0.6); }
+  [data-theme="dark"] .btn--primary { color: var(--paper); }
+  .btn--ghost {
+    background: var(--card);
+    color: var(--ink);
+    border: 1px solid var(--rule);
+    padding: 11px 18px;
+  }
+  .btn--ghost:hover { border-color: var(--ink-4); }
+
+  /* ============================================================
+     STAT STRIP
+     ============================================================ */
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    border-bottom: 1px solid var(--rule);
+  }
+  .stat {
+    padding: 26px 0 24px;
+    position: relative;
+  }
+  .stat + .stat { padding-left: 28px; }
+  .stat + .stat::before {
+    content: "";
+    position: absolute;
+    left: 0; top: 26px; bottom: 24px;
+    width: 1px;
+    background: var(--rule-soft);
+  }
+  .stat__num {
+    font-family: var(--serif);
+    font-size: 38px;
+    font-weight: 600;
+    line-height: 1;
+    letter-spacing: -0.02em;
+    font-variant-numeric: lining-nums tabular-nums;
+  }
+  .stat__num .accent { color: var(--accent); }
+  .stat__label {
+    margin-top: 8px;
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    color: var(--ink-3);
+  }
+
+  /* ============================================================
+     SECTION HEADINGS
+     ============================================================ */
+  .section { padding: 44px 0 8px; }
+  .section__head {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    margin-bottom: 22px;
+  }
+  .section__head h2 {
+    font-family: var(--serif);
+    font-weight: 600;
+    font-size: 13px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    margin: 0;
+    color: var(--ink-3);
+  }
+  .section__head .line {
+    flex: 1;
+    height: 1px;
+    background: var(--rule);
+  }
+
+  /* ============================================================
+     FEATURE CARDS
+     ============================================================ */
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 22px;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--rule);
+    border-radius: var(--radius-lg);
+    padding: 24px 22px 22px;
+    display: flex;
+    flex-direction: column;
+    min-height: 232px;
+    box-shadow: var(--shadow-card);
+    transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease;
+  }
+  .card:hover {
+    transform: translateY(-3px);
+    border-color: var(--ink-4);
+    box-shadow: 0 1px 0 rgba(27,26,23,0.04), 0 26px 44px -28px rgba(27,26,23,0.5);
+  }
+  .card__top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+  .card__kicker {
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-4);
+  }
+  .card h3 {
+    font-family: var(--serif);
+    font-weight: 600;
+    font-size: 21px;
+    line-height: 1.18;
+    letter-spacing: -0.01em;
+    margin: 4px 0 0;
+    color: var(--ink);
+  }
+  .card__body { flex: 1; }
+  .card__meta {
+    font-size: 12.5px;
+    color: var(--ink-3);
+    margin-top: 14px;
+  }
+  .card__foot {
+    margin-top: 18px;
+    padding-top: 14px;
+    border-top: 1px solid var(--rule-soft);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .open-link {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--accent);
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .open-link .arr { transition: transform .18s ease; }
+  .open-link:hover .arr { transform: translateX(3px); }
+
+  /* chips */
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    padding: 4px 10px;
+    border-radius: 100px;
+    border: 1px solid transparent;
+    white-space: nowrap;
+  }
+  .chip::before {
+    content: "";
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    opacity: 0.85;
+  }
+  .chip--review { color: var(--maybe); background: var(--maybe-bg); border-color: color-mix(in srgb, var(--maybe) 28%, transparent); }
+  .chip--include { color: var(--include); background: var(--include-bg); border-color: color-mix(in srgb, var(--include) 26%, transparent); }
+  .chip--maybe { color: var(--maybe); background: var(--maybe-bg); border-color: color-mix(in srgb, var(--maybe) 28%, transparent); }
+  .chip--exclude { color: var(--exclude); background: var(--exclude-bg); border-color: color-mix(in srgb, var(--exclude) 26%, transparent); }
+
+  /* progress bar */
+  .progress {
+    height: 5px;
+    background: var(--paper-sunk);
+    border-radius: 100px;
+    overflow: hidden;
+    margin: 16px 0 8px;
+    box-shadow: inset 0 0 0 1px var(--rule-soft);
+  }
+  .progress__fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent), var(--accent-deep));
+    border-radius: 100px;
+  }
+  .progress__label {
+    font-size: 11.5px;
+    color: var(--ink-4);
+    font-variant-numeric: tabular-nums;
+    display: flex;
+    justify-content: space-between;
+  }
+
+  /* funnel mini */
+  .funnel {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    margin: 6px 0 4px;
+  }
+  .funnel__row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    gap: 10px;
+    font-size: 12.5px;
+  }
+  .funnel__name { color: var(--ink-2); }
+  .funnel__bar {
+    height: 8px;
+    background: var(--paper-sunk);
+    border-radius: 3px;
+    overflow: hidden;
+    box-shadow: inset 0 0 0 1px var(--rule-soft);
+    grid-column: 1 / 2;
+    margin-top: 2px;
+  }
+  .funnel__bar > span {
+    display: block;
+    height: 100%;
+    background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 80%, var(--ink)), var(--accent));
+    border-radius: 3px;
+  }
+  .funnel__line {
+    display: contents;
+  }
+  .funnel__count {
+    font-variant-numeric: tabular-nums;
+    color: var(--ink-3);
+    font-weight: 600;
+    font-size: 12px;
+  }
+  .funnel__steps {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 8px;
+    font-size: 12.5px;
+    color: var(--ink-2);
+    margin: 4px 0 2px;
+    line-height: 1.6;
+  }
+  .funnel__step b { font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .funnel__arrow { color: var(--ink-4); }
+
+  /* diff line */
+  .diff {
+    font-family: "Newsreader", Georgia, serif;
+    font-size: 14px;
+    line-height: 1.6;
+    margin: 14px 0 4px;
+    border-left: 2px solid var(--rule);
+    padding-left: 12px;
+  }
+  .diff__line { display: block; }
+  .diff del {
+    color: var(--del);
+    background: var(--del-bg);
+    text-decoration: line-through;
+    text-decoration-color: color-mix(in srgb, var(--del) 70%, transparent);
+    padding: 1px 4px;
+    border-radius: 3px;
+  }
+  .diff ins {
+    color: var(--add);
+    background: var(--add-bg);
+    text-decoration: none;
+    padding: 1px 4px;
+    border-radius: 3px;
+  }
+  .diff .gutter { font-family: var(--sans); font-weight: 700; margin-right: 6px; font-size: 12px; }
+  .diff .gutter--del { color: var(--del); }
+  .diff .gutter--add { color: var(--add); }
+
+  /* pill button */
+  .pill {
+    appearance: none;
+    cursor: pointer;
+    font-family: var(--sans);
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--accent);
+    background: var(--accent-tint);
+    border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+    padding: 7px 14px;
+    border-radius: 100px;
+    transition: background-color .18s ease, color .18s ease, transform .1s ease;
+  }
+  .pill:hover { background: var(--accent); color: #fff; }
+  [data-theme="dark"] .pill:hover { color: var(--paper); }
+  .pill:active { transform: translateY(1px); }
+
+  /* ============================================================
+     TABLE
+     ============================================================ */
+  .table-wrap {
+    background: var(--card);
+    border: 1px solid var(--rule);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    box-shadow: var(--shadow-card);
+  }
+  table.screening {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+  }
+  table.screening thead th {
+    text-align: left;
+    font-family: var(--sans);
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--ink-4);
+    padding: 15px 18px;
+    border-bottom: 1.5px solid var(--ink);
+    background: var(--paper-2);
+    white-space: nowrap;
+  }
+  [data-theme="dark"] table.screening thead th { border-bottom-color: var(--ink-4); }
+  table.screening tbody td {
+    padding: 16px 18px;
+    border-bottom: 1px solid var(--rule-soft);
+    color: var(--ink-2);
+    vertical-align: middle;
+  }
+  table.screening tbody tr:last-child td { border-bottom: none; }
+  table.screening tbody tr { transition: background-color .15s ease; }
+  table.screening tbody tr:hover { background: var(--paper-2); }
+  .paper-title {
+    font-family: var(--serif);
+    font-size: 15.5px;
+    color: var(--ink);
+    font-weight: 500;
+    line-height: 1.3;
+  }
+  .num { font-variant-numeric: lining-nums tabular-nums; text-align: right; color: var(--ink-2); font-weight: 500; }
+  th.num { text-align: right; }
+  .journal { color: var(--ink-3); font-style: italic; font-family: var(--serif); font-size: 14.5px; }
+  .year { font-variant-numeric: tabular-nums; color: var(--ink-3); }
+
+  .badge-q {
+    display: inline-grid;
+    place-items: center;
+    min-width: 30px;
+    height: 21px;
+    padding: 0 7px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    border-radius: 4px;
+    border: 1px solid var(--rule);
+    color: var(--ink-2);
+    background: var(--paper-sunk);
+    font-variant-numeric: tabular-nums;
+  }
+  .badge-q.q1 { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 35%, transparent); background: var(--accent-tint); }
+
+  .decision-cell { white-space: nowrap; }
+
+  /* ============================================================
+     BOTTOM STRIP
+     ============================================================ */
+  .bottom {
+    margin: 40px 0 64px;
+    padding: 22px 24px;
+    background: var(--paper-2);
+    border: 1px solid var(--rule);
+    border-radius: var(--radius-lg);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    flex-wrap: wrap;
+  }
+  .bottom__left { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+
+  .segmented {
+    display: inline-flex;
+    background: var(--paper-sunk);
+    border: 1px solid var(--rule);
+    border-radius: 7px;
+    padding: 3px;
+    gap: 2px;
+  }
+  .segmented button {
+    appearance: none;
+    cursor: pointer;
+    border: none;
+    background: transparent;
+    font-family: var(--sans);
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--ink-3);
+    padding: 6px 15px;
+    border-radius: 5px;
+    transition: color .15s ease, background-color .15s ease, box-shadow .15s ease;
+  }
+  .segmented button:hover { color: var(--ink); }
+  .segmented button[aria-selected="true"] {
+    background: var(--card);
+    color: var(--ink);
+    font-weight: 600;
+    box-shadow: 0 1px 2px rgba(27,26,23,0.12), inset 0 0 0 1px var(--rule-soft);
+  }
+
+  .tags { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .tag {
+    font-family: var(--serif);
+    font-size: 13px;
+    font-style: italic;
+    color: var(--ink-2);
+    background: var(--card);
+    border: 1px solid var(--rule);
+    padding: 4px 11px;
+    border-radius: 100px;
+  }
+  .tag::before { content: "#"; color: var(--accent); font-style: normal; margin-right: 1px; opacity: 0.8; }
+
+  /* footer hairline note */
+  .colophon {
+    border-top: 1px solid var(--rule);
+    padding: 22px 0 48px;
+  }
+  .colophon__inner {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+    font-size: 12px;
+    color: var(--ink-4);
+  }
+  .colophon b { font-family: var(--serif); font-weight: 600; color: var(--ink-3); font-style: italic; }
+
+  /* ============================================================
+     RESPONSIVE
+     ============================================================ */
+  @media (max-width: 900px) {
+    .wrap { padding: 0 22px; }
+    .cards { grid-template-columns: 1fr; }
+    .stats { grid-template-columns: repeat(2, 1fr); }
+    .stat:nth-child(3) { padding-left: 0; }
+    .stat:nth-child(3)::before { display: none; }
+    .stat:nth-child(2) { padding-left: 28px; }
+  }
+
+  @media (max-width: 720px) {
+    .nav { display: none; }
+    .hero { padding: 40px 0 26px; }
+    .hero__inner { align-items: flex-start; }
+  }
+
+  @media (max-width: 640px) {
+    .stats { grid-template-columns: 1fr 1fr; }
+    /* table -> stacked cards */
+    table.screening thead { display: none; }
+    table.screening, table.screening tbody, table.screening tr, table.screening td { display: block; width: 100%; }
+    table.screening tbody tr {
+      border-bottom: 1px solid var(--rule);
+      padding: 6px 4px 12px;
+    }
+    table.screening tbody td {
+      border: none;
+      padding: 5px 18px;
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 16px;
+    }
+    table.screening tbody td::before {
+      content: attr(data-label);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--ink-4);
+      flex: 0 0 auto;
+    }
+    .paper-title { text-align: right; }
+    .num, .journal, .year { text-align: right; }
+    .bottom { flex-direction: column; align-items: stretch; }
+  }
+</style>
+</head>
+<body>
+
+  <!-- ===================== TOP BAR ===================== -->
+  <header class="topbar">
+    <div class="wrap topbar__inner">
+      <a class="brand" href="#" aria-label="Publify home">
+        <span class="logomark" aria-hidden="true">P</span>
+        <span class="wordmark">Publify<span class="dot">.</span></span>
+      </a>
+
+      <nav class="nav" aria-label="Primary">
+        <a href="#" aria-current="page">Projects</a>
+        <span class="sep" aria-hidden="true">·</span>
+        <a href="#">Research</a>
+        <span class="sep" aria-hidden="true">·</span>
+        <a href="#">Compare</a>
+        <span class="sep" aria-hidden="true">·</span>
+        <a href="#">Chat</a>
+      </nav>
+
+      <div class="topbar__right">
+        <button class="iconbtn" id="themeToggle" type="button" aria-label="Toggle theme" title="Toggle light / dark">
+          <span aria-hidden="true" id="themeIcon">☾</span>
+        </button>
+        <span class="avatar" role="img" aria-label="Lóránt Szabó">LS</span>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <!-- ===================== HERO ===================== -->
+    <section class="hero">
+      <div class="wrap hero__inner">
+        <div>
+          <span class="eyebrow">Publify · Research Workspace</span>
+          <h1>Workspace</h1>
+          <p class="hero__sub">Good afternoon, <b>Lóránt</b> — three projects in progress.</p>
+        </div>
+        <button class="btn btn--primary" type="button">
+          <span aria-hidden="true">+</span> New project
+        </button>
+      </div>
+    </section>
+
+    <!-- ===================== STAT STRIP ===================== -->
+    <section class="wrap" aria-label="Summary statistics">
+      <div class="stats">
+        <div class="stat">
+          <div class="stat__num">12</div>
+          <div class="stat__label">Projects</div>
+        </div>
+        <div class="stat">
+          <div class="stat__num">248</div>
+          <div class="stat__label">Papers screened</div>
+        </div>
+        <div class="stat">
+          <div class="stat__num">5</div>
+          <div class="stat__label">Audiobooks</div>
+        </div>
+        <div class="stat">
+          <div class="stat__num">2</div>
+          <div class="stat__label">Shared reviews</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== FEATURE CARDS ===================== -->
+    <section class="wrap section" aria-label="Active work">
+      <div class="section__head">
+        <h2>In Progress</h2>
+        <span class="line" aria-hidden="true"></span>
+      </div>
+
+      <div class="cards">
+
+        <!-- (a) Manuscript -->
+        <article class="card">
+          <div class="card__top">
+            <span class="card__kicker">Manuscript</span>
+            <span class="chip chip--review">In review</span>
+          </div>
+          <div class="card__body">
+            <h3>Conformally Certified OOD Detection for Camera &amp; LiDAR Sensors</h3>
+            <div class="progress" role="progressbar" aria-valuenow="72" aria-valuemin="0" aria-valuemax="100" aria-label="Draft completion">
+              <div class="progress__fill" style="width:72%"></div>
+            </div>
+            <div class="progress__label"><span>Draft completion</span><span>72%</span></div>
+          </div>
+          <div class="card__foot">
+            <span class="card__meta">Edited 2h ago</span>
+            <a class="open-link" href="#">Open <span class="arr" aria-hidden="true">→</span></a>
+          </div>
+        </article>
+
+        <!-- (b) Literature study -->
+        <article class="card">
+          <div class="card__top">
+            <span class="card__kicker">Literature study</span>
+          </div>
+          <div class="card__body">
+            <h3>OOD detection — sensor fusion</h3>
+            <div class="funnel__steps" aria-label="Screening funnel">
+              <span class="funnel__step">Quick <b>150</b></span>
+              <span class="funnel__arrow" aria-hidden="true">→</span>
+              <span class="funnel__step">Abstract <b>48</b></span>
+              <span class="funnel__arrow" aria-hidden="true">→</span>
+              <span class="funnel__step">Full text <b>21</b></span>
+              <span class="funnel__arrow" aria-hidden="true">→</span>
+              <span class="funnel__step">Review <b>1</b></span>
+            </div>
+            <div class="progress" role="progressbar" aria-valuenow="75" aria-valuemin="0" aria-valuemax="100" aria-label="Screening progress">
+              <div class="progress__fill" style="width:75%"></div>
+            </div>
+            <div class="progress__label"><span>Screening</span><span>Step 3 of 4</span></div>
+          </div>
+          <div class="card__foot">
+            <span class="card__meta">21 papers in full-text review</span>
+            <a class="open-link" href="#">Open <span class="arr" aria-hidden="true">→</span></a>
+          </div>
+        </article>
+
+        <!-- (c) Revision compare -->
+        <article class="card">
+          <div class="card__top">
+            <span class="card__kicker">Revision compare</span>
+          </div>
+          <div class="card__body">
+            <h3>Sensors v2 → v3</h3>
+            <div class="card__meta">34 changes · 18 reviewer points</div>
+            <div class="diff" aria-label="Diff preview">
+              <span class="diff__line"><span class="gutter gutter--del" aria-hidden="true">−</span><del>…via Fisher Score Fusion</del></span>
+              <span class="diff__line"><span class="gutter gutter--add" aria-hidden="true">+</span><ins>When Does Score Fusion Help? …</ins></span>
+            </div>
+          </div>
+          <div class="card__foot">
+            <span class="card__meta">Reviewed by 2</span>
+            <button class="pill" type="button">Share with reviewers</button>
+          </div>
+        </article>
+
+      </div>
+    </section>
+
+    <!-- ===================== TABLE ===================== -->
+    <section class="wrap section" aria-label="Screening results">
+      <div class="section__head">
+        <h2>Screening Results</h2>
+        <span class="line" aria-hidden="true"></span>
+      </div>
+
+      <div class="table-wrap">
+        <table class="screening">
+          <thead>
+            <tr>
+              <th scope="col">Decision</th>
+              <th scope="col">Paper</th>
+              <th scope="col">Quartile</th>
+              <th scope="col" class="num">Cites</th>
+              <th scope="col">Journal</th>
+              <th scope="col">Year</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td data-label="Decision" class="decision-cell"><span class="chip chip--include">Include</span></td>
+              <td data-label="Paper"><span class="paper-title">Out-of-distribution detection via Mahalanobis distance</span></td>
+              <td data-label="Quartile"><span class="badge-q q1">Q1</span></td>
+              <td data-label="Cites" class="num">412</td>
+              <td data-label="Journal" class="journal">IEEE TPAMI</td>
+              <td data-label="Year" class="year">2023</td>
+            </tr>
+            <tr>
+              <td data-label="Decision" class="decision-cell"><span class="chip chip--maybe">Maybe</span></td>
+              <td data-label="Paper"><span class="paper-title">Conformal prediction for open-set recognition</span></td>
+              <td data-label="Quartile"><span class="badge-q q1">Q1</span></td>
+              <td data-label="Cites" class="num">88</td>
+              <td data-label="Journal" class="journal">NeurIPS</td>
+              <td data-label="Year" class="year">2024</td>
+            </tr>
+            <tr>
+              <td data-label="Decision" class="decision-cell"><span class="chip chip--exclude">Exclude</span></td>
+              <td data-label="Paper"><span class="paper-title">A survey of anomaly detection</span></td>
+              <td data-label="Quartile"><span class="badge-q">Q2</span></td>
+              <td data-label="Cites" class="num">1,503</td>
+              <td data-label="Journal" class="journal">ACM CSUR</td>
+              <td data-label="Year" class="year">2021</td>
+            </tr>
+            <tr>
+              <td data-label="Decision" class="decision-cell"><span class="chip chip--include">Include</span></td>
+              <td data-label="Paper"><span class="paper-title">Fisher information and OOD</span></td>
+              <td data-label="Quartile"><span class="badge-q">Q2</span></td>
+              <td data-label="Cites" class="num">27</td>
+              <td data-label="Journal" class="journal">Sensors</td>
+              <td data-label="Year" class="year">2024</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ===================== BOTTOM STRIP ===================== -->
+    <section class="wrap" aria-label="View controls">
+      <div class="bottom">
+        <div class="bottom__left">
+          <div class="segmented" role="tablist" aria-label="View mode">
+            <button role="tab" aria-selected="true">Overview</button>
+            <button role="tab" aria-selected="false">Changes</button>
+            <button role="tab" aria-selected="false">PDF</button>
+          </div>
+          <div class="tags" aria-label="Tags">
+            <span class="tag">OOD</span>
+            <span class="tag">LiDAR</span>
+            <span class="tag">conformal</span>
+          </div>
+        </div>
+        <button class="btn btn--ghost" type="button">Open editor</button>
+      </div>
+    </section>
+  </main>
+
+  <!-- ===================== COLOPHON ===================== -->
+  <footer class="colophon">
+    <div class="wrap colophon__inner">
+      <span><b>Publify</b> &nbsp;·&nbsp; A scholarly press for working researchers</span>
+      <span>Set in Newsreader &amp; Inter</span>
+    </div>
+  </footer>
+
+  <script>
+    // Tiny optional theme toggle — no app logic.
+    (function () {
+      var root = document.documentElement;
+      var btn = document.getElementById('themeToggle');
+      var icon = document.getElementById('themeIcon');
+      btn.addEventListener('click', function () {
+        var dark = root.getAttribute('data-theme') === 'dark';
+        root.setAttribute('data-theme', dark ? 'light' : 'dark');
+        icon.textContent = dark ? '☾' : '☀';
+        btn.setAttribute('aria-pressed', String(!dark));
+      });
+    })();
+  </script>
+</body>
+</html>
