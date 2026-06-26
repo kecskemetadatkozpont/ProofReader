@@ -58,18 +58,18 @@ function NotifBell({ notif }) {
   const accept = (n) => { const p = n.payload || {}; if (p.project_id && Store.acceptInvitation) Store.acceptInvitation(p.project_id); notif.markRead(n); };
   const view = (n) => { notif.markRead(n); const t = notifTarget(n); if (t) location.href = t; };
   return <div className="notif-wrap">
-    <button className="bell" title="Notifications" onClick={(e) => { e.stopPropagation(); const o = !open; setOpen(o); if (o) notif.reload(); }}>
-      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M8 2a3.5 3.5 0 0 0-3.5 3.5c0 3-1.5 4-1.5 4h10s-1.5-1-1.5-4A3.5 3.5 0 0 0 8 2z" strokeLinejoin="round" /><path d="M6.6 12.4a1.5 1.5 0 0 0 2.8 0" strokeLinecap="round" /></svg>
+    <button className="bell" title="Notifications" aria-label={'Notifications' + (notif.unread ? ' (' + notif.unread + ' unread)' : '')} aria-pressed={open} onClick={(e) => { e.stopPropagation(); const o = !open; setOpen(o); if (o) notif.reload(); }}>
+      <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M8 2a3.5 3.5 0 0 0-3.5 3.5c0 3-1.5 4-1.5 4h10s-1.5-1-1.5-4A3.5 3.5 0 0 0 8 2z" strokeLinejoin="round" /><path d="M6.6 12.4a1.5 1.5 0 0 0 2.8 0" strokeLinecap="round" /></svg>
       {notif.unread ? <i className="nb">{notif.unread > 9 ? '9+' : notif.unread}</i> : null}
     </button>
     {open ? <div className="notif-pop" onClick={(e) => e.stopPropagation()}>
-      <div className="nh">Notifications{notif.unread ? <button className="back-btn" onClick={notif.markAll}>Mark all read</button> : null}</div>
+      <div className="nh">Notifications{notif.unread ? <button className="back-btn" aria-label="Mark all notifications as read" onClick={notif.markAll}>Mark all read</button> : null}</div>
       {notif.notes.length ? notif.notes.slice(0, 20).map((n) => { const tgt = notifTarget(n); return (
         <div key={n.id} className={'notif-item' + (n.read_at ? '' : ' unread')}>
           <b>{notifTitle(n)}</b><div className="nx">{notifSumm(n)}</div>
           <div className="ni-actions">
-            {n.kind === 'share' ? <button className="adr-accept" onClick={() => accept(n)}>Accept</button> : null}
-            {tgt ? <button className="adr-view" onClick={() => view(n)}>Open →</button> : null}
+            {n.kind === 'share' ? <button className="adr-accept" aria-label={'Accept invitation: ' + notifTitle(n)} onClick={() => accept(n)}>Accept</button> : null}
+            {tgt ? <button className="adr-view" aria-label={'Open: ' + notifTitle(n)} onClick={() => view(n)}>Open <span aria-hidden="true">→</span></button> : null}
           </div>
         </div>
       ); }) : <div className="adr-notif-empty" style={{ textAlign: 'center' }}>No notifications.</div>}
@@ -209,6 +209,7 @@ function ShareModal({ project, me, onClose, onChange }) {
   const owner = Auth.byId(project.ownerId);
   const isOwnerView = project.ownerId === me.id;
   useEffect(() => { if (isOwnerView && isCloudMode() && Store.loadAcceptance) Store.loadAcceptance(project.id).then(setAccept); }, [project.id, project.members.length]);
+  useEffect(() => { const onKey = (e) => { if (e.key === 'Escape') onClose(); }; document.addEventListener('keydown', onKey); return () => document.removeEventListener('keydown', onKey); }, [onClose]);
   const invite = async () => {
     const e = email.trim(); if (!e) return;
     let u = Auth.byEmail(e);
@@ -219,7 +220,7 @@ function ShareModal({ project, me, onClose, onChange }) {
   const link = location.origin + location.pathname.replace(/Projects\.html$/, '') + 'ProofReader.html?p=' + project.id;
   return (
     <div className="overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+      <div className="modal" role="dialog" aria-modal="true" aria-label={'Share ' + project.title} onClick={(e) => e.stopPropagation()}>
         <div className="modal-head"><h3>Share “{project.title}”</h3><p>Invite collaborators or share a link.</p></div>
         <div className="modal-body">
           <div className="field-label">Invite by email</div>
@@ -246,7 +247,7 @@ function ShareModal({ project, me, onClose, onChange }) {
                 <Avatar user={u} size={32} />
                 <span className="mname">{u ? u.name : m.userId}{u && u.id === me.id ? ' (you)' : ''}<small>{u && u.email}</small></span>
                 {isOwnerView && isCloudMode()
-                  ? <span className={'inv-pill ' + (pending ? 'pending' : 'ok')} title={pending ? 'The invitee has not accepted the invitation yet' : ('Accepted: ' + new Date(acc).toLocaleString())}>{pending ? 'Pending' : 'Accepted'}</span>
+                  ? <span className={'inv-pill ' + (pending ? 'pending' : 'ok')} aria-label={'Invitation ' + (pending ? 'pending' : 'accepted')} title={pending ? 'The invitee has not accepted the invitation yet' : ('Accepted: ' + new Date(acc).toLocaleString())}>{pending ? 'Pending' : 'Accepted'}</span>
                   : null}
                 {project.ownerId === me.id
                   ? <>
@@ -517,7 +518,7 @@ function App() {
           {!preview && <button className="btn-primary" onClick={() => setModal('new')}><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M8 3v10M3 8h10" /></svg>New publication</button>}
           {isCloudMode() && <NotifBell notif={notif} />}
           <div className="acct">
-            <button className="acct-btn" title="Account" onClick={(e) => { e.stopPropagation(); setAcctOpen((v) => !v); }}><Avatar user={me} size={34} /></button>
+            <button className="acct-btn" title="Account" aria-label="Account menu" aria-expanded={acctOpen} onClick={(e) => { e.stopPropagation(); setAcctOpen((v) => !v); }}><Avatar user={me} size={34} /></button>
             {acctOpen && <AccountMenu me={me}
               onUsage={() => { setAcctOpen(false); setModal('usage'); }}
               onSwitch={(id) => { Auth.signIn(id); setMe(Auth.byId(id)); setAcctOpen(false); }}

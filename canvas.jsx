@@ -282,6 +282,13 @@
       window.addEventListener('keydown', onKey); return function () { window.removeEventListener('keydown', onKey); };
     }, [sel, editing]); // eslint-disable-line
 
+    // ---- keyboard: Esc closes the AI-summary dialog ----
+    useEffect(function () {
+      if (!summary) return;
+      function onEsc(e) { if (e.key === 'Escape') { e.preventDefault(); setSummary(null); } }
+      window.addEventListener('keydown', onEsc); return function () { window.removeEventListener('keydown', onEsc); };
+    }, [summary]); // eslint-disable-line
+
     if (!loaded) return h('div', { className: 'empty' }, 'Loading canvas…');
 
     // ---- edges (screen-space SVG) ----
@@ -335,32 +342,32 @@
           : isEd ? h('textarea', { autoFocus: true, defaultValue: n.text || '', onBlur: function (e) { updateNode(n.id, { text: e.target.value }); setEditing(null); }, onMouseDown: function (e) { e.stopPropagation(); }, style: { width: '100%', minHeight: 50, border: 0, background: 'transparent', resize: 'none', fontFamily: 'inherit', fontSize: 13, lineHeight: 1.4, padding: '2px 10px 10px', color: 'inherit', outline: 'none', boxSizing: 'border-box' } })
             : h('div', { style: { fontSize: 13, lineHeight: 1.4, padding: '2px 10px 10px', color: 'var(--ink)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, n.text || h('span', { style: { color: 'var(--faint)' } }, n.type === 'note' ? 'double-click to edit' : '—')),
         (!media && n.meta) ? h('div', { style: { fontSize: 11, color: 'var(--muted)', padding: '0 10px 8px' } }, n.meta) : null,
-        canEdit ? h('div', { title: 'Drag onto another node', onMouseDown: function (e) { onHandleDown(e, n); }, style: { position: 'absolute', right: -7, top: '50%', marginTop: -7, width: 14, height: 14, borderRadius: '50%', background: 'var(--accent)', border: '2px solid var(--surface)', cursor: 'crosshair', zIndex: 2 } }) : null,
-        canEdit ? h('div', { title: 'Resize', onMouseDown: function (e) { onResizeDown(e, n); }, style: { position: 'absolute', right: 0, bottom: 0, width: 16, height: 16, cursor: 'nwse-resize', zIndex: 2, background: 'linear-gradient(135deg, transparent 45%, ' + (on ? 'var(--accent)' : 'var(--muted)') + ' 45%, ' + (on ? 'var(--accent)' : 'var(--muted)') + ' 60%, transparent 60%)' } }) : null,
-        (on && canEdit) ? h('button', { onClick: function (e) { e.stopPropagation(); delNode(n.id); }, onMouseDown: function (e) { e.stopPropagation(); }, style: { position: 'absolute', top: -10, right: -10, width: 22, height: 22, borderRadius: '50%', border: '1px solid var(--line)', background: 'var(--surface)', color: 'var(--danger)', cursor: 'pointer', fontSize: 13, lineHeight: '20px', padding: 0, zIndex: 3 } }, '×') : null);
+        canEdit ? h('div', { role: 'button', 'aria-label': 'Connect to another node', title: 'Drag onto another node', onMouseDown: function (e) { onHandleDown(e, n); }, style: { position: 'absolute', right: -7, top: '50%', marginTop: -7, width: 14, height: 14, borderRadius: '50%', background: 'var(--accent)', border: '2px solid var(--surface)', cursor: 'crosshair', zIndex: 2 } }) : null,
+        canEdit ? h('div', { role: 'button', 'aria-label': 'Resize node', title: 'Resize', onMouseDown: function (e) { onResizeDown(e, n); }, style: { position: 'absolute', right: 0, bottom: 0, width: 16, height: 16, cursor: 'nwse-resize', zIndex: 2, background: 'linear-gradient(135deg, transparent 45%, ' + (on ? 'var(--accent)' : 'var(--muted)') + ' 45%, ' + (on ? 'var(--accent)' : 'var(--muted)') + ' 60%, transparent 60%)' } }) : null,
+        (on && canEdit) ? h('button', { 'aria-label': 'Delete node', onClick: function (e) { e.stopPropagation(); delNode(n.id); }, onMouseDown: function (e) { e.stopPropagation(); }, style: { position: 'absolute', top: -10, right: -10, width: 22, height: 22, borderRadius: '50%', border: '1px solid var(--line)', background: 'var(--surface)', color: 'var(--danger)', cursor: 'pointer', fontSize: 13, lineHeight: '20px', padding: 0, zIndex: 3 } }, '×') : null);
     });
 
     var btn = { border: '1px solid var(--line)', background: 'var(--surface)', color: 'var(--ink)', borderRadius: 8, padding: '6px 11px', fontFamily: 'inherit', fontSize: 13, fontWeight: 600, cursor: 'pointer' };
     return h('div', { style: { position: 'relative' } },
       // toolbar
       h('div', { style: { display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' } },
-        canEdit ? h('button', { style: btn, onClick: function () { addNode('note'); } }, '+ Note') : null,
-        canEdit ? h('button', { style: btn, onClick: openIdeas }, '+ Idea') : null,
-        canEdit ? h('button', { style: btn, onClick: openPubs }, '+ Publication') : null,
-        canEdit ? h('button', { style: btn, onClick: openSources }, '+ Source') : null,
-        canEdit ? h('button', { style: btn, onClick: openData }, '+ Data') : null,
-        canEdit ? h('button', { style: btn, onClick: pickFile, disabled: uploading, title: 'Upload image / PDF / video / .md' }, uploading ? 'Uploading…' : '⬆ Upload') : null,
-        canEdit ? h('button', { style: btn, onClick: addLink, title: 'Website / YouTube / Vimeo / image link' }, '+ Link') : null,
+        canEdit ? h('button', { style: btn, 'aria-label': 'Add note', onClick: function () { addNode('note'); } }, '+ Note') : null,
+        canEdit ? h('button', { style: btn, 'aria-label': 'Add idea', onClick: openIdeas }, '+ Idea') : null,
+        canEdit ? h('button', { style: btn, 'aria-label': 'Add publication', onClick: openPubs }, '+ Publication') : null,
+        canEdit ? h('button', { style: btn, 'aria-label': 'Add source', onClick: openSources }, '+ Source') : null,
+        canEdit ? h('button', { style: btn, 'aria-label': 'Add data', onClick: openData }, '+ Data') : null,
+        canEdit ? h('button', { style: btn, 'aria-label': 'Upload image, PDF, video or markdown', onClick: pickFile, disabled: uploading, title: 'Upload image / PDF / video / .md' }, uploading ? 'Uploading…' : '⬆ Upload') : null,
+        canEdit ? h('button', { style: btn, 'aria-label': 'Add link', onClick: addLink, title: 'Website / YouTube / Vimeo / image link' }, '+ Link') : null,
         canEdit ? h('input', { ref: fileRef, type: 'file', accept: 'image/*,application/pdf,video/*,.md,.markdown,text/markdown', style: { display: 'none' }, onChange: onPickFile }) : null,
-        h('span', { style: { width: 1, height: 22, background: 'var(--line)', margin: '0 2px' } }),
-        h('button', { style: btn, title: 'Zoom out', onClick: function () { zoom(1 / 1.2); } }, '−'),
-        h('button', { style: btn, title: 'Zoom in', onClick: function () { zoom(1.2); } }, '+'),
-        h('button', { style: btn, onClick: fit }, 'Fit'),
+        h('span', { 'aria-hidden': 'true', style: { width: 1, height: 22, background: 'var(--line)', margin: '0 2px' } }),
+        h('button', { style: btn, 'aria-label': 'Zoom out', title: 'Zoom out', onClick: function () { zoom(1 / 1.2); } }, '−'),
+        h('button', { style: btn, 'aria-label': 'Zoom in', title: 'Zoom in', onClick: function () { zoom(1.2); } }, '+'),
+        h('button', { style: btn, 'aria-label': 'Fit to view', onClick: fit }, 'Fit'),
         h('span', { style: { fontSize: 12, color: 'var(--muted)' } }, Math.round(view.k * 100) + '%'),
-        h('span', { style: { width: 1, height: 22, background: 'var(--line)', margin: '0 2px' } }),
-        h('button', { style: btn, onClick: aiSummary }, '✨ AI summary'),
+        h('span', { 'aria-hidden': 'true', style: { width: 1, height: 22, background: 'var(--line)', margin: '0 2px' } }),
+        h('button', { style: btn, 'aria-label': 'AI summary', onClick: aiSummary }, '✨ AI summary'),
         h('span', { style: { position: 'relative' } },
-          h('button', { style: btn, onClick: function () { setExpOpen(!expOpen); } }, 'Export ▾'),
+          h('button', { style: btn, 'aria-label': 'Export', onClick: function () { setExpOpen(!expOpen); } }, 'Export ▾'),
           expOpen ? h('div', { style: { position: 'absolute', zIndex: 30, top: 36, right: 0, background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 9, boxShadow: '0 10px 30px rgba(0,0,0,.2)', padding: 5, width: 130 } },
             h('div', { onClick: exportSVG, style: { padding: '7px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 13 } }, 'SVG (.svg)'),
             h('div', { onClick: exportPNG, style: { padding: '7px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 13 } }, 'Image (.png)')) : null),
@@ -391,8 +398,8 @@
         nodes.length === 0 ? h('div', { style: { position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: 'var(--faint)', fontSize: 14, pointerEvents: 'none' } }, 'Empty canvas — add a Note / Idea / Publication / Source / Data and connect them.') : null),
       h('div', { style: { fontSize: 11.5, color: 'var(--faint)', marginTop: 6 } }, 'Drag background = pan · scroll = zoom · drag from node edge = connection · double-click an edge = type · Delete = remove'),
       summary ? h('div', { onClick: function () { setSummary(null); }, style: { position: 'fixed', inset: 0, background: 'rgba(8,10,16,.5)', zIndex: 2000, display: 'grid', placeItems: 'center', padding: 20 } },
-        h('div', { onClick: function (e) { e.stopPropagation(); }, style: { width: 560, maxWidth: '100%', maxHeight: '80vh', overflowY: 'auto', background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 16, boxShadow: '0 24px 70px rgba(0,0,0,.4)', padding: '22px 24px' } },
-          h('div', { style: { display: 'flex', alignItems: 'center', marginBottom: 12 } }, h('b', { style: { fontSize: 16 } }, '✨ Canvas summary'), h('button', { onClick: function () { setSummary(null); }, style: { marginLeft: 'auto', border: 0, background: 'transparent', fontSize: 20, color: 'var(--muted)', cursor: 'pointer' } }, '×')),
+        h('div', { role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Canvas summary', onClick: function (e) { e.stopPropagation(); }, style: { width: 560, maxWidth: '100%', maxHeight: '80vh', overflowY: 'auto', background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 16, boxShadow: '0 24px 70px rgba(0,0,0,.4)', padding: '22px 24px' } },
+          h('div', { style: { display: 'flex', alignItems: 'center', marginBottom: 12 } }, h('b', { style: { fontSize: 16 } }, h('span', { 'aria-hidden': 'true' }, '✨ '), 'Canvas summary'), h('button', { 'aria-label': 'Close', onClick: function () { setSummary(null); }, style: { marginLeft: 'auto', border: 0, background: 'transparent', fontSize: 20, color: 'var(--muted)', cursor: 'pointer' } }, '×')),
           summary.loading ? h('div', { style: { color: 'var(--muted)', fontSize: 14 } }, 'Analyzing…') :
             summary.err ? h('div', { style: { color: 'var(--danger)', fontSize: 14 } }, summary.err) :
               h('div', { style: { fontSize: 14, lineHeight: 1.6 }, dangerouslySetInnerHTML: { __html: (window.DOMPurify && window.marked) ? DOMPurify.sanitize(marked.parse(summary.text || '')) : (summary.text || '').replace(/\n/g, '<br>') } }))) : null

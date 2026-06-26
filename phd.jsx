@@ -72,9 +72,10 @@
   // ---------- Supervisors ----------
   function SupervisorModal(props) {
     var s = props.sup, students = props.students.filter(function (x) { return x.supervisor_id === s.id; }), rec = pubRec(s.email);
+    useEffect(function () { var onKey = function (e) { if (e.key === 'Escape') props.onClose(); }; window.addEventListener('keydown', onKey); return function () { window.removeEventListener('keydown', onKey); }; }, []);
     return h('div', { className: 'scrim', onMouseDown: props.onClose },
-      h('div', { className: 'modal', onMouseDown: function (e) { e.stopPropagation(); } },
-        h('div', { className: 'modal-h' }, h(Avatar, { u: s, size: 44 }), h('div', null, h('b', { style: { fontSize: 16 } }, s.name), h('div', { style: { fontSize: 12.5, color: 'var(--muted)' } }, s.department || '—')), h('button', { className: 'x', onClick: props.onClose }, '✕')),
+      h('div', { className: 'modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': s.name || 'Supervisor', onMouseDown: function (e) { e.stopPropagation(); } },
+        h('div', { className: 'modal-h' }, h(Avatar, { u: s, size: 44 }), h('div', null, h('b', { style: { fontSize: 16 } }, s.name), h('div', { style: { fontSize: 12.5, color: 'var(--muted)' } }, s.department || '—')), h('button', { className: 'x', 'aria-label': 'Close', onClick: props.onClose }, '✕')),
         h('div', { className: 'modal-b' },
           h('div', { className: 'sec-t' }, 'Research interests'),
           (s.research_interests && s.research_interests.length) ? h('div', { className: 'tags' }, s.research_interests.map(function (t, i) { return h('span', { className: 'tag', key: i }, t); })) : h('div', { style: { fontSize: 13, color: 'var(--faint)' } }, 'None listed yet.'),
@@ -152,9 +153,10 @@
         supervisor_id: form.supervisor_id || props.me.id, required_credits: Number(form.required_credits) || 240, status: 'Aktív'
       }).select().maybeSingle().then(function (r) { setSaving(false); if (r && r.error) { alert('Could not add: ' + r.error.message); return; } props.onSaved(); });
     }
+    useEffect(function () { var onKey = function (e) { if (e.key === 'Escape') props.onClose(); }; window.addEventListener('keydown', onKey); return function () { window.removeEventListener('keydown', onKey); }; }, []);
     return h('div', { className: 'scrim', onMouseDown: props.onClose },
-      h('div', { className: 'modal', onMouseDown: function (e) { e.stopPropagation(); } },
-        h('div', { className: 'modal-h' }, h('b', { style: { fontSize: 16 } }, 'New PhD student'), h('button', { className: 'x', onClick: props.onClose }, '✕')),
+      h('div', { className: 'modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'New PhD student', onMouseDown: function (e) { e.stopPropagation(); } },
+        h('div', { className: 'modal-h' }, h('b', { style: { fontSize: 16 } }, 'New PhD student'), h('button', { className: 'x', 'aria-label': 'Close', onClick: props.onClose }, '✕')),
         h('div', { className: 'modal-b' },
           h('div', { className: 'field' }, h('label', null, 'Name *'), h('input', { value: form.name, onChange: function (e) { set('name', e.target.value); } })),
           h('div', { className: 'field' }, h('label', null, 'Email'), h('input', { value: form.email, onChange: function (e) { set('email', e.target.value); } })),
@@ -252,9 +254,9 @@
           var pct = r.target_value ? Math.min(100, Math.round(r.current_value / r.target_value * 100)) : 0;
           return h('div', { className: 'req', key: r.id },
             h('div', { className: 'req-h' }, h('b', null, r.title, ' ', h('span', { className: 'chip c-grey', style: { marginLeft: 4 } }, r.category)), h('span', null,
-              canEdit && !r.is_auto ? h('button', { className: 'icon-x', style: { color: 'var(--accent)' }, onClick: function () { setReqVal(r, -1); } }, '−') : null,
+              canEdit && !r.is_auto ? h('button', { className: 'icon-x', style: { color: 'var(--accent)' }, 'aria-label': 'Decrease ' + (r.title || 'value'), onClick: function () { setReqVal(r, -1); } }, '−') : null,
               ' ' + (r.current_value || 0) + ' / ' + r.target_value + ' ' + (r.unit || ''),
-              canEdit && !r.is_auto ? h('button', { className: 'icon-x', style: { color: 'var(--accent)' }, onClick: function () { setReqVal(r, 1); } }, '+') : null)),
+              canEdit && !r.is_auto ? h('button', { className: 'icon-x', style: { color: 'var(--accent)' }, 'aria-label': 'Increase ' + (r.title || 'value'), onClick: function () { setReqVal(r, 1); } }, '+') : null)),
             h('div', { className: 'meter' }, h('i', { style: { width: pct + '%', background: pct >= 100 ? 'var(--ok)' : 'var(--accent)' } }))
           );
         })
@@ -265,8 +267,8 @@
         mil.length ? mil.map(function (m) {
           return h('div', { className: 'ms', key: m.id },
             h('div', { className: 'mt' }, h('b', null, m.title), h('span', null, [huLabel(m.type), m.credits ? m.credits + ' cr' : null, m.deadline].filter(Boolean).join(' · '))),
-            canEdit ? h('button', { className: 'chip ' + stCls(m.status), title: 'Click to advance', onClick: function () { cycleMs(m); } }, huLabel(m.status)) : h('span', { className: 'chip ' + stCls(m.status) }, huLabel(m.status)),
-            canEdit ? h('button', { className: 'icon-x', onClick: function () { delMil(m); } }, '✕') : null
+            canEdit ? h('button', { className: 'chip ' + stCls(m.status), title: 'Click to advance', 'aria-label': 'Advance status: ' + huLabel(m.status), onClick: function () { cycleMs(m); } }, huLabel(m.status)) : h('span', { className: 'chip ' + stCls(m.status) }, huLabel(m.status)),
+            canEdit ? h('button', { className: 'icon-x', 'aria-label': 'Delete milestone', onClick: function () { delMil(m); } }, '✕') : null
           );
         }) : h('div', { style: { fontSize: 13, color: 'var(--faint)' } }, 'No milestones yet.'),
         canEdit ? h('div', { className: 'addrow' },
@@ -282,10 +284,10 @@
         h('h3', null, 'Tasks'),
         task.length ? task.map(function (t) {
           return h('div', { className: 'ms', key: t.id },
-            canEdit ? h('button', { className: 'chip ' + stCls(t.status), title: 'Click to advance', onClick: function () { cycleTask(t); } }, t.status.replace('_', ' ')) : h('span', { className: 'chip ' + stCls(t.status) }, t.status.replace('_', ' ')),
+            canEdit ? h('button', { className: 'chip ' + stCls(t.status), title: 'Click to advance', 'aria-label': 'Advance status: ' + t.status.replace('_', ' '), onClick: function () { cycleTask(t); } }, t.status.replace('_', ' ')) : h('span', { className: 'chip ' + stCls(t.status) }, t.status.replace('_', ' ')),
             h('div', { className: 'mt' }, h('b', { style: { textDecoration: t.status === 'DONE' ? 'line-through' : 'none', color: t.status === 'DONE' ? 'var(--muted)' : 'inherit' } }, t.title), t.due_date ? h('span', null, 'due ' + t.due_date) : null),
             h('span', { className: 'chip c-grey' }, t.priority),
-            canEdit ? h('button', { className: 'icon-x', onClick: function () { delTask(t); } }, '✕') : null
+            canEdit ? h('button', { className: 'icon-x', 'aria-label': 'Delete task', onClick: function () { delTask(t); } }, '✕') : null
           );
         }) : h('div', { style: { fontSize: 13, color: 'var(--faint)' } }, 'No tasks yet.'),
         canEdit ? h('div', { className: 'addrow' },
@@ -305,9 +307,10 @@
       if (!form.title.trim()) return; setSaving(true);
       sb.from('phd_topics').insert({ title: form.title.trim(), description: form.description.trim() || null, tags: form.tags ? form.tags.split(',').map(function (x) { return x.trim(); }).filter(Boolean) : null, supervisor_id: form.supervisor_id || props.me.id, status: 'OPEN' }).select().maybeSingle().then(function (r) { setSaving(false); if (r && r.error) { alert('Could not add: ' + r.error.message); return; } props.onSaved(); });
     }
+    useEffect(function () { var onKey = function (e) { if (e.key === 'Escape') props.onClose(); }; window.addEventListener('keydown', onKey); return function () { window.removeEventListener('keydown', onKey); }; }, []);
     return h('div', { className: 'scrim', onMouseDown: props.onClose },
-      h('div', { className: 'modal', onMouseDown: function (e) { e.stopPropagation(); } },
-        h('div', { className: 'modal-h' }, h('b', { style: { fontSize: 16 } }, 'New research topic'), h('button', { className: 'x', onClick: props.onClose }, '✕')),
+      h('div', { className: 'modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'New research topic', onMouseDown: function (e) { e.stopPropagation(); } },
+        h('div', { className: 'modal-h' }, h('b', { style: { fontSize: 16 } }, 'New research topic'), h('button', { className: 'x', 'aria-label': 'Close', onClick: props.onClose }, '✕')),
         h('div', { className: 'modal-b' },
           h('div', { className: 'field' }, h('label', null, 'Title *'), h('input', { value: form.title, onChange: function (e) { set('title', e.target.value); } })),
           h('div', { className: 'field' }, h('label', null, 'Description'), h('input', { value: form.description, onChange: function (e) { set('description', e.target.value); } })),
@@ -468,7 +471,7 @@
             h('div', { className: 'mt' }, h('b', null, (st ? st.name : '—') + ' → ' + (su ? su.name : '—')), h('span', null, v.kind)),
             h('span', { className: 'chip ' + stCls(v.status) }, v.status),
             v.status !== 'accepted' ? h('button', { className: 'chip c-ok', onClick: function () { setStatus(v, 'accepted'); } }, 'Accept') : null,
-            h('button', { className: 'icon-x', onClick: function () { del(v); } }, '✕')
+            h('button', { className: 'icon-x', 'aria-label': 'Delete relationship', onClick: function () { del(v); } }, '✕')
           );
         }) : h('div', { style: { fontSize: 13, color: 'var(--faint)' } }, 'No relationships yet — assign one above.')
       )
@@ -521,11 +524,11 @@
     }
     var today = new Date().toISOString().slice(0, 10);
     var yday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
-    var dateInput = h('input', { type: 'date', value: day, max: today, onChange: function (e) { if (e.target.value) setDay(e.target.value); }, style: { height: 34, border: '1px solid var(--line)', borderRadius: 8, padding: '0 10px', fontFamily: 'inherit', fontSize: 13, background: 'var(--surface)', color: 'inherit' } });
+    var dateInput = h('input', { type: 'date', value: day, max: today, 'aria-label': 'Report date', onChange: function (e) { if (e.target.value) setDay(e.target.value); }, style: { height: 34, border: '1px solid var(--line)', borderRadius: 8, padding: '0 10px', fontFamily: 'inherit', fontSize: 13, background: 'var(--surface)', color: 'inherit' } });
     return h('div', null,
       h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14, flexWrap: 'wrap' } },
-        h('button', { className: 'btn' + (day === today ? ' pri' : ''), onClick: function () { setDay(today); } }, 'Today'),
-        h('button', { className: 'btn' + (day === yday ? ' pri' : ''), onClick: function () { setDay(yday); } }, 'Yesterday'),
+        h('button', { className: 'btn' + (day === today ? ' pri' : ''), 'aria-pressed': day === today, onClick: function () { setDay(today); } }, 'Today'),
+        h('button', { className: 'btn' + (day === yday ? ' pri' : ''), 'aria-pressed': day === yday, onClick: function () { setDay(yday); } }, 'Yesterday'),
         dateInput),
       !students.length ? h('div', { className: 'empty' }, 'You have no students to report on.') :
         loading ? h('div', { className: 'empty' }, 'Loading…') :
@@ -547,7 +550,7 @@
                   (sm.blockers && sm.blockers.length) ? blk('⚠ Blocked / needs guidance', sm.blockers) : null,
                   (sm.topics && sm.topics.length) ? h('div', { style: { marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 6 } }, sm.topics.map(function (t, i) { return h('span', { key: i, className: 'chip c-grey' }, t); })) : null,
                   h('div', { style: { marginTop: 12, display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' } },
-                    rep.chat_msgs ? h('button', { className: 'btn', style: { padding: '5px 10px', fontSize: 12.5 }, onClick: function () { toggleChat(s.id); } }, (ex && ex.open) ? 'Hide conversation' : 'Show conversation (' + rep.chat_msgs + ')') : null,
+                    rep.chat_msgs ? h('button', { className: 'btn', style: { padding: '5px 10px', fontSize: 12.5 }, 'aria-expanded': !!(ex && ex.open), onClick: function () { toggleChat(s.id); } }, (ex && ex.open) ? 'Hide conversation' : 'Show conversation (' + rep.chat_msgs + ')') : null,
                     h('span', { style: { fontSize: 11.5, color: 'var(--faint)' } }, 'Generated: ' + (rep.generated_at || '').slice(0, 16).replace('T', ' '))),
                   (ex && ex.open) ? h('div', { style: { marginTop: 10, borderTop: '1px solid var(--line)', paddingTop: 10, maxHeight: 320, overflowY: 'auto' } },
                     (ex.msgs && ex.msgs.length) ? ex.msgs.map(function (m, i) {
@@ -569,8 +572,8 @@
     function ttl(n) { return n.kind === 'digest' ? 'Daily research digest' : n.kind === 'student_report' ? 'Student daily report' : ((n.payload && n.payload.title) || n.kind); }
     function summ(n) { var p = n.payload || {}; if (n.kind === 'digest') return (p.day || '') + ' · ' + (p.students || 0) + ' student' + (p.students === 1 ? '' : 's') + ', ' + (p.entries || 0) + ' update' + (p.entries === 1 ? '' : 's'); if (n.kind === 'student_report') return (p.student || 'Student') + ' · ' + (p.day || '') + ' · ' + (p.msgs || 0) + ' chat, ' + (p.decisions || 0) + ' decision'; return p.body || ''; }
     return h('div', { className: 'notif-wrap' },
-      h('button', { className: 'bell', onClick: function () { setOpen(!open); if (!open) load(); } },
-        h('svg', { viewBox: '0 0 16 16', fill: 'none', stroke: 'var(--muted)', strokeWidth: 1.5 }, h('path', { d: 'M8 2a3.5 3.5 0 0 0-3.5 3.5c0 3-1.5 4-1.5 4h10s-1.5-1-1.5-4A3.5 3.5 0 0 0 8 2z', strokeLinejoin: 'round' }), h('path', { d: 'M6.6 12.4a1.5 1.5 0 0 0 2.8 0', strokeLinecap: 'round' })),
+      h('button', { className: 'bell', 'aria-label': 'Notifications' + (unread ? ' (' + unread + ' unread)' : ''), 'aria-expanded': open, onClick: function () { setOpen(!open); if (!open) load(); } },
+        h('svg', { viewBox: '0 0 16 16', fill: 'none', stroke: 'var(--muted)', strokeWidth: 1.5, 'aria-hidden': 'true' }, h('path', { d: 'M8 2a3.5 3.5 0 0 0-3.5 3.5c0 3-1.5 4-1.5 4h10s-1.5-1-1.5-4A3.5 3.5 0 0 0 8 2z', strokeLinejoin: 'round' }), h('path', { d: 'M6.6 12.4a1.5 1.5 0 0 0 2.8 0', strokeLinecap: 'round' })),
         unread ? h('i', { className: 'nb' }, unread) : null
       ),
       open ? h('div', { className: 'notif-pop' },
@@ -692,7 +695,7 @@
       h('div', { className: 'side' },
         h('div', { className: 'side-brand' }, h('div', { className: 'mk' }, h('span')), h('div', null, h('b', null, 'Publify'), h('i', null, 'Doctoral School'))),
         h('nav', { className: 'nav' }, NAV.map(function (it) { return h('button', { key: it[0], className: cur === it[0] ? 'on' : '', onClick: function () { setSel(null); setView(it[0]); } }, IC[it[0]], h('span', null, it[1]), it[2] ? h('i', { className: 'nav-badge' }, it[2]) : null); })),
-        h('div', { className: 'side-foot' }, h(Avatar, { u: me, size: 32 }), h('div', { className: 'who' }, h('b', null, me.name), h('span', null, roleLabel)), h('a', { className: 'exit', href: 'Projects.html', title: 'Back to Publify' }, '←'))
+        h('div', { className: 'side-foot' }, h(Avatar, { u: me, size: 32 }), h('div', { className: 'who' }, h('b', null, me.name), h('span', null, roleLabel)), h('a', { className: 'exit', href: 'Projects.html', title: 'Back to Publify', 'aria-label': 'Back to Publify' }, '←'))
       ),
       h('div', { className: 'main' },
         preview ? h('div', { style: { background: 'var(--warn-bg)', color: 'var(--warn)', padding: '9px 14px', fontSize: 13, fontWeight: 600, borderRadius: 10, marginBottom: 14 } }, '👁 Admin preview — viewing ', h('b', null, me.name), '’s Doctoral School (', roleLabel, '). ', h('a', { href: 'Profile.html?adminView=1', style: { color: 'var(--warn)' } }, 'Profile view'), ' · ', h('a', { href: 'Admin.html', style: { color: 'var(--warn)' } }, '← Back to admin')) : null,

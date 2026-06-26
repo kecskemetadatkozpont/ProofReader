@@ -104,7 +104,7 @@
       if (pane.docId) { // rendered "export to PDF" view of a document
         const c = ctx.getCompiled(pane.docId);
         return <div className="pdf-render">
-          <div className="pdf-render-bar"><span>Rendered PDF · {ctx.docLabel(pane.docId)}</span><span style={{ display: 'inline-flex', gap: 6 }}><button onClick={() => ctx.onWord && ctx.onWord(pane.docId)} title="Download as Word (.docx)">⬇ Word</button><button onClick={() => ctx.onPrint(pane.docId)}><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M4 6V2.5h8V6M4 11H3a1 1 0 01-1-1V7a1 1 0 011-1h10a1 1 0 011 1v3a1 1 0 01-1 1h-1M4 9h8v4.5H4z" strokeLinejoin="round" /></svg>Print / Save PDF</button></span></div>
+          <div className="pdf-render-bar"><span>Rendered PDF · {ctx.docLabel(pane.docId)}</span><span style={{ display: 'inline-flex', gap: 6 }}><button onClick={() => ctx.onWord && ctx.onWord(pane.docId)} title="Download as Word (.docx)" aria-label="Download as Word (.docx)"><span aria-hidden="true">⬇</span> Word</button><button onClick={() => ctx.onPrint(pane.docId)}><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M4 6V2.5h8V6M4 11H3a1 1 0 01-1-1V7a1 1 0 011-1h10a1 1 0 011 1v3a1 1 0 01-1 1h-1M4 9h8v4.5H4z" strokeLinejoin="round" /></svg>Print / Save PDF</button></span></div>
           <div className="pdf-render-scroll"><div className="pdf-paper" dangerouslySetInnerHTML={{ __html: c ? c.html : '' }} /></div>
         </div>;
       }
@@ -464,8 +464,8 @@
         <button title="Italic" onMouseDown={(e) => { e.preventDefault(); fmtCmd('italic'); }}><i>I</i></button>
         <button title="Underline" onMouseDown={(e) => { e.preventDefault(); fmtCmd('underline'); }}><u>U</u></button>
         <span className="wm-fmt-sep" />
-        <button title="Link" onMouseDown={(e) => { e.preventDefault(); fmtLink(); }}><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.6"><path d="M6.5 9.5l3-3M7 5l1-1a2.5 2.5 0 013.5 3.5l-1 1M9 11l-1 1a2.5 2.5 0 01-3.5-3.5l1-1" strokeLinecap="round" /></svg></button>
-        <button title="Inline math" onMouseDown={(e) => { e.preventDefault(); fmtMath(); }}><span style={{ fontStyle: 'italic', fontFamily: 'Georgia, serif' }}>ƒx</span></button>
+        <button title="Link" aria-label="Link" onMouseDown={(e) => { e.preventDefault(); fmtLink(); }}><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.6"><path d="M6.5 9.5l3-3M7 5l1-1a2.5 2.5 0 013.5 3.5l-1 1M9 11l-1 1a2.5 2.5 0 01-3.5-3.5l1-1" strokeLinecap="round" /></svg></button>
+        <button title="Inline math" aria-label="Inline math" onMouseDown={(e) => { e.preventDefault(); fmtMath(); }}><span style={{ fontStyle: 'italic', fontFamily: 'Georgia, serif' }}>ƒx</span></button>
       </div>}
       {tableTb && <div className="wm-tbltb" style={{ position: 'fixed', top: tableTb.top, left: tableTb.left, transform: 'translateX(-50%)' }} onMouseDown={(e) => e.preventDefault()}>
         <button title="Add row below" onMouseDown={(e) => { e.preventDefault(); tblOp('addRow'); }}>＋ Row</button>
@@ -836,19 +836,19 @@
               <button className={!ctx.writeMode ? 'on' : ''} onClick={() => ctx.setWrite(false)}>Read</button>
               <button className={ctx.writeMode ? 'on' : ''} onClick={() => ctx.setWrite(true)}>Write</button>
             </div>}
-          <button className="ws-hbtn" title="Add / split" onClick={(e) => { e.stopPropagation(); setMenu(menu === 'split' ? null : 'split'); }}>
+          <button className="ws-hbtn" title="Add / split" aria-label="Add / split" onClick={(e) => { e.stopPropagation(); setMenu(menu === 'split' ? null : 'split'); }}>
             <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="2.5" y="2.5" width="11" height="11" rx="1.5" /><path d="M8 2.5v11" strokeDasharray="2 1.5" /></svg>
           </button>
           {menu === 'split' && <div className="ws-menu sm" onClick={(e) => e.stopPropagation()}>
             <button onClick={() => { ctx.onAdd(pane.id, 'row'); setMenu(null); }}><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3"><rect x="2" y="3" width="12" height="10" rx="1" /><path d="M8 3v10" /></svg>Split right</button>
             <button onClick={() => { ctx.onAdd(pane.id, 'col'); setMenu(null); }}><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3"><rect x="2" y="3" width="12" height="10" rx="1" /><path d="M2 8h12" /></svg>Split down</button>
           </div>}
-          <button className="ws-hbtn" title={ctx.soloPaneId === pane.id ? 'Restore layout' : 'Focus this pane'} onClick={(e) => { e.stopPropagation(); ctx.onSolo(pane.id); }}>
+          <button className="ws-hbtn" title={ctx.soloPaneId === pane.id ? 'Restore layout' : 'Focus this pane'} aria-label={ctx.soloPaneId === pane.id ? 'Restore layout' : 'Focus this pane'} aria-pressed={ctx.soloPaneId === pane.id} onClick={(e) => { e.stopPropagation(); ctx.onSolo(pane.id); }}>
             {ctx.soloPaneId === pane.id
               ? <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M9 7l4-4M13 3v3M13 3h-3M7 9l-4 4M3 13v-3M3 13h3" strokeLinecap="round" strokeLinejoin="round" /></svg>
               : <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M3 6V3h3M13 6V3h-3M3 10v3h3M13 10v3h-3" strokeLinecap="round" strokeLinejoin="round" /></svg>}
           </button>
-          {ctx.canClose && <button className="ws-hbtn ws-close" title="Close pane" onClick={(e) => { e.stopPropagation(); ctx.onClose(pane.id); }}>
+          {ctx.canClose && <button className="ws-hbtn ws-close" title="Close pane" aria-label="Close pane" onClick={(e) => { e.stopPropagation(); ctx.onClose(pane.id); }}>
             <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.6"><path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" /></svg>
           </button>}
         </div>

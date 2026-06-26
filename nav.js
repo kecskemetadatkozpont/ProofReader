@@ -154,7 +154,7 @@
     bar.innerHTML = '<div class="pn-left" id="pn-left"></div><button class="pn-prof" id="pn-prof" aria-label="Open menu"></button>';
 
     var scrim = document.createElement('div'); scrim.id = 'pn-scrim';
-    var drawer = document.createElement('aside'); drawer.id = 'pn-drawer'; drawer.setAttribute('role', 'dialog'); drawer.setAttribute('aria-label', 'Navigation');
+    var drawer = document.createElement('aside'); drawer.id = 'pn-drawer'; drawer.setAttribute('role', 'dialog'); drawer.setAttribute('aria-modal', 'true'); drawer.setAttribute('aria-label', 'Navigation');
 
     function avHtml(user) {
       var col = (user && user.color) || '#4f46e5';
@@ -169,7 +169,7 @@
       document.getElementById('pn-left').innerHTML = '<a class="pn-brand" href="' + withAv('Projects.html') + '" title="Home"><span class="pn-mk"><i></i></span>Publify</a>'
         + (PAGE_NAME[here] ? '<span class="pn-page">' + PAGE_NAME[here] + '</span>' : '')
         + (av ? '<span class="pn-as">👁 ' + esc(av.name || av.email || '') + '</span>' : '');
-      document.getElementById('pn-prof').innerHTML = avHtml(du) + '<span class="pn-nm">' + esc((du && du.name) || 'Menu') + '</span><span class="pn-cv">' + (av ? '👁' : '▾') + '</span>';
+      document.getElementById('pn-prof').innerHTML = avHtml(du) + '<span class="pn-nm">' + esc((du && du.name) || 'Menu') + '</span><span class="pn-cv" aria-hidden="true">' + (av ? '👁' : '▾') + '</span>';
       var links = LINKS.filter(function (l) { return !l.adminOnly || admin; }).map(function (l) {
         return '<a href="' + withAv(l.href) + '"' + (l.key === here ? ' class="on"' : '') + '>' + (ICONS[l.key] || '') + esc(l.label) + '</a>';
       }).join('');
@@ -183,8 +183,9 @@
         + (av ? '<a class="pnd-backadmin" href="Admin.html">← Back to admin</a>' : '<button class="pnd-signout" id="pn-signout">Sign out</button>') + '</div>';
       wire();
     }
-    function open() { scrim.classList.add('on'); drawer.classList.add('on'); }
-    function close() { scrim.classList.remove('on'); drawer.classList.remove('on'); }
+    function onDrawerKey(e) { if (e.key === 'Escape') close(); }
+    function open() { scrim.classList.add('on'); drawer.classList.add('on'); document.addEventListener('keydown', onDrawerKey); }
+    function close() { scrim.classList.remove('on'); drawer.classList.remove('on'); document.removeEventListener('keydown', onDrawerKey); }
     function wire() {
       var t = document.getElementById('pn-theme');
       if (t) t.onclick = function () { if (window.PRTheme) window.PRTheme.toggle(); render(); };
@@ -200,7 +201,6 @@
     render();
     document.getElementById('pn-prof').onclick = open;
     scrim.onclick = close;
-    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') close(); });
     window.addEventListener('pr-theme', render);
     window.addEventListener('pr-profile', render);
     // user/admin may resolve after auth loads — refresh a few times
@@ -214,23 +214,24 @@
     if (document.getElementById('pn-bug-btn')) return;
     var category = 'bug', imageData = null;
     var btn = document.createElement('button');
-    btn.id = 'pn-bug-btn'; btn.title = 'Bug report / feedback'; btn.textContent = '🐞';
+    btn.id = 'pn-bug-btn'; btn.title = 'Bug report / feedback'; btn.setAttribute('aria-label', 'Report a bug or feedback'); btn.textContent = '🐞';
     btn.setAttribute('style', 'position:fixed;right:16px;bottom:16px;z-index:90;width:42px;height:42px;border-radius:50%;border:1px solid var(--line,#e4e7ec);background:var(--pane,#fff);box-shadow:0 4px 14px rgba(20,24,40,.18);font-size:18px;cursor:pointer;line-height:1;padding:0');
     var modal = document.createElement('div');
     modal.id = 'pn-bug-modal';
+    modal.setAttribute('role', 'dialog'); modal.setAttribute('aria-modal', 'true'); modal.setAttribute('aria-label', 'Feedback');
     modal.setAttribute('style', 'position:fixed;inset:0;z-index:95;background:rgba(15,20,40,.4);display:none;align-items:center;justify-content:center');
     var card = document.createElement('div');
     card.setAttribute('style', 'background:var(--pane,#fff);color:var(--ink,#111);width:min(480px,94vw);max-height:90vh;overflow:auto;border-radius:14px;box-shadow:0 20px 60px rgba(15,20,40,.35);padding:16px 18px');
     var iSt = 'width:100%;box-sizing:border-box;border:1px solid var(--line,#e4e7ec);border-radius:8px;padding:8px 10px;font-size:13px;background:var(--app-bg,#fff);color:inherit';
     var catSt = 'flex:1;border:1px solid var(--line,#e4e7ec);background:var(--app-bg,#f7f8fa);color:inherit;border-radius:8px;padding:7px 8px;font-size:12.5px;cursor:pointer';
-    card.innerHTML = '<div style="font-weight:700;font-size:15px;margin-bottom:8px">🐞 Feedback</div>'
-      + '<div id="pn-bug-cats" style="display:flex;gap:6px;margin-bottom:10px"><button data-cat="bug" style="' + catSt + '">🐞 Bug</button><button data-cat="feature" style="' + catSt + '">💡 Feature request</button></div>'
+    card.innerHTML = '<div style="font-weight:700;font-size:15px;margin-bottom:8px"><span aria-hidden="true">🐞</span> Feedback</div>'
+      + '<div id="pn-bug-cats" style="display:flex;gap:6px;margin-bottom:10px"><button data-cat="bug" aria-label="Bug" style="' + catSt + '"><span aria-hidden="true">🐞</span> Bug</button><button data-cat="feature" aria-label="Feature request" style="' + catSt + '"><span aria-hidden="true">💡</span> Feature request</button></div>'
       + '<input id="pn-bug-title" placeholder="Short title (optional)" style="' + iSt + ';margin-bottom:8px">'
       + '<textarea id="pn-bug-body" rows="5" placeholder="What did you experience? (the page and version are recorded automatically)" style="' + iSt + ';font-family:inherit;resize:vertical"></textarea>'
-      + '<div style="display:flex;align-items:center;gap:8px;margin-top:8px"><button id="pn-bug-img-btn" style="border:1px solid var(--line,#e4e7ec);background:var(--app-bg,#f7f8fa);color:inherit;border-radius:8px;padding:6px 10px;font-size:12.5px;cursor:pointer">📎 Attach image</button><span id="pn-bug-img-name" style="font-size:12px;color:var(--muted,#667)"></span><input id="pn-bug-img" type="file" accept="image/*" style="display:none"></div>'
+      + '<div style="display:flex;align-items:center;gap:8px;margin-top:8px"><button id="pn-bug-img-btn" aria-label="Attach image" style="border:1px solid var(--line,#e4e7ec);background:var(--app-bg,#f7f8fa);color:inherit;border-radius:8px;padding:6px 10px;font-size:12.5px;cursor:pointer"><span aria-hidden="true">📎</span> Attach image</button><span id="pn-bug-img-name" style="font-size:12px;color:var(--muted,#667)"></span><input id="pn-bug-img" type="file" accept="image/*" style="display:none"></div>'
       + '<div id="pn-bug-img-prev" style="margin-top:8px"></div>'
       + '<div id="pn-bug-msg" style="font-size:12px;margin-top:6px;min-height:16px"></div>'
-      + '<div style="display:flex;gap:8px;justify-content:space-between;align-items:center;margin-top:8px"><button id="pn-bug-mine" style="border:0;background:transparent;color:var(--accent,#4f46e5);font-size:12.5px;cursor:pointer;padding:6px 0">My previous reports ▾</button><div style="display:flex;gap:8px"><button id="pn-bug-cancel" style="border:1px solid var(--line,#e4e7ec);background:var(--app-bg,#f7f8fa);color:inherit;border-radius:8px;padding:7px 12px;font-size:13px;cursor:pointer">Cancel</button><button id="pn-bug-send" style="border:0;background:var(--accent,#4f46e5);color:#fff;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:600;cursor:pointer">Send</button></div></div>'
+      + '<div style="display:flex;gap:8px;justify-content:space-between;align-items:center;margin-top:8px"><button id="pn-bug-mine" style="border:0;background:transparent;color:var(--accent,#4f46e5);font-size:12.5px;cursor:pointer;padding:6px 0">My previous reports ▾</button><div style="display:flex;gap:8px"><button id="pn-bug-cancel" aria-label="Close" style="border:1px solid var(--line,#e4e7ec);background:var(--app-bg,#f7f8fa);color:inherit;border-radius:8px;padding:7px 12px;font-size:13px;cursor:pointer">Cancel</button><button id="pn-bug-send" aria-label="Send" style="border:0;background:var(--accent,#4f46e5);color:#fff;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:600;cursor:pointer">Send</button></div></div>'
       + '<div id="pn-bug-list" style="display:none;margin-top:10px;max-height:260px;overflow:auto;border-top:1px solid var(--line,#e4e7ec);padding-top:8px"></div>';
     modal.appendChild(card);
     document.body.appendChild(btn); document.body.appendChild(modal);
@@ -247,8 +248,9 @@
     [].forEach.call(document.querySelectorAll('#pn-bug-cats button'), function (b) { b.onclick = function () { setCat(b.getAttribute('data-cat')); }; });
     setCat('bug');
 
-    function show() { var m = document.getElementById('pn-bug-msg'); if (m) m.textContent = '';   /* clear a stale "elküldve" message from a previous submit */ modal.style.display = 'flex'; var t = document.getElementById('pn-bug-body'); if (t) t.focus(); }
-    function hide() { modal.style.display = 'none'; }
+    function onBugKey(e) { if (e.key === 'Escape') hide(); }
+    function show() { var m = document.getElementById('pn-bug-msg'); if (m) m.textContent = '';   /* clear a stale "elküldve" message from a previous submit */ modal.style.display = 'flex'; document.addEventListener('keydown', onBugKey); var t = document.getElementById('pn-bug-body'); if (t) t.focus(); }
+    function hide() { modal.style.display = 'none'; document.removeEventListener('keydown', onBugKey); }
     btn.onclick = show;
     modal.onclick = function (e) { if (e.target === modal) hide(); };
     document.getElementById('pn-bug-cancel').onclick = hide;

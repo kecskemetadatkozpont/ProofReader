@@ -180,12 +180,12 @@
 
     var side = h('div', { className: 'side' },
       h('div', { className: 'side-brand' }, h('div', { className: 'mk' }, h('span')), h('div', null, h('b', null, 'Publify'), h('i', null, 'Chat with Publify'))),
-      h('button', { className: 'newchat', onClick: newChat }, '➕  New conversation'),
+      h('button', { className: 'newchat', 'aria-label': 'New conversation', onClick: newChat }, h('span', { 'aria-hidden': 'true' }, '➕'), '  New conversation'),
       h('div', { className: 'hist-h' }, 'History'),
-      h('div', { className: 'hist' }, chats.length ? chats.map(function (c) {
-        return h('div', { className: 'hist-item' + (c.id === cid ? ' on' : ''), key: c.id, onClick: function () { openChat(c.id); } },
+      h('div', { className: 'hist', role: 'list' }, chats.length ? chats.map(function (c) {
+        return h('div', { className: 'hist-item' + (c.id === cid ? ' on' : ''), role: 'listitem', key: c.id, onClick: function () { openChat(c.id); } },
           h('span', { className: 'ht' }, c.title || 'Conversation'),
-          h('button', { className: 'hx', title: 'Delete', onClick: function (e) { delChat(c.id, e); } }, '×'));
+          h('button', { className: 'hx', title: 'Delete', 'aria-label': 'Delete conversation', onClick: function (e) { delChat(c.id, e); } }, '×'));
       }) : h('div', { style: { fontSize: 12.5, color: 'var(--faint)', padding: '8px 9px' } }, 'No conversations yet.')),
       h('div', { className: 'side-foot' }, h('span', null, me.name || me.email), h('a', { href: 'Projects.html', title: 'Back' }, '← Publify'))
     );
@@ -195,10 +195,10 @@
         var ai = m.role === 'assistant';
         return h('div', { key: m.id, className: 'bubble ' + (ai ? 'ai' : 'user') },
           ai ? h('div', { className: 'btxt md', dangerouslySetInnerHTML: { __html: foldCode(mdHtml(m.content)) } }) : h('div', { className: 'btxt' }, m.content),
-          ai ? h('div', { className: 'bmeta' }, h('button', { onClick: function () { copy(m); } }, 'Copy')) : null);
+          ai ? h('div', { className: 'bmeta' }, h('button', { 'aria-label': 'Copy message', onClick: function () { copy(m); } }, 'Copy')) : null);
       }),
-      streaming ? h('div', { className: 'bubble ai', key: 'stream' }, h('div', { className: 'btxt' }, streaming.text || '', h('span', { className: 'tw-cursor' }, '▌')))
-        : busy ? h('div', { className: 'bubble ai' }, h('div', { className: 'btxt', style: { color: 'var(--faint)' } }, wf ? '🛠 Publify is working on the task (multiple steps, with files)…' : 'Publify is thinking…')) : null
+      streaming ? h('div', { className: 'bubble ai', key: 'stream', 'aria-live': 'polite' }, h('div', { className: 'btxt' }, streaming.text || '', h('span', { className: 'tw-cursor', 'aria-hidden': 'true' }, '▌')))
+        : busy ? h('div', { className: 'bubble ai', 'aria-live': 'polite' }, h('div', { className: 'btxt', style: { color: 'var(--faint)' } }, wf ? '🛠 Publify is working on the task (multiple steps, with files)…' : 'Publify is thinking…')) : null
     )) : h('div', { className: 'empty' }, h('h1', null, 'How can I help?'), h('p', null, 'Ask Publify — ask anything about your research; attach files, LaTeX/research projects or publications (📎).'),
       h('div', { className: 'suggest' }, SUGGEST.map(function (s, i) { return h('button', { key: i, onClick: function () { sendText(s); } }, s); })));
 
@@ -206,35 +206,35 @@
     var main = h('div', { className: 'main', onDragOver: function (e) { e.preventDefault(); if (!dragOver) setDragOver(true); }, onDragLeave: function (e) { if (e.target === e.currentTarget) setDragOver(false); }, onDrop: onDrop },
       h('div', { className: 'topbar' }, h('span', null, curTitle), h('span', { className: 'mtag' }, wf ? '🛠 Workflow' : 'Publify')),
       (cid && files.length) ? h('div', { className: 'files-strip' }, h('span', { className: 'fs-h' }, '🗂 Attached:'), files.map(function (f) { return h('span', { className: 'fs-chip', key: f.id },
-        h('button', { className: 'fs-name', title: 'Preview', onClick: function () { setPreview(f); } }, f.path),
-        h('button', { className: 'fs-x', title: 'Remove', onClick: function (e) { removeFile(f, e); } }, '×')); })) : null,
+        h('button', { className: 'fs-name', title: 'Preview', 'aria-label': 'Preview attachment', onClick: function () { setPreview(f); } }, f.path),
+        h('button', { className: 'fs-x', title: 'Remove', 'aria-label': 'Remove attachment', onClick: function (e) { removeFile(f, e); } }, '×')); })) : null,
       conv,
       h('div', { className: 'composer' },
         canWf ? h('div', { className: 'wf-row' },
-          h('button', { className: 'wf-toggle' + (wf ? ' on' : ''), onClick: function () { setWf(!wf); } }, '🛠 Workflow mode: ' + (wf ? 'ON' : 'OFF')),
+          h('button', { className: 'wf-toggle' + (wf ? ' on' : ''), 'aria-pressed': wf, 'aria-label': 'Workflow mode', onClick: function () { setWf(!wf); } }, '🛠 Workflow mode: ' + (wf ? 'ON' : 'OFF')),
           h('span', { className: 'wf-hint' }, wf ? 'Publify solves a task in multiple steps, with files.' : 'Multi-step agent mode (enabled by admin).')) : null,
         h('div', { className: 'composer-in' },
           h('div', { className: 'attach-wrap' },
-            h('button', { className: 'attach-btn', title: 'Attach', disabled: busy, onClick: function () { setAtOpen(!atOpen); } }, '📎'),
-            atOpen ? h('div', { className: 'attach-menu' },
-              h('button', { onClick: pickFiles }, '📄  Upload file'),
-              h('button', { onClick: function () { openPicker('latex'); } }, '📐  LaTeX project'),
-              h('button', { onClick: function () { openPicker('research'); } }, '🔬  Research project'),
-              h('button', { onClick: function () { openPicker('pub'); } }, '📚  Publication')) : null),
-          h('textarea', { ref: taRef, value: input, rows: 1, placeholder: wf ? 'Describe the task — Publify will solve it in multiple steps…' : 'Message Publify…  (Enter = send · Shift+Enter = new line)', disabled: busy, onChange: onInput, onKeyDown: onKey }),
-          h('button', { className: 'send-btn', disabled: busy || !input.trim(), onClick: send }, '↑'))),
+            h('button', { className: 'attach-btn', title: 'Attach', 'aria-label': 'Attach', 'aria-haspopup': 'true', 'aria-expanded': atOpen, disabled: busy, onClick: function () { setAtOpen(!atOpen); } }, '📎'),
+            atOpen ? h('div', { className: 'attach-menu', role: 'menu', onKeyDown: function (e) { if (e.key === 'Escape') setAtOpen(false); } },
+              h('button', { role: 'menuitem', onClick: pickFiles }, h('span', { 'aria-hidden': 'true' }, '📄'), '  Upload file'),
+              h('button', { role: 'menuitem', onClick: function () { openPicker('latex'); } }, h('span', { 'aria-hidden': 'true' }, '📐'), '  LaTeX project'),
+              h('button', { role: 'menuitem', onClick: function () { openPicker('research'); } }, h('span', { 'aria-hidden': 'true' }, '🔬'), '  Research project'),
+              h('button', { role: 'menuitem', onClick: function () { openPicker('pub'); } }, h('span', { 'aria-hidden': 'true' }, '📚'), '  Publication')) : null),
+          h('textarea', { ref: taRef, value: input, rows: 1, 'aria-label': 'Message Publify', placeholder: wf ? 'Describe the task — Publify will solve it in multiple steps…' : 'Message Publify…  (Enter = send · Shift+Enter = new line)', disabled: busy, onChange: onInput, onKeyDown: onKey }),
+          h('button', { className: 'send-btn', 'aria-label': 'Send message', disabled: busy || !input.trim(), onClick: send }, '↑'))),
       dragOver ? h('div', { className: 'drop-ov' }, h('div', { className: 'drop-card' }, '📎 Drop files here to attach')) : null
     );
 
     return h('div', { className: 'app' }, side, main,
       h('input', { ref: fileRef, type: 'file', multiple: true, style: { display: 'none' }, onChange: onPickedFiles }),
-      preview ? h('div', { className: 'pv-scrim', onClick: function () { setPreview(null); } }, h('div', { className: 'pv-modal', onClick: function (e) { e.stopPropagation(); } },
-        h('div', { className: 'pv-head' }, h('b', null, preview.path), h('button', { className: 'pv-x', onClick: function () { setPreview(null); } }, '×')),
+      preview ? h('div', { className: 'pv-scrim', onClick: function () { setPreview(null); }, onKeyDown: function (e) { if (e.key === 'Escape') setPreview(null); } }, h('div', { className: 'pv-modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'File preview', tabIndex: -1, onClick: function (e) { e.stopPropagation(); } },
+        h('div', { className: 'pv-head' }, h('b', null, preview.path), h('button', { className: 'pv-x', 'aria-label': 'Close', onClick: function () { setPreview(null); } }, '×')),
         (preview.content && /^data:image\//.test(preview.content))
           ? h('div', { className: 'pv-body', style: { textAlign: 'center' } }, h('img', { src: preview.content, style: { maxWidth: '100%', borderRadius: 8 } }))
           : h('div', { className: 'btxt md pv-body', dangerouslySetInnerHTML: { __html: foldCode(mdHtml(preview.content || '')) } }))) : null,
-      picker ? h('div', { className: 'pv-scrim', onClick: function () { setPicker(null); } }, h('div', { className: 'pv-modal pick-modal', onClick: function (e) { e.stopPropagation(); } },
-        h('div', { className: 'pv-head' }, h('b', null, picker.kind === 'latex' ? '📐 LaTeX projects' : picker.kind === 'research' ? '🔬 Research projects' : '📚 Publications'), h('button', { className: 'pv-x', onClick: function () { setPicker(null); } }, '×')),
+      picker ? h('div', { className: 'pv-scrim', onClick: function () { setPicker(null); }, onKeyDown: function (e) { if (e.key === 'Escape') setPicker(null); } }, h('div', { className: 'pv-modal pick-modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Attach picker', tabIndex: -1, onClick: function (e) { e.stopPropagation(); } },
+        h('div', { className: 'pv-head' }, h('b', null, picker.kind === 'latex' ? '📐 LaTeX projects' : picker.kind === 'research' ? '🔬 Research projects' : '📚 Publications'), h('button', { className: 'pv-x', 'aria-label': 'Close', onClick: function () { setPicker(null); } }, '×')),
         h('div', { className: 'pick-body' },
           picker.items == null ? h('div', { className: 'pick-empty' }, 'Loading…')
             : !picker.items.length ? h('div', { className: 'pick-empty' }, 'No items available.')

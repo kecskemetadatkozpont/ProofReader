@@ -136,7 +136,7 @@
             h('span', { className: 'chip' }, ({ study: 'Study', upload: 'Upload', text: 'Text' })[r.source_kind] || r.source_kind))),
         h('div', { style: { display: 'flex', gap: 6, flex: 'none' } },
           h('button', { className: 'btn', onClick: function () { props.onOpen(r); } }, '▶ Play'),
-          h('button', { className: 'icon-x', title: 'Delete', onClick: function () { props.onDelete(r); } }, '✕')));
+          h('button', { className: 'icon-x', title: 'Delete', 'aria-label': 'Delete audiobook', onClick: function () { props.onDelete(r); } }, '✕')));
     }));
   }
 
@@ -297,7 +297,7 @@
       h('h3', null, 'New audiobook'),
       h('div', { className: 'mp-row' },
         h('label', null, 'Source'),
-        h('div', { className: 'seg' }, [['text', '📝 Text'], ['upload', '📄 Upload'], ['study', '🔬 Study']].map(function (o) { return h('button', { key: o[0], className: src === o[0] ? 'on' : '', onClick: function () { setSrc(o[0]); } }, o[1]); }))),
+        h('div', { className: 'seg' }, [['text', '📝 Text'], ['upload', '📄 Upload'], ['study', '🔬 Study']].map(function (o) { return h('button', { key: o[0], className: src === o[0] ? 'on' : '', 'aria-pressed': src === o[0], onClick: function () { setSrc(o[0]); } }, o[1]); }))),
       src === 'text' ? h('textarea', { className: 'field', rows: 7, style: { width: '100%', boxSizing: 'border-box' }, placeholder: 'Paste the text to narrate…', value: text, onChange: function (e) { setText(e.target.value); } }) : null,
       src === 'upload' ? h('div', null,
         h('input', { ref: fileRef, type: 'file', accept: '.pdf,.docx,.pptx,.txt,.md', style: { display: 'none' }, onChange: onFile }),
@@ -308,7 +308,7 @@
         h('div', { className: 'mp-row' }, h('label', null, 'Study'),
           h('select', { className: 'field', value: studyId, onChange: function (e) { setStudyId(e.target.value); } }, h('option', { value: '' }, '— select —'), studies.map(function (s) { return h('option', { key: s.id, value: s.id }, s.title); }))),
         h('div', { className: 'mp-row' }, h('label', null, 'Depth'),
-          h('div', { className: 'seg' }, [['abstract', 'Abstract'], ['summary', 'Publify overview'], ['fulltext', 'Full text (PDF)']].map(function (o) { return h('button', { key: o[0], className: depth === o[0] ? 'on' : '', onClick: function () { setDepth(o[0]); } }, o[1]); })))) : null,
+          h('div', { className: 'seg' }, [['abstract', 'Abstract'], ['summary', 'Publify overview'], ['fulltext', 'Full text (PDF)']].map(function (o) { return h('button', { key: o[0], className: depth === o[0] ? 'on' : '', 'aria-pressed': depth === o[0], onClick: function () { setDepth(o[0]); } }, o[1]); })))) : null,
       src === 'study' && studyId ? (papers.length ? h('div', { style: { marginTop: 6, marginBottom: 6 } },
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 } },
           h('div', { className: 'field-label', style: { margin: 0 } }, 'Papers — ' + papers.filter(function (s) { return picked[s.id]; }).length + '/' + papers.length + ' selected'),
@@ -357,19 +357,19 @@
 
     return h('div', { className: 'mp-card' },
       h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
-        h('button', { className: 'btn', onClick: props.onBack }, '← Back'),
+        h('button', { className: 'btn', 'aria-label': 'Back', onClick: props.onBack }, '← Back'),
         h('h3', { style: { margin: 0 } }, props.item.row.title),
-        h('button', { className: 'btn', style: { marginLeft: 'auto' }, onClick: dl }, '⬇ Download (MP3)')),
+        h('button', { className: 'btn', style: { marginLeft: 'auto' }, 'aria-label': 'Download MP3', onClick: dl }, '⬇ Download (MP3)')),
       h('audio', { ref: aRef, src: props.item.url, preload: 'metadata', style: { display: 'none' },
         onLoadedMetadata: function (e) { if (isFinite(e.target.duration)) setDur(e.target.duration); e.target.playbackRate = rate; },
         onTimeUpdate: function (e) { setT(e.target.currentTime); },
         onEnded: function () { setPlaying(false); }, onPlay: function () { setPlaying(true); }, onPause: function () { setPlaying(false); } }),
       h('div', { className: 'mp-player' },
-        h('button', { className: 'mp-play', onClick: toggle }, playing ? '❚❚' : '▶'),
+        h('button', { className: 'mp-play', role: 'button', 'aria-label': playing ? 'Pause' : 'Play', 'aria-pressed': playing, onClick: toggle }, playing ? '❚❚' : '▶'),
         h('span', { className: 'mp-time' }, fmtT(t)),
-        h('input', { className: 'mp-seek', type: 'range', min: 0, max: Math.max(1, dur), step: 0.1, value: Math.min(t, dur), onChange: function (e) { seekTo(parseFloat(e.target.value)); } }),
+        h('input', { className: 'mp-seek', type: 'range', 'aria-label': 'Seek', min: 0, max: Math.max(1, dur), step: 0.1, value: Math.min(t, dur), onChange: function (e) { seekTo(parseFloat(e.target.value)); } }),
         h('span', { className: 'mp-time' }, fmtT(dur)),
-        h('select', { className: 'field', style: { width: 'auto' }, value: rate, onChange: function (e) { setRate(parseFloat(e.target.value)); } }, [0.75, 1, 1.25, 1.5, 1.75, 2].map(function (r) { return h('option', { key: r, value: r }, r + '×'); }))),
+        h('select', { className: 'field', style: { width: 'auto' }, 'aria-label': 'Playback rate', value: rate, onChange: function (e) { setRate(parseFloat(e.target.value)); } }, [0.75, 1, 1.25, 1.5, 1.75, 2].map(function (r) { return h('option', { key: r, value: r }, r + '×'); }))),
       segs.length ? h('div', { className: 'mp-segs' }, segs.map(function (s, i) {
         return h('div', { key: i, ref: i === curSeg ? segRef : null, className: 'mp-seg' + (i === curSeg ? ' on' : ''), onClick: function () { seekTo(s.start); if (aRef.current && aRef.current.paused) { aRef.current.play(); } } },
           h('span', { className: 'mp-seg-t' }, fmtT(s.start)), h('span', { className: 'mp-seg-x' }, s.text));

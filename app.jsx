@@ -151,9 +151,9 @@
       });
     }
     function pick(c) { rasterize(c.dataUrl).then((blob) => { if (!blob) { setErr('Image processing failed.'); return; } onPick(blob, caption); }); }
-    return <div className="overlay" onClick={onClose}>
-      <div className="fig-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="fig-h"><b>✨ Generate figure (AI)</b><button className="fig-x" onClick={onClose}>✕</button></div>
+    return <div className="overlay" onClick={onClose} onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}>
+      <div className="fig-modal" role="dialog" aria-modal="true" aria-label="Generate figure (AI)" onClick={(e) => e.stopPropagation()}>
+        <div className="fig-h"><b><span aria-hidden="true">✨</span> Generate figure (AI)</b><button className="fig-x" aria-label="Close" onClick={onClose}>✕</button></div>
         <label className="fig-l">Caption</label>
         <input className="fig-in" value={caption} placeholder="E.g. The architecture of the Fisher Fusion pipeline." onChange={(e) => setCaption(e.target.value)} />
         <label className="fig-l">Method text — optional, for a better figure</label>
@@ -1954,17 +1954,17 @@
             <Collab.PresenceBar peers={peers} />
             <span className={'role-tag role-' + myRole}>{myRole}</span>
             <div className="collab-toggles">
-              <button className={'ct' + (drawer.open && drawer.tab === 'comments' ? ' on' : '')} title="Comments" onClick={() => toggleDrawer('comments')}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M2 3.5h12v8H8l-3 2.5V11.5H2z" strokeLinejoin="round" /></svg>{openComments ? <i className="ct-badge">{openComments}</i> : null}</button>
-              <button className={'ct' + (drawer.open && drawer.tab === 'todos' ? ' on' : '')} title="To-dos" onClick={() => toggleDrawer('todos')}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><rect x="2.5" y="2.5" width="11" height="11" rx="2" /><path d="M5.5 8l2 2 3.5-4" strokeLinecap="round" strokeLinejoin="round" /></svg>{openTodos ? <i className="ct-badge">{openTodos}</i> : null}</button>
-              <button className={'ct' + (drawer.open && drawer.tab === 'history' ? ' on' : '')} title="Version history" onClick={() => toggleDrawer('history')}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M8 4v4l3 1.5" strokeLinecap="round" /><path d="M2.5 8a5.5 5.5 0 105.5-5.5A5.5 5.5 0 003.2 5" /><path d="M2.5 2.5V5H5" strokeLinecap="round" strokeLinejoin="round" /></svg></button>
-              <button className={'ct' + (drawer.open && drawer.tab === 'activity' ? ' on' : '')} title="Activity" onClick={() => toggleDrawer('activity')}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M2 8h3l1.5 4 3-8L13.5 8H14" strokeLinecap="round" strokeLinejoin="round" /></svg></button>
-              <button className={'ct' + (drawer.open && drawer.tab === 'kpi' ? ' on' : '')} title="KPIs & format compliance" onClick={() => toggleDrawer('kpi')}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M2 14V8M6 14V4M10 14v-3M14 14V6" strokeLinecap="round" /></svg></button>
-              <button className={'ct' + (drawer.open && drawer.tab === 'review' ? ' on' : '')} title="AI review" onClick={() => toggleDrawer('review')}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M8 1.7l1.7 3.7 4 .4-3 2.7.9 4L8 12.9 4.4 14.5l.9-4-3-2.7 4-.4z" strokeLinejoin="round" /></svg>{openReview ? <i className="ct-badge">{openReview}</i> : null}</button>
-              <button className={'ct' + (drawer.open && drawer.tab === 'numbers' ? ' on' : '')} title="Number consistency" onClick={() => toggleDrawer('numbers')}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M3 5h3M3 8h6M3 11h4" strokeLinecap="round" /><path d="M11.5 4v8M9.7 5.6L11.5 4l1.8 1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>{consistencyConflicts ? <i className="ct-badge warn">{consistencyConflicts}</i> : null}</button>
-              {spellAvailable && <button className={'ct' + (drawer.open && drawer.tab === 'spelling' ? ' on' : '')} title="Spell check (HU/EN)" onClick={() => { const opening = !(drawer.open && drawer.tab === 'spelling'); toggleDrawer('spelling'); if (opening && !spellOn) setSpellOn(true); }}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M2 12l2.6-7 2.6 7M3 9.5h3.2" strokeLinecap="round" strokeLinejoin="round" /><path d="M9.5 12l2-3 2 3M10 10.6h3" strokeLinecap="round" strokeLinejoin="round" /></svg>{spellOn && spellCount ? <i className="ct-badge warn">{spellCount}</i> : null}</button>}
-              <button className={'ct' + (drawer.open && drawer.tab === 'refs' ? ' on' : '')} title="References & citations" onClick={() => toggleDrawer('refs')}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M4 2.5h6l2.5 2.5V13.5H4z" strokeLinejoin="round" /><path d="M6.2 6h4M6.2 8.3h4M6.2 10.6h2.6" strokeLinecap="round" /></svg>{refsIssues ? <i className="ct-badge warn">{refsIssues}</i> : null}</button>
+              <button className={'ct' + (drawer.open && drawer.tab === 'comments' ? ' on' : '')} title="Comments" aria-label="Comments" aria-pressed={drawer.open && drawer.tab === 'comments'} onClick={() => toggleDrawer('comments')}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M2 3.5h12v8H8l-3 2.5V11.5H2z" strokeLinejoin="round" /></svg>{openComments ? <i className="ct-badge">{openComments}</i> : null}</button>
+              <button className={'ct' + (drawer.open && drawer.tab === 'todos' ? ' on' : '')} title="To-dos" aria-label="To-dos" aria-pressed={drawer.open && drawer.tab === 'todos'} onClick={() => toggleDrawer('todos')}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><rect x="2.5" y="2.5" width="11" height="11" rx="2" /><path d="M5.5 8l2 2 3.5-4" strokeLinecap="round" strokeLinejoin="round" /></svg>{openTodos ? <i className="ct-badge">{openTodos}</i> : null}</button>
+              <button className={'ct' + (drawer.open && drawer.tab === 'history' ? ' on' : '')} title="Version history" aria-label="Version history" aria-pressed={drawer.open && drawer.tab === 'history'} onClick={() => toggleDrawer('history')}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M8 4v4l3 1.5" strokeLinecap="round" /><path d="M2.5 8a5.5 5.5 0 105.5-5.5A5.5 5.5 0 003.2 5" /><path d="M2.5 2.5V5H5" strokeLinecap="round" strokeLinejoin="round" /></svg></button>
+              <button className={'ct' + (drawer.open && drawer.tab === 'activity' ? ' on' : '')} title="Activity" aria-label="Activity" aria-pressed={drawer.open && drawer.tab === 'activity'} onClick={() => toggleDrawer('activity')}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M2 8h3l1.5 4 3-8L13.5 8H14" strokeLinecap="round" strokeLinejoin="round" /></svg></button>
+              <button className={'ct' + (drawer.open && drawer.tab === 'kpi' ? ' on' : '')} title="KPIs & format compliance" aria-label="KPIs & format compliance" aria-pressed={drawer.open && drawer.tab === 'kpi'} onClick={() => toggleDrawer('kpi')}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M2 14V8M6 14V4M10 14v-3M14 14V6" strokeLinecap="round" /></svg></button>
+              <button className={'ct' + (drawer.open && drawer.tab === 'review' ? ' on' : '')} title="AI review" aria-label="AI review" aria-pressed={drawer.open && drawer.tab === 'review'} onClick={() => toggleDrawer('review')}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M8 1.7l1.7 3.7 4 .4-3 2.7.9 4L8 12.9 4.4 14.5l.9-4-3-2.7 4-.4z" strokeLinejoin="round" /></svg>{openReview ? <i className="ct-badge">{openReview}</i> : null}</button>
+              <button className={'ct' + (drawer.open && drawer.tab === 'numbers' ? ' on' : '')} title="Number consistency" aria-label="Number consistency" aria-pressed={drawer.open && drawer.tab === 'numbers'} onClick={() => toggleDrawer('numbers')}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M3 5h3M3 8h6M3 11h4" strokeLinecap="round" /><path d="M11.5 4v8M9.7 5.6L11.5 4l1.8 1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>{consistencyConflicts ? <i className="ct-badge warn">{consistencyConflicts}</i> : null}</button>
+              {spellAvailable && <button className={'ct' + (drawer.open && drawer.tab === 'spelling' ? ' on' : '')} title="Spell check (HU/EN)" aria-label="Spell check (HU/EN)" aria-pressed={drawer.open && drawer.tab === 'spelling'} onClick={() => { const opening = !(drawer.open && drawer.tab === 'spelling'); toggleDrawer('spelling'); if (opening && !spellOn) setSpellOn(true); }}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M2 12l2.6-7 2.6 7M3 9.5h3.2" strokeLinecap="round" strokeLinejoin="round" /><path d="M9.5 12l2-3 2 3M10 10.6h3" strokeLinecap="round" strokeLinejoin="round" /></svg>{spellOn && spellCount ? <i className="ct-badge warn">{spellCount}</i> : null}</button>}
+              <button className={'ct' + (drawer.open && drawer.tab === 'refs' ? ' on' : '')} title="References & citations" aria-label="References & citations" aria-pressed={drawer.open && drawer.tab === 'refs'} onClick={() => toggleDrawer('refs')}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M4 2.5h6l2.5 2.5V13.5H4z" strokeLinejoin="round" /><path d="M6.2 6h4M6.2 8.3h4M6.2 10.6h2.6" strokeLinecap="round" /></svg>{refsIssues ? <i className="ct-badge warn">{refsIssues}</i> : null}</button>
             </div>
-            {isAdmin && <a className="btn btn-icon" href="Admin.html" title="Admin">
+            {isAdmin && <a className="btn btn-icon" href="Admin.html" title="Admin" aria-label="Admin">
               <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"><path d="M8 1.8l5 1.9v3.6c0 3-2.1 5.2-5 6.1-2.9-.9-5-3.1-5-6.1V3.7z" /><path d="M5.8 8l1.6 1.6L10.4 6.5" /></svg>
             </a>}
             <button className="btn" onClick={() => setShareOpen(true)}>
@@ -1973,17 +1973,17 @@
             <input ref={fileInput} type="file" multiple accept=".tex,.bib,.bbl,.bst,.cls,.sty,.txt,.md,.markdown,.pdf,application/pdf,.docx,.xlsx,.xls,.pptx,image/*" style={{ display: 'none' }} onChange={onUpload} />
             <input ref={reviewInput} type="file" accept=".json,application/json" style={{ display: 'none' }} onChange={onReviewFile} />
             <input ref={dirInput} type="file" multiple style={{ display: 'none' }} onChange={onUploadFolder} />
-            <button className="btn btn-icon" title="Upload files" onClick={() => fileInput.current.click()}>
+            <button className="btn btn-icon" title="Upload files" aria-label="Upload files" onClick={() => fileInput.current.click()}>
               <svg viewBox="0 0 16 16" width="15" height="15"><path d="M8 2v8M8 2L5 5M8 2l3 3M3 11v2a1 1 0 001 1h8a1 1 0 001-1v-2" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
             </button>
-            <button className="btn btn-icon" title="Upload folder" onClick={() => dirInput.current.click()}>
+            <button className="btn btn-icon" title="Upload folder" aria-label="Upload folder" onClick={() => dirInput.current.click()}>
               <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"><path d="M1.8 5c0-.5.4-.9.9-.9h2.6c.3 0 .5.1.7.3l.7.8h5.6c.5 0 .9.4.9.9V12c0 .5-.4.9-.9.9H2.7c-.5 0-.9-.4-.9-.9z" /><path d="M8 11.6V7M8 7L6.4 8.6M8 7l1.6 1.6" /></svg>
             </button>
-            <button className="btn btn-icon" title={dlBusy ? 'Downloading project…' : 'Download project (.zip — all files + images + the comments/to-dos database)'} onClick={downloadProject} disabled={dlBusy} style={dlBusy ? { opacity: .6 } : null}>
+            <button className="btn btn-icon" title={dlBusy ? 'Downloading project…' : 'Download project (.zip — all files + images + the comments/to-dos database)'} aria-label={dlBusy ? 'Downloading project…' : 'Download project (.zip — all files + images + the comments/to-dos database)'} onClick={downloadProject} disabled={dlBusy} style={dlBusy ? { opacity: .6 } : null}>
               <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"><path d="M8 2.5v6.5M5.4 6.4L8 9l2.6-2.6M3 12.5h10" /></svg>
             </button>
             <div className="acct-mini">
-              <button className="acct-btn" onClick={(e) => { e.stopPropagation(); setAcctOpen((v) => !v); }}><Collab.Avatar user={me} size={30} /></button>
+              <button className="acct-btn" title="Account" aria-label="Account" aria-expanded={acctOpen} onClick={(e) => { e.stopPropagation(); setAcctOpen((v) => !v); }}><Collab.Avatar user={me} size={30} /></button>
               {acctOpen && <React.Fragment>
                 <div className="acct-scrim" onClick={() => setAcctOpen(false)} />
                 <aside className="acct-drawer" onClick={(e) => e.stopPropagation()}>
@@ -2338,18 +2338,18 @@
     return (
       <footer className="transport">
         <div className="tp-controls">
-          <button className="tp-btn" onClick={props.onPrev} title="Previous sentence (Alt+←)">
+          <button className="tp-btn" onClick={props.onPrev} title="Previous sentence (Alt+←)" aria-label="Previous sentence (Alt+←)">
             <svg viewBox="0 0 20 20"><path d="M13 4l-7 6 7 6zM6 4v12" fill="currentColor" /></svg>
           </button>
-          <button className={'tp-btn tp-play' + (playing ? ' is-playing' : '')} onClick={props.onPlay} title="Play / Pause (Space)">
+          <button className={'tp-btn tp-play' + (playing ? ' is-playing' : '')} onClick={props.onPlay} title="Play / Pause (Space)" aria-label="Play / Pause (Space)">
             {playing
               ? <svg viewBox="0 0 20 20"><rect x="5" y="4" width="3.5" height="12" rx="1" /><rect x="11.5" y="4" width="3.5" height="12" rx="1" /></svg>
               : <svg viewBox="0 0 20 20"><path d="M6 4l11 6-11 6z" /></svg>}
           </button>
-          <button className="tp-btn" onClick={props.onStop} title="Stop">
+          <button className="tp-btn" onClick={props.onStop} title="Stop" aria-label="Stop">
             <svg viewBox="0 0 20 20"><rect x="5" y="5" width="10" height="10" rx="1.5" /></svg>
           </button>
-          <button className="tp-btn" onClick={props.onNext} title="Next sentence (Alt+→)">
+          <button className="tp-btn" onClick={props.onNext} title="Next sentence (Alt+→)" aria-label="Next sentence (Alt+→)">
             <svg viewBox="0 0 20 20"><path d="M7 4l7 6-7 6zM14 4v12" fill="currentColor" /></svg>
           </button>
         </div>
@@ -2369,12 +2369,12 @@
         </div>
 
         <div className="tp-right">
-          <button className={'tp-toggle' + (props.showVoiced ? ' on' : ' off')} title={props.showVoiced ? 'Hide ♪ voiced-sentence highlights' : 'Show ♪ voiced-sentence highlights'} onClick={(e) => { e.stopPropagation(); props.onToggleVoiced && props.onToggleVoiced(); }}><span className="tp-glyph">♪</span></button>
-          {props.hasReview ? <button className={'tp-toggle' + (props.showReview ? ' on' : ' off')} title={props.showReview ? 'Hide AI review markers' : 'Show AI review markers'} onClick={(e) => { e.stopPropagation(); props.onToggleReview && props.onToggleReview(); }}><span className="tp-glyph">✦</span></button> : null}
-          {props.hlShow ? <button className={'tp-toggle' + (props.hlShow.comment ? ' on' : ' off')} title={(props.hlShow.comment ? 'Hide' : 'Show') + ': comment highlights in the code'} onClick={(e) => { e.stopPropagation(); props.onToggleHl && props.onToggleHl('comment'); }}><span className="tp-glyph">✎</span></button> : null}
-          {props.hlShow ? <button className={'tp-toggle' + (props.hlShow.todo ? ' on' : ' off')} title={(props.hlShow.todo ? 'Hide' : 'Show') + ': to-do highlights in the code'} onClick={(e) => { e.stopPropagation(); props.onToggleHl && props.onToggleHl('todo'); }}><span className="tp-glyph">✓</span></button> : null}
-          {props.hlShow ? <button className={'tp-toggle' + (props.hlShow.spell ? ' on' : ' off')} title={(props.hlShow.spell ? 'Hide' : 'Show') + ': spelling highlights in the code'} onClick={(e) => { e.stopPropagation(); props.onToggleHl && props.onToggleHl('spell'); }}><span className="tp-glyph">∿</span></button> : null}
-          <button className={'tp-gear' + (props.engine === 'eleven' ? ' on' : '')} title="Voice engine" onClick={(e) => { e.stopPropagation(); props.onVoice && props.onVoice(); }}>
+          <button className={'tp-toggle' + (props.showVoiced ? ' on' : ' off')} title={props.showVoiced ? 'Hide ♪ voiced-sentence highlights' : 'Show ♪ voiced-sentence highlights'} aria-label={props.showVoiced ? 'Hide ♪ voiced-sentence highlights' : 'Show ♪ voiced-sentence highlights'} aria-pressed={!!props.showVoiced} onClick={(e) => { e.stopPropagation(); props.onToggleVoiced && props.onToggleVoiced(); }}><span className="tp-glyph">♪</span></button>
+          {props.hasReview ? <button className={'tp-toggle' + (props.showReview ? ' on' : ' off')} title={props.showReview ? 'Hide AI review markers' : 'Show AI review markers'} aria-label={props.showReview ? 'Hide AI review markers' : 'Show AI review markers'} aria-pressed={!!props.showReview} onClick={(e) => { e.stopPropagation(); props.onToggleReview && props.onToggleReview(); }}><span className="tp-glyph">✦</span></button> : null}
+          {props.hlShow ? <button className={'tp-toggle' + (props.hlShow.comment ? ' on' : ' off')} title={(props.hlShow.comment ? 'Hide' : 'Show') + ': comment highlights in the code'} aria-label={(props.hlShow.comment ? 'Hide' : 'Show') + ': comment highlights in the code'} aria-pressed={!!props.hlShow.comment} onClick={(e) => { e.stopPropagation(); props.onToggleHl && props.onToggleHl('comment'); }}><span className="tp-glyph">✎</span></button> : null}
+          {props.hlShow ? <button className={'tp-toggle' + (props.hlShow.todo ? ' on' : ' off')} title={(props.hlShow.todo ? 'Hide' : 'Show') + ': to-do highlights in the code'} aria-label={(props.hlShow.todo ? 'Hide' : 'Show') + ': to-do highlights in the code'} aria-pressed={!!props.hlShow.todo} onClick={(e) => { e.stopPropagation(); props.onToggleHl && props.onToggleHl('todo'); }}><span className="tp-glyph">✓</span></button> : null}
+          {props.hlShow ? <button className={'tp-toggle' + (props.hlShow.spell ? ' on' : ' off')} title={(props.hlShow.spell ? 'Hide' : 'Show') + ': spelling highlights in the code'} aria-label={(props.hlShow.spell ? 'Hide' : 'Show') + ': spelling highlights in the code'} aria-pressed={!!props.hlShow.spell} onClick={(e) => { e.stopPropagation(); props.onToggleHl && props.onToggleHl('spell'); }}><span className="tp-glyph">∿</span></button> : null}
+          <button className={'tp-gear' + (props.engine === 'eleven' ? ' on' : '')} title="Voice engine" aria-label="Voice engine" onClick={(e) => { e.stopPropagation(); props.onVoice && props.onVoice(); }}>
             <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="10" cy="10" r="2.6" /><path d="M10 2.5v2M10 15.5v2M2.5 10h2M15.5 10h2M4.7 4.7l1.4 1.4M13.9 13.9l1.4 1.4M4.7 15.3l1.4-1.4M13.9 6.1l1.4-1.4" strokeLinecap="round" /></svg>
             {props.engine === 'eleven' ? <span className="gear-tag">EL</span> : null}
           </button>
@@ -2415,11 +2415,11 @@
     }, [settled, skipped, failed, items.length]);
     const fmt = (n) => !n ? '' : n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(0) + ' KB' : (n / 1048576).toFixed(1) + ' MB';
     return (
-      <div className="up-scrim" onMouseDown={() => { if (settled) onClose(); }}>
-        <div className="up-modal" onMouseDown={(e) => e.stopPropagation()}>
+      <div className="up-scrim" onMouseDown={() => { if (settled) onClose(); }} onKeyDown={(e) => { if (e.key === 'Escape' && settled) onClose(); }}>
+        <div className="up-modal" role="dialog" aria-modal="true" aria-label={settled ? 'Upload complete' : 'Uploading files'} onMouseDown={(e) => e.stopPropagation()}>
           <div className="up-head">
             <b>{settled ? 'Upload complete' : 'Uploading files'}</b>
-            <button className="up-x" onClick={onClose} disabled={!settled} title={settled ? 'Close' : 'Uploads in progress…'}>✕</button>
+            <button className="up-x" onClick={onClose} disabled={!settled} title={settled ? 'Close' : 'Uploads in progress…'} aria-label={settled ? 'Close' : 'Uploads in progress…'}>✕</button>
             <span className="up-sub">{active > 0 ? active + ' in progress · ' : ''}{done} done{skipped ? ' · ' + skipped + ' skipped' : ''}{failed ? ' · ' + failed + ' failed' : ''}</span>
           </div>
           <div className="up-list">
@@ -2459,7 +2459,7 @@
     let idx = -1;
     return (
       <div className="cmdk-overlay" onMouseDown={onClose}>
-        <div className="cmdk" onMouseDown={(e) => e.stopPropagation()} onKeyDown={onKey}>
+        <div className="cmdk" role="dialog" aria-modal="true" aria-label="Command palette" onMouseDown={(e) => e.stopPropagation()} onKeyDown={onKey}>
           <div className="cmdk-in">
             <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.6"><circle cx="7" cy="7" r="4.5" /><path d="M11 11l3 3" strokeLinecap="round" /></svg>
             <input ref={inRef} value={q} placeholder="Type a command or jump to a section…" onChange={(e) => setQ(e.target.value)} />

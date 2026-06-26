@@ -178,6 +178,11 @@
       sb.auth.getUser().then(function (r) { var u = r && r.data && r.data.user; if (u) { setMe(u); loadProjects(u.id); } });
     }, []);
     useEffect(function () { if (sharedMode && sb && window.JSZip) loadShared(shareToken); }, []);
+    // Esc closes the share modal / floating reviewer note (additive keyboard affordance)
+    useEffect(function () {
+      function onKey(e) { if (e.key !== 'Escape') return; if (shareOpen) setShareOpen(false); else if (notePanel) setNotePanel(false); }
+      document.addEventListener('keydown', onKey); return function () { document.removeEventListener('keydown', onKey); };
+    }, [shareOpen, notePanel]);
     function loadShared(token) {
       setLoading(true); setErr('');
       sb.rpc('compare_shared', { p_token: token }).then(function (r) {
@@ -320,7 +325,7 @@
             h('div', { style: { minWidth: 0, textAlign: 'left' } },
               h('div', { className: 'cm-saved-t' }, row.title || 'Comparison'),
               h('div', { className: 'cm-saved-m' }, (n ? n + ' changes · ' : '') + (row.size_bytes ? Math.round(row.size_bytes / 1048576) + ' MB · ' : '') + (row.created_at ? String(row.created_at).slice(0, 10) : ''))),
-            h('button', { className: 'cm-saved-del', title: 'Delete', onClick: function (ev) { deleteProject(row, ev); } }, '🗑'));
+            h('button', { className: 'cm-saved-del', title: 'Delete', 'aria-label': 'Delete saved comparison', onClick: function (ev) { deleteProject(row, ev); } }, '🗑'));
         }));
     }
 
@@ -396,7 +401,7 @@
         (!ro && sb && savedId) ? h('button', { className: 'btn' + (curRow.is_public ? ' pri' : ''), title: 'Public link for the reviewers', onClick: function () { setShareOpen(true); } }, curRow.is_public ? '🔗 Shared' : '🔗 Share') : null,
         h('button', { className: 'btn' + (notePanel ? ' pri' : ''), title: 'Reviewer note as a floating panel', onClick: function () { var show = !notePanel; if (show && !notePos) setNotePos({ top: 66, left: Math.max(8, window.innerWidth - 404) }); setNotePanel(show); } }, '📝 Note'),
         (!ro) ? h('button', { className: 'btn', onClick: function () { setDb(null); setPkg(null); setPdfs({}); setRawFiles(null); setSavedId(null); setErr(''); } }, '← Folders') : null,
-        (!ro) ? h('div', { className: 'seg' }, TABS.map(function (t) { return h('button', { key: t[0], className: view === t[0] ? 'on' : '', onClick: function () { setView(t[0]); if (t[0] === 'edit' && !texSrc) openEdit(); } }, t[1]); })) : null));
+        (!ro) ? h('div', { className: 'seg', role: 'tablist', 'aria-label': 'View' }, TABS.map(function (t) { return h('button', { key: t[0], className: view === t[0] ? 'on' : '', role: 'tab', 'aria-selected': view === t[0] ? 'true' : 'false', 'aria-label': t[1], onClick: function () { setView(t[0]); if (t[0] === 'edit' && !texSrc) openEdit(); } }, t[1]); })) : null));
 
     function sidebar() {
       return h('div', { className: 'cm-side' },
@@ -410,7 +415,7 @@
     }
     function changeLi(c) {
       var cat = CAT[c.category] || { c: '#6b7280', t: c.category };
-      return h('div', { key: c.id, className: 'cm-li' + (c.id === (sel && sel.id) ? ' on' : ''), onClick: function () { setSelId(c.id); } },
+      return h('div', { key: c.id, className: 'cm-li' + (c.id === (sel && sel.id) ? ' on' : ''), role: 'button', tabIndex: 0, 'aria-label': 'Change: ' + (c.change_summary || c.id), onClick: function () { setSelId(c.id); }, onKeyDown: function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelId(c.id); } } },
         h('div', { style: { display: 'flex', gap: 6, alignItems: 'center', marginBottom: 2 } },
           h('span', { className: 'cm-op', style: { color: (OP[c.op] || {}).c } }, (OP[c.op] || {}).t || c.op),
           h('span', { className: 'cm-cat', style: { background: cat.c } }, cat.t),
@@ -429,22 +434,22 @@
         h('div', { className: 'cm-ws-col', style: { width: revW + 'px', flex: 'none' } },
           h('div', { className: 'cm-ws-h' }, '📝 Reviewer comments (' + rps.length + ')'),
           h('div', { className: 'cm-ws-scroll' },
-            h('div', { className: 'cm-rp-item' + (filterP === '' ? ' on' : ''), onClick: function () { selectRp(''); } }, h('div', { className: 'cm-rp-top' }, h('span', { className: 'cm-rp-id' }, 'All changes'), h('span', { className: 'cm-rp-cnt' }, changes.length))),
+            h('div', { className: 'cm-rp-item' + (filterP === '' ? ' on' : ''), role: 'button', tabIndex: 0, 'aria-label': 'Show all changes', onClick: function () { selectRp(''); }, onKeyDown: function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectRp(''); } } }, h('div', { className: 'cm-rp-top' }, h('span', { className: 'cm-rp-id' }, 'All changes'), h('span', { className: 'cm-rp-cnt' }, changes.length))),
             rps.map(function (r) {
               var n = (db.index_by_review_point && db.index_by_review_point[r.id] || []).length;
-              return h('div', { key: r.id, className: 'cm-rp-item' + (filterP === r.id ? ' on' : ''), onClick: function () { selectRp(r.id); } },
+              return h('div', { key: r.id, className: 'cm-rp-item' + (filterP === r.id ? ' on' : ''), role: 'button', tabIndex: 0, 'aria-label': 'Reviewer comment ' + r.id + ' (' + r.reviewer + ')', onClick: function () { selectRp(r.id); }, onKeyDown: function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectRp(r.id); } } },
                 h('div', { className: 'cm-rp-top' }, h('span', { className: 'cm-rp-id' }, r.id), h('span', { className: 'cm-rp-rev' }, r.reviewer), h('span', { className: 'cm-rp-cnt' }, n)),
                 h('div', { className: 'cm-rp-text' }, r.comment));
             }))),
-        h('div', { className: 'cm-split', onMouseDown: function (e) { startDrag(e, wsRef.current, function (x, w) { setRevW(Math.max(190, Math.min(w - 470, x))); }); } }),
+        h('div', { className: 'cm-split', role: 'separator', 'aria-orientation': 'vertical', 'aria-label': 'Resize panels', tabIndex: 0, onMouseDown: function (e) { startDrag(e, wsRef.current, function (x, w) { setRevW(Math.max(190, Math.min(w - 470, x))); }); } }),
         h('div', { className: 'cm-ws-col', style: { width: chgW + 'px', flex: 'none' } },
           h('div', { className: 'cm-ws-h' }, 'Applied changes' + (filterP ? ' · ' + filterP : '') + ' (' + shown.length + ')'),
           h('div', { className: 'cm-ws-scroll' }, shown.length ? shown.map(changeLi) : h('div', { style: { padding: 12, color: 'var(--muted)', fontSize: 13 } }, 'No changes for this comment.')),
           sel ? h('div', { className: 'cm-ws-detail' }, h('div', { className: 'cm-ws-detail-sum' }, sel.change_summary), sel.reason ? h('div', { className: 'cm-ws-detail-reason' }, sel.reason) : null) : null),
-        h('div', { className: 'cm-split', onMouseDown: function (e) { startDrag(e, wsRef.current, function (x, w) { setChgW(Math.max(220, Math.min(w - revW - 340, x - revW - 8))); }); } }),
+        h('div', { className: 'cm-split', role: 'separator', 'aria-orientation': 'vertical', 'aria-label': 'Resize panels', tabIndex: 0, onMouseDown: function (e) { startDrag(e, wsRef.current, function (x, w) { setChgW(Math.max(220, Math.min(w - revW - 340, x - revW - 8))); }); } }),
         h('div', { className: 'cm-ws-pdfs', ref: pdfWrapRef, style: { gridTemplateColumns: pdfFrac + 'fr 8px ' + (1 - pdfFrac) + 'fr' } },
           h('div', { className: 'cm-pdfcol' }, h('div', { className: 'cm-pdf-h' }, 'Original (v2)', sel ? h('span', { className: 'cm-pdf-hint' }, ' — ' + sel.id) : null), pdfs.v2 ? h(PdfDoc, { bytes: pdfs.v2, change: sel, side: 'original' }) : h('div', { className: 'cm-pdf-empty' }, 'no original PDF — load a folder/project')),
-          h('div', { className: 'cm-split', onMouseDown: function (e) { startDrag(e, pdfWrapRef.current, function (x, w) { setPdfFrac(Math.max(0.18, Math.min(0.82, x / w))); }); } }),
+          h('div', { className: 'cm-split', role: 'separator', 'aria-orientation': 'vertical', 'aria-label': 'Resize panels', tabIndex: 0, onMouseDown: function (e) { startDrag(e, pdfWrapRef.current, function (x, w) { setPdfFrac(Math.max(0.18, Math.min(0.82, x / w))); }); } }),
           h('div', { className: 'cm-pdfcol' }, h('div', { className: 'cm-pdf-h' }, 'Revised (v3)', sel ? h('span', { className: 'cm-pdf-hint' }, ' — ' + sel.id) : null), pdfs.v3 ? h(PdfDoc, { bytes: pdfs.v3, change: sel, side: 'final' }) : h('div', { className: 'cm-pdf-empty' }, 'no revised PDF'))));
     }
     function changeDetail() {
@@ -481,7 +486,7 @@
             h('button', { className: 'btn pri', onClick: compile, disabled: compiling || !texSrc }, compiling ? 'Compiling…' : '▶ Compile (PDF)')),
           h('textarea', { className: 'cm-tex', value: texSrc, spellCheck: false, onChange: function (e) { setTexSrc(e.target.value); }, placeholder: 'Choose a version, then „Original .tex" — the manuscript source loads here…' }),
           compileLog ? h('pre', { className: 'cm-log' }, compileLog) : null),
-        h('div', { className: 'cm-split', onMouseDown: function (e) { startDrag(e, editRef.current, function (x, w) { setEditFrac(Math.max(0.2, Math.min(0.8, x / w))); }); } }),
+        h('div', { className: 'cm-split', role: 'separator', 'aria-orientation': 'vertical', 'aria-label': 'Resize panels', tabIndex: 0, onMouseDown: function (e) { startDrag(e, editRef.current, function (x, w) { setEditFrac(Math.max(0.2, Math.min(0.8, x / w))); }); } }),
         h('div', { className: 'cm-edit-r' },
           compiledBytes ? h(PdfDoc, { bytes: compiledBytes, change: null, side: 'final' })
             : h('div', { className: 'cm-pdf-empty', style: { height: '100%' } }, 'The compiled PDF appears here. (SwiftLaTeX, in the browser — no bibtex, so citations may be „?"; live text/figure changes, however, are visible.)')));
@@ -511,7 +516,7 @@
     function withSide(mainEl) {
       return h('div', { className: 'cm-body', ref: bodyRef, style: { gridTemplateColumns: sideW + 'px 8px minmax(0,1fr)' } },
         sidebar(),
-        h('div', { className: 'cm-split', onMouseDown: function (e) { startDrag(e, bodyRef.current, function (x, w) { setSideW(Math.max(220, Math.min(w * 0.7, x))); }); } }),
+        h('div', { className: 'cm-split', role: 'separator', 'aria-orientation': 'vertical', 'aria-label': 'Resize panels', tabIndex: 0, onMouseDown: function (e) { startDrag(e, bodyRef.current, function (x, w) { setSideW(Math.max(220, Math.min(w * 0.7, x))); }); } }),
         mainEl);
     }
     var body;
@@ -523,18 +528,18 @@
     else if (eview === 'audio') body = audioPanel();
     else body = withSide(changeDetail());
 
-    var notePanelEl = notePanel ? h('div', { className: 'cm-note', style: notePos ? { top: notePos.top + 'px', left: notePos.left + 'px', right: 'auto', bottom: 'auto' } : null },
+    var notePanelEl = notePanel ? h('div', { className: 'cm-note', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Reviewer note', style: notePos ? { top: notePos.top + 'px', left: notePos.left + 'px', right: 'auto', bottom: 'auto' } : null },
       h('div', { className: 'cm-note-h', onMouseDown: function (e) { startMove(e, setNotePos); } },
         h('span', { className: 'cm-note-title' }, '📝 Reviewer note'),
-        (!ro && sb && savedId) ? h('button', { className: 'cm-note-btn', title: 'Save', onMouseDown: function (e) { e.stopPropagation(); }, onClick: saveReviewerText }, '💾') : null,
-        h('button', { className: 'cm-note-x', title: 'Close', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function () { setNotePanel(false); } }, '×')),
+        (!ro && sb && savedId) ? h('button', { className: 'cm-note-btn', title: 'Save', 'aria-label': 'Save reviewer note', onMouseDown: function (e) { e.stopPropagation(); }, onClick: saveReviewerText }, '💾') : null,
+        h('button', { className: 'cm-note-x', title: 'Close', 'aria-label': 'Close reviewer note', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function () { setNotePanel(false); } }, '×')),
       revSaving ? h('div', { className: 'cm-note-status' }, revSaving) : null,
       h('textarea', { className: 'cm-note-t', value: reviewerText, spellCheck: false, readOnly: ro, placeholder: 'Paste / edit the reviewers\' text here — it is preserved together with the saved project…', onChange: function (e) { setReviewerText(e.target.value); } })) : null;
 
     var shareLink = curRow.share_token ? shareLinkFor(curRow.share_token) : '';
     var shareModalEl = (shareOpen && !ro) ? h('div', { className: 'cm-modal-scrim', onClick: function () { setShareOpen(false); } },
-      h('div', { className: 'cm-modal', onClick: function (e) { e.stopPropagation(); } },
-        h('div', { className: 'cm-modal-h' }, h('b', null, '🔗 Share with the reviewers'), h('button', { className: 'cm-note-x', onClick: function () { setShareOpen(false); } }, '×')),
+      h('div', { className: 'cm-modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Share with the reviewers', onClick: function (e) { e.stopPropagation(); } },
+        h('div', { className: 'cm-modal-h' }, h('b', null, '🔗 Share with the reviewers'), h('button', { className: 'cm-note-x', 'aria-label': 'Close share dialog', onClick: function () { setShareOpen(false); } }, '×')),
         h('p', { style: { fontSize: 13, color: 'var(--muted)', margin: '2px 0 12px' } }, 'Public link: anyone you send it to can view this comparison (the two PDFs, the applied changes, the reviewer comments) — without signing in, in read-only mode.'),
         h('label', { className: 'cm-share-toggle' },
           h('input', { type: 'checkbox', checked: !!curRow.is_public, disabled: shareBusy, onChange: function (e) { shareProject(e.target.checked); } }),

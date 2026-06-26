@@ -80,11 +80,11 @@
           return h('div', { key: b.id, onMouseEnter: function () { setHover(b.id); }, onMouseLeave: function () { setHover(function (x) { return x === b.id ? null : x; }); }, style: { display: 'flex', alignItems: 'flex-start', gap: 6, position: 'relative', padding: '1px 0', marginLeft: isQ ? 12 : 0, borderLeft: isQ ? '3px solid var(--line)' : 'none', paddingLeft: isQ ? 12 : 0 } },
             // hover gutter
             (canEdit && hover === b.id) ? h('div', { style: { position: 'absolute', left: -64, top: 2, display: 'flex', gap: 2 } },
-              h('button', { title: 'New block', onMouseDown: function (e) { e.preventDefault(); }, onClick: function () { newAfter(b.id); }, style: gbtn }, '+'),
-              h('select', { value: b.type, onChange: function (e) { patch(b.id, { type: e.target.value }); }, style: { fontSize: 11, border: '1px solid var(--line)', borderRadius: 6, background: 'var(--surface)', color: 'var(--ink)' } }, TYPE_OPTS.map(function (o) { return h('option', { key: o[0], value: o[0] }, o[1]); })),
-              h('button', { title: 'Delete', onMouseDown: function (e) { e.preventDefault(); }, onClick: function () { remove(b.id); }, style: gbtn }, '×')) : null,
-            isT ? h('input', { type: 'checkbox', checked: !!b.checked, onChange: function (e) { patch(b.id, { checked: e.target.checked }); }, style: { marginTop: 5 } }) : null,
-            isB ? h('span', { style: { marginTop: 1, color: 'var(--muted)', lineHeight: '1.55', fontSize: 16 } }, '•') : null,
+              h('button', { 'aria-label': 'New block', title: 'New block', onMouseDown: function (e) { e.preventDefault(); }, onClick: function () { newAfter(b.id); }, style: gbtn }, '+'),
+              h('select', { 'aria-label': 'Block type', value: b.type, onChange: function (e) { patch(b.id, { type: e.target.value }); }, style: { fontSize: 11, border: '1px solid var(--line)', borderRadius: 6, background: 'var(--surface)', color: 'var(--ink)' } }, TYPE_OPTS.map(function (o) { return h('option', { key: o[0], value: o[0] }, o[1]); })),
+              h('button', { 'aria-label': 'Delete block', title: 'Delete', onMouseDown: function (e) { e.preventDefault(); }, onClick: function () { remove(b.id); }, style: gbtn }, '×')) : null,
+            isT ? h('input', { type: 'checkbox', 'aria-label': 'To-do done', checked: !!b.checked, onChange: function (e) { patch(b.id, { checked: e.target.checked }); }, style: { marginTop: 5 } }) : null,
+            isB ? h('span', { 'aria-hidden': 'true', style: { marginTop: 1, color: 'var(--muted)', lineHeight: '1.55', fontSize: 16 } }, '•') : null,
             isC ? null : null,
             h('textarea', {
               ref: function (el) { if (el) { taRefs.current[b.id] = el; fit(el); } else delete taRefs.current[b.id]; },

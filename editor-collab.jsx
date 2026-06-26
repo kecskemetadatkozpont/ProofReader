@@ -22,7 +22,7 @@
       <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M5 3l8 5-8 5z" /></svg>
       {label || ('Resume reading from sentence ' + n)}
       <button onClick={onResume}>Resume</button>
-      <button className="x" onClick={onDismiss}>✕</button>
+      <button className="x" onClick={onDismiss} aria-label="Dismiss">✕</button>
     </div>;
   }
 
@@ -32,7 +32,7 @@
       <span className="seltool-q">“{quote.slice(0, 46)}{quote.length > 46 ? '…' : ''}”</span>
       <button onClick={onComment}><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M2 3.5h12v8H8l-3 2.5V11.5H2z" strokeLinejoin="round" /></svg>Comment</button>
       <button onClick={onTodo}><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="2.5" y="2.5" width="11" height="11" rx="2" /><path d="M5.5 8l2 2 3.5-4" strokeLinecap="round" strokeLinejoin="round" /></svg>To-do</button>
-      <button className="x" onClick={onClose}>✕</button>
+      <button className="x" onClick={onClose} aria-label="Close">✕</button>
     </div>;
   }
 
@@ -58,7 +58,7 @@
           </span>
           {it.when ? <span className="anno-pop2-when">{it.when}</span> : null}
         </div>
-        {it.due ? <div className="anno-pop2-due">⏷ {it.due}</div> : null}
+        {it.due ? <div className="anno-pop2-due"><span aria-hidden="true">⏷</span> {it.due}</div> : null}
         <div className="anno-pop2-body">{it.body ? it.body : <i className="anno-pop2-empty">(no text)</i>}</div>
       </div>)}
     </div>;
@@ -100,7 +100,7 @@
     if (!att) return null;
     return <div className="lightbox" onClick={() => setAtt(null)}>
       <img src={att.dataURL} alt={att.name} onClick={(e) => e.stopPropagation()} />
-      <div className="lb-bar"><span>{att.name}</span><a href={att.dataURL} download={att.name} onClick={(e) => e.stopPropagation()}>Download</a><button onClick={() => setAtt(null)}>✕</button></div>
+      <div className="lb-bar"><span>{att.name}</span><a href={att.dataURL} download={att.name} onClick={(e) => e.stopPropagation()}>Download</a><button onClick={() => setAtt(null)} aria-label="Close">✕</button></div>
     </div>;
   }
 
@@ -113,7 +113,7 @@
             ? <button className="attach-thumb" onClick={() => openLightbox(a)} title={'Open ' + a.name} style={{ backgroundImage: 'url(' + a.dataURL + ')' }} />
             : <a className="attach-file" href={a.dataURL} download={a.name} title={'Download ' + a.name}><span className="ext">{extOf(a.name)}</span></a>}
           <div className="attach-meta"><span className="attach-name" title={a.name}>{a.name}</span>{a.size ? <span className="attach-size">{fmtSize(a.size)}</span> : null}</div>
-          {onRemove && <button className="attach-x" onClick={() => onRemove(i)} title="Remove">✕</button>}
+          {onRemove && <button className="attach-x" onClick={() => onRemove(i)} title="Remove" aria-label="Remove">✕</button>}
         </div>
       ))}
     </div>;
@@ -221,9 +221,9 @@
           </div>
         : !editing && <div className="thread-foot">
             <button className="reply-trigger" onClick={() => setReplyOpen(true)}>Reply…</button>
-            {mayEdit && <button onClick={() => setEditing(true)} title="Edit"><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M10.5 2.5l3 3-7.5 7.5H3v-3z" strokeLinejoin="round" /></svg></button>}
-            <button onClick={() => onResolve(ann)} title={ann.status === 'open' ? 'Resolve' : 'Reopen'}>{ann.status === 'open' ? '✓' : '↺'}</button>
-            {mayEdit && <button onClick={() => onDelete(ann)} title="Delete">✕</button>}
+            {mayEdit && <button onClick={() => setEditing(true)} title="Edit" aria-label="Edit"><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M10.5 2.5l3 3-7.5 7.5H3v-3z" strokeLinejoin="round" /></svg></button>}
+            <button onClick={() => onResolve(ann)} title={ann.status === 'open' ? 'Resolve' : 'Reopen'} aria-label={ann.status === 'open' ? 'Resolve' : 'Reopen'}>{ann.status === 'open' ? '✓' : '↺'}</button>
+            {mayEdit && <button onClick={() => onDelete(ann)} title="Delete" aria-label="Delete">✕</button>}
           </div>}
     </div>;
   }
@@ -234,15 +234,15 @@
     const mayEdit = canEdit || (me && ann.authorId === me.id);
     if (editing) return <div className="todo-item editing"><div className="tbody"><Compose kind="todo" members={members} submitLabel="Save" initial={{ body: ann.body, mentions: ann.mentions, attachments: ann.attachments, assignee: ann.assignee, due: ann.due }} onSave={(d) => { onEdit(ann, d); setEditing(false); }} onCancel={() => setEditing(false)} /></div></div>;
     return <div className={'todo-item' + (ann.status === 'done' ? ' done' : '')}>
-      <button className="tcheck" onClick={() => onToggle(ann)}>{ann.status === 'done' ? '✓' : ''}</button>
+      <button className="tcheck" onClick={() => onToggle(ann)} aria-label={ann.status === 'done' ? 'Mark as not done' : 'Mark as done'} aria-pressed={ann.status === 'done'}>{ann.status === 'done' ? '✓' : ''}</button>
       <div className="tbody">
         <div className="ttext">{highlightBody(ann.body, ann.mentions)}</div>
         <div className="tmeta" onClick={() => onJump(ann)}>“{(ann.anchor.quote || '').slice(0, 40)}”</div>
         <AttachmentList attachments={ann.attachments} compact />
         <div className="tchips">{assignee && <span className="tchip"><Avatar user={assignee} size={16} />{assignee.name.split(' ')[0]}</span>}{(ann.mentions || []).map((id) => { const u = Auth.byId(id); return u ? <span className="tchip mention-chip" key={id}>@{u.name.split(' ')[0]}</span> : null; })}{ann.due && <span className="tchip due">due {ann.due}</span>}<span className="tchip file">{bn(ann.anchor.file)}</span></div>
       </div>
-      {mayEdit && <button className="tdel" onClick={() => setEditing(true)} title="Edit"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.6"><path d="M10.5 2.5l3 3-7.5 7.5H3v-3z" strokeLinejoin="round" /></svg></button>}
-      {mayEdit && <button className="tdel" onClick={() => onDelete(ann)} title="Delete">✕</button>}
+      {mayEdit && <button className="tdel" onClick={() => setEditing(true)} title="Edit" aria-label="Edit"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.6"><path d="M10.5 2.5l3 3-7.5 7.5H3v-3z" strokeLinejoin="round" /></svg></button>}
+      {mayEdit && <button className="tdel" onClick={() => onDelete(ann)} title="Delete" aria-label="Delete">✕</button>}
     </div>;
   }
 
@@ -266,8 +266,8 @@
     const anns = p.anns || [];
     const comments = anns.filter((a) => a.kind !== 'todo');
     const todos = anns.filter((a) => a.kind === 'todo');
-    return <div className="bubble-pop" ref={ref} style={{ left: left, top: top, width: W }}>
-      <div className="bubble-pop-head"><span>{[comments.length ? 'Comment' : '', todos.length ? 'To-do' : ''].filter(Boolean).join(' · ')}</span><button className="bubble-pop-x" onClick={p.onClose} title="Close">✕</button></div>
+    return <div className="bubble-pop" ref={ref} role="dialog" aria-modal="true" aria-label="Notes for this sentence" style={{ left: left, top: top, width: W }}>
+      <div className="bubble-pop-head"><span>{[comments.length ? 'Comment' : '', todos.length ? 'To-do' : ''].filter(Boolean).join(' · ')}</span><button className="bubble-pop-x" onClick={p.onClose} title="Close" aria-label="Close">✕</button></div>
       <div className="bubble-pop-body">
         {comments.map((a) => <Thread key={a.id} ann={a} me={p.me} members={p.members} canEdit={p.canEdit} onReply={p.onReply} onResolve={p.onResolve} onDelete={p.onDelete} onJump={p.onJump} onEdit={p.onEdit} />)}
         {todos.map((a) => <TodoItem key={a.id} ann={a} me={p.me} members={p.members} canEdit={p.canEdit} onToggle={p.onToggleTodo} onJump={p.onJump} onDelete={p.onDelete} onEdit={p.onEdit} />)}
@@ -317,8 +317,8 @@
     }
     return <aside className="drawer">
       <div className="drawer-tabs">
-        {tabs.map(([k, l]) => <button key={k} className={'dtab' + (p.tab === k ? ' on' : '')} onClick={() => p.setTab(k)}>{l}{k === 'comments' && openCount ? <span className="badge">{openCount}</span> : null}{k === 'todos' && todoOpen ? <span className="badge">{todoOpen}</span> : null}{k === 'review' && reviewOpen ? <span className="badge">{reviewOpen}</span> : null}{k === 'numbers' && numConflicts ? <span className="badge warn">{numConflicts}</span> : null}{k === 'refs' && refIssues ? <span className="badge warn">{refIssues}</span> : null}{k === 'spelling' && spellOpen ? <span className="badge warn">{spellOpen}</span> : null}</button>)}
-        <button className="drawer-x" onClick={p.onClose} title="Close">✕</button>
+        {tabs.map(([k, l]) => <button key={k} className={'dtab' + (p.tab === k ? ' on' : '')} aria-pressed={p.tab === k} onClick={() => p.setTab(k)}>{l}{k === 'comments' && openCount ? <span className="badge">{openCount}</span> : null}{k === 'todos' && todoOpen ? <span className="badge">{todoOpen}</span> : null}{k === 'review' && reviewOpen ? <span className="badge">{reviewOpen}</span> : null}{k === 'numbers' && numConflicts ? <span className="badge warn">{numConflicts}</span> : null}{k === 'refs' && refIssues ? <span className="badge warn">{refIssues}</span> : null}{k === 'spelling' && spellOpen ? <span className="badge warn">{spellOpen}</span> : null}</button>)}
+        <button className="drawer-x" onClick={p.onClose} title="Close" aria-label="Close">✕</button>
       </div>
       {(p.tab === 'comments' || p.tab === 'todos') && p.docName && <div className="drawer-doc"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M4 2.5h5l3 3V13a.5.5 0 01-.5.5h-7A.5.5 0 014 13z" strokeLinejoin="round" /></svg>Active document <b>{p.docName}</b><span className="dd-hint">· each note is tagged with its file</span></div>}
       <div className="drawer-body">
@@ -745,7 +745,7 @@
     const add = () => { const f = from.trim(); if (!f) return; p.onSet(list.filter((e) => e.from.toLowerCase() !== f.toLowerCase()).concat([{ from: f, to: to.trim() }])); setFrom(''); setTo(''); };
     const remove = (f) => p.onSet(list.filter((e) => e.from !== f));
     return <div className="pron">
-      {list.length > 0 && <div className="pron-list">{list.map((e) => <div key={e.from} className="pron-row"><b>{e.from}</b><span className="pron-arrow">→</span><i>{e.to || '∅'}</i><button className="pron-x" title="Remove" onClick={() => remove(e.from)}>✕</button></div>)}</div>}
+      {list.length > 0 && <div className="pron-list">{list.map((e) => <div key={e.from} className="pron-row"><b>{e.from}</b><span className="pron-arrow">→</span><i>{e.to || '∅'}</i><button className="pron-x" title="Remove" aria-label="Remove" onClick={() => remove(e.from)}>✕</button></div>)}</div>}
       <div className="pron-add">
         <input className="vp-input" placeholder="word — e.g. LiDAR" value={from} onChange={(e) => setFrom(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') add(); }} />
         <input className="vp-input" placeholder="say — e.g. lie-dar" value={to} onChange={(e) => setTo(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') add(); }} />
@@ -797,7 +797,7 @@
       else alert('No such registered user.');
     };
     const link = location.href.split('#')[0];
-    return <div className="overlay" onClick={p.onClose}><div className="modal" onClick={(e) => e.stopPropagation()}>
+    return <div className="overlay" onClick={p.onClose} onKeyDown={(e) => { if (e.key === 'Escape') p.onClose(); }}><div className="modal" role="dialog" aria-modal="true" aria-label={'Share ' + project.title} onClick={(e) => e.stopPropagation()}>
       <div className="modal-head"><h3>Share “{project.title}”</h3><p>Invite collaborators or share a link.</p></div>
       <div className="modal-body">
         <div className="field-label">Invite by email</div>
@@ -813,7 +813,7 @@
         <div className="member-row"><Avatar user={owner} size={30} /><span className="mname">{owner ? owner.name : project.ownerId}{owner && owner.id === me.id ? ' (you)' : ''}</span><span className="role-pill">Owner</span></div>
         {project.members.map((m) => { const u = Auth.byId(m.userId); const acc = accept[m.userId]; const pending = acc == null; return <div key={m.userId} className="member-row"><Avatar user={u} size={30} /><span className="mname">{u ? u.name : m.userId}</span>
           {isOwnerView && cloud ? <span className={'inv-pill ' + (pending ? 'pending' : 'ok')} title={pending ? 'The invitee has not yet accepted the invitation' : ('Accepted: ' + new Date(acc).toLocaleString())}>{pending ? 'Pending' : 'Accepted'}</span> : null}
-          {project.ownerId === me.id ? <>{pending && cloud ? <button className="link" title="Resend invitation notification" onClick={() => { Store.resendInvite(project.id, m.userId, m.role, project.title); setResent((s) => Object.assign({}, s, { [m.userId]: true })); }}>{resent[m.userId] ? 'Sent ✓' : 'Resend'}</button> : null}<select className="sel" value={m.role} onChange={(e) => { Store.setRole(project.id, m.userId, e.target.value); p.onChange(); }}>{ROLES.map((r) => <option key={r} value={r}>{r}</option>)}</select><button className="link" style={{ color: '#dc2626' }} onClick={() => { Store.removeMember(project.id, m.userId); p.onChange(); }}>Remove</button></> : <span className="role-pill">{m.role}</span>}
+          {project.ownerId === me.id ? <>{pending && cloud ? <button className="link" title="Resend invitation notification" aria-label="Resend invitation notification" onClick={() => { Store.resendInvite(project.id, m.userId, m.role, project.title); setResent((s) => Object.assign({}, s, { [m.userId]: true })); }}>{resent[m.userId] ? 'Sent ✓' : 'Resend'}</button> : null}<select className="sel" value={m.role} onChange={(e) => { Store.setRole(project.id, m.userId, e.target.value); p.onChange(); }}>{ROLES.map((r) => <option key={r} value={r}>{r}</option>)}</select><button className="link" style={{ color: '#dc2626' }} onClick={() => { Store.removeMember(project.id, m.userId); p.onChange(); }}>Remove</button></> : <span className="role-pill">{m.role}</span>}
         </div>; })}
         <div className="field-label" style={{ marginTop: 16 }}>Public link</div>
         <label style={{ display: 'flex', alignItems: 'center', gap: 9, fontSize: 13 }}>
@@ -834,7 +834,7 @@
     const words = window.PRDiff.words(oldS, newS);
     const lines = window.PRDiff.lines(oldS, newS);
     const stats = window.PRDiff.stats(oldS, newS);
-    return <div className="overlay" onClick={p.onClose}><div className="modal diff-modal" onClick={(e) => e.stopPropagation()}>
+    return <div className="overlay" onClick={p.onClose} onKeyDown={(e) => { if (e.key === 'Escape') p.onClose(); }}><div className="modal diff-modal" role="dialog" aria-modal="true" aria-label={'Compare · ' + p.version.label} onClick={(e) => e.stopPropagation()}>
       <div className="modal-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div><h3>Compare · {p.version.label}</h3><p>{bn(p.file)} · <span style={{ color: '#15803d' }}>+{stats.add}</span> <span style={{ color: '#b91c1c' }}>−{stats.del}</span> words vs. current</p></div>
         <div className="seg2 small"><button className={mode === 'inline' ? 'on' : ''} onClick={() => setMode('inline')}>Inline</button><button className={mode === 'split' ? 'on' : ''} onClick={() => setMode('split')}>Split</button></div>

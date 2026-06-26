@@ -100,12 +100,13 @@
       if (f.type === 'tex' && window.LatexEngine) { try { return window.LatexEngine.process(f.content || '', files).html; } catch (e) { return '<p style="color:#b42318">Render error</p>'; } }
       return null;
     }, [active]);
+    useEffect(function () { var onKey = function (e) { if (e.key === 'Escape') onClose(); }; window.addEventListener('keydown', onKey); return function () { window.removeEventListener('keydown', onKey); }; }, []);
     return h('div', { className: 'pv-scrim on', onMouseDown: onClose },
-      h('div', { className: 'pv', onMouseDown: function (e) { e.stopPropagation(); } },
+      h('div', { className: 'pv', role: 'dialog', 'aria-modal': 'true', 'aria-label': project.title || 'Project preview', onMouseDown: function (e) { e.stopPropagation(); } },
         h('div', { className: 'pvh' },
           h('b', null, project.title || 'Untitled project'),
           h('span', { className: 'mono', style: { color: 'var(--muted)' } }, fmtBytes(bytesOf(data))),
-          h('button', { className: 'x', onClick: onClose }, '✕')
+          h('button', { className: 'x', 'aria-label': 'Close', onClick: onClose }, '✕')
         ),
         h('div', { className: 'pvb' },
           h('div', { className: 'files' }, order.map(function (p) {
@@ -125,14 +126,15 @@
   function UserDrawer(props) {
     var u = props.user, agg = props.agg, onClose = props.onClose, onPreview = props.onPreview, onAction = props.onAction, onSetModel = props.onSetModel, onSetWorkflows = props.onSetWorkflows, onSetFigures = props.onSetFigures;
     var open = !!u;
+    useEffect(function () { if (!open) return; var onKey = function (e) { if (e.key === 'Escape') onClose(); }; window.addEventListener('keydown', onKey); return function () { window.removeEventListener('keydown', onKey); }; }, [open]);
     return h(React.Fragment, null,
       h('div', { className: 'scrim' + (open ? ' on' : ''), onClick: onClose }),
-      h('div', { className: 'drawer' + (open ? ' on' : '') },
+      h('div', { className: 'drawer' + (open ? ' on' : ''), role: 'dialog', 'aria-modal': 'true', 'aria-label': (u && (u.name || u.email)) || 'User details' },
         u && h(React.Fragment, null,
           h('div', { className: 'dh' },
             h(Avatar, { u: u, size: 40 }),
             h('div', null, h('div', { style: { fontWeight: 700, fontSize: 15 } }, u.name || '—'), h('div', { style: { fontSize: 12.5, color: 'var(--muted)' } }, u.email)),
-            h('button', { className: 'x', onClick: onClose }, '✕')
+            h('button', { className: 'x', 'aria-label': 'Close', onClick: onClose }, '✕')
           ),
           h('div', { className: 'db' },
             h('div', { style: { marginBottom: 16, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' } },
@@ -190,6 +192,7 @@
     var imS = useState(null), imgOpen = imS[0], setImgOpen = imS[1];
     function load() { sb.from('bug_reports').select('*').order('created_at', { ascending: false }).then(function (r) { setRows((r && r.data) || []); }); }
     useEffect(function () { load(); }, []);
+    useEffect(function () { if (!imgOpen) return; var onKey = function (e) { if (e.key === 'Escape') setImgOpen(null); }; window.addEventListener('keydown', onKey); return function () { window.removeEventListener('keydown', onKey); }; }, [imgOpen]);
     function setStatus(b, st) { sb.from('bug_reports').update({ status: st }).eq('id', b.id).then(load); }
     function sendReply(b) {
       var txt = String(replies[b.id] != null ? replies[b.id] : (b.reply || '')).trim();
@@ -211,7 +214,7 @@
                 h('span', { className: 'badge', style: { background: b.category === 'feature' ? '#eef2ff' : '#fef3e6', color: b.category === 'feature' ? '#4f46e5' : '#b4530f' } }, b.category === 'feature' ? '💡 Feature' : '🐞 Bug'),
                 b.title ? h('b', null, b.title) : h('span', { style: { color: 'var(--muted)' } }, '(no title)'),
                 h('span', { style: { marginLeft: 'auto', fontSize: 11.5, color: 'var(--muted)' } }, fmtDate(b.created_at) + (b.page ? ' · ' + b.page : '') + (b.app_version ? ' · v' + b.app_version : '')),
-                h('select', { className: 'btn', value: b.status, onChange: function (e) { setStatus(b, e.target.value); } }, ['open', 'triaged', 'fixed', 'wontfix'].map(function (s) { return h('option', { key: s, value: s }, s); }))
+                h('select', { className: 'btn', 'aria-label': 'Report status', value: b.status, onChange: function (e) { setStatus(b, e.target.value); } }, ['open', 'triaged', 'fixed', 'wontfix'].map(function (s) { return h('option', { key: s, value: s }, s); }))
               ),
               h('div', { style: { fontSize: 13, marginTop: 6, whiteSpace: 'pre-wrap' } }, b.body),
               b.image_data ? h('img', { src: b.image_data, alt: 'screenshot', style: { maxWidth: 300, maxHeight: 190, borderRadius: 8, border: '1px solid var(--line)', marginTop: 8, cursor: 'zoom-in' }, onClick: function () { setImgOpen(b.image_data); } }) : null,
@@ -223,7 +226,7 @@
             );
           })
       ),
-      imgOpen ? h('div', { onClick: function () { setImgOpen(null); }, style: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,.72)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, cursor: 'zoom-out' } }, h('img', { src: imgOpen, style: { maxWidth: '92%', maxHeight: '92%', borderRadius: 8 } })) : null
+      imgOpen ? h('div', { role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Screenshot', onClick: function () { setImgOpen(null); }, style: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,.72)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, cursor: 'zoom-out' } }, h('img', { src: imgOpen, style: { maxWidth: '92%', maxHeight: '92%', borderRadius: 8 } })) : null
     );
   }
 

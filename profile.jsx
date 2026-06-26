@@ -54,7 +54,7 @@ function Header(props) {
       <div className="pf-id-main">
         {editing
           ? <div className="pf-name-edit"><input value={name} autoFocus aria-label="Display name" onChange={function (e) { setName(e.target.value); }} onKeyDown={function (e) { if (e.key === 'Enter') saveName(); if (e.key === 'Escape') setEditing(false); }} /><button className="btn-ghost" onClick={saveName}>Save</button></div>
-          : <h1>{me.name} {isDemo ? <button className="pf-edit" title="Edit name" onClick={function () { setName(me.name); setEditing(true); }}>✎</button> : null}</h1>}
+          : <h1>{me.name} {isDemo ? <button className="pf-edit" title="Edit name" aria-label="Edit name" onClick={function () { setName(me.name); setEditing(true); }}>✎</button> : null}</h1>}
         <div className="pf-email">{me.email}</div>
         <div className="pf-chips">
           <span className="plan-pill">{usage.planLabel}</span>
@@ -410,7 +410,7 @@ function Publications(props) {
               <span className="pf-file-s">{fmtBytes(m.size)}</span>
               <button onClick={function () { view(m); }}>View</button>
               <button onClick={function () { download(m); }}>Download</button>
-              <button className="pf-file-x" onClick={function () { del(m.id, k); }}>✕</button>
+              <button className="pf-file-x" aria-label="Remove file" title="Remove file" onClick={function () { del(m.id, k); }}>✕</button>
             </div>; })}
             <button className="btn-ghost" disabled={busy === k} onClick={function () { pick(k); }}>{busy === k ? 'Uploading…' : '+ Add another file'}</button>
           </div> : null}
@@ -624,7 +624,7 @@ function PdfViewer(props) {
   }, [idx, view, phase]);
 
   return <div className="pf-viewer" onMouseDown={props.onClose}>
-    <div className="pf-viewer-box" onMouseDown={function (e) { e.stopPropagation(); }}>
+    <div className="pf-viewer-box" role="dialog" aria-modal="true" aria-label={f.name || 'File viewer'} onMouseDown={function (e) { e.stopPropagation(); }}>
       <div className="pf-viewer-bar">
         <span className="pf-viewer-name" title={f.name}>{f.name}</span>
         {isPdf ? <button className="btn-ghost" title="Toggle sentence highlighting on the PDF" onClick={function () { view === 'hl' ? setView('orig') : showHighlight(); }}>{view === 'hl' ? '📄 Original' : '✨ Highlight'}</button> : null}
@@ -643,11 +643,11 @@ function PdfViewer(props) {
           : <div className="pf-viewer-other">This file type can’t be previewed inline. <a href={f.url} download={f.name}>Download it</a> to open.</div>}
       {isPdf ? <div className="pf-ra">
         <div className="pf-ra-row">
-          <button className="pf-ra-btn play" onClick={togglePlay} disabled={phase === 'loading'} title={playing ? 'Pause' : 'Read aloud'}>{phase === 'loading' ? '…' : playing ? '⏸' : '▶'}</button>
+          <button className="pf-ra-btn play" onClick={togglePlay} disabled={phase === 'loading'} title={playing ? 'Pause' : 'Read aloud'} aria-label={playing ? 'Pause' : 'Read aloud'}>{phase === 'loading' ? '…' : playing ? '⏸' : '▶'}</button>
           {phase === 'ready' ? [
-            <button key="p" className="pf-ra-btn" onClick={function () { jump(-1); }} title="Previous sentence">⏮</button>,
-            <button key="n" className="pf-ra-btn" onClick={function () { jump(1); }} title="Next sentence">⏭</button>,
-            <button key="s" className="pf-ra-btn" onClick={stopAll} title="Stop">⏹</button>,
+            <button key="p" className="pf-ra-btn" onClick={function () { jump(-1); }} title="Previous sentence" aria-label="Previous sentence">⏮</button>,
+            <button key="n" className="pf-ra-btn" onClick={function () { jump(1); }} title="Next sentence" aria-label="Next sentence">⏭</button>,
+            <button key="s" className="pf-ra-btn" onClick={stopAll} title="Stop" aria-label="Stop">⏹</button>,
             <div key="pr" className="pf-ra-prog"><i style={{ width: (sents.length ? ((idx + 1) / sents.length * 100) : 0) + '%' }} /></div>,
             <span key="m" className="pf-ra-meta">{(idx + 1) + '/' + sents.length} · {elevenOn(cfg) ? 'ElevenLabs' : 'Browser voice'}{elevenOn(cfg) && E && E.cached && E.cached(sents[idx], cfg) ? <span className="pf-ra-cached"> · cached</span> : null}</span>
           ] : phase === 'idle' ? <span className="pf-ra-meta">▶ Read this PDF aloud{elevenOn(cfg) ? ' with ElevenLabs' : ' (browser voice — add an ElevenLabs key in the editor for premium audio)'}.</span>
