@@ -166,6 +166,7 @@
     // reviewers' raw text (free reference, persisted with the saved project)
     var rtS = useState(''), reviewerText = rtS[0], setReviewerText = rtS[1];
     var rvsS = useState(''), revSaving = rvsS[0], setRevSaving = rvsS[1];
+    var rspS = useState(''), responseText = rspS[0], setResponseText = rspS[1];   // auto-drafted Response-to-Reviewers letter
     var npS = useState(false), notePanel = npS[0], setNotePanel = npS[1];        // floating reviewer-note overlay
     var posS = useState(null), notePos = posS[0], setNotePos = posS[1];          // {top,left} once dragged
     // public sharing
@@ -318,6 +319,44 @@
           revSaving ? h('span', { style: { fontSize: 12.5, color: revSaving.indexOf('Error') >= 0 ? 'var(--danger)' : 'var(--muted)' } }, revSaving) : null),
         h('textarea', { className: 'cm-revtext', value: reviewerText, spellCheck: false, readOnly: ro, placeholder: 'Reviewer 1\n1. ...\n2. ...\n\nReviewer 2\n1. ...', onChange: function (e) { setReviewerText(e.target.value); } }));
     }
+    // auto-draft a "Response to Reviewers" letter from the change_database (each comment → the changes that address it)
+    function buildResponse() {
+      var rps = db.review_points || []; var byId = {}; changes.forEach(function (c) { byId[c.id] = c; });
+      var ix = db.index_by_review_point || {}; var byRev = {}; var order = [];
+      rps.forEach(function (r) { if (!byRev[r.reviewer]) { byRev[r.reviewer] = []; order.push(r.reviewer); } byRev[r.reviewer].push(r); });
+      var L = ['# Response to Reviewers'];
+      if (db.publication && db.publication.title) L.push('', '**Manuscript:** ' + db.publication.title);
+      L.push('', 'We thank the reviewers for their careful reading and constructive comments. We address each point below: the reviewer\'s comment is quoted, followed by our response and the corresponding revisions.');
+      order.forEach(function (rev) {
+        L.push('', '', '## ' + rev);
+        byRev[rev].forEach(function (rp0) {
+          if (rp0.id === 'editorial' || /^re-audit/.test(rp0.id)) return;   // not a reviewer comment — skip in the letter
+          L.push('', '**' + rp0.id + '.** ' + String(rp0.comment || '').replace(/\s+/g, ' ').trim());
+          var cs = (ix[rp0.id] || []).map(function (id) { return byId[id]; }).filter(Boolean);
+          if (cs.length) {
+            var acts = cs.map(function (c) { return String(c.change_summary || '').replace(/\s+/g, ' ').replace(/\.\s*$/, '').trim(); }).filter(Boolean);
+            L.push('', '*Response:* We thank the reviewer for this comment. In response, ' + acts.join('; ') + '.');
+            cs.forEach(function (c) { L.push('  - *' + (c.section || '') + '* — ' + String(c.change_summary || '').trim() + (c.reason ? ' (' + String(c.reason).replace(/\s+/g, ' ').trim() + ')' : '')); });
+          } else {
+            L.push('', '*Response:* [Please add your response — no specific change is linked to this point yet.]');
+          }
+        });
+      });
+      L.push('', '', '---', 'We believe these revisions address the reviewers\' concerns and have strengthened the manuscript.');
+      return L.join('\n');
+    }
+    function responsePanel() {
+      var txt = responseText || buildResponse();
+      var dl = function () { var blob = new Blob([txt], { type: 'text/markdown' }); var u = URL.createObjectURL(blob); var a = document.createElement('a'); a.href = u; a.download = 'response-to-reviewers.md'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function () { URL.revokeObjectURL(u); }, 3000); };
+      return h('div', { className: 'cm-rev' },
+        h('div', { className: 'cm-rev-bar' },
+          h('h3', { style: { margin: 0 } }, '✍️ Response to Reviewers'),
+          h('span', { className: 'cm-sub', style: { flex: 1 } }, 'Auto-drafted from the reviewer points and the changes addressing each. Edit freely, then copy or download.'),
+          h('button', { className: 'btn', onClick: function () { setResponseText(buildResponse()); } }, '↻ Regenerate'),
+          h('button', { className: 'btn', onClick: function () { try { navigator.clipboard.writeText(txt); window.PRUI && window.PRUI.toast('Response copied to clipboard', { kind: 'ok' }); } catch (e) { } } }, 'Copy'),
+          h('button', { className: 'btn pri', onClick: dl }, '⬇ Download .md')),
+        h('textarea', { className: 'cm-revtext', value: txt, spellCheck: false, onChange: function (e) { setResponseText(e.target.value); } }));
+    }
     function savedListBlock() {
       if (!sb) return null;
       if (!me) return h('div', { style: { marginTop: 22, fontSize: 13, color: 'var(--faint)' } }, 'Sign in to save your uploaded comparisons and reload them later with a single click.');
@@ -397,7 +436,7 @@
           savedListBlock()));
     }
 
-    var TABS = [['workspace', '⊞ Overview'], ['changes', 'Changes'], ['pdf', 'PDF + highlight'], ['edit', 'Live editing'], ['reviewers', '📝 Reviewers'], ['audio', '🎧 Audiobook']];
+    var TABS = [['workspace', '⊞ Overview'], ['changes', 'Changes'], ['pdf', 'PDF + highlight'], ['edit', 'Live editing'], ['reviewers', '📝 Reviewers'], ['response', '✍️ Response'], ['audio', '🎧 Audiobook']];
     var header = h('div', { className: 'cm-head' },
       h('div', { style: { minWidth: 0 } },
         h('h1', null, (db.publication && db.publication.title) || 'Revision comparison'),
@@ -534,6 +573,7 @@
     else if (eview === 'pdf') body = withSide(pdfPanes());
     else if (eview === 'edit') body = editPanel();
     else if (eview === 'reviewers') body = reviewersPanel();
+    else if (eview === 'response') body = responsePanel();
     else if (eview === 'audio') body = audioPanel();
     else body = withSide(changeDetail());
 
