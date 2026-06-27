@@ -229,6 +229,17 @@
     const [selPos, setSelPos] = useState(null);
     const selDocRef = useRef(null);
 
+    // resizable file-browser width (no divider existed between .filepanel and .ws-area)
+    const [fileW, setFileW] = useState(() => { try { const v = parseInt(localStorage.getItem('pr.fileW'), 10); return v ? Math.max(160, Math.min(560, v)) : 226; } catch (_) { return 226; } });
+    const startFileDrag = (e) => {
+      e.preventDefault();
+      const startX = e.clientX, startW = fileW; let lastW = startW;
+      const mv = (ev) => { lastW = Math.max(160, Math.min(560, startW + (ev.clientX - startX))); setFileW(lastW); };
+      const up = () => { window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); document.body.style.cursor = ''; document.body.style.userSelect = ''; try { localStorage.setItem('pr.fileW', String(lastW)); } catch (_) { } };
+      window.addEventListener('mousemove', mv); window.addEventListener('mouseup', up);
+      document.body.style.cursor = 'col-resize'; document.body.style.userSelect = 'none';
+    };
+
     /* ---- collaboration state ---- */
     const projectId = init.projectId;
     const me = useMemo(() => (window.PRAuth && (window.PRAuth.current() || window.PRAuth.byId(init.ownerId) || (window.PRAuth.demoUsers ? window.PRAuth.demoUsers() : window.PRAuth.users())[0])) || { id: 'u_anna', name: 'You', color: '#4f46e5' }, []);
@@ -2005,7 +2016,7 @@
         </header>
 
         <div className="workspace">
-          <FilePanel files={files} order={order} folders={folders} active={active}
+          <FilePanel files={files} order={order} folders={folders} active={active} width={fileW}
             outline={outline} onGoto={gotoOffset}
             expanded={expanded} currentDir={currentDir} renaming={renaming}
             onOpen={(p) => {
@@ -2028,6 +2039,8 @@
             onCommitRename={commitRename} onCancelRename={() => setRenaming(null)} onStartRename={(type, path) => setRenaming({ type, path })}
             onDeleteFile={deleteFile} onDeleteFolder={deleteFolder} onMove={moveItem}
             onSetNote={(path, note) => setFiles((f) => f[path] ? { ...f, [path]: { ...f[path], note: note } } : f)} />
+
+          <div className="splitter" onMouseDown={startFileDrag} title="Drag to resize the file browser"><span></span></div>
 
           <div className="ws-area">
             <div className="ws-toolbar">
@@ -2260,7 +2273,7 @@
     }
 
     return (
-      <aside className="filepanel">
+      <aside className="filepanel" style={props.width ? { width: props.width } : null}>
         <div className="fp-head">
           <span className="fp-title">Project</span>
           <div className="fp-actions">
