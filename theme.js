@@ -63,6 +63,8 @@
     // ── Magnetic Ring cursor (desktop/mouse only; the JS that drives it is below) ──
     'html.pr-cursor, html.pr-cursor * { cursor: none !important; }',
     'html.pr-cursor textarea, html.pr-cursor [contenteditable], html.pr-cursor .cm-tex, html.pr-cursor .cm-revtext, html.pr-cursor pre, html.pr-cursor code, html.pr-cursor input:is([type=text],[type=search],[type=email],[type=url],[type=password],[type=number],[type=tel]), html.pr-cursor input:not([type]) { cursor: text !important; }',
+    'html.pr-cursor .splitter, html.pr-cursor .splitter *, html.pr-cursor .ws-divider, html.pr-cursor .ws-divider.row, html.pr-cursor .cm-split, html.pr-cursor .cm-split * { cursor: col-resize !important; }',
+    'html.pr-cursor .ws-divider.col { cursor: row-resize !important; }',
     '#pr-cur { position: fixed; inset: 0; pointer-events: none; z-index: 2147483646; opacity: 1; transition: opacity .2s; }',
     '#pr-cur.hide { opacity: 0; }',
     '#pr-cur .pr-cur-dot { position: fixed; left: 0; top: 0; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%; background: #fff; mix-blend-mode: difference; will-change: transform; }',
@@ -162,14 +164,15 @@
       var mx = window.innerWidth / 2, my = window.innerHeight / 2, rx = mx, ry = my, snap = null, txt = false;
       var HIT = 'a,button,[role="button"],.btn,.seg button,.chip,.tab,.ca,.pc-chip,.pf-pub-files,label,summary,[data-cursor],.cm-rp-item,.cm-li,.cm-saved-li,.pn-nav a';
       var TEXT = 'textarea,[contenteditable],.cm-tex,.cm-revtext,.ct-textlayer,pre,code,input:is([type=text],[type=search],[type=email],[type=url],[type=password],[type=number],[type=tel]),input:not([type])';
+      var RESIZE = '.splitter,.ws-divider,.cm-split';   // show the native resize cursor on draggable dividers
       function lerp(a, b, t) { return a + (b - a) * t; }
       document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; if (!txt) root.classList.remove('hide'); }, { passive: true });
       document.addEventListener('mouseover', function (e) {
         var el = e.target; if (!el || !el.closest) return;
-        var isTxt = !!el.closest(TEXT) && !el.closest('button,a,[role="button"],.btn');
+        var native = (!!el.closest(TEXT) && !el.closest('button,a,[role="button"],.btn')) || !!el.closest(RESIZE);
         var hit = el.closest(HIT);
-        txt = isTxt;
-        if (isTxt) { root.classList.add('hide'); snap = null; } else { root.classList.remove('hide'); snap = hit || null; }
+        txt = native;
+        if (native) { root.classList.add('hide'); snap = null; } else { root.classList.remove('hide'); snap = hit || null; }
       }, { passive: true });
       document.addEventListener('mouseleave', function () { root.classList.add('hide'); });
       window.addEventListener('blur', function () { root.classList.add('hide'); });
