@@ -3,6 +3,11 @@ const { useState, useEffect, useRef, useCallback } = React;
 const Store = window.PRStore;
 const Auth = window.PRAuth;
 
+// manuscript lifecycle — a project's submission stage drives the card chip + progress
+const STAGES = ['Drafting', 'Submitted', 'Under review', 'Revising', 'Accepted'];
+const STAGE_COLOR = { 'Drafting': '#8a92a0', 'Submitted': '#0891b2', 'Under review': '#b45309', 'Revising': '#7c3aed', 'Accepted': '#16a34a', 'Rejected': '#dc2626' };
+function stagePct(s) { var i = STAGES.indexOf(s); if (i >= 0) return Math.round(i / (STAGES.length - 1) * 100); return s === 'Rejected' ? 100 : 0; }
+
 function Avatar({ user, size = 30 }) {
   if (!user) return null;
   return <span className="avatar" style={{ width: size, height: size, fontSize: size * 0.4, background: user.color }}>{Auth.initials(user.name)}</span>;
@@ -362,7 +367,9 @@ function MiniPage({ project }) {
     </div>
   );
 }
-function Card({ project, me, onOpen, onRename, onDuplicate, onDelete, onShare }) {
+function Card({ project, me, onOpen, onRename, onDuplicate, onDelete, onShare, onStatus }) {
+  const status = project.status || 'Drafting';
+  const stColor = STAGE_COLOR[status] || '#8a92a0';
   const [renaming, setRenaming] = useState(false);
   const [val, setVal] = useState(project.title);
   const inputRef = useRef(null);
@@ -379,9 +386,12 @@ function Card({ project, me, onOpen, onRename, onDuplicate, onDelete, onShare })
           <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M4 2.2h4.6L12.4 6V13a.6.6 0 0 1-.6.6H4a.6.6 0 0 1-.6-.6V2.8A.6.6 0 0 1 4 2.2z" /><path d="M8.4 2.4v3.4h3.6" /><path d="M5.6 9h4.8M5.6 11h3.2" /></svg>
         </span>
         <div className="pc-chips">
-          {project._shared
-            ? <span className="pc-chip shared"><Avatar user={Auth.byId(project.ownerId)} size={15} />Shared</span>
-            : <span className="pc-chip">{isOwner ? 'Draft' : 'Editor'}</span>}
+          {project._shared && <span className="pc-chip shared"><Avatar user={Auth.byId(project.ownerId)} size={15} />Shared</span>}
+          {isOwner
+            ? <select className="pc-status" value={status} style={{ color: stColor, borderColor: stColor + '66' }} title="Submission status" aria-label="Submission status" onClick={(e) => e.stopPropagation()} onChange={(e) => onStatus(e.target.value)}>
+                {STAGES.concat(['Rejected']).map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+            : <span className="pc-chip">Editor</span>}
         </div>
       </div>
       <div className="card-foot" onClick={(e) => { if (renaming) e.stopPropagation(); }}>
@@ -418,6 +428,7 @@ function Card({ project, me, onOpen, onRename, onDuplicate, onDelete, onShare })
           </div>
         )}
       </div>
+      <div className="pc-progress" title={status + ' · ' + stagePct(status) + '%'}><i style={{ width: stagePct(status) + '%', background: stColor }} /></div>
     </div>
   );
 }
@@ -566,6 +577,7 @@ function App() {
                   <Card key={p.id} project={p} me={me} onOpen={() => open(p.id)}
                     onShare={() => setShareId(p.id)}
                     onRename={(t) => { Store.rename(p.id, t); refresh(); }}
+                    onStatus={(s) => { const pr = Store.get(p.id); if (pr) { pr.status = s; Store.save(pr); refresh(); } }}
                     onDuplicate={() => { Store.duplicate(p.id); refresh(); }}
                     onDelete={() => { Store.remove(p.id); refresh(); }} />
                 ))}
