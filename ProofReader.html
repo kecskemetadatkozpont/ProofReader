@@ -359,6 +359,19 @@
     .ac-label { font-family: 'JetBrains Mono', monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .ac-hint { margin-left: auto; font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: #be185d;
       background: color-mix(in srgb, #be185d 11%, var(--pane)); padding: 1px 6px; border-radius: 10px; }
+    /* ✨ AI writing-assist bar on a source selection */
+    .ai-bar { position: fixed; z-index: 200; display: flex; align-items: center; gap: 3px; background: var(--pane); border: 1px solid var(--line); border-radius: 11px; padding: 5px; box-shadow: 0 14px 36px rgba(20,24,40,.34); font-size: 12.5px; }
+    .ai-bar-wide { display: block; width: 320px; }
+    .ai-bar-h { font-size: 14px; padding: 0 4px; }
+    .ai-bar-b, .ai-bar-x, .ai-bar-accept { border: 0; background: transparent; color: var(--ink); border-radius: 7px; padding: 5px 9px; font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; }
+    .ai-bar-b:hover { background: var(--surface-2, color-mix(in srgb, var(--accent) 9%, var(--pane))); color: var(--accent); }
+    .ai-bar-x { color: var(--faint, #8a92a0); font-size: 16px; line-height: 1; }
+    .ai-bar-accept { background: var(--accent); color: #fff; }
+    .ai-bar-accept:hover { filter: brightness(1.08); }
+    .ai-bar-busy { padding: 5px 11px; color: var(--muted); }
+    .ai-bar-err { padding: 5px 9px; color: var(--danger, #dc2626); font-weight: 600; }
+    .ai-bar-res-t { font-size: 13px; line-height: 1.5; max-height: 220px; overflow-y: auto; padding: 9px 11px; background: var(--surface-2, color-mix(in srgb, var(--accent) 6%, var(--pane))); border: 1px solid var(--line); border-radius: 8px; margin-bottom: 8px; white-space: pre-wrap; }
+    .ai-bar-row { display: flex; gap: 6px; }
 
     /* command palette (⌘K) */
     .cmdk-overlay { position: fixed; inset: 0; z-index: 300; background: rgba(15,18,30,.4); display: flex; justify-content: center; align-items: flex-start; padding-top: 12vh; }

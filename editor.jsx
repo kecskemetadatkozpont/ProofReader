@@ -91,6 +91,8 @@
     const [find, setFind] = useState(null);   // null = closed; else { q, repl, cs, ww, re }
     const [info, setInfo] = useState({ idx: 0, total: 0, err: false });
     const [ac, setAc] = useState(null);        // autocomplete: { items, sel, from, to, kind, x, y }
+    const [aiSel, setAiSel] = useState(null);  // ✨ AI assist bar on a source selection: { x, y, start, end, text }
+    const [aiRun, setAiRun] = useState(null);  // a running / finished AI rewrite: { action, busy, result, error }
     const charWRef = useRef({ fs: 0, w: 0 });
     const acRef = useRef(null); acRef.current = ac;
 
@@ -168,6 +170,28 @@
         return;
       }
       if (selS != null) { try { ta.setSelectionRange(selS, selE != null ? selE : selS); } catch (_) { } }
+    }
+
+    // ── ✨ AI writing assist on the current source selection ──
+    function maybeAi(e) {
+      const ta = taRef.current; if (!ta || props.readOnly) { setAiSel(null); setAiRun(null); return; }
+      const s = ta.selectionStart, en = ta.selectionEnd, txt = ta.value.slice(s, en);
+      if (s === en || txt.trim().length < 8 || (en - s) > 6000) { setAiSel(null); setAiRun(null); return; }
+      setAiSel({ x: e.clientX, y: e.clientY, start: s, end: en, text: txt }); setAiRun(null);
+    }
+    function runAi(action) {
+      const sel = aiSel; if (!sel) return;
+      setAiRun({ action: action, busy: true });
+      const BE = window.PR_BACKEND, CFG = window.PR_CONFIG || {};
+      (BE && BE.sb ? BE.sb.auth.getSession() : Promise.resolve(null)).then(function (s) {
+        const tok = (s && s.data && s.data.session && s.data.session.access_token) || CFG.supabaseAnonKey;
+        return fetch(CFG.supabaseUrl + '/functions/v1/text-assist', { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: CFG.supabaseAnonKey, Authorization: 'Bearer ' + tok }, body: JSON.stringify({ text: sel.text, action: action }) }).then(function (r) { return r.json(); });
+      }).then(function (d) { setAiRun(d && d.error ? { action: action, error: d.error } : { action: action, result: (d && d.result) || '' }); }, function (err) { setAiRun({ action: action, error: String(err) }); });
+    }
+    function acceptAi() {
+      if (!aiSel || !aiRun || aiRun.result == null) return;
+      replaceRange(aiSel.start, aiSel.end, aiRun.result, aiSel.start, aiSel.start + aiRun.result.length);
+      setAiSel(null); setAiRun(null);
     }
 
     function lineBounds(v, from, to) {
@@ -570,7 +594,7 @@
             value: props.value, wrap: 'off', readOnly: !!props.readOnly,
             onChange: (e) => { props.onChange(e.target.value); refreshAC(); },
             onScroll: sync, onKeyDown: onKeyDown,
-            onClick: () => { setAc(null); reportJump(); }, onKeyUp: reportCaret, onSelect: reportCaret, onMouseUp: reportCaret, onDoubleClick: () => { dblTs.current = Date.now(); },
+            onClick: () => { setAc(null); reportJump(); }, onKeyUp: reportCaret, onSelect: reportCaret, onMouseUp: (e) => { reportCaret(); maybeAi(e); }, onDoubleClick: () => { dblTs.current = Date.now(); },
             onBlur: () => setTimeout(() => setAc(null), 150)
           }),
           ac && React.createElement('div', { className: 'ac-menu', style: { left: ac.x + 'px', top: ac.y + 'px' } },
@@ -582,6 +606,23 @@
               React.createElement('span', { className: 'ac-label' }, it.label),
               it.hint && React.createElement('span', { className: 'ac-hint' }, it.hint)
             ))
+          ),
+          aiSel && React.createElement('div', { className: 'ai-bar' + (aiRun && aiRun.result != null ? ' ai-bar-wide' : ''), style: { left: Math.min(aiSel.x, window.innerWidth - 340) + 'px', top: Math.min(aiSel.y + 12, window.innerHeight - 80) + 'px' } },
+            !aiRun ? React.createElement(React.Fragment, null,
+              React.createElement('span', { className: 'ai-bar-h' }, '✨'),
+              [['improve', 'Improve'], ['condense', 'Condense'], ['academic', 'Academic'], ['grammar', 'Grammar'], ['simplify', 'Simplify'], ['expand', 'Expand']].map(function (a) { return React.createElement('button', { key: a[0], className: 'ai-bar-b', onMouseDown: function (ev) { ev.preventDefault(); runAi(a[0]); } }, a[1]); }),
+              React.createElement('button', { className: 'ai-bar-x', 'aria-label': 'Close', onMouseDown: function (ev) { ev.preventDefault(); setAiSel(null); } }, '×')
+            ) : aiRun.busy ? React.createElement('span', { className: 'ai-bar-busy' }, '✨ Rewriting…')
+              : aiRun.error ? React.createElement(React.Fragment, null,
+                React.createElement('span', { className: 'ai-bar-err' }, 'Error — check your AI quota'),
+                React.createElement('button', { className: 'ai-bar-b', onMouseDown: function (ev) { ev.preventDefault(); runAi(aiRun.action); } }, 'Retry'),
+                React.createElement('button', { className: 'ai-bar-x', onMouseDown: function (ev) { ev.preventDefault(); setAiSel(null); } }, '×'))
+                : React.createElement('div', { className: 'ai-bar-res' },
+                  React.createElement('div', { className: 'ai-bar-res-t' }, aiRun.result),
+                  React.createElement('div', { className: 'ai-bar-row' },
+                    React.createElement('button', { className: 'ai-bar-accept', onMouseDown: function (ev) { ev.preventDefault(); acceptAi(); } }, '✓ Replace'),
+                    React.createElement('button', { className: 'ai-bar-b', onMouseDown: function (ev) { ev.preventDefault(); runAi(aiRun.action); } }, '↻ Retry'),
+                    React.createElement('button', { className: 'ai-bar-b', onMouseDown: function (ev) { ev.preventDefault(); setAiRun(null); } }, '← Back')))
           )
         )
       )
