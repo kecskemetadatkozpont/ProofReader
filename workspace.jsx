@@ -689,7 +689,9 @@
       const sameDoc = lastDocRef.current === docId; lastDocRef.current = docId;
       const restoreFrac = (sameDoc && root.scrollHeight > root.clientHeight) ? root.scrollTop / (root.scrollHeight - root.clientHeight) : 0;
       setState('loading'); root.innerHTML = '';
-      const st = stRef.current = { pageDivs: {}, sids: {}, rendered: {}, io: null };
+      // pages live in a wrapper we CSS-`zoom` for buttery, re-render-free zooming; comment cards stay on `root`.
+      const docEl = document.createElement('div'); docEl.className = 'ct-doc'; docEl.style.zoom = zoomRef.current || 1; root.appendChild(docEl);
+      const st = stRef.current = { pageDivs: {}, sids: {}, rendered: {}, io: null, docEl: docEl };
       (async () => {
         try {
           const pdf = await lib.getDocument({ data: bytes.slice(), disableStream: true, disableAutoFetch: true }).promise;
@@ -700,13 +702,16 @@
           const width = Math.max(280, root.clientWidth - 28 - gutter);
           const dpr = window.devicePixelRatio || 1;
           const base1 = (await pdf.getPage(1)).getViewport({ scale: 1 });
-          const scale = Math.min(2.0, width / base1.width) * (zoomRef.current || 1);
+          // Render at fit-width (NOT user zoom); user zoom is a CSS transform on docEl (no re-render → no flash).
+          // Bitmaps render at RQ× the display size so CSS-zooming up to ~RQ× still looks crisp.
+          const scale = Math.min(2.0, width / base1.width);
+          const RQ = 2;
           // placeholders (lazy)
           for (let n = 1; n <= pdf.numPages; n++) {
             const div = document.createElement('div'); div.className = 'ct-page'; div.dataset.page = n;
             div.style.width = Math.floor(base1.width * scale) + 'px';
             div.style.height = Math.floor(base1.height * scale) + 'px';
-            root.appendChild(div); st.pageDivs[n] = div;
+            docEl.appendChild(div); st.pageDivs[n] = div;
           }
           // ---- alignment: monotonic token match (engine spoken words → PDF tokens) ----
           // Granular per-token advance keeps each sentence's span set small (no clumping); a 2-word-confirmed
@@ -744,7 +749,7 @@
           const renderPage = async (n) => {
             if (st.rendered[n] || cancelled) return; st.rendered[n] = true;
             const page = await pdf.getPage(n);
-            const cssVp = page.getViewport({ scale }); const vp = page.getViewport({ scale: scale * dpr });
+            const cssVp = page.getViewport({ scale }); const vp = page.getViewport({ scale: scale * dpr * RQ });   // hi-res bitmap, fit-size display → crisp when CSS-zoomed
             const canvas = document.createElement('canvas'); canvas.className = 'ct-canvas';
             canvas.width = vp.width; canvas.height = vp.height;
             canvas.style.width = Math.floor(cssVp.width) + 'px'; canvas.style.height = Math.floor(cssVp.height) + 'px';
@@ -775,35 +780,41 @@
           st.io = io;
           // Restore the viewport after the re-render: a handler-captured centre anchor (zoom) wins; otherwise the
           // top fraction (recompile/draft). Re-applied across a few frames so nothing post-render yanks it away.
-          const anchor = anchorRef.current; anchorRef.current = null;
-          if ((anchor != null || restoreFrac > 0) && !cancelled) {
-            const applyScroll = () => {
-              if (cancelled) return; const sc = ref.current; if (!sc || sc.scrollHeight <= sc.clientHeight) return;
-              sc.scrollTop = anchor != null ? Math.max(0, anchor * sc.scrollHeight - sc.clientHeight / 2) : restoreFrac * (sc.scrollHeight - sc.clientHeight);
-            };
-            applyScroll();
-            requestAnimationFrame(() => { applyScroll(); requestAnimationFrame(applyScroll); });
-            setTimeout(applyScroll, 180);
+          // recompile/draft re-render preserves the scroll position (top fraction); zoom is handled separately (CSS).
+          if (restoreFrac > 0 && !cancelled) {
+            const applyScroll = () => { if (cancelled) return; const sc = ref.current; if (!sc || sc.scrollHeight <= sc.clientHeight) return; sc.scrollTop = restoreFrac * (sc.scrollHeight - sc.clientHeight); };
+            applyScroll(); requestAnimationFrame(applyScroll); setTimeout(applyScroll, 180);
           }
           updateRail();
         } catch (e) { if (!cancelled) setState('error'); }
       })();
       return () => { cancelled = true; if (stRef.current && stRef.current.io) stRef.current.io.disconnect(); };
-    }, [bytes, docId, hasAnno, zoom]);
+    }, [bytes, docId, hasAnno]);
+
+    // ⚡ Smooth zoom: CSS-`zoom` the page wrapper — no pdf.js re-render, no flash. Pages were rendered at RQ× so
+    // this stays crisp; the scroll anchor (viewport centre, captured in the zoom handlers) is restored in place.
+    useEffect(() => {
+      const st = stRef.current, sc = ref.current; if (!st || !st.docEl || !sc) return;
+      const anchor = anchorRef.current; anchorRef.current = null;
+      st.docEl.style.zoom = zoom;
+      const apply = () => { if (anchor != null && sc.scrollHeight > sc.clientHeight) sc.scrollTop = Math.max(0, anchor * sc.scrollHeight - sc.clientHeight / 2); };
+      apply(); requestAnimationFrame(apply);
+      applyMarginCards(); applyHighlight(); updateRail();
+    }, [zoom]);
 
     // Ctrl/⌘ + wheel — and touchpad pinch (which the browser reports as ctrlKey + wheel) — zoom the PDF.
     // Debounced so a continuous pinch re-renders once it settles (pan happens via the scroll container).
     useEffect(() => {
-      const el = ref.current; if (!el) return; let t = 0;
+      const el = ref.current; if (!el) return; let raf = 0;
       const onWheel = (e) => {
         if (!(e.ctrlKey || e.metaKey)) return;
         e.preventDefault();
         if (anchorRef.current == null) captureAnchor();   // capture the viewport centre at the gesture start
         zoomRef.current = Math.max(0.5, Math.min(4, zoomRef.current * Math.exp(-e.deltaY * 0.0022)));
-        clearTimeout(t); t = setTimeout(() => setZoom(Math.round(zoomRef.current * 100) / 100), 90);
+        if (!raf) raf = requestAnimationFrame(() => { raf = 0; setZoom(Math.round(zoomRef.current * 100) / 100); });   // CSS zoom is cheap → update per frame
       };
       el.addEventListener('wheel', onWheel, { passive: false });
-      return () => { el.removeEventListener('wheel', onWheel); clearTimeout(t); };
+      return () => { el.removeEventListener('wheel', onWheel); if (raf) cancelAnimationFrame(raf); };
     }, []);
     // keep the quick-scrollbar thumb in sync after (re)render / zoom / lazy page rendering settles
     useEffect(() => { const ids = [setTimeout(updateRail, 350), setTimeout(updateRail, 1200)]; return () => ids.forEach(clearTimeout); }, [state, zoom, updateRail]);
