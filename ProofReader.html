@@ -970,6 +970,9 @@
     /* AI figure generation (PaperBanana) */
     .ws-tb-btn { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--line); background: var(--pane); color: var(--accent); font-family: inherit; font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 8px; cursor: pointer; }
     .ws-tb-btn:hover { border-color: var(--accent); }
+    .ws-tb-btn:disabled { opacity: .6; cursor: default; border-color: var(--line); }
+    .pr-spin { display: inline-block; width: 11px; height: 11px; border: 2px solid color-mix(in srgb, var(--accent) 28%, transparent); border-top-color: var(--accent); border-radius: 50%; animation: pr-spin .7s linear infinite; }
+    @keyframes pr-spin { to { transform: rotate(360deg); } }
     .fig-modal { background: var(--pane); border: 1px solid var(--line); border-radius: 14px; width: min(640px, 94vw); max-height: 88vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(20,24,40,.35); padding: 16px 18px; color: var(--ink); }
     .fig-h { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
     .fig-h b { flex: 1; font-size: 15px; }

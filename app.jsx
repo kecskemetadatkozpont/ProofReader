@@ -254,6 +254,7 @@
     const selRange = useRef({ start: 0, end: 0 });
     const [previewSel, setPreviewSel] = useState(null); // {top,left} when selection made in preview
     const [shareOpen, setShareOpen] = useState(false);
+    const [pdfWantDl, setPdfWantDl] = useState(false);   // "Download PDF" pressed before a compile finished
     // admin role (cloud only) — drives the top-bar Admin link (replaces the old bottom-right floating button)
     const [isAdmin, setIsAdmin] = useState(() => !!(window.PR_BACKEND && window.PR_BACKEND.user && window.PR_BACKEND.user.role === 'admin'));
     const [canFigures, setCanFigures] = useState(false);   // admin-granted AI figure generation (PaperBanana)
@@ -567,6 +568,32 @@
     }, [assembleTexFiles, active]);
 
     const getCompiledPdf = useCallback((docId) => pdfCompiled[docId] || null, [pdfCompiled]);
+
+    // ── download the rendered (real TeX → PDF) document ──
+    const doDownloadPdf = (bytes, name) => {
+      try {
+        const blob = new Blob([bytes], { type: 'application/pdf' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+      } catch (e) { window.PRUI.toast('Could not download the PDF: ' + e, { kind: 'error' }); }
+    };
+    const pdfName = useCallback((docId) => ((bn(docId) || 'document').replace(/\.[^.]+$/, '') || 'document') + '.pdf', []);
+    const downloadPdf = useCallback(() => {
+      const st = pdfCompiledRef.current[active];
+      if (st && st.pdf) { doDownloadPdf(st.pdf, pdfName(active)); return; }   // already compiled → instant
+      if (!window.AloudTeX) { window.PRUI.toast('The PDF engine is still loading — try again in a moment.', { kind: 'error' }); return; }
+      window.PRUI.toast('Compiling the rendered PDF — the download starts when it is ready…');
+      setPdfWantDl(true);
+      requestCompile(active, true);
+    }, [active, requestCompile, pdfName]);
+    // once a pending "download" compile lands, push the file
+    useEffect(() => {
+      if (!pdfWantDl) return;
+      const st = pdfCompiled[active];
+      if (st && st.pdf && !st.busy && !st.pending) { setPdfWantDl(false); doDownloadPdf(st.pdf, pdfName(active)); }
+      else if (st && st.err && !st.busy) { setPdfWantDl(false); window.PRUI.toast('Compile failed: ' + st.err, { kind: 'error' }); }
+    }, [pdfCompiled, active, pdfWantDl, pdfName]);
 
     /* ---- live manuscript KPIs (auto-tracked format compliance vs the template's limits) ---- */
     const kpiPages = (pdfCompiled[active] && pdfCompiled[active].pages) || null;
@@ -2071,6 +2098,11 @@
                     </div>}
                   </div>
                 : <span className="ph-ok"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M3 8.5l3 3 7-8" strokeLinecap="round" strokeLinejoin="round" /></svg>Rendered</span>}
+              <button className="ws-tb-btn" title="Download the rendered PDF (real TeX → PDF)" onClick={downloadPdf} disabled={pdfWantDl}>
+                {pdfWantDl
+                  ? <><span className="pr-spin" aria-hidden="true" /> Compiling…</>
+                  : <><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M8 2.5v7M5 7l3 3 3-3M3 13h10" /></svg> PDF</>}
+              </button>
               <div className="add-wrap">
                 <button className={'btn add-pane-btn' + (addOpen ? ' on' : '')} onClick={(e) => { e.stopPropagation(); setAddOpen((v) => !v); }}>
                   <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"><path d="M8 3v10M3 8h10" /></svg>Add pane
