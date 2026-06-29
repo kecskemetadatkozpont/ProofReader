@@ -1062,18 +1062,31 @@
       if (isCurProj(pane.docId)) {
         if (k !== idxRef.current) seekTo(k);   // clicking the already-current sentence must not restart playback
         const sent = comp.sentences[k];
-        // jump to the EXACT clicked word inside the sentence, not just the sentence start
+        // Jump to the EXACT clicked WORD, not just the sentence start. Use the caret position AT the click point
+        // (caretRangeFromPoint) so it works in BOTH the preview — where .sent wraps the whole sentence — and the
+        // compiled PDF, where .sent is a single word. Then locate that word's occurrence in the sentence's source.
         let off = sent.start;
-        const word = (s.textContent || '').trim();
-        if (word && sent.end > sent.start) {
-          // disambiguate a repeated word by counting matching spans up to the one clicked
-          const root = e.target.closest('.ct-scroll, .preview-scroll');
-          let occ = 1;
-          if (root) { const sp = root.querySelectorAll('.sent[data-sid="' + id + '"]'); let c = 0; for (let i = 0; i < sp.length; i++) { if ((sp[i].textContent || '').trim() === word) { c++; if (sp[i] === s) { occ = c; break; } } } }
-          const seg = (getSource(active) || '').slice(sent.start, sent.end).toLowerCase();
-          const wl = word.toLowerCase(); let p = -1, from = 0, found = 0;
-          while (found < occ) { p = seg.indexOf(wl, from); if (p < 0) break; found++; from = p + 1; }
-          if (p >= 0) off = sent.start + p;
+        if (sent.end > sent.start) {
+          const src = getSource(active) || ''; const root = e.target.closest('.ct-scroll, .preview-scroll');
+          let cn = null, co = 0;
+          try {
+            const cr = document.caretRangeFromPoint ? document.caretRangeFromPoint(e.clientX, e.clientY) : null;
+            if (cr) { cn = cr.startContainer; co = cr.startOffset; }
+            else if (document.caretPositionFromPoint) { const cp = document.caretPositionFromPoint(e.clientX, e.clientY); if (cp) { cn = cp.offsetNode; co = cp.offset; } }
+          } catch (_) { }
+          if (cn && cn.nodeType === 3 && root && src) {
+            const tx = cn.textContent || ''; const isW = (ch) => ch && /[0-9A-Za-zÀ-ɏ]/.test(ch);
+            let a = co, b = co; while (a > 0 && isW(tx[a - 1])) a--; while (b < tx.length && isW(tx[b])) b++;
+            const word = tx.slice(a, b);
+            if (word.length >= 2) {
+              // occurrence index: count the word in the sentence's rendered text BEFORE the clicked one
+              const spans = root.querySelectorAll('[data-sid="' + id + '"]'); let occ = 1;
+              if (spans.length) { try { const rng = document.createRange(); rng.setStartBefore(spans[0]); rng.setEnd(cn, a); const pre = rng.toString().toLowerCase(); const wl0 = word.toLowerCase(); let c = 0, ix = 0; while ((ix = pre.indexOf(wl0, ix)) >= 0) { c++; ix += wl0.length; } occ = c + 1; } catch (_) { } }
+              const seg = src.slice(sent.start, sent.end).toLowerCase(); const wl = word.toLowerCase();
+              let p = -1, from = 0, found = 0; while (found < occ) { p = seg.indexOf(wl, from); if (p < 0) break; found++; from = p + 1; }
+              if (p >= 0) off = sent.start + p;
+            }
+          }
         }
         if (files[active] && files[active].type === 'tex') setSelectReq({ start: off, end: off, nonce: Date.now() });
       }
