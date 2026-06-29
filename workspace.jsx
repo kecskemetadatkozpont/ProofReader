@@ -730,16 +730,21 @@
           for (let pi = 0; pi < P.length; pi++) {
             const pw = P[pi];
             if (ei < E.length && E[ei].w === pw) { tokSid[pi] = E[ei].sid; ei++; continue; }
-            let r = -1; const lim = Math.min(ei + 60, E.length);
-            for (let j = ei + 1; j < lim; j++) { if (E[j].w === pw && (pi + 1 >= P.length || (E[j + 1] && E[j + 1].w === P[pi + 1]))) { r = j; break; } }
+            // resync on a 2-word-confirmed match — scan forward first, then a short backward band — so a single
+            // skipped/extra/divergent token (hyphenation, draft "??" refs, page furniture) can't poison the rest.
+            let r = -1; const nx = pi + 1 < P.length ? P[pi + 1] : null;
+            for (let j = ei + 1, lim = Math.min(ei + 80, E.length); j < lim; j++) { if (E[j].w === pw && (nx == null || (E[j + 1] && E[j + 1].w === nx))) { r = j; break; } }
+            if (r < 0) { for (let j = ei - 1, back = Math.max(0, ei - 10); j >= back; j--) { if (E[j].w === pw && (nx == null || (E[j + 1] && E[j + 1].w === nx))) { r = j; break; } } }
             if (r >= 0) { ei = r; tokSid[pi] = E[ei].sid; ei++; }
-            else tokSid[pi] = ei < E.length ? E[ei].sid : lastSid;
+            else tokSid[pi] = null;   // unmatched: DON'T fabricate a sid and DON'T advance ei → no drift propagation
           }
+          let carry = firstSid;
           for (let n = 1; n <= pdf.numPages; n++) {
             const arr = pageItems[n]; const sids = new Array(arr.length);
             for (let i = 0; i < arr.length; i++) {
-              const rg = itemRange[n + ':' + i]; let sid = firstSid;
+              const rg = itemRange[n + ':' + i]; let sid = null;
               if (rg && rg[1] > rg[0]) { const votes = {}; let best = null, bc = 0; for (let t = rg[0]; t < rg[1]; t++) { const v = tokSid[t]; if (v == null) continue; votes[v] = (votes[v] || 0) + 1; if (votes[v] > bc) { bc = votes[v]; best = v; } } if (best != null) sid = best; }
+              if (sid == null) sid = carry; else carry = sid;   // unmatched item → carry the LAST matched sentence (continuity), not sentence 0
               sids[i] = sid;
             }
             st.sids[n] = sids;
