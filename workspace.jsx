@@ -584,6 +584,10 @@
       if (sc.scrollHeight <= sc.clientHeight + 4) { setRail(null); return; }
       setRail({ top: sc.scrollTop / sc.scrollHeight * 100, h: Math.max(7, sc.clientHeight / sc.scrollHeight * 100) });
     }, []);
+    // zoom-in-place: capture the document point at the viewport CENTRE the instant a zoom starts, restore it after
+    // the (async) re-render lands. Captured synchronously in the zoom handlers so the value can't be clobbered.
+    const anchorRef = useRef(null);
+    const captureAnchor = React.useCallback(() => { const sc = ref.current; if (!sc || sc.scrollHeight <= sc.clientHeight) { anchorRef.current = null; return; } anchorRef.current = (sc.scrollTop + sc.clientHeight / 2) / sc.scrollHeight; }, []);
     const isActive = docId === ctx.activeDocId;
     const playing = isActive && ctx.status && ctx.status !== 'idle';
     // follow the current sentence even when idle (cursor sync from the editor), not only while reading
@@ -704,8 +708,6 @@
             div.style.height = Math.floor(base1.height * scale) + 'px';
             root.appendChild(div); st.pageDivs[n] = div;
           }
-          if (restoreFrac > 0) root.scrollTop = restoreFrac * Math.max(0, root.scrollHeight - root.clientHeight);   // zoom-in-place
-          updateRail();
           // ---- alignment: monotonic token match (engine spoken words → PDF tokens) ----
           // Granular per-token advance keeps each sentence's span set small (no clumping); a 2-word-confirmed
           // forward resync avoids wrong jumps on common words; PDF-only tokens (page numbers, table cells,
@@ -771,6 +773,19 @@
           const io = new IntersectionObserver((ents) => { ents.forEach((e) => { if (e.isIntersecting) renderPage(+e.target.dataset.page).catch(() => { }); }); }, { root: root, rootMargin: '800px 0px' });
           Object.keys(st.pageDivs).forEach((n) => io.observe(st.pageDivs[n]));
           st.io = io;
+          // Restore the viewport after the re-render: a handler-captured centre anchor (zoom) wins; otherwise the
+          // top fraction (recompile/draft). Re-applied across a few frames so nothing post-render yanks it away.
+          const anchor = anchorRef.current; anchorRef.current = null;
+          if ((anchor != null || restoreFrac > 0) && !cancelled) {
+            const applyScroll = () => {
+              if (cancelled) return; const sc = ref.current; if (!sc || sc.scrollHeight <= sc.clientHeight) return;
+              sc.scrollTop = anchor != null ? Math.max(0, anchor * sc.scrollHeight - sc.clientHeight / 2) : restoreFrac * (sc.scrollHeight - sc.clientHeight);
+            };
+            applyScroll();
+            requestAnimationFrame(() => { applyScroll(); requestAnimationFrame(applyScroll); });
+            setTimeout(applyScroll, 180);
+          }
+          updateRail();
         } catch (e) { if (!cancelled) setState('error'); }
       })();
       return () => { cancelled = true; if (stRef.current && stRef.current.io) stRef.current.io.disconnect(); };
@@ -783,6 +798,7 @@
       const onWheel = (e) => {
         if (!(e.ctrlKey || e.metaKey)) return;
         e.preventDefault();
+        if (anchorRef.current == null) captureAnchor();   // capture the viewport centre at the gesture start
         zoomRef.current = Math.max(0.5, Math.min(4, zoomRef.current * Math.exp(-e.deltaY * 0.0022)));
         clearTimeout(t); t = setTimeout(() => setZoom(Math.round(zoomRef.current * 100) / 100), 90);
       };
@@ -827,9 +843,9 @@
         <div className="pdf-rail-thumb" style={{ top: rail.top + '%', height: rail.h + '%' }} />
       </div>}
       {state === 'ready' && <div className="pdf-zoom" onMouseDown={(e) => e.stopPropagation()} title="Ctrl/⌘ + scroll (or pinch) to zoom · scroll to pan">
-        <button onClick={() => setZoom((z) => Math.max(0.5, Math.round((z - 0.15) * 100) / 100))} aria-label="Zoom out">−</button>
-        <button className="pz-pct" onClick={() => setZoom(1)} aria-label="Reset zoom to fit width">{Math.round(zoom * 100)}%</button>
-        <button onClick={() => setZoom((z) => Math.min(4, Math.round((z + 0.15) * 100) / 100))} aria-label="Zoom in">+</button>
+        <button onClick={() => { captureAnchor(); setZoom((z) => Math.max(0.5, Math.round((z - 0.15) * 100) / 100)); }} aria-label="Zoom out">−</button>
+        <button className="pz-pct" onClick={() => { captureAnchor(); setZoom(1); }} aria-label="Reset zoom to fit width">{Math.round(zoom * 100)}%</button>
+        <button onClick={() => { captureAnchor(); setZoom((z) => Math.min(4, Math.round((z + 0.15) * 100) / 100)); }} aria-label="Zoom in">+</button>
       </div>}
     </React.Fragment>;
   }
