@@ -190,7 +190,16 @@
     var lS = useState(null), rows = lS[0], setRows = lS[1];
     var rpS = useState({}), replies = rpS[0], setReplies = rpS[1];
     var imS = useState(null), imgOpen = imS[0], setImgOpen = imS[1];
-    function load() { sb.from('bug_reports').select('*').order('created_at', { ascending: false }).then(function (r) { setRows((r && r.data) || []); }); }
+    var repS = useState({}), reporters = repS[0], setReporters = repS[1];   // reporter_id → {name,email,avatar_url}
+    function load() {
+      sb.from('bug_reports').select('*').order('created_at', { ascending: false }).then(function (r) {
+        var data = (r && r.data) || []; setRows(data);
+        var ids = []; data.forEach(function (b) { if (b.reporter_id && ids.indexOf(b.reporter_id) < 0) ids.push(b.reporter_id); });
+        if (ids.length) sb.from('profiles').select('id,name,email,avatar_url').in('id', ids).then(function (p) {
+          var m = {}; ((p && p.data) || []).forEach(function (u) { m[u.id] = u; }); setReporters(m);
+        });
+      });
+    }
     useEffect(function () { load(); }, []);
     useEffect(function () { if (!imgOpen) return; var onKey = function (e) { if (e.key === 'Escape') setImgOpen(null); }; window.addEventListener('keydown', onKey); return function () { window.removeEventListener('keydown', onKey); }; }, [imgOpen]);
     function setStatus(b, st) { sb.from('bug_reports').update({ status: st }).eq('id', b.id).then(load); }
@@ -213,6 +222,14 @@
               h('div', { style: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' } },
                 h('span', { className: 'badge', style: { background: b.category === 'feature' ? '#eef2ff' : '#fef3e6', color: b.category === 'feature' ? '#4f46e5' : '#b4530f' } }, b.category === 'feature' ? '💡 Feature' : '🐞 Bug'),
                 b.title ? h('b', null, b.title) : h('span', { style: { color: 'var(--muted)' } }, '(no title)'),
+                (function () {
+                  var rep = reporters[b.reporter_id];
+                  var lbl = rep ? (rep.name || rep.email) : (b.reporter_id ? b.reporter_id.slice(0, 8) + '…' : 'unknown');
+                  return h('span', { className: 'u', title: rep ? (rep.email || rep.name) : (b.reporter_id || 'unknown'), style: { display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, color: 'var(--ink)' } },
+                    h(Avatar, { u: rep || { name: lbl, id: b.reporter_id || 'x' }, size: 20 }),
+                    h('span', null, lbl),
+                    (rep && rep.name && rep.email) ? h('span', { style: { color: 'var(--muted)' } }, '· ' + rep.email) : null);
+                })(),
                 h('span', { style: { marginLeft: 'auto', fontSize: 11.5, color: 'var(--muted)' } }, fmtDate(b.created_at) + (b.page ? ' · ' + b.page : '') + (b.app_version ? ' · v' + b.app_version : '')),
                 h('select', { className: 'btn', 'aria-label': 'Report status', value: b.status, onChange: function (e) { setStatus(b, e.target.value); } }, ['open', 'triaged', 'fixed', 'wontfix'].map(function (s) { return h('option', { key: s, value: s }, s); }))
               ),
