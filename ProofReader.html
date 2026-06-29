@@ -340,6 +340,13 @@
     .backdrop { pointer-events: none; color: var(--ink); overflow: hidden; }
     .code-input { color: transparent; caret-color: var(--accent); background: transparent; resize: none; outline: none; }
     .code-input::selection { background: color-mix(in srgb, var(--accent) 25%, transparent); }
+    /* blinking purple caret pulse when jumping to the exact spot from the preview / compiled PDF */
+    .jump-cursor { position: absolute; width: 2.5px; z-index: 15; background: var(--accent); border-radius: 2px;
+      box-shadow: 0 0 7px 1.5px color-mix(in srgb, var(--accent) 65%, transparent); pointer-events: none;
+      transform-origin: center; animation: jump-cur 1.9s ease-out forwards; }
+    @keyframes jump-cur {
+      0% { opacity: 1; transform: scaleY(1.2); } 12% { opacity: .15; } 24% { opacity: 1; } 36% { opacity: .15; }
+      48% { opacity: 1; } 60% { opacity: .15; } 72% { opacity: 1; transform: scaleY(1); } 100% { opacity: 0; } }
 
     /* find & replace bar */
     .find-bar { position: absolute; top: 8px; right: 14px; z-index: 14; background: var(--pane); border: 1px solid var(--line);

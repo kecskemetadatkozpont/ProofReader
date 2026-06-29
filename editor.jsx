@@ -93,6 +93,8 @@
     const [ac, setAc] = useState(null);        // autocomplete: { items, sel, from, to, kind, x, y }
     const [aiSel, setAiSel] = useState(null);  // ✨ AI assist bar on a source selection: { x, y, start, end, text }
     const [aiRun, setAiRun] = useState(null);  // a running / finished AI rewrite: { action, busy, result, error }
+    const [jumpMark, setJumpMark] = useState(null);   // blinking caret pulse when we jump here from the preview/PDF
+    const jumpTimer = useRef(0);
     const charWRef = useRef({ fs: 0, w: 0 });
     const acRef = useRef(null); acRef.current = ac;
 
@@ -132,6 +134,10 @@
       ta.focus(); try { ta.setSelectionRange(sr.start, sr.end); } catch (e) { }
       const line = props.value.slice(0, sr.start).split('\n').length - 1;
       ta.scrollTop = Math.max(0, line * props.lineHeight - ta.clientHeight / 2); sync();
+      // a blinking purple caret pulse exactly where we landed (jump from the preview/PDF)
+      const col = sr.start - (props.value.lastIndexOf('\n', sr.start - 1) + 1);
+      setJumpMark({ x: 16 + col * charWidth() - ta.scrollLeft, y: 14 + line * props.lineHeight - ta.scrollTop, nonce: sr.nonce });
+      clearTimeout(jumpTimer.current); jumpTimer.current = setTimeout(() => setJumpMark(null), 1900);
     }, [props.selectReq]);
 
     /* ------- edit helpers ------- */
@@ -597,6 +603,7 @@
             onClick: () => { setAc(null); reportJump(); }, onKeyUp: reportCaret, onSelect: reportCaret, onMouseUp: (e) => { reportCaret(); maybeAi(e); }, onDoubleClick: () => { dblTs.current = Date.now(); },
             onBlur: () => setTimeout(() => setAc(null), 150)
           }),
+          jumpMark && React.createElement('div', { key: jumpMark.nonce, className: 'jump-cursor', style: { left: jumpMark.x + 'px', top: jumpMark.y + 'px', height: props.lineHeight + 'px' } }),
           ac && React.createElement('div', { className: 'ac-menu', style: { left: ac.x + 'px', top: ac.y + 'px' } },
             ac.items.map((it, i) => React.createElement('div', {
               key: i, className: 'ac-item' + (i === ac.sel ? ' on' : ''),

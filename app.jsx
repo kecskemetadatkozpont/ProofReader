@@ -1062,9 +1062,22 @@
       if (isCurProj(pane.docId)) {
         if (k !== idxRef.current) seekTo(k);   // clicking the already-current sentence must not restart playback
         const sent = comp.sentences[k];
-        if (files[active] && files[active].type === 'tex') setSelectReq({ start: sent.start, end: sent.start, nonce: Date.now() });
+        // jump to the EXACT clicked word inside the sentence, not just the sentence start
+        let off = sent.start;
+        const word = (s.textContent || '').trim();
+        if (word && sent.end > sent.start) {
+          // disambiguate a repeated word by counting matching spans up to the one clicked
+          const root = e.target.closest('.ct-scroll, .preview-scroll');
+          let occ = 1;
+          if (root) { const sp = root.querySelectorAll('.sent[data-sid="' + id + '"]'); let c = 0; for (let i = 0; i < sp.length; i++) { if ((sp[i].textContent || '').trim() === word) { c++; if (sp[i] === s) { occ = c; break; } } } }
+          const seg = (getSource(active) || '').slice(sent.start, sent.end).toLowerCase();
+          const wl = word.toLowerCase(); let p = -1, from = 0, found = 0;
+          while (found < occ) { p = seg.indexOf(wl, from); if (p < 0) break; found++; from = p + 1; }
+          if (p >= 0) off = sent.start + p;
+        }
+        if (files[active] && files[active].type === 'tex') setSelectReq({ start: off, end: off, nonce: Date.now() });
       }
-    }, [getCompiled, isCurProj, active, files, seekTo]);
+    }, [getCompiled, isCurProj, active, files, seekTo, getSource]);
 
     const onPreviewMouseUp = useCallback((pane, e) => {
       // only a deliberate drag-selection pops the comment/to-do toolbar — not a double/triple-click word select
