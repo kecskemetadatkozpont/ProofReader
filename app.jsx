@@ -543,9 +543,14 @@
         }
         // (3) compile, then remember the result by content hash
         try {
-          const r = await window.AloudTeX.compile({ mainFile: input.mainFile, files: input.files, passes: 3, onProgress: (m) => setPdfCompiled((s) => ({ ...s, [docId]: { ...(s[docId] || {}), phase: m } })) });
-          if (r.ok && hash && C) { try { C.put(hash, { pdf: r.pdf, pages: r.pages, ts: Date.now() }); } catch (e) { } }
-          setPdfCompiled((s) => ({ ...s, [docId]: { busy: false, pending: false, phase: null, pdf: r.ok ? r.pdf : ((s[docId] || {}).pdf || null), log: r.log, pages: r.pages, status: r.status, mode: 'browser', err: r.ok ? null : (r.reason || ('Compile failed (status ' + r.status + ')')), ms: r.ms, hash: r.ok ? hash : ((s[docId] || {}).hash), ts: Date.now() } }));
+          // Draft mode: a quick 1-pass redraw while typing (reuses the .aux the singleton engine kept from the
+          // last full compile this session, so cross-refs stay correct); first compile + explicit Recompile run
+          // the full 3 passes. `compiledInEngine` guards the page-refresh case (cache-loaded PDF, fresh engine,
+          // no .aux yet) — a draft is only safe once a full compile has actually run in this engine session.
+          const draft = !force && !!(cur && cur.pdf && cur.compiledInEngine);
+          const r = await window.AloudTeX.compile({ mainFile: input.mainFile, files: input.files, passes: draft ? 1 : 3, onProgress: (m) => setPdfCompiled((s) => ({ ...s, [docId]: { ...(s[docId] || {}), phase: (draft ? 'draft · ' : '') + m } })) });
+          if (r.ok && hash && C && !draft) { try { C.put(hash, { pdf: r.pdf, pages: r.pages, ts: Date.now() }); } catch (e) { } }   // only cache full-quality compiles
+          setPdfCompiled((s) => ({ ...s, [docId]: { busy: false, pending: false, phase: null, pdf: r.ok ? r.pdf : ((s[docId] || {}).pdf || null), log: r.log, pages: r.pages, status: r.status, mode: 'browser', draft: r.ok ? draft : ((s[docId] || {}).draft), compiledInEngine: r.ok ? true : ((s[docId] || {}).compiledInEngine), err: r.ok ? null : (r.reason || ('Compile failed (status ' + r.status + ')')), ms: r.ms, hash: r.ok ? hash : ((s[docId] || {}).hash), ts: Date.now() } }));
         } catch (e) {
           setPdfCompiled((s) => ({ ...s, [docId]: { ...(s[docId] || {}), busy: false, pending: false, phase: null, err: String((e && e.message) || e), mode: 'browser', ts: Date.now() } }));
         }

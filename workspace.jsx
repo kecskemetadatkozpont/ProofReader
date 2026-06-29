@@ -837,7 +837,7 @@
     // debounced recompile when the source changes (Version B auto-recompile)
     useEffect(() => { if (ctx.requestCompile) ctx.requestCompile(docId, false); }, [src]);
     const busy = !!(st && st.busy), pending = !!(st && st.pending), phase = (st && st.phase) || null, pdf = st && st.pdf, err = st && st.err;
-    const modeLabel = st && st.mode === 'exact' ? 'exact (TeX Live 2026)' : 'browser (pdfTeX)';
+    const modeLabel = st && st.mode === 'exact' ? 'exact (TeX Live 2026)' : ('browser (pdfTeX)' + (st && st.draft && !busy ? ' · ⚡ draft' : ''));
     // Parse a determinate pass fraction from phase strings like 'compiling 2/3…'; otherwise indeterminate.
     const passMatch = phase ? String(phase).match(/(\d+)\s*\/\s*(\d+)/) : null;
     const passPct = passMatch && +passMatch[2] > 0 ? Math.max(0, Math.min(100, Math.round((+passMatch[1] / +passMatch[2]) * 100))) : null;
@@ -851,7 +851,7 @@
       <div className="pdf-render-bar">
         <span className="prb-title">{busy ? <span className="cspin" /> : null}Compiled · {ctx.docLabel(docId)}{st && st.pages ? ' · ' + st.pages + ' p.' : ''} · {modeLabel}{busy ? (' · ' + (phase || 'compiling…')) : (pending ? ' · ⏳ changes — waiting to compile' : (err ? ' · ⚠ compile error' : ''))}</span>
         <span style={{ display: 'inline-flex', gap: 6, flex: 'none' }}>
-          <button onClick={() => ctx.requestCompile && ctx.requestCompile(docId, true)} disabled={busy}>Recompile</button>
+          <button onClick={() => ctx.requestCompile && ctx.requestCompile(docId, true)} disabled={busy} title="Full 3-pass recompile — resolves all cross-references, citations and page numbers (typing does a fast 1-pass draft)">Recompile</button>
           <button onClick={() => ctx.onCompileExact && ctx.onCompileExact(docId)} disabled={busy} title="Byte-identical PDF via an external TeX Live 2026 API">Exact PDF</button>
         </span>
       </div>
