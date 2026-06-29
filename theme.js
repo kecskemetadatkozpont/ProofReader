@@ -168,14 +168,18 @@
       var RESIZE = '.splitter,.ws-divider,.cm-split';   // show the native resize cursor on draggable dividers
       var PDFV = '.pdf-render-scroll,.pdf-paper,.ct-scroll,.pdf-view,.pdf-view-wrap';   // PDF surfaces: native cursor for scroll/zoom/pan
       function lerp(a, b, t) { return a + (b - a) * t; }
-      document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; if (!txt) root.classList.remove('hide'); }, { passive: true });
-      document.addEventListener('mouseover', function (e) {
-        var el = e.target; if (!el || !el.closest) return;
+      function evalAt(el) {
+        if (!el || !el.closest) return;
         var native = (!!el.closest(TEXT) && !el.closest('button,a,[role="button"],.btn')) || !!el.closest(RESIZE) || !!el.closest(PDFV);
         var hit = el.closest(HIT);
         txt = native;
         if (native) { root.classList.add('hide'); snap = null; } else { root.classList.remove('hide'); snap = hit || null; }
-      }, { passive: true });
+      }
+      document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; if (!txt) root.classList.remove('hide'); }, { passive: true });
+      document.addEventListener('mouseover', function (e) { evalAt(e.target); }, { passive: true });
+      // re-evaluate the snap target during scrolling: the mouse may not move (so mouseover won't fire), and the
+      // snapped element scrolls away — re-pick whatever is actually under the cursor so the ring stays consistent.
+      document.addEventListener('scroll', function () { evalAt(document.elementFromPoint(mx, my)); }, { passive: true, capture: true });
       document.addEventListener('mouseleave', function () { root.classList.add('hide'); });
       window.addEventListener('blur', function () { root.classList.add('hide'); });
       (function frame() {

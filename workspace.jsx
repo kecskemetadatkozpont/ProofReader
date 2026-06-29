@@ -93,7 +93,7 @@
       return () => { el.removeEventListener('wheel', onWheel); if (raf) cancelAnimationFrame(raf); };
     }, []);
     return <div className="pdf-render">
-      <div className="pdf-render-bar"><span>Rendered PDF · {ctx.docLabel(pane.docId)}</span><span style={{ display: 'inline-flex', gap: 6 }}><button onClick={() => ctx.onWord && ctx.onWord(pane.docId)} title="Download as Word (.docx)" aria-label="Download as Word (.docx)"><span aria-hidden="true">⬇</span> Word</button><button onClick={() => ctx.onPrint(pane.docId)}><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M4 6V2.5h8V6M4 11H3a1 1 0 01-1-1V7a1 1 0 011-1h10a1 1 0 011 1v3a1 1 0 01-1 1h-1M4 9h8v4.5H4z" strokeLinejoin="round" /></svg>Print / Save PDF</button></span></div>
+      <div className="pdf-render-bar"><span className="prb-title">Rendered PDF · {ctx.docLabel(pane.docId)}</span><span style={{ display: 'inline-flex', gap: 6, flex: 'none' }}><button onClick={() => ctx.onWord && ctx.onWord(pane.docId)} title="Download as Word (.docx)" aria-label="Download as Word (.docx)"><span aria-hidden="true">⬇</span> Word</button><button onClick={() => ctx.onPrint(pane.docId)}><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M4 6V2.5h8V6M4 11H3a1 1 0 01-1-1V7a1 1 0 011-1h10a1 1 0 011 1v3a1 1 0 01-1 1h-1M4 9h8v4.5H4z" strokeLinejoin="round" /></svg>Print / Save PDF</button></span></div>
       <div className="pdf-render-scroll" ref={scRef}><div className="pdf-paper" style={{ zoom: zoom }} dangerouslySetInnerHTML={{ __html: c ? c.html : '' }} /></div>
       <div className="pdf-zoom" onMouseDown={(e) => e.stopPropagation()} title="Ctrl/⌘ + scroll (or pinch) to zoom · scroll to pan">
         <button onClick={() => setZoom((z) => Math.max(0.5, Math.round((z - 0.15) * 100) / 100))} aria-label="Zoom out">−</button>
@@ -576,6 +576,12 @@
     const [state, setState] = useState('loading'); // loading | ready | error
     const [zoom, setZoom] = useState(1);           // user zoom on top of fit-to-width (pan via the scroll container)
     const zoomRef = useRef(1); zoomRef.current = zoom;
+    const [rail, setRail] = useState(null);        // IDE-style quick scrollbar: { top%, h% } of the viewport, or null
+    const updateRail = React.useCallback(() => {
+      const sc = ref.current; if (!sc) return;
+      if (sc.scrollHeight <= sc.clientHeight + 4) { setRail(null); return; }
+      setRail({ top: sc.scrollTop / sc.scrollHeight * 100, h: Math.max(7, sc.clientHeight / sc.scrollHeight * 100) });
+    }, []);
     const isActive = docId === ctx.activeDocId;
     const playing = isActive && ctx.status && ctx.status !== 'idle';
     // follow the current sentence even when idle (cursor sync from the editor), not only while reading
@@ -774,6 +780,8 @@
       el.addEventListener('wheel', onWheel, { passive: false });
       return () => { el.removeEventListener('wheel', onWheel); clearTimeout(t); };
     }, []);
+    // keep the quick-scrollbar thumb in sync after (re)render / zoom / lazy page rendering settles
+    useEffect(() => { const ids = [setTimeout(updateRail, 350), setTimeout(updateRail, 1200)]; return () => ids.forEach(clearTimeout); }, [state, zoom, updateRail]);
 
     // re-highlight when the active spoken sentence changes
     useEffect(() => { applyHighlight(); }, [curSid, playing, state]);
@@ -793,11 +801,22 @@
     // The ref'd scroll div is imperatively filled (kept empty in JSX so React never reconciles its
     // children); status overlays are React-managed siblings inside the positioned pdf-view-wrap.
     return <React.Fragment>
-      <div className="ct-scroll" ref={ref} data-doc={docId}
+      <div className="ct-scroll" ref={ref} data-doc={docId} onScroll={updateRail}
         onClick={(e) => ctx.onPreviewClick && ctx.onPreviewClick(pane, e)}
         onMouseUp={(e) => ctx.onPreviewMouseUp && ctx.onPreviewMouseUp(pane, e)} />
       {state === 'loading' && <div className="pdf-status">Rendering…</div>}
       {state === 'error' && <div className="pdf-status">Could not render.</div>}
+      {state === 'ready' && rail && <div className="pdf-rail" title="Click or drag to jump" onMouseDown={(e) => {
+        e.stopPropagation(); e.preventDefault();
+        const railEl = e.currentTarget, sc = ref.current; if (!sc) return;
+        const jump = (clientY) => { const r = railEl.getBoundingClientRect(); const ratio = Math.max(0, Math.min(1, (clientY - r.top) / r.height)); sc.scrollTop = ratio * (sc.scrollHeight - sc.clientHeight); };
+        jump(e.clientY);
+        const mv = (ev) => jump(ev.clientY);
+        const up = () => { window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); };
+        window.addEventListener('mousemove', mv); window.addEventListener('mouseup', up);
+      }}>
+        <div className="pdf-rail-thumb" style={{ top: rail.top + '%', height: rail.h + '%' }} />
+      </div>}
       {state === 'ready' && <div className="pdf-zoom" onMouseDown={(e) => e.stopPropagation()} title="Ctrl/⌘ + scroll (or pinch) to zoom · scroll to pan">
         <button onClick={() => setZoom((z) => Math.max(0.5, Math.round((z - 0.15) * 100) / 100))} aria-label="Zoom out">−</button>
         <button className="pz-pct" onClick={() => setZoom(1)} aria-label="Reset zoom to fit width">{Math.round(zoom * 100)}%</button>
@@ -812,8 +831,9 @@
     const docId = pane.docId;
     const st = ctx.getCompiledPdf ? ctx.getCompiledPdf(docId) : null;
     const src = ctx.getSource ? ctx.getSource(docId) : '';
-    // initial compile on mount
-    useEffect(() => { if (ctx.requestCompile) ctx.requestCompile(docId, true); }, [docId]);
+    // initial compile on mount — NON-forced, so re-opening/switching to an already-compiled doc reuses the
+    // cached PDF (kept in the app-level pdfCompiled state) instead of recompiling the whole document again.
+    useEffect(() => { if (ctx.requestCompile) ctx.requestCompile(docId, false); }, [docId]);
     // debounced recompile when the source changes (Version B auto-recompile)
     useEffect(() => { if (ctx.requestCompile) ctx.requestCompile(docId, false); }, [src]);
     const busy = !!(st && st.busy), pending = !!(st && st.pending), phase = (st && st.phase) || null, pdf = st && st.pdf, err = st && st.err;
@@ -829,8 +849,8 @@
       : null;
     return <div className="pdf-render">
       <div className="pdf-render-bar">
-        <span>{busy ? <span className="cspin" /> : null}Compiled · {ctx.docLabel(docId)}{st && st.pages ? ' · ' + st.pages + ' p.' : ''} · {modeLabel}{busy ? (' · ' + (phase || 'compiling…')) : (pending ? ' · ⏳ changes — waiting to compile' : (err ? ' · ⚠ compile error' : ''))}</span>
-        <span style={{ display: 'inline-flex', gap: 6 }}>
+        <span className="prb-title">{busy ? <span className="cspin" /> : null}Compiled · {ctx.docLabel(docId)}{st && st.pages ? ' · ' + st.pages + ' p.' : ''} · {modeLabel}{busy ? (' · ' + (phase || 'compiling…')) : (pending ? ' · ⏳ changes — waiting to compile' : (err ? ' · ⚠ compile error' : ''))}</span>
+        <span style={{ display: 'inline-flex', gap: 6, flex: 'none' }}>
           <button onClick={() => ctx.requestCompile && ctx.requestCompile(docId, true)} disabled={busy}>Recompile</button>
           <button onClick={() => ctx.onCompileExact && ctx.onCompileExact(docId)} disabled={busy} title="Byte-identical PDF via an external TeX Live 2026 API">Exact PDF</button>
         </span>
