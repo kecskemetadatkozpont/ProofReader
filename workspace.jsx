@@ -841,7 +841,7 @@
       </div> : null}
       <div className="pdf-view-wrap" style={{ flex: 1, minHeight: 0 }}>
         {err && !pdf ? <div className="pdf-status" style={{ maxWidth: '82%', whiteSpace: 'normal', lineHeight: 1.45, textAlign: 'center', background: 'rgba(120,30,30,.55)' }}>⚠️ {String(err)}</div>
-          : pdf ? <div style={{ height: '100%', opacity: showBar ? .45 : 1, transition: 'opacity .2s ease' }}><CompiledPdfView pane={pane} ctx={ctx} bytes={pdf} /></div>
+          : pdf ? <div style={{ height: '100%', display: 'flex', flexDirection: 'column', opacity: showBar ? .45 : 1, transition: 'opacity .2s ease' }}><CompiledPdfView pane={pane} ctx={ctx} bytes={pdf} /></div>
           : <div className="pdf-status">{busy ? (phase || 'Compiling…') : (pending ? 'Changes — waiting to compile…' : 'Waiting to compile…')}</div>}
       </div>
     </div>;
