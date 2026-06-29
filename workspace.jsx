@@ -574,6 +574,7 @@
     const ref = useRef(null);
     const stRef = useRef(null);
     const lastDocRef = useRef(null);   // to detect zoom/recompile re-renders (same doc) vs a real doc switch
+    const lastScrolledSidRef = useRef(null);   // only auto-scroll to a sentence when it actually CHANGES (not on a zoom re-render)
     const [state, setState] = useState('loading'); // loading | ready | error
     const [zoom, setZoom] = useState(1);           // user zoom on top of fit-to-width (pan via the scroll container)
     const zoomRef = useRef(1); zoomRef.current = zoom;
@@ -605,7 +606,9 @@
       const cls = playingRef.current ? 'sent-cur' : 'sent-cursor';
       const spans = root.querySelectorAll('.ct-textlayer > span[data-sid="' + sid + '"]');
       spans.forEach((s) => s.classList.add(cls));
-      if (spans[0]) { try { spans[0].scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) { } }
+      // only auto-scroll when the active sentence actually changed (read-aloud / cursor sync) — never on a plain
+      // re-render (zoom, recompile), which would otherwise yank the view away from the zoom-in-place restore.
+      if (spans[0] && sid !== lastScrolledSidRef.current) { lastScrolledSidRef.current = sid; try { spans[0].scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) { } }
     }
     // highlight sentences that carry a comment/to-do (lazy-safe: applied per page + on annotation change)
     function applyAnno(root) {
