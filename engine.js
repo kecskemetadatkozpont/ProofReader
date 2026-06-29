@@ -495,11 +495,19 @@
     if (ma) { var ra = inline(ma.inner); ctx.meta.authorHtml = ra.html; ctx.meta.authorId = newSent(ctx, ra.spoken, ma.start, ma.end); }
     if (md) { ctx.meta.dateHtml = inline(md.inner).html; }
 
+    // MDPI/Elsevier (and similar classes) declare the abstract as a \abstract{...} COMMAND in the PREAMBLE,
+    // before \begin{document} — so the body parser never sees it. Its sentences were missing entirely, so any
+    // click inside the abstract fell through to the first BODY sentence (the Introduction). Extract it here with
+    // real source offsets (parseBlocks → multiple sentences) so source↔preview/PDF sync works in the abstract too.
+    var absHtml = '';
+    var mabs = meta('abstract');
+    if (mabs && mabs.inner && mabs.inner.trim()) absHtml = '<div class="abstract"><div class="abstract-title">Abstract</div>' + parseBlocks(mabs.inner, mabs.start, ctx) + '</div>';
+
     var bodyHtml = parseBlocks(body, bodyOffset, ctx);
     // sort sentences by start so editor caret mapping is monotonic
     ctx.sentences.sort(function (a, b) { return a.start - b.start; });
     var diags = ctx.diagnostics; DIAG = null;
-    return { html: '<div class="paper">' + bodyHtml + renderReferences() + '</div>', sentences: ctx.sentences, meta: ctx.meta, diagnostics: diags };
+    return { html: '<div class="paper">' + absHtml + bodyHtml + renderReferences() + '</div>', sentences: ctx.sentences, meta: ctx.meta, diagnostics: diags };
   }
 
   window.LatexEngine = { process: process, inline: inline };
