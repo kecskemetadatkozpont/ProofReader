@@ -1065,7 +1065,7 @@
         // Jump to the EXACT clicked WORD, not just the sentence start. Use the caret position AT the click point
         // (caretRangeFromPoint) so it works in BOTH the preview — where .sent wraps the whole sentence — and the
         // compiled PDF, where .sent is a single word. Then locate that word's occurrence in the sentence's source.
-        let off = sent.start;
+        let off = sent.start, wend = sent.start;
         if (sent.end > sent.start) {
           const src = getSource(active) || ''; const root = e.target.closest('.ct-scroll, .preview-scroll');
           let cn = null, co = 0;
@@ -1084,11 +1084,12 @@
               if (spans.length) { try { const rng = document.createRange(); rng.setStartBefore(spans[0]); rng.setEnd(cn, a); const pre = rng.toString().toLowerCase(); const wl0 = word.toLowerCase(); let c = 0, ix = 0; while ((ix = pre.indexOf(wl0, ix)) >= 0) { c++; ix += wl0.length; } occ = c + 1; } catch (_) { } }
               const seg = src.slice(sent.start, sent.end).toLowerCase(); const wl = word.toLowerCase();
               let p = -1, from = 0, found = 0; while (found < occ) { p = seg.indexOf(wl, from); if (p < 0) break; found++; from = p + 1; }
-              if (p >= 0) off = sent.start + p;
+              if (p >= 0) { off = sent.start + p; wend = off; while (wend < sent.end && /[0-9A-Za-zÀ-ɏ]/.test(src[wend] || '')) wend++; }   // word end in the source
             }
           }
         }
-        if (files[active] && files[active].type === 'tex') setSelectReq({ start: off, end: off, nonce: Date.now() });
+        // select the whole word in the editor (mirror the word from the preview/compiled), else just place the caret
+        if (files[active] && files[active].type === 'tex') setSelectReq({ start: off, end: wend > off ? wend : off, nonce: Date.now() });
       }
     }, [getCompiled, isCurProj, active, files, seekTo, getSource]);
 
