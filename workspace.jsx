@@ -74,6 +74,34 @@
   const KIND_LABEL = { source: 'Source', preview: 'Preview', pdf: 'PDF', image: 'Image', compiled: 'Compiled' };
 
   /* ---------------- pane body renderers ---------------- */
+  // The "Rendered PDF" (HTML paper) pane, with zoom (Ctrl/⌘+wheel or pinch) + pan (scroll). CSS `zoom`
+  // scales the layout box too, so the scroll container grows and two-finger pan reveals the zoomed page.
+  function RenderedPaper({ pane, ctx }) {
+    const c = ctx.getCompiled(pane.docId);
+    const [zoom, setZoom] = useState(1);
+    const zoomRef = useRef(1); zoomRef.current = zoom;
+    const scRef = useRef(null);
+    useEffect(() => {
+      const el = scRef.current; if (!el) return; let raf = 0;
+      const onWheel = (e) => {
+        if (!(e.ctrlKey || e.metaKey)) return;
+        e.preventDefault();
+        zoomRef.current = Math.max(0.5, Math.min(4, zoomRef.current * Math.exp(-e.deltaY * 0.0022)));
+        if (!raf) raf = requestAnimationFrame(() => { raf = 0; setZoom(Math.round(zoomRef.current * 100) / 100); });
+      };
+      el.addEventListener('wheel', onWheel, { passive: false });
+      return () => { el.removeEventListener('wheel', onWheel); if (raf) cancelAnimationFrame(raf); };
+    }, []);
+    return <div className="pdf-render">
+      <div className="pdf-render-bar"><span>Rendered PDF · {ctx.docLabel(pane.docId)}</span><span style={{ display: 'inline-flex', gap: 6 }}><button onClick={() => ctx.onWord && ctx.onWord(pane.docId)} title="Download as Word (.docx)" aria-label="Download as Word (.docx)"><span aria-hidden="true">⬇</span> Word</button><button onClick={() => ctx.onPrint(pane.docId)}><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M4 6V2.5h8V6M4 11H3a1 1 0 01-1-1V7a1 1 0 011-1h10a1 1 0 011 1v3a1 1 0 01-1 1h-1M4 9h8v4.5H4z" strokeLinejoin="round" /></svg>Print / Save PDF</button></span></div>
+      <div className="pdf-render-scroll" ref={scRef}><div className="pdf-paper" style={{ zoom: zoom }} dangerouslySetInnerHTML={{ __html: c ? c.html : '' }} /></div>
+      <div className="pdf-zoom" onMouseDown={(e) => e.stopPropagation()} title="Ctrl/⌘ + scroll (or pinch) to zoom · scroll to pan">
+        <button onClick={() => setZoom((z) => Math.max(0.5, Math.round((z - 0.15) * 100) / 100))} aria-label="Zoom out">−</button>
+        <button className="pz-pct" onClick={() => setZoom(1)} aria-label="Reset zoom">{Math.round(zoom * 100)}%</button>
+        <button onClick={() => setZoom((z) => Math.min(4, Math.round((z + 0.15) * 100) / 100))} aria-label="Zoom in">+</button>
+      </div>
+    </div>;
+  }
   function PaneBody({ pane, ctx }) {
     if (pane.kind === 'source') {
       const editable = ctx.isCurProj(pane.docId) && ctx.canEdit && !ctx.readOnlyDoc(pane.docId);
@@ -101,13 +129,7 @@
       return <PreviewBody pane={pane} ctx={ctx} />;
     }
     if (pane.kind === 'pdf') {
-      if (pane.docId) { // rendered "export to PDF" view of a document
-        const c = ctx.getCompiled(pane.docId);
-        return <div className="pdf-render">
-          <div className="pdf-render-bar"><span>Rendered PDF · {ctx.docLabel(pane.docId)}</span><span style={{ display: 'inline-flex', gap: 6 }}><button onClick={() => ctx.onWord && ctx.onWord(pane.docId)} title="Download as Word (.docx)" aria-label="Download as Word (.docx)"><span aria-hidden="true">⬇</span> Word</button><button onClick={() => ctx.onPrint(pane.docId)}><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M4 6V2.5h8V6M4 11H3a1 1 0 01-1-1V7a1 1 0 011-1h10a1 1 0 011 1v3a1 1 0 01-1 1h-1M4 9h8v4.5H4z" strokeLinejoin="round" /></svg>Print / Save PDF</button></span></div>
-          <div className="pdf-render-scroll"><div className="pdf-paper" dangerouslySetInnerHTML={{ __html: c ? c.html : '' }} /></div>
-        </div>;
-      }
+      if (pane.docId) return <RenderedPaper pane={pane} ctx={ctx} />;   // rendered "export to PDF" view of a document
       const data = ctx.getFileData(pane.file);
       const url = ctx.getFileURL(pane.file);
       if (!data && !url) return <Missing label="PDF" />;
@@ -552,6 +574,8 @@
     const ref = useRef(null);
     const stRef = useRef(null);
     const [state, setState] = useState('loading'); // loading | ready | error
+    const [zoom, setZoom] = useState(1);           // user zoom on top of fit-to-width (pan via the scroll container)
+    const zoomRef = useRef(1); zoomRef.current = zoom;
     const isActive = docId === ctx.activeDocId;
     const playing = isActive && ctx.status && ctx.status !== 'idle';
     // follow the current sentence even when idle (cursor sync from the editor), not only while reading
@@ -659,7 +683,7 @@
           const width = Math.max(280, root.clientWidth - 28 - gutter);
           const dpr = window.devicePixelRatio || 1;
           const base1 = (await pdf.getPage(1)).getViewport({ scale: 1 });
-          const scale = Math.min(2.0, width / base1.width);
+          const scale = Math.min(2.0, width / base1.width) * (zoomRef.current || 1);
           // placeholders (lazy)
           for (let n = 1; n <= pdf.numPages; n++) {
             const div = document.createElement('div'); div.className = 'ct-page'; div.dataset.page = n;
@@ -735,7 +759,21 @@
         } catch (e) { if (!cancelled) setState('error'); }
       })();
       return () => { cancelled = true; if (stRef.current && stRef.current.io) stRef.current.io.disconnect(); };
-    }, [bytes, docId, hasAnno]);
+    }, [bytes, docId, hasAnno, zoom]);
+
+    // Ctrl/⌘ + wheel — and touchpad pinch (which the browser reports as ctrlKey + wheel) — zoom the PDF.
+    // Debounced so a continuous pinch re-renders once it settles (pan happens via the scroll container).
+    useEffect(() => {
+      const el = ref.current; if (!el) return; let t = 0;
+      const onWheel = (e) => {
+        if (!(e.ctrlKey || e.metaKey)) return;
+        e.preventDefault();
+        zoomRef.current = Math.max(0.5, Math.min(4, zoomRef.current * Math.exp(-e.deltaY * 0.0022)));
+        clearTimeout(t); t = setTimeout(() => setZoom(Math.round(zoomRef.current * 100) / 100), 90);
+      };
+      el.addEventListener('wheel', onWheel, { passive: false });
+      return () => { el.removeEventListener('wheel', onWheel); clearTimeout(t); };
+    }, []);
 
     // re-highlight when the active spoken sentence changes
     useEffect(() => { applyHighlight(); }, [curSid, playing, state]);
@@ -760,6 +798,11 @@
         onMouseUp={(e) => ctx.onPreviewMouseUp && ctx.onPreviewMouseUp(pane, e)} />
       {state === 'loading' && <div className="pdf-status">Rendering…</div>}
       {state === 'error' && <div className="pdf-status">Could not render.</div>}
+      {state === 'ready' && <div className="pdf-zoom" onMouseDown={(e) => e.stopPropagation()} title="Ctrl/⌘ + scroll (or pinch) to zoom · scroll to pan">
+        <button onClick={() => setZoom((z) => Math.max(0.5, Math.round((z - 0.15) * 100) / 100))} aria-label="Zoom out">−</button>
+        <button className="pz-pct" onClick={() => setZoom(1)} aria-label="Reset zoom to fit width">{Math.round(zoom * 100)}%</button>
+        <button onClick={() => setZoom((z) => Math.min(4, Math.round((z + 0.15) * 100) / 100))} aria-label="Zoom in">+</button>
+      </div>}
     </React.Fragment>;
   }
 

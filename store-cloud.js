@@ -30,7 +30,19 @@
   /* ---- cache ---- */
   var CACHE = [];
   (function warm() { try { CACHE = JSON.parse(localStorage.getItem(WARM) || '[]') || []; } catch (e) { CACHE = []; } })();
-  function persistWarm() { try { localStorage.setItem(WARM, JSON.stringify(CACHE)); } catch (e) { } }
+  // A localStorage-friendly copy of a project: drop the heavy version history + big inline file payloads
+  // (both stay in memory + on the server). A large project (e.g. a thesis with long history) can otherwise
+  // blow the ~5 MB localStorage quota and silently break OTHER writes — notably the annotation queue below.
+  function trimForWarm(p) {
+    var t = {}; for (var k in p) if (Object.prototype.hasOwnProperty.call(p, k)) t[k] = p[k];
+    t.versions = [];
+    if (t.files && typeof t.files === 'object') { var nf = {}; for (var f in t.files) if (Object.prototype.hasOwnProperty.call(t.files, f)) { var v = t.files[f]; nf[f] = (v && v.dataURL && String(v.dataURL).length > 4000) ? Object.assign({}, v, { dataURL: '' }) : v; } t.files = nf; }
+    return t;
+  }
+  function persistWarm() {
+    try { localStorage.setItem(WARM, JSON.stringify(CACHE)); }
+    catch (e) { try { localStorage.setItem(WARM, JSON.stringify(CACHE.map(trimForWarm))); } catch (e2) { try { localStorage.removeItem(WARM); } catch (e3) { } } }
+  }
   // ---- unconfirmed-annotation queue ----
   // Comments/to-dos persist via granular RPCs that are NOT part of the project-level `pending` flush, so a
   // hydrate (10s poll / realtime / focus) could otherwise replace the local array before the RPC commits and
@@ -38,7 +50,16 @@
   // unconfirmed ops; mergeRow re-applies them on top of the server copy, and they're retried (persisted across
   // reloads) until the server confirms — the granular equivalent of the `pending` protection for full saves.
   var annoQ = {}; try { annoQ = JSON.parse(localStorage.getItem('pr-anno-q') || '{}') || {}; } catch (e) { annoQ = {}; }
-  function persistAnnoQ() { try { localStorage.setItem('pr-anno-q', JSON.stringify(annoQ)); } catch (e) { } }
+  // The annotation queue is small but CRITICAL (un-synced comments/to-dos). If localStorage is full, free
+  // space by trimming/dropping the (re-fetchable) warm project cache, then persist the queue — never lose a
+  // to-do just because a big project filled the quota.
+  function persistAnnoQ() {
+    try { localStorage.setItem('pr-anno-q', JSON.stringify(annoQ)); }
+    catch (e) {
+      try { localStorage.setItem(WARM, JSON.stringify(CACHE.map(trimForWarm))); localStorage.setItem('pr-anno-q', JSON.stringify(annoQ)); }
+      catch (e2) { try { localStorage.removeItem(WARM); localStorage.setItem('pr-anno-q', JSON.stringify(annoQ)); } catch (e3) { } }
+    }
+  }
   function qAnno(pid, entry) { if (!annoQ[pid]) annoQ[pid] = {}; annoQ[pid][entry.op === 'delete' ? entry.id : entry.ann.id] = entry; persistAnnoQ(); }
   function unqAnno(pid, annId) { if (annoQ[pid]) { delete annoQ[pid][annId]; if (!Object.keys(annoQ[pid]).length) delete annoQ[pid]; persistAnnoQ(); } }
   // overlay the queued (unconfirmed) ops on top of a server annotations array (used during the hydrate merge)
