@@ -573,6 +573,7 @@
     const docId = pane.docId;
     const ref = useRef(null);
     const stRef = useRef(null);
+    const lastDocRef = useRef(null);   // to detect zoom/recompile re-renders (same doc) vs a real doc switch
     const [state, setState] = useState('loading'); // loading | ready | error
     const [zoom, setZoom] = useState(1);           // user zoom on top of fit-to-width (pan via the scroll container)
     const zoomRef = useRef(1); zoomRef.current = zoom;
@@ -677,6 +678,9 @@
     useEffect(() => {
       let cancelled = false; const lib = window.pdfjsLib; const root = ref.current;
       if (!lib || !bytes || !root) { setState('error'); return; }
+      // keep the viewport where it is across a zoom / recompile re-render (same doc); reset to top on a doc switch
+      const sameDoc = lastDocRef.current === docId; lastDocRef.current = docId;
+      const restoreFrac = (sameDoc && root.scrollHeight > root.clientHeight) ? root.scrollTop / (root.scrollHeight - root.clientHeight) : 0;
       setState('loading'); root.innerHTML = '';
       const st = stRef.current = { pageDivs: {}, sids: {}, rendered: {}, io: null };
       (async () => {
@@ -697,6 +701,8 @@
             div.style.height = Math.floor(base1.height * scale) + 'px';
             root.appendChild(div); st.pageDivs[n] = div;
           }
+          if (restoreFrac > 0) root.scrollTop = restoreFrac * Math.max(0, root.scrollHeight - root.clientHeight);   // zoom-in-place
+          updateRail();
           // ---- alignment: monotonic token match (engine spoken words → PDF tokens) ----
           // Granular per-token advance keeps each sentence's span set small (no clumping); a 2-word-confirmed
           // forward resync avoids wrong jumps on common words; PDF-only tokens (page numbers, table cells,

@@ -262,9 +262,8 @@
     .pdf-zoom button:hover { background: color-mix(in srgb, var(--accent) 12%, var(--pane)); color: var(--accent); }
     .pdf-zoom .pz-pct { min-width: 48px; font-size: 12px; }
     /* IDE-style quick scrollbar / minimap on the compiled PDF — click or drag to jump to a region */
-    .pdf-rail { position: absolute; top: 0; right: 0; bottom: 0; width: 13px; z-index: 7; cursor: pointer; opacity: 0; transition: opacity .15s ease; background: linear-gradient(var(--line), var(--line)) center / 1px 100% no-repeat; }
-    .pdf-render:hover .pdf-rail, .pdf-view-wrap:hover .pdf-rail, .pdf-rail:hover { opacity: 1; }
-    .pdf-rail-thumb { position: absolute; left: 2px; right: 2px; min-height: 26px; background: color-mix(in srgb, var(--accent) 55%, transparent); border-radius: 6px; box-shadow: 0 0 0 1px rgba(0,0,0,.18); transition: background .12s ease; }
+    .pdf-rail { position: absolute; top: 0; right: 0; bottom: 0; width: 12px; z-index: 7; cursor: pointer; background: linear-gradient(var(--line), var(--line)) center / 1px 100% no-repeat; }
+    .pdf-rail-thumb { position: absolute; left: 2px; right: 2px; min-height: 26px; background: color-mix(in srgb, var(--accent) 42%, transparent); border-radius: 6px; box-shadow: 0 0 0 1px rgba(0,0,0,.18); transition: background .12s ease; }
     .pdf-rail:hover .pdf-rail-thumb { background: var(--accent); }
     .pdf-render-bar { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--line); background: var(--pane); font-size: 11.5px; color: var(--muted); font-weight: 600; }
     .pdf-render-bar .prb-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }   /* keep the Recompile/Word buttons always visible */
@@ -283,7 +282,8 @@
     .pdf-fallback { width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; background: var(--app-bg); color: var(--muted); font-size: 13px; text-align: center; padding: 24px; }
     .pdf-fallback a { color: var(--accent); font-weight: 600; text-decoration: none; } .pdf-fallback a:hover { text-decoration: underline; }
     /* Compiled-pane PDF view with read-aloud text layer (lazy-rendered) */
-    .ct-scroll { position: relative; flex: 1; min-height: 0; overflow: auto; padding: 14px; display: flex; flex-direction: column; align-items: safe center; gap: 12px; background: #6b7280; }
+    .ct-scroll { position: relative; flex: 1; min-height: 0; overflow: auto; padding: 14px; display: flex; flex-direction: column; align-items: safe center; gap: 12px; background: #6b7280; scrollbar-width: none; }
+    .ct-scroll::-webkit-scrollbar { width: 0; height: 0; display: none; }   /* the custom .pdf-rail replaces the native scrollbar here */
     .ct-page { position: relative; border-radius: 2px; box-shadow: 0 2px 10px rgba(0,0,0,.35); background: var(--surface); }
     .ct-page canvas.ct-canvas { display: block; border-radius: 2px; }
     .ct-textlayer { position: absolute; left: 0; top: 0; overflow: hidden; line-height: 1; opacity: 1; }
