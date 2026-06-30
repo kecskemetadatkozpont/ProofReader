@@ -147,6 +147,16 @@
         title: name + (props.canEdit ? ' — open / set stage' : ' — open'),
         onClick: function () { if (props.onNav) props.onNav(i); if (props.canEdit && i !== cur && props.onSet) props.onSet(i); }
       }, h('span', { className: 'dot', 'aria-hidden': 'true' }, STAGE_ICONS[i] || (i + 1)), name));
+      // intermediate "Studies" funnel between Idea and Literature — opens the study tab (NOT a lifecycle stage,
+      // so it never changes the stored project.stage / shifts indices)
+      if (i === 1) {
+        kids.push(h('div', { className: 'step-sep', key: 'sep-study' }));
+        kids.push(h('button', {
+          key: 'study', className: 'step step-study' + (props.tab === 'study' ? ' cur' : ''),
+          title: 'Studies — the literature-screening funnel between an idea and your literature',
+          onClick: function () { if (props.onStudy) props.onStudy(); }
+        }, h('span', { className: 'dot', 'aria-hidden': 'true' }, svg('M3 4 13 4 9.2 8.8 9.2 12 6.8 13 6.8 8.8Z')), 'Studies'));
+      }
     });
     return h('div', { className: 'stepper' }, kids);
   }
@@ -1459,7 +1469,7 @@
           props.canEdit ? h('button', { className: 'btn', style: { height: 32, flex: 'none' }, title: 'Project base settings (title, field, keywords, goal)', onClick: function () { setEditOpen(true); } }, '✎ Settings') : null
         )
       ),
-      h(Stepper, { stage: p.stage, canEdit: props.canEdit, onSet: setStage, onNav: function (i) { setTab(STAGE_TAB[i] || 'overview'); } }),
+      h(Stepper, { stage: p.stage, tab: tab, canEdit: props.canEdit, onSet: setStage, onStudy: function () { setTab('study'); }, onNav: function (i) { setTab(STAGE_TAB[i] || 'overview'); } }),
       h('div', { className: 'subtabs' }, [['overview', 'Overview', null], ['canvas', 'Canvas', null], ['notes', 'Notes', null], ['log', 'Log', (props.log || []).length], ['tasks', 'Tasks', openTasks]].map(function (t) {
         return h('button', { key: t[0], className: tab === t[0] ? 'on' : '', onClick: function () { setTab(t[0]); } }, t[1], t[2] ? h('span', { className: 'c' }, t[2]) : null);
       })),
