@@ -318,20 +318,22 @@
       Promise.resolve(props.onSave(props.md)).then(function () { setSaved('done'); setTimeout(function () { setSaved(''); }, 2200); },
         function () { setSaved(''); });
     }
+    var btnStyle = { padding: '4px 9px', fontSize: 14, lineHeight: 1, flex: 'none' };
+    var bar = h('div', { className: 'rv-bar' },
+      props.inline ? h('button', { className: 'btn', style: { padding: '4px 11px', fontSize: 12.5, flex: 'none' }, onClick: props.onClose }, '←') : null,
+      h('b', { style: { flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, props.title || 'Report'),
+      props.onSave ? h('button', { className: 'btn', style: btnStyle, disabled: saved === 'saving', 'aria-label': 'Save to files', title: 'Save to project files (Ideas → Files)', onClick: save }, saved === 'done' ? '✓' : (saved === 'saving' ? '…' : '💾')) : null,
+      h('button', { className: 'btn', style: btnStyle, 'aria-label': 'Download markdown', title: 'Download .md', onClick: dl }, '⬇'),
+      h('button', { className: 'btn', style: btnStyle, 'aria-label': 'Print or save as PDF', title: 'Print / save as PDF', onClick: function () { window.print(); } }, '🖨'),
+      h('button', { className: 'icon-x', 'aria-label': 'Close', title: 'Close', onClick: props.onClose }, '✕'));
+    var main = h('div', { className: 'rv-main' },
+      doc.toc.length > 2 ? h('nav', { className: 'rv-toc' },
+        h('div', { className: 'rv-toc-h' }, 'Contents'),
+        doc.toc.map(function (t) { return h('button', { key: t.id, className: 'rv-toc-i lvl' + t.level, onClick: function () { jump(t.id); } }, t.text); })) : null,
+      h('div', { className: 'rv-body' }, h('article', { className: 'report-doc', dangerouslySetInnerHTML: { __html: doc.html } })));
+    if (props.inline) return h('div', { className: 'report-pane' }, bar, main);   // in-flow, slides in from the side
     return ReactDOM.createPortal(h('div', { className: 'rv-scrim', onClick: props.onClose },
-      h('div', { className: 'rv-shell', onClick: function (e) { e.stopPropagation(); } },
-        h('div', { className: 'rv-bar' },
-          h('b', { style: { flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, props.title || 'Report'),
-          props.onSave ? h('button', { className: 'btn', style: { padding: '4px 9px', fontSize: 14, lineHeight: 1, flex: 'none' }, disabled: saved === 'saving', 'aria-label': 'Save to files', title: 'Save to project files (Ideas → Files)', onClick: save }, saved === 'done' ? '✓' : (saved === 'saving' ? '…' : '💾')) : null,
-          h('button', { className: 'btn', style: { padding: '4px 9px', fontSize: 14, lineHeight: 1, flex: 'none' }, 'aria-label': 'Download markdown', title: 'Download .md', onClick: dl }, '⬇'),
-          h('button', { className: 'btn', style: { padding: '4px 9px', fontSize: 14, lineHeight: 1, flex: 'none' }, 'aria-label': 'Print or save as PDF', title: 'Print / save as PDF', onClick: function () { window.print(); } }, '🖨'),
-          h('button', { className: 'icon-x', 'aria-label': 'Close', title: 'Close', onClick: props.onClose }, '✕')),
-        h('div', { className: 'rv-main' },
-          doc.toc.length > 2 ? h('nav', { className: 'rv-toc' },
-            h('div', { className: 'rv-toc-h' }, 'Contents'),
-            doc.toc.map(function (t) { return h('button', { key: t.id, className: 'rv-toc-i lvl' + t.level, onClick: function () { jump(t.id); } }, t.text); })) : null,
-          h('div', { className: 'rv-body' }, h('article', { className: 'report-doc', dangerouslySetInnerHTML: { __html: doc.html } })))
-      )), document.body);
+      h('div', { className: 'rv-shell', onClick: function (e) { e.stopPropagation(); } }, bar, main)), document.body);
   }
   var CHAT_SUGGEST = ['What are the open problems in this field?', 'Summarize the key methods used so far.', 'Suggest 3 testable research questions for my goal.', 'What evidence would support or refute my hypothesis?'];
   // In a chat reply, the AI saves files via fenced ```file:<path> … ``` blocks. For DISPLAY we collapse
@@ -1732,6 +1734,18 @@
       ) : h('div', { className: 'empty' }, 'No protocol yet.')
     );
 
+    if (rvMd) return h(ReportViewer, {
+      md: rvMd, inline: true, title: prot.title + ' — result report', onClose: function () { setRvMd(null); },
+      onSave: ce ? function (md) {
+        var slug = (prot.title || 'protocol').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 60) || 'protocol';
+        return sb.from('research_files').upsert({ project_id: props.projectId, path: 'protocol/' + slug + '_report.md', content: md, mime: 'text/markdown', source: 'ai', created_by: props.authorId, updated_by: props.authorId, updated_at: new Date().toISOString() }, { onConflict: 'project_id,path' }).then(function (r) {
+          if (r && r.error) { window.PRUI.toast(r.error.message, { kind: 'error' }); throw r.error; }
+          window.PRUI.toast('Saved to project files (Ideas → Files): protocol/' + slug + '_report.md', { kind: 'ok' });
+          if (props.onChanged) props.onChanged();
+        });
+      } : null
+    });
+
     var done = steps.filter(function (s) { return s.status === 'done'; }).length;
     var pct = steps.length ? Math.round(done / steps.length * 100) : 0;
     var alive = prot.heartbeat_at && (Date.now() - new Date(prot.heartbeat_at).getTime() < 30000);
@@ -1807,18 +1821,7 @@
           h('button', { className: 'btn', style: { flex: 'none' }, disabled: aiBusy || !aiPrompt.trim(), onClick: aiAppend }, aiBusy ? '✨…' : '✨ Add tasks')
         ) : null
       ),
-      editing ? h(TaskEditorModal, { step: editing.step, isNew: editing.isNew, allSteps: steps, projectId: props.projectId, onSave: saveTask, onClose: function () { setEditing(null); } }) : null,
-      rvMd ? h(ReportViewer, {
-        md: rvMd, title: prot.title + ' — result report', onClose: function () { setRvMd(null); },
-        onSave: ce ? function (md) {
-          var slug = (prot.title || 'protocol').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 60) || 'protocol';
-          return sb.from('research_files').upsert({ project_id: props.projectId, path: 'protocol/' + slug + '_report.md', content: md, mime: 'text/markdown', source: 'ai', created_by: props.authorId, updated_by: props.authorId, updated_at: new Date().toISOString() }, { onConflict: 'project_id,path' }).then(function (r) {
-            if (r && r.error) { window.PRUI.toast(r.error.message, { kind: 'error' }); throw r.error; }
-            window.PRUI.toast('Saved to project files (Ideas → Files): protocol/' + slug + '_report.md', { kind: 'ok' });
-            if (props.onChanged) props.onChanged();
-          });
-        } : null
-      }) : null
+      editing ? h(TaskEditorModal, { step: editing.step, isNew: editing.isNew, allSteps: steps, projectId: props.projectId, onSave: saveTask, onClose: function () { setEditing(null); } }) : null
     );
   }
 
