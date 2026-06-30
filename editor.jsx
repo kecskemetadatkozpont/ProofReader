@@ -95,6 +95,8 @@
     const [aiRun, setAiRun] = useState(null);  // a running / finished AI rewrite: { action, busy, result, error }
     const [jumpMark, setJumpMark] = useState(null);   // blinking caret pulse when we jump here from the preview/PDF
     const jumpTimer = useRef(0);
+    const [wrap, setWrap] = useState(() => { try { return localStorage.getItem('pr.wrap') !== '0'; } catch (_) { return true; } });   // soft word-wrap (default on)
+    const toggleWrap = () => setWrap((w) => { const n = !w; try { localStorage.setItem('pr.wrap', n ? '1' : '0'); } catch (_) { } return n; });
     const charWRef = useRef({ fs: 0, w: 0 });
     const acRef = useRef(null); acRef.current = ac;
 
@@ -132,11 +134,18 @@
       const sr = props.selectReq; if (!sr) return;
       const ta = taRef.current; if (!ta) return;
       ta.focus(); try { ta.setSelectionRange(sr.start, sr.end); } catch (e) { }
-      const line = props.value.slice(0, sr.start).split('\n').length - 1;
-      ta.scrollTop = Math.max(0, line * props.lineHeight - ta.clientHeight / 2); sync();
-      // a blinking purple caret pulse exactly where we landed (jump from the preview/PDF)
-      const col = sr.start - (props.value.lastIndexOf('\n', sr.start - 1) + 1);
-      setJumpMark({ x: 16 + col * charWidth() - ta.scrollLeft, y: 14 + line * props.lineHeight - ta.scrollTop, nonce: sr.nonce });
+      // scroll to + mark the exact caret via a measured position (correct even when soft-wrapped)
+      const xy0 = caretXY(sr.start);
+      if (xy0) {
+        ta.scrollTop = Math.max(0, xy0.y + ta.scrollTop - ta.clientHeight / 2); sync();
+        const xy = caretXY(sr.start) || xy0;
+        setJumpMark({ x: xy.x, y: xy.y, nonce: sr.nonce });
+      } else {
+        const line = props.value.slice(0, sr.start).split('\n').length - 1;
+        ta.scrollTop = Math.max(0, line * props.lineHeight - ta.clientHeight / 2); sync();
+        const col = sr.start - (props.value.lastIndexOf('\n', sr.start - 1) + 1);
+        setJumpMark({ x: 16 + col * charWidth() - ta.scrollLeft, y: 14 + line * props.lineHeight - ta.scrollTop, nonce: sr.nonce });
+      }
       clearTimeout(jumpTimer.current); jumpTimer.current = setTimeout(() => setJumpMark(null), 1900);
     }, [props.selectReq]);
 
@@ -220,7 +229,23 @@
       return (v.slice(ls).match(/^[ \t]*/) || [''])[0];
     }
     function collectKeys(v, re) { const out = []; let m; while ((m = re.exec(v))) out.push(m[1]); return out; }
+    // Range-based caret pixel position measured in the backdrop (which mirrors the textarea incl. soft-wrap) —
+    // gives the on-screen x/y of an offset even when wrapped. Falls back to null at the edges.
+    function caretXY(to) {
+      const back = backRef.current; if (!back) return null;
+      let rem = to, node = null;
+      const w = document.createTreeWalker(back, NodeFilter.SHOW_TEXT, null);
+      let tn; while ((tn = w.nextNode())) { const L = tn.nodeValue.length; if (rem <= L) { node = tn; break; } rem -= L; }
+      if (!node) return null;
+      try {
+        const r = document.createRange(); r.setStart(node, Math.min(rem, node.nodeValue.length)); r.collapse(true);
+        const rect = r.getClientRects()[0] || r.getBoundingClientRect(); if (!rect) return null;
+        const br = back.getBoundingClientRect();
+        return { x: rect.left - br.left, y: rect.top - br.top };
+      } catch (_) { return null; }
+    }
     function acPos(to) {
+      if (wrap) { const xy = caretXY(to); if (xy) return { x: Math.max(4, xy.x), y: xy.y + props.lineHeight + 3 }; }
       const ta = taRef.current; const v = ta.value;
       const upto = v.slice(0, to);
       const line = upto.split('\n').length - 1;
@@ -583,7 +608,7 @@
     }
 
     return (
-      React.createElement('div', { className: 'editor' + (props.hlHide || '') },
+      React.createElement('div', { className: 'editor' + (props.hlHide || '') + (wrap ? ' wrap' : '') },
         React.createElement('div', { className: 'gutter', ref: gutRef },
           React.createElement('div', { className: 'gutter-inner', style: fontStyle },
             gutter.map((k) => React.createElement('div', { key: k, className: 'ln' + (props.readLine === k - 1 ? ' ln-active' : '') }, k))
@@ -597,12 +622,14 @@
           }),
           React.createElement('textarea', {
             ref: taRef, className: 'code-input', style: fontStyle, spellCheck: false,
-            value: props.value, wrap: 'off', readOnly: !!props.readOnly,
+            value: props.value, wrap: wrap ? 'soft' : 'off', readOnly: !!props.readOnly,
             onChange: (e) => { props.onChange(e.target.value); refreshAC(); },
             onScroll: sync, onKeyDown: onKeyDown,
             onClick: () => { setAc(null); reportJump(); }, onKeyUp: reportCaret, onSelect: reportCaret, onMouseUp: (e) => { reportCaret(); maybeAi(e); }, onDoubleClick: () => { dblTs.current = Date.now(); },
             onBlur: () => setTimeout(() => setAc(null), 150)
           }),
+          React.createElement('button', { className: 'cw-wrap' + (wrap ? ' on' : ''), onClick: toggleWrap, title: wrap ? 'Word wrap is ON — click to turn off (show line numbers)' : 'Word wrap is OFF — click to turn on' },
+            React.createElement('svg', { viewBox: '0 0 16 16', width: 12, height: 12, fill: 'none', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round', strokeLinejoin: 'round' }, React.createElement('path', { d: 'M2 4h12M2 8h9a2.3 2.3 0 010 4.6H8M10 11l-2 1.6 2 1.6M2 12.6h3' })), 'Wrap'),
           jumpMark && React.createElement('div', { key: jumpMark.nonce, className: 'jump-cursor', style: { left: jumpMark.x + 'px', top: jumpMark.y + 'px', height: props.lineHeight + 'px' } }),
           ac && React.createElement('div', { className: 'ac-menu', style: { left: ac.x + 'px', top: ac.y + 'px' } },
             ac.items.map((it, i) => React.createElement('div', {
