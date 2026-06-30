@@ -292,21 +292,45 @@
     try { if (window.marked && window.DOMPurify) return window.DOMPurify.sanitize(window.marked.parse(s, { breaks: false }), { ADD_DATA_URI_TAGS: ['img'] }); } catch (e) { }
     return mdHtml(s);
   }
-  // Full-screen, nicely-formatted markdown report reader (figures + tables inline). Reusable for any .md report.
+  // Render report markdown, inject heading ids, and collect a table of contents (jump links).
+  function buildDoc(md) {
+    var html = mdReport(md); var toc = []; var i = 0;
+    html = html.replace(/<h([1-3])([^>]*)>([\s\S]*?)<\/h\1>/g, function (m, lvl, attrs, inner) {
+      var idm = /id="([^"]+)"/.exec(attrs); var id = idm ? idm[1] : 'sec-' + (i++);
+      var text = inner.replace(/<[^>]+>/g, '').trim();
+      if (text) toc.push({ id: id, level: +lvl, text: text });
+      return '<h' + lvl + (idm ? attrs : (attrs + ' id="' + id + '"')) + '>' + inner + '</h' + lvl + '>';
+    });
+    return { html: html, toc: toc };
+  }
+  // Full-screen, nicely-formatted markdown report reader (TOC + figures + tables inline). Reusable for any .md report.
   function ReportViewer(props) {
+    var doc = buildDoc(props.md);
+    var svS = useState(''), saved = svS[0], setSaved = svS[1];
     function dl() {
       var u = URL.createObjectURL(new Blob([props.md || ''], { type: 'text/markdown;charset=utf-8' }));
       var a = document.createElement('a'); a.href = u; a.download = (props.title || 'report').replace(/[^\w.-]+/g, '_') + '.md';
       document.body.appendChild(a); a.click(); a.remove(); setTimeout(function () { URL.revokeObjectURL(u); }, 4000);
     }
+    function jump(id) { var el = document.getElementById(id); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+    function save() {
+      setSaved('saving');
+      Promise.resolve(props.onSave(props.md)).then(function () { setSaved('done'); setTimeout(function () { setSaved(''); }, 2200); },
+        function () { setSaved(''); });
+    }
     return h('div', { className: 'rv-scrim', onClick: props.onClose },
       h('div', { className: 'rv-shell', onClick: function (e) { e.stopPropagation(); } },
         h('div', { className: 'rv-bar' },
           h('b', { style: { flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, props.title || 'Report'),
+          props.onSave ? h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12, flex: 'none' }, disabled: saved === 'saving', title: 'Save this consolidated report into the project files', onClick: save }, saved === 'done' ? '✓ Saved' : (saved === 'saving' ? '💾…' : '💾 Save to files')) : null,
           h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12, flex: 'none' }, onClick: dl }, '⬇ .md'),
           h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12, flex: 'none' }, title: 'Print / save as PDF', onClick: function () { window.print(); } }, '🖨 PDF'),
           h('button', { className: 'icon-x', 'aria-label': 'Close', onClick: props.onClose }, '✕')),
-        h('div', { className: 'rv-body' }, h('article', { className: 'report-doc', dangerouslySetInnerHTML: { __html: mdReport(props.md) } }))
+        h('div', { className: 'rv-main' },
+          doc.toc.length > 2 ? h('nav', { className: 'rv-toc' },
+            h('div', { className: 'rv-toc-h' }, 'Contents'),
+            doc.toc.map(function (t) { return h('button', { key: t.id, className: 'rv-toc-i lvl' + t.level, onClick: function () { jump(t.id); } }, t.text); })) : null,
+          h('div', { className: 'rv-body' }, h('article', { className: 'report-doc', dangerouslySetInnerHTML: { __html: doc.html } })))
       ));
   }
   var CHAT_SUGGEST = ['What are the open problems in this field?', 'Summarize the key methods used so far.', 'Suggest 3 testable research questions for my goal.', 'What evidence would support or refute my hypothesis?'];
@@ -1706,7 +1730,17 @@
         ) : null
       ),
       editing ? h(TaskEditorModal, { step: editing.step, isNew: editing.isNew, allSteps: steps, projectId: props.projectId, onSave: saveTask, onClose: function () { setEditing(null); } }) : null,
-      rvMd ? h(ReportViewer, { md: rvMd, title: prot.title + ' — result report', onClose: function () { setRvMd(null); } }) : null
+      rvMd ? h(ReportViewer, {
+        md: rvMd, title: prot.title + ' — result report', onClose: function () { setRvMd(null); },
+        onSave: ce ? function (md) {
+          var slug = (prot.title || 'protocol').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 60) || 'protocol';
+          return sb.from('research_files').upsert({ project_id: props.projectId, path: 'protocol/' + slug + '_report.md', content: md, mime: 'text/markdown', source: 'ai', created_by: props.authorId, updated_by: props.authorId, updated_at: new Date().toISOString() }, { onConflict: 'project_id,path' }).then(function (r) {
+            if (r && r.error) { window.PRUI.toast(r.error.message, { kind: 'error' }); throw r.error; }
+            window.PRUI.toast('Saved to project files (Ideas → Files): protocol/' + slug + '_report.md', { kind: 'ok' });
+            if (props.onChanged) props.onChanged();
+          });
+        } : null
+      }) : null
     );
   }
 
