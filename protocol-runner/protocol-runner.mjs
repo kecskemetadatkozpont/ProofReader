@@ -70,7 +70,7 @@ async function fetchAttachments(s, sx) {
       const dest = join(base, (a.name || 'file').replace(/^\/+/, ''));
       await mkdir(dirname(dest), { recursive: true });
       await writeFile(dest, buf);
-      local.push(`task_${s.ord}_files/${a.name}`);
+      local.push({ path: `task_${s.ord}_files/${a.name}`, note: a.note || '' });
     } catch (e) { console.log(`  attachment ${a.name} error: ${e.message || e}`); }
   }
   if (local.length) console.log(`  downloaded ${local.length} attachment(s) → task_${s.ord}_files/`);
@@ -86,7 +86,7 @@ async function runStep(s) {
     `STEP: ${s.title}\n` +
     `INSTRUCTION: ${sx.instruction || ''}\n` +
     (sx.inputs?.length ? `INPUTS: ${sx.inputs.join(', ')}\n` : '') +
-    (localAtts.length ? `ATTACHED FILES (already downloaded for you): ${localAtts.join(', ')}\n` : '') +
+    (localAtts.length ? `ATTACHED FILES (already downloaded for you):\n${localAtts.map((a) => `  - ${a.path}${a.note ? ` — ${a.note}` : ''}`).join('\n')}\n` : '') +
     (sx.expected_outputs?.length ? `EXPECTED OUTPUTS: ${sx.expected_outputs.join(', ')}\n` : '') +
     (sx.acceptance?.length ? `ACCEPTANCE CRITERIA: ${sx.acceptance.join('; ')}\n` : '') +
     (sx.command_hint ? `SUGGESTED COMMAND: ${sx.command_hint}\n` : '') +

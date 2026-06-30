@@ -1508,25 +1508,52 @@
     var rr = useState(false), refining = rr[0], setRefining = rr[1];
     var atA = useState(sx0.attachments || []), att = atA[0], setAtt = atA[1];   // per-task uploaded files/folders
     var ubA = useState(''), upBusy = ubA[0], setUpBusy = ubA[1];
+    var dgA = useState(false), dragOver = dgA[0], setDragOver = dgA[1];
     var fileRef = useRef(null), folderRef = useRef(null);
     function toggleDep(o) { setDeps(function (d) { return d.indexOf(o) >= 0 ? d.filter(function (x) { return x !== o; }) : d.concat([o]); }); }
-    function uploadFiles(e) {
-      var fs = Array.prototype.slice.call((e.target && e.target.files) || []); if (e.target) e.target.value = '';
-      if (!fs.length) return;
+    function uploadList(items) {   // items: [{file, relpath}] — shared by the inputs and the drop zone
+      if (!items.length) return;
       var batch = String(Date.now()) + '_' + Math.random().toString(36).slice(2, 7);
-      var added = [], done = 0; setUpBusy('Uploading 0/' + fs.length);
+      var added = [], done = 0; setUpBusy('Uploading 0/' + items.length);
       (function next(i) {
-        if (i >= fs.length) { if (added.length) setAtt(function (a) { return a.concat(added); }); setUpBusy(''); return; }
-        var f = fs[i]; var rel = (f.webkitRelativePath || f.name);
+        if (i >= items.length) { if (added.length) setAtt(function (a) { return a.concat(added); }); setUpBusy(''); return; }
+        var f = items[i].file; var rel = items[i].relpath || f.name;
         var sp = props.projectId + '/protocol/' + batch + '/' + rel.replace(/[^A-Za-z0-9._\/-]/g, '_');
         sb.storage.from('research-data').upload(sp, f).then(function (res) {
-          done++; setUpBusy('Uploading ' + done + '/' + fs.length);
+          done++; setUpBusy('Uploading ' + done + '/' + items.length);
           if (res && res.error) window.PRUI.toast(rel + ': ' + res.error.message, { kind: 'error' });
-          else added.push({ name: rel, storage_path: sp, mime: f.type || '', size: f.size });
+          else added.push({ name: rel, storage_path: sp, mime: f.type || '', size: f.size, note: '' });
           next(i + 1);
         }, function () { done++; next(i + 1); });
       })(0);
     }
+    function uploadFiles(e) {
+      var fs = Array.prototype.slice.call((e.target && e.target.files) || []); if (e.target) e.target.value = '';
+      uploadList(fs.map(function (f) { return { file: f, relpath: f.webkitRelativePath || f.name }; }));
+    }
+    function walkEntry(entry, prefix) {   // recursively collect File objects (with relpath) from a dropped file/folder entry
+      return new Promise(function (resolve) {
+        if (entry.isFile) { entry.file(function (f) { resolve([{ file: f, relpath: prefix + entry.name }]); }, function () { resolve([]); }); }
+        else if (entry.isDirectory) {
+          var reader = entry.createReader(); var all = [];
+          (function readBatch() {
+            reader.readEntries(function (ents) {
+              if (!ents.length) { Promise.all(all.map(function (c) { return walkEntry(c, prefix + entry.name + '/'); })).then(function (a) { resolve(a.reduce(function (x, y) { return x.concat(y); }, [])); }); }
+              else { all = all.concat(Array.prototype.slice.call(ents)); readBatch(); }
+            }, function () { resolve([]); });
+          })();
+        } else resolve([]);
+      });
+    }
+    function onDrop(e) {
+      e.preventDefault(); setDragOver(false);
+      var items = e.dataTransfer && e.dataTransfer.items;
+      if (items && items.length && items[0].webkitGetAsEntry) {
+        var entries = []; for (var i = 0; i < items.length; i++) { var en = items[i].webkitGetAsEntry && items[i].webkitGetAsEntry(); if (en) entries.push(en); }
+        Promise.all(entries.map(function (en) { return walkEntry(en, ''); })).then(function (a) { uploadList(a.reduce(function (x, y) { return x.concat(y); }, [])); });
+      } else { uploadList(Array.prototype.slice.call((e.dataTransfer && e.dataTransfer.files) || []).map(function (f) { return { file: f, relpath: f.name }; })); }
+    }
+    function setNote(i, v) { setAtt(function (x) { return x.map(function (it, j) { return j === i ? Object.assign({}, it, { note: v }) : it; }); }); }
     function removeAtt(i) {
       var a = att[i]; if (a && a.storage_path) { try { sb.storage.from('research-data').remove([a.storage_path]); } catch (e) { } }
       setAtt(function (x) { return x.filter(function (_, j) { return j !== i; }); });
@@ -1571,13 +1598,17 @@
             upBusy ? h('span', { style: { fontSize: 11.5, color: 'var(--muted)' } }, '⏳ ' + upBusy) : null,
             h('input', { ref: fileRef, type: 'file', multiple: true, style: { display: 'none' }, onChange: uploadFiles }),
             h('input', { ref: function (n) { if (n) { try { n.webkitdirectory = true; n.directory = true; } catch (e) { } } folderRef.current = n; }, type: 'file', multiple: true, style: { display: 'none' }, onChange: uploadFiles })),
-          att.length ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 3 } }, att.map(function (a, i) {
-            return h('div', { key: i, style: { display: 'flex', gap: 8, alignItems: 'center', fontSize: 11.5, background: 'var(--soft)', padding: '3px 8px', borderRadius: 6 } },
-              h('span', { style: { flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, title: a.name }, '📎 ' + a.name),
-              h('span', { style: { color: 'var(--faint)', flex: 'none' } }, a.size != null ? (Math.max(1, Math.round(a.size / 1024)) + ' KB') : ''),
-              h('button', { className: 'fb-mini', 'aria-label': 'Download', title: 'Download', onClick: function () { dlAtt(a); } }, '⬇'),
-              h('button', { className: 'fb-mini', 'aria-label': 'Remove', title: 'Remove', onClick: function () { removeAtt(i); } }, '×'));
-          })) : h('div', { style: { fontSize: 11.5, color: 'var(--faint)' } }, 'No files yet. Upload files/folders, then say in the Instruction above what the runner should do with them.')),
+          h('div', { className: 'att-drop' + (dragOver ? ' over' : ''), onDragOver: function (e) { e.preventDefault(); if (!dragOver) setDragOver(true); }, onDragLeave: function (e) { e.preventDefault(); setDragOver(false); }, onDrop: onDrop },
+            dragOver ? '⤓ Drop to upload' : '⤓ Drag & drop files or a folder here'),
+          att.length ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 5, marginTop: 6 } }, att.map(function (a, i) {
+            return h('div', { key: i, style: { background: 'var(--soft)', padding: '5px 8px', borderRadius: 6 } },
+              h('div', { style: { display: 'flex', gap: 8, alignItems: 'center', fontSize: 11.5 } },
+                h('span', { style: { flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, title: a.name }, '📎 ' + a.name),
+                h('span', { style: { color: 'var(--faint)', flex: 'none' } }, a.size != null ? (Math.max(1, Math.round(a.size / 1024)) + ' KB') : ''),
+                h('button', { className: 'fb-mini', 'aria-label': 'Download', title: 'Download', onClick: function () { dlAtt(a); } }, '⬇'),
+                h('button', { className: 'fb-mini', 'aria-label': 'Remove', title: 'Remove', onClick: function () { removeAtt(i); } }, '×')),
+              h('input', { className: 'field', style: { width: '100%', boxSizing: 'border-box', marginTop: 4, fontSize: 11.5, padding: '3px 7px' }, placeholder: '📝 What to do with this file (optional per-file note)…', value: a.note || '', onChange: function (e) { setNote(i, e.target.value); } }));
+          })) : h('div', { style: { fontSize: 11.5, color: 'var(--faint)' } }, 'No files yet. Upload files/folders, then say in the Instruction (or per-file note) what the runner should do with them.')),
         (props.allSteps && props.allSteps.filter(function (x) { return x.id !== st.id; }).length) ? h('div', null, h('div', { className: 'field-label' }, 'Depends on (must finish first)'),
           h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 6 } }, props.allSteps.filter(function (x) { return x.id !== st.id; }).map(function (x) {
             return h('button', { key: x.id, className: 'lchip' + (deps.indexOf(x.ord) >= 0 ? ' on' : ''), style: { fontSize: 11 }, onClick: function () { toggleDep(x.ord); } }, x.ord + '. ' + (x.title || '').slice(0, 26));
@@ -1745,9 +1776,11 @@
               sx.command_hint ? h('div', { style: { marginTop: 4, fontFamily: 'monospace', fontSize: 11.5, background: 'var(--soft)', padding: '4px 7px', borderRadius: 6, whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, sx.command_hint) : null,
               sx.est_minutes ? h('span', { style: { fontSize: 11, color: 'var(--faint)' } }, '~' + sx.est_minutes + ' min') : null,
               (sx.attachments && sx.attachments.length) ? h('div', { style: { marginTop: 6 } },
-                h('b', { style: { fontSize: 11.5 } }, '📎 Attachments (' + sx.attachments.length + '): '),
+                h('b', { style: { fontSize: 11.5 } }, '📎 Attachments (' + sx.attachments.length + '):'),
                 sx.attachments.map(function (a, ai) {
-                  return h('button', { key: ai, className: 'lchip', style: { fontSize: 10.5, margin: '2px 4px 0 0' }, title: 'Download ' + a.name, onClick: function () { sb.storage.from('research-data').createSignedUrl(a.storage_path, 3600, { download: (a.name || '').split('/').pop() }).then(function (r) { if (r && r.data && r.data.signedUrl) window.open(r.data.signedUrl, '_blank'); }); } }, '⬇ ' + ((a.name || '').split('/').pop()));
+                  return h('div', { key: ai, style: { display: 'flex', gap: 6, alignItems: 'baseline', marginTop: 2 } },
+                    h('button', { className: 'lchip', style: { fontSize: 10.5, flex: 'none' }, title: 'Download ' + a.name, onClick: function () { sb.storage.from('research-data').createSignedUrl(a.storage_path, 3600, { download: (a.name || '').split('/').pop() }).then(function (r) { if (r && r.data && r.data.signedUrl) window.open(r.data.signedUrl, '_blank'); }); } }, '⬇ ' + ((a.name || '').split('/').pop())),
+                    a.note ? h('span', { style: { fontSize: 11, color: 'var(--muted)' } }, '— ' + a.note) : null);
                 })) : null,
               (s.result && s.result.report) ? h('div', { className: 'step-report', dangerouslySetInnerHTML: { __html: mdHtml(s.result.report) } }) : null,
               (s.result && s.result.summary && !s.result.report) ? h('div', { style: { marginTop: 6, fontSize: 12.5, color: 'var(--ink)', lineHeight: 1.5 } }, s.result.summary) : null,
