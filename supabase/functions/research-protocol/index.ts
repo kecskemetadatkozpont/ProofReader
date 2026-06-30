@@ -88,6 +88,51 @@ Deno.serve(async (req) => {
       return json({ ok: true, protocol_id: pid, steps: rows.length });
     }
 
+    // ---- Task Editor AI-assist: these RETURN data (no DB writes); the client applies them via RLS ----
+    if (action === 'refine_step') {
+      const stepId = String(body.step_id || ''); const hint = String(body.hint || '').slice(0, 1500);
+      if (!stepId) return json({ error: 'step_id required' }, 400);
+      const stq = await sb.from('research_protocol_steps').select('*').eq('id', stepId).single();
+      if (stq.error || !stq.data) return json({ error: 'step not found' }, 404);
+      const s = stq.data; const sx = s.spec || {};
+      const pq = await sb.from('research_protocols').select('goal,context_snapshot').eq('id', s.protocol_id).single();
+      const ctx = (pq.data && pq.data.context_snapshot) || {};
+      const sys = 'You are improving ONE step of an executable research protocol. Keep its intent; make it more precise and runnable. Return ONLY a JSON object: {"title","kind","instruction","inputs":[],"expected_outputs":[],"acceptance":[],"command_hint":"","est_minutes":N,"needs_approval":bool}. Be concise.';
+      const u = `PROTOCOL GOAL: ${(pq.data && pq.data.goal) || ''}\nIDEA: ${(ctx.idea && ctx.idea.question) || ''}\n\nCURRENT STEP:\n${JSON.stringify({ title: s.title, kind: s.kind, ...sx }, null, 1)}\n\n${hint ? 'FOCUS: ' + hint + '\n\n' : ''}Return the improved step.`;
+      const raw = await callClaude(sys, u); const m = raw.match(/\{[\s\S]*\}/);
+      if (!m) return json({ error: 'model returned no JSON' }, 502);
+      let p: any; try { p = JSON.parse(m[0]); } catch (e) { return json({ error: 'bad JSON: ' + e }, 502); }
+      return json({ ok: true, step: p });
+    }
+
+    if (action === 'append_steps') {
+      const pid = String(body.protocol_id || ''); const prompt = String(body.prompt || '').slice(0, 1500); const count = Math.min(6, Math.max(1, parseInt(body.count, 10) || 3));
+      if (!pid || !prompt) return json({ error: 'protocol_id + prompt required' }, 400);
+      const pq = await sb.from('research_protocols').select('goal,context_snapshot').eq('id', pid).single();
+      const exq = await sb.from('research_protocol_steps').select('ord,title,kind').eq('protocol_id', pid).order('ord');
+      const ex = (exq.data || []); const ctx = (pq.data && pq.data.context_snapshot) || {};
+      const sys = `Propose NEW steps to add to an existing executable research protocol. Return ONLY a JSON object {"steps":[{"title","kind","instruction","inputs":[],"expected_outputs":[],"acceptance":[],"command_hint":"","est_minutes":N,"depends_on":[],"needs_approval":bool}]}. Use depends_on with the 1-based positions of EXISTING steps if relevant. At most ${count} steps, concise.`;
+      const u = `PROTOCOL GOAL: ${(pq.data && pq.data.goal) || ''}\nIDEA: ${(ctx.idea && ctx.idea.question) || ''}\n\nEXISTING STEPS:\n${ex.map((e: any) => `${e.ord}. [${e.kind}] ${e.title}`).join('\n') || '(none)'}\n\nADD STEPS FOR: ${prompt}`;
+      const raw = await callClaude(sys, u); const m = raw.match(/\{[\s\S]*\}/);
+      if (!m) return json({ error: 'model returned no JSON' }, 502);
+      let p: any; try { p = JSON.parse(m[0]); } catch (e) { return json({ error: 'bad JSON: ' + e }, 502); }
+      return json({ ok: true, steps: (Array.isArray(p.steps) ? p.steps : []).slice(0, count) });
+    }
+
+    if (action === 'split_step') {
+      const stepId = String(body.step_id || '');
+      if (!stepId) return json({ error: 'step_id required' }, 400);
+      const stq = await sb.from('research_protocol_steps').select('*').eq('id', stepId).single();
+      if (stq.error || !stq.data) return json({ error: 'step not found' }, 404);
+      const s = stq.data; const sx = s.spec || {};
+      const sys = 'Split ONE protocol step into 2–4 smaller, ordered sub-steps that together accomplish it. Return ONLY {"steps":[{"title","kind","instruction","inputs":[],"expected_outputs":[],"acceptance":[],"command_hint":"","est_minutes":N,"needs_approval":bool}]}. Concise; each sub-step runnable on its own.';
+      const u = `STEP TO SPLIT:\n${JSON.stringify({ title: s.title, kind: s.kind, ...sx }, null, 1)}`;
+      const raw = await callClaude(sys, u); const m = raw.match(/\{[\s\S]*\}/);
+      if (!m) return json({ error: 'model returned no JSON' }, 502);
+      let p: any; try { p = JSON.parse(m[0]); } catch (e) { return json({ error: 'bad JSON: ' + e }, 502); }
+      return json({ ok: true, steps: (Array.isArray(p.steps) ? p.steps : []).slice(0, 4) });
+    }
+
     return json({ error: 'unknown action: ' + action }, 400);
   } catch (e) { return json({ error: String(e) }, 500); }
 });

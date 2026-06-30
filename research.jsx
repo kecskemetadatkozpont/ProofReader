@@ -1441,10 +1441,68 @@
     );
   }
 
+  // ---------- Task editor (full-field modal for a protocol step; manual + AI-refine) ----------
+  var PROT_KINDS = ['data', 'preprocess', 'train', 'eval', 'analysis', 'figure', 'writeup', 'custom'];
+  function TaskEditorModal(props) {
+    var st = props.step || {}; var sx0 = st.spec || {};
+    var tt = useState(st.title || ''), title = tt[0], setTitle = tt[1];
+    var kk = useState(st.kind || 'custom'), kind = kk[0], setKind = kk[1];
+    var ii = useState(sx0.instruction || ''), instr = ii[0], setInstr = ii[1];
+    var ip = useState(sx0.inputs || []), inputs = ip[0], setInputs = ip[1];
+    var oo = useState(sx0.expected_outputs || []), outs = oo[0], setOuts = oo[1];
+    var aa = useState(sx0.acceptance || []), accept = aa[0], setAccept = aa[1];
+    var cc = useState(sx0.command_hint || ''), cmd = cc[0], setCmd = cc[1];
+    var ee = useState(sx0.est_minutes != null ? String(sx0.est_minutes) : ''), est = ee[0], setEst = ee[1];
+    var dd = useState(st.depends_on || []), deps = dd[0], setDeps = dd[1];
+    var nn = useState(!!st.needs_approval), needsApp = nn[0], setNeedsApp = nn[1];
+    var rr = useState(false), refining = rr[0], setRefining = rr[1];
+    function toggleDep(o) { setDeps(function (d) { return d.indexOf(o) >= 0 ? d.filter(function (x) { return x !== o; }) : d.concat([o]); }); }
+    function save() {
+      if (!title.trim()) { window.PRUI.toast('A title is required', { kind: 'error' }); return; }
+      props.onSave({ title: title.trim(), kind: kind, spec: { instruction: instr, inputs: inputs, expected_outputs: outs, acceptance: accept, command_hint: cmd, est_minutes: est ? parseInt(est, 10) : null }, depends_on: deps, needs_approval: needsApp });
+    }
+    function refine() {
+      if (!st.id) return; setRefining(true);
+      sb.functions.invoke('research-protocol', { body: { action: 'refine_step', project_id: props.projectId, step_id: st.id } }).then(function (r) {
+        setRefining(false); var sp = r && r.data && r.data.step;
+        if (!sp) { window.PRUI.toast('Refine failed: ' + ((r && r.data && r.data.error) || ''), { kind: 'error' }); return; }
+        if (sp.title) setTitle(sp.title); if (sp.kind) setKind(sp.kind);
+        if (sp.instruction != null) setInstr(sp.instruction); if (sp.inputs) setInputs(sp.inputs); if (sp.expected_outputs) setOuts(sp.expected_outputs);
+        if (sp.acceptance) setAccept(sp.acceptance); if (sp.command_hint != null) setCmd(sp.command_hint); if (sp.est_minutes != null) setEst(String(sp.est_minutes)); if (sp.needs_approval != null) setNeedsApp(!!sp.needs_approval);
+        window.PRUI.toast('Refined — review and Save', { kind: 'ok' });
+      }, function (e) { setRefining(false); window.PRUI.toast('Refine failed: ' + e, { kind: 'error' }); });
+    }
+    return h('div', { className: 'scrim', onClick: props.onClose }, h('div', { className: 'modal', style: { width: 620 }, onClick: function (e) { e.stopPropagation(); } },
+      h('div', { className: 'modal-h' },
+        h('h3', { style: { margin: 0, flex: 1 } }, props.isNew ? 'New task' : 'Edit task'),
+        st.id ? h('button', { className: 'btn', style: { padding: '4px 9px', fontSize: 12, flex: 'none' }, disabled: refining, title: 'Let Publify improve this step', onClick: refine }, refining ? '✨…' : '✨ Refine') : null,
+        h('button', { className: 'icon-x', 'aria-label': 'Close', onClick: props.onClose }, '✕')),
+      h('div', { style: { padding: 16, display: 'flex', flexDirection: 'column', gap: 10, maxHeight: '70vh', overflow: 'auto' } },
+        h('div', { style: { display: 'flex', gap: 8 } },
+          h('input', { className: 'field', style: { flex: 1 }, placeholder: 'Task title', value: title, onChange: function (e) { setTitle(e.target.value); } }),
+          h('select', { className: 'field', style: { width: 130, flex: 'none' }, value: kind, onChange: function (e) { setKind(e.target.value); } }, PROT_KINDS.map(function (x) { return h('option', { key: x, value: x }, x); }))),
+        h('label', { style: { display: 'flex', gap: 7, alignItems: 'center', fontSize: 12.5 } }, h('input', { type: 'checkbox', checked: needsApp, onChange: function (e) { setNeedsApp(e.target.checked); } }), '⏸ Needs my approval before the runner executes it'),
+        h('div', null, h('div', { className: 'field-label' }, 'Instruction'), h('textarea', { className: 'field', rows: 3, style: { width: '100%', boxSizing: 'border-box' }, placeholder: 'Exactly what the agent should do…', value: instr, onChange: function (e) { setInstr(e.target.value); } })),
+        h('div', null, h('div', { className: 'field-label' }, 'Inputs'), h(CritEditor, { items: inputs, onChange: setInputs, placeholder: 'a file / dataset / prior-step output', empty: 'No inputs.' })),
+        h('div', null, h('div', { className: 'field-label' }, 'Expected outputs'), h(CritEditor, { items: outs, onChange: setOuts, placeholder: 'a file / metric / artifact produced', empty: 'No outputs.' })),
+        h('div', null, h('div', { className: 'field-label' }, 'Acceptance — done when…'), h(CritEditor, { items: accept, onChange: setAccept, accent: '#16a34a', placeholder: 'an objective success check', empty: 'No acceptance checks.' })),
+        h('div', null, h('div', { className: 'field-label' }, 'Command hint'), h('textarea', { className: 'field', rows: 2, style: { width: '100%', boxSizing: 'border-box', fontFamily: 'monospace', fontSize: 12 }, placeholder: 'a likely shell command / script', value: cmd, onChange: function (e) { setCmd(e.target.value); } })),
+        h('div', { style: { display: 'flex', gap: 8, alignItems: 'center' } }, h('span', { className: 'field-label', style: { margin: 0 } }, 'Est. minutes'), h('input', { className: 'field', type: 'number', min: 0, style: { width: 100 }, value: est, onChange: function (e) { setEst(e.target.value); } })),
+        (props.allSteps && props.allSteps.filter(function (x) { return x.id !== st.id; }).length) ? h('div', null, h('div', { className: 'field-label' }, 'Depends on (must finish first)'),
+          h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 6 } }, props.allSteps.filter(function (x) { return x.id !== st.id; }).map(function (x) {
+            return h('button', { key: x.id, className: 'lchip' + (deps.indexOf(x.ord) >= 0 ? ' on' : ''), style: { fontSize: 11 }, onClick: function () { toggleDep(x.ord); } }, x.ord + '. ' + (x.title || '').slice(0, 26));
+          }))) : null
+      ),
+      h('div', { style: { display: 'flex', gap: 8, justifyContent: 'flex-end', padding: '12px 16px', borderTop: '1px solid var(--line)' } },
+        h('button', { className: 'btn', onClick: props.onClose }, 'Cancel'),
+        h('button', { className: 'btn pri', onClick: save }, props.isNew ? 'Add task' : 'Save'))
+    ));
+  }
+
   // ---------- Protocol (executable research plan; a Claude agent on a dedicated machine runs the steps) ----------
   function ProtocolPanel(props) {
     var STEP_ICON = { data: '🗄️', preprocess: '🧹', train: '🏋️', eval: '📊', analysis: '🔬', figure: '📈', writeup: '✍️', custom: '•' };
-    var KINDS = ['data', 'preprocess', 'train', 'eval', 'analysis', 'figure', 'writeup', 'custom'];
+    var KINDS = PROT_KINDS;
     var PST = { todo: ['c-grey', 'To do'], queued: ['c-acc', 'Queued'], running: ['c-warn', 'Running…'], blocked: ['c-warn', '⏸ Needs approval'], done: ['c-ok', '✓ Done'], failed: ['c-danger', '✗ Failed'], skipped: ['c-grey', 'Skipped'] };
     var PROT_CHIP = { draft: 'c-grey', ready: 'c-acc', running: 'c-warn', paused: 'c-grey', done: 'c-ok', failed: 'c-danger' };
     var lp = useState(null), prot = lp[0], setProt = lp[1];
@@ -1453,6 +1511,9 @@
     var gg = useState(''), goal = gg[0], setGoal = gg[1];
     var bz = useState(false), busy = bz[0], setBusy = bz[1];
     var ex = useState({}), exp = ex[0], setExp = ex[1];
+    var edS = useState(null), editing = edS[0], setEditing = edS[1];   // { step, isNew, after }
+    var apS = useState(''), aiPrompt = apS[0], setAiPrompt = apS[1];
+    var abS = useState(false), aiBusy = abS[0], setAiBusy = abS[1];
     var ce = props.canEdit;
     function load() {
       sb.from('research_protocols').select('*').eq('project_id', props.projectId).neq('status', 'archived').order('created_at', { ascending: false }).limit(1).then(function (r) {
@@ -1475,15 +1536,54 @@
     function setPStatus(st) { sb.from('research_protocols').update({ status: st, updated_at: new Date().toISOString() }).eq('id', prot.id).then(load); }
     function setProtField(field, val) { var patch = {}; patch[field] = val; patch.updated_at = new Date().toISOString(); sb.from('research_protocols').update(patch).eq('id', prot.id).then(function () { }); }
     function patchStep(s, patch) { sb.from('research_protocol_steps').update(patch).eq('id', s.id).then(load); }
-    function delStep(s) { window.PRUI.confirm({ title: 'Delete step?', body: s.title, danger: true, confirmLabel: 'Delete' }).then(function (ok) { if (ok) sb.from('research_protocol_steps').delete().eq('id', s.id).then(load); }); }
-    function move(s, dir) {
-      var i = steps.findIndex(function (x) { return x.id === s.id; }); var j = i + dir; if (j < 0 || j >= steps.length) return;
-      var a = steps[i], b = steps[j], oa = a.ord, ob = b.ord;   // 3-step swap to respect unique(protocol_id, ord)
-      sb.from('research_protocol_steps').update({ ord: -1 }).eq('id', a.id).then(function () {
-        sb.from('research_protocol_steps').update({ ord: oa }).eq('id', b.id).then(function () {
-          sb.from('research_protocol_steps').update({ ord: ob }).eq('id', a.id).then(load); }); });
+    // renumber ord 1..N + remap each depends_on (ord-based) — two phases (negative temp ords) to dodge unique(protocol_id,ord)
+    function repack(ordered) {
+      var map = {}; ordered.forEach(function (s, i) { map[s.ord] = i + 1; });
+      return Promise.all(ordered.map(function (s, i) { return sb.from('research_protocol_steps').update({ ord: -(i + 1) }).eq('id', s.id); })).then(function () {
+        return Promise.all(ordered.map(function (s, i) {
+          var nd = (s.depends_on || []).map(function (o) { return map[o]; }).filter(function (x) { return x && x < i + 1; });
+          return sb.from('research_protocol_steps').update({ ord: i + 1, depends_on: nd }).eq('id', s.id);
+        }));
+      }).then(load);
     }
-    function addStep() { var mx = steps.reduce(function (m, x) { return Math.max(m, x.ord); }, 0); sb.from('research_protocol_steps').insert({ protocol_id: prot.id, ord: mx + 1, title: 'New step', kind: 'custom', spec: {} }).then(load); }
+    function insertSteps(newSpecs, afterStep) {
+      var rows = newSpecs.map(function (ns, k) { return { protocol_id: prot.id, ord: 100000 + k, title: (ns.title || 'New step').slice(0, 240), kind: ns.kind || 'custom', spec: ns.spec || { instruction: ns.instruction || '', inputs: ns.inputs || [], expected_outputs: ns.expected_outputs || [], acceptance: ns.acceptance || [], command_hint: ns.command_hint || '', est_minutes: (ns.est_minutes != null ? ns.est_minutes : null) }, depends_on: ns.depends_on || [], needs_approval: !!ns.needs_approval }; });
+      return sb.from('research_protocol_steps').insert(rows).select().then(function (r) {
+        var created = (r && r.data) || [];
+        var base = steps.slice(); var pos = afterStep ? (base.findIndex(function (x) { return x.id === afterStep.id; }) + 1) : base.length;
+        return repack(base.slice(0, pos).concat(created).concat(base.slice(pos)));
+      });
+    }
+    function delStep(s) { window.PRUI.confirm({ title: 'Delete task?', body: s.title, danger: true, confirmLabel: 'Delete' }).then(function (ok) { if (!ok) return; sb.from('research_protocol_steps').delete().eq('id', s.id).then(function () { repack(steps.filter(function (x) { return x.id !== s.id; })); }); }); }
+    function move(s, dir) { var i = steps.findIndex(function (x) { return x.id === s.id; }); var j = i + dir; if (j < 0 || j >= steps.length) return; var o = steps.slice(); var tmp = o[i]; o[i] = o[j]; o[j] = tmp; repack(o); }
+    function duplicate(s) { insertSteps([{ title: s.title + ' (copy)', kind: s.kind, spec: s.spec, depends_on: s.depends_on, needs_approval: s.needs_approval }], s); }
+    function saveTask(data) {
+      var ed = editing; setEditing(null); if (!ed) return;
+      if (ed.isNew) {
+        if (ed.after) insertSteps([data], ed.after);
+        else { var mx = steps.reduce(function (m, x) { return Math.max(m, x.ord); }, 0); sb.from('research_protocol_steps').insert({ protocol_id: prot.id, ord: mx + 1, title: data.title, kind: data.kind, spec: data.spec, depends_on: data.depends_on || [], needs_approval: !!data.needs_approval }).then(load); }
+      } else { sb.from('research_protocol_steps').update({ title: data.title, kind: data.kind, spec: data.spec, depends_on: data.depends_on || [], needs_approval: !!data.needs_approval }).eq('id', ed.step.id).then(load); }
+    }
+    function aiSplit(s) {
+      if (busy) return; setBusy(true);
+      sb.functions.invoke('research-protocol', { body: { action: 'split_step', project_id: props.projectId, step_id: s.id } }).then(function (r) {
+        setBusy(false); var subs = r && r.data && r.data.steps;
+        if (!subs || !subs.length) { window.PRUI.toast('Split failed: ' + ((r && r.data && r.data.error) || ''), { kind: 'error' }); return; }
+        var rows = subs.map(function (ns, k) { return { protocol_id: prot.id, ord: 100000 + k, title: (ns.title || 'Sub-step').slice(0, 240), kind: ns.kind || s.kind, spec: { instruction: ns.instruction || '', inputs: ns.inputs || [], expected_outputs: ns.expected_outputs || [], acceptance: ns.acceptance || [], command_hint: ns.command_hint || '', est_minutes: (ns.est_minutes != null ? ns.est_minutes : null) }, depends_on: k === 0 ? (s.depends_on || []) : [100000 + (k - 1)], needs_approval: !!ns.needs_approval }; });
+        sb.from('research_protocol_steps').insert(rows).select().then(function (ins) {
+          var created = (ins && ins.data) || []; var pos = steps.findIndex(function (x) { return x.id === s.id; }); var base = steps.filter(function (x) { return x.id !== s.id; });
+          sb.from('research_protocol_steps').delete().eq('id', s.id).then(function () { repack(base.slice(0, pos).concat(created).concat(base.slice(pos))); });
+        });
+      }, function (e) { setBusy(false); window.PRUI.toast('Split failed: ' + e, { kind: 'error' }); });
+    }
+    function aiAppend() {
+      var p = aiPrompt.trim(); if (!p || aiBusy) return; setAiBusy(true);
+      sb.functions.invoke('research-protocol', { body: { action: 'append_steps', protocol_id: prot.id, project_id: props.projectId, prompt: p } }).then(function (r) {
+        var subs = r && r.data && r.data.steps;
+        if (!subs || !subs.length) { setAiBusy(false); window.PRUI.toast('No tasks suggested: ' + ((r && r.data && r.data.error) || ''), { kind: 'error' }); return; }
+        insertSteps(subs, null).then(function () { setAiBusy(false); setAiPrompt(''); });
+      }, function (e) { setAiBusy(false); window.PRUI.toast('Add failed: ' + e, { kind: 'error' }); });
+    }
 
     if (loading) return h('div', { className: 'empty' }, 'Loading protocol…');
 
@@ -1519,7 +1619,7 @@
         ) : null
       ),
       h('div', { className: 'panel' },
-        h('h3', null, 'Steps (' + steps.length + ')', ce ? h('button', { className: 'btn', style: { marginLeft: 'auto', padding: '3px 9px', fontSize: 11.5, flex: 'none' }, onClick: addStep }, '+ Add step') : null),
+        h('h3', null, 'Steps (' + steps.length + ')', ce ? h('button', { className: 'btn', style: { marginLeft: 'auto', padding: '3px 9px', fontSize: 11.5, flex: 'none' }, onClick: function () { setEditing({ step: {}, isNew: true, after: null }); } }, '+ Add task') : null),
         steps.length ? steps.map(function (s, i) {
           var open = !!exp[s.id]; var pst = PST[s.status] || PST.todo; var sx = s.spec || {};
           return h('div', { key: s.id, style: { borderBottom: '1px solid var(--soft)', padding: '8px 0' } },
@@ -1541,17 +1641,24 @@
               (s.result && s.result.error) ? h('div', { style: { marginTop: 4, color: 'var(--danger)' } }, '⚠ ' + s.result.error) : null,
               (s.result && s.result.metrics) ? h('div', { style: { marginTop: 4, fontFamily: 'monospace', fontSize: 11.5 } }, JSON.stringify(s.result.metrics)) : null,
               ce ? h('div', { style: { display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8, alignItems: 'center' } },
+                h('button', { className: 'btn pri', style: { padding: '2px 9px', fontSize: 11 }, onClick: function () { setEditing({ step: s, isNew: false }); } }, '✎ Edit'),
+                h('button', { className: 'btn', style: { padding: '2px 7px', fontSize: 11 }, title: 'Add a task right after this one', onClick: function () { setEditing({ step: {}, isNew: true, after: s }); } }, '+ after'),
+                h('button', { className: 'btn', style: { padding: '2px 7px', fontSize: 11 }, onClick: function () { duplicate(s); } }, 'Duplicate'),
+                h('button', { className: 'btn', style: { padding: '2px 7px', fontSize: 11 }, disabled: busy, title: 'Split into smaller sub-steps (AI)', onClick: function () { aiSplit(s); } }, '✨ Split'),
                 h('button', { className: 'btn', style: { padding: '2px 7px', fontSize: 11 }, disabled: i === 0, onClick: function () { move(s, -1); } }, '↑'),
                 h('button', { className: 'btn', style: { padding: '2px 7px', fontSize: 11 }, disabled: i === steps.length - 1, onClick: function () { move(s, 1); } }, '↓'),
-                h('select', { className: 'btn', style: { padding: '2px 7px', fontSize: 11 }, value: s.kind, onChange: function (e) { patchStep(s, { kind: e.target.value }); } }, KINDS.map(function (k) { return h('option', { key: k, value: k }, k); })),
-                h('button', { className: 'btn' + (s.needs_approval ? ' pri' : ''), style: { padding: '2px 7px', fontSize: 11 }, onClick: function () { patchStep(s, { needs_approval: !s.needs_approval }); } }, s.needs_approval ? '⏸ approval on' : 'approval off'),
                 (s.status === 'blocked' || (s.needs_approval && s.status === 'todo')) ? h('button', { className: 'btn pri', style: { padding: '2px 7px', fontSize: 11 }, title: 'Approve so the runner may execute this step', onClick: function () { patchStep(s, { status: 'queued' }); } }, '✓ Approve to run') : null,
                 h('button', { className: 'btn', style: { padding: '2px 7px', fontSize: 11, color: 'var(--danger)' }, onClick: function () { delStep(s); } }, 'Delete')
               ) : null
             ) : null
           );
-        }) : h('div', { className: 'empty' }, 'No steps.')
-      )
+        }) : h('div', { className: 'empty' }, 'No steps.'),
+        ce ? h('div', { style: { display: 'flex', gap: 6, marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--line)' } },
+          h('input', { className: 'field', style: { flex: 1, minWidth: 0 }, placeholder: '✨ Describe task(s) to add — e.g. "add an ablation comparing fusion variants"', value: aiPrompt, onChange: function (e) { setAiPrompt(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter') aiAppend(); } }),
+          h('button', { className: 'btn', style: { flex: 'none' }, disabled: aiBusy || !aiPrompt.trim(), onClick: aiAppend }, aiBusy ? '✨…' : '✨ Add tasks')
+        ) : null
+      ),
+      editing ? h(TaskEditorModal, { step: editing.step, isNew: editing.isNew, allSteps: steps, projectId: props.projectId, onSave: saveTask, onClose: function () { setEditing(null); } }) : null
     );
   }
 
