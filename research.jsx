@@ -286,6 +286,29 @@
     if (!html) return html;
     return html.replace(/<pre>/g, '<details class="code-fold"><summary>⟨⟩ Code — expand / collapse</summary><pre>').replace(/<\/pre>/g, '</pre></details>');
   }
+  // Document-grade markdown render: allows inline data: images (figures) — used by the full-page report reader.
+  function mdReport(t) {
+    var s = String(t == null ? '' : t);
+    try { if (window.marked && window.DOMPurify) return window.DOMPurify.sanitize(window.marked.parse(s, { breaks: false }), { ADD_DATA_URI_TAGS: ['img'] }); } catch (e) { }
+    return mdHtml(s);
+  }
+  // Full-screen, nicely-formatted markdown report reader (figures + tables inline). Reusable for any .md report.
+  function ReportViewer(props) {
+    function dl() {
+      var u = URL.createObjectURL(new Blob([props.md || ''], { type: 'text/markdown;charset=utf-8' }));
+      var a = document.createElement('a'); a.href = u; a.download = (props.title || 'report').replace(/[^\w.-]+/g, '_') + '.md';
+      document.body.appendChild(a); a.click(); a.remove(); setTimeout(function () { URL.revokeObjectURL(u); }, 4000);
+    }
+    return h('div', { className: 'rv-scrim', onClick: props.onClose },
+      h('div', { className: 'rv-shell', onClick: function (e) { e.stopPropagation(); } },
+        h('div', { className: 'rv-bar' },
+          h('b', { style: { flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, props.title || 'Report'),
+          h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12, flex: 'none' }, onClick: dl }, '⬇ .md'),
+          h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12, flex: 'none' }, title: 'Print / save as PDF', onClick: function () { window.print(); } }, '🖨 PDF'),
+          h('button', { className: 'icon-x', 'aria-label': 'Close', onClick: props.onClose }, '✕')),
+        h('div', { className: 'rv-body' }, h('article', { className: 'report-doc', dangerouslySetInnerHTML: { __html: mdReport(props.md) } }))
+      ));
+  }
   var CHAT_SUGGEST = ['What are the open problems in this field?', 'Summarize the key methods used so far.', 'Suggest 3 testable research questions for my goal.', 'What evidence would support or refute my hypothesis?'];
   // In a chat reply, the AI saves files via fenced ```file:<path> … ``` blocks. For DISPLAY we collapse
   // those to a compact chip (the full content lives in the file browser, not inline in the chat).
@@ -314,6 +337,7 @@
   function SessionFileBrowser(props) {
     var fS = useState(null), files = fS[0], setFiles = fS[1];
     var pvS = useState(null), preview = pvS[0], setPreview = pvS[1];
+    var rvS = useState(null), rvDoc = rvS[0], setRvDoc = rvS[1];   // open a .md file in the full-page report reader
     var adS = useState(false), added = adS[0], setAdded = adS[1];   // #8: brief "added to ideas" feedback
     var spS = useState(null), selPop = spS[0], setSelPop = spS[1];   // #1: text selection in the MD preview → "add to idea" popup
     var upRef = useRef(null);
@@ -374,6 +398,7 @@
           return h('div', { className: 'fb-item' + (preview && preview.id === f.id ? ' on' : ''), key: f.id },
             h('button', { className: 'fb-name', title: f.path, onClick: function () { setPreview(f); } }, h('span', { className: 'fb-ic' }, icon(f)), h('span', { className: 'fb-lbl' }, f.path), f.source === 'ai' ? h('span', { className: 'fb-tag' }, 'AI') : null),
             h('span', { className: 'fb-acts' },
+              (f.content != null && /\.(md|markdown|txt)$/i.test(f.path || '')) ? h('button', { className: 'fb-mini', 'aria-label': 'Open in reader', title: 'Open in formatted reader', onClick: function () { setRvDoc(f); } }, '⤢') : null,
               h('button', { className: 'fb-mini', 'aria-label': 'Download', title: 'Download', onClick: function () { download(f); } }, '⬇'),
               props.canEdit ? h('button', { className: 'fb-mini', 'aria-label': 'Attach to chat', title: 'Attach to chat', onClick: function () { attach(f); } }, '📎') : null,
               props.canEdit ? h('button', { className: 'fb-mini', 'aria-label': 'Delete file', title: 'Delete', onClick: function () { del(f); } }, '×') : null));
@@ -383,11 +408,12 @@
           (props.canEdit && props.onAddIdea && preview.content != null) ? h('button', { className: 'fb-mini', style: { width: 'auto', padding: '0 7px', fontSize: 11, color: 'var(--accent)' }, title: 'Add the file content as an idea', onClick: function () { props.onAddIdea(preview.content); setAdded(true); setTimeout(function () { setAdded(false); }, 1800); } }, added ? '✓ Added' : '✚ To idea') : null,
           h('button', { className: 'fb-mini', 'aria-label': 'Close preview', onClick: function () { setPreview(null); } }, '×')),
         preview.content != null
-          ? h('div', { className: 'btxt md', style: { fontSize: 12.5 }, onMouseUp: onPreviewMouseUp, onScroll: function () { if (selPop) setSelPop(null); }, dangerouslySetInnerHTML: { __html: mdHtml(preview.content) } })
+          ? h('div', { className: 'btxt md', style: { fontSize: 12.5 }, onMouseUp: onPreviewMouseUp, onScroll: function () { if (selPop) setSelPop(null); }, dangerouslySetInnerHTML: { __html: mdReport(preview.content) } })
           : h('button', { className: 'btn', style: { fontSize: 12 }, onClick: function () { openSigned(preview.storage_path); } }, 'Open / download →')
       ) : null,
       // #1 — floating "add the selected passage to a research idea" button, popped on a text selection in the preview
-      selPop ? h('button', { className: 'sel-idea-btn', style: { position: 'fixed', left: selPop.x, top: selPop.y - 40, transform: 'translateX(-50%)', zIndex: 60 }, onMouseDown: function (e) { e.preventDefault(); }, onClick: function () { props.onAddIdea(selPop.text); setSelPop(null); try { window.getSelection().removeAllRanges(); } catch (e) { } } }, '✚ To idea') : null
+      selPop ? h('button', { className: 'sel-idea-btn', style: { position: 'fixed', left: selPop.x, top: selPop.y - 40, transform: 'translateX(-50%)', zIndex: 60 }, onMouseDown: function (e) { e.preventDefault(); }, onClick: function () { props.onAddIdea(selPop.text); setSelPop(null); try { window.getSelection().removeAllRanges(); } catch (e) { } } }, '✚ To idea') : null,
+      rvDoc ? h(ReportViewer, { md: rvDoc.content, title: rvDoc.path, onClose: function () { setRvDoc(null); } }) : null
     );
   }
 
@@ -1514,7 +1540,22 @@
     var edS = useState(null), editing = edS[0], setEditing = edS[1];   // { step, isNew, after }
     var apS = useState(''), aiPrompt = apS[0], setAiPrompt = apS[1];
     var abS = useState(false), aiBusy = abS[0], setAiBusy = abS[1];
+    var rvS = useState(null), rvMd = rvS[0], setRvMd = rvS[1];   // full-report reader markdown
     var ce = props.canEdit;
+    function buildFullReport() {
+      var L = ['# ' + (prot.title || 'Protocol') + '\n'];
+      if (prot.goal) L.push('> ' + prot.goal + '\n');
+      var done = steps.filter(function (s) { return s.status === 'done'; }).length;
+      L.push('*' + done + '/' + steps.length + ' steps complete · status: ' + prot.status + '*\n\n---\n');
+      steps.forEach(function (s) {
+        var r = s.result || {};
+        if (r.report) L.push(r.report);
+        else L.push('## Step ' + s.ord + ' — ' + s.title + '\n\n*' + (PST[s.status] ? PST[s.status][1] : s.status) + '*' + (r.summary ? '\n\n' + r.summary : ''));
+        (r.figures || []).forEach(function (f) { L.push('\n![' + (f.title || '') + '](' + f.img + ')\n'); });
+        L.push('\n---\n');
+      });
+      return L.join('\n');
+    }
     function load() {
       sb.from('research_protocols').select('*').eq('project_id', props.projectId).neq('status', 'archived').order('created_at', { ascending: false }).limit(1).then(function (r) {
         var pp = (r && r.data && r.data[0]) || null; setProt(pp); setLoading(false);
@@ -1604,6 +1645,7 @@
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
           h('h3', { style: { margin: 0, flex: 1, minWidth: 160 } }, '🧪 ', prot.title),
           h('span', { className: 'chip ' + (PROT_CHIP[prot.status] || 'c-grey') }, prot.status),
+          steps.some(function (s) { return s.result && (s.result.report || s.result.summary); }) ? h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12, flex: 'none' }, title: 'Open the full formatted result report', onClick: function () { setRvMd(buildFullReport()); } }, '📄 Report') : null,
           ce ? h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12, flex: 'none' }, disabled: busy, title: 'Re-generate (archives the current one)', onClick: generate }, busy ? '✨…' : '↻ Re-generate') : null,
           (ce && (prot.status === 'draft' || prot.status === 'paused')) ? h('button', { className: 'btn pri', style: { padding: '4px 10px', fontSize: 12, flex: 'none' }, title: 'Make it claimable by your dedicated runner', onClick: function () { setPStatus('ready'); } }, '▶ Mark ready') : null,
           (ce && (prot.status === 'ready' || prot.status === 'running')) ? h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12, flex: 'none' }, onClick: function () { setPStatus('paused'); } }, '⏸ Pause') : null
@@ -1663,7 +1705,8 @@
           h('button', { className: 'btn', style: { flex: 'none' }, disabled: aiBusy || !aiPrompt.trim(), onClick: aiAppend }, aiBusy ? '✨…' : '✨ Add tasks')
         ) : null
       ),
-      editing ? h(TaskEditorModal, { step: editing.step, isNew: editing.isNew, allSteps: steps, projectId: props.projectId, onSave: saveTask, onClose: function () { setEditing(null); } }) : null
+      editing ? h(TaskEditorModal, { step: editing.step, isNew: editing.isNew, allSteps: steps, projectId: props.projectId, onSave: saveTask, onClose: function () { setEditing(null); } }) : null,
+      rvMd ? h(ReportViewer, { md: rvMd, title: prot.title + ' — result report', onClose: function () { setRvMd(null); } }) : null
     );
   }
 
