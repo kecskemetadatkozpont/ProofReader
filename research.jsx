@@ -1506,10 +1506,35 @@
     var dd = useState(st.depends_on || []), deps = dd[0], setDeps = dd[1];
     var nn = useState(!!st.needs_approval), needsApp = nn[0], setNeedsApp = nn[1];
     var rr = useState(false), refining = rr[0], setRefining = rr[1];
+    var atA = useState(sx0.attachments || []), att = atA[0], setAtt = atA[1];   // per-task uploaded files/folders
+    var ubA = useState(''), upBusy = ubA[0], setUpBusy = ubA[1];
+    var fileRef = useRef(null), folderRef = useRef(null);
     function toggleDep(o) { setDeps(function (d) { return d.indexOf(o) >= 0 ? d.filter(function (x) { return x !== o; }) : d.concat([o]); }); }
+    function uploadFiles(e) {
+      var fs = Array.prototype.slice.call((e.target && e.target.files) || []); if (e.target) e.target.value = '';
+      if (!fs.length) return;
+      var batch = String(Date.now()) + '_' + Math.random().toString(36).slice(2, 7);
+      var added = [], done = 0; setUpBusy('Uploading 0/' + fs.length);
+      (function next(i) {
+        if (i >= fs.length) { if (added.length) setAtt(function (a) { return a.concat(added); }); setUpBusy(''); return; }
+        var f = fs[i]; var rel = (f.webkitRelativePath || f.name);
+        var sp = props.projectId + '/protocol/' + batch + '/' + rel.replace(/[^A-Za-z0-9._\/-]/g, '_');
+        sb.storage.from('research-data').upload(sp, f).then(function (res) {
+          done++; setUpBusy('Uploading ' + done + '/' + fs.length);
+          if (res && res.error) window.PRUI.toast(rel + ': ' + res.error.message, { kind: 'error' });
+          else added.push({ name: rel, storage_path: sp, mime: f.type || '', size: f.size });
+          next(i + 1);
+        }, function () { done++; next(i + 1); });
+      })(0);
+    }
+    function removeAtt(i) {
+      var a = att[i]; if (a && a.storage_path) { try { sb.storage.from('research-data').remove([a.storage_path]); } catch (e) { } }
+      setAtt(function (x) { return x.filter(function (_, j) { return j !== i; }); });
+    }
+    function dlAtt(a) { sb.storage.from('research-data').createSignedUrl(a.storage_path, 3600, { download: (a.name || '').split('/').pop() }).then(function (r) { if (r && r.data && r.data.signedUrl) window.open(r.data.signedUrl, '_blank'); }); }
     function save() {
       if (!title.trim()) { window.PRUI.toast('A title is required', { kind: 'error' }); return; }
-      props.onSave({ title: title.trim(), kind: kind, spec: { instruction: instr, inputs: inputs, expected_outputs: outs, acceptance: accept, command_hint: cmd, est_minutes: est ? parseInt(est, 10) : null }, depends_on: deps, needs_approval: needsApp });
+      props.onSave({ title: title.trim(), kind: kind, spec: { instruction: instr, inputs: inputs, expected_outputs: outs, acceptance: accept, command_hint: cmd, est_minutes: est ? parseInt(est, 10) : null, attachments: att }, depends_on: deps, needs_approval: needsApp });
     }
     function refine() {
       if (!st.id) return; setRefining(true);
@@ -1538,6 +1563,21 @@
         h('div', null, h('div', { className: 'field-label' }, 'Acceptance — done when…'), h(CritEditor, { items: accept, onChange: setAccept, accent: '#16a34a', placeholder: 'an objective success check', empty: 'No acceptance checks.' })),
         h('div', null, h('div', { className: 'field-label' }, 'Command hint'), h('textarea', { className: 'field', rows: 2, style: { width: '100%', boxSizing: 'border-box', fontFamily: 'monospace', fontSize: 12 }, placeholder: 'a likely shell command / script', value: cmd, onChange: function (e) { setCmd(e.target.value); } })),
         h('div', { style: { display: 'flex', gap: 8, alignItems: 'center' } }, h('span', { className: 'field-label', style: { margin: 0 } }, 'Est. minutes'), h('input', { className: 'field', type: 'number', min: 0, style: { width: 100 }, value: est, onChange: function (e) { setEst(e.target.value); } })),
+        h('div', null,
+          h('div', { className: 'field-label' }, 'Attachments — files / folders for this task'),
+          h('div', { style: { display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6, flexWrap: 'wrap' } },
+            h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12 }, onClick: function () { if (fileRef.current) fileRef.current.click(); } }, '⤒ Add files'),
+            h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12 }, title: 'Upload a whole folder (structure preserved)', onClick: function () { if (folderRef.current) folderRef.current.click(); } }, '📁 Add folder'),
+            upBusy ? h('span', { style: { fontSize: 11.5, color: 'var(--muted)' } }, '⏳ ' + upBusy) : null,
+            h('input', { ref: fileRef, type: 'file', multiple: true, style: { display: 'none' }, onChange: uploadFiles }),
+            h('input', { ref: function (n) { if (n) { try { n.webkitdirectory = true; n.directory = true; } catch (e) { } } folderRef.current = n; }, type: 'file', multiple: true, style: { display: 'none' }, onChange: uploadFiles })),
+          att.length ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 3 } }, att.map(function (a, i) {
+            return h('div', { key: i, style: { display: 'flex', gap: 8, alignItems: 'center', fontSize: 11.5, background: 'var(--soft)', padding: '3px 8px', borderRadius: 6 } },
+              h('span', { style: { flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, title: a.name }, '📎 ' + a.name),
+              h('span', { style: { color: 'var(--faint)', flex: 'none' } }, a.size != null ? (Math.max(1, Math.round(a.size / 1024)) + ' KB') : ''),
+              h('button', { className: 'fb-mini', 'aria-label': 'Download', title: 'Download', onClick: function () { dlAtt(a); } }, '⬇'),
+              h('button', { className: 'fb-mini', 'aria-label': 'Remove', title: 'Remove', onClick: function () { removeAtt(i); } }, '×'));
+          })) : h('div', { style: { fontSize: 11.5, color: 'var(--faint)' } }, 'No files yet. Upload files/folders, then say in the Instruction above what the runner should do with them.')),
         (props.allSteps && props.allSteps.filter(function (x) { return x.id !== st.id; }).length) ? h('div', null, h('div', { className: 'field-label' }, 'Depends on (must finish first)'),
           h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 6 } }, props.allSteps.filter(function (x) { return x.id !== st.id; }).map(function (x) {
             return h('button', { key: x.id, className: 'lchip' + (deps.indexOf(x.ord) >= 0 ? ' on' : ''), style: { fontSize: 11 }, onClick: function () { toggleDep(x.ord); } }, x.ord + '. ' + (x.title || '').slice(0, 26));
@@ -1704,6 +1744,11 @@
               (sx.acceptance && sx.acceptance.length) ? h('div', null, h('b', null, 'Done when: '), sx.acceptance.join('; ')) : null,
               sx.command_hint ? h('div', { style: { marginTop: 4, fontFamily: 'monospace', fontSize: 11.5, background: 'var(--soft)', padding: '4px 7px', borderRadius: 6, whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, sx.command_hint) : null,
               sx.est_minutes ? h('span', { style: { fontSize: 11, color: 'var(--faint)' } }, '~' + sx.est_minutes + ' min') : null,
+              (sx.attachments && sx.attachments.length) ? h('div', { style: { marginTop: 6 } },
+                h('b', { style: { fontSize: 11.5 } }, '📎 Attachments (' + sx.attachments.length + '): '),
+                sx.attachments.map(function (a, ai) {
+                  return h('button', { key: ai, className: 'lchip', style: { fontSize: 10.5, margin: '2px 4px 0 0' }, title: 'Download ' + a.name, onClick: function () { sb.storage.from('research-data').createSignedUrl(a.storage_path, 3600, { download: (a.name || '').split('/').pop() }).then(function (r) { if (r && r.data && r.data.signedUrl) window.open(r.data.signedUrl, '_blank'); }); } }, '⬇ ' + ((a.name || '').split('/').pop()));
+                })) : null,
               (s.result && s.result.report) ? h('div', { className: 'step-report', dangerouslySetInnerHTML: { __html: mdHtml(s.result.report) } }) : null,
               (s.result && s.result.summary && !s.result.report) ? h('div', { style: { marginTop: 6, fontSize: 12.5, color: 'var(--ink)', lineHeight: 1.5 } }, s.result.summary) : null,
               (s.result && s.result.adaptation && !s.result.report) ? h('div', { style: { marginTop: 4, fontSize: 11.5, color: 'var(--warn)' } }, '⚙ ' + s.result.adaptation) : null,

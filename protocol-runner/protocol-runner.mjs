@@ -15,6 +15,8 @@
 //  Run:  RUNNER_ID=gpu-box REPO_DIR=~/proj node protocol-runner.mjs
 // ============================================================================
 import { execFile } from 'node:child_process';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 
 const URL = process.env.SUPABASE_URL;
 const KEY = process.env.SUPABASE_SERVICE_KEY;
@@ -54,14 +56,37 @@ function runClaude(prompt) {
   });
 }
 
+// Download a step's attachments (uploaded in the Task editor) into REPO_DIR/task_<ord>_files/<name>, preserving folders.
+async function fetchAttachments(s, sx) {
+  const atts = Array.isArray(sx.attachments) ? sx.attachments : [];
+  if (!atts.length) return [];
+  const base = join(CWD, `task_${s.ord}_files`);
+  const local = [];
+  for (const a of atts) {
+    try {
+      const r = await fetch(`${URL}/storage/v1/object/research-data/${a.storage_path}`, { headers: { apikey: KEY, Authorization: 'Bearer ' + KEY } });
+      if (!r.ok) { console.log(`  attachment ${a.name} download failed: ${r.status}`); continue; }
+      const buf = Buffer.from(await r.arrayBuffer());
+      const dest = join(base, (a.name || 'file').replace(/^\/+/, ''));
+      await mkdir(dirname(dest), { recursive: true });
+      await writeFile(dest, buf);
+      local.push(`task_${s.ord}_files/${a.name}`);
+    } catch (e) { console.log(`  attachment ${a.name} error: ${e.message || e}`); }
+  }
+  if (local.length) console.log(`  downloaded ${local.length} attachment(s) → task_${s.ord}_files/`);
+  return local;
+}
+
 async function runStep(s) {
   await patchStep(s.id, { status: 'running', started_at: nowISO(), attempts: (s.attempts || 0) + 1 });
   const sx = s.spec || {};
+  const localAtts = await fetchAttachments(s, sx);
   const prompt =
     `You are autonomously executing step ${s.ord} of a research protocol on this machine. The working directory is the project repo.\n\n` +
     `STEP: ${s.title}\n` +
     `INSTRUCTION: ${sx.instruction || ''}\n` +
     (sx.inputs?.length ? `INPUTS: ${sx.inputs.join(', ')}\n` : '') +
+    (localAtts.length ? `ATTACHED FILES (already downloaded for you): ${localAtts.join(', ')}\n` : '') +
     (sx.expected_outputs?.length ? `EXPECTED OUTPUTS: ${sx.expected_outputs.join(', ')}\n` : '') +
     (sx.acceptance?.length ? `ACCEPTANCE CRITERIA: ${sx.acceptance.join('; ')}\n` : '') +
     (sx.command_hint ? `SUGGESTED COMMAND: ${sx.command_hint}\n` : '') +
