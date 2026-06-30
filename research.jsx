@@ -318,7 +318,7 @@
       Promise.resolve(props.onSave(props.md)).then(function () { setSaved('done'); setTimeout(function () { setSaved(''); }, 2200); },
         function () { setSaved(''); });
     }
-    return h('div', { className: 'rv-scrim', onClick: props.onClose },
+    return ReactDOM.createPortal(h('div', { className: 'rv-scrim', onClick: props.onClose },
       h('div', { className: 'rv-shell', onClick: function (e) { e.stopPropagation(); } },
         h('div', { className: 'rv-bar' },
           h('b', { style: { flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, props.title || 'Report'),
@@ -331,7 +331,7 @@
             h('div', { className: 'rv-toc-h' }, 'Contents'),
             doc.toc.map(function (t) { return h('button', { key: t.id, className: 'rv-toc-i lvl' + t.level, onClick: function () { jump(t.id); } }, t.text); })) : null,
           h('div', { className: 'rv-body' }, h('article', { className: 'report-doc', dangerouslySetInnerHTML: { __html: doc.html } })))
-      ));
+      )), document.body);
   }
   var CHAT_SUGGEST = ['What are the open problems in this field?', 'Summarize the key methods used so far.', 'Suggest 3 testable research questions for my goal.', 'What evidence would support or refute my hypothesis?'];
   // In a chat reply, the AI saves files via fenced ```file:<path> … ``` blocks. For DISPLAY we collapse
