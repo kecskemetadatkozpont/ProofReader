@@ -183,38 +183,47 @@
 
   /* ---- hydrate from server ---- */
   function mergeRow(p) { if (!p || !p.id) return; if (annoQ[p.id]) p.annotations = applyAnnoQ(p.id, p.annotations || []); var i = idx(p.id); if (i >= 0) CACHE[i] = normalize(p); else CACHE.push(normalize(p)); }
+  // EGRESS-light hydrate: the 10s poll / realtime / focus must NOT re-download every project's full `data` (a
+  // thesis row is megabytes — refetching it every 10s blew the Supabase egress quota). We first fetch only
+  // id+updated_at (tiny), then pull `data` ONLY for projects whose updated_at actually changed (or are new).
+  var tsCache = {};   // id -> last-seen updated_at
   function hydrate() {
-    // Scope the editor's project list to what THIS user owns or is a member of
-    // (explicit, not RLS-implicit) so an admin's own editor isn't flooded with
-    // every project the admin can read via admin RLS.
-    // include trashed (deleted_at not null) for the OWNER so the Trash view can list/restore them;
-    // shared projects below stay deleted_at-null so collaborators never see an owner's trash.
-    var ownedQ = sb.from('projects').select('id,data,updated_at,deleted_at').eq('owner_id', me.id);
+    // Scope to what THIS user owns or is a member of (explicit, not admin-RLS). Owner sees trashed rows too.
+    var ownedQ = sb.from('projects').select('id,updated_at,deleted_at').eq('owner_id', me.id);
     var memQ = sb.from('project_members').select('project_id').eq('user_id', me.id);
     return Promise.all([ownedQ, memQ]).then(function (res) {
       var owned = res[0], mem = res[1];
       if (owned.error) { console.warn('[PR] hydrate failed', owned.error.message); return; }
-      var rows = (owned.data || []).slice();
+      var lite = (owned.data || []).slice();
       var memIds = (mem && mem.data ? mem.data.map(function (m) { return m.project_id; }) : []);
-      function finish(sharedRows) {
-        var all = rows.concat(sharedRows || []);
-        var seen = {};
+      function finish(sharedLite) {
+        var all = lite.concat(sharedLite || []);
+        var seen = {}, need = [];
         all.forEach(function (row) {
-          var p = (row.data && typeof row.data === 'object' && row.data.files) ? row.data
-            : { id: row.id, title: (row.data && row.data.title) || 'Untitled project', ownerId: me.id };
-          p.id = row.id;
-          // reconcile the deleted_at column with the embedded flag (column is source of truth)
-          if (row.deleted_at) { if (!p.deletedAt) p.deletedAt = Date.parse(row.deleted_at) || Date.now(); }
-          else if (p.deletedAt) { delete p.deletedAt; }
           seen[row.id] = 1;
-          if (pending[row.id]) return;   // a local edit (e.g. a just-added comment) is queued to flush — don't clobber it with the server copy
-          mergeRow(p);
+          var ts = row.updated_at || '';
+          if (idx(row.id) < 0 || tsCache[row.id] !== ts) need.push(row.id);   // new or changed → fetch full data
+          tsCache[row.id] = ts;
+          // reconcile deleted_at on the already-cached copy without a full re-fetch
+          var i = idx(row.id);
+          if (i >= 0) { if (row.deleted_at) { if (!CACHE[i].deletedAt) CACHE[i].deletedAt = Date.parse(row.deleted_at) || Date.now(); } else if (CACHE[i].deletedAt) { delete CACHE[i].deletedAt; } }
         });
-        CACHE = CACHE.filter(function (p) { return seen[p.id] || pending[p.id]; });
-        persistWarm(); notify(); loadProfilesFor(CACHE);
+        CACHE = CACHE.filter(function (p) { return seen[p.id] || pending[p.id]; });   // drop projects we lost access to
+        need = need.filter(function (id) { return !pending[id]; });                    // don't clobber a locally-queued edit
+        if (!need.length) { persistWarm(); notify(); loadProfilesFor(CACHE); return; }
+        sb.from('projects').select('id,data,updated_at,deleted_at').in('id', need).then(function (full) {
+          (full.data || []).forEach(function (row) {
+            var p = (row.data && typeof row.data === 'object' && row.data.files) ? row.data
+              : { id: row.id, title: (row.data && row.data.title) || 'Untitled project', ownerId: me.id };
+            p.id = row.id;
+            if (row.deleted_at) { if (!p.deletedAt) p.deletedAt = Date.parse(row.deleted_at) || Date.now(); } else if (p.deletedAt) { delete p.deletedAt; }
+            if (!pending[row.id]) mergeRow(p);
+          });
+          persistWarm(); notify(); loadProfilesFor(CACHE);
+        }, function () { persistWarm(); notify(); });
       }
       if (memIds.length) {
-        sb.from('projects').select('id,data,updated_at,deleted_at').in('id', memIds).is('deleted_at', null)
+        sb.from('projects').select('id,updated_at,deleted_at').in('id', memIds).is('deleted_at', null)
           .then(function (sr) { finish(sr.data || []); }, function () { finish([]); });
       } else { finish([]); }
     }).catch(function (e) { console.warn('[PR] hydrate error', e); });
@@ -232,13 +241,15 @@
   // initial hydrate + realtime + focus refresh
   hydrate();
   redriveAnnoQ();   // re-send any annotations left unconfirmed from a previous session
+  var hydT = 0;
+  function hydrateSoon() { clearTimeout(hydT); hydT = setTimeout(hydrate, 800); }   // coalesce bursts of realtime/focus events
   try {
-    sb.channel('projects-feed').on('postgres_changes', { event: '*', schema: 'public', table: 'projects' }, function () { hydrate(); }).subscribe();
+    sb.channel('projects-feed').on('postgres_changes', { event: '*', schema: 'public', table: 'projects' }, function () { hydrateSoon(); }).subscribe();
   } catch (e) { }
-  window.addEventListener('focus', function () { hydrate(); });
-  document.addEventListener('visibilitychange', function () { if (!document.hidden) hydrate(); });
-  // fallback poll: keep collaborators' comments/to-dos in sync even if a realtime event is missed/dropped
-  setInterval(function () { if (!document.hidden) hydrate(); }, 10000);
+  window.addEventListener('focus', hydrateSoon);
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) hydrateSoon(); });
+  // fallback poll — now light (id+updated_at only; full data fetched only for genuinely-changed rows)
+  setInterval(function () { if (!document.hidden) hydrate(); }, 15000);
 
   /* ---- prefs sync: the Supabase `prefs` row is the cross-device truth; mirror it into the local
      cache so prefs() stays synchronous, and push local changes back (debounced). ---- */
