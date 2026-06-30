@@ -808,16 +808,22 @@
     useEffect(function () { loadScimago().then(setScimap); }, []);
     // source_ids that were selected in a Study (AI-included in any step, or the user's "Your decision" override) —
     // these float to the top of the Library and are highlighted.
-    var siS = useState({}), studyInc = siS[0], setStudyInc = siS[1];
+    var siS = useState({}), studyInc = siS[0], setStudyInc = siS[1];   // source_id -> [study titles it was selected in]
     useEffect(function () {
       var ids = (props.studies || []).map(function (s) { return s.id; });
       if (!ids.length) { setStudyInc({}); return; }
-      sb.from('research_study_papers').select('source_id,decision,overridden').in('study_id', ids).then(function (r2) {
+      var titleById = {}; (props.studies || []).forEach(function (s) { titleById[s.id] = s.title || 'Untitled study'; });
+      sb.from('research_study_papers').select('source_id,study_id,decision,overridden').in('study_id', ids).then(function (r2) {
         var m = {};
-        ((r2 && r2.data) || []).forEach(function (p) { if (p.source_id && (p.decision === 'include' || (p.overridden && p.decision !== 'exclude'))) m[p.source_id] = true; });
+        ((r2 && r2.data) || []).forEach(function (p) {
+          if (!p.source_id || !(p.decision === 'include' || (p.overridden && p.decision !== 'exclude'))) return;
+          var t = titleById[p.study_id] || 'Study';
+          if (!m[p.source_id]) m[p.source_id] = [];
+          if (m[p.source_id].indexOf(t) < 0) m[p.source_id].push(t);
+        });
         setStudyInc(m);
       }, function () { });
-    }, [(props.studies || []).length, (props.sources || []).length]);
+    }, [(props.studies || []).map(function (s) { return s.id + ':' + (s.title || ''); }).join('|'), (props.sources || []).length]);
     var saved = {}; (props.sources || []).forEach(function (s) { if (s.ext_id) saved[s.ext_id] = true; });
     function setF(k, v) { var o = {}; o[k] = v; setFlt(Object.assign({}, flt, o)); }
     function buildFilter(f) {
@@ -846,7 +852,7 @@
     }
     function setScreen(s, v) { sb.from('research_sources').update({ screening: v }).eq('id', s.id).then(props.onChanged); }
     function del(s) { sb.from('research_sources').delete().eq('id', s.id).then(props.onChanged); }
-    var lib = (props.sources || []).slice().sort(function (a, b) { return (studyInc[b.id] ? 1 : 0) - (studyInc[a.id] ? 1 : 0); });   // study-selected sources first
+    var lib = (props.sources || []).slice().sort(function (a, b) { return ((studyInc[b.id] && studyInc[b.id].length) ? 1 : 0) - ((studyInc[a.id] && studyInc[a.id].length) ? 1 : 0); });   // study-selected sources first
     var hasSci = scimap && Object.keys(scimap).length > 0;
     var shown = results ? (scopusMax ? results.filter(function (w) { var qq = scopusQ(scimap, w); return qq != null && qq <= scopusMax; }) : results) : null;
     return h('div', null,
@@ -887,7 +893,7 @@
           return h('div', { className: 'src' + (studyInc[s.id] ? ' src-study' : ''), style: { alignItems: 'flex-start' }, key: s.id },
             h('div', { style: { flex: 1, minWidth: 0 } },
               h('b', { style: { fontSize: 13 } }, s.url ? h('a', { href: s.url, target: '_blank' }, s.title) : s.title),
-              studyInc[s.id] ? h('span', { className: 'chip c-acc', style: { marginLeft: 7, fontSize: 10, verticalAlign: 'middle' } }, '★ in study') : null,
+              (studyInc[s.id] && studyInc[s.id].length) ? h('span', { className: 'chip c-acc', style: { marginLeft: 7, fontSize: 10, verticalAlign: 'middle', maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'inline-block' }, title: 'Selected in study: ' + studyInc[s.id].join(', ') }, '★ in study: ' + studyInc[s.id].join(', ')) : null,
               (s.authors && s.authors.length) ? h('div', { style: { fontSize: 11.5, color: 'var(--muted)', marginTop: 1 } }, s.authors.slice(0, 3).join(', ')) : null,
               metricTags({ journal: s.venue, year: s.year, cites: s.cited_by })
             ),
