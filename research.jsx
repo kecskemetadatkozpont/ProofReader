@@ -806,6 +806,18 @@
     var sm = useState(null), scimap = sm[0], setScimap = sm[1];
     var sq = useState(0), scopusMax = sq[0], setScopusMax = sq[1];
     useEffect(function () { loadScimago().then(setScimap); }, []);
+    // source_ids that were selected in a Study (AI-included in any step, or the user's "Your decision" override) —
+    // these float to the top of the Library and are highlighted.
+    var siS = useState({}), studyInc = siS[0], setStudyInc = siS[1];
+    useEffect(function () {
+      var ids = (props.studies || []).map(function (s) { return s.id; });
+      if (!ids.length) { setStudyInc({}); return; }
+      sb.from('research_study_papers').select('source_id,decision,overridden').in('study_id', ids).then(function (r2) {
+        var m = {};
+        ((r2 && r2.data) || []).forEach(function (p) { if (p.source_id && (p.decision === 'include' || (p.overridden && p.decision !== 'exclude'))) m[p.source_id] = true; });
+        setStudyInc(m);
+      }, function () { });
+    }, [(props.studies || []).length, (props.sources || []).length]);
     var saved = {}; (props.sources || []).forEach(function (s) { if (s.ext_id) saved[s.ext_id] = true; });
     function setF(k, v) { var o = {}; o[k] = v; setFlt(Object.assign({}, flt, o)); }
     function buildFilter(f) {
@@ -834,7 +846,7 @@
     }
     function setScreen(s, v) { sb.from('research_sources').update({ screening: v }).eq('id', s.id).then(props.onChanged); }
     function del(s) { sb.from('research_sources').delete().eq('id', s.id).then(props.onChanged); }
-    var lib = props.sources || [];
+    var lib = (props.sources || []).slice().sort(function (a, b) { return (studyInc[b.id] ? 1 : 0) - (studyInc[a.id] ? 1 : 0); });   // study-selected sources first
     var hasSci = scimap && Object.keys(scimap).length > 0;
     var shown = results ? (scopusMax ? results.filter(function (w) { var qq = scopusQ(scimap, w); return qq != null && qq <= scopusMax; }) : results) : null;
     return h('div', null,
@@ -872,9 +884,10 @@
           lib.length ? h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12 }, title: 'Export included (or all) as BibTeX', onClick: function () { var inc = lib.filter(function (x) { return x.screening === 'include'; }); downloadText('library.bib', genBibtex(inc.length ? inc : lib)); } }, '⬇ BibTeX') : null
         )),
         lib.length ? lib.map(function (s) {
-          return h('div', { className: 'src', style: { alignItems: 'flex-start' }, key: s.id },
+          return h('div', { className: 'src' + (studyInc[s.id] ? ' src-study' : ''), style: { alignItems: 'flex-start' }, key: s.id },
             h('div', { style: { flex: 1, minWidth: 0 } },
               h('b', { style: { fontSize: 13 } }, s.url ? h('a', { href: s.url, target: '_blank' }, s.title) : s.title),
+              studyInc[s.id] ? h('span', { className: 'chip c-acc', style: { marginLeft: 7, fontSize: 10, verticalAlign: 'middle' } }, '★ in study') : null,
               (s.authors && s.authors.length) ? h('div', { style: { fontSize: 11.5, color: 'var(--muted)', marginTop: 1 } }, s.authors.slice(0, 3).join(', ')) : null,
               metricTags({ journal: s.venue, year: s.year, cites: s.cited_by })
             ),
@@ -1447,7 +1460,7 @@
     var TABS = [['overview', 'Overview', null], ['ideas', 'Ideas', (props.ideas || []).length], ['study', 'Studies', (props.studies || []).length], ['literature', 'Literature', (props.sources || []).length], ['data', 'Data', (props.datasets || []).length], ['compute', 'Compute', (props.jobs || []).length], ['writing', 'Writing', null], ['canvas', 'Canvas', null], ['notes', 'Notes', null], ['log', 'Log', (props.log || []).length], ['tasks', 'Tasks', openTasks]];
     var content;
     if (tab === 'ideas') content = h('div', null, h(ChatPanel, { projectId: p.id, supervised: !!p.student_id, canEdit: props.canEdit, authorId: props.authorId, fileOwnerId: props.fileOwnerId, sources: props.sources, onChanged: props.onChanged }), h(IdeasPanel, { projectId: p.id, ideas: props.ideas, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, onStartStudyMulti: function (ideas) { setAutoStudy(ideas || []); setTab('study'); }, onGoStudy: function () { setTab('study'); } }));
-    else if (tab === 'literature') content = h(LiteraturePanel, { projectId: p.id, sources: props.sources, canEdit: props.canEdit, myEmail: props.myEmail, onChanged: props.onChanged });
+    else if (tab === 'literature') content = h(LiteraturePanel, { projectId: p.id, sources: props.sources, studies: props.studies, canEdit: props.canEdit, myEmail: props.myEmail, onChanged: props.onChanged });
     else if (tab === 'study') content = null;   // #9: rendered persistently below so a running study survives tab switches
     else if (tab === 'data') content = h(DataPanel, { projectId: p.id, datasets: props.datasets, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
     else if (tab === 'compute') content = h(ComputePanel, { projectId: p.id, jobs: props.jobs, datasets: props.datasets, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
