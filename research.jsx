@@ -8,19 +8,18 @@
   var BE = window.PR_BACKEND, PUBS = window.PRPubs;
   var sb = BE && BE.sb;
 
-  var STAGES = ['Setup', 'Idea', 'Literature', 'Protocol', 'Data', 'Compute', 'Analysis', 'Writing', 'Submission'];
+  // Data / Compute / Analysis are temporarily removed; Journal (publication-venue recommender) added before Submission.
+  var STAGES = ['Setup', 'Idea', 'Literature', 'Protocol', 'Writing', 'Journal', 'Submission'];
   // clicking a workflow step opens the matching panel (the old redundant tab row is gone)
-  var STAGE_TAB = ['overview', 'ideas', 'literature', 'protocol', 'data', 'compute', 'compute', 'writing', 'writing'];
+  var STAGE_TAB = ['overview', 'ideas', 'literature', 'protocol', 'writing', 'journal', 'writing'];
   function svg() { var args = Array.prototype.slice.call(arguments); return h('svg', { viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round', strokeLinejoin: 'round' }, args.map(function (d, i) { return h('path', { key: i, d: d }); })); }
   var STAGE_ICONS = [
     svg('M4 14V2.5', 'M4 3h7l-1.4 2.3L11 7.6H4'),                                         // Setup — flag
     svg('M5.6 9.6A3.5 3.5 0 1 1 10.4 9.6c-.5.5-.8 1-.8 1.6H6.4c0-.6-.3-1.1-.8-1.6Z', 'M6.6 13.2h2.8'), // Idea — bulb
     svg('M8 3.6C6.4 2.7 4.8 2.7 3.2 3.4v8.4c1.6-.7 3.2-.7 4.8.2 1.6-.9 3.2-.9 4.8-.2V3.4C11.2 2.7 9.6 2.7 8 3.6Z', 'M8 3.6v8.6'), // Literature — book
     svg('M5.9 8.2 7.2 9.5 10 6.6', 'M4.5 3.5h7v9.5h-7z', 'M6.2 3.5V2.4h3.6v1.1'),          // Protocol — clipboard check
-    svg('M12.5 4c0 1-2 1.8-4.5 1.8S3.5 5 3.5 4 5.5 2.2 8 2.2 12.5 3 12.5 4Z', 'M3.5 4v8c0 1 2 1.8 4.5 1.8s4.5-.8 4.5-1.8V4', 'M3.5 8c0 1 2 1.8 4.5 1.8s4.5-.8 4.5-1.8'), // Data — db
-    svg('M4.7 4.7h6.6v6.6h-6.6z', 'M6.6 2v2.5M9.4 2v2.5M6.6 11.5V14M9.4 11.5V14M2 6.6h2.5M2 9.4h2.5M11.5 6.6H14M11.5 9.4H14'), // Compute — chip
-    svg('M3 13h10', 'M5.2 13V9M8 13V5.5M10.8 13V7.5'),                                     // Analysis — bars
     svg('M10.8 2.6 13.4 5.2 5.6 13l-3 .6.6-3z', 'M9.8 3.6 12.4 6.2'),                       // Writing — pencil
+    svg('M2 8a6 6 0 1 0 12 0a6 6 0 1 0 -12 0', 'M5 8a3 3 0 1 0 6 0a3 3 0 1 0 -6 0', 'M7.6 8a.4.4 0 1 0 .8 0a.4.4 0 1 0 -.8 0'), // Journal — target (where to publish)
     svg('M8 10.5V3M5.2 5.8 8 3l2.8 2.8', 'M3.5 13h9')                                       // Submission — upload
   ];
   var LOG_TYPES = ['NOTE', 'DECISION', 'RESULT', 'ARTIFACT', 'MILESTONE', 'TASK'];
@@ -1825,6 +1824,72 @@
     );
   }
 
+  // ---------- Journal recommender (Norwegian register + Scimago, matched to the research) ----------
+  function JournalPanel(props) {
+    var ld = useState(true), loading = ld[0], setLoading = ld[1];
+    var rc = useState(null), rec = rc[0], setRec = rc[1];
+    var bz = useState(false), busy = bz[0], setBusy = bz[1];
+    var pk = useState([]), picks = pk[0], setPicks = pk[1];
+    var hn = useState(''), hint = hn[0], setHint = hn[1];
+    var ce = props.canEdit;
+    function loadPicks() { sb.from('research_journal_picks').select('*').eq('project_id', props.projectId).order('fit_score', { ascending: false }).then(function (r) { setPicks((r && r.data) || []); setLoading(false); }, function () { setLoading(false); }); }
+    useEffect(loadPicks, [props.projectId]);
+    function recommend() {
+      if (busy) return; setBusy(true); setRec(null);
+      sb.functions.invoke('research-journals', { body: { action: 'recommend', project_id: props.projectId, hint: hint } }).then(function (r) {
+        setBusy(false); var d = r && r.data; var err = (d && d.error) || (r && r.error && r.error.message);
+        if (err) { window.PRUI.toast('Recommend failed: ' + err, { kind: 'error' }); return; }
+        setRec(d);
+      }, function (e) { setBusy(false); window.PRUI.toast('Recommend failed: ' + e, { kind: 'error' }); });
+    }
+    var pickedIds = {}; picks.forEach(function (p) { if (p.journal_id != null) pickedIds[p.journal_id] = p; });
+    function shortlist(j) { sb.from('research_journal_picks').insert({ project_id: props.projectId, journal_id: j.id, title: j.title, field: j.field, npi_level: j.npi_level, sjr_quartile: j.sjr_quartile, url: j.url, fit_score: j.fit_score, fit_reason: j.fit_reason, status: 'shortlisted', created_by: props.authorId }).then(function (r) { if (r && r.error) { window.PRUI.toast(r.error.message, { kind: 'error' }); return; } window.PRUI.toast('Added to shortlist', { kind: 'ok' }); loadPicks(); }); }
+    function setStatus(p, st) { sb.from('research_journal_picks').update({ status: st }).eq('id', p.id).then(loadPicks); }
+    function removePick(p) { sb.from('research_journal_picks').delete().eq('id', p.id).then(loadPicks); }
+    function levelBadge(lvl) { return lvl === 2 ? h('span', { className: 'jl-lvl lvl2', title: 'Norwegian register level 2 — top tier' }, '◆ Level 2') : h('span', { className: 'jl-lvl lvl1', title: 'Norwegian register level 1 — approved' }, '◇ Level 1'); }
+    function quartile(q) { return q ? h('span', { className: 'jl-q q' + String(q).replace(/[^1-4]/g, '') }, q) : null; }
+    function card(j, picked) {
+      return h('div', { className: 'jl-card', key: j.id },
+        h('div', { style: { display: 'flex', gap: 7, alignItems: 'baseline', flexWrap: 'wrap' } },
+          h('a', { href: j.url || '#', target: '_blank', rel: 'noopener noreferrer', className: 'jl-title' }, j.title),
+          levelBadge(j.npi_level), quartile(j.sjr_quartile),
+          j.fit_score != null ? h('span', { className: 'jl-fit' }, j.fit_score + '% fit') : null),
+        h('div', { className: 'jl-meta' }, [j.field, j.country, j.open_access ? 'OA: ' + j.open_access : null, j.publisher].filter(Boolean).join(' · ')),
+        j.fit_reason ? h('div', { className: 'jl-reason' }, j.fit_reason) : null,
+        ce ? h('div', { style: { marginTop: 6 } }, picked ? h('span', { className: 'chip c-ok' }, '★ Shortlisted') : h('button', { className: 'btn', style: { padding: '3px 10px', fontSize: 12 }, onClick: function () { shortlist(j); } }, '★ Shortlist')) : null);
+    }
+    if (loading) return h('div', { className: 'empty' }, 'Loading…');
+    return h('div', null,
+      h('div', { className: 'panel' },
+        h('h3', { style: { marginTop: 0 } }, '🎯 Journal recommender'),
+        h('p', { style: { fontSize: 13, color: 'var(--muted)', lineHeight: 1.5 } }, 'Suggests where to publish — from the Norwegian publication register (level 1–2 quality) matched to your research questions and results. 29,685 vetted journals indexed; Scimago quartiles fold in as available.'),
+        ce ? h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap' } },
+          h('input', { className: 'field', style: { flex: 1, minWidth: 180 }, placeholder: 'Optional preference (e.g. "open access", "high impact", "European venue")', value: hint, onChange: function (e) { setHint(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter') recommend(); } }),
+          h('button', { className: 'btn pri', style: { flex: 'none' }, disabled: busy, onClick: recommend }, busy ? '✨ Finding journals…' : '✨ Recommend journals')
+        ) : null),
+      rec ? h('div', { className: 'panel' },
+        h('div', { style: { fontSize: 12.5, color: 'var(--muted)', marginBottom: 3 } }, h('b', null, 'Matched fields: '), (rec.fields || []).join(', ') || '—'),
+        rec.summary ? h('div', { style: { fontSize: 12, color: 'var(--faint)', marginBottom: 10 } }, rec.summary) : null,
+        (rec.journals && rec.journals.length) ? rec.journals.map(function (j) { return card(j, !!pickedIds[j.id]); }) : h('div', { className: 'empty' }, rec.note || 'No matching journals found — try a broader preference.')
+      ) : null,
+      picks.length ? h('div', { className: 'panel' },
+        h('h3', null, '★ Shortlist (' + picks.length + ')'),
+        picks.map(function (p) {
+          return h('div', { className: 'jl-card', key: p.id },
+            h('div', { style: { display: 'flex', gap: 7, alignItems: 'baseline', flexWrap: 'wrap' } },
+              h('a', { href: p.url || '#', target: '_blank', rel: 'noopener noreferrer', className: 'jl-title' }, p.title),
+              p.npi_level ? levelBadge(p.npi_level) : null, quartile(p.sjr_quartile),
+              h('span', { className: 'chip ' + (p.status === 'submitted' ? 'c-ok' : 'c-acc') }, p.status),
+              p.fit_score != null ? h('span', { className: 'jl-fit' }, p.fit_score + '% fit') : null),
+            p.fit_reason ? h('div', { className: 'jl-reason' }, p.fit_reason) : null,
+            ce ? h('div', { style: { display: 'flex', gap: 6, marginTop: 6 } },
+              p.status !== 'submitted' ? h('button', { className: 'btn', style: { padding: '2px 9px', fontSize: 11 }, onClick: function () { setStatus(p, 'submitted'); } }, '✓ Mark submitted') : h('button', { className: 'btn', style: { padding: '2px 9px', fontSize: 11 }, onClick: function () { setStatus(p, 'shortlisted'); } }, 'Unmark'),
+              h('button', { className: 'btn', style: { padding: '2px 9px', fontSize: 11, color: 'var(--danger)' }, onClick: function () { removePick(p); } }, 'Remove')) : null);
+        })
+      ) : null
+    );
+  }
+
   // ---------- Project detail ----------
   function ProjectDetail(props) {
     var p = props.project;
@@ -1855,6 +1920,7 @@
     else if (tab === 'protocol') content = h(ProtocolPanel, { projectId: p.id, ideas: props.ideas, sources: props.sources, studies: props.studies, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
     else if (tab === 'data') content = h(DataPanel, { projectId: p.id, datasets: props.datasets, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
     else if (tab === 'compute') content = h(ComputePanel, { projectId: p.id, jobs: props.jobs, datasets: props.datasets, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
+    else if (tab === 'journal') content = h(JournalPanel, { projectId: p.id, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
     else if (tab === 'writing') content = h(WritingPanel, { project: p, sources: props.sources, ideas: props.ideas, jobs: props.jobs });
     else if (tab === 'canvas') content = window.PRCanvas ? h(window.PRCanvas, { projectId: p.id, canEdit: props.canEdit, authorId: props.authorId }) : h('div', { className: 'empty' }, 'Loading Canvas…');
     else if (tab === 'notes') content = window.PRNotes ? h(window.PRNotes, { projectId: p.id, canEdit: props.canEdit, authorId: props.authorId }) : h('div', { className: 'empty' }, 'Loading Notes…');

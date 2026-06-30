@@ -13,3 +13,6 @@ verify_jwt = false
 
 [functions.research-protocol]
 verify_jwt = false
+
+[functions.research-journals]
+verify_jwt = false

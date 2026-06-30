@@ -93,6 +93,20 @@
     .chip.c-ok { background: var(--ok-bg); color: var(--ok); } .chip.c-warn { background: var(--warn-bg); color: var(--warn); }
     .chip.c-grey { background: var(--surface-2); color: var(--muted); } .chip.c-acc { background: var(--accent-tint); color: var(--accent); }
     .chip.c-danger { background: var(--danger-bg); color: var(--danger); }
+    /* journal recommender cards */
+    .jl-card { border-bottom: 1px solid var(--soft); padding: 11px 0; }
+    .jl-card:last-child { border-bottom: 0; }
+    .jl-title { font-weight: 600; font-size: 14px; color: var(--ink); text-decoration: none; }
+    .jl-title:hover { color: var(--accent); text-decoration: underline; }
+    .jl-lvl { font-size: 10px; font-weight: 700; padding: 1.5px 7px; border-radius: 999px; flex: none; white-space: nowrap; }
+    .jl-lvl.lvl2 { background: #fef3c7; color: #92400e; }
+    .jl-lvl.lvl1 { background: var(--surface-2); color: var(--muted); }
+    .jl-q { font-size: 10px; font-weight: 700; padding: 1.5px 7px; border-radius: 999px; }
+    .jl-q.q1 { background: #dcfce7; color: #166534; } .jl-q.q2 { background: #e0f2fe; color: #075985; }
+    .jl-q.q3 { background: #fef9c3; color: #854d0e; } .jl-q.q4 { background: #fee2e2; color: #991b1b; }
+    .jl-fit { font-size: 11px; font-weight: 700; color: var(--accent); margin-left: auto; }
+    .jl-meta { font-size: 11.5px; color: var(--faint); margin-top: 3px; }
+    .jl-reason { font-size: 12.5px; color: var(--muted); margin-top: 4px; line-height: 1.45; }
     /* task attachment drag & drop zone */
     .att-drop { border: 1.5px dashed var(--line); border-radius: 9px; padding: 12px; text-align: center; font-size: 12px; color: var(--faint); transition: border-color .12s, background .12s, color .12s; }
     .att-drop.over { border-color: var(--accent); background: var(--accent-tint); color: var(--accent); }
@@ -319,8 +333,8 @@
     .mtag.warn { background: var(--warn-bg); color: var(--warn); }
     @media (max-width: 760px) { .side { width: 64px; } .side-brand i, .side-brand b, .nav button span, .side-foot .who { display: none; } .main { padding: 18px; } }
   </style>
-  <script src="theme.js?v=1782853463"></script>
-  <script src="nav.js?v=1782853463"></script>
+  <script src="theme.js?v=1782855291"></script>
+  <script src="nav.js?v=1782855291"></script>
 </head>
 
 <body>
@@ -332,19 +346,19 @@
   <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
   <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="backend/config.js?v=1782853463"></script>
-  <script src="auth.js?v=1782853463"></script>
-  <script src="backend.js?v=1782853463"></script>
-  <script src="office.js?v=1782853463"></script>
-  <script src="publications.js?v=1782853463"></script>
+  <script src="backend/config.js?v=1782855291"></script>
+  <script src="auth.js?v=1782855291"></script>
+  <script src="backend.js?v=1782855291"></script>
+  <script src="office.js?v=1782855291"></script>
+  <script src="publications.js?v=1782855291"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
-  <script type="text/babel" src="canvas.jsx?v=1782853463"></script>
-  <script type="text/babel" src="notes.jsx?v=1782853463"></script>
-  <script type="text/babel" src="research.jsx?v=1782853463"></script>
+  <script type="text/babel" src="canvas.jsx?v=1782855291"></script>
+  <script type="text/babel" src="notes.jsx?v=1782855291"></script>
+  <script type="text/babel" src="research.jsx?v=1782855291"></script>
 
-  <script src="build.js?v=1782853463"></script>
-  <script src="version-badge.js?v=1782853463"></script>
+  <script src="build.js?v=1782855291"></script>
+  <script src="version-badge.js?v=1782855291"></script>
 </body>
 
 </html>
