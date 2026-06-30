@@ -10,3 +10,6 @@ verify_jwt = false
 
 [functions.student-digest]
 verify_jwt = false
+
+[functions.research-protocol]
+verify_jwt = false

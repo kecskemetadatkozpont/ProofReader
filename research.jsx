@@ -10,7 +10,7 @@
 
   var STAGES = ['Setup', 'Idea', 'Literature', 'Protocol', 'Data', 'Compute', 'Analysis', 'Writing', 'Submission'];
   // clicking a workflow step opens the matching panel (the old redundant tab row is gone)
-  var STAGE_TAB = ['overview', 'ideas', 'literature', 'tasks', 'data', 'compute', 'compute', 'writing', 'writing'];
+  var STAGE_TAB = ['overview', 'ideas', 'literature', 'protocol', 'data', 'compute', 'compute', 'writing', 'writing'];
   function svg() { var args = Array.prototype.slice.call(arguments); return h('svg', { viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round', strokeLinejoin: 'round' }, args.map(function (d, i) { return h('path', { key: i, d: d }); })); }
   var STAGE_ICONS = [
     svg('M4 14V2.5', 'M4 3h7l-1.4 2.3L11 7.6H4'),                                         // Setup — flag
@@ -1441,6 +1441,120 @@
     );
   }
 
+  // ---------- Protocol (executable research plan; a Claude agent on a dedicated machine runs the steps) ----------
+  function ProtocolPanel(props) {
+    var STEP_ICON = { data: '🗄️', preprocess: '🧹', train: '🏋️', eval: '📊', analysis: '🔬', figure: '📈', writeup: '✍️', custom: '•' };
+    var KINDS = ['data', 'preprocess', 'train', 'eval', 'analysis', 'figure', 'writeup', 'custom'];
+    var PST = { todo: ['c-grey', 'To do'], queued: ['c-acc', 'Queued'], running: ['c-warn', 'Running…'], blocked: ['c-warn', '⏸ Needs approval'], done: ['c-ok', '✓ Done'], failed: ['c-danger', '✗ Failed'], skipped: ['c-grey', 'Skipped'] };
+    var PROT_CHIP = { draft: 'c-grey', ready: 'c-acc', running: 'c-warn', paused: 'c-grey', done: 'c-ok', failed: 'c-danger' };
+    var lp = useState(null), prot = lp[0], setProt = lp[1];
+    var sp = useState([]), steps = sp[0], setSteps = sp[1];
+    var ld = useState(true), loading = ld[0], setLoading = ld[1];
+    var gg = useState(''), goal = gg[0], setGoal = gg[1];
+    var bz = useState(false), busy = bz[0], setBusy = bz[1];
+    var ex = useState({}), exp = ex[0], setExp = ex[1];
+    var ce = props.canEdit;
+    function load() {
+      sb.from('research_protocols').select('*').eq('project_id', props.projectId).neq('status', 'archived').order('created_at', { ascending: false }).limit(1).then(function (r) {
+        var pp = (r && r.data && r.data[0]) || null; setProt(pp); setLoading(false);
+        if (pp) sb.from('research_protocol_steps').select('*').eq('protocol_id', pp.id).order('ord', { ascending: true }).then(function (s) { setSteps((s && s.data) || []); });
+        else setSteps([]);
+      }, function () { setLoading(false); });
+    }
+    useEffect(function () { load(); }, [props.projectId]);
+    useEffect(function () { if (!prot || prot.status !== 'running') return; var t = setInterval(load, 5000); return function () { clearInterval(t); }; }, [prot && prot.id, prot && prot.status]);
+    function generate() {
+      if (busy) return; setBusy(true);
+      sb.functions.invoke('research-protocol', { body: { action: 'generate', project_id: props.projectId, goal: goal } }).then(function (r) {
+        setBusy(false);
+        var err = (r && r.data && r.data.error) || (r && r.error && r.error.message);
+        if (err) { window.PRUI.toast('Generation failed: ' + err, { kind: 'error' }); return; }
+        setGoal(''); load(); if (props.onChanged) props.onChanged();
+      }, function (e) { setBusy(false); window.PRUI.toast('Generation failed: ' + e, { kind: 'error' }); });
+    }
+    function setPStatus(st) { sb.from('research_protocols').update({ status: st, updated_at: new Date().toISOString() }).eq('id', prot.id).then(load); }
+    function setProtField(field, val) { var patch = {}; patch[field] = val; patch.updated_at = new Date().toISOString(); sb.from('research_protocols').update(patch).eq('id', prot.id).then(function () { }); }
+    function patchStep(s, patch) { sb.from('research_protocol_steps').update(patch).eq('id', s.id).then(load); }
+    function delStep(s) { window.PRUI.confirm({ title: 'Delete step?', body: s.title, danger: true, confirmLabel: 'Delete' }).then(function (ok) { if (ok) sb.from('research_protocol_steps').delete().eq('id', s.id).then(load); }); }
+    function move(s, dir) {
+      var i = steps.findIndex(function (x) { return x.id === s.id; }); var j = i + dir; if (j < 0 || j >= steps.length) return;
+      var a = steps[i], b = steps[j], oa = a.ord, ob = b.ord;   // 3-step swap to respect unique(protocol_id, ord)
+      sb.from('research_protocol_steps').update({ ord: -1 }).eq('id', a.id).then(function () {
+        sb.from('research_protocol_steps').update({ ord: oa }).eq('id', b.id).then(function () {
+          sb.from('research_protocol_steps').update({ ord: ob }).eq('id', a.id).then(load); }); });
+    }
+    function addStep() { var mx = steps.reduce(function (m, x) { return Math.max(m, x.ord); }, 0); sb.from('research_protocol_steps').insert({ protocol_id: prot.id, ord: mx + 1, title: 'New step', kind: 'custom', spec: {} }).then(load); }
+
+    if (loading) return h('div', { className: 'empty' }, 'Loading protocol…');
+
+    if (!prot) return h('div', { className: 'panel' },
+      h('h3', { style: { marginTop: 0 } }, '🧪 Protocol'),
+      h('p', { style: { fontSize: 13, color: 'var(--muted)', lineHeight: 1.5 } }, 'Generate an executable research plan — an ordered ToDo list (data → preprocess → baselines → method → evaluation → figures) built from your idea and the literature you selected in Studies. A Claude agent on your dedicated machine can then run it step by step, with your approval on the expensive ones.'),
+      ce ? h('div', null,
+        h('textarea', { className: 'field', rows: 2, style: { width: '100%', boxSizing: 'border-box', marginBottom: 8 }, placeholder: 'Optional goal / constraints (e.g. "reproduce the per-class AUROC + Fisher fusion rescue on nuScenes")', value: goal, onChange: function (e) { setGoal(e.target.value); } }),
+        h('button', { className: 'btn pri', disabled: busy, onClick: generate }, busy ? '✨ Generating…' : '✨ Generate protocol')
+      ) : h('div', { className: 'empty' }, 'No protocol yet.')
+    );
+
+    var done = steps.filter(function (s) { return s.status === 'done'; }).length;
+    var pct = steps.length ? Math.round(done / steps.length * 100) : 0;
+    var alive = prot.heartbeat_at && (Date.now() - new Date(prot.heartbeat_at).getTime() < 30000);
+    return h('div', null,
+      h('div', { className: 'panel' },
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
+          h('h3', { style: { margin: 0, flex: 1, minWidth: 160 } }, '🧪 ', prot.title),
+          h('span', { className: 'chip ' + (PROT_CHIP[prot.status] || 'c-grey') }, prot.status),
+          ce ? h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12, flex: 'none' }, disabled: busy, title: 'Re-generate (archives the current one)', onClick: generate }, busy ? '✨…' : '↻ Re-generate') : null,
+          (ce && (prot.status === 'draft' || prot.status === 'paused')) ? h('button', { className: 'btn pri', style: { padding: '4px 10px', fontSize: 12, flex: 'none' }, title: 'Make it claimable by your dedicated runner', onClick: function () { setPStatus('ready'); } }, '▶ Mark ready') : null,
+          (ce && (prot.status === 'ready' || prot.status === 'running')) ? h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12, flex: 'none' }, onClick: function () { setPStatus('paused'); } }, '⏸ Pause') : null
+        ),
+        prot.goal ? h('div', { style: { fontSize: 12.5, color: 'var(--muted)', marginTop: 4 } }, prot.goal) : null,
+        h('div', { className: 'meter', style: { marginTop: 10 } }, h('i', { style: { width: pct + '%' } })),
+        h('div', { style: { display: 'flex', gap: 12, fontSize: 11.5, color: 'var(--muted)', marginTop: 4 } },
+          h('span', null, done + '/' + steps.length + ' done · ' + pct + '%'),
+          alive ? h('span', { style: { color: 'var(--ok)' } }, '● runner active') : (prot.status === 'ready' ? h('span', null, 'waiting for a runner to claim it…') : null)),
+        ce ? h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 } },
+          h('input', { className: 'field', style: { flex: 1, minWidth: 140 }, placeholder: 'Runner ID (dedicated machine)', defaultValue: prot.runner_id || '', onBlur: function (e) { setProtField('runner_id', e.target.value || null); } }),
+          h('input', { className: 'field', style: { flex: 2, minWidth: 180 }, placeholder: 'Repo URL (git)', defaultValue: (prot.repo && prot.repo.url) || '', onBlur: function (e) { setProtField('repo', Object.assign({}, prot.repo || {}, { url: e.target.value })); } })
+        ) : null
+      ),
+      h('div', { className: 'panel' },
+        h('h3', null, 'Steps (' + steps.length + ')', ce ? h('button', { className: 'btn', style: { marginLeft: 'auto', padding: '3px 9px', fontSize: 11.5, flex: 'none' }, onClick: addStep }, '+ Add step') : null),
+        steps.length ? steps.map(function (s, i) {
+          var open = !!exp[s.id]; var pst = PST[s.status] || PST.todo; var sx = s.spec || {};
+          return h('div', { key: s.id, style: { borderBottom: '1px solid var(--soft)', padding: '8px 0' } },
+            h('div', { style: { display: 'flex', gap: 8, alignItems: 'center' } },
+              h('span', { style: { width: 18, textAlign: 'right', color: 'var(--faint)', fontSize: 12, flex: 'none' } }, s.ord),
+              h('span', { 'aria-hidden': 'true', title: s.kind, style: { fontSize: 14, flex: 'none' } }, STEP_ICON[s.kind] || '•'),
+              h('button', { style: { flex: 1, minWidth: 0, textAlign: 'left', border: 0, background: 'transparent', font: 'inherit', cursor: 'pointer', color: 'var(--ink)', fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }, onClick: function () { setExp(function (p) { var n = Object.assign({}, p); n[s.id] = !n[s.id]; return n; }); } }, (open ? '▾ ' : '▸ ') + s.title),
+              s.needs_approval ? h('span', { className: 'chip c-warn', style: { fontSize: 10, flex: 'none' }, title: 'Requires your approval before the runner executes it' }, '⏸') : null,
+              (s.depends_on && s.depends_on.length) ? h('span', { style: { fontSize: 10.5, color: 'var(--faint)', flex: 'none' }, title: 'Runs after these steps' }, 'after ' + s.depends_on.join(',')) : null,
+              h('span', { className: 'chip ' + pst[0], style: { fontSize: 10, flex: 'none' } }, pst[1])
+            ),
+            open ? h('div', { style: { margin: '6px 0 2px 28px', fontSize: 12.5, color: 'var(--muted)', lineHeight: 1.5 } },
+              sx.instruction ? h('div', null, sx.instruction) : null,
+              (sx.inputs && sx.inputs.length) ? h('div', { style: { marginTop: 4 } }, h('b', null, 'Inputs: '), sx.inputs.join(', ')) : null,
+              (sx.expected_outputs && sx.expected_outputs.length) ? h('div', null, h('b', null, 'Outputs: '), sx.expected_outputs.join(', ')) : null,
+              (sx.acceptance && sx.acceptance.length) ? h('div', null, h('b', null, 'Done when: '), sx.acceptance.join('; ')) : null,
+              sx.command_hint ? h('div', { style: { marginTop: 4, fontFamily: 'monospace', fontSize: 11.5, background: 'var(--soft)', padding: '4px 7px', borderRadius: 6, whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, sx.command_hint) : null,
+              sx.est_minutes ? h('span', { style: { fontSize: 11, color: 'var(--faint)' } }, '~' + sx.est_minutes + ' min') : null,
+              (s.result && s.result.error) ? h('div', { style: { marginTop: 4, color: 'var(--danger)' } }, '⚠ ' + s.result.error) : null,
+              (s.result && s.result.metrics) ? h('div', { style: { marginTop: 4, fontFamily: 'monospace', fontSize: 11.5 } }, JSON.stringify(s.result.metrics)) : null,
+              ce ? h('div', { style: { display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8, alignItems: 'center' } },
+                h('button', { className: 'btn', style: { padding: '2px 7px', fontSize: 11 }, disabled: i === 0, onClick: function () { move(s, -1); } }, '↑'),
+                h('button', { className: 'btn', style: { padding: '2px 7px', fontSize: 11 }, disabled: i === steps.length - 1, onClick: function () { move(s, 1); } }, '↓'),
+                h('select', { className: 'btn', style: { padding: '2px 7px', fontSize: 11 }, value: s.kind, onChange: function (e) { patchStep(s, { kind: e.target.value }); } }, KINDS.map(function (k) { return h('option', { key: k, value: k }, k); })),
+                h('button', { className: 'btn' + (s.needs_approval ? ' pri' : ''), style: { padding: '2px 7px', fontSize: 11 }, onClick: function () { patchStep(s, { needs_approval: !s.needs_approval }); } }, s.needs_approval ? '⏸ approval on' : 'approval off'),
+                (s.status === 'blocked' || (s.needs_approval && s.status === 'todo')) ? h('button', { className: 'btn pri', style: { padding: '2px 7px', fontSize: 11 }, title: 'Approve so the runner may execute this step', onClick: function () { patchStep(s, { status: 'queued' }); } }, '✓ Approve to run') : null,
+                h('button', { className: 'btn', style: { padding: '2px 7px', fontSize: 11, color: 'var(--danger)' }, onClick: function () { delStep(s); } }, 'Delete')
+              ) : null
+            ) : null
+          );
+        }) : h('div', { className: 'empty' }, 'No steps.')
+      )
+    );
+  }
+
   // ---------- Project detail ----------
   function ProjectDetail(props) {
     var p = props.project;
@@ -1468,6 +1582,7 @@
     if (tab === 'ideas') content = h('div', null, h(ChatPanel, { projectId: p.id, supervised: !!p.student_id, canEdit: props.canEdit, authorId: props.authorId, fileOwnerId: props.fileOwnerId, sources: props.sources, onChanged: props.onChanged }), h(IdeasPanel, { projectId: p.id, ideas: props.ideas, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, onStartStudyMulti: function (ideas) { setAutoStudy(ideas || []); setTab('study'); }, onGoStudy: function () { setTab('study'); } }));
     else if (tab === 'literature') content = h(LiteraturePanel, { projectId: p.id, sources: props.sources, studies: props.studies, canEdit: props.canEdit, myEmail: props.myEmail, onChanged: props.onChanged });
     else if (tab === 'study') content = null;   // #9: rendered persistently below so a running study survives tab switches
+    else if (tab === 'protocol') content = h(ProtocolPanel, { projectId: p.id, ideas: props.ideas, sources: props.sources, studies: props.studies, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
     else if (tab === 'data') content = h(DataPanel, { projectId: p.id, datasets: props.datasets, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
     else if (tab === 'compute') content = h(ComputePanel, { projectId: p.id, jobs: props.jobs, datasets: props.datasets, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
     else if (tab === 'writing') content = h(WritingPanel, { project: p, sources: props.sources, ideas: props.ideas, jobs: props.jobs });
