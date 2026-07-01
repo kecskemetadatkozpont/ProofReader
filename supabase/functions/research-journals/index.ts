@@ -11,7 +11,30 @@ async function callClaude(system: string, user: string, max = 4000): Promise<str
   const o = await r.json(); if (o.error) throw new Error(o.error.message || 'anthropic');
   return (o.content || []).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n').trim();
 }
-const SEL = 'id,title,field,discipline,npi_level,npi_level_year,sjr,sjr_quartile,h_index,country,open_access,publisher,url';
+const SEL = 'id,title,field,discipline,npi_level,npi_level_year,sjr,sjr_quartile,h_index,country,open_access,publisher,url,issn_print,issn_online';
+
+// Enrich candidates with real OpenAlex impact (h-index + 2-year mean citedness) on ISSN. Scimago's own SJR/quartile
+// is Cloudflare-gated for automated download, so we use OpenAlex (reliable, free) as the impact layer.
+async function enrichOpenAlex(cands: any[]) {
+  const byIssn = new Map<string, any>();
+  for (const c of cands) for (const s of [c.issn_print, c.issn_online]) if (s) byIssn.set(String(s).trim(), c);
+  const issns = Array.from(byIssn.keys());
+  for (let i = 0; i < issns.length; i += 50) {
+    const flt = issns.slice(i, i + 50).join('|');
+    try {
+      const r = await fetch(`https://api.openalex.org/sources?per-page=200&mailto=publify@users.noreply&select=issn,summary_stats,works_count&filter=issn:${encodeURIComponent(flt)}`);
+      const o = await r.json();
+      for (const src of (o.results || [])) {
+        const st = src.summary_stats || {};
+        for (const is of (src.issn || [])) {
+          const c = byIssn.get(String(is).trim());
+          if (c && c._oa == null) { c.impact = st['2yr_mean_citedness'] != null ? Math.round(st['2yr_mean_citedness'] * 100) / 100 : null; if (st.h_index != null) c.h_index = st.h_index; c.oa_works = src.works_count; c._oa = 1; }
+        }
+      }
+    } catch (_e) { /* skip batch */ }
+  }
+  for (const c of cands) delete c._oa;
+}
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
@@ -62,10 +85,11 @@ Deno.serve(async (req) => {
       }
       const cand = Array.from(byId.values()).slice(0, 100);
       if (!cand.length) return json({ ok: true, fields, keywords: kwList, summary: fm.summary, journals: [], note: 'No matching journals in the register for these fields yet.' });
+      await enrichOpenAlex(cand);
 
-      const sys2 = 'You are a scholarly publishing advisor. Rank the candidate journals by suitability for publishing the described research. Weigh topical/scope fit highest, then prestige (Norwegian level 2 > level 1; Scimago Q1 > Q2 when present). Only recommend genuinely on-topic venues. Return ONLY JSON: {"ranked":[{"id":<journal id>,"fit_score":<integer 0-100>,"fit_reason":"<one concise sentence: why it fits this research>"}]} for the BEST 12, most suitable first.';
-      const u2 = `RESEARCH: ${fm.summary}\nKEYWORDS: ${kwList.join(', ')}\n\nCANDIDATES (id | title | field | level | quartile | country | OA):\n` +
-        cand.map((c) => `${c.id} | ${c.title} | ${c.field || ''} | L${c.npi_level} | ${c.sjr_quartile || '-'} | ${c.country || ''} | ${c.open_access || ''}`).join('\n');
+      const sys2 = 'You are a scholarly publishing advisor. Rank the candidate journals by suitability for publishing the described research. Weigh topical/scope fit highest, then prestige (Norwegian level 2 > level 1) and impact (higher 2-year mean citedness / h-index). Only recommend genuinely on-topic venues. Return ONLY JSON: {"ranked":[{"id":<journal id>,"fit_score":<integer 0-100>,"fit_reason":"<one concise sentence: why it fits this research>"}]} for the BEST 12, most suitable first.';
+      const u2 = `RESEARCH: ${fm.summary}\nKEYWORDS: ${kwList.join(', ')}\n\nCANDIDATES (id | title | field | NorwegianLevel | impact(2yr citedness) | h-index | country | OA):\n` +
+        cand.map((c) => `${c.id} | ${c.title} | ${c.field || ''} | L${c.npi_level} | ${c.impact != null ? c.impact : '-'} | ${c.h_index != null ? c.h_index : '-'} | ${c.country || ''} | ${c.open_access || ''}`).join('\n');
       const r2 = await callClaude(sys2, u2, 4000);
       const m2 = r2.match(/\{[\s\S]*\}/); if (!m2) return json({ error: 'ranking returned no JSON' }, 502);
       const ranked: any[] = (JSON.parse(m2[0]).ranked || []);

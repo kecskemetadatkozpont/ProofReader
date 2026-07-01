@@ -334,6 +334,20 @@
     return ReactDOM.createPortal(h('div', { className: 'rv-scrim', onClick: props.onClose },
       h('div', { className: 'rv-shell', onClick: function (e) { e.stopPropagation(); } }, bar, main)), document.body);
   }
+  // Reusable "the AI is working" indicator: pulsing orb + animated label + indeterminate bar + honest elapsed timer.
+  function AiThinking(props) {
+    var t = useState(0), sec = t[0], setSec = t[1];
+    useEffect(function () {
+      var t0 = Date.now(); var iv = setInterval(function () { setSec(Math.max(0, Math.round((Date.now() - t0) / 1000))); }, 250);
+      return function () { clearInterval(iv); };
+    }, []);
+    return h('div', { className: 'ai-think', role: 'status', 'aria-live': 'polite', style: props.mini ? { padding: '7px 10px' } : null },
+      h('span', { className: 'ai-orb', 'aria-hidden': 'true' }),
+      h('div', { style: { flex: 1, minWidth: 0 } },
+        h('div', { className: 'ai-think-lbl' }, (props.label || 'The AI is thinking'), h('span', { className: 'ai-dots', 'aria-hidden': 'true' })),
+        props.mini ? null : h('div', { className: 'ai-ind' }, h('i'))),
+      h('span', { className: 'ai-think-sec' }, sec + 's'));
+  }
   var CHAT_SUGGEST = ['What are the open problems in this field?', 'Summarize the key methods used so far.', 'Suggest 3 testable research questions for my goal.', 'What evidence would support or refute my hypothesis?'];
   // In a chat reply, the AI saves files via fenced ```file:<path> … ``` blocks. For DISPLAY we collapse
   // those to a compact chip (the full content lives in the file browser, not inline in the chat).
@@ -1581,6 +1595,7 @@
         st.id ? h('button', { className: 'btn', style: { padding: '4px 9px', fontSize: 12, flex: 'none' }, disabled: refining, title: 'Let Publify improve this step', onClick: refine }, refining ? '✨…' : '✨ Refine') : null,
         h('button', { className: 'icon-x', 'aria-label': 'Close', onClick: props.onClose }, '✕')),
       h('div', { style: { padding: 16, display: 'flex', flexDirection: 'column', gap: 10, maxHeight: '70vh', overflow: 'auto' } },
+        refining ? h(AiThinking, { label: 'Refining this task', mini: true }) : null,
         h('div', { style: { display: 'flex', gap: 8 } },
           h('input', { className: 'field', style: { flex: 1 }, placeholder: 'Task title', value: title, onChange: function (e) { setTitle(e.target.value); } }),
           h('select', { className: 'field', style: { width: 130, flex: 'none' }, value: kind, onChange: function (e) { setKind(e.target.value); } }, PROT_KINDS.map(function (x) { return h('option', { key: x, value: x }, x); }))),
@@ -1728,8 +1743,9 @@
       h('h3', { style: { marginTop: 0 } }, '🧪 Protocol'),
       h('p', { style: { fontSize: 13, color: 'var(--muted)', lineHeight: 1.5 } }, 'Generate an executable research plan — an ordered ToDo list (data → preprocess → baselines → method → evaluation → figures) built from your idea and the literature you selected in Studies. A Claude agent on your dedicated machine can then run it step by step, with your approval on the expensive ones.'),
       ce ? h('div', null,
-        h('textarea', { className: 'field', rows: 2, style: { width: '100%', boxSizing: 'border-box', marginBottom: 8 }, placeholder: 'Optional goal / constraints (e.g. "reproduce the per-class AUROC + Fisher fusion rescue on nuScenes")', value: goal, onChange: function (e) { setGoal(e.target.value); } }),
-        h('button', { className: 'btn pri', disabled: busy, onClick: generate }, busy ? '✨ Generating…' : '✨ Generate protocol')
+        h('textarea', { className: 'field', rows: 2, style: { width: '100%', boxSizing: 'border-box', marginBottom: 8 }, placeholder: 'Optional goal / constraints (e.g. "reproduce the per-class AUROC + Fisher fusion rescue on nuScenes")', value: goal, disabled: busy, onChange: function (e) { setGoal(e.target.value); } }),
+        h('button', { className: 'btn pri', disabled: busy, onClick: generate }, busy ? '✨ Working…' : '✨ Generate protocol'),
+        busy ? h('div', { style: { marginTop: 10 } }, h(AiThinking, { label: 'Reading your idea & the selected literature, drafting an executable protocol' })) : null
       ) : h('div', { className: 'empty' }, 'No protocol yet.')
     );
 
@@ -1766,7 +1782,8 @@
         ce ? h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 } },
           h('input', { className: 'field', style: { flex: 1, minWidth: 140 }, placeholder: 'Runner ID (dedicated machine)', defaultValue: prot.runner_id || '', onBlur: function (e) { setProtField('runner_id', e.target.value || null); } }),
           h('input', { className: 'field', style: { flex: 2, minWidth: 180 }, placeholder: 'Repo URL (git)', defaultValue: (prot.repo && prot.repo.url) || '', onBlur: function (e) { setProtField('repo', Object.assign({}, prot.repo || {}, { url: e.target.value })); } })
-        ) : null
+        ) : null,
+        busy ? h('div', { style: { marginTop: 10 } }, h(AiThinking, { label: 'The AI is working on this protocol' })) : null
       ),
       h('div', { className: 'panel' },
         h('h3', null, 'Steps (' + steps.length + ')', ce ? h('button', { className: 'btn', style: { marginLeft: 'auto', padding: '3px 9px', fontSize: 11.5, flex: 'none' }, onClick: function () { setEditing({ step: {}, isNew: true, after: null }); } }, '+ Add task') : null),
@@ -1815,9 +1832,11 @@
             ) : null
           );
         }) : h('div', { className: 'empty' }, 'No steps.'),
-        ce ? h('div', { style: { display: 'flex', gap: 6, marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--line)' } },
-          h('input', { className: 'field', style: { flex: 1, minWidth: 0 }, placeholder: '✨ Describe task(s) to add — e.g. "add an ablation comparing fusion variants"', value: aiPrompt, onChange: function (e) { setAiPrompt(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter') aiAppend(); } }),
-          h('button', { className: 'btn', style: { flex: 'none' }, disabled: aiBusy || !aiPrompt.trim(), onClick: aiAppend }, aiBusy ? '✨…' : '✨ Add tasks')
+        ce ? h('div', { style: { marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--line)' } },
+          h('div', { style: { display: 'flex', gap: 6 } },
+            h('input', { className: 'field', style: { flex: 1, minWidth: 0 }, placeholder: '✨ Describe task(s) to add — e.g. "add an ablation comparing fusion variants"', value: aiPrompt, disabled: aiBusy, onChange: function (e) { setAiPrompt(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter') aiAppend(); } }),
+            h('button', { className: 'btn', style: { flex: 'none' }, disabled: aiBusy || !aiPrompt.trim(), onClick: aiAppend }, aiBusy ? '✨ Working…' : '✨ Add tasks')),
+          aiBusy ? h('div', { style: { marginTop: 8 } }, h(AiThinking, { label: 'Drafting new tasks from your prompt' })) : null
         ) : null
       ),
       editing ? h(TaskEditorModal, { step: editing.step, isNew: editing.isNew, allSteps: steps, projectId: props.projectId, onSave: saveTask, onClose: function () { setEditing(null); } }) : null
@@ -1853,6 +1872,8 @@
         h('div', { style: { display: 'flex', gap: 7, alignItems: 'baseline', flexWrap: 'wrap' } },
           h('a', { href: j.url || '#', target: '_blank', rel: 'noopener noreferrer', className: 'jl-title' }, j.title),
           levelBadge(j.npi_level), quartile(j.sjr_quartile),
+          j.impact != null ? h('span', { className: 'jl-q', style: { background: 'var(--surface-2)', color: 'var(--muted)' }, title: '2-year mean citedness (OpenAlex)' }, '⌀ ' + j.impact) : null,
+          j.h_index != null ? h('span', { className: 'jl-q', style: { background: 'var(--surface-2)', color: 'var(--muted)' }, title: 'h-index (OpenAlex)' }, 'h ' + j.h_index) : null,
           j.fit_score != null ? h('span', { className: 'jl-fit' }, j.fit_score + '% fit') : null),
         h('div', { className: 'jl-meta' }, [j.field, j.country, j.open_access ? 'OA: ' + j.open_access : null, j.publisher].filter(Boolean).join(' · ')),
         j.fit_reason ? h('div', { className: 'jl-reason' }, j.fit_reason) : null,
@@ -1862,10 +1883,12 @@
     return h('div', null,
       h('div', { className: 'panel' },
         h('h3', { style: { marginTop: 0 } }, '🎯 Journal recommender'),
-        h('p', { style: { fontSize: 13, color: 'var(--muted)', lineHeight: 1.5 } }, 'Suggests where to publish — from the Norwegian publication register (level 1–2 quality) matched to your research questions and results. 29,685 vetted journals indexed; Scimago quartiles fold in as available.'),
-        ce ? h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap' } },
-          h('input', { className: 'field', style: { flex: 1, minWidth: 180 }, placeholder: 'Optional preference (e.g. "open access", "high impact", "European venue")', value: hint, onChange: function (e) { setHint(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter') recommend(); } }),
-          h('button', { className: 'btn pri', style: { flex: 'none' }, disabled: busy, onClick: recommend }, busy ? '✨ Finding journals…' : '✨ Recommend journals')
+        h('p', { style: { fontSize: 13, color: 'var(--muted)', lineHeight: 1.5 } }, 'Suggests where to publish — from the Norwegian publication register (level 1–2 quality) matched to your research questions & results, enriched with OpenAlex impact (2-yr citedness, h-index). 29,685 vetted journals indexed. Scimago SJR/quartile can be folded in from a manual export.'),
+        ce ? h('div', null,
+          h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap' } },
+            h('input', { className: 'field', style: { flex: 1, minWidth: 180 }, placeholder: 'Optional preference (e.g. "open access", "high impact", "European venue")', value: hint, disabled: busy, onChange: function (e) { setHint(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter') recommend(); } }),
+            h('button', { className: 'btn pri', style: { flex: 'none' }, disabled: busy, onClick: recommend }, busy ? '✨ Working…' : '✨ Recommend journals')),
+          busy ? h('div', { style: { marginTop: 10 } }, h(AiThinking, { label: 'Matching your research to fields, then ranking journals' })) : null
         ) : null),
       rec ? h('div', { className: 'panel' },
         h('div', { style: { fontSize: 12.5, color: 'var(--muted)', marginBottom: 3 } }, h('b', null, 'Matched fields: '), (rec.fields || []).join(', ') || '—'),
