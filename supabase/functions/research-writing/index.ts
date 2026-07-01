@@ -42,8 +42,18 @@ Deno.serve(async (req) => {
         // dedup figures that repeat across steps (same caption) so each distinct figure is placed exactly once
         const seenCap = new Set<string>(); figures = figures.filter((f) => { const c = String(f.caption || '').trim().toLowerCase(); if (!c || seenCap.has(c)) return false; seenCap.add(c); return true; });
       }
-      // literature (included) → bib
-      const srcs: any[] = (await sb.from('research_sources').select('title,authors,year,venue,doi,url').eq('project_id', projectId).eq('screening', 'include').limit(60)).data || [];
+      // literature to cite — from BOTH the library screening AND the Literature Study funnel includes
+      const SSEL = 'id,title,authors,year,venue,doi,url,cited_by';
+      const byId = new Map<any, any>();
+      ((await sb.from('research_sources').select(SSEL).eq('project_id', projectId).eq('screening', 'include').limit(120)).data || []).forEach((s: any) => byId.set(s.id, s));
+      const studies: any[] = (await sb.from('research_studies').select('id').eq('project_id', projectId)).data || [];
+      if (studies.length) {
+        const sp: any[] = (await sb.from('research_study_papers').select('source_id').in('study_id', studies.map((x) => x.id)).eq('decision', 'include').limit(500)).data || [];
+        const need = Array.from(new Set(sp.map((x) => x.source_id).filter((id: any) => id != null && !byId.has(id))));
+        if (need.length) ((await sb.from('research_sources').select(SSEL).in('id', need).limit(300)).data || []).forEach((s: any) => byId.set(s.id, s));
+      }
+      let srcs: any[] = Array.from(byId.values());
+      if (!srcs.length) srcs = (await sb.from('research_sources').select(SSEL).eq('project_id', projectId).order('cited_by', { ascending: false, nullsFirst: false }).limit(40)).data || [];
       const used = new Set<string>(); const literature = srcs.map((s) => ({ key: bibKey(s.authors, s.year, used), title: s.title, authors: s.authors, year: s.year, venue: s.venue, doi: s.doi, url: s.url }));
       // journal
       let journal: any = { name: '', family: 'generic-latex', notes: '' };
