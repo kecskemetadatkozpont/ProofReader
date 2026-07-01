@@ -1,0 +1,73 @@
+import { createClient } from 'jsr:@supabase/supabase-js@2';
+const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type', 'Access-Control-Allow-Methods': 'POST, OPTIONS' };
+const ANTHROPIC_KEY = Deno.env.get('ANTHROPIC_API_KEY');
+const BEST = 'claude-opus-4-8';          // always use the best model for the manuscript
+const FALLBACK = 'claude-sonnet-4-6';
+function json(b: unknown, s = 200) { return new Response(JSON.stringify(b), { status: s, headers: { ...CORS, 'Content-Type': 'application/json' } }); }
+async function callClaude(system: string, user: string, max = 4000, model = BEST): Promise<string> {
+  const r = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST', headers: { 'x-api-key': ANTHROPIC_KEY!, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+    body: JSON.stringify({ model, max_tokens: max, system, messages: [{ role: 'user', content: user }] }),
+  });
+  const o = await r.json();
+  if (o.error) { if (model !== FALLBACK && /model|not_found|permission/i.test(o.error.message || '')) return callClaude(system, user, max, FALLBACK); throw new Error(o.error.message || 'anthropic'); }
+  return (o.content || []).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n').trim();
+}
+function bibKey(authors: any, year: any, used: Set<string>) {
+  let a = 'ref'; if (Array.isArray(authors) && authors.length) a = String(authors[0]).split(/[\s,]+/)[0]; else if (typeof authors === 'string') a = authors.split(/[\s,]+/)[0];
+  a = a.replace(/[^A-Za-z]/g, '').toLowerCase() || 'ref'; let k = a + (year || 'n'); let i = 1; while (used.has(k)) { k = a + (year || 'n') + String.fromCharCode(96 + i++); } used.add(k); return k;
+}
+
+Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
+  try {
+    if (!ANTHROPIC_KEY) return json({ error: 'ANTHROPIC_API_KEY not set' }, 503);
+    const sb = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!, { global: { headers: { Authorization: req.headers.get('Authorization') || '' } } });
+    const { data: ures } = await sb.auth.getUser();
+    if (!ures || !ures.user) return json({ error: 'unauthorized' }, 401);
+    const body = await req.json().catch(() => ({}));
+    const action = String(body.action || '');
+    const projectId = String(body.project_id || '');
+    if (!projectId) return json({ error: 'project_id required' }, 400);
+
+    if (action === 'outline') {
+      const proj: any = (await sb.from('research_projects').select('*').eq('id', projectId).single()).data || {};
+      const ideas: any[] = (await sb.from('research_ideas').select('question,hypothesis,status').eq('project_id', projectId).limit(6)).data || [];
+      const prot: any = ((await sb.from('research_protocols').select('id,title,goal').eq('project_id', projectId).neq('status', 'archived').order('created_at', { ascending: false }).limit(1)).data || [])[0];
+      let resultsTxt = ''; const figures: any[] = [];
+      if (prot) {
+        const steps: any[] = (await sb.from('research_protocol_steps').select('ord,title,result,spec').eq('protocol_id', prot.id).order('ord')).data || [];
+        resultsTxt = steps.map((s) => { const r = s.result || {}; const met = r.metrics ? '\n  metrics: ' + JSON.stringify(r.metrics).slice(0, 800) : ''; return `[Step ${s.ord}] ${s.title}${r.summary ? '\n  ' + r.summary : ''}${met}`; }).join('\n');
+        steps.forEach((s) => (s.result && s.result.figures || []).forEach((f: any, i: number) => figures.push({ key: `fig_${s.ord}_${i + 1}`, caption: f.title || ('Figure from step ' + s.ord) })));
+      }
+      // literature (included) → bib
+      const srcs: any[] = (await sb.from('research_sources').select('title,authors,year,venue,doi,url').eq('project_id', projectId).eq('screening', 'include').limit(60)).data || [];
+      const used = new Set<string>(); const literature = srcs.map((s) => ({ key: bibKey(s.authors, s.year, used), title: s.title, authors: s.authors, year: s.year, venue: s.venue, doi: s.doi, url: s.url }));
+      // journal
+      let journal: any = { name: '', family: 'generic-latex', notes: '' };
+      if (body.journal_pick_id) { const jp: any = (await sb.from('research_journal_picks').select('title,field,npi_level,details,template').eq('id', body.journal_pick_id).single()).data; if (jp) { const t = jp.template || {}; const d = jp.details || {}; journal = { name: jp.title, family: t.family || 'generic-latex', class_notes: t.notes || '', scope: d.scope || '', field: jp.field }; } }
+
+      const research = `PROJECT: ${proj.title || ''}\nDESCRIPTION: ${proj.topic || proj.description || proj.summary || ''}\n` +
+        `RESEARCH QUESTION: ${(ideas[0] && ideas[0].question) || ''}\nHYPOTHESIS: ${(ideas[0] && ideas[0].hypothesis) || ''}\n` +
+        (prot ? `\nPROTOCOL: ${prot.title}\nGOAL: ${prot.goal || ''}\n\nRESULTS (verbatim from the executed protocol — the ONLY results you may report):\n${resultsTxt}\n` : '');
+
+      const sys = 'You are a senior author planning a research manuscript for a specific journal. Design an outline grounded ONLY in the provided real results — never invent findings or numbers. Return ONLY JSON: {"title":"paper title","abstract":"150-220 word abstract using only the real results","keywords":["5-6"],"sections":[{"key":"introduction|related_work|method|results|discussion|conclusion|<slug>","heading":"Section heading","points":["3-6 bullet points to cover"],"cite_keys":["bib keys to cite here"],"figure_keys":["figure keys to place here"]}]}. Include the standard sections (Introduction, Related Work, Method, Results, Discussion, Conclusion) adapted to the journal. Put every figure in a sensible section.';
+      const u = `${research}\n\nTARGET JOURNAL: ${journal.name || '(unspecified)'} — family ${journal.family}; scope: ${journal.scope || 'n/a'}\n\nAVAILABLE FIGURES: ${figures.map((f) => f.key + ' = ' + f.caption).join(' | ') || '(none)'}\n\nLITERATURE (cite by key):\n${literature.map((l) => `${l.key}: ${l.title} (${l.year || 'n.d.'})`).join('\n') || '(none)'}`;
+      const raw = await callClaude(sys, u, 3000);
+      const m = raw.match(/\{[\s\S]*\}/); if (!m) return json({ error: 'outline returned no JSON' }, 502);
+      let ol: any; try { ol = JSON.parse(m[0]); } catch (e) { return json({ error: 'bad outline JSON: ' + e }, 502); }
+      const context = { research, results: resultsTxt, literature, figures, journal, title: ol.title, abstract: ol.abstract, keywords: ol.keywords };
+      return json({ ok: true, outline: ol, context, model: BEST });
+    }
+
+    if (action === 'section') {
+      const ctx = body.context || {}; const sec = body.section || {};
+      const sys = 'You are writing ONE section of a research manuscript in LaTeX. Ground every claim ONLY in the provided research + results — NEVER invent numbers or findings; if something is unknown write "[TODO: ...]". Cite with \\cite{key} using ONLY the given bib keys. Reference figures with \\ref{fig:key} and place them with \\begin{figure}...\\includegraphics[width=\\linewidth]{key.png}...\\caption{...}\\label{fig:key}\\end{figure} only for the assigned figure keys. Output ONLY the LaTeX body for this one section (start with \\section{...}); no preamble, no document wrapper, no code fences.';
+      const u = `TARGET JOURNAL: ${(ctx.journal && ctx.journal.name) || 'generic'}\n\nRESEARCH & RESULTS (the only source of truth):\n${ctx.research || ''}\n\nAVAILABLE BIB KEYS: ${(ctx.literature || []).map((l: any) => l.key).join(', ') || '(none)'}\nASSIGNED FIGURES: ${(sec.figure_keys || []).join(', ') || '(none)'}\n\nWRITE THIS SECTION:\nHeading: ${sec.heading}\nCover these points:\n- ${(sec.points || []).join('\n- ')}\nSuggested citations: ${(sec.cite_keys || []).join(', ')}`;
+      const latex = await callClaude(sys, u, 3500);
+      return json({ ok: true, key: sec.key, latex: latex.replace(/^```(latex)?/i, '').replace(/```$/, '').trim() });
+    }
+
+    return json({ error: 'unknown action: ' + action }, 400);
+  } catch (e) { return json({ error: String(e) }, 500); }
+});

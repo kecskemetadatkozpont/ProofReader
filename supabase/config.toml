@@ -16,3 +16,6 @@ verify_jwt = false
 
 [functions.research-journals]
 verify_jwt = false
+
+[functions.research-writing]
+verify_jwt = false

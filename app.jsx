@@ -2562,5 +2562,27 @@
     );
   }
 
-  ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  // Handoff from the Research module's Writing step: ?draft=<id> imports an AI-generated manuscript
+  // (research_drafts) into a real editor project, once, then opens it as ?p=<projectId>.
+  async function bootstrap() {
+    try {
+      const draftId = new URLSearchParams(location.search).get('draft');
+      if (draftId && window.PR_BACKEND && window.PR_BACKEND.mode === 'cloud' && window.PR_BACKEND.sb && window.PRStore) {
+        const sb = window.PR_BACKEND.sb;
+        const res = await sb.from('research_drafts').select('*').eq('id', draftId).single();
+        const data = res && res.data;
+        if (data) {
+          if (data.editor_project_id) { location.replace(location.pathname + '?p=' + data.editor_project_id); return; }
+          const proj = window.PRStore.create(data.title || 'Draft manuscript', 'blank', { journal: data.journal || '' });
+          const src = data.files || {}; const files = {}; const order = [];
+          Object.keys(src).forEach((k) => { const f = src[k] || {}; if (f.type === 'image') files[k] = { type: 'image', dataURL: f.content }; else files[k] = { type: fileTypeOf(k), content: f.content != null ? f.content : '' }; order.push(k); });
+          if (order.length) { proj.files = files; proj.order = order; proj.active = files['main.tex'] ? 'main.tex' : (order.find((k) => files[k].type === 'tex') || order[0]); window.PRStore.save(proj); }
+          try { await sb.from('research_drafts').update({ editor_project_id: proj.id, status: 'imported', updated_at: new Date().toISOString() }).eq('id', draftId); } catch (e) { }
+          location.replace(location.pathname + '?p=' + proj.id); return;
+        }
+      }
+    } catch (e) { console.warn('[PR] draft import failed', e); }
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  }
+  bootstrap();
 })();

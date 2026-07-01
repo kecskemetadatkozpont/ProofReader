@@ -1067,23 +1067,94 @@
 
   // ---------- Writing (R6 bridge) ----------
   function WritingPanel(props) {
-    var p = props.project;
+    var p = props.project; var pid = p.id; var ce = props.canEdit;
     var inc = (props.sources || []).filter(function (s) { return s.screening === 'include'; });
-    var lib = inc.length ? inc : (props.sources || []);
-    var idea = (props.ideas || []).filter(function (i) { return i.status === 'selected'; })[0] || (props.ideas || [])[0];
-    var doneJobs = (props.jobs || []).filter(function (j) { return j.status === 'done'; });
-    return h('div', { className: 'panel' },
-      h('h3', null, 'Writing'),
-      h('div', { style: { fontSize: 13, color: 'var(--muted)', marginBottom: 12 } },
-        'Assemble a manuscript starter from this project — the selected idea as the abstract, the ',
-        h('b', null, lib.length), ' library source' + (lib.length === 1 ? '' : 's') + ' as \\cite references' + (inc.length ? ' (included)' : '') + ', and ',
-        h('b', null, doneJobs.length), ' finished result' + (doneJobs.length === 1 ? '' : 's') + '.'),
-      h('div', { style: { display: 'flex', gap: 10, flexWrap: 'wrap' } },
-        h('button', { className: 'btn pri', onClick: function () { downloadText((p.title || 'manuscript').replace(/[^A-Za-z0-9]+/g, '_') + '.tex', genTexSkeleton(p, idea, lib, doneJobs)); } }, '⬇ .tex skeleton'),
-        h('button', { className: 'btn', onClick: function () { downloadText('library.bib', genBibtex(lib)); } }, '⬇ library.bib'),
-        h('a', { className: 'btn', href: 'ProofReader.html', style: { textDecoration: 'none', display: 'inline-flex', alignItems: 'center' } }, 'Open LaTeX editor →')
+    var pkS = useState([]), picks = pkS[0], setPicks = pkS[1];
+    var jS = useState(''), jid = jS[0], setJid = jS[1];
+    var phS = useState(''), phase = phS[0], setPhase = phS[1];      // '', outline, sections, assemble, done
+    var pgS = useState(''), prog = pgS[0], setProg = pgS[1];
+    var drS = useState(null), draft = drS[0], setDraft = drS[1];
+    var busy = phase === 'outline' || phase === 'sections' || phase === 'assemble';
+    useEffect(function () {
+      sb.from('research_journal_picks').select('id,title,status,npi_level,template').eq('project_id', pid).order('created_at').then(function (r) {
+        var d = (r && r.data) || []; setPicks(d); var pick = d.filter(function (x) { return x.status === 'submitted'; })[0] || d[0]; if (pick) setJid(pick.id);
+      });
+      sb.from('research_drafts').select('id,title,outline,sections,files,created_at').eq('project_id', pid).order('created_at', { ascending: false }).limit(1).then(function (r) { var row = r && r.data && r.data[0]; if (row) setDraft({ id: row.id, outline: row.outline, sections: row.sections, files: row.files, existing: true }); });
+    }, [pid]);
+
+    function bibOf(lit) { return (lit || []).map(function (l) { var au = Array.isArray(l.authors) ? l.authors.join(' and ') : (l.authors || ''); return '@article{' + l.key + ',\n  title={' + (l.title || '') + '},\n  author={' + au + '},\n  year={' + (l.year || '') + '},\n  journal={' + (l.venue || '') + '}' + (l.doi ? ',\n  doi={' + l.doi + '}' : '') + '\n}'; }).join('\n\n'); }
+    function buildMain(outline, context, drafted) {
+      var J = context.journal || {};
+      return '% AI-generated draft — VERIFY every claim, number and citation against your real artifacts before use.\n' +
+        '% Intended journal: ' + (J.name || '—') + '  (template family: ' + (J.family || 'generic') + '). Written with the best model (Claude Opus).\n' +
+        '% To match the journal format, swap \\documentclass to the journal class and add its .cls to this project.\n' +
+        '\\documentclass[a4paper,11pt]{article}\n\\usepackage{graphicx,amsmath,amssymb,booktabs,hyperref}\n\\usepackage[numbers]{natbib}\n' +
+        '\\title{' + (outline.title || p.title || 'Untitled') + '}\n\\author{[TODO: author names and affiliations]}\n\\date{\\today}\n\n\\begin{document}\n\\maketitle\n' +
+        '\\begin{abstract}\n' + (outline.abstract || '[TODO: abstract]') + '\n\\end{abstract}\n' +
+        ((outline.keywords && outline.keywords.length) ? '\\noindent\\textbf{Keywords:} ' + outline.keywords.join(', ') + '\n\n' : '\n') +
+        drafted.map(function (s) { return s.latex; }).join('\n\n') + '\n\n\\bibliographystyle{plainnat}\n\\bibliography{refs}\n\\end{document}\n';
+    }
+    function assemble(outline, context, drafted) {
+      sb.from('research_protocols').select('id').eq('project_id', pid).neq('status', 'archived').order('created_at', { ascending: false }).limit(1).then(function (pr) {
+        var prot = pr && pr.data && pr.data[0];
+        var finish = function (figMap) {
+          var files = {}; files['main.tex'] = { type: 'tex', content: buildMain(outline, context, drafted) };
+          files['refs.bib'] = { type: 'bib', content: bibOf(context.literature) };
+          Object.keys(figMap).forEach(function (k) { files[k + '.png'] = { type: 'image', content: figMap[k] }; });
+          sb.from('research_drafts').insert({ project_id: pid, journal_pick_id: jid || null, title: outline.title, journal: (context.journal && context.journal.name) || null, outline: outline, sections: drafted, files: files, status: 'ready', model: 'claude-opus-4-8', created_by: props.authorId }).select().then(function (r) {
+            if (r && r.error) { window.PRUI.toast(r.error.message, { kind: 'error' }); setPhase(''); return; }
+            var row = r && r.data && r.data[0]; setDraft({ id: row && row.id, outline: outline, sections: drafted, files: files }); setPhase('done'); setProg('');
+            window.PRUI.toast('Draft ready — open it in the LaTeX editor', { kind: 'ok' });
+          });
+        };
+        if (!prot) return finish({});
+        sb.from('research_protocol_steps').select('ord,result').eq('protocol_id', prot.id).order('ord').then(function (sr) {
+          var figMap = {}; ((sr && sr.data) || []).forEach(function (s) { ((s.result && s.result.figures) || []).forEach(function (f, i) { if (f.img) figMap['fig_' + s.ord + '_' + (i + 1)] = f.img; }); }); finish(figMap);
+        });
+      });
+    }
+    function generate() {
+      if (busy) return; setDraft(null); setPhase('outline'); setProg('Planning the outline (best model)…');
+      sb.functions.invoke('research-writing', { body: { action: 'outline', project_id: pid, journal_pick_id: jid || null } }).then(function (r) {
+        var d = r && r.data; if (!d || d.error) { window.PRUI.toast('Outline failed: ' + ((d && d.error) || (r && r.error && r.error.message) || ''), { kind: 'error' }); setPhase(''); return; }
+        var outline = d.outline || {}, context = d.context || {}; var secs = outline.sections || [];
+        if (!secs.length) { window.PRUI.toast('No sections planned', { kind: 'error' }); setPhase(''); return; }
+        setPhase('sections'); setProg('Drafting ' + secs.length + ' sections with the best model…');
+        Promise.all(secs.map(function (s) {
+          return sb.functions.invoke('research-writing', { body: { action: 'section', project_id: pid, section: s, context: context } }).then(function (rr) {
+            return { key: s.key, heading: s.heading, latex: (rr && rr.data && rr.data.latex) || ('\\section{' + (s.heading || s.key) + '}\n% [generation failed for this section]') };
+          }, function () { return { key: s.key, heading: s.heading, latex: '\\section{' + (s.heading || s.key) + '}\n% [generation failed]' }; });
+        })).then(function (drafted) { setPhase('assemble'); setProg('Assembling the LaTeX project…'); assemble(outline, context, drafted); });
+      }, function (e) { window.PRUI.toast('Outline failed: ' + e, { kind: 'error' }); setPhase(''); });
+    }
+    function dl(name, content) { var u = URL.createObjectURL(new Blob([content], { type: 'text/plain;charset=utf-8' })); var a = document.createElement('a'); a.href = u; a.download = name; a.click(); setTimeout(function () { URL.revokeObjectURL(u); }, 3000); }
+
+    var selPick = picks.filter(function (x) { return x.id === jid; })[0];
+    var nFig = draft && draft.files ? Object.keys(draft.files).filter(function (k) { return /\.png$/.test(k); }).length : 0;
+    return h('div', null,
+      h('div', { className: 'panel' },
+        h('h3', { style: { marginTop: 0 } }, '✍️ Writing — draft manuscript'),
+        h('p', { style: { fontSize: 13, color: 'var(--muted)', lineHeight: 1.5 } }, 'Assembles a full draft paper from your executed results + the selected journal, with the best model (Claude Opus), grounded only in your real results (no invented numbers). The draft opens as a compilable project in the LaTeX editor.'),
+        picks.length ? h('div', { style: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 } },
+          h('span', { className: 'field-label', style: { margin: 0 } }, 'Target journal'),
+          h('select', { className: 'field', style: { minWidth: 220 }, value: jid, onChange: function (e) { setJid(e.target.value); } },
+            picks.map(function (x) { return h('option', { key: x.id, value: x.id }, x.title + (x.status === 'submitted' ? ' ✓' : '')); }))
+        ) : h('div', { style: { fontSize: 12.5, color: 'var(--warn)', marginBottom: 8 } }, '⚠ No journal selected yet — pick one on the Journal step first (the draft still generates, but without journal-specific formatting).'),
+        h('div', { style: { fontSize: 12, color: 'var(--faint)', marginBottom: 10 } }, 'Inputs: your protocol results & figures, ' + inc.length + ' included reference' + (inc.length === 1 ? '' : 's') + (selPick ? ', journal “' + selPick.title + '”' + (selPick.template && selPick.template.family ? ' (' + selPick.template.family + ')' : '') : '') + '.'),
+        ce ? h('button', { className: 'btn pri', disabled: busy, onClick: generate }, busy ? '✨ Working…' : '✨ Generate draft (AutoMode)') : null,
+        busy ? h('div', { style: { marginTop: 10 } }, h(AiThinking, { label: prog || 'Writing your manuscript' })) : null
       ),
-      idea ? h('div', { style: { marginTop: 14, fontSize: 12.5, color: 'var(--faint)' } }, 'Abstract seed: ' + idea.question) : h('div', { style: { marginTop: 14, fontSize: 12.5, color: 'var(--faint)' } }, 'Tip: select an idea on the Ideas tab to seed the abstract.')
+      draft ? h('div', { className: 'panel' },
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
+          h('h3', { style: { margin: 0, flex: 1, minWidth: 160 } }, '📄 ', (draft.outline && draft.outline.title) || draft.title || 'Draft'),
+          draft.id ? h('a', { className: 'btn pri', style: { textDecoration: 'none', padding: '5px 12px' }, href: 'ProofReader.html?draft=' + draft.id }, '📝 Open in LaTeX editor') : null,
+          draft.files && draft.files['main.tex'] ? h('button', { className: 'btn', style: { padding: '5px 12px' }, onClick: function () { dl('main.tex', draft.files['main.tex'].content); } }, '⬇ main.tex') : null,
+          draft.files && draft.files['refs.bib'] ? h('button', { className: 'btn', style: { padding: '5px 12px' }, onClick: function () { dl('refs.bib', draft.files['refs.bib'].content); } }, '⬇ refs.bib') : null),
+        draft.existing ? h('div', { style: { fontSize: 11.5, color: 'var(--faint)', marginTop: 2 } }, 'Previously generated draft. Re-generate to refresh.') : null,
+        (draft.outline && draft.outline.abstract) ? h('div', { style: { fontSize: 12.5, color: 'var(--muted)', marginTop: 8, lineHeight: 1.5 } }, h('b', null, 'Abstract. '), draft.outline.abstract) : null,
+        (draft.sections && draft.sections.length) ? h('div', { style: { marginTop: 10 } }, h('b', { style: { fontSize: 12 } }, 'Sections:'), h('ol', { style: { margin: '4px 0', paddingLeft: 20, fontSize: 12.5 } }, draft.sections.map(function (s, i) { return h('li', { key: i }, s.heading || s.key); }))) : null,
+        nFig ? h('div', { style: { fontSize: 11.5, color: 'var(--faint)', marginTop: 4 } }, nFig + ' figure' + (nFig === 1 ? '' : 's') + ' included.') : null
+      ) : null
     );
   }
 
@@ -2039,7 +2110,7 @@
     else if (tab === 'data') content = h(DataPanel, { projectId: p.id, datasets: props.datasets, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
     else if (tab === 'compute') content = h(ComputePanel, { projectId: p.id, jobs: props.jobs, datasets: props.datasets, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
     else if (tab === 'journal') content = h(JournalPanel, { projectId: p.id, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
-    else if (tab === 'writing') content = h(WritingPanel, { project: p, sources: props.sources, ideas: props.ideas, jobs: props.jobs });
+    else if (tab === 'writing') content = h(WritingPanel, { project: p, sources: props.sources, ideas: props.ideas, jobs: props.jobs, canEdit: props.canEdit, authorId: props.authorId });
     else if (tab === 'canvas') content = window.PRCanvas ? h(window.PRCanvas, { projectId: p.id, canEdit: props.canEdit, authorId: props.authorId }) : h('div', { className: 'empty' }, 'Loading Canvas…');
     else if (tab === 'notes') content = window.PRNotes ? h(window.PRNotes, { projectId: p.id, canEdit: props.canEdit, authorId: props.authorId }) : h('div', { className: 'empty' }, 'Loading Notes…');
     else if (tab === 'log') content = h(LogPanel, { projectId: p.id, authorId: props.authorId, entries: props.log, canEdit: props.canEdit, onChanged: props.onChanged });
