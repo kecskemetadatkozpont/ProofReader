@@ -96,6 +96,34 @@ Deno.serve(async (req) => {
       const out = ranked.map((x) => { const j = byId.get(x.id); return j ? { ...j, fit_score: x.fit_score, fit_reason: x.fit_reason } : null; }).filter(Boolean).slice(0, 12);
       return json({ ok: true, fields, keywords: kwList, summary: fm.summary, journals: out, candidate_count: cand.length });
     }
+    if (action === 'dossier') {
+      const jid = body.journal_id;
+      const q = jid != null ? sb.from('journals_ref').select('*').eq('id', jid) : sb.from('journals_ref').select('*').or(`issn_print.eq.${body.issn},issn_online.eq.${body.issn}`);
+      const jr: any = ((await q.limit(1)).data || [])[0];
+      if (!jr) return json({ error: 'journal not found' }, 404);
+      // OpenAlex hard metrics (by ISSN)
+      let oa: any = {};
+      const issns = [jr.issn_online, jr.issn_print].filter(Boolean).map((s: string) => String(s).trim());
+      if (issns.length) {
+        try {
+          const r = await fetch(`https://api.openalex.org/sources?per-page=1&mailto=publify@users.noreply&select=display_name,issn,homepage_url,works_count,is_oa,is_in_doaj,apc_usd,apc_prices,country_code,host_organization_name,summary_stats,topics&filter=issn:${encodeURIComponent(issns.join('|'))}`);
+          const o = await r.json(); const s = (o.results || [])[0];
+          if (s) {
+            const st = s.summary_stats || {};
+            oa = { homepage_url: s.homepage_url, works_count: s.works_count, is_oa: s.is_oa, is_in_doaj: s.is_in_doaj, apc_usd: s.apc_usd, publisher: s.host_organization_name, country_code: s.country_code,
+              h_index: st.h_index, impact_2yr: st['2yr_mean_citedness'] != null ? Math.round(st['2yr_mean_citedness'] * 100) / 100 : null, i10: st.i10_index,
+              topics: (s.topics || []).slice(0, 6).map((t: any) => t.display_name) };
+          }
+        } catch (_e) { /* openalex optional */ }
+      }
+      // Claude: scope + template family + soft KPIs (labelled estimated) + submission URL
+      const sys = 'You are a scholarly-publishing librarian. For the given journal, provide its aims/scope and the details that are NOT in bibliometric APIs, using your knowledge. Mark every figure as an estimate. Return ONLY JSON: {"scope":"2-3 sentence aims & scope","peer_review":"e.g. single-blind / double-blind (estimated)","acceptance_rate":"e.g. ~20% (estimated) or unknown","first_decision":"e.g. ~8 weeks (estimated) or unknown","apc":"e.g. $2500 APC / hybrid / free (estimated) or unknown","submission_url":"best-known author-guidelines or submission URL (or empty)","template":{"family":"one of IEEEtran|elsarticle|sn-jnl (Springer Nature)|mdpi|acmart|wiley-njd|tf (Taylor & Francis)|generic-latex|word","official_url":"official author-template page URL (or empty)","overleaf_url":"Overleaf template gallery URL for this family (or empty)","notes":"1 line on format (columns, length, refs style)"}}';
+      const u = `JOURNAL: ${jr.title}\nPUBLISHER: ${oa.publisher || jr.publisher || ''}\nFIELD: ${jr.field || ''}\nCOUNTRY: ${jr.country || ''}\nISSN: ${issns.join(', ')}\nHOMEPAGE: ${oa.homepage_url || jr.url || ''}\nOPENALEX TOPICS: ${(oa.topics || []).join(', ')}`;
+      let ai: any = {};
+      try { const raw = await callClaude(sys, u, 1500); const m = raw.match(/\{[\s\S]*\}/); if (m) ai = JSON.parse(m[0]); } catch (_e) { /* ai optional */ }
+      return json({ ok: true, journal: jr, openalex: oa, ai });
+    }
+
     return json({ error: 'unknown action: ' + action }, 400);
   } catch (e) { return json({ error: String(e) }, 500); }
 });

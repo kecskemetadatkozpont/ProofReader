@@ -1850,9 +1850,40 @@
     var bz = useState(false), busy = bz[0], setBusy = bz[1];
     var pk = useState([]), picks = pk[0], setPicks = pk[1];
     var hn = useState(''), hint = hn[0], setHint = hn[1];
+    var dvS = useState(null), dv = dvS[0], setDv = dvS[1];       // journal dossier view
+    var tref = useRef(null), tfref = useRef(null);              // template file / folder inputs
     var ce = props.canEdit;
     function loadPicks() { sb.from('research_journal_picks').select('*').eq('project_id', props.projectId).order('fit_score', { ascending: false }).then(function (r) { setPicks((r && r.data) || []); setLoading(false); }, function () { setLoading(false); }); }
     useEffect(loadPicks, [props.projectId]);
+    function openDossier(j, pick) {
+      setDv({ j: j, loading: true });
+      sb.functions.invoke('research-journals', { body: { action: 'dossier', project_id: props.projectId, journal_id: j.id } }).then(function (r) {
+        var d = r && r.data; if (!d || d.error) { window.PRUI.toast('Dossier failed: ' + ((d && d.error) || (r && r.error && r.error.message) || ''), { kind: 'error' }); setDv(null); return; }
+        var ex = pick || picks.filter(function (p) { return p.journal_id === j.id; })[0];
+        var det = (ex && ex.details) || {}; var ai = d.ai || {};
+        var form = { scope: det.scope || ai.scope || '', peer_review: det.peer_review || ai.peer_review || '', acceptance_rate: det.acceptance_rate || ai.acceptance_rate || '', first_decision: det.first_decision || ai.first_decision || '', apc: det.apc || ai.apc || '', submission_url: det.submission_url || ai.submission_url || '' };
+        setDv({ j: j, loading: false, data: d, form: form, tpl: (ex && ex.template && Object.keys(ex.template).length ? ex.template : (ai.template || {})), notes: det.notes || '', pickId: ex && ex.id });
+      }, function (e) { window.PRUI.toast('Dossier failed: ' + e, { kind: 'error' }); setDv(null); });
+    }
+    function dvSet(k, v) { setDv(function (x) { var f = Object.assign({}, x.form); f[k] = v; return Object.assign({}, x, { form: f }); }); }
+    function tplUpload(e) {
+      var fs = Array.prototype.slice.call((e.target && e.target.files) || []); if (e.target) e.target.value = ''; if (!fs.length) return;
+      var batch = String(Date.now()) + '_' + Math.random().toString(36).slice(2, 7); var added = [];
+      (function next(i) {
+        if (i >= fs.length) { setDv(function (x) { var t = Object.assign({}, x.tpl); t.uploads = (t.uploads || []).concat(added); return Object.assign({}, x, { tpl: t }); }); return; }
+        var f = fs[i]; var rel = f.webkitRelativePath || f.name;
+        var sp = props.projectId + '/journal-templates/' + batch + '/' + rel.replace(/[^A-Za-z0-9._\/-]/g, '_');
+        sb.storage.from('research-data').upload(sp, f).then(function (res) { if (!(res && res.error)) added.push({ name: rel, storage_path: sp, size: f.size }); next(i + 1); }, function () { next(i + 1); });
+      })(0);
+    }
+    function tplRemove(i) { setDv(function (x) { var t = Object.assign({}, x.tpl); t.uploads = (t.uploads || []).filter(function (_, j) { return j !== i; }); return Object.assign({}, x, { tpl: t }); }); }
+    function tplDl(a) { sb.storage.from('research-data').createSignedUrl(a.storage_path, 3600, { download: (a.name || '').split('/').pop() }).then(function (r) { if (r && r.data && r.data.signedUrl) window.open(r.data.signedUrl, '_blank'); }); }
+    function saveDossier() {
+      var x = dv; if (!x) return; var det = Object.assign({}, x.form, { notes: x.notes });
+      var base = { project_id: props.projectId, journal_id: x.j.id, title: x.j.title, field: x.j.field, npi_level: x.j.npi_level, sjr_quartile: x.j.sjr_quartile, url: x.j.url, details: det, template: x.tpl || {} };
+      var op = x.pickId ? sb.from('research_journal_picks').update({ details: det, template: x.tpl || {} }).eq('id', x.pickId) : sb.from('research_journal_picks').insert(Object.assign({ status: 'shortlisted', created_by: props.authorId }, base));
+      op.then(function (r) { if (r && r.error) { window.PRUI.toast(r.error.message, { kind: 'error' }); return; } window.PRUI.toast('Dossier saved to shortlist', { kind: 'ok' }); setDv(function (y) { return Object.assign({}, y, { pickId: y.pickId }); }); loadPicks(); });
+    }
     function recommend() {
       if (busy) return; setBusy(true); setRec(null);
       sb.functions.invoke('research-journals', { body: { action: 'recommend', project_id: props.projectId, hint: hint } }).then(function (r) {
@@ -1867,6 +1898,66 @@
     function removePick(p) { sb.from('research_journal_picks').delete().eq('id', p.id).then(loadPicks); }
     function levelBadge(lvl) { return lvl === 2 ? h('span', { className: 'jl-lvl lvl2', title: 'Norwegian register level 2 — top tier' }, '◆ Level 2') : h('span', { className: 'jl-lvl lvl1', title: 'Norwegian register level 1 — approved' }, '◇ Level 1'); }
     function quartile(q) { return q ? h('span', { className: 'jl-q q' + String(q).replace(/[^1-4]/g, '') }, q) : null; }
+    function dossierPane() {
+      var x = dv; var j = x.j;
+      var bar = h('div', { className: 'rv-bar' },
+        h('button', { className: 'btn', style: { padding: '4px 11px', fontSize: 12.5, flex: 'none' }, onClick: function () { setDv(null); } }, '←'),
+        h('b', { style: { flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, j.title),
+        ce ? h('button', { className: 'btn pri', style: { padding: '4px 11px', fontSize: 12.5, flex: 'none' }, onClick: saveDossier }, '💾 Save') : null);
+      if (x.loading) return h('div', { className: 'report-pane' }, bar, h('div', { style: { padding: 20 } }, h(AiThinking, { label: 'Gathering KPIs & template for this journal' })));
+      var d = x.data || {}; var oa = d.openalex || {}; var jr = d.journal || j; var ai = d.ai || {}; var tpl = x.tpl || {};
+      function kv(label, val) { return (val != null && val !== '') ? h('div', { className: 'kpi' }, h('span', { className: 'kpi-k' }, label), h('span', { className: 'kpi-v' }, String(val))) : null; }
+      function editRow(label, key, ph) {
+        return h('div', { style: { marginTop: 8 } },
+          h('div', { className: 'field-label' }, label, h('span', { style: { color: 'var(--faint)', fontWeight: 400 } }, ' · ~estimated, editable')),
+          h('input', { className: 'field', style: { width: '100%', boxSizing: 'border-box' }, value: x.form[key] || '', placeholder: ph, onChange: function (e) { dvSet(key, e.target.value); } }));
+      }
+      var verify = x.form.submission_url || oa.homepage_url || jr.url;
+      return h('div', { className: 'report-pane' }, bar,
+        h('div', { className: 'rv-body' }, h('div', { className: 'report-doc', style: { maxWidth: 820 } },
+          h('h2', null, 'Bibliometric KPIs ', h('span', { style: { fontSize: 11, fontWeight: 400, color: 'var(--faint)' } }, '(Norwegian register + OpenAlex — verified)')),
+          h('div', { className: 'kpi-grid' },
+            kv('Norwegian level', jr.npi_level === 2 ? '2 (top tier)' : (jr.npi_level === 1 ? '1 (approved)' : '—')),
+            kv('NPI field', jr.field), kv('Discipline', jr.discipline),
+            kv('Scimago quartile', jr.sjr_quartile), kv('SJR', jr.sjr),
+            kv('h-index', oa.h_index != null ? oa.h_index : jr.h_index),
+            kv('2-yr mean citedness', oa.impact_2yr), kv('i10-index', oa.i10),
+            kv('Works (total)', oa.works_count), kv('APC (OpenAlex)', oa.apc_usd != null ? ('$' + oa.apc_usd) : null),
+            kv('Open access', (oa.is_oa != null ? (oa.is_oa ? 'yes' : 'no') : jr.open_access) + (oa.is_in_doaj ? ' · DOAJ' : '')),
+            kv('Publisher', oa.publisher || jr.publisher), kv('Country', jr.country), kv('Language', jr.language),
+            kv('Print ISSN', jr.issn_print), kv('Online ISSN', jr.issn_online)),
+          (oa.topics && oa.topics.length) ? h('div', { style: { marginTop: 8, fontSize: 12.5 } }, h('b', null, 'Top topics (OpenAlex): '), oa.topics.join(', ')) : null,
+          (oa.homepage_url || jr.url) ? h('div', { style: { marginTop: 6 } }, h('a', { href: oa.homepage_url || jr.url, target: '_blank', rel: 'noopener noreferrer' }, '↗ Journal homepage')) : null,
+          h('h2', { style: { marginTop: 22 } }, 'Scope & submission ', h('span', { style: { fontSize: 11, fontWeight: 400, color: 'var(--warn)' } }, '· AI-estimated — verify on the journal site')),
+          h('div', { style: { marginTop: 8 } }, h('div', { className: 'field-label' }, 'Aims & scope'), h('textarea', { className: 'field', rows: 3, style: { width: '100%', boxSizing: 'border-box' }, value: x.form.scope || '', onChange: function (e) { dvSet('scope', e.target.value); } })),
+          editRow('Acceptance rate', 'acceptance_rate', 'e.g. ~20%'),
+          editRow('Time to first decision', 'first_decision', 'e.g. ~8 weeks'),
+          editRow('APC (article processing charge)', 'apc', 'e.g. $2500 / hybrid / free'),
+          editRow('Peer review', 'peer_review', 'e.g. double-blind'),
+          editRow('Submission / author-guidelines URL', 'submission_url', 'https://…'),
+          verify ? h('div', { style: { marginTop: 6 } }, h('a', { href: verify, target: '_blank', rel: 'noopener noreferrer' }, '↗ Verify on the journal site')) : null,
+          h('h2', { style: { marginTop: 22 } }, 'Template'),
+          tpl.family ? h('div', { style: { fontSize: 13 } }, h('b', null, 'Detected: '), tpl.family, tpl.notes ? h('span', { style: { color: 'var(--muted)' } }, ' — ' + tpl.notes) : null) : h('div', { style: { fontSize: 12.5, color: 'var(--muted)' } }, 'No template family detected.'),
+          h('div', { style: { display: 'flex', gap: 14, marginTop: 4, fontSize: 12.5 } },
+            tpl.official_url ? h('a', { href: tpl.official_url, target: '_blank', rel: 'noopener noreferrer' }, '↗ Official template') : null,
+            tpl.overleaf_url ? h('a', { href: tpl.overleaf_url, target: '_blank', rel: 'noopener noreferrer' }, '↗ Overleaf template') : null),
+          ce ? h('div', { style: { marginTop: 10 } },
+            h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 6 } },
+              h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12 }, onClick: function () { if (tref.current) tref.current.click(); } }, '⤒ Upload template files'),
+              h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12 }, title: 'Upload a whole template folder', onClick: function () { if (tfref.current) tfref.current.click(); } }, '📁 Upload folder'),
+              h('input', { ref: tref, type: 'file', multiple: true, style: { display: 'none' }, onChange: tplUpload }),
+              h('input', { ref: function (n) { if (n) { try { n.webkitdirectory = true; n.directory = true; } catch (e) { } } tfref.current = n; }, type: 'file', multiple: true, style: { display: 'none' }, onChange: tplUpload })),
+            (tpl.uploads && tpl.uploads.length) ? tpl.uploads.map(function (a, i) {
+              return h('div', { key: i, style: { display: 'flex', gap: 8, alignItems: 'center', fontSize: 11.5, background: 'var(--soft)', padding: '3px 8px', borderRadius: 6, marginTop: 3 } },
+                h('span', { style: { flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, '📎 ' + a.name),
+                h('button', { className: 'fb-mini', 'aria-label': 'Download', title: 'Download', onClick: function () { tplDl(a); } }, '⬇'),
+                h('button', { className: 'fb-mini', 'aria-label': 'Remove', title: 'Remove', onClick: function () { tplRemove(i); } }, '×'));
+            }) : h('div', { style: { fontSize: 11.5, color: 'var(--faint)' } }, "Upload the journal's own .cls/.sty/.docx or a template folder you already have.")) : null,
+          h('h2', { style: { marginTop: 22 } }, 'Notes'),
+          h('textarea', { className: 'field', rows: 3, style: { width: '100%', boxSizing: 'border-box' }, value: x.notes || '', placeholder: 'Your notes on this venue…', onChange: function (e) { setDv(function (y) { return Object.assign({}, y, { notes: e.target.value }); }); } }),
+          ce ? h('div', { style: { marginTop: 14 } }, h('button', { className: 'btn pri', onClick: saveDossier }, '💾 Save dossier to shortlist')) : null
+        )));
+    }
     function card(j, picked) {
       return h('div', { className: 'jl-card', key: j.id },
         h('div', { style: { display: 'flex', gap: 7, alignItems: 'baseline', flexWrap: 'wrap' } },
@@ -1877,8 +1968,11 @@
           j.fit_score != null ? h('span', { className: 'jl-fit' }, j.fit_score + '% fit') : null),
         h('div', { className: 'jl-meta' }, [j.field, j.country, j.open_access ? 'OA: ' + j.open_access : null, j.publisher].filter(Boolean).join(' · ')),
         j.fit_reason ? h('div', { className: 'jl-reason' }, j.fit_reason) : null,
-        ce ? h('div', { style: { marginTop: 6 } }, picked ? h('span', { className: 'chip c-ok' }, '★ Shortlisted') : h('button', { className: 'btn', style: { padding: '3px 10px', fontSize: 12 }, onClick: function () { shortlist(j); } }, '★ Shortlist')) : null);
+        h('div', { style: { marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap' } },
+          h('button', { className: 'btn', style: { padding: '3px 10px', fontSize: 12 }, onClick: function () { openDossier(j); } }, '🔎 Details & template'),
+          ce ? (picked ? h('span', { className: 'chip c-ok' }, '★ Shortlisted') : h('button', { className: 'btn', style: { padding: '3px 10px', fontSize: 12 }, onClick: function () { shortlist(j); } }, '★ Shortlist')) : null));
     }
+    if (dv) return dossierPane();
     if (loading) return h('div', { className: 'empty' }, 'Loading…');
     return h('div', null,
       h('div', { className: 'panel' },
@@ -1905,9 +1999,10 @@
               h('span', { className: 'chip ' + (p.status === 'submitted' ? 'c-ok' : 'c-acc') }, p.status),
               p.fit_score != null ? h('span', { className: 'jl-fit' }, p.fit_score + '% fit') : null),
             p.fit_reason ? h('div', { className: 'jl-reason' }, p.fit_reason) : null,
-            ce ? h('div', { style: { display: 'flex', gap: 6, marginTop: 6 } },
-              p.status !== 'submitted' ? h('button', { className: 'btn', style: { padding: '2px 9px', fontSize: 11 }, onClick: function () { setStatus(p, 'submitted'); } }, '✓ Mark submitted') : h('button', { className: 'btn', style: { padding: '2px 9px', fontSize: 11 }, onClick: function () { setStatus(p, 'shortlisted'); } }, 'Unmark'),
-              h('button', { className: 'btn', style: { padding: '2px 9px', fontSize: 11, color: 'var(--danger)' }, onClick: function () { removePick(p); } }, 'Remove')) : null);
+            h('div', { style: { display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' } },
+              p.journal_id != null ? h('button', { className: 'btn', style: { padding: '2px 9px', fontSize: 11 }, onClick: function () { openDossier({ id: p.journal_id, title: p.title, field: p.field, npi_level: p.npi_level, sjr_quartile: p.sjr_quartile, url: p.url }, p); } }, '🔎 Details') : null,
+              ce ? (p.status !== 'submitted' ? h('button', { className: 'btn', style: { padding: '2px 9px', fontSize: 11 }, onClick: function () { setStatus(p, 'submitted'); } }, '✓ Mark submitted') : h('button', { className: 'btn', style: { padding: '2px 9px', fontSize: 11 }, onClick: function () { setStatus(p, 'shortlisted'); } }, 'Unmark')) : null,
+              ce ? h('button', { className: 'btn', style: { padding: '2px 9px', fontSize: 11, color: 'var(--danger)' }, onClick: function () { removePick(p); } }, 'Remove') : null));
         })
       ) : null
     );
