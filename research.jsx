@@ -1091,14 +1091,21 @@
       while ((mm = re.exec(body))) { var b = mm[1].split('/').pop().replace(/\.[^.]+$/, ''); referenced[b] = 1; }
       var missing = (figList || []).filter(function (f) { return !referenced[f.key]; });
       if (missing.length) body += '\n\n\\section{Additional figures}\n' + missing.map(function (f) { return '\\begin{figure}[htbp]\\centering\\includegraphics[width=\\linewidth]{' + f.key + '.png}\\caption{' + (f.caption || '') + '}\\label{fig:' + f.key + '}\\end{figure}'; }).join('\n');
+      // inline bibliography (no natbib / no BibTeX pass needed → compiles standalone in the browser engine)
+      function texEsc(s) { return String(s == null ? '' : s).replace(/\\/g, '\\textbackslash{}').replace(/([&%$#_{}])/g, '\\$1').replace(/~/g, '\\textasciitilde{}').replace(/\^/g, '\\textasciicircum{}'); }
+      var lit = context.literature || [];
+      var thebib = lit.length ? ('\\begin{thebibliography}{' + lit.length + '}\n' + lit.map(function (l) {
+        var au = Array.isArray(l.authors) ? l.authors.join(', ') : (l.authors || '');
+        return '\\bibitem{' + l.key + '} ' + (au ? texEsc(au) + '. ' : '') + (l.title ? texEsc(l.title) + '. ' : '') + (l.venue ? '\\textit{' + texEsc(l.venue) + '}. ' : '') + (l.year ? l.year + '.' : '') + (l.doi ? ' doi:' + texEsc(l.doi) + '.' : '');
+      }).join('\n') + '\n\\end{thebibliography}') : '';
       return '% AI-generated draft — VERIFY every claim, number and citation against your real artifacts before use.\n' +
         '% Intended journal: ' + (J.name || '—') + '  (template family: ' + (J.family || 'generic') + '). Written with the best model (Claude Opus).\n' +
         '% To match the journal format, swap \\documentclass to the journal class and add its .cls to this project.\n' +
-        '\\documentclass[a4paper,11pt]{article}\n\\usepackage{graphicx,amsmath,amssymb,booktabs,hyperref}\n\\usepackage[numbers]{natbib}\n' +
+        '\\documentclass[a4paper,11pt]{article}\n\\usepackage{graphicx,amsmath,amssymb,booktabs,hyperref}\n' +
         '\\title{' + (outline.title || p.title || 'Untitled') + '}\n\\author{[TODO: author names and affiliations]}\n\\date{\\today}\n\n\\begin{document}\n\\maketitle\n' +
         '\\begin{abstract}\n' + (outline.abstract || '[TODO: abstract]') + '\n\\end{abstract}\n' +
         ((outline.keywords && outline.keywords.length) ? '\\noindent\\textbf{Keywords:} ' + outline.keywords.join(', ') + '\n\n' : '\n') +
-        body + '\n\n\\bibliographystyle{plainnat}\n\\bibliography{refs}\n\\end{document}\n';
+        body + '\n\n' + thebib + '\n\\end{document}\n';
     }
     function assemble(outline, context, drafted) {
       sb.from('research_protocols').select('id').eq('project_id', pid).neq('status', 'archived').order('created_at', { ascending: false }).limit(1).then(function (pr) {
