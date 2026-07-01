@@ -1,6 +1,8 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type', 'Access-Control-Allow-Methods': 'POST, OPTIONS' };
 const ANTHROPIC_KEY = Deno.env.get('ANTHROPIC_API_KEY');
+const OA_KEY = Deno.env.get('OPENALEX_API_KEY') || '';
+const oaKey = OA_KEY ? '&api_key=' + OA_KEY : '';
 const MODEL = 'claude-sonnet-4-6';
 function json(b: unknown, s = 200) { return new Response(JSON.stringify(b), { status: s, headers: { ...CORS, 'Content-Type': 'application/json' } }); }
 async function callClaude(system: string, user: string, max = 4000): Promise<string> {
@@ -22,7 +24,7 @@ async function enrichOpenAlex(cands: any[]) {
   for (let i = 0; i < issns.length; i += 50) {
     const flt = issns.slice(i, i + 50).join('|');
     try {
-      const r = await fetch(`https://api.openalex.org/sources?per-page=200&mailto=publify@users.noreply&select=issn,summary_stats,works_count&filter=issn:${encodeURIComponent(flt)}`);
+      const r = await fetch(`https://api.openalex.org/sources?per-page=200&mailto=publify@users.noreply&select=issn,summary_stats,works_count&filter=issn:${encodeURIComponent(flt)}${oaKey}`);
       const o = await r.json();
       for (const src of (o.results || [])) {
         const st = src.summary_stats || {};
@@ -106,7 +108,7 @@ Deno.serve(async (req) => {
       const issns = [jr.issn_online, jr.issn_print].filter(Boolean).map((s: string) => String(s).trim());
       if (issns.length) {
         try {
-          const r = await fetch(`https://api.openalex.org/sources?per-page=1&mailto=publify@users.noreply&select=display_name,issn,homepage_url,works_count,is_oa,is_in_doaj,apc_usd,apc_prices,country_code,host_organization_name,summary_stats,topics&filter=issn:${encodeURIComponent(issns.join('|'))}`);
+          const r = await fetch(`https://api.openalex.org/sources?per-page=1&mailto=publify@users.noreply&select=display_name,issn,homepage_url,works_count,is_oa,is_in_doaj,apc_usd,apc_prices,country_code,host_organization_name,summary_stats,topics&filter=issn:${encodeURIComponent(issns.join('|'))}${oaKey}`);
           const o = await r.json(); const s = (o.results || [])[0];
           if (s) {
             const st = s.summary_stats || {};

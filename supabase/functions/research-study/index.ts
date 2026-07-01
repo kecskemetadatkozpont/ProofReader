@@ -51,18 +51,45 @@ function normWork(w: any) {
     ext_id: w.id, doi: w.doi || null, title: w.display_name || 'Untitled', authors,
     year: w.publication_year || null, venue: venueOf(w) || null,
     abstract: abstractFromInverted(w.abstract_inverted_index), cited_by: w.cited_by_count || 0,
-    url: w.doi || w.id, oa_pdf_url: oa, issn,
+    url: w.doi || w.id, oa_pdf_url: oa, issn, source: 'openalex',
   };
+}
+// ---- Crossref fallback adapter (free, no key) — used when OpenAlex search is rate-limited/unavailable -------
+function stripJats(s: string): string { return String(s || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 1500); }
+function normCrossref(it: any) {
+  const doi = it.DOI || '';
+  const authors = (it.author || []).slice(0, 8).map((a: any) => [a.given, a.family].filter(Boolean).join(' ').trim()).filter(Boolean);
+  const yr = it.issued && it.issued['date-parts'] && it.issued['date-parts'][0] && it.issued['date-parts'][0][0];
+  const issns = (it.ISSN || []).map((s: any) => String(s || '').replace(/[^0-9Xx]/g, '').toUpperCase()).filter((s: string) => s.length === 8);
+  return {
+    ext_id: doi ? 'crossref:' + doi : (it.URL || ''), doi: doi || null, title: (it.title && it.title[0]) || 'Untitled', authors,
+    year: yr || null, venue: (it['container-title'] && it['container-title'][0]) || null,
+    abstract: stripJats(it.abstract), cited_by: it['is-referenced-by-count'] || 0,
+    url: doi ? 'https://doi.org/' + doi : (it.URL || ''), oa_pdf_url: '', issn: issns.join(','), source: 'crossref',
+  };
+}
+async function crossrefFetch(terms: string, perPage: number) {
+  if (!terms) return { papers: [] as any[] };
+  const url = 'https://api.crossref.org/works?query=' + encodeURIComponent(terms) + '&rows=' + perPage +
+    '&select=DOI,title,author,issued,container-title,abstract,is-referenced-by-count,ISSN,URL&mailto=kecskemet.adatkozpont@gmail.com';
+  try {
+    const r = await fetch(url, { headers: { 'User-Agent': 'Publify/1.0 (mailto:kecskemet.adatkozpont@gmail.com)' } });
+    if (!r.ok) return { papers: [] as any[] };
+    const o = await r.json();
+    return { papers: (((o.message && o.message.items) || []).map(normCrossref)).filter((p: any) => p.title && p.ext_id) };
+  } catch (_e) { return { papers: [] as any[] }; }
 }
 // Strip characters the OpenAlex `search` parser rejects — notably '?' (a sentence question returns "Invalid
 // query parameters error" + 0 results), quotes, brackets, boolean operators, +, =, etc.
 function cleanTerms(s: string): string {
   return String(s || '').replace(/[?!"'`(){}\[\]:;^~*\\\/|&<>+=#@%$]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 350);
 }
+const OA_KEY = Deno.env.get('OPENALEX_API_KEY') || '';   // OpenAlex now rate-limits anonymous search → free API key required
 async function openalexFetch(terms: string, filters: string[], page: number, perPage: number) {
   if (!terms) return { papers: [], total: 0 };
   let url = 'https://api.openalex.org/works?search=' + encodeURIComponent(terms)
-    + '&per-page=' + perPage + '&page=' + page + '&mailto=publify@example.com';
+    + '&per-page=' + perPage + '&page=' + page + '&mailto=kecskemet.adatkozpont@gmail.com';
+  if (OA_KEY) url += '&api_key=' + OA_KEY;
   if (filters.length) url += '&filter=' + filters.join(',');
   const r = await fetch(url, { headers: { 'User-Agent': 'Publify/1.0 (mailto:publify@example.com)' } });
   if (!r.ok) return { papers: [], total: 0 };
@@ -109,14 +136,20 @@ async function openalexUnion(question: string, config: any, maxResults: number) 
     if (out.length >= maxResults) break;
     let res = await openalexFetch(q, filters, 1, perKw);
     if (res.total === 0 && filters.length) res = await openalexFetch(q, [], 1, perKw);   // relax filters for this keyword
+    if (!res.papers.length) { const cr = await crossrefFetch(q, perKw); res = { papers: cr.papers, total: cr.papers.length }; }   // OpenAlex empty/rate-limited → Crossref fallback
     for (const p of res.papers) {
       if (!p.ext_id || seen.has(p.ext_id)) continue;
       seen.add(p.ext_id); out.push(p);
       if (out.length >= maxResults) break;
     }
   }
-  // ultimate fallback: nothing found per-keyword → the single-query relax path
-  if (!out.length) { const r = await openalexSearch(question, config, 1, Math.min(50, maxResults)); return { papers: r.papers, relaxed: true }; }
+  // ultimate fallback: nothing found per-keyword → single-query OpenAlex, then Crossref
+  if (!out.length) {
+    const r = await openalexSearch(question, config, 1, Math.min(50, maxResults));
+    if (r.papers && r.papers.length) return { papers: r.papers, relaxed: true };
+    const cr = await crossrefFetch(cleanTerms(question), Math.min(50, maxResults));
+    return { papers: cr.papers, relaxed: true };
+  }
   return { papers: out, relaxed: false };
 }
 
@@ -280,7 +313,7 @@ Deno.serve(async (req) => {
         const found = u.papers;
         if (found.length) {
           const srcRows = found.map((p: any) => ({
-            project_id: study.project_id, source_api: config.source_adapter || 'openalex', ext_id: p.ext_id,
+            project_id: study.project_id, source_api: p.source || config.source_adapter || 'openalex', ext_id: p.ext_id,
             doi: p.doi, title: p.title, authors: (p.authors && p.authors.length) ? p.authors : null, year: p.year,
             venue: p.venue, abstract: p.abstract || null, cited_by: p.cited_by, url: p.url, oa_pdf_url: p.oa_pdf_url || null, issn: p.issn || null, screening: 'unscreened',
           }));
