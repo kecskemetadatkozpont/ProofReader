@@ -9,17 +9,17 @@
   var sb = BE && BE.sb;
 
   // Data / Compute / Analysis are temporarily removed; Journal (publication-venue recommender) added before Submission.
-  var STAGES = ['Setup', 'Idea', 'Literature', 'Protocol', 'Writing', 'Journal', 'Submission'];
+  var STAGES = ['Setup', 'Idea', 'Literature', 'Protocol', 'Journal', 'Writing', 'Submission'];
   // clicking a workflow step opens the matching panel (the old redundant tab row is gone)
-  var STAGE_TAB = ['overview', 'ideas', 'literature', 'protocol', 'writing', 'journal', 'writing'];
+  var STAGE_TAB = ['overview', 'ideas', 'literature', 'protocol', 'journal', 'writing', 'writing'];
   function svg() { var args = Array.prototype.slice.call(arguments); return h('svg', { viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round', strokeLinejoin: 'round' }, args.map(function (d, i) { return h('path', { key: i, d: d }); })); }
   var STAGE_ICONS = [
     svg('M4 14V2.5', 'M4 3h7l-1.4 2.3L11 7.6H4'),                                         // Setup — flag
     svg('M5.6 9.6A3.5 3.5 0 1 1 10.4 9.6c-.5.5-.8 1-.8 1.6H6.4c0-.6-.3-1.1-.8-1.6Z', 'M6.6 13.2h2.8'), // Idea — bulb
     svg('M8 3.6C6.4 2.7 4.8 2.7 3.2 3.4v8.4c1.6-.7 3.2-.7 4.8.2 1.6-.9 3.2-.9 4.8-.2V3.4C11.2 2.7 9.6 2.7 8 3.6Z', 'M8 3.6v8.6'), // Literature — book
     svg('M5.9 8.2 7.2 9.5 10 6.6', 'M4.5 3.5h7v9.5h-7z', 'M6.2 3.5V2.4h3.6v1.1'),          // Protocol — clipboard check
-    svg('M10.8 2.6 13.4 5.2 5.6 13l-3 .6.6-3z', 'M9.8 3.6 12.4 6.2'),                       // Writing — pencil
     svg('M2 8a6 6 0 1 0 12 0a6 6 0 1 0 -12 0', 'M5 8a3 3 0 1 0 6 0a3 3 0 1 0 -6 0', 'M7.6 8a.4.4 0 1 0 .8 0a.4.4 0 1 0 -.8 0'), // Journal — target (where to publish)
+    svg('M10.8 2.6 13.4 5.2 5.6 13l-3 .6.6-3z', 'M9.8 3.6 12.4 6.2'),                       // Writing — pencil
     svg('M8 10.5V3M5.2 5.8 8 3l2.8 2.8', 'M3.5 13h9')                                       // Submission — upload
   ];
   var LOG_TYPES = ['NOTE', 'DECISION', 'RESULT', 'ARTIFACT', 'MILESTONE', 'TASK'];
