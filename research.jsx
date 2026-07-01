@@ -1083,8 +1083,14 @@
     }, [pid]);
 
     function bibOf(lit) { return (lit || []).map(function (l) { var au = Array.isArray(l.authors) ? l.authors.join(' and ') : (l.authors || ''); return '@article{' + l.key + ',\n  title={' + (l.title || '') + '},\n  author={' + au + '},\n  year={' + (l.year || '') + '},\n  journal={' + (l.venue || '') + '}' + (l.doi ? ',\n  doi={' + l.doi + '}' : '') + '\n}'; }).join('\n\n'); }
-    function buildMain(outline, context, drafted) {
+    function buildMain(outline, context, drafted, figList) {
       var J = context.journal || {};
+      var body = drafted.map(function (s) { return s.latex; }).join('\n\n');
+      // safety net: guarantee EVERY figure appears — collect referenced \includegraphics, append any that were missed
+      var referenced = {}; var re = /\\includegraphics\s*(?:\[[^\]]*\])?\s*\{([^}]+)\}/g; var mm;
+      while ((mm = re.exec(body))) { var b = mm[1].split('/').pop().replace(/\.[^.]+$/, ''); referenced[b] = 1; }
+      var missing = (figList || []).filter(function (f) { return !referenced[f.key]; });
+      if (missing.length) body += '\n\n\\section{Additional figures}\n' + missing.map(function (f) { return '\\begin{figure}[htbp]\\centering\\includegraphics[width=\\linewidth]{' + f.key + '.png}\\caption{' + (f.caption || '') + '}\\label{fig:' + f.key + '}\\end{figure}'; }).join('\n');
       return '% AI-generated draft — VERIFY every claim, number and citation against your real artifacts before use.\n' +
         '% Intended journal: ' + (J.name || '—') + '  (template family: ' + (J.family || 'generic') + '). Written with the best model (Claude Opus).\n' +
         '% To match the journal format, swap \\documentclass to the journal class and add its .cls to this project.\n' +
@@ -1092,15 +1098,17 @@
         '\\title{' + (outline.title || p.title || 'Untitled') + '}\n\\author{[TODO: author names and affiliations]}\n\\date{\\today}\n\n\\begin{document}\n\\maketitle\n' +
         '\\begin{abstract}\n' + (outline.abstract || '[TODO: abstract]') + '\n\\end{abstract}\n' +
         ((outline.keywords && outline.keywords.length) ? '\\noindent\\textbf{Keywords:} ' + outline.keywords.join(', ') + '\n\n' : '\n') +
-        drafted.map(function (s) { return s.latex; }).join('\n\n') + '\n\n\\bibliographystyle{plainnat}\n\\bibliography{refs}\n\\end{document}\n';
+        body + '\n\n\\bibliographystyle{plainnat}\n\\bibliography{refs}\n\\end{document}\n';
     }
     function assemble(outline, context, drafted) {
       sb.from('research_protocols').select('id').eq('project_id', pid).neq('status', 'archived').order('created_at', { ascending: false }).limit(1).then(function (pr) {
         var prot = pr && pr.data && pr.data[0];
         var finish = function (figMap) {
-          var files = {}; files['main.tex'] = { type: 'tex', content: buildMain(outline, context, drafted) };
+          var figList = (context.figures || []).filter(function (f) { return figMap[f.key] && figMap[f.key].img; });   // deduped figures with images
+          if (!figList.length) figList = Object.keys(figMap).map(function (k) { return { key: k, caption: figMap[k].caption }; });
+          var files = {}; files['main.tex'] = { type: 'tex', content: buildMain(outline, context, drafted, figList) };
           files['refs.bib'] = { type: 'bib', content: bibOf(context.literature) };
-          Object.keys(figMap).forEach(function (k) { files[k + '.png'] = { type: 'image', content: figMap[k] }; });
+          figList.forEach(function (f) { files[f.key + '.png'] = { type: 'image', content: figMap[f.key].img }; });
           sb.from('research_drafts').insert({ project_id: pid, journal_pick_id: jid || null, title: outline.title, journal: (context.journal && context.journal.name) || null, outline: outline, sections: drafted, files: files, status: 'ready', model: 'claude-opus-4-8', created_by: props.authorId }).select().then(function (r) {
             if (r && r.error) { window.PRUI.toast(r.error.message, { kind: 'error' }); setPhase(''); return; }
             var row = r && r.data && r.data[0]; setDraft({ id: row && row.id, outline: outline, sections: drafted, files: files }); setPhase('done'); setProg('');
@@ -1109,7 +1117,7 @@
         };
         if (!prot) return finish({});
         sb.from('research_protocol_steps').select('ord,result').eq('protocol_id', prot.id).order('ord').then(function (sr) {
-          var figMap = {}; ((sr && sr.data) || []).forEach(function (s) { ((s.result && s.result.figures) || []).forEach(function (f, i) { if (f.img) figMap['fig_' + s.ord + '_' + (i + 1)] = f.img; }); }); finish(figMap);
+          var figMap = {}; ((sr && sr.data) || []).forEach(function (s) { ((s.result && s.result.figures) || []).forEach(function (f, i) { if (f.img) figMap['fig_' + s.ord + '_' + (i + 1)] = { img: f.img, caption: f.title || ('Figure from step ' + s.ord) }; }); }); finish(figMap);
         });
       });
     }
