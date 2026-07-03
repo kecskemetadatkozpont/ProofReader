@@ -12,6 +12,7 @@
   var LINKS = [
     { key: 'profile', label: 'Open Profile', href: 'Profile.html' },
     { key: 'research', label: 'Research', href: 'Research.html' },
+    { key: 'submissions', label: 'Érkeztető', href: 'Submissions.html' },
     { key: 'session', label: 'Publify Chat', href: 'Session.html' },
     { key: 'media', label: 'Media player', href: 'Media.html' },
     { key: 'compare', label: 'Version comparison', href: 'Compare.html' },
@@ -23,6 +24,7 @@
     var p = (location.pathname.split('/').pop() || '').toLowerCase();
     if (p.indexOf('profile') === 0) return 'profile';
     if (p.indexOf('research') === 0) return 'research';
+    if (p.indexOf('submissions') === 0) return 'submissions';
     if (p.indexOf('session') === 0) return 'session';
     if (p.indexOf('phd') === 0) return 'phd';
     if (p.indexOf('projects') === 0) return 'publications';
@@ -30,7 +32,7 @@
     if (p.indexOf('proofreader') === 0) return 'editor';
     return '';
   }
-  var PAGE_NAME = { profile: 'Profile', research: 'Research', session: 'Publify Chat', phd: 'Doctoral School', publications: 'Publications', admin: 'Admin', editor: 'Editor' };
+  var PAGE_NAME = { profile: 'Profile', research: 'Research', submissions: 'Érkeztető', session: 'Publify Chat', phd: 'Doctoral School', publications: 'Publications', admin: 'Admin', editor: 'Editor' };
   function initials(name, email) {
     var s = (name || email || '?').trim();
     var parts = s.split(/\s+/).filter(Boolean);
