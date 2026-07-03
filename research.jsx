@@ -472,6 +472,7 @@
     var pkS = useState(false), picker = pkS[0], setPicker = pkS[1];
     var enS = useState(false), enhancing = enS[0], setEnhancing = enS[1];   // #6: prompt enhancement in flight
     var firstLoad = useRef(true), animated = useRef({}), alive = useRef(true), scrollRef = useRef(null), taRef = useRef(null), justStreamed = useRef(false);
+    var atBottom = useRef(true);   // only auto-follow the stream while the user is at the bottom; if they scroll up, stay put
     var sgS = useState(''), sgMsg = sgS[0], setSgMsg = sgS[1];
     var sgB = useState(false), sgBusy = sgB[0], setSgBusy = sgB[1];
     useEffect(function () { return function () { alive.current = false; }; }, []);
@@ -530,7 +531,7 @@
         var c = (r && r.data && r.data[0]) || null; setChat(c); if (c) loadMsgs(c.id);
       });
     }, []);
-    useEffect(function () { var el = scrollRef.current; if (el) el.scrollTop = el.scrollHeight; }, [msgs.length, typing, streaming]);  // follow the conversation (incl. live stream)
+    useEffect(function () { var el = scrollRef.current; if (el && atBottom.current) el.scrollTop = el.scrollHeight; }, [msgs.length, typing, streaming]);  // follow the stream ONLY if the user is at the bottom
     function ensureChat() {
       if (chat) return Promise.resolve(chat.id);
       return sb.from('research_chats').insert({ project_id: props.projectId, title: 'Publify chat' }).select('id').maybeSingle().then(function (r) { var c = r && r.data; setChat(c); return c && c.id; });
@@ -571,6 +572,7 @@
     function sendText(raw) {
       var txt = (raw || '').trim();
       if (!txt || busy) return;
+      atBottom.current = true;   // sending → jump back to the live conversation
       var atts = attach;
       setBusy(true); setErr(''); setInput(''); setAttach([]);
       if (taRef.current) taRef.current.style.height = 'auto';
@@ -628,7 +630,7 @@
         sgMsg ? h('span', { style: { fontSize: 12, color: 'var(--muted)' } }, sgMsg) : null
       ) : null,
       props.supervised ? h('div', { style: { fontSize: 12, color: 'var(--muted)', background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 8, padding: '7px 11px', marginBottom: 10, lineHeight: 1.45 } }, 'ℹ️ Your supervisor may receive a daily summary of your research conversations (what you worked on, what decisions you made).') : null,
-      h('div', { className: 'chat-msgs', ref: scrollRef, onMouseUp: onChatMouseUp, onScroll: function () { if (selPop) setSelPop(null); } },
+      h('div', { className: 'chat-msgs', ref: scrollRef, onMouseUp: onChatMouseUp, onScroll: function () { var el = scrollRef.current; if (el) atBottom.current = (el.scrollHeight - el.scrollTop - el.clientHeight) < 64; if (selPop) setSelPop(null); } },
         msgs.length ? msgs.map(function (m) {
           var isTyping = typing && typing.id === m.id;
           var ai = m.role === 'assistant';
@@ -1255,6 +1257,7 @@
     var ppS = useState(''), promptText = ppS[0], setPromptText = ppS[1];   // previewed screening prompt
     var smS = useState(false), studiesOpen = smS[0], setStudiesOpen = smS[1];   // "Tanulmányok" manage modal
     var rnS = useState(null), renameId = rnS[0], setRenameId = rnS[1];   // study being renamed
+    var rvwS = useState(''), review = rvwS[0], setReview = rvwS[1];   // step-4 generated review markdown (rendered in-panel)
     var rvS = useState(''), renameVal = rvS[0], setRenameVal = rvS[1];
     var meS = useState({}), srcMeta = meS[0], setSrcMeta = meS[1];   // source_id -> {title,venue,cited_by,year,issn}
     var scS = useState(null), scimap = scS[0], setScimap = scS[1];   // SCImago ISSN→quartile map (lazy)
@@ -1279,8 +1282,13 @@
     var sel = studies.filter(function (x) { return x.id === selId; })[0];
     var srcMap = {}; (props.sources || []).forEach(function (s) { srcMap[s.id] = s; });
 
+    function loadReview(id) {
+      if (!id) { setReview(''); return; }
+      sb.from('research_files').select('content').eq('project_id', props.projectId).like('path', 'studies/%-' + String(id).slice(0, 8) + '-review.md').order('updated_at', { ascending: false }).limit(1).then(function (rr) { setReview((rr && rr.data && rr.data[0] && rr.data[0].content) || ''); }, function () { });
+    }
     function loadStudy(id) {
-      if (!id) { setSteps([]); setPapers([]); setPapersLoading(false); return; }
+      if (!id) { setSteps([]); setPapers([]); setPapersLoading(false); setReview(''); return; }
+      loadReview(id);
       Promise.all([
         sb.from('research_study_steps').select('step,kind,config,status,cursor,total,counts').eq('study_id', id).order('step'),
         sb.from('research_study_papers').select('source_id,step,decision,reason,score,signals,overridden').eq('study_id', id)
@@ -1508,9 +1516,16 @@
         ) : null
       ) : h('div', { className: 'panel', style: { marginTop: 10 } },
         h('h3', null, '4. Review paper'),
-        h('p', { style: { fontSize: 13, color: 'var(--muted)' } }, 'We generate a structured review from the ' + incCount(3) + ' paper(s) “include”-d in step 3 (saved to Files). Consensus grounding if the token is connected.'),
-        props.canEdit ? h('div', { className: 'runbar' }, h('button', { className: 'btn pri', disabled: running || incCount(3) === 0, onClick: function () { runStep(4); } }, running ? 'Generating…' : 'Generate review'), (stepRow(4) || {}).status === 'done' ? h('span', { className: 'chip c-ok' }, 'Done — see Files') : null) : null,
-        err ? h('div', { style: { color: 'var(--danger)', fontSize: 12.5, marginTop: 6 } }, err) : null
+        h('p', { style: { fontSize: 13, color: 'var(--muted)' } }, 'We generate a structured review from the ' + incCount(3) + ' paper(s) “include”-d in step 3 (also saved to Files). Consensus grounding if the token is connected.'),
+        props.canEdit ? h('div', { className: 'runbar' }, h('button', { className: 'btn pri', disabled: running || incCount(3) === 0, onClick: function () { runStep(4); } }, running ? 'Generating…' : (review ? '🔄 Regenerate review' : 'Generate review')), (stepRow(4) || {}).status === 'done' ? h('span', { className: 'chip c-ok' }, '✓ Done · saved to Files') : null) : null,
+        running ? h('div', { style: { marginTop: 10 } }, h(AiThinking, { label: 'Synthesizing the review from the included papers' })) : null,
+        err ? h('div', { style: { color: 'var(--danger)', fontSize: 12.5, marginTop: 6 } }, err) : null,
+        review ? h('div', { style: { marginTop: 12 } },
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 } },
+            h('b', { style: { fontSize: 12.5, flex: 1 } }, '📄 Generated review'),
+            h('button', { className: 'btn', style: { padding: '3px 10px', fontSize: 11.5 }, onClick: function () { try { var u = URL.createObjectURL(new Blob([review], { type: 'text/markdown' })); var a = document.createElement('a'); a.href = u; a.download = 'literature-review.md'; a.click(); setTimeout(function () { URL.revokeObjectURL(u); }, 3000); } catch (e) { } } }, '⬇ .md')),
+          h('div', { className: 'report-doc', style: { maxWidth: '100%', maxHeight: 640, overflow: 'auto', padding: '22px 26px' }, dangerouslySetInnerHTML: { __html: mdReport(review) } })
+        ) : null
       ),
       // results list (steps 1-3)
       curStep < 4 ? h('div', { className: 'panel', style: { marginTop: 10 } },

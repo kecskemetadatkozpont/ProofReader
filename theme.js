@@ -63,7 +63,7 @@
     // ── Magnetic Ring cursor (desktop/mouse only; the JS that drives it is below) ──
     'html.pr-cursor, html.pr-cursor * { cursor: none !important; }',
     'html.pr-cursor textarea, html.pr-cursor [contenteditable], html.pr-cursor .cm-tex, html.pr-cursor .cm-revtext, html.pr-cursor pre, html.pr-cursor code, html.pr-cursor input:is([type=text],[type=search],[type=email],[type=url],[type=password],[type=number],[type=tel]), html.pr-cursor input:not([type]) { cursor: text !important; }',
-    'html.pr-cursor .splitter, html.pr-cursor .splitter *, html.pr-cursor .ws-divider, html.pr-cursor .ws-divider.row, html.pr-cursor .cm-split, html.pr-cursor .cm-split * { cursor: col-resize !important; }',
+    'html.pr-cursor .splitter, html.pr-cursor .splitter *, html.pr-cursor .ws-divider, html.pr-cursor .ws-divider.row, html.pr-cursor .cm-split, html.pr-cursor .cm-split *, html.pr-cursor .fb-resizer { cursor: col-resize !important; }',
     'html.pr-cursor .ws-divider.col { cursor: row-resize !important; }',
     'html.pr-cursor .pdf-render-scroll, html.pr-cursor .pdf-render-scroll *, html.pr-cursor .pdf-paper, html.pr-cursor .pdf-paper *, html.pr-cursor .ct-scroll, html.pr-cursor .ct-scroll *, html.pr-cursor .pdf-view, html.pr-cursor .pdf-view *, html.pr-cursor .pdf-view-wrap, html.pr-cursor .pdf-view-wrap * { cursor: auto !important; }',
     '#pr-cur { position: fixed; inset: 0; pointer-events: none; z-index: 2147483646; opacity: 1; transition: opacity .2s; }',
@@ -165,7 +165,7 @@
       var mx = window.innerWidth / 2, my = window.innerHeight / 2, rx = mx, ry = my, snap = null, txt = false;
       var HIT = 'a,button,[role="button"],.btn,.seg button,.chip,.tab,.ca,.pc-chip,.pf-pub-files,label,summary,[data-cursor],.cm-rp-item,.cm-li,.cm-saved-li,.pn-nav a';
       var TEXT = 'textarea,[contenteditable],.cm-tex,.cm-revtext,.ct-textlayer,pre,code,input:is([type=text],[type=search],[type=email],[type=url],[type=password],[type=number],[type=tel]),input:not([type])';
-      var RESIZE = '.splitter,.ws-divider,.cm-split';   // show the native resize cursor on draggable dividers
+      var RESIZE = '.splitter,.ws-divider,.cm-split,.fb-resizer';   // show the native resize cursor on draggable dividers
       var PDFV = '.pdf-render-scroll,.pdf-paper,.ct-scroll,.pdf-view,.pdf-view-wrap';   // PDF surfaces: native cursor for scroll/zoom/pan
       function lerp(a, b, t) { return a + (b - a) * t; }
       function evalAt(el) {
