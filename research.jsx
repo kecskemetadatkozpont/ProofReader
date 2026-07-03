@@ -1609,6 +1609,29 @@
 
   // ---------- Task editor (full-field modal for a protocol step; manual + AI-refine) ----------
   var PROT_KINDS = ['data', 'preprocess', 'train', 'eval', 'analysis', 'figure', 'writeup', 'custom'];
+  // Shared drag&drop collector: turns a drop event into [{file, relpath}] — folders traversed recursively.
+  function walkEntry(entry, prefix) {
+    return new Promise(function (resolve) {
+      if (entry.isFile) { entry.file(function (f) { resolve([{ file: f, relpath: prefix + entry.name }]); }, function () { resolve([]); }); }
+      else if (entry.isDirectory) {
+        var reader = entry.createReader(); var all = [];
+        (function readBatch() {
+          reader.readEntries(function (ents) {
+            if (!ents.length) { Promise.all(all.map(function (c) { return walkEntry(c, prefix + entry.name + '/'); })).then(function (a) { resolve(a.reduce(function (x, y) { return x.concat(y); }, [])); }); }
+            else { all = all.concat(Array.prototype.slice.call(ents)); readBatch(); }
+          }, function () { resolve([]); });
+        })();
+      } else resolve([]);
+    });
+  }
+  function collectDropped(e) {
+    var items = e.dataTransfer && e.dataTransfer.items;
+    if (items && items.length && items[0].webkitGetAsEntry) {
+      var entries = []; for (var i = 0; i < items.length; i++) { var en = items[i].webkitGetAsEntry && items[i].webkitGetAsEntry(); if (en) entries.push(en); }
+      return Promise.all(entries.map(function (en) { return walkEntry(en, ''); })).then(function (a) { return a.reduce(function (x, y) { return x.concat(y); }, []); });
+    }
+    return Promise.resolve(Array.prototype.slice.call((e.dataTransfer && e.dataTransfer.files) || []).map(function (f) { return { file: f, relpath: f.name }; }));
+  }
   function TaskEditorModal(props) {
     var st = props.step || {}; var sx0 = st.spec || {};
     var tt = useState(st.title || ''), title = tt[0], setTitle = tt[1];
@@ -1647,27 +1670,9 @@
       var fs = Array.prototype.slice.call((e.target && e.target.files) || []); if (e.target) e.target.value = '';
       uploadList(fs.map(function (f) { return { file: f, relpath: f.webkitRelativePath || f.name }; }));
     }
-    function walkEntry(entry, prefix) {   // recursively collect File objects (with relpath) from a dropped file/folder entry
-      return new Promise(function (resolve) {
-        if (entry.isFile) { entry.file(function (f) { resolve([{ file: f, relpath: prefix + entry.name }]); }, function () { resolve([]); }); }
-        else if (entry.isDirectory) {
-          var reader = entry.createReader(); var all = [];
-          (function readBatch() {
-            reader.readEntries(function (ents) {
-              if (!ents.length) { Promise.all(all.map(function (c) { return walkEntry(c, prefix + entry.name + '/'); })).then(function (a) { resolve(a.reduce(function (x, y) { return x.concat(y); }, [])); }); }
-              else { all = all.concat(Array.prototype.slice.call(ents)); readBatch(); }
-            }, function () { resolve([]); });
-          })();
-        } else resolve([]);
-      });
-    }
     function onDrop(e) {
       e.preventDefault(); setDragOver(false);
-      var items = e.dataTransfer && e.dataTransfer.items;
-      if (items && items.length && items[0].webkitGetAsEntry) {
-        var entries = []; for (var i = 0; i < items.length; i++) { var en = items[i].webkitGetAsEntry && items[i].webkitGetAsEntry(); if (en) entries.push(en); }
-        Promise.all(entries.map(function (en) { return walkEntry(en, ''); })).then(function (a) { uploadList(a.reduce(function (x, y) { return x.concat(y); }, [])); });
-      } else { uploadList(Array.prototype.slice.call((e.dataTransfer && e.dataTransfer.files) || []).map(function (f) { return { file: f, relpath: f.name }; })); }
+      collectDropped(e).then(uploadList);
     }
     function setNote(i, v) { setAtt(function (x) { return x.map(function (it, j) { return j === i ? Object.assign({}, it, { note: v }) : it; }); }); }
     function removeAtt(i) {
@@ -1690,7 +1695,13 @@
         window.PRUI.toast('Refined — review and Save', { kind: 'ok' });
       }, function (e) { setRefining(false); window.PRUI.toast('Refine failed: ' + e, { kind: 'error' }); });
     }
-    return h('div', { className: 'scrim', onClick: props.onClose }, h('div', { className: 'modal', style: { width: 620 }, onClick: function (e) { e.stopPropagation(); } },
+    return h('div', { className: 'scrim', onClick: props.onClose }, h('div', {
+      className: 'modal', style: { width: 620 }, onClick: function (e) { e.stopPropagation(); },
+      // the WHOLE editor accepts drops (files or folders) — the zone below is just the visual target
+      onDragOver: function (e) { e.preventDefault(); if (!dragOver) setDragOver(true); },
+      onDragLeave: function (e) { if (e.relatedTarget && e.currentTarget.contains(e.relatedTarget)) return; setDragOver(false); },
+      onDrop: onDrop
+    },
       h('div', { className: 'modal-h' },
         h('h3', { style: { margin: 0, flex: 1 } }, props.isNew ? 'New task' : 'Edit task'),
         st.id ? h('button', { className: 'btn', style: { padding: '4px 9px', fontSize: 12, flex: 'none' }, disabled: refining, title: 'Let Publify improve this step', onClick: refine }, refining ? '✨…' : '✨ Refine') : null,
@@ -1753,7 +1764,34 @@
     var apS = useState(''), aiPrompt = apS[0], setAiPrompt = apS[1];
     var abS = useState(false), aiBusy = abS[0], setAiBusy = abS[1];
     var rvS = useState(null), rvMd = rvS[0], setRvMd = rvS[1];   // full-report reader markdown
+    var dsS = useState(null), dropStep = dsS[0], setDropStep = dsS[1];   // step id a file is being dragged over
+    var usS = useState(null), upStep = usS[0], setUpStep = usS[1];       // { id, msg } while uploading onto a step
     var ce = props.canEdit;
+    // drop files/folders straight onto a task row → upload + append to that step's spec.attachments
+    function uploadToStep(s, items) {
+      if (!items.length) return;
+      var batch = String(Date.now()) + '_' + Math.random().toString(36).slice(2, 7);
+      var added = [], done = 0; setUpStep({ id: s.id, msg: 'Uploading 0/' + items.length });
+      (function next(i) {
+        if (i >= items.length) {
+          setUpStep(null);
+          if (added.length) {
+            var sx = Object.assign({}, s.spec || {}); sx.attachments = (sx.attachments || []).concat(added);
+            patchStep(s, { spec: sx });
+            window.PRUI.toast('📎 ' + added.length + ' file(s) attached to task ' + s.ord, { kind: 'ok' });
+          }
+          return;
+        }
+        var f = items[i].file; var rel = items[i].relpath || f.name;
+        var sp = props.projectId + '/protocol/' + batch + '/' + rel.replace(/[^A-Za-z0-9._\/-]/g, '_');
+        sb.storage.from('research-data').upload(sp, f).then(function (res) {
+          done++; setUpStep({ id: s.id, msg: 'Uploading ' + done + '/' + items.length });
+          if (res && res.error) window.PRUI.toast(rel + ': ' + res.error.message, { kind: 'error' });
+          else added.push({ name: rel, storage_path: sp, mime: f.type || '', size: f.size, note: '' });
+          next(i + 1);
+        }, function () { done++; next(i + 1); });
+      })(0);
+    }
     function buildFullReport() {
       var L = ['# ' + (prot.title || 'Protocol') + '\n'];
       if (prot.goal) L.push('> ' + prot.goal + '\n');
@@ -1887,10 +1925,18 @@
         busy ? h('div', { style: { marginTop: 10 } }, h(AiThinking, { label: 'The AI is working on this protocol' })) : null
       ),
       h('div', { className: 'panel' },
-        h('h3', null, 'Steps (' + steps.length + ')', ce ? h('button', { className: 'btn', style: { marginLeft: 'auto', padding: '3px 9px', fontSize: 11.5, flex: 'none' }, onClick: function () { setEditing({ step: {}, isNew: true, after: null }); } }, '+ Add task') : null),
+        h('h3', null, 'Steps (' + steps.length + ')', ce ? h('span', { style: { marginLeft: 10, fontSize: 10.5, color: 'var(--faint)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 } }, '⤓ drop files on a task to attach') : null, ce ? h('button', { className: 'btn', style: { marginLeft: 'auto', padding: '3px 9px', fontSize: 11.5, flex: 'none' }, onClick: function () { setEditing({ step: {}, isNew: true, after: null }); } }, '+ Add task') : null),
         steps.length ? steps.map(function (s, i) {
           var open = !!exp[s.id]; var pst = PST[s.status] || PST.todo; var sx = s.spec || {};
-          return h('div', { key: s.id, style: { borderBottom: '1px solid var(--soft)', padding: '8px 0' } },
+          return h('div', {
+            key: s.id,
+            style: Object.assign({ borderBottom: '1px solid var(--soft)', padding: '8px 0' },
+              dropStep === s.id ? { background: 'var(--accent-tint)', outline: '1.5px dashed var(--accent)', outlineOffset: '-2px', borderRadius: 8 } : null),
+            onDragOver: ce ? function (e) { e.preventDefault(); e.stopPropagation(); if (dropStep !== s.id) setDropStep(s.id); } : null,
+            onDragLeave: ce ? function (e) { if (e.relatedTarget && e.currentTarget.contains(e.relatedTarget)) return; setDropStep(null); } : null,
+            onDrop: ce ? function (e) { e.preventDefault(); e.stopPropagation(); setDropStep(null); collectDropped(e).then(function (its) { uploadToStep(s, its); }); } : null
+          },
+            (upStep && upStep.id === s.id) ? h('div', { style: { fontSize: 11.5, color: 'var(--accent)', margin: '0 0 4px 28px' } }, '⏳ ' + upStep.msg) : null,
             h('div', { style: { display: 'flex', gap: 8, alignItems: 'center' } },
               h('span', { style: { width: 18, textAlign: 'right', color: 'var(--faint)', fontSize: 12, flex: 'none' } }, s.ord),
               h('span', { 'aria-hidden': 'true', title: s.kind, style: { fontSize: 14, flex: 'none' } }, STEP_ICON[s.kind] || '•'),
