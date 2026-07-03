@@ -102,7 +102,15 @@
 
     const sync = useCallback(() => {
       const ta = taRef.current; if (!ta) return;
-      if (backRef.current) { backRef.current.scrollTop = ta.scrollTop; backRef.current.scrollLeft = ta.scrollLeft; }
+      if (backRef.current) {
+        backRef.current.scrollTop = ta.scrollTop; backRef.current.scrollLeft = ta.scrollLeft;
+        // mirror the textarea's scrollbar width as extra right padding, so both layers wrap lines at the
+        // SAME content width — otherwise (always-on scrollbars) the visible text and the real caret/click
+        // mapping drift apart by whole lines in soft-wrap mode ("I type somewhere else than the caret").
+        const sbw = ta.offsetWidth - ta.clientWidth;
+        const want = sbw > 0 ? ('calc(16px + ' + sbw + 'px)') : '';
+        if (backRef.current.style.paddingRight !== want) backRef.current.style.paddingRight = want;
+      }
       if (gutRef.current) gutRef.current.scrollTop = ta.scrollTop;
     }, []);
 
@@ -147,6 +155,8 @@
         setJumpMark({ x: 16 + col * charWidth() - ta.scrollLeft, y: 14 + line * props.lineHeight - ta.scrollTop, nonce: sr.nonce });
       }
       clearTimeout(jumpTimer.current); jumpTimer.current = setTimeout(() => setJumpMark(null), 1900);
+      // re-assert on the next tick: a late render/focus handler must not steal the caret away from the jump target
+      setTimeout(() => { const t = taRef.current; if (t && document.activeElement === t) { try { t.setSelectionRange(sr.start, sr.end); } catch (e) { } } }, 0);
     }, [props.selectReq]);
 
     /* ------- edit helpers ------- */
