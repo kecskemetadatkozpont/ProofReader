@@ -291,3 +291,6 @@ We thank you for considering our venue.
 Kind regards,
 Editorial Office')
 on conflict (key) do nothing;
+
+-- Phase 2 addendum: editor-visible reviewer display name (profiles are privacy-locked; captured at invite time from pr_search_users)
+alter table submission_reviews add column if not exists reviewer_name text;
