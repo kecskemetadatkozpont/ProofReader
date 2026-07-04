@@ -1766,7 +1766,54 @@
     var rvS = useState(null), rvMd = rvS[0], setRvMd = rvS[1];   // full-report reader markdown
     var dsS = useState(null), dropStep = dsS[0], setDropStep = dsS[1];   // step id a file is being dragged over
     var usS = useState(null), upStep = usS[0], setUpStep = usS[1];       // { id, msg } while uploading onto a step
+    var pvS = useState('overview'), pview = pvS[0], setPview = pvS[1];   // sub-view: 'overview' | 'steps'
+    var lbS = useState(null), lb = lbS[0], setLb = lbS[1];               // figure lightbox { src, cap }
+    var rfS = useState([]), rfiles = rfS[0], setRfiles = rfS[1];         // project deliverable files
+    var ntS = useState({}), noteDraft = ntS[0], setNoteDraft = ntS[1];   // per-step composer { <id>: { kind, body } }
+    var ndS = useState({}), notesData = ndS[0], setNotesData = ndS[1];   // review notes keyed by step id
     var ce = props.canEdit;
+    // ---- result helpers (read the runner's structured output) ----
+    function acOf(s) {
+      var r = s.result && s.result.acceptance_check; if (!r || typeof r !== 'object') return null;
+      var items = Object.keys(r).map(function (k) { var v = String(r[k]); var ok = v.indexOf('PASS') === 0; return { crit: k, ok: ok, reason: ok ? '' : v.replace(/^FAIL:?\s*/, '') }; });
+      if (!items.length) return null;
+      return { total: items.length, pass: items.filter(function (x) { return x.ok; }).length, items: items };
+    }
+    function devsOf(s) { return (s.result && s.result.deviations) || []; }
+    function figsOf(s) { return (s.result && s.result.figures) || []; }
+    function notesOf(s) { return notesData[s.id] || []; }
+    function protStats() {
+      var acP = 0, acT = 0, dv = 0, fg = 0, dn = 0;
+      steps.forEach(function (s) { var a = acOf(s); if (a) { acP += a.pass; acT += a.total; } dv += devsOf(s).length; fg += figsOf(s).length; if (s.status === 'done') dn++; });
+      return { acPass: acP, acTot: acT, dev: dv, fig: fg, done: dn };
+    }
+    function loadNotes() {
+      if (!prot) return;
+      sb.from('research_protocol_notes').select('id,step_id,kind,body,author_id,created_at').eq('protocol_id', prot.id).order('created_at', { ascending: true }).then(function (r) {
+        var rows = (r && r.data) || [];
+        var ids = rows.map(function (n) { return n.author_id; }).filter(function (x, i, a) { return x && a.indexOf(x) === i; });
+        function finish(names) { var by = {}; rows.forEach(function (n) { n.author_name = names[n.author_id] || 'Member'; (by[n.step_id] = by[n.step_id] || []).push(n); }); setNotesData(by); }
+        if (ids.length) sb.from('profiles_public').select('id,name').in('id', ids).then(function (pr) { var m = {}; ((pr && pr.data) || []).forEach(function (x) { m[x.id] = x.name; }); finish(m); }, function () { finish({}); });
+        else finish({});
+      }, function () { });
+    }
+    // Post a review note. Any project member may comment (RLS: read-access = member); the runner never overwrites these.
+    function addNote(s, kind, body) {
+      if (!(body || '').trim() || !prot) return;
+      sb.from('research_protocol_notes').insert({ project_id: props.projectId, protocol_id: prot.id, step_id: s.id, author_id: props.authorId, kind: kind, body: body.trim() }).then(function (r) {
+        if (r && r.error) { window.PRUI.toast(r.error.message, { kind: 'error' }); return; }
+        setNoteDraft(function (p) { var n = Object.assign({}, p); delete n[s.id]; return n; });
+        loadNotes();
+      });
+    }
+    function spawnFollowup(s, body) {
+      var txt = (body || '').trim(); if (!txt) return;
+      insertSteps([{ title: txt.slice(0, 120), kind: 'custom', instruction: txt, depends_on: [s.ord], needs_approval: true }], s).then(function () {
+        window.PRUI.toast('New task created after step ' + s.ord + ' — review it, then “Send for evaluation”.', { kind: 'ok' });
+      });
+      setNoteDraft(function (p) { var n = Object.assign({}, p); delete n[s.id]; return n; });
+    }
+    function sendForEval(s) { patchStep(s, { status: 'queued' }); }
     // drop files/folders straight onto a task row → upload + append to that step's spec.attachments
     function uploadToStep(s, items) {
       if (!items.length) return;
@@ -1813,8 +1860,10 @@
         else setSteps([]);
       }, function () { setLoading(false); });
     }
-    useEffect(function () { load(); }, [props.projectId]);
-    useEffect(function () { if (!prot || prot.status !== 'running') return; var t = setInterval(load, 5000); return function () { clearInterval(t); }; }, [prot && prot.id, prot && prot.status]);
+    function loadFiles() { sb.from('research_files').select('id,path,content,storage_path,mime,size,updated_at').eq('project_id', props.projectId).order('updated_at', { ascending: false }).then(function (r) { setRfiles((r && r.data) || []); }); }
+    useEffect(function () { load(); loadFiles(); }, [props.projectId]);
+    useEffect(function () { loadNotes(); }, [prot && prot.id]);
+    useEffect(function () { if (!prot || prot.status !== 'running') return; var t = setInterval(function () { load(); loadFiles(); loadNotes(); }, 5000); return function () { clearInterval(t); }; }, [prot && prot.id, prot && prot.status]);
     function generate() {
       if (busy) return; setBusy(true);
       sb.functions.invoke('research-protocol', { body: { action: 'generate', project_id: props.projectId, goal: goal } }).then(function (r) {
@@ -1903,6 +1952,46 @@
     var done = steps.filter(function (s) { return s.status === 'done'; }).length;
     var pct = steps.length ? Math.round(done / steps.length * 100) : 0;
     var alive = prot.heartbeat_at && (Date.now() - new Date(prot.heartbeat_at).getTime() < 30000);
+    var hasResults = steps.some(function (s) { return s.result && (s.result.report || s.result.summary); });
+    var stt = protStats();
+    // ---- Overview: verdict + status matrix + deliverables + the full report rendered inline ----
+    function renderOverview() {
+      var allpass = stt.acTot > 0 && stt.acPass === stt.acTot;
+      var doc = buildDoc(buildFullReport());
+      var deliv = rfiles.filter(function (f) { return f.content != null || /\.(md|txt|csv|tsv|tex|bib|json|html?|gexf)$/i.test(f.path); });
+      return h('div', null,
+        h('div', { className: 'panel' },
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 12 } },
+            stt.acTot ? h('span', { className: 'chip ' + (allpass ? 'c-ok' : 'c-warn'), style: { fontSize: 12, padding: '5px 11px' } }, (allpass ? '✓ ' : '⚠ ') + stt.acPass + '/' + stt.acTot + ' acceptance checks passed') : null,
+            h('span', { style: { fontSize: 12, color: 'var(--muted)' } }, stt.done + '/' + steps.length + ' tasks complete' + (stt.dev ? ' · ' + stt.dev + ' documented deviations' : '') + (stt.fig ? ' · ' + stt.fig + ' figures' : ''))
+          ),
+          h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 6 } }, steps.map(function (s) {
+            var a = acOf(s); var bad = a && a.pass < a.total; var col = s.status === 'done' ? (bad ? 'var(--warn)' : 'var(--ok)') : (s.status === 'running' || s.status === 'queued' ? 'var(--accent)' : 'var(--faint)');
+            return h('button', { key: s.id, className: 'smx', title: s.title, onClick: function () { setExp(function (p) { var n = Object.assign({}, p); n[s.id] = true; return n; }); setPview('steps'); } },
+              h('span', { className: 'smx-dot', style: { background: col } }), h('b', null, s.ord + '.'), ' ' + (s.title.length > 32 ? s.title.slice(0, 32) + '…' : s.title),
+              a ? h('span', { style: { marginLeft: 5, color: 'var(--faint)', fontVariantNumeric: 'tabular-nums' } }, a.pass + '/' + a.total) : null);
+          }))
+        ),
+        deliv.length ? h('div', { className: 'panel' },
+          h('h3', null, '📦 Deliverables', h('span', { style: { fontWeight: 600, color: 'var(--faint)' } }, deliv.length + '')),
+          h('div', { style: { display: 'flex', flexDirection: 'column', gap: 7 } }, deliv.map(function (f) {
+            var ic = /\.md$|\.txt$/i.test(f.path) ? '📄' : /\.(csv|tsv)$/i.test(f.path) ? '📊' : /\.json$/i.test(f.path) ? '◧' : /\.tex$/i.test(f.path) ? '📐' : /\.bib$/i.test(f.path) ? '📚' : /\.html?$/i.test(f.path) ? '🌐' : /\.gexf$/i.test(f.path) ? '🕸' : '📎';
+            var canRead = f.content != null;
+            return h('div', { key: f.id, className: 'deliv' + (canRead ? ' click' : ''), onClick: canRead ? function () { setRvMd(f.content); } : null },
+              h('span', { className: 'deliv-ic' }, ic),
+              h('span', { style: { flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, h('b', { style: { fontSize: 12.5 } }, f.path), f.size ? h('span', { style: { fontSize: 11, color: 'var(--faint)', marginLeft: 6 } }, Math.round(f.size / 1024) + ' KB') : null),
+              canRead ? h('span', { className: 'btn', style: { padding: '2px 9px', fontSize: 11, flex: 'none' } }, '👁 Open') : (f.storage_path ? h('span', { className: 'btn', style: { padding: '2px 9px', fontSize: 11, flex: 'none' }, onClick: function (e) { e.stopPropagation(); sb.storage.from('research-data').createSignedUrl(f.storage_path, 3600, { download: f.path }).then(function (r) { if (r && r.data && r.data.signedUrl) window.open(r.data.signedUrl, '_blank'); }); } }, '⬇') : null));
+          }))
+        ) : null,
+        hasResults ? h('div', { className: 'panel' },
+          h('h3', null, '📄 Full report', h('button', { className: 'btn', style: { marginLeft: 'auto', padding: '3px 9px', fontSize: 11.5, flex: 'none' }, title: 'Open full screen', onClick: function () { setRvMd(buildFullReport()); } }, '⛶ Full screen')),
+          h('div', { className: 'doc-embed' },
+            doc.toc.length > 2 ? h('nav', { className: 'rv-toc doc-embed-toc' }, h('div', { className: 'rv-toc-h' }, 'Contents'), doc.toc.map(function (t) { return h('button', { key: t.id, className: 'rv-toc-i lvl' + t.level, onClick: function () { var el = document.getElementById(t.id); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); } }, t.text); })) : null,
+            h('article', { className: 'report-doc', dangerouslySetInnerHTML: { __html: doc.html } })
+          )
+        ) : null
+      );
+    }
     return h('div', null,
       h('div', { className: 'panel' },
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
@@ -1922,9 +2011,14 @@
           h('input', { className: 'field', style: { flex: 1, minWidth: 140 }, placeholder: 'Runner ID (dedicated machine)', defaultValue: prot.runner_id || '', onBlur: function (e) { setProtField('runner_id', e.target.value || null); } }),
           h('input', { className: 'field', style: { flex: 2, minWidth: 180 }, placeholder: 'Repo URL (git)', defaultValue: (prot.repo && prot.repo.url) || '', onBlur: function (e) { setProtField('repo', Object.assign({}, prot.repo || {}, { url: e.target.value })); } })
         ) : null,
-        busy ? h('div', { style: { marginTop: 10 } }, h(AiThinking, { label: 'The AI is working on this protocol' })) : null
+        busy ? h('div', { style: { marginTop: 10 } }, h(AiThinking, { label: 'The AI is working on this protocol' })) : null,
+        hasResults ? h('div', { className: 'ptabs' },
+          h('button', { className: 'ptab' + (pview === 'overview' ? ' on' : ''), onClick: function () { setPview('overview'); } }, 'Overview'),
+          h('button', { className: 'ptab' + (pview === 'steps' ? ' on' : ''), onClick: function () { setPview('steps'); } }, 'Tasks & results', h('span', { className: 'ptab-c' }, steps.length))
+        ) : null
       ),
-      h('div', { className: 'panel' },
+      (hasResults && pview === 'overview') ? renderOverview() : null,
+      (!hasResults || pview === 'steps') ? h('div', { className: 'panel' },
         h('h3', null, 'Steps (' + steps.length + ')', ce ? h('span', { style: { marginLeft: 10, fontSize: 10.5, color: 'var(--faint)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 } }, '⤓ drop files on a task to attach') : null, ce ? h('button', { className: 'btn', style: { marginLeft: 'auto', padding: '3px 9px', fontSize: 11.5, flex: 'none' }, onClick: function () { setEditing({ step: {}, isNew: true, after: null }); } }, '+ Add task') : null),
         steps.length ? steps.map(function (s, i) {
           var open = !!exp[s.id]; var pst = PST[s.status] || PST.todo; var sx = s.spec || {};
@@ -1963,9 +2057,46 @@
               (s.result && s.result.summary && !s.result.report) ? h('div', { style: { marginTop: 6, fontSize: 12.5, color: 'var(--ink)', lineHeight: 1.5 } }, s.result.summary) : null,
               (s.result && s.result.adaptation && !s.result.report) ? h('div', { style: { marginTop: 4, fontSize: 11.5, color: 'var(--warn)' } }, '⚙ ' + s.result.adaptation) : null,
               (s.result && s.result.error) ? h('div', { style: { marginTop: 4, color: 'var(--danger)' } }, '⚠ ' + s.result.error) : null,
-              (s.result && s.result.metrics) ? h('details', { style: { marginTop: 6 } }, h('summary', { style: { fontSize: 11, color: 'var(--muted)', cursor: 'pointer' } }, 'raw metrics (JSON)'), h('pre', { style: { marginTop: 4, fontFamily: 'monospace', fontSize: 11, background: 'var(--soft)', padding: '6px 8px', borderRadius: 6, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 220 } }, JSON.stringify(s.result.metrics, null, 1))) : null,
-              (s.result && s.result.figures && s.result.figures.length) ? h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 } }, s.result.figures.map(function (f, fi) { return h('figure', { key: fi, style: { margin: 0, width: 220 } }, h('img', { src: f.img, alt: f.title, loading: 'lazy', style: { width: '100%', borderRadius: 6, border: '1px solid var(--line)', cursor: 'zoom-in' }, onClick: function () { var w = window.open(); if (w) w.document.write('<img src="' + f.img + '" style="max-width:100%">'); } }), h('figcaption', { style: { fontSize: 10.5, color: 'var(--muted)', marginTop: 2 } }, f.title)); })) : null,
-              (s.result && s.result.artifacts && s.result.artifacts.length) ? h('div', { style: { marginTop: 6, fontSize: 10.5, color: 'var(--faint)', fontFamily: 'monospace', wordBreak: 'break-all' } }, '📎 ' + s.result.artifacts.join('  ·  ')) : null,
+              (function () { var a = acOf(s); return a ? h('div', { style: { marginTop: 10 } },
+                h('div', { className: 'res-h' }, (a.pass === a.total ? '✓ ' : '⚠ ') + 'Acceptance ' + a.pass + '/' + a.total),
+                h('div', { style: { display: 'flex', flexDirection: 'column', gap: 4 } }, a.items.map(function (it, k) {
+                  return h('div', { key: k, className: 'acc-row' + (it.ok ? '' : ' fail') }, h('span', { className: 'acc-mk' }, it.ok ? '✓' : '✗'), h('span', null, it.crit, it.reason ? h('span', { className: 'acc-rz' }, it.reason) : null));
+                }))) : null; })(),
+              (function () { var d = devsOf(s); return d.length ? h('div', { style: { marginTop: 10 } },
+                h('div', { className: 'res-h' }, '⚙ Deviations from spec (' + d.length + ')'),
+                h('div', { style: { display: 'flex', flexDirection: 'column', gap: 5 } }, d.map(function (x, k) { return h('div', { key: k, className: 'dev-row' }, x); }))) : null; })(),
+              (function () { var m = s.result && s.result.metrics; if (!m || typeof m !== 'object') return null; var keys = Object.keys(m).filter(function (k) { var v = m[k]; return v == null || typeof v !== 'object'; }); return keys.length ? h('div', { style: { marginTop: 10 } },
+                h('div', { className: 'res-h' }, 'Metrics'),
+                h('div', { className: 'metric-wrap' }, h('table', { className: 'metric-t' }, h('tbody', null, keys.map(function (k) { return h('tr', { key: k }, h('td', { className: 'mk' }, k), h('td', { className: 'mv' }, String(m[k]))); })))),
+                h('details', { style: { marginTop: 5 } }, h('summary', { style: { fontSize: 11, color: 'var(--muted)', cursor: 'pointer' } }, 'raw JSON'), h('pre', { style: { marginTop: 4, fontFamily: 'monospace', fontSize: 11, background: 'var(--soft)', padding: '6px 8px', borderRadius: 6, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 220 } }, JSON.stringify(m, null, 1)))) : null; })(),
+              (s.result && s.result.figures && s.result.figures.length) ? h('div', { style: { marginTop: 10 } }, h('div', { className: 'res-h' }, '🖼 Figures (' + s.result.figures.length + ')'), h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 8 } }, s.result.figures.map(function (f, fi) { return h('figure', { key: fi, style: { margin: 0, width: 220 } }, h('img', { src: f.img, alt: f.title, loading: 'lazy', style: { width: '100%', borderRadius: 6, border: '1px solid var(--line)', cursor: 'zoom-in' }, onClick: function () { setLb({ src: f.img, cap: f.title || '' }); } }), f.title ? h('figcaption', { style: { fontSize: 10.5, color: 'var(--muted)', marginTop: 2 } }, f.title) : null); }))) : null,
+              (s.result && s.result.artifacts && s.result.artifacts.length) ? h('div', { style: { marginTop: 10 } }, h('div', { className: 'res-h' }, '📎 Artifacts'), h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 6 } }, s.result.artifacts.map(function (art, k) {
+                var m2 = /^([a-z0-9-]+):(.+)$/i.exec(String(art)); var bucket = m2 && ['research-data', 'project-files'].indexOf(m2[1]) >= 0 ? m2[1] : null;
+                return bucket ? h('button', { key: k, className: 'art-chip', title: m2[2], onClick: function () { sb.storage.from(bucket).createSignedUrl(m2[2], 3600, { download: m2[2].split('/').pop() }).then(function (r) { if (r && r.data && r.data.signedUrl) window.open(r.data.signedUrl, '_blank'); }); } }, '⬇ ' + m2[2].split('/').pop()) : h('span', { key: k, className: 'art-chip', title: String(art) }, String(art).split('/').pop());
+              }))) : null,
+              (s.result && s.result.runner_note) ? h('div', { style: { marginTop: 8, fontSize: 10.5, color: 'var(--faint)', fontStyle: 'italic' } }, s.result.runner_note) : null,
+              (s.result || notesOf(s).length) ? h('div', { className: 'iter-dock' },
+                h('div', { className: 'res-h', style: { color: 'var(--accent)' } }, '🧭 Concerns, notes & new directions'),
+                notesOf(s).length ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 7, marginBottom: 9 } }, notesOf(s).map(function (n, k) {
+                  var kl = n.kind === 'obs' ? ['💬', 'note'] : n.kind === 'dir' ? ['🧭', 'direction'] : ['⚠', 'concern'];
+                  return h('div', { key: n.id || k, className: 'note' }, h('span', { className: 'note-k' }, kl[0]), h('div', { style: { flex: 1 } },
+                    h('div', { style: { display: 'flex', gap: 7, alignItems: 'baseline', flexWrap: 'wrap' } }, h('span', { className: 'note-who' }, n.author_name || 'Member'), h('span', { className: 'note-kd' }, kl[1]), n.created_at ? h('span', { className: 'note-when' }, new Date(n.created_at).toLocaleDateString()) : null),
+                    h('div', { className: 'note-b' }, n.body)));
+                })) : null,
+                (function () {
+                  var nd = noteDraft[s.id] || { kind: 'concern', body: '' };
+                  function setND(patch) { setNoteDraft(function (p) { var n = Object.assign({}, p); n[s.id] = Object.assign({}, nd, patch); return n; }); }
+                  var canTask = ce && nd.kind === 'dir';
+                  return h('div', { className: 'iter-composer' },
+                    h('div', { style: { display: 'flex', gap: 5, marginBottom: 7, flexWrap: 'wrap' } }, [['concern', '⚠ Concern'], ['obs', '💬 Note'], ['dir', '🧭 New direction']].map(function (o) { return h('button', { key: o[0], className: 'kbtn' + (nd.kind === o[0] ? ' on' : ''), onClick: function () { setND({ kind: o[0] }); } }, o[1]); })),
+                    h('textarea', { className: 'field', rows: 2, style: { width: '100%', boxSizing: 'border-box', fontSize: 12.5 }, placeholder: nd.kind === 'dir' ? 'Describe the new direction / next task…' : 'Raise a concern or note about this result…', value: nd.body, onChange: function (e) { setND({ body: e.target.value }); } }),
+                    h('div', { style: { display: 'flex', gap: 6, marginTop: 6, alignItems: 'center', flexWrap: 'wrap' } },
+                      h('button', { className: 'btn' + (canTask ? '' : ' pri'), style: { padding: '3px 10px', fontSize: 11.5 }, disabled: !(nd.body || '').trim(), onClick: function () { addNote(s, nd.kind, nd.body); } }, '＋ Post ' + (nd.kind === 'dir' ? 'direction' : nd.kind === 'obs' ? 'note' : 'concern')),
+                      canTask ? h('button', { className: 'btn pri', style: { padding: '3px 10px', fontSize: 11.5 }, disabled: !(nd.body || '').trim(), title: 'Also create a runnable task after this step', onClick: function () { spawnFollowup(s, nd.body); } }, '＋ Create follow-up task') : null,
+                      h('span', { style: { fontSize: 10.5, color: 'var(--faint)', flex: 1, minWidth: 100 } }, canTask ? 'A follow-up task is created after this step (needs approval); then “Approve to run” sends it for evaluation.' : 'Any project member can post notes here.'))
+                  );
+                })()
+              ) : null,
               ce ? h('div', { style: { display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8, alignItems: 'center' } },
                 h('button', { className: 'btn pri', style: { padding: '2px 9px', fontSize: 11 }, onClick: function () { setEditing({ step: s, isNew: false }); } }, '✎ Edit'),
                 h('button', { className: 'btn', style: { padding: '2px 7px', fontSize: 11 }, title: 'Add a task right after this one', onClick: function () { setEditing({ step: {}, isNew: true, after: s }); } }, '+ after'),
@@ -1985,7 +2116,11 @@
             h('button', { className: 'btn', style: { flex: 'none' }, disabled: aiBusy || !aiPrompt.trim(), onClick: aiAppend }, aiBusy ? '✨ Working…' : '✨ Add tasks')),
           aiBusy ? h('div', { style: { marginTop: 8 } }, h(AiThinking, { label: 'Drafting new tasks from your prompt' })) : null
         ) : null
-      ),
+      ) : null,
+      lb ? ReactDOM.createPortal(h('div', { className: 'fig-lb', onClick: function () { setLb(null); } },
+        h('button', { className: 'fig-lb-x', 'aria-label': 'Close', onClick: function () { setLb(null); } }, '✕'),
+        h('img', { src: lb.src, alt: lb.cap || '', onClick: function (e) { e.stopPropagation(); } }),
+        lb.cap ? h('div', { className: 'fig-lb-cap' }, lb.cap) : null), document.body) : null,
       editing ? h(TaskEditorModal, { step: editing.step, isNew: editing.isNew, allSteps: steps, projectId: props.projectId, onSave: saveTask, onClose: function () { setEditing(null); } }) : null
     );
   }
