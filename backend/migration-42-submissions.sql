@@ -294,3 +294,15 @@ on conflict (key) do nothing;
 
 -- Phase 2 addendum: editor-visible reviewer display name (profiles are privacy-locked; captured at invite time from pr_search_users)
 alter table submission_reviews add column if not exists reviewer_name text;
+
+-- Phase 3 addendum: in-app notification RPC (mirrors pr_notify_share; caller must be able to read the submission)
+create or replace function public.pr_notify_submission(p_recipient uuid, p_submission uuid, p_kind text, p_title text, p_body text)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  if p_recipient is null or p_submission is null then return; end if;
+  if not public.sub_can_read(p_submission) then return; end if;
+  insert into notifications (recipient_id, kind, payload)
+  values (p_recipient, coalesce(p_kind, 'info'),
+          jsonb_build_object('title', p_title, 'body', p_body, 'href', 'Submissions.html?s=' || p_submission::text, 'submission_id', p_submission));
+end; $$;
+grant execute on function public.pr_notify_submission(uuid, uuid, text, text, text) to authenticated;

@@ -38,7 +38,30 @@
     var dS = useState({ original: false, approved: false, noconflict: false }), decl = dS[0], setDecl = dS[1];
     var fS = useState(null), file = fS[0], setFile = fS[1];
     var bS = useState(''), busy = bS[0], setBusy = bS[1];
+    var exS = useState(false), exBusy = exS[0], setExBusy = exS[1];
     var fileRef = useRef(null);
+    // AI: prefill metadata from the PDF (the author reviews/edits every field — never a source of record)
+    function extractMeta() {
+      if (!file || exBusy) return;
+      if (file.size > 8 * 1024 * 1024) { window.PRUI.toast('A PDF túl nagy az AI-kinyeréshez (max 8 MB) — töltsd ki kézzel.', { kind: 'error' }); return; }
+      setExBusy(true);
+      var rd = new FileReader();
+      rd.onload = function () {
+        var b64 = String(rd.result).split(',')[1] || '';
+        sb.functions.invoke('submission-ops', { body: { action: 'extract', pdf_base64: b64 } }).then(function (r) {
+          setExBusy(false); var m = r && r.data && r.data.meta;
+          if (!m) { window.PRUI.toast('Kinyerés sikertelen: ' + ((r && r.data && r.data.error) || (r && r.error && r.error.message) || ''), { kind: 'error' }); return; }
+          if (m.title && !title.trim()) setTitle(m.title);
+          if (m.abstract && !abs.trim()) setAbs(m.abstract);
+          if (m.keywords && m.keywords.length && !kw.trim()) setKw(m.keywords.join(', '));
+          if (m.authors && m.authors.length) setAuthors(m.authors.map(function (a, i) {
+            return { name: a.name || '', email: a.email || '', affiliation: a.affiliation || '', orcid: '', is_corresponding: i === 0 };
+          }));
+          window.PRUI.toast('Adatok kinyerve a PDF-ből — ellenőrizd minden mezőt!', { kind: 'ok' });
+        }, function (e) { setExBusy(false); window.PRUI.toast('Kinyerés sikertelen: ' + e, { kind: 'error' }); });
+      };
+      rd.readAsDataURL(file);
+    }
     useEffect(function () {
       if (!vq.trim() || vq.trim().length < 3) { setVres([]); return; }
       var t = setTimeout(function () {
@@ -66,6 +89,12 @@
             sb.from('submission_versions').insert({ submission_id: s.id, round: 0, kind: 'manuscript', storage_path: sp, file_name: file.name, size: file.size, uploaded_by: props.me.id }).then(function () {
               sb.from('submissions').update({ status: 'submitted', submitted_at: new Date().toISOString() }).eq('id', s.id).then(function () {
                 logEvent(s.id, props.me.id, 'submitted', 'draft', 'submitted', { file: file.name }).then(function () {
+                  // notify the editorial office (fire-and-forget)
+                  sb.from('editorial_staff').select('user_id').eq('active', true).then(function (er) {
+                    ((er && er.data) || []).forEach(function (e) {
+                      sb.rpc('pr_notify_submission', { p_recipient: e.user_id, p_submission: s.id, p_kind: 'request', p_title: 'Új kézirat érkezett: ' + s.manuscript_code, p_body: row.title }).then(function () { }, function () { });
+                    });
+                  });
                   setBusy(''); window.PRUI.toast('Beadva — azonosító: ' + s.manuscript_code, { kind: 'ok' }); props.onDone();
                 });
               });
@@ -109,9 +138,10 @@
       }),
       h('button', { className: 'btn', style: { padding: '3px 10px', fontSize: 12 }, onClick: addAu }, '+ szerző'),
       h('div', { className: 'field-label', style: { marginTop: 12 } }, 'Kézirat PDF *'),
-      h('div', { style: { display: 'flex', gap: 8, alignItems: 'center' } },
+      h('div', { style: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' } },
         h('button', { className: 'btn', onClick: function () { if (fileRef.current) fileRef.current.click(); } }, file ? '↻ Csere' : '⤒ PDF kiválasztása'),
         file ? h('span', { style: { fontSize: 12.5 } }, '📄 ' + file.name + ' (' + Math.round(file.size / 1024) + ' KB)') : null,
+        file ? h('button', { className: 'btn', style: { fontSize: 12 }, disabled: exBusy, title: 'Claude kinyeri a címet/absztraktot/kulcsszavakat/szerzőket a PDF-ből — minden mezőt te erősítesz meg', onClick: extractMeta }, exBusy ? '⏳ Kinyerés…' : '✨ Adatok kinyerése a PDF-ből') : null,
         h('input', { ref: fileRef, type: 'file', accept: '.pdf', style: { display: 'none' }, onChange: function (e) { setFile(e.target.files && e.target.files[0]); e.target.value = ''; } })),
       h('div', { className: 'field-label', style: { marginTop: 12 } }, 'Kísérőlevél (opcionális)'),
       h('textarea', { className: 'field', rows: 3, style: { width: '100%', boxSizing: 'border-box' }, value: cover, onChange: function (e) { setCover(e.target.value); } }),
@@ -138,6 +168,34 @@
     var rspS = useState(null), respF = rspS[0], setRespF = rspS[1];// author: response-to-reviewers file
     var crfS = useState(null), crF = crfS[0], setCrF = crfS[1];    // author: camera-ready file
     var revRef = useRef(null), respRef = useRef(null), crRef = useRef(null);
+    var ascS = useState(null), aiScr = ascS[0], setAiScr = ascS[1];    // AI desk-check advisory: {loading}|{report}
+    var sggS = useState(null), sgg = sggS[0], setSgg = sggS[1];        // AI reviewer suggestions: {loading}|{list}
+    var polS = useState(false), polishing = polS[0], setPolishing = polS[1];
+    function aiScreen() {
+      setAiScr({ loading: true });
+      sb.functions.invoke('submission-ops', { body: { action: 'screen', submission_id: s.id } }).then(function (r) {
+        var rep = r && r.data && r.data.report;
+        if (!rep) { setAiScr(null); window.PRUI.toast('AI-riport sikertelen: ' + ((r && r.data && r.data.error) || (r && r.error && r.error.message) || ''), { kind: 'error' }); return; }
+        setAiScr({ report: rep });
+      }, function (e) { setAiScr(null); window.PRUI.toast('AI-riport sikertelen: ' + e, { kind: 'error' }); });
+    }
+    function suggest() {
+      setSgg({ loading: true });
+      sb.functions.invoke('submission-ops', { body: { action: 'suggest_reviewers', submission_id: s.id } }).then(function (r) {
+        var list = r && r.data && r.data.suggestions;
+        if (!list) { setSgg(null); window.PRUI.toast('Ajánlás sikertelen: ' + ((r && r.data && r.data.error) || (r && r.error && r.error.message) || ''), { kind: 'error' }); return; }
+        setSgg({ list: list });
+      }, function (e) { setSgg(null); window.PRUI.toast('Ajánlás sikertelen: ' + e, { kind: 'error' }); });
+    }
+    function polish() {
+      if (!letter || polishing) return; setPolishing(true);
+      sb.functions.invoke('submission-ops', { body: { action: 'draft_letter', subject: letter.subject, body_text: letter.body } }).then(function (r) {
+        setPolishing(false); var L = r && r.data && r.data.letter;
+        if (!L) { window.PRUI.toast('AI-piszkozat sikertelen', { kind: 'error' }); return; }
+        setLetter(Object.assign({}, letter, { subject: L.subject || letter.subject, body: L.body || letter.body }));
+        window.PRUI.toast('AI-piszkozat betöltve — ellenőrizd küldés előtt', { kind: 'ok' });
+      }, function () { setPolishing(false); window.PRUI.toast('AI-piszkozat sikertelen', { kind: 'error' }); });
+    }
     function load() {
       Promise.all([
         sb.from('submission_authors').select('*').eq('submission_id', s.id).order('position'),
@@ -176,7 +234,10 @@
     function sendLetter() {
       if (!letter) return; setBusy(true);
       sb.from('submission_letters').insert({ submission_id: s.id, template_key: letter.key, subject: letter.subject, body: letter.body, recipient_user_id: s.owner_id, sent_by: me.id }).then(function () {
-        var fin = function () { setLetter(null); setBusy(false); load(); props.onChanged(); window.PRUI.toast('Levél elküldve + naplózva', { kind: 'ok' }); };
+        var fin = function () {
+          sb.rpc('pr_notify_submission', { p_recipient: s.owner_id, p_submission: s.id, p_kind: 'info', p_title: letter.subject, p_body: 'Új levél érkezett a szerkesztőségtől.' }).then(function () { }, function () { });
+          setLetter(null); setBusy(false); load(); props.onChanged(); window.PRUI.toast('Levél elküldve + naplózva', { kind: 'ok' });
+        };
         if (letter.to_status) {
           var patch = { status: letter.to_status };
           if (letter.to_status === 'rejected' || letter.to_status === 'accepted') patch.decided_at = new Date().toISOString();
@@ -198,7 +259,10 @@
       var due = new Date(Date.now() + 21 * 864e5).toISOString();
       sb.from('submission_reviews').insert({ submission_id: s.id, round: curRound, reviewer_id: u.id, reviewer_name: u.name || null, status: 'invited', due_at: due, invited_by: me.id }).then(function (r) {
         if (r && r.error) { window.PRUI.toast(r.error.message, { kind: 'error' }); return; }
-        var after = function () { setRq(''); setRres([]); load(); props.onChanged(); window.PRUI.toast('Bíráló meghívva: ' + (u.name || ''), { kind: 'ok' }); };
+        var after = function () {
+          sb.rpc('pr_notify_submission', { p_recipient: u.id, p_submission: s.id, p_kind: 'request', p_title: 'Bírálati felkérés: ' + (s.manuscript_code || ''), p_body: s.title }).then(function () { }, function () { });
+          setRq(''); setRres([]); load(); props.onChanged(); window.PRUI.toast('Bíráló meghívva: ' + (u.name || ''), { kind: 'ok' });
+        };
         if (!s.round) sb.from('submissions').update({ round: 1 }).eq('id', s.id).then(after); else after();
       });
     }
@@ -287,6 +351,15 @@
           h('b', { style: { fontSize: 13 } }, '🗂 Érkeztetés / desk-check'),
           s.status === 'submitted' ? h('div', { style: { marginTop: 8 } },
             h('button', { className: 'btn pri', disabled: busy, onClick: function () { setStatus('screening', 'screening_started'); } }, '▶ Szűrés megkezdése (átveszem)')) : h('div', null,
+            h('div', { style: { marginTop: 8 } },
+              h('button', { className: 'btn', style: { fontSize: 12 }, disabled: !!(aiScr && aiScr.loading), title: 'Claude tanácsadó elő-szűrési riportot készít (a PDF + metaadatok alapján) — a döntés a tiéd', onClick: aiScreen }, (aiScr && aiScr.loading) ? '⏳ AI elemez…' : '✨ AI elő-szűrési riport'),
+              (aiScr && aiScr.report) ? h('div', { style: { marginTop: 8, background: 'var(--accent-tint)', border: '1px solid var(--line)', borderRadius: 9, padding: '9px 12px' } },
+                h('div', { style: { fontSize: 12.5, lineHeight: 1.5, marginBottom: 6 } }, h('b', null, 'AI-összegzés (tanácsadó): '), aiScr.report.summary),
+                (aiScr.report.items || []).map(function (it, i) {
+                  var ic = it.verdict === 'ok' ? '✅' : it.verdict === 'warn' ? '⚠️' : '❌';
+                  return h('div', { key: i, style: { fontSize: 12, padding: '1px 0' } }, ic + ' ', h('b', null, it.check + ': '), it.note);
+                }),
+                h('div', { style: { fontSize: 10.5, color: 'var(--faint)', marginTop: 5 } }, 'Az AI sosem dönt — a checklistet te pipálod, a kimenetet te választod.')) : null),
             h('div', { style: { display: 'flex', flexDirection: 'column', gap: 5, margin: '8px 0', fontSize: 12.5 } }, CHECKS.map(function (c) {
               return h('label', { key: c[0] }, h('input', { type: 'checkbox', checked: !!chk[c[0]], onChange: function (e) { var n = Object.assign({}, chk); n[c[0]] = e.target.checked; setChk(n); } }), ' ' + c[1]);
             })),
@@ -317,6 +390,17 @@
               var already = roundReviews.some(function (r) { return r.reviewer_id === u.id; });
               return h('button', { key: u.id, disabled: already, style: { display: 'block', width: '100%', textAlign: 'left', padding: '6px 10px', border: 0, borderBottom: '1px solid var(--soft)', background: 'var(--surface)', cursor: already ? 'default' : 'pointer', fontSize: 12.5, opacity: already ? 0.5 : 1 }, onClick: function () { invite(u); } }, u.name || u.id, already ? '  (már meghívva)' : '');
             })) : null),
+          h('div', { style: { marginTop: 8 } },
+            h('button', { className: 'btn', style: { fontSize: 12 }, disabled: !!(sgg && sgg.loading), title: 'Claude a meglévő kutatói profilok alapján ajánl bírálókat (COI-jelzéssel, tanácsadó jelleggel)', onClick: suggest }, (sgg && sgg.loading) ? '⏳ Ajánlás…' : '✨ Bírálók ajánlása'),
+            (sgg && sgg.list) ? (sgg.list.length ? sgg.list.map(function (u, i) {
+              var already = roundReviews.some(function (r) { return r.reviewer_id === u.id; });
+              return h('div', { key: u.id, style: { display: 'flex', gap: 8, alignItems: 'baseline', fontSize: 12.5, padding: '5px 0', borderBottom: '1px dashed var(--soft)' } },
+                h('b', { style: { flex: 'none' } }, u.name),
+                h('span', { className: 'chip c-acc', style: { fontSize: 10, flex: 'none' } }, (u.score != null ? u.score + '%' : '')),
+                h('span', { style: { flex: 1, minWidth: 0, color: 'var(--muted)', fontSize: 11.5 } }, u.reason || ''),
+                u.coi_flag ? h('span', { className: 'chip c-danger', style: { fontSize: 10, flex: 'none' }, title: u.coi_flag }, '⚠ COI?') : null,
+                already ? h('span', { style: { fontSize: 11, color: 'var(--faint)', flex: 'none' } }, 'meghívva') : h('button', { className: 'btn', style: { padding: '2px 9px', fontSize: 11, flex: 'none' }, onClick: function () { invite(u); } }, '+ meghívás'));
+            }) : h('div', { style: { fontSize: 12, color: 'var(--faint)', marginTop: 4 } }, 'Nincs illeszkedő jelölt a regisztrált kutatók között.')) : null),
           (s.status === 'under_review') ? h('div', { style: { marginTop: 8 } },
             h('button', { className: 'btn', disabled: busy, title: 'A kör lezárása — tovább a döntésre', onClick: function () { setStatus('decision_pending', 'review_round_closed'); } }, '→ Döntésre')) : null) : null,
         // ---- editor: decision ----
@@ -362,8 +446,9 @@
         h('b', { style: { fontSize: 13 } }, '✉ Levél (' + letter.key + ')' + (letter.to_status ? ' → státusz: ' + letter.to_status : '')),
         h('input', { className: 'field', style: { width: '100%', boxSizing: 'border-box', marginTop: 8 }, value: letter.subject, onChange: function (e) { setLetter(Object.assign({}, letter, { subject: e.target.value })); } }),
         h('textarea', { className: 'field', rows: 9, style: { width: '100%', boxSizing: 'border-box', marginTop: 6, fontSize: 12.5, lineHeight: 1.5 }, value: letter.body, onChange: function (e) { setLetter(Object.assign({}, letter, { body: e.target.value })); } }),
-        h('div', { style: { display: 'flex', gap: 8, marginTop: 8 } },
+        h('div', { style: { display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' } },
           h('button', { className: 'btn pri', disabled: busy, onClick: sendLetter }, 'Küldés + naplózás'),
+          h('button', { className: 'btn', disabled: busy || polishing, title: 'Claude átfogalmazza a levelet (a bírálati szövegeket szó szerint megőrzi) — küldés előtt te ellenőrzöd', onClick: polish }, polishing ? '⏳…' : '✨ AI-piszkozat'),
           h('button', { className: 'btn', disabled: busy, onClick: function () { setLetter(null); } }, 'Mégse'))) : null);
   }
 
@@ -444,6 +529,15 @@
     var modeS = useState('author'), mode = modeS[0], setMode = modeS[1];  // author | editor | reviewer
     var mrS = useState([]), myRevs = mrS[0], setMyRevs = mrS[1];          // my reviewer assignments
     var srS = useState(null), selRev = srS[0], setSelRev = srS[1];
+    var deepRef = useRef(false);
+    useEffect(function () {   // deep link from notifications: Submissions.html?s=<submission id>
+      if (deepRef.current || !subs.length) return;
+      var sid = new URLSearchParams(location.search).get('s');
+      deepRef.current = true;
+      if (!sid) return;
+      var found = subs.filter(function (x) { return x.id === sid; })[0];
+      if (found) { setSel(found); setView('detail'); }
+    }, [subs]);
     useEffect(function () { boot(); }, []);
     function boot() {
       if (!BE || !sb) { setPhase('nobackend'); return; }

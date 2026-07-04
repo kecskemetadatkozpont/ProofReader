@@ -19,3 +19,6 @@ verify_jwt = false
 
 [functions.research-writing]
 verify_jwt = false
+
+[functions.submission-ops]
+verify_jwt = false
