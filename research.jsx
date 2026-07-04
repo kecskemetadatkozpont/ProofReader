@@ -2456,6 +2456,17 @@
     var stuS = useState({ byId: {}, list: [] }), supStudents = stuS[0], setSupStudents = stuS[1];   // this supervisor's students (for the "Diákjaim kutatása" view + author badges)
 
     useEffect(function () { boot(); }, []);
+    // Admin "view as": the target is gated on the admin role, which backend.js resolves ASYNCHRONOUSLY
+    // (it fires `pr-profile` once the profile row — incl. role — is loaded). If boot() ran before that,
+    // adminTargetUser() returned null and we fell back to the admin's OWN projects and never recovered
+    // (boot runs once). Re-boot when the role resolves so the VIEWED user's workspace loads instead.
+    // Scoped to ?adminView=1, so ordinary sessions are untouched.
+    useEffect(function () {
+      if (!/[?&]adminView=1/.test(location.search)) return;
+      function onProfile() { boot(); }
+      window.addEventListener('pr-profile', onProfile);
+      return function () { window.removeEventListener('pr-profile', onProfile); };
+    }, []);
     function boot() {
       if (!BE || !BE.sb) { setPhase('nobackend'); return; }
       if (BE.mode === 'signin' || BE.mode === 'pending') { setPhase('signin'); return; }

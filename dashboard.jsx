@@ -344,7 +344,7 @@ function AccountMenu({ me, onClose, onUsage, onSwitch, onSignOut }) {
         <div className="adr-nav">
           <a className="adr-i" href="Profile.html"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><circle cx="8" cy="5.5" r="2.5" /><path d="M3.5 13.5c0-2.5 2-4 4.5-4s4.5 1.5 4.5 4" strokeLinecap="round" /></svg>Open profile</a>
           <a className="adr-i" href="PhD.html"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M8 2L1.5 5 8 8l6.5-3L8 2z" strokeLinejoin="round" /><path d="M4.5 6.3v3.4c0 1 1.6 1.8 3.5 1.8s3.5-.8 3.5-1.8V6.3M14.5 5.2v3.3" strokeLinecap="round" /></svg>Doctoral School</a>
-          <a className="adr-i" href="Research.html"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M6.5 2v4L3 12.2A1.4 1.4 0 0 0 4.2 14h7.6A1.4 1.4 0 0 0 13 12.2L9.5 6V2" strokeLinejoin="round" /><path d="M5.5 2h5M5.6 9h4.8" strokeLinecap="round" /></svg>Research</a>
+          <a className="adr-i" href={/[?&]adminView=1/.test(location.search) ? "Research.html?adminView=1" : "Research.html"}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M6.5 2v4L3 12.2A1.4 1.4 0 0 0 4.2 14h7.6A1.4 1.4 0 0 0 13 12.2L9.5 6V2" strokeLinejoin="round" /><path d="M5.5 2h5M5.6 9h4.8" strokeLinecap="round" /></svg>Research</a>
           <button className="adr-i" onClick={onUsage}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M2 13h12M4 13V7M8 13V3M12 13V9" strokeLinecap="round" /></svg>Usage &amp; storage</button>
         </div>
         {others.length ? <React.Fragment>
