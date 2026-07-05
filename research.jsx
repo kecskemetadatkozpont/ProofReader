@@ -25,6 +25,38 @@
   var LOG_TYPES = ['NOTE', 'DECISION', 'RESULT', 'ARTIFACT', 'MILESTONE', 'TASK'];
   var STATUS_LABEL = { active: 'Active', paused: 'Paused', done: 'Done', archived: 'Archived' };
 
+  // ---- Task board (Kanban) — shared by the per-protocol board AND the cross-project global board.
+  // A step's column is derived from (assignee, status); moving a card writes back the encoded patch. ----
+  var BOARD_COLS = [
+    { key: 'todo-human', title: 'ToDo — Human', who: 'human' },
+    { key: 'todo-ai', title: 'ToDo — AI', who: 'ai' },
+    { key: 'prog-ai', title: 'In progress — AI', who: 'ai' },
+    { key: 'prog-human', title: 'In progress — Human', who: 'human' },
+    { key: 'blocked', title: 'Blocked / Needs approval', who: 'any' },
+    { key: 'done-ai', title: 'Done by AI', who: 'ai' },
+    { key: 'done-human', title: 'Done by Human', who: 'human' }
+  ];
+  var BCOL_IC = { 'todo-human': '📋', 'todo-ai': '📋', 'prog-ai': '⚙️', 'prog-human': '✋', 'blocked': '⏸', 'done-ai': '✅', 'done-human': '✅' };
+  var STEP_ICON = { data: '🗄️', preprocess: '🧹', train: '🏋️', eval: '📊', analysis: '🔬', figure: '📈', writeup: '✍️', custom: '•' };
+  function assigneeOf(s) { return s.assignee === 'human' ? 'human' : 'ai'; }   // legacy steps default to AI
+  function stepCol(s) {
+    var a = assigneeOf(s), st = s.status;
+    if (st === 'done') return a === 'human' ? 'done-human' : 'done-ai';
+    if (st === 'running') return a === 'human' ? 'prog-human' : 'prog-ai';
+    if (st === 'blocked' || st === 'failed' || (s.needs_approval && (st === 'todo' || st === 'queued'))) return 'blocked';
+    return a === 'human' ? 'todo-human' : 'todo-ai';
+  }
+  // the (assignee, status, needs_approval) patch a column encodes. Writing `assignee` needs migration-44.
+  function colPatch(key) {
+    return key === 'todo-human' ? { assignee: 'human', status: 'todo', needs_approval: false }
+      : key === 'todo-ai' ? { assignee: 'ai', status: 'queued', needs_approval: false }
+        : key === 'prog-ai' ? { assignee: 'ai', status: 'running' }
+          : key === 'prog-human' ? { assignee: 'human', status: 'running' }
+            : key === 'blocked' ? { status: 'blocked' }
+              : key === 'done-ai' ? { assignee: 'ai', status: 'done' }
+                : key === 'done-human' ? { assignee: 'human', status: 'done' } : null;
+  }
+
   function adminTargetUser() {
     try {
       if (!/[?&]adminView=1/.test(location.search)) return null;
@@ -1750,7 +1782,6 @@
 
   // ---------- Protocol (executable research plan; a Claude agent on a dedicated machine runs the steps) ----------
   function ProtocolPanel(props) {
-    var STEP_ICON = { data: '🗄️', preprocess: '🧹', train: '🏋️', eval: '📊', analysis: '🔬', figure: '📈', writeup: '✍️', custom: '•' };
     var KINDS = PROT_KINDS;
     var PST = { todo: ['c-grey', 'To do'], queued: ['c-acc', 'Queued'], running: ['c-warn', 'Running…'], blocked: ['c-warn', '⏸ Needs approval'], done: ['c-ok', '✓ Done'], failed: ['c-danger', '✗ Failed'], skipped: ['c-grey', 'Skipped'] };
     var PROT_CHIP = { draft: 'c-grey', ready: 'c-acc', running: 'c-warn', paused: 'c-grey', done: 'c-ok', failed: 'c-danger' };
@@ -1994,37 +2025,9 @@
         ) : null
       );
     }
-    // ---- Task board (Kanban): human↔AI columns derived from (assignee, status) ----
-    var BOARD_COLS = [
-      { key: 'todo-human', title: 'ToDo — Human', who: 'human' },
-      { key: 'todo-ai', title: 'ToDo — AI', who: 'ai' },
-      { key: 'prog-ai', title: 'In progress — AI', who: 'ai' },
-      { key: 'prog-human', title: 'In progress — Human', who: 'human' },
-      { key: 'blocked', title: 'Blocked / Needs approval', who: 'any' },
-      { key: 'done-ai', title: 'Done by AI', who: 'ai' },
-      { key: 'done-human', title: 'Done by Human', who: 'human' }
-    ];
-    var BCOL_IC = { 'todo-human': '📋', 'todo-ai': '📋', 'prog-ai': '⚙️', 'prog-human': '✋', 'blocked': '⏸', 'done-ai': '✅', 'done-human': '✅' };
-    function assigneeOf(s) { return s.assignee === 'human' ? 'human' : 'ai'; }   // legacy steps default to AI
-    function colOf(s) {
-      var a = assigneeOf(s), st = s.status;
-      if (st === 'done') return a === 'human' ? 'done-human' : 'done-ai';
-      if (st === 'running') return a === 'human' ? 'prog-human' : 'prog-ai';
-      if (st === 'blocked' || st === 'failed' || (s.needs_approval && (st === 'todo' || st === 'queued'))) return 'blocked';
-      return a === 'human' ? 'todo-human' : 'todo-ai';
-    }
-    // moving a card to a column encodes (assignee, status). Writing `assignee` needs migration-44.
-    function moveToCol(s, key) {
-      if (!ce) return;
-      var patch = key === 'todo-human' ? { assignee: 'human', status: 'todo', needs_approval: false }
-        : key === 'todo-ai' ? { assignee: 'ai', status: 'queued', needs_approval: false }
-          : key === 'prog-ai' ? { assignee: 'ai', status: 'running' }
-            : key === 'prog-human' ? { assignee: 'human', status: 'running' }
-              : key === 'blocked' ? { status: 'blocked' }
-                : key === 'done-ai' ? { assignee: 'ai', status: 'done' }
-                  : key === 'done-human' ? { assignee: 'human', status: 'done' } : null;
-      if (patch) patchStep(s, patch);
-    }
+    // ---- Task board (Kanban): human↔AI columns via the shared BOARD_COLS / stepCol / colPatch (module scope) ----
+    // moving a card to a column encodes (assignee, status) via colPatch(). Writing `assignee` needs migration-44.
+    function moveToCol(s, key) { if (!ce) return; var patch = colPatch(key); if (patch) patchStep(s, patch); }
     function boardCard(s) {
       var a = assigneeOf(s), ac = acOf(s), sx = s.spec || {};
       var chips = [];
@@ -2052,7 +2055,7 @@
       return h('div', { className: 'panel', style: { overflow: 'hidden' } },
         h('h3', null, '🗂️ Task board', h('span', { style: { marginLeft: 10, fontSize: 10.5, color: 'var(--faint)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 } }, ce ? 'húzd a kártyákat oszlopok között — a felelős + státusz frissül' : 'olvasható nézet')),
         h('div', { className: 'bwrap' }, BOARD_COLS.map(function (col) {
-          var cards = steps.filter(function (s) { return colOf(s) === col.key; });
+          var cards = steps.filter(function (s) { return stepCol(s) === col.key; });
           var est = cards.reduce(function (a, s) { return a + ((s.spec && s.spec.est_minutes) || 0); }, 0);
           return h('div', {
             key: col.key, className: 'bcol' + (boardOver === col.key ? ' over' : '') + (' cap-' + (col.who === 'human' ? 'hu' : col.who === 'ai' ? 'ai' : 'bk')),
@@ -2522,6 +2525,140 @@
     );
   }
 
+  // ---------- Cross-project global Task board ----------
+  // One Kanban across ALL of a user's research projects' protocol steps (the same steps the per-protocol
+  // board shows), with a project filter + a human/AI filter + search. Owner may drag cards between columns;
+  // read-only (supervised / admin-preview) projects render un-draggable. Reuses BOARD_COLS / stepCol / colPatch.
+  function GlobalBoard(props) {
+    var projects = props.projects || [];
+    var projById = {}; projects.forEach(function (p) { projById[p.id] = p; });
+    var pidKey = projects.map(function (p) { return p.id; }).join(',');
+    var ldS = useState(true), loading = ldS[0], setLoading = ldS[1];
+    var spS = useState([]), steps = spS[0], setSteps = spS[1];        // steps enriched with _proj / _prot
+    var fpS = useState(null), selPid = fpS[0], setSelPid = fpS[1];     // null = all projects, else isolate one
+    var fwS = useState('all'), who = fwS[0], setWho = fwS[1];          // 'all' | 'human' | 'ai'
+    var qS = useState(''), q = qS[0], setQ = qS[1];
+    var dgS = useState(null), drag = dgS[0], setDrag = dgS[1];
+    var ovS = useState(null), over = ovS[0], setOver = ovS[1];
+
+    function load() {
+      var pids = projects.map(function (p) { return p.id; });
+      if (!pids.length) { setSteps([]); setLoading(false); return; }
+      setLoading(true);
+      sb.from('research_protocols').select('id,project_id,title,status').in('project_id', pids).neq('status', 'archived').then(function (r) {
+        var prots = (r && r.data) || [];
+        var pmap = {}; prots.forEach(function (p) { pmap[p.id] = p; });
+        var protIds = prots.map(function (p) { return p.id; });
+        if (!protIds.length) { setSteps([]); setLoading(false); return; }
+        sb.from('research_protocol_steps').select('id,protocol_id,ord,title,kind,status,assignee,needs_approval,depends_on,spec,result').in('protocol_id', protIds).order('ord', { ascending: true }).then(function (sr) {
+          var rows = (sr && sr.data) || [];
+          rows.forEach(function (s) { var pr = pmap[s.protocol_id]; s._prot = pr; s._proj = pr ? projById[pr.project_id] : null; });
+          setSteps(rows); setLoading(false);
+        }, function () { setLoading(false); });
+      }, function () { setLoading(false); });
+    }
+    useEffect(function () { load(); }, [pidKey]); // eslint-disable-line
+
+    function canEdit(proj) { return !!(proj && props.canEditProject && props.canEditProject(proj)); }
+    function patchStep(s, patch) {
+      var proj = s._proj;
+      if (!canEdit(proj)) { window.PRUI.toast('Read-only project — this task can’t be moved.', { kind: 'error' }); return; }
+      setSteps(function (list) { return list.map(function (x) { return x.id === s.id ? Object.assign({}, x, patch) : x; }); });   // optimistic
+      sb.from('research_protocol_steps').update(patch).eq('id', s.id).then(function (r) {
+        if (r && r.error) { window.PRUI.toast('Move failed: ' + r.error.message, { kind: 'error' }); load(); }
+      }, function () { load(); });
+    }
+    function moveToCol(s, key) { var patch = colPatch(key); if (patch) patchStep(s, patch); }
+    function acOf(s) {
+      var r = s.result && s.result.acceptance_check; if (!r || typeof r !== 'object') return null;
+      var keys = Object.keys(r); if (!keys.length) return null;
+      var pass = keys.filter(function (k) { return String(r[k]).indexOf('PASS') === 0; }).length;
+      return { total: keys.length, pass: pass };
+    }
+
+    // projects that actually have tasks — the filter chips
+    var withTasks = [], seen = {};
+    steps.forEach(function (s) { if (s._proj && !seen[s._proj.id]) { seen[s._proj.id] = 1; withTasks.push(s._proj); } });
+    var countByPid = {}; steps.forEach(function (s) { if (s._proj) countByPid[s._proj.id] = (countByPid[s._proj.id] || 0) + 1; });
+    var qq = q.trim().toLowerCase();
+    function pidOn(pid) { return !selPid || selPid === pid; }
+    var shown = steps.filter(function (s) {
+      if (!s._proj || !pidOn(s._proj.id)) return false;
+      if (who !== 'all' && assigneeOf(s) !== who) return false;
+      if (qq && (s.title || '').toLowerCase().indexOf(qq) < 0 && (s._proj.title || '').toLowerCase().indexOf(qq) < 0) return false;
+      return true;
+    });
+
+    function card(s) {
+      var a = assigneeOf(s), sx = s.spec || {}, proj = s._proj, ac = acOf(s), editable = canEdit(proj);
+      var figs = (s.result && s.result.figures) || [];
+      var chips = [];
+      if (sx.est_minutes) chips.push(h('span', { key: 'e', className: 'bchip' }, '⏱ ' + sx.est_minutes + 'p'));
+      if ((sx.attachments || []).length) chips.push(h('span', { key: 'a', className: 'bchip' }, '📎 ' + sx.attachments.length));
+      if ((s.depends_on || []).length) chips.push(h('span', { key: 'd', className: 'bchip' }, '⛓ ' + s.depends_on.join(',')));
+      if (figs.length) chips.push(h('span', { key: 'f', className: 'bchip' }, '📈 ' + figs.length));
+      if (s.needs_approval && s.status !== 'done') chips.push(h('span', { key: 'p', className: 'bchip warn' }, '⏸ approval'));
+      return h('div', {
+        key: s.id, className: 'bcard ' + (a === 'human' ? 'hu' : 'ai'), draggable: editable,
+        onDragStart: editable ? function (e) { setDrag(s.id); try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', s.id); } catch (x) { } } : null,
+        onDragEnd: editable ? function () { setDrag(null); setOver(null); } : null,
+        onClick: function () { if (proj && props.onOpenProject) props.onOpenProject(proj); },
+        title: proj ? 'Open ' + proj.title : 'Open project'
+      },
+        proj ? h('div', { className: 'gb-proj', title: proj.title }, h('i', { style: { background: colorFor(proj.id) } }), h('span', null, proj.title)) : null,
+        h('div', { className: 'bcard-top' }, h('span', { 'aria-hidden': 'true' }, STEP_ICON[s.kind] || '•'),
+          h('span', { className: 'bchip who ' + (a === 'human' ? 'hu' : 'ai') }, a === 'human' ? 'HUMAN' : 'AI'),
+          ac ? h('span', { className: 'bchip ' + (ac.pass === ac.total ? 'ok' : 'fail') }, ac.pass + '/' + ac.total + ' ✓') : null,
+          editable ? null : h('span', { className: 'bchip', title: 'Read-only' }, '🔒')),
+        h('div', { className: 'bcard-t' }, h('span', { style: { color: 'var(--faint)' } }, s.ord + '. '), s.title),
+        chips.length ? h('div', { className: 'bcard-m' }, chips) : null
+      );
+    }
+
+    var seg = h('div', { className: 'gb-seg', role: 'group', 'aria-label': 'Assignee filter' },
+      [['all', 'All'], ['human', '👤 Human'], ['ai', '🤖 AI']].map(function (o) {
+        return h('button', { key: o[0], className: who === o[0] ? 'on' : '', onClick: function () { setWho(o[0]); } }, o[1]);
+      }));
+
+    return h('div', null,
+      h('div', { className: 'gb-bar' },
+        h('div', { className: 'gb-chips' },
+          h('button', { className: 'gb-chip' + (!selPid ? ' on' : ''), onClick: function () { setSelPid(null); } }, 'All projects ', h('span', { className: 'gb-c' }, steps.length)),
+          withTasks.map(function (p) {
+            return h('button', { key: p.id, className: 'gb-chip' + (selPid === p.id ? ' on' : ''), title: p.title, onClick: function () { setSelPid(selPid === p.id ? null : p.id); } },
+              h('i', { className: 'gb-dot', style: { background: colorFor(p.id) } }),
+              h('span', { className: 'gb-nm' }, p.title), h('span', { className: 'gb-c' }, countByPid[p.id] || 0));
+          })
+        ),
+        h('div', { className: 'gb-tools' },
+          seg,
+          h('input', { className: 'gb-q', value: q, placeholder: '🔍 Filter tasks…', onChange: function (e) { setQ(e.target.value); } }),
+          h('button', { className: 'btn', style: { padding: '5px 10px', fontSize: 12, flex: 'none' }, onClick: load, title: 'Reload' }, '↻')
+        )
+      ),
+      loading ? h('div', { className: 'empty' }, 'Loading tasks…')
+        : !steps.length ? h('div', { className: 'soon' }, h('b', null, 'No protocol tasks yet. '), 'Generate a protocol inside a research project — its steps appear here as a cross-project Kanban.')
+          : h('div', { className: 'panel', style: { overflow: 'hidden' } },
+            h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 8 } },
+              h('span', { style: { fontSize: 12, color: 'var(--muted)' } }, shown.length + ' / ' + steps.length + ' task' + (steps.length === 1 ? '' : 's') + ' · ' + withTasks.length + ' project' + (withTasks.length === 1 ? '' : 's')),
+              h('span', { style: { fontSize: 10.5, color: 'var(--faint)' } }, 'húzd a kártyákat oszlopok között — a felelős + státusz frissül (a saját projektjeidben)')),
+            h('div', { className: 'bwrap' }, BOARD_COLS.map(function (col) {
+              var cards = shown.filter(function (s) { return stepCol(s) === col.key; });
+              var est = cards.reduce(function (a, s) { return a + ((s.spec && s.spec.est_minutes) || 0); }, 0);
+              return h('div', {
+                key: col.key, className: 'bcol' + (over === col.key ? ' over' : '') + (' cap-' + (col.who === 'human' ? 'hu' : col.who === 'ai' ? 'ai' : 'bk')),
+                onDragOver: function (e) { if (drag) { e.preventDefault(); if (over !== col.key) setOver(col.key); } },
+                onDrop: function (e) { e.preventDefault(); setOver(null); if (drag) { var s = steps.filter(function (x) { return x.id === drag; })[0]; if (s) moveToCol(s, col.key); setDrag(null); } }
+              },
+                h('div', { className: 'bcol-h' }, h('span', null, BCOL_IC[col.key]), h('span', { className: 'bcol-t' }, col.title), h('span', { className: 'bcol-n' }, cards.length + '')),
+                est ? h('div', { className: 'bcol-est' }, '⏱ ~' + est + 'p') : null,
+                h('div', { className: 'bcol-b' }, cards.length ? cards.map(card) : h('div', { className: 'bcol-empty' }, '—'))
+              );
+            }))
+          )
+    );
+  }
+
   // ---------- App ----------
   function App() {
     var ph = useState('loading'), phase = ph[0], setPhase = ph[1];
@@ -2626,6 +2763,7 @@
   // shell split out so "new project" modal state is local & simple
   function AppShell(props) {
     var a = useState(false), adding = a[0], setAdding = a[1];
+    var bd = useState(false), board = bd[0], setBoard = bd[1];   // header 🗂️ Kanban: cross-project task board
     var me = props.me, sel = props.sel, meId = me.id;
     var studentById = (props.students && props.students.byId) || {};
     var studentList = (props.students && props.students.list) || [];
@@ -2644,6 +2782,8 @@
     var body;
     if (sel) {
       body = h(ProjectDetail, { project: sel, log: props.detail.log, tasks: props.detail.tasks, ideas: props.detail.ideas, sources: props.detail.sources, datasets: props.detail.datasets, jobs: props.detail.jobs, studies: props.detail.studies, loading: props.detail.loading, canEdit: props.canEdit(sel), viewerId: meId, fileOwnerId: meId, studentName: (studentById[sel.student_id] && studentById[sel.student_id].name) || null, authorId: props.authorId, myEmail: props.me.email, onBack: props.onBack, onChanged: props.refreshAll });
+    } else if (board) {
+      body = h(GlobalBoard, { projects: props.projects, canEditProject: props.canEdit, onOpenProject: props.openProject });
     } else if (view === 'supervised') {
       body = h('div', null, seg, h(SupervisedView, { students: props.students, projects: supProjects, studentById: studentById, onOpen: props.openProject }));
     } else if (!mineProjects.length) {
@@ -2663,10 +2803,11 @@
       h('div', { className: 'main' },
         props.preview ? h('div', { className: 'preview-banner' }, '👁 Admin preview — viewing ', h('b', null, me.name), '’s Research. ', h('a', { href: 'PhD.html?adminView=1' }, 'Doctoral School'), ' · ', h('a', { href: 'Profile.html?adminView=1' }, 'Profile'), ' · ', h('a', { href: 'Admin.html' }, '← Back to admin')) : null,
         h('div', { className: 'head' },
-          h('div', null, h('h1', null, sel ? 'Project' : 'Research projects'), h('div', { className: 'sub' }, sub)),
+          h('div', null, h('h1', null, sel ? 'Project' : (board ? 'All tasks' : 'Research projects')), h('div', { className: 'sub' }, board && !sel ? 'Cross-project Kanban — every research project’s tasks in one board' : sub)),
           h('div', { style: { display: 'flex', gap: 10, alignItems: 'center' } },
             h(NotifBell, null),
-            (sel || view === 'supervised') ? null : h('button', { className: 'btn pri', onClick: function () { setAdding(true); } }, '+ New project')
+            sel ? null : h('button', { className: 'btn' + (board ? ' pri' : ''), onClick: function () { setBoard(!board); }, title: 'Cross-project task board — all projects’ tasks in one Kanban' }, board ? '☷ Projects' : '🗂️ Kanban'),
+            (sel || board || view === 'supervised') ? null : h('button', { className: 'btn pri', onClick: function () { setAdding(true); } }, '+ New project')
           )
         ),
         body,

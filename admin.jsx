@@ -43,6 +43,165 @@
   }
   function Badge(props) { var s = props.s || 'incomplete'; return h('span', { className: 'badge b-' + s }, s); }
 
+  /* ---------- Task board (Kanban) helpers — same (assignee, status) → column mapping as research.jsx ---------- */
+  var BOARD_COLS = [
+    { key: 'todo-human', title: 'ToDo — Human', who: 'human' },
+    { key: 'todo-ai', title: 'ToDo — AI', who: 'ai' },
+    { key: 'prog-ai', title: 'In progress — AI', who: 'ai' },
+    { key: 'prog-human', title: 'In progress — Human', who: 'human' },
+    { key: 'blocked', title: 'Blocked / Needs approval', who: 'any' },
+    { key: 'done-ai', title: 'Done by AI', who: 'ai' },
+    { key: 'done-human', title: 'Done by Human', who: 'human' }
+  ];
+  var BCOL_IC = { 'todo-human': '📋', 'todo-ai': '📋', 'prog-ai': '⚙️', 'prog-human': '✋', 'blocked': '⏸', 'done-ai': '✅', 'done-human': '✅' };
+  var STEP_ICON = { data: '🗄️', preprocess: '🧹', train: '🏋️', eval: '📊', analysis: '🔬', figure: '📈', writeup: '✍️', custom: '•' };
+  function assigneeOf(s) { return s.assignee === 'human' ? 'human' : 'ai'; }
+  function stepCol(s) {
+    var a = assigneeOf(s), st = s.status;
+    if (st === 'done') return a === 'human' ? 'done-human' : 'done-ai';
+    if (st === 'running') return a === 'human' ? 'prog-human' : 'prog-ai';
+    if (st === 'blocked' || st === 'failed' || (s.needs_approval && (st === 'todo' || st === 'queued'))) return 'blocked';
+    return a === 'human' ? 'todo-human' : 'todo-ai';
+  }
+  function acOf(s) {
+    var r = s.result && s.result.acceptance_check; if (!r || typeof r !== 'object') return null;
+    var keys = Object.keys(r); if (!keys.length) return null;
+    var pass = keys.filter(function (k) { return String(r[k]).indexOf('PASS') === 0; }).length;
+    return { total: keys.length, pass: pass };
+  }
+
+  /* ---------- Admin global Task board: every user's every research project's tasks, in one Kanban ----------
+   * Read-only monitoring view (admin does not edit others' tasks here). Filter by user, by project, by
+   * assignee, and by text. Clicking a card opens that user's Research read-only ("view as"). */
+  function GlobalTaskBoard(props) {
+    var profiles = props.profiles || [];
+    var ownerById = {}; profiles.forEach(function (u) { ownerById[u.id] = u; });
+    var opS = useState(true), open = opS[0], setOpen = opS[1];
+    var ldS = useState(false), loading = ldS[0], setLoading = ldS[1];
+    var lddS = useState(false), loaded = lddS[0], setLoaded = lddS[1];
+    var spS = useState([]), steps = spS[0], setSteps = spS[1];         // steps enriched with _proj / _prot / _owner
+    var suS = useState(null), selUid = suS[0], setSelUid = suS[1];     // isolate one user (null = all)
+    var fpS = useState(null), selPid = fpS[0], setSelPid = fpS[1];     // isolate one project (null = all)
+    var fwS = useState('all'), who = fwS[0], setWho = fwS[1];
+    var qS = useState(''), q = qS[0], setQ = qS[1];
+
+    function load() {
+      setLoading(true);
+      Promise.all([
+        sb.from('research_projects').select('id,owner_id,title'),
+        sb.from('research_protocols').select('id,project_id,title,status').neq('status', 'archived'),
+        sb.from('research_protocol_steps').select('id,protocol_id,ord,title,kind,status,assignee,needs_approval,depends_on,spec,result')
+      ]).then(function (res) {
+        var projById = {}; ((res[0] && res[0].data) || []).forEach(function (p) { projById[p.id] = p; });
+        var protById = {}; ((res[1] && res[1].data) || []).forEach(function (p) { protById[p.id] = p; });
+        var rows = (res[2] && res[2].data) || [];
+        rows.forEach(function (s) {
+          var pr = protById[s.protocol_id]; s._prot = pr;
+          var pj = pr ? projById[pr.project_id] : null; s._proj = pj;
+          s._owner = pj ? (ownerById[pj.owner_id] || { id: pj.owner_id, name: 'User ' + String(pj.owner_id).slice(0, 6) }) : null;
+        });
+        // keep only steps we could resolve to a project (defensive against RLS gaps)
+        setSteps(rows.filter(function (s) { return s._proj; }));
+        setLoading(false); setLoaded(true);
+      }, function () { setLoading(false); setLoaded(true); });
+    }
+    useEffect(function () { if (open && !loaded) load(); }, [open]); // eslint-disable-line
+
+    function viewAsResearch(o) {
+      if (!o) return;
+      try { localStorage.setItem('pr-admin-view', JSON.stringify({ id: o.id, name: o.name, email: o.email, avatar_url: o.avatar_url, color: o.color, role: 'researcher', plan: 'pro' })); } catch (e) { }
+      window.open('Research.html?adminView=1', '_blank');
+    }
+
+    // filter derivations
+    var ownersWithTasks = [], oseen = {}, ownerCount = {};
+    steps.forEach(function (s) { var o = s._owner; if (o) { ownerCount[o.id] = (ownerCount[o.id] || 0) + 1; if (!oseen[o.id]) { oseen[o.id] = 1; ownersWithTasks.push(o); } } });
+    ownersWithTasks.sort(function (a, b) { return (ownerCount[b.id] || 0) - (ownerCount[a.id] || 0); });
+    function ownerOK(s) { return !selUid || (s._owner && s._owner.id === selUid); }
+    var projList = [], pseen = {}, projCount = {};
+    steps.forEach(function (s) { if (ownerOK(s) && s._proj) { projCount[s._proj.id] = (projCount[s._proj.id] || 0) + 1; if (!pseen[s._proj.id]) { pseen[s._proj.id] = 1; projList.push(s._proj); } } });
+    var visiblePids = {}; projList.forEach(function (p) { visiblePids[p.id] = 1; });
+    var effPid = (selPid && visiblePids[selPid]) ? selPid : null;
+    function pidOn(pid) { return !effPid || effPid === pid; }
+    var qq = q.trim().toLowerCase();
+    var shown = steps.filter(function (s) {
+      if (!ownerOK(s)) return false;
+      if (!s._proj || !pidOn(s._proj.id)) return false;
+      if (who !== 'all' && assigneeOf(s) !== who) return false;
+      if (qq && (s.title || '').toLowerCase().indexOf(qq) < 0 && (s._proj.title || '').toLowerCase().indexOf(qq) < 0 && ((s._owner && s._owner.name || '').toLowerCase().indexOf(qq) < 0)) return false;
+      return true;
+    });
+
+    function card(s) {
+      var a = assigneeOf(s), sx = s.spec || {}, proj = s._proj, o = s._owner, ac = acOf(s);
+      var figs = (s.result && s.result.figures) || [];
+      var chips = [];
+      if (sx.est_minutes) chips.push(h('span', { key: 'e', className: 'bchip' }, '⏱ ' + sx.est_minutes + 'p'));
+      if ((sx.attachments || []).length) chips.push(h('span', { key: 'a', className: 'bchip' }, '📎 ' + sx.attachments.length));
+      if ((s.depends_on || []).length) chips.push(h('span', { key: 'd', className: 'bchip' }, '⛓ ' + s.depends_on.join(',')));
+      if (figs.length) chips.push(h('span', { key: 'f', className: 'bchip' }, '📈 ' + figs.length));
+      if (s.needs_approval && s.status !== 'done') chips.push(h('span', { key: 'p', className: 'bchip warn' }, '⏸ approval'));
+      return h('div', { key: s.id, className: 'bcard ' + (a === 'human' ? 'hu' : 'ai'), onClick: function () { viewAsResearch(o); }, title: o ? 'Open ' + o.name + '’s Research (view as)' : 'Open Research' },
+        h('div', { className: 'gb-owner' }, h(Avatar, { u: o || {}, size: 16 }), h('span', { className: 'gb-onm' }, (o && o.name) || '—')),
+        proj ? h('div', { className: 'gb-proj' }, h('i', { style: { background: colorFor(proj.id) } }), h('span', null, proj.title)) : null,
+        h('div', { className: 'bcard-top' }, h('span', { 'aria-hidden': 'true' }, STEP_ICON[s.kind] || '•'),
+          h('span', { className: 'bchip who ' + (a === 'human' ? 'hu' : 'ai') }, a === 'human' ? 'HUMAN' : 'AI'),
+          ac ? h('span', { className: 'bchip ' + (ac.pass === ac.total ? 'ok' : 'fail') }, ac.pass + '/' + ac.total + ' ✓') : null),
+        h('div', { className: 'bcard-t' }, h('span', { style: { color: 'var(--faint)' } }, s.ord + '. '), s.title),
+        chips.length ? h('div', { className: 'bcard-m' }, chips) : null
+      );
+    }
+
+    var seg = h('div', { className: 'gb-seg', role: 'group', 'aria-label': 'Assignee filter' },
+      [['all', 'All'], ['human', '👤 Human'], ['ai', '🤖 AI']].map(function (o) {
+        return h('button', { key: o[0], className: who === o[0] ? 'on' : '', onClick: function () { setWho(o[0]); } }, o[1]);
+      }));
+
+    return h('div', { className: 'gb-wrap' },
+      h('button', { className: 'gb-head', onClick: function () { setOpen(!open); } },
+        h('span', { style: { width: 12, color: 'var(--muted)' } }, open ? '▾' : '▸'),
+        h('span', { style: { fontWeight: 700, fontSize: 14 } }, '🗂️ Global task board'),
+        h('span', { style: { fontSize: 12, color: 'var(--muted)', fontWeight: 500 } }, 'every user’s research tasks in one Kanban'),
+        loaded ? h('span', { style: { marginLeft: 'auto', fontSize: 12, color: 'var(--muted)' } }, steps.length + ' task' + (steps.length === 1 ? '' : 's') + ' · ' + ownersWithTasks.length + ' user' + (ownersWithTasks.length === 1 ? '' : 's')) : null
+      ),
+      open ? h('div', { className: 'gb-body' },
+        loading ? h('div', { className: 'empty', style: { padding: 24 } }, 'Loading every project’s tasks…')
+          : !steps.length ? h('div', { className: 'empty', style: { padding: 24 } }, 'No protocol tasks across the platform yet.')
+            : h('div', null,
+              h('div', { className: 'gb-bar' },
+                h('div', { style: { display: 'flex', flexDirection: 'column', gap: 6, flex: 1, minWidth: 0 } },
+                  h('div', { className: 'gb-chips' },
+                    h('button', { className: 'gb-chip' + (!selUid ? ' on' : ''), onClick: function () { setSelUid(null); setSelPid(null); } }, '👥 All users ', h('span', { className: 'gb-c' }, steps.length)),
+                    ownersWithTasks.map(function (o) {
+                      return h('button', { key: o.id, className: 'gb-chip' + (selUid === o.id ? ' on' : ''), title: o.email || o.name, onClick: function () { var v = selUid === o.id ? null : o.id; setSelUid(v); setSelPid(null); } },
+                        h(Avatar, { u: o, size: 14 }), h('span', { className: 'gb-nm' }, o.name), h('span', { className: 'gb-c' }, ownerCount[o.id] || 0));
+                    })
+                  ),
+                  h('div', { className: 'gb-chips' },
+                    h('button', { className: 'gb-chip' + (!effPid ? ' on' : ''), onClick: function () { setSelPid(null); } }, '🗂️ All projects'),
+                    projList.map(function (p) {
+                      return h('button', { key: p.id, className: 'gb-chip' + (effPid === p.id ? ' on' : ''), title: p.title, onClick: function () { setSelPid(effPid === p.id ? null : p.id); } },
+                        h('i', { className: 'gb-dot', style: { background: colorFor(p.id) } }), h('span', { className: 'gb-nm' }, p.title), h('span', { className: 'gb-c' }, projCount[p.id] || 0));
+                    })
+                  )
+                ),
+                h('div', { className: 'gb-tools' }, seg,
+                  h('input', { className: 'gb-q', value: q, placeholder: '🔍 Filter…', onChange: function (e) { setQ(e.target.value); } }),
+                  h('button', { className: 'btn', onClick: load, title: 'Reload' }, '↻'))
+              ),
+              h('div', { style: { fontSize: 11.5, color: 'var(--muted)', margin: '2px 0 8px' } }, shown.length + ' shown · click a card to open that researcher’s board (view as)'),
+              h('div', { className: 'bwrap' }, BOARD_COLS.map(function (col) {
+                var cards = shown.filter(function (s) { return stepCol(s) === col.key; });
+                return h('div', { key: col.key, className: 'bcol cap-' + (col.who === 'human' ? 'hu' : col.who === 'ai' ? 'ai' : 'bk') },
+                  h('div', { className: 'bcol-h' }, h('span', null, BCOL_IC[col.key]), h('span', { className: 'bcol-t' }, col.title), h('span', { className: 'bcol-n' }, cards.length + '')),
+                  h('div', { className: 'bcol-b' }, cards.length ? cards.map(card) : h('div', { className: 'bcol-empty' }, '—'))
+                );
+              }))
+            )
+      ) : null
+    );
+  }
+
   /* ---------- researchers (MTMT-sourced profiles, bundled in publications.js) ---------- */
   function Researchers() {
     var oS = useState(null), open = oS[0], setOpen = oS[1];
@@ -427,6 +586,8 @@
           h('div', { className: 'stat' }, h('div', { className: 'n' }, projects.length + rprojects.length), h('div', { className: 'l' }, 'Total projects')),
           h('div', { className: 'stat' }, h('div', { className: 'n' }, fmtBytes(totalStorage)), h('div', { className: 'l' }, 'Total storage · ' + credits(totalChars) + ' credits'))
         ),
+
+        h(GlobalTaskBoard, { profiles: profiles }),
 
         pending.length > 0 && h(React.Fragment, null,
           h('div', { className: 'sec-h' }, h('h2', null, 'Pending registrations'), h('span', { className: 'count' }, pending.length + ' waiting')),

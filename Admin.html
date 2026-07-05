@@ -125,6 +125,50 @@
     .center-msg .btn { margin-top: 6px; }
     .empty { padding: 40px; text-align: center; color: var(--faint); font-size: 13.5px; }
 
+    /* --- global task board (Kanban) --- */
+    .gb-wrap { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; margin-bottom: 22px; overflow: hidden; }
+    .gb-head { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; background: transparent; border: 0; padding: 14px 16px; cursor: pointer; font: inherit; color: inherit; }
+    .gb-head:hover { background: var(--softer); }
+    .gb-body { padding: 4px 14px 14px; border-top: 1px solid var(--line); }
+    .gb-bar { display: flex; flex-wrap: wrap; gap: 12px 16px; align-items: flex-start; justify-content: space-between; margin: 12px 0; }
+    .gb-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+    .gb-chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); background: var(--surface); color: var(--muted); border-radius: 999px; padding: 3px 9px 3px 6px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; max-width: 240px; }
+    .gb-chip:hover { border-color: var(--accent); color: var(--ink); }
+    .gb-chip.on { background: var(--accent-tint); color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+    .gb-chip .gb-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+    .gb-chip .gb-nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .gb-chip .gb-c { font-size: 10.5px; font-weight: 700; background: var(--soft); color: var(--muted); padding: 0 6px; border-radius: 999px; font-variant-numeric: tabular-nums; }
+    .gb-chip.on .gb-c { background: rgba(255,255,255,.55); color: var(--accent); }
+    .gb-tools { display: flex; align-items: center; gap: 8px; flex: none; }
+    .gb-seg { display: inline-flex; background: var(--soft); border: 1px solid var(--line); border-radius: 9px; padding: 2px; }
+    .gb-seg button { border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 7px; cursor: pointer; }
+    .gb-seg button.on { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgba(20,26,32,.08); }
+    .gb-q { border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 9px; padding: 6px 10px; font: inherit; font-size: 12.5px; width: 140px; }
+    .gb-q:focus { outline: none; border-color: var(--accent); }
+    .gb-owner { display: flex; align-items: center; gap: 5px; margin-bottom: 5px; font-size: 11px; font-weight: 700; color: var(--ink); }
+    .gb-chip .av, .gb-owner .av { border-radius: 50%; background-size: cover; display: grid; place-items: center; color: #fff; flex: none; }
+    .gb-onm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .gb-proj { display: flex; align-items: center; gap: 5px; font-size: 10.5px; font-weight: 700; color: var(--muted); margin-bottom: 5px; overflow: hidden; }
+    .gb-proj i { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+    .gb-proj span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .bwrap { display: flex; gap: 10px; overflow-x: auto; padding: 4px 2px 12px; align-items: flex-start; }
+    .bcol { flex: 0 0 240px; background: var(--surface-2); border: 1px solid var(--line); border-top: 3px solid var(--bcap, var(--line)); border-radius: 11px; display: flex; flex-direction: column; max-height: 72vh; }
+    .bcol.cap-hu { --bcap: #7c3aed; } .bcol.cap-ai { --bcap: #0e8fa8; } .bcol.cap-bk { --bcap: var(--warn); }
+    .bcol-h { display: flex; align-items: center; gap: 7px; padding: 9px 11px 7px; font-size: 11.5px; font-weight: 700; }
+    .bcol-t { flex: 1; min-width: 0; }
+    .bcol-n { font-size: 11px; font-weight: 700; color: var(--muted); background: var(--soft); padding: 1px 7px; border-radius: 999px; }
+    .bcol-b { padding: 7px; display: flex; flex-direction: column; gap: 7px; overflow-y: auto; flex: 1; min-height: 34px; }
+    .bcol-empty { font-size: 11px; color: var(--faint); text-align: center; padding: 8px; }
+    .bcard { position: relative; background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--bst, var(--line)); border-radius: 9px; padding: 8px 9px; cursor: pointer; box-shadow: 0 1px 2px rgba(20,24,40,.04); transition: box-shadow .12s, border-color .12s; }
+    .bcard.ai { --bst: #0e8fa8; } .bcard.hu { --bst: #7c3aed; }
+    .bcard:hover { box-shadow: 0 6px 16px -8px rgba(20,24,40,.28); border-color: #cfd4e6; }
+    .bcard-top { display: flex; align-items: center; gap: 5px; margin-bottom: 4px; }
+    .bcard-t { font-size: 12px; font-weight: 600; line-height: 1.3; color: var(--ink); }
+    .bcard-m { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+    .bchip { font-size: 9.5px; font-weight: 700; padding: 1px 5px; border-radius: 5px; background: var(--soft); color: var(--muted); font-variant-numeric: tabular-nums; }
+    .bchip.who.ai { background: #e0f3f7; color: #0a6f83; } .bchip.who.hu { background: #f1eafe; color: #6425c7; }
+    .bchip.ok { background: var(--ok-bg); color: var(--ok); } .bchip.fail { background: var(--danger-bg); color: var(--danger); } .bchip.warn { background: var(--warn-bg); color: var(--warn); }
+
     @media (max-width: 900px) { .stats { grid-template-columns: repeat(2, 1fr); } .topbar .me span.nm { display: none; } table { font-size: 12.5px; } }
   </style>
   <script src="theme.js?v=1783137934"></script>
@@ -144,7 +188,7 @@
   <script src="engine.js?v=1783137934"></script>
   <script src="auth.js?v=1783137934"></script>
   <script src="publications.js?v=1783137934"></script>
-  <script type="text/babel" src="admin.jsx?v=1783137934"></script>
+  <script type="text/babel" src="admin.jsx?v=1783269462"></script>
   <!-- build/version tracking -->
   <script src="build.js?v=1783137934"></script>
   <script src="version-badge.js?v=1783137934"></script>
