@@ -407,6 +407,28 @@
     .fig-lb img { max-width: 100%; max-height: 84vh; border-radius: 10px; box-shadow: 0 24px 64px rgba(0,0,0,.5); background: #fff; }
     .fig-lb-x { position: absolute; top: 16px; right: 18px; width: 38px; height: 38px; border-radius: 9px; border: 0; background: rgba(255,255,255,.14); color: #fff; font-size: 18px; cursor: pointer; }
     .fig-lb-cap { position: absolute; bottom: 20px; left: 0; right: 0; text-align: center; color: #e7edf3; font-size: 13px; padding: 0 24px; }
+    /* ===== Task board (Kanban): human ↔ AI ===== */
+    .bwrap { display: flex; gap: 10px; overflow-x: auto; padding: 4px 2px 12px; align-items: flex-start; }
+    .bcol { flex: 0 0 244px; background: var(--surface-2); border: 1px solid var(--line); border-top: 3px solid var(--bcap, var(--line)); border-radius: 11px; display: flex; flex-direction: column; max-height: 72vh; }
+    .bcol.cap-hu { --bcap: #7c3aed; } .bcol.cap-ai { --bcap: #0e8fa8; } .bcol.cap-bk { --bcap: var(--warn); }
+    .bcol.over { outline: 2px dashed var(--accent); outline-offset: -3px; background: var(--accent-tint); }
+    .bcol-h { display: flex; align-items: center; gap: 7px; padding: 9px 11px 7px; font-size: 11.5px; font-weight: 700; }
+    .bcol-t { flex: 1; min-width: 0; }
+    .bcol-n { font-size: 11px; font-weight: 700; color: var(--muted); background: var(--soft); padding: 1px 7px; border-radius: 999px; }
+    .bcol-est { font-size: 10px; color: var(--faint); padding: 0 11px 6px; font-variant-numeric: tabular-nums; }
+    .bcol-b { padding: 7px; display: flex; flex-direction: column; gap: 7px; overflow-y: auto; flex: 1; min-height: 34px; }
+    .bcol-empty { font-size: 11px; color: var(--faint); text-align: center; padding: 8px; }
+    .bcard { position: relative; background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--bst, var(--line)); border-radius: 9px; padding: 8px 9px; cursor: pointer; box-shadow: 0 1px 2px rgba(20,24,40,.04); transition: box-shadow .12s, border-color .12s; }
+    .bcard.ai { --bst: #0e8fa8; } .bcard.hu { --bst: #7c3aed; }
+    .bcard:hover { box-shadow: 0 6px 16px -8px rgba(20,24,40,.28); border-color: #cfd4e6; }
+    .bcard[draggable="true"] { cursor: grab; } .bcard[draggable="true"]:active { cursor: grabbing; }
+    .bcard-top { display: flex; align-items: center; gap: 5px; margin-bottom: 4px; }
+    .bcard-t { font-size: 12px; font-weight: 600; line-height: 1.3; color: var(--ink); }
+    .bcard-m { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+    .bchip { font-size: 9.5px; font-weight: 700; padding: 1px 5px; border-radius: 5px; background: var(--soft); color: var(--muted); font-variant-numeric: tabular-nums; }
+    .bchip.who.ai { background: #e0f3f7; color: #0a6f83; } .bchip.who.hu { background: #f1eafe; color: #6425c7; }
+    html.dark .bchip.who.ai { background: rgba(40,184,212,.16); color: #5fd3e8; } html.dark .bchip.who.hu { background: rgba(165,131,247,.16); color: #c3aefb; }
+    .bchip.ok { background: var(--ok-bg); color: var(--ok); } .bchip.fail { background: var(--danger-bg); color: var(--danger); } .bchip.warn { background: var(--warn-bg); color: var(--warn); }
   </style>
   <script src="theme.js?v=1783137934"></script>
   <script src="nav.js?v=1783137934"></script>
@@ -430,7 +452,7 @@
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
   <script type="text/babel" src="canvas.jsx?v=1783137934"></script>
   <script type="text/babel" src="notes.jsx?v=1783137934"></script>
-  <script type="text/babel" src="research.jsx?v=1783200891"></script>
+  <script type="text/babel" src="research.jsx?v=1783259749"></script>
 
   <script src="build.js?v=1783137934"></script>
   <script src="version-badge.js?v=1783137934"></script>
