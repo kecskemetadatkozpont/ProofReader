@@ -291,12 +291,15 @@ function Publications(props) {
   var pubs = Object.keys(_by).map(function (k) { return _by[k]; });
   var synced = !!(liveRows && liveRows.length);
   var rec = staticRec || (synced ? { name: me.name, mtmtId: '', orcid: null, publications: pubs } : null);
-  // on mount (cloud): load this user's publications table so a refresh persists across reloads
+  // load the VIEWED user's publications table (cloud). In admin view-as `me` is the target, not the
+  // session user — must scope to me.id, else the admin's own pubs leak into the target's profile.
+  // (RLS pub_read is `using(true)`, so it can't catch this — the query filter is the only guard.)
   useEffect(function () {
     var B = window.PR_BACKEND;
     if (!(B && B.sb && B.user)) return;
-    B.sb.from('publications').select('*').eq('researcher_id', B.user.id).order('year', { ascending: false }).then(function (r) { if (r && r.data) setLiveRows(r.data); });
-  }, []);
+    var rid = (preview && me && me.id) ? me.id : B.user.id;
+    B.sb.from('publications').select('*').eq('researcher_id', rid).order('year', { ascending: false }).then(function (r) { if (r && r.data) setLiveRows(r.data); });
+  }, [me && me.id]);   // reload when the viewed user resolves (view-as loads the admin role async)
   // refresh: pull the latest from MTMT (by the user's mtmt_id) via the mtmt-sync edge function
   function syncMtmt() {
     var B = window.PR_BACKEND;
