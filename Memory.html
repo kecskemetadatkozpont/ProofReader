@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Publify — Memory</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root { --surface:#fff; --surface-2:#f5f6f9; --surface-3:#fafbfc; --accent-tint:#eef0ff; --ok:#15803d; --ok-bg:#e7f6ee; --warn:#b45309; --warn-bg:#fdf6e3; --danger:#b42318; --danger-bg:#fdeef0;
+      --accent: #4f46e5; --accent-d: #4338ca; --ink: #1a2030; --muted: #5b6473; --faint: #8a92a0;
+      --line: #e6e8ee; --soft: #f5f6f9; --softer: #fafbfc; --paper: #fff; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body { background: var(--softer); color: var(--ink); font-family: 'IBM Plex Sans', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+    a { color: var(--accent); text-decoration: none; }
+    .mk { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: linear-gradient(135deg, #6366f1, #d946ef); box-shadow: 0 4px 12px rgba(79,70,229,.34); flex: none; }
+    .mk span { width: 12px; height: 12px; border-top: 2.4px solid #fff; border-left: 2.4px solid #fff; border-radius: 2px 0 0 0; transform: rotate(45deg); margin-top: 3px; }
+    .center { min-height: 80vh; display: flex; align-items: center; justify-content: center; }
+    .center .box { text-align: center; max-width: 420px; }
+    .center .mk { width: 52px; height: 52px; margin: 0 auto 16px; }
+    .center h1 { font-size: 20px; margin: 0 0 6px; } .center p { font-size: 13.5px; color: var(--muted); margin: 0 0 20px; }
+    .btn { border: 1px solid var(--line); background: var(--surface); border-radius: 10px; padding: 8px 13px; font-family: inherit; font-size: 13px; font-weight: 600; color: var(--ink); cursor: pointer; white-space: nowrap; }
+    .btn:hover { border-color: var(--accent); } .btn:disabled { opacity: .55; cursor: default; }
+    .btn.pri { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; margin-bottom: 14px; }
+    .panel h3 { margin: 0 0 12px; font-size: 14px; }
+    .empty { color: var(--faint); font-size: 14px; padding: 40px; text-align: center; }
+    .soon { background: var(--surface); border: 1px dashed var(--line); border-radius: 14px; padding: 36px; text-align: center; color: var(--muted); line-height: 1.55; max-width: 640px; }
+
+    .kg-wrap { max-width: 1440px; margin: 0 auto; padding: 22px 26px 40px; }
+    .kg-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
+    .kg-top h1 { font-size: 22px; margin: 0; letter-spacing: -.3px; }
+    .kg-sub { font-size: 13px; color: var(--muted); margin-top: 2px; }
+    .kg-tools { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .kg-tabs { display: inline-flex; background: var(--soft); border: 1px solid var(--line); border-radius: 10px; padding: 3px; }
+    .kg-tab { border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 12.5px; font-weight: 600; padding: 6px 13px; border-radius: 7px; cursor: pointer; }
+    .kg-tab.on { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgba(20,26,32,.08); }
+    .kg-searchbar { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
+    .kg-q { flex: 1; border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 10px; padding: 10px 13px; font: inherit; font-size: 13.5px; }
+    .kg-q:focus { outline: none; border-color: var(--accent); }
+    .kg-facets { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+    .kg-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+    .kg-chip { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--line); background: var(--surface); color: var(--muted); border-radius: 999px; padding: 4px 10px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; max-width: 240px; }
+    .kg-chip:hover { color: var(--ink); border-color: var(--accent); }
+    .kg-chip.on { background: var(--accent-tint); color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+    .kg-nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 170px; }
+    .kg-c { font-size: 10.5px; font-weight: 700; background: var(--soft); color: var(--muted); padding: 0 6px; border-radius: 999px; font-variant-numeric: tabular-nums; }
+    .kg-split { display: flex; gap: 16px; align-items: flex-start; }
+    .kg-list { flex: 1; min-width: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; align-content: start; }
+    .kg-list-h { grid-column: 1/-1; font-size: 12px; color: var(--muted); font-weight: 600; }
+    .kg-card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 11px 12px; cursor: pointer; transition: box-shadow .12s, border-color .12s; }
+    .kg-card:hover { box-shadow: 0 8px 20px -12px rgba(20,24,40,.4); border-color: #cfd4e6; }
+    .kg-card.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+    .kg-card-h { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; }
+    .kg-kdot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+    .kg-kname { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+    .kg-mval { margin-left: auto; font-size: 11px; font-weight: 700; color: var(--ink); background: var(--soft); padding: 1px 7px; border-radius: 6px; font-variant-numeric: tabular-nums; }
+    .kg-card-t { font-size: 13px; font-weight: 600; line-height: 1.32; color: var(--ink); }
+    .kg-card-b { font-size: 11.5px; color: var(--muted); margin-top: 4px; line-height: 1.4; }
+    .kg-card-p { font-size: 10.5px; color: var(--faint); margin-top: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .kg-canvas { flex: 1; height: 74vh; min-width: 0; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: var(--surface-3); }
+    .kg-detail { width: 340px; flex: none; position: sticky; top: 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 16px; max-height: 82vh; overflow: auto; }
+    .kg-d-head { display: flex; align-items: center; gap: 8px; }
+    .kg-kind { font-size: 11px; font-weight: 700; color: #fff; padding: 3px 9px; border-radius: 999px; }
+    .kg-x { margin-left: auto; border: 0; background: var(--soft); color: var(--muted); width: 26px; height: 26px; border-radius: 8px; font-size: 16px; cursor: pointer; }
+    .kg-d-title { font-size: 16px; margin: 10px 0 8px; line-height: 1.3; }
+    .kg-d-val { font-size: 13px; color: var(--muted); margin-bottom: 8px; }
+    .kg-d-body { font-size: 12.5px; color: var(--ink); line-height: 1.5; white-space: pre-wrap; margin: 0 0 10px; }
+    .kg-d-proj { font-size: 12px; color: var(--faint); margin-bottom: 10px; }
+    .kg-d-sec { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 4px; }
+    .kg-d-lbl { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--faint); margin-bottom: 8px; }
+    .kg-d-rels { display: flex; flex-direction: column; gap: 5px; }
+    .kg-rel { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; text-align: left; border: 1px solid var(--line); background: var(--soft); border-radius: 9px; padding: 6px 9px; font: inherit; cursor: pointer; }
+    .kg-rel:hover { border-color: var(--accent); }
+    .kg-rel-verb { font-size: 10px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+    .kg-rel-node { font-size: 12.5px; color: var(--ink); font-weight: 500; }
+    .kg-open { display: block; margin-top: 12px; text-align: center; border: 1px solid var(--accent); border-radius: 10px; padding: 9px; font-size: 12.5px; font-weight: 700; color: var(--accent); }
+    .kg-open:hover { background: var(--accent-tint); }
+    .kg-hint { width: 340px; flex: none; color: var(--faint); font-size: 13px; padding: 20px; border: 1px dashed var(--line); border-radius: 14px; line-height: 1.5; }
+    .kg-log { display: flex; align-items: center; gap: 10px; padding: 9px 4px; border-bottom: 1px solid var(--line); cursor: pointer; }
+    .kg-log:hover { background: var(--soft); }
+    .kg-log-op { font-size: 10.5px; font-weight: 700; text-transform: uppercase; color: var(--accent); background: var(--accent-tint); padding: 2px 7px; border-radius: 6px; flex: none; }
+    .kg-log-note { flex: 1; min-width: 0; font-size: 12.5px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .kg-log-ts { font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums; flex: none; }
+    @media (max-width: 900px) { .kg-split { flex-direction: column; } .kg-detail, .kg-hint { width: 100%; position: static; } .kg-canvas { height: 60vh; } }
+  </style>
+  <script src="theme.js?v=1783137934"></script>
+  <script src="nav.js?v=1783137934"></script>
+</head>
+
+<body>
+  <div id="root">
+    <div class="center"><div class="box"><div class="mk"><span></span></div><h1>Memory</h1><p>Loading…</p></div></div>
+  </div>
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="backend/config.js?v=1783137934"></script>
+  <script src="auth.js?v=1783137934"></script>
+  <script src="backend.js?v=1783137934"></script>
+  <script src="vendor/force-graph.min.js"></script>
+  <script type="text/babel" src="memory.jsx?v=1783269462"></script>
+
+  <script src="build.js?v=1783137934"></script>
+  <script src="version-badge.js?v=1783137934"></script>
+</body>
+
+</html>

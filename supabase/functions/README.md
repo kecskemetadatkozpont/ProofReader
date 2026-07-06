@@ -63,3 +63,42 @@ add `CONSENSUS_MCP_TOKEN` and it auto-upgrades to evidence-grounded Consensus mo
 **The hard ceiling lives in the Anthropic Console**, not the code: load a small **prepaid** balance
 (e.g. $5) with **auto-reload OFF** → the API stops when it runs out. That guarantees "a few dollars max".
 The function returns `usage` (input/output tokens) per call for monitoring.
+
+---
+
+## Memory Layer — km-distill + km-search (Memory.html / tudástérkép)
+
+Builds a knowledge graph automatically from completed protocol tasks. Stays on the **Claude + Supabase**
+line: Claude API for entity/relation extraction, the **built-in `gte-small`** model for embeddings
+(384-dim, no external embedding API).
+
+**Prereq:** apply `backend/migration-45-memory-layer.sql` in the SQL Editor first (km_* tables, RLS,
+`km_hybrid_search` / `km_subgraph` RPCs, the `km_ingested_at` marker + re-ingest trigger).
+
+```bash
+# reuses the same ANTHROPIC_API_KEY as research-chat
+supabase secrets set KM_CRON_SECRET=$(openssl rand -hex 24)   # lets pg_cron / manual cron invoke km-distill
+# optional: supabase secrets set KM_MODEL=claude-sonnet-4-6   KM_BATCH=8
+supabase functions deploy km-distill --project-ref jokqthwszkweyqmmdesn
+supabase functions deploy km-search  --project-ref jokqthwszkweyqmmdesn
+```
+
+- **km-distill** — the ingester. Drains `research_protocol_steps` where `status='done'` and
+  `km_ingested_at is null`: deterministic nodes/edges from `spec`/`result` columns + Claude extraction
+  from the free-text report, then embeds each node with `gte-small`. Runs as **service role** but stamps
+  each node's `project_id`/`created_by` from the source step (isolation preserved). Trigger it from the
+  Memory page **⟳ Sync** button (admin JWT) or on a schedule (`x-km-secret: $KM_CRON_SECRET`).
+  Optional pg_cron:
+  ```sql
+  select cron.schedule('km-distill-15m', '*/15 * * * *', $$
+    select net.http_post(
+      url    := 'https://jokqthwszkweyqmmdesn.functions.supabase.co/km-distill',
+      headers:= jsonb_build_object('content-type','application/json','x-km-secret','<KM_CRON_SECRET>'),
+      body   := jsonb_build_object('limit', 12)) $$);
+  ```
+- **km-search** — semantic search. Embeds the query with `gte-small`, calls `km_hybrid_search`
+  (RRF of full-text + vector) **under the caller's JWT** so RLS composes. The Memory page works with
+  full-text only until this is deployed; deploying it adds the ✨ Semantic ranking.
+
+**Cost:** the deterministic pass is free; extraction is one short Claude call per completed task; embeddings
+are free (`gte-small` runs inside the Edge runtime). The same prepaid-balance ceiling applies.

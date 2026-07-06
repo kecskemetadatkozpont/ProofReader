@@ -2680,6 +2680,15 @@
       window.addEventListener('pr-profile', onProfile);
       return function () { window.removeEventListener('pr-profile', onProfile); };
     }, []);
+    // deep-link: Memory (and other surfaces) link back with ?project=<id> — open that project once loaded.
+    var jumpedRef = useRef(false);
+    useEffect(function () {
+      if (jumpedRef.current || phase !== 'ready' || sel) return;
+      var pid; try { pid = new URLSearchParams(location.search).get('project'); } catch (e) { pid = null; }
+      if (!pid) { jumpedRef.current = true; return; }
+      var p = projects.filter(function (x) { return x.id === pid; })[0];
+      if (p) { jumpedRef.current = true; openProject(p); }
+    }, [phase, projects.length]);
     function boot() {
       if (!BE || !BE.sb) { setPhase('nobackend'); return; }
       if (BE.mode === 'signin' || BE.mode === 'pending') { setPhase('signin'); return; }

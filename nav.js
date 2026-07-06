@@ -12,6 +12,7 @@
   var LINKS = [
     { key: 'profile', label: 'Open Profile', href: 'Profile.html' },
     { key: 'research', label: 'Research', href: 'Research.html' },
+    { key: 'memory', label: 'Memory', href: 'Memory.html' },
     { key: 'submissions', label: 'Érkeztető', href: 'Submissions.html' },
     { key: 'session', label: 'Publify Chat', href: 'Session.html' },
     { key: 'media', label: 'Media player', href: 'Media.html' },
@@ -24,6 +25,7 @@
     var p = (location.pathname.split('/').pop() || '').toLowerCase();
     if (p.indexOf('profile') === 0) return 'profile';
     if (p.indexOf('research') === 0) return 'research';
+    if (p.indexOf('memory') === 0) return 'memory';
     if (p.indexOf('submissions') === 0) return 'submissions';
     if (p.indexOf('session') === 0) return 'session';
     if (p.indexOf('phd') === 0) return 'phd';
@@ -32,7 +34,7 @@
     if (p.indexOf('proofreader') === 0) return 'editor';
     return '';
   }
-  var PAGE_NAME = { profile: 'Profile', research: 'Research', submissions: 'Érkeztető', session: 'Publify Chat', phd: 'Doctoral School', publications: 'Publications', admin: 'Admin', editor: 'Editor' };
+  var PAGE_NAME = { profile: 'Profile', research: 'Research', memory: 'Memory', submissions: 'Érkeztető', session: 'Publify Chat', phd: 'Doctoral School', publications: 'Publications', admin: 'Admin', editor: 'Editor' };
   function initials(name, email) {
     var s = (name || email || '?').trim();
     var parts = s.split(/\s+/).filter(Boolean);
@@ -151,6 +153,7 @@
     media: svg('<path d="M3 9V8.2a5 5 0 0 1 10 0V9"/><rect x="2.2" y="9" width="2.9" height="4.2" rx="1.1"/><rect x="10.9" y="9" width="2.9" height="4.2" rx="1.1"/>'),
     compare: svg('<rect x="2" y="2.8" width="4.8" height="10.4" rx="1"/><rect x="9.2" y="2.8" width="4.8" height="10.4" rx="1"/><path d="M8 1.5v13"/>'),
     research: svg('<path d="M6 2v4.5L3 12.5A1 1 0 0 0 4 14h8a1 1 0 0 0 .9-1.5L10 6.5V2"/><path d="M5 2h6"/>'),
+    memory: svg('<circle cx="4" cy="4" r="1.6"/><circle cx="12" cy="5" r="1.6"/><circle cx="6.5" cy="11.5" r="1.6"/><circle cx="11.5" cy="11" r="1.6"/><path d="M5.4 4.6 10.6 4.8M5.2 5.3 6.2 10M11.7 6.5 11.6 9.6M7.9 11.3 10 11.1"/>'),
     phd: svg('<path d="M8 2L1.5 5.5 8 9l6.5-3.5z"/><path d="M4 7v3.2c0 .9 1.8 1.8 4 1.8s4-.9 4-1.8V7"/>'),
     publications: svg('<path d="M3 2.5h7l3 3V13a.5.5 0 0 1-.5.5H3a.5.5 0 0 1-.5-.5V3a.5.5 0 0 1 .5-.5z"/><path d="M5 7h6M5 9.5h6"/>'),
     admin: svg('<path d="M8 1.8l5 1.9v3.6c0 3-2.1 5.2-5 6.1-2.9-.9-5-3.1-5-6.1V3.7z"/><path d="M5.8 8l1.6 1.6L10.4 6.5"/>')
@@ -184,7 +187,7 @@
       document.documentElement.classList.toggle('pn-adminview', !!av);
       document.getElementById('pn-left').innerHTML = '<a class="pn-brand" href="' + withAv('Projects.html') + '" title="Home"><span class="pn-mk"><i></i></span>Publify</a>'
         + (av ? '<span class="pn-as">👁 ' + esc(av.name || av.email || '') + '</span>' : '');
-      var SHORT = { profile: 'Profile', research: 'Research', session: 'Chat', media: 'Media', compare: 'Compare', phd: 'Doctoral', publications: 'Publications', admin: 'Admin' };
+      var SHORT = { profile: 'Profile', research: 'Research', memory: 'Memory', session: 'Chat', media: 'Media', compare: 'Compare', phd: 'Doctoral', publications: 'Publications', admin: 'Admin' };
       var barNav = LINKS.filter(function (l) { return !l.adminOnly || admin; }).map(function (l) {
         return '<a href="' + withAv(l.href) + '"' + (l.key === here ? ' class="on" aria-current="page"' : '') + '>' + esc(SHORT[l.key] || l.label) + '</a>';
       }).join('');
