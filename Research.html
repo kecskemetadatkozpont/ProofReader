@@ -429,6 +429,13 @@
     .bchip.who.ai { background: #e0f3f7; color: #0a6f83; } .bchip.who.hu { background: #f1eafe; color: #6425c7; }
     html.dark .bchip.who.ai { background: rgba(40,184,212,.16); color: #5fd3e8; } html.dark .bchip.who.hu { background: rgba(165,131,247,.16); color: #c3aefb; }
     .bchip.ok { background: var(--ok-bg); color: var(--ok); } .bchip.fail { background: var(--danger-bg); color: var(--danger); } .bchip.warn { background: var(--warn-bg); color: var(--warn); }
+    /* personal ToDo cards on the protocol board: dashed to read as hand-added, not AI-generated */
+    .bcard.todo { border-style: dashed; background: color-mix(in srgb, var(--surface) 96%, var(--accent)); }
+    .bchip.todo-tag { background: var(--accent-tint); color: var(--accent); }
+    /* segmented control inside the Add/Edit task modal */
+    .tm-seg { display: inline-flex; flex-wrap: wrap; background: var(--soft); border: 1px solid var(--line); border-radius: 9px; padding: 2px; }
+    .tm-seg button { border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 12.5px; font-weight: 600; padding: 5px 11px; border-radius: 7px; cursor: pointer; }
+    .tm-seg button.on { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgba(20,26,32,.08); }
     /* --- cross-project global board: filter bar, project chips, per-card project tag --- */
     .gb-bar { display: flex; flex-wrap: wrap; gap: 12px 16px; align-items: flex-start; justify-content: space-between; margin-bottom: 12px; }
     .gb-chips { display: flex; flex-wrap: wrap; gap: 6px; flex: 1; min-width: 0; }
@@ -451,7 +458,7 @@
     .gb-proj span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   </style>
   <script src="theme.js?v=1783137934"></script>
-  <script src="nav.js?v=1783137934"></script>
+  <script src="nav.js?v=1783320101"></script>
 </head>
 
 <body>
@@ -472,7 +479,7 @@
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
   <script type="text/babel" src="canvas.jsx?v=1783137934"></script>
   <script type="text/babel" src="notes.jsx?v=1783137934"></script>
-  <script type="text/babel" src="research.jsx?v=1783269462"></script>
+  <script type="text/babel" src="research.jsx?v=1783320101"></script>
 
   <script src="build.js?v=1783137934"></script>
   <script src="version-badge.js?v=1783137934"></script>

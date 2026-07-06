@@ -46,6 +46,61 @@
     if (st === 'blocked' || st === 'failed' || (s.needs_approval && (st === 'todo' || st === 'queued'))) return 'blocked';
     return a === 'human' ? 'todo-human' : 'todo-ai';
   }
+  // personal ToDo tasks (research_todos, migration-46) render on the same board. Their status vocab is
+  // todo|doing|blocked|done, so they need their own column map (mirrors kanban.jsx).
+  function todoStepCol(t) {
+    var a = t.assignee === 'human' ? 'human' : 'ai', s = t.status;
+    if (s === 'done') return a === 'human' ? 'done-human' : 'done-ai';
+    if (s === 'doing') return a === 'human' ? 'prog-human' : 'prog-ai';
+    if (s === 'blocked') return 'blocked';
+    return a === 'human' ? 'todo-human' : 'todo-ai';
+  }
+  function todoColPatch(key) {
+    return key === 'todo-human' ? { assignee: 'human', status: 'todo' }
+      : key === 'todo-ai' ? { assignee: 'ai', status: 'todo' }
+        : key === 'prog-ai' ? { assignee: 'ai', status: 'doing' }
+          : key === 'prog-human' ? { assignee: 'human', status: 'doing' }
+            : key === 'blocked' ? { status: 'blocked' }
+              : key === 'done-ai' ? { assignee: 'ai', status: 'done' }
+                : key === 'done-human' ? { assignee: 'human', status: 'done' } : null;
+  }
+  var PRIO_META = { low: { l: 'Low', c: '#0e9f6e' }, med: { l: 'Med', c: '#d9760b' }, high: { l: 'High', c: '#dc2626' } };
+
+  // ---- Add/edit a personal ToDo (research_todos) — used by the board "Add task" button ----
+  function TodoModal(props) {
+    var init = props.todo || {};
+    var fS = useState({ title: init.title || '', notes: init.notes || '', assignee: init.assignee || 'human', status: init.status || 'todo', priority: init.priority || '', due: init.due || '' }), f = fS[0], setF = fS[1];
+    var bS = useState(false), busy = bS[0], setBusy = bS[1];
+    function up(k, v) { setF(Object.assign({}, f, (function () { var o = {}; o[k] = v; return o; })())); }
+    function save() {
+      if (!f.title.trim()) return; setBusy(true);
+      var row = { title: f.title.trim(), notes: f.notes.trim() || null, assignee: f.assignee, status: f.status, priority: f.priority || null, due: f.due || null, updated_at: new Date().toISOString() };
+      var p;
+      if (props.todo) p = sb.from('research_todos').update(row).eq('id', props.todo.id);
+      else { row.owner_id = props.ownerId; row.created_by = props.ownerId; row.project_id = props.projectId; p = sb.from('research_todos').insert(row); }
+      p.then(function (r) { setBusy(false); if (r && r.error) { window.PRUI.toast(r.error.message, { kind: 'error' }); return; } props.onSaved(); });
+    }
+    function del() { if (!props.todo) return; window.PRUI.confirm({ title: 'Delete this task?', body: props.todo.title, danger: true, confirmLabel: 'Delete' }).then(function (ok) { if (!ok) return; sb.from('research_todos').delete().eq('id', props.todo.id).then(function () { props.onSaved(); }); }); }
+    useEffect(function () { function esc(e) { if (e.key === 'Escape') props.onClose(); } window.addEventListener('keydown', esc); return function () { window.removeEventListener('keydown', esc); }; });
+    var seg = function (k, opts) { return h('div', { className: 'tm-seg' }, opts.map(function (o) { return h('button', { key: o[0], type: 'button', className: f[k] === o[0] ? 'on' : '', onClick: function () { up(k, o[0]); } }, o[1]); })); };
+    return h('div', { className: 'scrim', onClick: props.onClose },
+      h('div', { className: 'modal', role: 'dialog', 'aria-modal': 'true', onClick: function (e) { e.stopPropagation(); } },
+        h('div', { className: 'modal-h' }, h('b', null, props.todo ? 'Edit task' : 'Add task'), h('button', { className: 'x', 'aria-label': 'Close', onClick: props.onClose }, '×')),
+        h('div', { className: 'modal-b' },
+          h('div', { className: 'field' }, h('label', null, 'Title *'), h('input', { autoFocus: true, value: f.title, onChange: function (e) { up('title', e.target.value); }, placeholder: 'What needs doing?' })),
+          h('div', { className: 'field' }, h('label', null, 'Notes'), h('textarea', { rows: 2, value: f.notes, onChange: function (e) { up('notes', e.target.value); } })),
+          h('div', { className: 'field' }, h('label', null, 'Owner'), seg('assignee', [['human', '👤 Human'], ['ai', '🤖 AI']])),
+          h('div', { className: 'field' }, h('label', null, 'Status'), seg('status', [['todo', 'ToDo'], ['doing', 'In progress'], ['blocked', 'Blocked'], ['done', 'Done']])),
+          h('div', { className: 'field' }, h('label', null, 'Priority'), seg('priority', [['', 'None'], ['low', 'Low'], ['med', 'Med'], ['high', 'High']])),
+          h('div', { className: 'field' }, h('label', null, 'Due date'), h('input', { type: 'date', value: f.due || '', onChange: function (e) { up('due', e.target.value); } }))
+        ),
+        h('div', { className: 'modal-foot' },
+          props.todo ? h('button', { className: 'btn', style: { color: 'var(--danger)' }, onClick: del }, 'Delete') : h('span'),
+          h('div', { style: { display: 'flex', gap: 8 } }, h('button', { className: 'btn', onClick: props.onClose }, 'Cancel'), h('button', { className: 'btn pri', disabled: busy || !f.title.trim(), onClick: save }, busy ? 'Saving…' : (props.todo ? 'Save' : 'Add task'))))
+      )
+    );
+  }
+
   // the (assignee, status, needs_approval) patch a column encodes. Writing `assignee` needs migration-44.
   function colPatch(key) {
     return key === 'todo-human' ? { assignee: 'human', status: 'todo', needs_approval: false }
@@ -1802,8 +1857,10 @@
     var rfS = useState([]), rfiles = rfS[0], setRfiles = rfS[1];         // project deliverable files
     var ntS = useState({}), noteDraft = ntS[0], setNoteDraft = ntS[1];   // per-step composer { <id>: { kind, body } }
     var ndS = useState({}), notesData = ndS[0], setNotesData = ndS[1];   // review notes keyed by step id
-    var bdS = useState(null), boardDrag = bdS[0], setBoardDrag = bdS[1];  // task-board drag: dragged step id
+    var bdS = useState(null), boardDrag = bdS[0], setBoardDrag = bdS[1];  // task-board drag: 'step:<id>' | 'todo:<id>'
     var bhS = useState(null), boardOver = bhS[0], setBoardOver = bhS[1];  // task-board drop-target column
+    var tdS = useState([]), todos = tdS[0], setTodos = tdS[1];            // personal ToDos on this project (research_todos)
+    var tmS = useState(null), todoModal = tmS[0], setTodoModal = tmS[1]; // null | {} add | {todo} edit
     var ce = props.canEdit;
     // ---- result helpers (read the runner's structured output) ----
     function acOf(s) {
@@ -1894,7 +1951,9 @@
       }, function () { setLoading(false); });
     }
     function loadFiles() { sb.from('research_files').select('id,path,content,storage_path,mime,size,updated_at').eq('project_id', props.projectId).order('updated_at', { ascending: false }).then(function (r) { setRfiles((r && r.data) || []); }); }
-    useEffect(function () { load(); loadFiles(); }, [props.projectId]);
+    function loadTodos() { sb.from('research_todos').select('*').eq('project_id', props.projectId).order('created_at', { ascending: false }).then(function (r) { setTodos((r && r.data) || []); }); }
+    function moveTodo(t, key) { if (!ce) return; var p = todoColPatch(key); if (!p) return; setTodos(function (l) { return l.map(function (x) { return x.id === t.id ? Object.assign({}, x, p) : x; }); }); sb.from('research_todos').update(Object.assign({ updated_at: new Date().toISOString() }, p)).eq('id', t.id).then(function (r) { if (r && r.error) { window.PRUI.toast(r.error.message, { kind: 'error' }); loadTodos(); } }); }
+    useEffect(function () { load(); loadFiles(); loadTodos(); }, [props.projectId]);
     useEffect(function () { loadNotes(); }, [prot && prot.id]);
     useEffect(function () { if (!prot || prot.status !== 'running') return; var t = setInterval(function () { load(); loadFiles(); loadNotes(); }, 5000); return function () { clearInterval(t); }; }, [prot && prot.id, prot && prot.status]);
     function generate() {
@@ -2039,7 +2098,7 @@
       if (figsOf(s).length) chips.push(h('span', { className: 'bchip' }, '📈 ' + figsOf(s).length));
       return h('div', {
         key: s.id, className: 'bcard ' + (a === 'human' ? 'hu' : 'ai'), draggable: ce,
-        onDragStart: ce ? function (e) { setBoardDrag(s.id); try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', s.id); } catch (x) { } } : null,
+        onDragStart: ce ? function (e) { setBoardDrag('step:' + s.id); try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', s.id); } catch (x) { } } : null,
         onDragEnd: ce ? function () { setBoardDrag(null); setBoardOver(null); } : null,
         onClick: function () { setPview('steps'); setExp(function (p) { var n = Object.assign({}, p); n[s.id] = true; return n; }); },
         title: 'Open in Tasks & results'
@@ -2051,22 +2110,52 @@
         chips.length ? h('div', { className: 'bcard-m' }, chips) : null
       );
     }
+    // a personal ToDo card on the protocol board (visually distinct from AI/protocol steps)
+    function todoBoardCard(t) {
+      var a = t.assignee === 'human' ? 'human' : 'ai', pr = PRIO_META[t.priority];
+      var overdue = t.due && t.status !== 'done' && t.due < new Date().toISOString().slice(0, 10);
+      var chips = [];
+      if (t.due) chips.push(h('span', { key: 'd', className: 'bchip' + (overdue ? ' warn' : '') }, '📅 ' + t.due));
+      if (t.notes) chips.push(h('span', { key: 'n', className: 'bchip' }, '📝'));
+      return h('div', {
+        key: 'todo-' + t.id, className: 'bcard todo ' + (a === 'human' ? 'hu' : 'ai'), draggable: ce,
+        onDragStart: ce ? function (e) { setBoardDrag('todo:' + t.id); try { e.dataTransfer.effectAllowed = 'move'; } catch (x) { } } : null,
+        onDragEnd: ce ? function () { setBoardDrag(null); setBoardOver(null); } : null,
+        onClick: ce ? function () { setTodoModal({ todo: t }); } : null, title: 'Edit task'
+      },
+        h('div', { className: 'bcard-top' }, h('span', { className: 'bchip todo-tag' }, '📝 ToDo'),
+          h('span', { className: 'bchip who ' + (a === 'human' ? 'hu' : 'ai') }, a === 'human' ? 'HUMAN' : 'AI'),
+          pr ? h('span', { className: 'bchip', style: { background: 'color-mix(in srgb,' + pr.c + ' 16%, transparent)', color: pr.c } }, pr.l) : null),
+        h('div', { className: 'bcard-t' }, t.title),
+        chips.length ? h('div', { className: 'bcard-m' }, chips) : null
+      );
+    }
+    function onBoardDrop(col) {
+      setBoardOver(null); if (!boardDrag) return; var d = boardDrag; setBoardDrag(null);
+      if (d.indexOf('todo:') === 0) { var t = todos.filter(function (x) { return x.id === d.slice(5); })[0]; if (t) moveTodo(t, col.key); }
+      else { var s = steps.filter(function (x) { return x.id === d.slice(5); })[0]; if (s) moveToCol(s, col.key); }
+    }
     function renderBoard() {
       return h('div', { className: 'panel', style: { overflow: 'hidden' } },
-        h('h3', null, '🗂️ Task board', h('span', { style: { marginLeft: 10, fontSize: 10.5, color: 'var(--faint)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 } }, ce ? 'húzd a kártyákat oszlopok között — a felelős + státusz frissül' : 'olvasható nézet')),
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 } },
+          h('h3', { style: { margin: 0 } }, '🗂️ Task board', h('span', { style: { marginLeft: 10, fontSize: 10.5, color: 'var(--faint)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 } }, ce ? 'húzd a kártyákat — a felelős + státusz frissül' : 'olvasható nézet')),
+          ce ? h('button', { className: 'btn', style: { marginLeft: 'auto', padding: '4px 10px', fontSize: 12, flex: 'none' }, onClick: function () { setTodoModal({}); } }, '+ Add task') : null),
         h('div', { className: 'bwrap' }, BOARD_COLS.map(function (col) {
           var cards = steps.filter(function (s) { return stepCol(s) === col.key; });
+          var tcards = todos.filter(function (t) { return todoStepCol(t) === col.key; });
           var est = cards.reduce(function (a, s) { return a + ((s.spec && s.spec.est_minutes) || 0); }, 0);
+          var total = cards.length + tcards.length;
           return h('div', {
             key: col.key, className: 'bcol' + (boardOver === col.key ? ' over' : '') + (' cap-' + (col.who === 'human' ? 'hu' : col.who === 'ai' ? 'ai' : 'bk')),
             onDragOver: ce ? function (e) { e.preventDefault(); if (boardOver !== col.key) setBoardOver(col.key); } : null,
-            onDrop: ce ? function (e) { e.preventDefault(); setBoardOver(null); if (boardDrag) { var s = steps.filter(function (x) { return x.id === boardDrag; })[0]; if (s) moveToCol(s, col.key); setBoardDrag(null); } } : null
+            onDrop: ce ? function (e) { e.preventDefault(); onBoardDrop(col); } : null
           },
-            h('div', { className: 'bcol-h' }, h('span', null, BCOL_IC[col.key]), h('span', { className: 'bcol-t' }, col.title), h('span', { className: 'bcol-n' }, cards.length + '')),
+            h('div', { className: 'bcol-h' }, h('span', null, BCOL_IC[col.key]), h('span', { className: 'bcol-t' }, col.title), h('span', { className: 'bcol-n' }, total + '')),
             est ? h('div', { className: 'bcol-est' }, '⏱ ~' + est + 'p') : null,
-            h('div', { className: 'bcol-b' }, cards.length ? cards.map(boardCard) : h('div', { className: 'bcol-empty' }, '—'))
+            h('div', { className: 'bcol-b' }, total ? cards.map(boardCard).concat(tcards.map(todoBoardCard)) : h('div', { className: 'bcol-empty' }, '—'))
           );
-        }))
+        })),
+        todoModal ? h(TodoModal, { todo: todoModal.todo, projectId: props.projectId, ownerId: props.authorId, onClose: function () { setTodoModal(null); }, onSaved: function () { setTodoModal(null); loadTodos(); } }) : null
       );
     }
     return h('div', null,
