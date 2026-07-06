@@ -41,6 +41,14 @@
     .kg-searchbar { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
     .kg-q { flex: 1; border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 10px; padding: 10px 13px; font: inherit; font-size: 13.5px; }
     .kg-q:focus { outline: none; border-color: var(--accent); }
+    .kg-groupbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+    .kg-gb-l { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; color: var(--faint); }
+    .kg-seg { display: inline-flex; background: var(--soft); border: 1px solid var(--line); border-radius: 10px; padding: 3px; }
+    .kg-seg button { border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 12.5px; font-weight: 600; padding: 6px 12px; border-radius: 7px; cursor: pointer; }
+    .kg-seg button.on { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgba(20,26,32,.08); }
+    .kg-glegend { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    .kg-gtag { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 600; color: var(--muted); background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 3px 9px; max-width: 200px; }
+    .kg-gtag i { width: 8px; height: 8px; border-radius: 50%; flex: none; }
     .kg-facets { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
     .kg-chips { display: flex; flex-wrap: wrap; gap: 6px; }
     .kg-chip { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--line); background: var(--surface); color: var(--muted); border-radius: 999px; padding: 4px 10px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; max-width: 240px; }
@@ -104,7 +112,7 @@
   <script src="auth.js?v=1783137934"></script>
   <script src="backend.js?v=1783137934"></script>
   <script src="vendor/force-graph.min.js"></script>
-  <script type="text/babel" src="memory.jsx?v=1783269462"></script>
+  <script type="text/babel" src="memory.jsx?v=1783322131"></script>
 
   <script src="build.js?v=1783137934"></script>
   <script src="version-badge.js?v=1783137934"></script>
