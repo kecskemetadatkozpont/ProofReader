@@ -57,6 +57,13 @@
     .mp-seg-x { font-size: 13px; line-height: 1.5; color: var(--ink); }
     .field-label { font-size: 11px; font-weight: 700; color: var(--faint); text-transform: uppercase; letter-spacing: .04em; }
     textarea.field { resize: vertical; line-height: 1.5; }
+    @media (max-width: 640px) {
+      .mp-wrap { padding: 16px 12px 44px; }
+      .mp-head h1 { font-size: 19px; }
+      .mp-card { padding: 14px 13px; }
+      .mp-row { gap: 8px; }
+      .mp-row > label { min-width: 0; }
+    }
   </style>
   <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
   <script>if (window.pdfjsLib) { try { window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js'; } catch (e) { } }</script>
@@ -70,13 +77,13 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="backend/config.js?v=1783137934"></script>
   <script src="auth.js?v=1783137934"></script>
-  <script src="backend.js?v=1783137934"></script>
+  <script src="backend.js?v=1783538128"></script>
   <script src="onboarding.js?v=1783137934"></script>
   <script src="office.js?v=1783137934"></script>
   <script src="eleven.js?v=1783137934"></script>
-  <script src="nav.js?v=1783494500"></script>
+  <script src="nav.js?v=1783538128"></script>
   <script type="text/babel" src="media.jsx?v=1783137934"></script>
-  <script src="build.js?v=1783494500"></script>
-  <script src="version-badge.js?v=1783137934"></script>
+  <script src="build.js?v=1783538128"></script>
+  <script src="version-badge.js?v=1783538128"></script>
 </body>
 </html>

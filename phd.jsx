@@ -568,7 +568,7 @@
     var oS = useState(false), open = oS[0], setOpen = oS[1];
     var eS = useState(null), expanded = eS[0], setExpanded = eS[1];
     function load() { sb.from('notifications').select('id,kind,payload,read_at,created_at').order('created_at', { ascending: false }).limit(40).then(function (r) { setNotes((r && r.data) || []); }); }
-    useEffect(function () { load(); }, []);
+    useEffect(function () { load(); var t = setInterval(load, 60000); return function () { clearInterval(t); }; }, []);   // poll so new digests appear without a manual reload
     function markRead(n) { if (n.read_at) return; sb.from('notifications').update({ read_at: new Date().toISOString() }).eq('id', n.id).then(function () { setNotes(function (l) { return l.map(function (x) { return x.id === n.id ? Object.assign({}, x, { read_at: 'now' }) : x; }); }); }); }
     function markAll() { var ids = notes.filter(function (n) { return !n.read_at; }).map(function (n) { return n.id; }); if (!ids.length) return; sb.from('notifications').update({ read_at: new Date().toISOString() }).in('id', ids).then(load); }
     var unread = notes.filter(function (n) { return !n.read_at; }).length;

@@ -39,7 +39,7 @@
     var pkS = useState(null), picker = pkS[0], setPicker = pkS[1];         // {kind, items} for the browse pickers
     var dgS = useState(false), dragOver = dgS[0], setDragOver = dgS[1];
     var hlS = useState(true), histLoading = hlS[0], setHistLoading = hlS[1];   // true until the first chat list resolves
-    var alive = useRef(true), scrollRef = useRef(null), taRef = useRef(null), fileRef = useRef(null);
+    var alive = useRef(true), scrollRef = useRef(null), taRef = useRef(null), fileRef = useRef(null), abortRef = useRef(null);
     useEffect(function () { return function () { alive.current = false; }; }, []);
     useEffect(function () { boot(); }, []);
 
@@ -69,24 +69,28 @@
       var title = (firstMsg || 'New conversation').slice(0, 60);
       return sb.from('user_chats').insert({ owner_id: me.id, title: title }).select('id').maybeSingle().then(function (r) { var id = r && r.data && r.data.id; setCid(id); loadChats(); return id; });
     }
+    // Stop an in-flight stream / workflow (the ■ button)
+    function stop() { if (abortRef.current) { try { abortRef.current.abort(); } catch (e) { } abortRef.current = null; } setStreaming(null); setBusy(false); }
     function streamReply(id) {
       sb.auth.getSession().then(function (s) {
         var token = (s && s.data && s.data.session && s.data.session.access_token) || CFG.supabaseAnonKey;
-        fetch(CFG.supabaseUrl + '/functions/v1/claude-session', { method: 'POST', headers: { 'Content-Type': 'application/json', 'apikey': CFG.supabaseAnonKey, 'Authorization': 'Bearer ' + token }, body: JSON.stringify({ chat_id: id, stream: true }) }).then(function (resp) {
-          if (!resp.ok || !resp.body || !resp.body.getReader) { setBusy(false); return; }
+        var ac = new AbortController(); abortRef.current = ac;
+        fetch(CFG.supabaseUrl + '/functions/v1/claude-session', { method: 'POST', headers: { 'Content-Type': 'application/json', 'apikey': CFG.supabaseAnonKey, 'Authorization': 'Bearer ' + token }, body: JSON.stringify({ chat_id: id, stream: true }), signal: ac.signal }).then(function (resp) {
+          if (!resp.ok || !resp.body || !resp.body.getReader) { abortRef.current = null; setBusy(false); return; }
           var reader = resp.body.getReader(), dec = new TextDecoder(), acc = '';
           setStreaming({ text: '' });
-          (function pump() { reader.read().then(function (r) { if (!alive.current) return; if (r.done) { setStreaming(null); setBusy(false); loadMsgs(id); loadChats(); return; } acc += dec.decode(r.value, { stream: true }); setStreaming({ text: acc }); pump(); }, function () { setStreaming(null); setBusy(false); loadMsgs(id); }); })();
-        }, function () { setBusy(false); });
+          (function pump() { reader.read().then(function (r) { if (!alive.current) return; if (r.done) { abortRef.current = null; setStreaming(null); setBusy(false); loadMsgs(id); loadChats(); return; } acc += dec.decode(r.value, { stream: true }); setStreaming({ text: acc }); pump(); }, function () { abortRef.current = null; setStreaming(null); setBusy(false); loadMsgs(id); }); })();
+        }, function () { abortRef.current = null; setBusy(false); });
       });
     }
     // workflow (agentic) run: Publify works multi-step with file tools, then we reload the chat + files
     function runWorkflow(id) {
       sb.auth.getSession().then(function (s) {
         var token = (s && s.data && s.data.session && s.data.session.access_token) || CFG.supabaseAnonKey;
-        fetch(CFG.supabaseUrl + '/functions/v1/claude-session', { method: 'POST', headers: { 'Content-Type': 'application/json', 'apikey': CFG.supabaseAnonKey, 'Authorization': 'Bearer ' + token }, body: JSON.stringify({ chat_id: id, mode: 'workflow' }) })
+        var ac = new AbortController(); abortRef.current = ac;
+        fetch(CFG.supabaseUrl + '/functions/v1/claude-session', { method: 'POST', headers: { 'Content-Type': 'application/json', 'apikey': CFG.supabaseAnonKey, 'Authorization': 'Bearer ' + token }, body: JSON.stringify({ chat_id: id, mode: 'workflow' }), signal: ac.signal })
           .then(function (r) { return r.json(); })
-          .then(function () { if (!alive.current) return; setBusy(false); loadMsgs(id); loadChats(); loadFiles(id); }, function () { setBusy(false); });
+          .then(function () { if (!alive.current) return; abortRef.current = null; setBusy(false); loadMsgs(id); loadChats(); loadFiles(id); }, function () { abortRef.current = null; setBusy(false); });
       });
     }
     function sendText(raw) {
@@ -238,7 +242,9 @@
               h('button', { role: 'menuitem', onClick: function () { openPicker('research'); } }, h('span', { 'aria-hidden': 'true' }, '🔬'), '  Research project'),
               h('button', { role: 'menuitem', onClick: function () { openPicker('pub'); } }, h('span', { 'aria-hidden': 'true' }, '📚'), '  Publication')) : null),
           h('textarea', { ref: taRef, value: input, rows: 1, 'aria-label': 'Message Publify', placeholder: wf ? 'Describe the task — Publify will solve it in multiple steps…' : 'Message Publify…  (Enter = send · Shift+Enter = new line)', disabled: busy, onChange: onInput, onKeyDown: onKey }),
-          h('button', { className: 'send-btn', 'aria-label': 'Send message', disabled: busy || !input.trim(), onClick: send }, '↑'))),
+          busy
+            ? h('button', { className: 'send-btn', 'aria-label': 'Stop', title: 'Stop', onClick: stop }, '■')
+            : h('button', { className: 'send-btn', 'aria-label': 'Send message', disabled: !input.trim(), onClick: send }, '↑'))),
       dragOver ? h('div', { className: 'drop-ov' }, h('div', { className: 'drop-card' }, '📎 Drop files here to attach')) : null
     );
 

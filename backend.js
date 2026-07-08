@@ -188,6 +188,7 @@
 
   sb.auth.onAuthStateChange(function (event, session) {
     if (session && session.access_token) { try { sb.realtime.setAuth(session.access_token); } catch (e) { } }   // keep realtime authed across token refreshes
+    if (event === 'PASSWORD_RECOVERY') { showRecovery(); return; }   // arrived via the reset-password email link
     if (event === 'SIGNED_IN' && session) { writeMyUser(userFromSession(session)); if (mode !== 'cloud') rebootInto(cleanUrl()); }
     if (event === 'SIGNED_OUT') { clearMyUser(); }
   });
@@ -256,6 +257,7 @@
       + '<button class="pr-primary" id="pr-pwbtn" type="submit">Sign in</button>'
       + '</form>'
       + '<div style="text-align:center;margin-top:11px;font-size:13px"><a href="#" id="pr-toggle" style="font-weight:600;text-decoration:none">Don’t have an account yet? Sign up</a></div>'
+      + '<div style="text-align:center;margin-top:6px;font-size:12.5px"><a href="#" id="pr-forgot" style="color:inherit;opacity:.75;text-decoration:none">Forgot your password?</a></div>'
       + '<div class="pr-or">or</div>'
       + '<button class="pr-g" id="pr-google">' + GBTN + 'Continue with Google</button>'
       + '<div class="pr-sep"></div>'
@@ -295,8 +297,40 @@
       this.textContent = isSignup ? 'Already have an account? Sign in' : 'Don’t have an account yet? Sign up';
       setOverlayErr('');
     };
+    document.getElementById('pr-forgot').onclick = function (e) {
+      e.preventDefault();
+      var em = (document.getElementById('pr-email').value || '').trim();
+      if (!em) { setOverlayErr('Enter your email above, then click “Forgot your password”.'); return; }
+      this.textContent = 'Sending…';
+      sb.auth.resetPasswordForEmail(em, { redirectTo: cleanUrl() }).then(function (res) {
+        setOverlayErr('');
+        if (res && res.error) { setOverlayErr(res.error.message); return; }
+        var pEl = document.querySelector('#pr-signin p'); if (pEl) pEl.textContent = 'If an account exists for ' + em + ', a password-reset link is on its way — check your email, then follow the link to set a new password.';
+      }, function (er) { setOverlayErr((er && er.message) || 'Could not send the reset email.'); });
+    };
     document.getElementById('pr-google').onclick = function () { this.textContent = 'Redirecting…'; signInWithGoogle(); };
     document.getElementById('pr-demo').onclick = chooseDemo;
+  }
+  // arrived from the reset-password email → let the user set a new password (reuses the sign-in overlay styles)
+  function showRecovery() {
+    var ex = document.getElementById('pr-signin'); if (ex) ex.remove();
+    var d = document.createElement('div'); d.id = 'pr-signin';
+    d.innerHTML = '<div class="pr-card"><div class="pr-mk"><span></span></div><h1>Set a new password</h1>'
+      + '<p>Choose a new password for your account.</p>'
+      + '<div class="pr-err" id="pr-rec-err" style="display:none"></div>'
+      + '<input class="pr-in" id="pr-rec-pw" type="password" autocomplete="new-password" placeholder="New password (min. 6 characters)" aria-label="New password" />'
+      + '<button class="pr-primary" id="pr-rec-btn" type="button">Set password</button></div>';
+    (document.body || document.documentElement).appendChild(d);
+    var pw = document.getElementById('pr-rec-pw'); if (pw) pw.focus();
+    function err(m) { var e = document.getElementById('pr-rec-err'); if (e) { e.style.display = 'block'; e.textContent = m; } }
+    document.getElementById('pr-rec-btn').onclick = function () {
+      var v = (pw && pw.value) || ''; if (v.length < 6) { err('The password must be at least 6 characters.'); return; }
+      var b = this; b.disabled = true; b.textContent = 'Saving…';
+      sb.auth.updateUser({ password: v }).then(function (r) {
+        if (r && r.error) { b.disabled = false; b.textContent = 'Set password'; err(r.error.message); return; }
+        rebootInto(cleanUrl());
+      }, function (er) { b.disabled = false; b.textContent = 'Set password'; err((er && er.message) || 'Could not set the password.'); });
+    };
   }
   function showSigninError(msg) { console.warn('[PR] sign-in error:', msg); try { history.replaceState(null, '', cleanUrl()); } catch (e) { } showOverlay(msg); }
 

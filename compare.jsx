@@ -45,16 +45,16 @@
   function startDrag(e, containerEl, onMove) {
     e.preventDefault(); if (!containerEl) return;
     function mv(ev) { var r = containerEl.getBoundingClientRect(); onMove(ev.clientX - r.left, r.width); }
-    function up() { document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up); document.body.style.userSelect = ''; document.body.style.cursor = ''; }
-    document.addEventListener('mousemove', mv); document.addEventListener('mouseup', up); document.body.style.userSelect = 'none'; document.body.style.cursor = 'col-resize';
+    function up() { document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up); document.body.style.userSelect = ''; document.body.style.cursor = ''; }
+    document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up); document.body.style.userSelect = 'none'; document.body.style.cursor = 'col-resize';
   }
   // drag a floating panel by its header
   function startMove(e, setPos) {
     var card = e.currentTarget && e.currentTarget.closest ? e.currentTarget.closest('.cm-note') : null; if (!card) return;
     e.preventDefault(); var r = card.getBoundingClientRect(); var ox = e.clientX - r.left, oy = e.clientY - r.top;
     function mv(ev) { setPos({ left: Math.max(4, Math.min(window.innerWidth - 80, ev.clientX - ox)), top: Math.max(54, Math.min(window.innerHeight - 60, ev.clientY - oy)) }); }
-    function up() { document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up); document.body.style.userSelect = ''; }
-    document.addEventListener('mousemove', mv); document.addEventListener('mouseup', up); document.body.style.userSelect = 'none';
+    function up() { document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up); document.body.style.userSelect = ''; }
+    document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up); document.body.style.userSelect = 'none';
   }
 
   // ---- a single PDF: render every page (canvas + text layer) and highlight the selected change ----
@@ -492,15 +492,15 @@
                 h('div', { className: 'cm-rp-top' }, h('span', { className: 'cm-rp-id' }, r.id), h('span', { className: 'cm-rp-rev' }, r.reviewer), h('span', { className: 'cm-rp-cnt' }, n)),
                 h('div', { className: 'cm-rp-text' }, r.comment));
             }))),
-        h('div', { className: 'cm-split', role: 'separator', 'aria-orientation': 'vertical', 'aria-label': 'Resize panels', tabIndex: 0, onMouseDown: function (e) { startDrag(e, wsRef.current, function (x, w) { setRevW(Math.max(190, Math.min(w - 470, x))); }); } }),
+        h('div', { className: 'cm-split', role: 'separator', 'aria-orientation': 'vertical', 'aria-label': 'Resize panels', tabIndex: 0, onPointerDown: function (e) { startDrag(e, wsRef.current, function (x, w) { setRevW(Math.max(190, Math.min(w - 470, x))); }); } }),
         h('div', { className: 'cm-ws-col', style: { width: chgW + 'px', flex: 'none' } },
           h('div', { className: 'cm-ws-h' }, 'Applied changes' + (filterP ? ' · ' + filterP : '') + ' (' + shown.length + ')'),
           h('div', { className: 'cm-ws-scroll' }, shown.length ? shown.map(changeLi) : h('div', { style: { padding: 12, color: 'var(--muted)', fontSize: 13 } }, 'No changes for this comment.')),
           sel ? h('div', { className: 'cm-ws-detail' }, h('div', { className: 'cm-ws-detail-sum' }, sel.change_summary), sel.reason ? h('div', { className: 'cm-ws-detail-reason' }, sel.reason) : null) : null),
-        h('div', { className: 'cm-split', role: 'separator', 'aria-orientation': 'vertical', 'aria-label': 'Resize panels', tabIndex: 0, onMouseDown: function (e) { startDrag(e, wsRef.current, function (x, w) { setChgW(Math.max(220, Math.min(w - revW - 340, x - revW - 8))); }); } }),
+        h('div', { className: 'cm-split', role: 'separator', 'aria-orientation': 'vertical', 'aria-label': 'Resize panels', tabIndex: 0, onPointerDown: function (e) { startDrag(e, wsRef.current, function (x, w) { setChgW(Math.max(220, Math.min(w - revW - 340, x - revW - 8))); }); } }),
         h('div', { className: 'cm-ws-pdfs', ref: pdfWrapRef, style: { gridTemplateColumns: pdfFrac + 'fr 8px ' + (1 - pdfFrac) + 'fr' } },
           h('div', { className: 'cm-pdfcol' }, h('div', { className: 'cm-pdf-h' }, 'Original (v2)', sel ? h('span', { className: 'cm-pdf-hint' }, ' — ' + sel.id) : null), pdfs.v2 ? h(PdfDoc, { bytes: pdfs.v2, change: sel, side: 'original' }) : h('div', { className: 'cm-pdf-empty' }, 'no original PDF — load a folder/project')),
-          h('div', { className: 'cm-split', role: 'separator', 'aria-orientation': 'vertical', 'aria-label': 'Resize panels', tabIndex: 0, onMouseDown: function (e) { startDrag(e, pdfWrapRef.current, function (x, w) { setPdfFrac(Math.max(0.18, Math.min(0.82, x / w))); }); } }),
+          h('div', { className: 'cm-split', role: 'separator', 'aria-orientation': 'vertical', 'aria-label': 'Resize panels', tabIndex: 0, onPointerDown: function (e) { startDrag(e, pdfWrapRef.current, function (x, w) { setPdfFrac(Math.max(0.18, Math.min(0.82, x / w))); }); } }),
           h('div', { className: 'cm-pdfcol' }, h('div', { className: 'cm-pdf-h' }, 'Revised (v3)', sel ? h('span', { className: 'cm-pdf-hint' }, ' — ' + sel.id) : null), pdfs.v3 ? h(PdfDoc, { bytes: pdfs.v3, change: sel, side: 'final' }) : h('div', { className: 'cm-pdf-empty' }, 'no revised PDF'))));
     }
     function changeDetail() {
@@ -525,7 +525,7 @@
       if (!pdfs.v2 && !pdfs.v3) return h('div', { className: 'cm-main' }, h('div', { style: { color: 'var(--muted)' } }, 'The PDFs did not load from the folder. Reload the entire folder (it must also contain the compiled PDF for both versions).'));
       return h('div', { className: 'cm-pdfwrap', ref: pdfWrapRef, style: { gridTemplateColumns: pdfFrac + 'fr 8px ' + (1 - pdfFrac) + 'fr' } },
         h('div', { className: 'cm-pdfcol' }, h('div', { className: 'cm-pdf-h' }, 'v2 — submitted', sel ? h('span', { className: 'cm-pdf-hint' }, ' — ' + sel.id) : null), pdfs.v2 ? h(PdfDoc, { bytes: pdfs.v2, change: sel, side: 'original' }) : h('div', { className: 'cm-pdf-empty' }, 'no v2 PDF')),
-        h('div', { className: 'cm-split', onMouseDown: function (e) { startDrag(e, pdfWrapRef.current, function (x, w) { setPdfFrac(Math.max(0.18, Math.min(0.82, x / w))); }); } }),
+        h('div', { className: 'cm-split', onPointerDown: function (e) { startDrag(e, pdfWrapRef.current, function (x, w) { setPdfFrac(Math.max(0.18, Math.min(0.82, x / w))); }); } }),
         h('div', { className: 'cm-pdfcol' }, h('div', { className: 'cm-pdf-h' }, 'v3 — revised', sel ? h('span', { className: 'cm-pdf-hint' }, ' — ' + sel.id) : null), pdfs.v3 ? h(PdfDoc, { bytes: pdfs.v3, change: sel, side: 'final' }) : h('div', { className: 'cm-pdf-empty' }, 'no v3 PDF')));
     }
     function editPanel() {
@@ -537,7 +537,7 @@
             h('button', { className: 'btn pri', onClick: compile, disabled: compiling || !texSrc }, compiling ? 'Compiling…' : '▶ Compile (PDF)')),
           h('textarea', { className: 'cm-tex', value: texSrc, spellCheck: false, onChange: function (e) { setTexSrc(e.target.value); }, placeholder: 'Choose a version, then „Original .tex" — the manuscript source loads here…' }),
           compileLog ? h('pre', { className: 'cm-log' }, compileLog) : null),
-        h('div', { className: 'cm-split', role: 'separator', 'aria-orientation': 'vertical', 'aria-label': 'Resize panels', tabIndex: 0, onMouseDown: function (e) { startDrag(e, editRef.current, function (x, w) { setEditFrac(Math.max(0.2, Math.min(0.8, x / w))); }); } }),
+        h('div', { className: 'cm-split', role: 'separator', 'aria-orientation': 'vertical', 'aria-label': 'Resize panels', tabIndex: 0, onPointerDown: function (e) { startDrag(e, editRef.current, function (x, w) { setEditFrac(Math.max(0.2, Math.min(0.8, x / w))); }); } }),
         h('div', { className: 'cm-edit-r' },
           compiledBytes ? h(PdfDoc, { bytes: compiledBytes, change: null, side: 'final' })
             : h('div', { className: 'cm-pdf-empty', style: { height: '100%' } }, 'The compiled PDF appears here. (SwiftLaTeX, in the browser — no bibtex, so citations may be „?"; live text/figure changes, however, are visible.)')));
@@ -567,7 +567,7 @@
     function withSide(mainEl) {
       return h('div', { className: 'cm-body', ref: bodyRef, style: { gridTemplateColumns: sideW + 'px 8px minmax(0,1fr)' } },
         sidebar(),
-        h('div', { className: 'cm-split', role: 'separator', 'aria-orientation': 'vertical', 'aria-label': 'Resize panels', tabIndex: 0, onMouseDown: function (e) { startDrag(e, bodyRef.current, function (x, w) { setSideW(Math.max(220, Math.min(w * 0.7, x))); }); } }),
+        h('div', { className: 'cm-split', role: 'separator', 'aria-orientation': 'vertical', 'aria-label': 'Resize panels', tabIndex: 0, onPointerDown: function (e) { startDrag(e, bodyRef.current, function (x, w) { setSideW(Math.max(220, Math.min(w * 0.7, x))); }); } }),
         mainEl);
     }
     var body;
@@ -581,10 +581,10 @@
     else body = withSide(changeDetail());
 
     var notePanelEl = notePanel ? h('div', { className: 'cm-note', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Reviewer note', style: notePos ? { top: notePos.top + 'px', left: notePos.left + 'px', right: 'auto', bottom: 'auto' } : null },
-      h('div', { className: 'cm-note-h', onMouseDown: function (e) { startMove(e, setNotePos); } },
+      h('div', { className: 'cm-note-h', onPointerDown: function (e) { startMove(e, setNotePos); } },
         h('span', { className: 'cm-note-title' }, '📝 Reviewer note'),
-        (!ro && sb && savedId) ? h('button', { className: 'cm-note-btn', title: 'Save', 'aria-label': 'Save reviewer note', onMouseDown: function (e) { e.stopPropagation(); }, onClick: saveReviewerText }, '💾') : null,
-        h('button', { className: 'cm-note-x', title: 'Close', 'aria-label': 'Close reviewer note', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function () { setNotePanel(false); } }, '×')),
+        (!ro && sb && savedId) ? h('button', { className: 'cm-note-btn', title: 'Save', 'aria-label': 'Save reviewer note', onPointerDown: function (e) { e.stopPropagation(); }, onClick: saveReviewerText }, '💾') : null,
+        h('button', { className: 'cm-note-x', title: 'Close', 'aria-label': 'Close reviewer note', onPointerDown: function (e) { e.stopPropagation(); }, onClick: function () { setNotePanel(false); } }, '×')),
       revSaving ? h('div', { className: 'cm-note-status' }, revSaving) : null,
       h('textarea', { className: 'cm-note-t', value: reviewerText, spellCheck: false, readOnly: ro, placeholder: 'Paste / edit the reviewers\' text here — it is preserved together with the saved project…', onChange: function (e) { setReviewerText(e.target.value); } })) : null;
 

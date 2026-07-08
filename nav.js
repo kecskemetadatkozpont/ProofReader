@@ -78,6 +78,14 @@
   function viewUser() { return adminView() || curUser(); }
   function withAv(href) { var av = adminView(); if (!av || href === 'Admin.html') return href; return href + (href.indexOf('?') < 0 ? '?' : '&') + 'adminView=1'; }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  // keep Tab focus inside an open dialog (drawer / bug modal) instead of escaping to the page behind
+  function trapFocus(el, e) {
+    if (e.key !== 'Tab') return;
+    var f = [].slice.call(el.querySelectorAll('a[href],button:not([disabled]),input:not([disabled]),select,textarea,[tabindex]:not([tabindex="-1"])')).filter(function (n) { return n.offsetParent !== null; });
+    if (!f.length) return; var first = f[0], last = f[f.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  }
 
   var CSS = [
     'html { --pubnav-h: ' + BAR + 'px; }',
@@ -175,8 +183,8 @@
     var bar = document.createElement('header'); bar.id = 'pubnav';
     bar.innerHTML = '<div class="pn-left" id="pn-left"></div>'
       + '<div class="pn-right"><nav class="pn-nav" id="pn-nav" aria-label="Primary navigation"></nav>'
-      + '<button class="pn-iconbtn" id="pn-theme-top" aria-label="Toggle dark mode" title="Toggle dark mode">◐</button>'
-      + '<button class="pn-prof" id="pn-prof" aria-label="Open account menu"></button></div>';
+      + '<button class="pn-iconbtn" id="pn-theme-top" aria-label="Toggle dark mode" aria-pressed="false" title="Toggle dark mode">◐</button>'
+      + '<button class="pn-prof" id="pn-prof" aria-label="Open account menu" aria-haspopup="dialog" aria-expanded="false"></button></div>';
 
     var scrim = document.createElement('div'); scrim.id = 'pn-scrim';
     var drawer = document.createElement('aside'); drawer.id = 'pn-drawer'; drawer.setAttribute('role', 'dialog'); drawer.setAttribute('aria-modal', 'true'); drawer.setAttribute('aria-label', 'Navigation');
@@ -200,9 +208,10 @@
       var pnNav = document.getElementById('pn-nav'); if (pnNav) pnNav.innerHTML = barNav;
       document.getElementById('pn-prof').innerHTML = avHtml(du) + '<span class="pn-nm">' + esc((du && du.name) || 'Menu') + '</span><span class="pn-cv" aria-hidden="true">' + (av ? '👁' : '▾') + '</span>';
       var links = LINKS.filter(function (l) { return !l.adminOnly || admin; }).map(function (l) {
-        return '<a href="' + withAv(l.href) + '"' + (l.key === here ? ' class="on"' : '') + '>' + (ICONS[l.key] || '') + esc(l.label) + '</a>';
+        return '<a href="' + withAv(l.href) + '"' + (l.key === here ? ' class="on" aria-current="page"' : '') + '>' + (ICONS[l.key] || '') + esc(l.label) + '</a>';
       }).join('');
       var dark = window.PRTheme ? window.PRTheme.isDark() : document.documentElement.classList.contains('dark');
+      var tt = document.getElementById('pn-theme-top'); if (tt) tt.setAttribute('aria-pressed', dark ? 'true' : 'false');
       drawer.innerHTML = '<div class="pnd-head">' + avHtml(du)
         + '<div style="min-width:0"><b>' + esc((du && du.name) || 'Not signed in') + '</b><span>' + esc((du && du.email) || '') + '</span></div>'
         + '<button class="pnd-x" id="pn-close" aria-label="Close">×</button></div>'
@@ -212,9 +221,10 @@
         + (av ? '<a class="pnd-backadmin" href="Admin.html">← Back to admin</a>' : '<button class="pnd-signout" id="pn-signout">Sign out</button>') + '</div>';
       wire();
     }
-    function onDrawerKey(e) { if (e.key === 'Escape') close(); }
-    function open() { scrim.classList.add('on'); drawer.classList.add('on'); document.addEventListener('keydown', onDrawerKey); }
-    function close() { scrim.classList.remove('on'); drawer.classList.remove('on'); document.removeEventListener('keydown', onDrawerKey); }
+    var lastFocus = null;
+    function onDrawerKey(e) { if (e.key === 'Escape') { close(); return; } trapFocus(drawer, e); }
+    function open() { lastFocus = document.activeElement; scrim.classList.add('on'); drawer.classList.add('on'); document.addEventListener('keydown', onDrawerKey); var pf = document.getElementById('pn-prof'); if (pf) pf.setAttribute('aria-expanded', 'true'); var c = document.getElementById('pn-close'); if (c) c.focus(); }
+    function close() { scrim.classList.remove('on'); drawer.classList.remove('on'); document.removeEventListener('keydown', onDrawerKey); var pf = document.getElementById('pn-prof'); if (pf) pf.setAttribute('aria-expanded', 'false'); if (lastFocus && lastFocus.focus) lastFocus.focus(); }
     function wire() {
       var t = document.getElementById('pn-theme');
       if (t) t.onclick = function () { if (window.PRTheme) window.PRTheme.toggle(); render(); };
@@ -278,9 +288,10 @@
     [].forEach.call(document.querySelectorAll('#pn-bug-cats button'), function (b) { b.onclick = function () { setCat(b.getAttribute('data-cat')); }; });
     setCat('bug');
 
-    function onBugKey(e) { if (e.key === 'Escape') hide(); }
-    function show() { var m = document.getElementById('pn-bug-msg'); if (m) m.textContent = '';   /* clear a stale "elküldve" message from a previous submit */ modal.style.display = 'flex'; document.addEventListener('keydown', onBugKey); var t = document.getElementById('pn-bug-body'); if (t) t.focus(); }
-    function hide() { modal.style.display = 'none'; document.removeEventListener('keydown', onBugKey); }
+    var lastBugFocus = null;
+    function onBugKey(e) { if (e.key === 'Escape') { hide(); return; } trapFocus(card, e); }
+    function show() { lastBugFocus = document.activeElement; var m = document.getElementById('pn-bug-msg'); if (m) m.textContent = '';   /* clear a stale "elküldve" message from a previous submit */ modal.style.display = 'flex'; document.addEventListener('keydown', onBugKey); var t = document.getElementById('pn-bug-body'); if (t) t.focus(); }
+    function hide() { modal.style.display = 'none'; document.removeEventListener('keydown', onBugKey); if (lastBugFocus && lastBugFocus.focus) lastBugFocus.focus(); }
     btn.onclick = show;
     modal.onclick = function (e) { if (e.target === modal) hide(); };
     document.getElementById('pn-bug-cancel').onclick = hide;

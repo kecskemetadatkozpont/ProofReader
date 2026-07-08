@@ -519,7 +519,7 @@
       var pubCount = (u.publications && u.publications[0] && u.publications[0].count) || 0;
       var isResearcher = u.is_researcher || pubCount > 0;
       var isExp = expanded === u.id;
-      var main = h('tr', { key: u.id, className: 'clickable', onClick: function () { setSelUser(u); } },
+      var main = h('tr', { key: u.id, className: 'clickable', tabIndex: 0, role: 'button', 'aria-label': 'Open ' + (u.name || u.email || 'user'), onClick: function () { setSelUser(u); }, onKeyDown: function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelUser(u); } } },
         h('td', null, h('div', { className: 'u' }, h(Avatar, { u: u }), h('div', null,
           h('b', null, u.name || '—'),
           h('span', null, u.email),

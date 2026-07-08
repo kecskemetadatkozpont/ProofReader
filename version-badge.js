@@ -11,7 +11,7 @@
     '.pr-ver{position:fixed;left:10px;bottom:52px;z-index:55;display:inline-flex;align-items:center;gap:6px;',
     'padding:3px 9px;border-radius:20px;font:600 10.5px/1 "IBM Plex Sans",system-ui,sans-serif;',
     'background:rgba(40,44,52,.5);color:#e8eaed;border:1px solid rgba(255,255,255,.1);',
-    'cursor:default;opacity:.38;transition:opacity .15s,background .15s;backdrop-filter:blur(3px);user-select:none;}',
+    'cursor:default;opacity:.6;transition:opacity .15s,background .15s;backdrop-filter:blur(3px);user-select:none;}',
     '.pr-ver:hover{opacity:1;}',
     '.pr-ver-dot{width:7px;height:7px;border-radius:50%;background:#3fb27f;flex:none;}',
     '.pr-ver.stale{opacity:1;cursor:pointer;background:#b4530f;border-color:#e0801e;color:#fff;padding:6px 12px;box-shadow:0 4px 16px rgba(0,0,0,.3);}',

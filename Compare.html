@@ -29,7 +29,7 @@
     .cm-head h1 { font-size: 19px; margin: 0; letter-spacing: -.2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 60vw; }
     .cm-sub { font-size: 12.5px; color: var(--muted); margin-top: 3px; }
     .cm-body { display: grid; grid-template-columns: 330px 8px minmax(0,1fr); gap: 0; align-items: start; }
-    .cm-split { cursor: col-resize; align-self: stretch; min-height: 60px; flex: none; width: 8px; }
+    .cm-split { cursor: col-resize; align-self: stretch; min-height: 60px; flex: none; width: 8px; touch-action: none; }
     .cm-split::after { content: ''; display: block; width: 3px; height: 100%; min-height: 60px; margin: 0 auto; background: var(--line); border-radius: 3px; transition: background .12s; }
     .cm-split:hover::after { background: var(--accent); }
     /* 4-pane workspace */
@@ -150,15 +150,15 @@
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="backend/config.js?v=1783137934"></script>
   <script src="auth.js?v=1783137934"></script>
-  <script src="backend.js?v=1783137934"></script>
+  <script src="backend.js?v=1783538128"></script>
   <script src="onboarding.js?v=1783137934"></script>
   <script src="eleven.js?v=1783137934"></script>
   <script src="vendor/swiftlatex/PdfTeXEngine.js?v=1783137934"></script>
   <script src="tex-compile.js?v=1783137934"></script>
   <script>if (location.search.indexOf('share=') >= 0) { window.PR_NO_NAV = true; try { document.documentElement.classList.add('cm-shared'); } catch (e) { } }</script>
-  <script src="nav.js?v=1783494500"></script>
-  <script type="text/babel" src="compare.jsx?v=1783494500"></script>
-  <script src="build.js?v=1783494500"></script>
-  <script src="version-badge.js?v=1783137934"></script>
+  <script src="nav.js?v=1783538128"></script>
+  <script type="text/babel" src="compare.jsx?v=1783538128"></script>
+  <script src="build.js?v=1783538128"></script>
+  <script src="version-badge.js?v=1783538128"></script>
 </body>
 </html>
