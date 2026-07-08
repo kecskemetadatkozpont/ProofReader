@@ -13,7 +13,8 @@
   function toast(m, o) { try { window.PRUI && window.PRUI.toast(m, o); } catch (e) { } }
   function esc(s) { return String(s == null ? '' : s); }
   function escHtml(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
-  var GPAL = ['#6366f1', '#22d3ee', '#f0913a', '#37d39a', '#f0559b', '#e0b23a', '#b483fb', '#0e9f6e', '#db2777', '#0891b2'];
+  // shared with research.jsx / kanban.jsx so a project is the SAME colour everywhere
+  var GPAL = ['#4f46e5', '#0e9f6e', '#d9760b', '#db2777', '#0891b2', '#7c3aed', '#ca8a04', '#dc2626'];
   function colorFor(id) { var x = 0; id = String(id || ''); for (var i = 0; i < id.length; i++) x = (x * 31 + id.charCodeAt(i)) >>> 0; return GPAL[x % GPAL.length]; }
   function adminTargetUser() {
     try {
@@ -139,7 +140,7 @@
     var proj = props.projById[n.project_id];
     var owner = proj && props.ownerById && props.ownerById[proj.owner_id];
     var neigh = props.neighbors || [];
-    var link = 'Research.html?project=' + encodeURIComponent(n.project_id) + (/[?&]adminView=1/.test(location.search) ? '&adminView=1' : '');
+    var link = 'Research.html?project=' + encodeURIComponent(n.project_id) + (n.step_id ? '&step=' + encodeURIComponent(n.step_id) : '') + (/[?&]adminView=1/.test(location.search) ? '&adminView=1' : '');
     return h('div', { className: 'kg-detail' },
       h('div', { className: 'kg-d-head' },
         h('span', { className: 'kg-kind', style: { background: meta.c } }, meta.ic + ' ' + meta.label),
@@ -268,9 +269,10 @@
     var groupSig = groupBy + '|' + groups.map(function (g) { return g.key; }).join(',');
 
     // graph data (facet-filtered; links only between shown nodes)
-    var shownIds = {}; filtered.forEach(function (n) { shownIds[n.id] = 1; });
+    // the Map shows the same set the list does — so a semantic search reflects in the graph, not just the list
+    var shownIds = {}; listNodes.forEach(function (n) { shownIds[n.id] = 1; });
     var gLinks = edges.filter(function (e) { return shownIds[e.source_id] && shownIds[e.target_id]; }).map(function (e) { return { source: e.source_id, target: e.target_id, rel: e.rel }; });
-    var gData = { nodes: filtered.map(function (n) { return { id: n.id, kind: n.kind, title: n.title, group: groupMap[n.id] != null ? groupMap[n.id] : null }; }), links: gLinks };
+    var gData = { nodes: listNodes.map(function (n) { return { id: n.id, kind: n.kind, title: n.title, group: groupMap[n.id] != null ? groupMap[n.id] : null }; }), links: gLinks };
 
     // neighbors of the selected node
     var selNode = sel ? nodeById[sel] : null;

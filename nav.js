@@ -30,6 +30,8 @@
     if (p.indexOf('memory') === 0) return 'memory';
     if (p.indexOf('submissions') === 0) return 'submissions';
     if (p.indexOf('session') === 0) return 'session';
+    if (p.indexOf('media') === 0) return 'media';
+    if (p.indexOf('compare') === 0) return 'compare';
     if (p.indexOf('phd') === 0) return 'phd';
     if (p.indexOf('projects') === 0) return 'publications';
     if (p.indexOf('admin') === 0) return 'admin';

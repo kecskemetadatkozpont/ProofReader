@@ -11,7 +11,7 @@
   // Data / Compute / Analysis are temporarily removed; Journal (publication-venue recommender) added before Submission.
   var STAGES = ['Setup', 'Idea', 'Literature', 'Protocol', 'Journal', 'Writing', 'Submission'];
   // clicking a workflow step opens the matching panel (the old redundant tab row is gone)
-  var STAGE_TAB = ['overview', 'ideas', 'literature', 'protocol', 'journal', 'writing', 'writing'];
+  var STAGE_TAB = ['overview', 'ideas', 'literature', 'protocol', 'journal', 'writing', 'submission'];
   function svg() { var args = Array.prototype.slice.call(arguments); return h('svg', { viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round', strokeLinejoin: 'round' }, args.map(function (d, i) { return h('path', { key: i, d: d }); })); }
   var STAGE_ICONS = [
     svg('M4 14V2.5', 'M4 3h7l-1.4 2.3L11 7.6H4'),                                         // Setup — flag
@@ -2141,7 +2141,7 @@
     function renderBoard() {
       return h('div', { className: 'panel', style: { overflow: 'hidden' } },
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 } },
-          h('h3', { style: { margin: 0 } }, '🗂️ Task board', h('span', { style: { marginLeft: 10, fontSize: 10.5, color: 'var(--faint)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 } }, ce ? 'húzd a kártyákat — a felelős + státusz frissül' : 'olvasható nézet')),
+          h('h3', { style: { margin: 0 } }, '🗂️ Task board', h('span', { style: { marginLeft: 10, fontSize: 10.5, color: 'var(--faint)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 } }, ce ? 'drag cards between columns — owner + status update' : 'read-only view')),
           ce ? h('button', { className: 'btn', style: { marginLeft: 'auto', padding: '4px 10px', fontSize: 12, flex: 'none' }, onClick: function () { setTodoModal({}); } }, '+ Add task') : null),
         h('div', { className: 'bwrap' }, BOARD_COLS.map(function (col) {
           var cards = steps.filter(function (s) { return stepCol(s) === col.key; });
@@ -2464,7 +2464,7 @@
   // ---------- Project detail ----------
   function ProjectDetail(props) {
     var p = props.project;
-    var tS = useState('overview'), tab = tS[0], setTab = tS[1];
+    var tS = useState(props.initTab || 'overview'), tab = tS[0], setTab = tS[1];   // Memory step deep-link opens the protocol tab
     var asS = useState(null), autoStudy = asS[0], setAutoStudy = asS[1];   // ideas to auto-create a study from (set by the Ideas "study basis" window → one-click create + Publify pre-fill)
     var edS = useState(false), editOpen = edS[0], setEditOpen = edS[1];   // #2: project settings editor
     function setStage(i) {
@@ -2483,7 +2483,7 @@
         sb.from('research_study_steps').insert(rows).then(function () { props.onChanged(); setTab('study'); });
       });
     }
-    var TABS = [['overview', 'Overview', null], ['ideas', 'Ideas', (props.ideas || []).length], ['study', 'Studies', (props.studies || []).length], ['literature', 'Literature', (props.sources || []).length], ['data', 'Data', (props.datasets || []).length], ['compute', 'Compute', (props.jobs || []).length], ['writing', 'Writing', null], ['canvas', 'Canvas', null], ['notes', 'Notes', null], ['log', 'Log', (props.log || []).length], ['tasks', 'Tasks', openTasks]];
+    // (the visible sub-tab row is a separate array below; Data/Compute are intentionally not surfaced)
     var content;
     if (tab === 'ideas') content = h('div', null, h(ChatPanel, { projectId: p.id, supervised: !!p.student_id, canEdit: props.canEdit, authorId: props.authorId, fileOwnerId: props.fileOwnerId, sources: props.sources, onChanged: props.onChanged }), h(IdeasPanel, { projectId: p.id, ideas: props.ideas, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, onStartStudyMulti: function (ideas) { setAutoStudy(ideas || []); setTab('study'); }, onGoStudy: function () { setTab('study'); } }));
     else if (tab === 'literature') content = h(LiteraturePanel, { projectId: p.id, sources: props.sources, studies: props.studies, canEdit: props.canEdit, myEmail: props.myEmail, onChanged: props.onChanged });
@@ -2493,6 +2493,10 @@
     else if (tab === 'compute') content = h(ComputePanel, { projectId: p.id, jobs: props.jobs, datasets: props.datasets, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
     else if (tab === 'journal') content = h(JournalPanel, { projectId: p.id, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
     else if (tab === 'writing') content = h(WritingPanel, { project: p, sources: props.sources, ideas: props.ideas, jobs: props.jobs, canEdit: props.canEdit, authorId: props.authorId });
+    else if (tab === 'submission') content = h('div', { className: 'panel' },
+      h('h3', { style: { marginTop: 0 } }, '📤 Submission'),
+      h('p', { style: { fontSize: 13.5, color: 'var(--muted)', lineHeight: 1.55 } }, 'When the manuscript is ready, submit and track it in the Érkeztető (submission) workflow — desk-check, reviewers, decisions and camera-ready.'),
+      h('a', { className: 'btn pri', href: 'Submissions.html' + (/[?&]adminView=1/.test(location.search) ? '?adminView=1' : ''), style: { textDecoration: 'none', display: 'inline-block' } }, 'Open the submission workflow →'));
     else if (tab === 'canvas') content = window.PRCanvas ? h(window.PRCanvas, { projectId: p.id, canEdit: props.canEdit, authorId: props.authorId }) : h('div', { className: 'empty' }, 'Loading Canvas…');
     else if (tab === 'notes') content = window.PRNotes ? h(window.PRNotes, { projectId: p.id, canEdit: props.canEdit, authorId: props.authorId }) : h('div', { className: 'empty' }, 'Loading Notes…');
     else if (tab === 'log') content = h(LogPanel, { projectId: p.id, authorId: props.authorId, entries: props.log, canEdit: props.canEdit, onChanged: props.onChanged });
@@ -2737,7 +2741,7 @@
           : h('div', { className: 'panel', style: { overflow: 'hidden' } },
             h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 8 } },
               h('span', { style: { fontSize: 12, color: 'var(--muted)' } }, shown.length + ' / ' + steps.length + ' task' + (steps.length === 1 ? '' : 's') + ' · ' + withTasks.length + ' project' + (withTasks.length === 1 ? '' : 's')),
-              h('span', { style: { fontSize: 10.5, color: 'var(--faint)' } }, 'húzd a kártyákat oszlopok között — a felelős + státusz frissül (a saját projektjeidben)')),
+              h('span', { style: { fontSize: 10.5, color: 'var(--faint)' } }, 'drag cards between columns — owner + status update (in your own projects)')),
             h('div', { className: 'bwrap' }, BOARD_COLS.map(function (col) {
               var cards = shown.filter(function (s) { return stepCol(s) === col.key; });
               var est = cards.reduce(function (a, s) { return a + ((s.spec && s.spec.est_minutes) || 0); }, 0);
@@ -2886,7 +2890,8 @@
     ) : null;
     var body;
     if (sel) {
-      body = h(ProjectDetail, { project: sel, log: props.detail.log, tasks: props.detail.tasks, ideas: props.detail.ideas, sources: props.detail.sources, datasets: props.detail.datasets, jobs: props.detail.jobs, studies: props.detail.studies, loading: props.detail.loading, canEdit: props.canEdit(sel), viewerId: meId, fileOwnerId: meId, studentName: (studentById[sel.student_id] && studentById[sel.student_id].name) || null, authorId: props.authorId, myEmail: props.me.email, onBack: props.onBack, onChanged: props.refreshAll });
+      var initTab = (function () { try { var sp = new URLSearchParams(location.search); return (sp.get('step') && sp.get('project') === sel.id) ? 'protocol' : null; } catch (e) { return null; } })();
+      body = h(ProjectDetail, { project: sel, initTab: initTab, log: props.detail.log, tasks: props.detail.tasks, ideas: props.detail.ideas, sources: props.detail.sources, datasets: props.detail.datasets, jobs: props.detail.jobs, studies: props.detail.studies, loading: props.detail.loading, canEdit: props.canEdit(sel), viewerId: meId, fileOwnerId: meId, studentName: (studentById[sel.student_id] && studentById[sel.student_id].name) || null, authorId: props.authorId, myEmail: props.me.email, onBack: props.onBack, onChanged: props.refreshAll });
     } else if (board) {
       body = h(GlobalBoard, { projects: props.projects, canEditProject: props.canEdit, onOpenProject: props.openProject });
     } else if (view === 'supervised') {

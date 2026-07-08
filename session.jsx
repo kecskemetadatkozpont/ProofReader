@@ -60,7 +60,7 @@
     function loadFiles(id) { if (!id) { setFiles([]); return; } sb.from('user_chat_files').select('id,path,content').eq('chat_id', id).order('path', { ascending: true }).then(function (r) { setFiles((r && r.data) || []); }); }
     function openChat(id) { setCid(id); setStreaming(null); setPreview(null); loadMsgs(id); loadFiles(id); }
     function newChat() { setCid(null); setMsgs([]); setStreaming(null); setFiles([]); setPreview(null); if (taRef.current) taRef.current.focus(); }
-    function delChat(id, e) { e.stopPropagation(); if (!window.confirm('Delete this conversation?')) return; sb.from('user_chats').delete().eq('id', id).then(function () { if (cid === id) { setCid(null); setMsgs([]); } loadChats(); }); }
+    function delChat(id, e) { e.stopPropagation(); window.PRUI.confirm({ title: 'Delete this conversation?', danger: true, confirmLabel: 'Delete' }).then(function (ok) { if (!ok) return; sb.from('user_chats').delete().eq('id', id).then(function () { if (cid === id) { setCid(null); setMsgs([]); } loadChats(); }); }); }
 
     useEffect(function () { var el = scrollRef.current; if (el) el.scrollTop = el.scrollHeight; }, [msgs.length, streaming]);
 
@@ -151,7 +151,7 @@
           if (window.PROffice && window.PROffice.isOffice(f.name)) return window.PROffice.extract(f).then(function (r) { return attachText(f.name + ' (Office)', r.text || '', 'upload'); }, function () { skipped++; });
           skipped++; return null;
         });
-      }, Promise.resolve()).then(function () { if (skipped) window.alert(skipped + ' file(s) skipped (unsupported type — text, PDF and images can be attached).'); });
+      }, Promise.resolve()).then(function () { if (skipped) window.PRUI.toast(skipped + ' file(s) skipped (unsupported type — text, PDF and images can be attached).', { kind: 'warn' }); });
     }
     function onPickedFiles(e) { doUpload(e.target.files); e.target.value = ''; }
     function pickFiles() { setAtOpen(false); if (fileRef.current) fileRef.current.click(); }

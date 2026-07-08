@@ -299,10 +299,13 @@
     }
     function deleteProject(row, ev) {
       if (ev) ev.stopPropagation();
-      if (!sb || !window.confirm('Delete the saved comparison?  „' + (row.title || '') + '"')) return;
-      var path = row.zip_path || (me && (me.id + '/' + row.id + '/package.zip'));
-      if (path) sb.storage.from('compare').remove([path]).then(function () { });
-      sb.from('compare_projects').delete().eq('id', row.id).then(function () { if (savedId === row.id) setSavedId(null); if (me) loadProjects(me.id); });
+      if (!sb) return;
+      window.PRUI.confirm({ title: 'Delete the saved comparison?', body: row.title || '', danger: true, confirmLabel: 'Delete' }).then(function (ok) {
+        if (!ok) return;
+        var path = row.zip_path || (me && (me.id + '/' + row.id + '/package.zip'));
+        if (path) sb.storage.from('compare').remove([path]).then(function () { });
+        sb.from('compare_projects').delete().eq('id', row.id).then(function () { if (savedId === row.id) setSavedId(null); if (me) loadProjects(me.id); });
+      });
     }
     function saveReviewerText() {
       if (!sb || !me) { setRevSaving('Sign in to save.'); setTimeout(function () { setRevSaving(''); }, 3000); return; }
