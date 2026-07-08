@@ -193,7 +193,7 @@
     // read-only AI protocol-step card (edit these on the project's protocol board)
     function stepCard(s) {
       var a = assigneeOf(s), proj = projById[s.project_id];
-      return h('a', { key: 's-' + s.id, className: 'bcard rostep ' + (a === 'human' ? 'hu' : 'ai'), href: 'Research.html?project=' + encodeURIComponent(s.project_id || ''), title: 'Open in the project’s protocol board' },
+      return h('a', { key: 's-' + s.id, className: 'bcard rostep ' + (a === 'human' ? 'hu' : 'ai'), href: 'Research.html?project=' + encodeURIComponent(s.project_id || '') + '&step=' + encodeURIComponent(s.ord || 1), title: 'Open in the project’s protocol board' },
         h('div', { className: 'gb-proj' }, h('i', { style: { background: proj ? colorFor(proj.id) : 'var(--faint)' } }), h('span', null, proj ? proj.title : 'Project')),
         h('div', { className: 'bcard-top' },
           h('span', { className: 'bchip who ' + (a === 'human' ? 'hu' : 'ai') }, a === 'human' ? 'HUMAN' : 'AI'),
@@ -229,7 +229,7 @@
 
     return h('div', { className: 'kb-wrap' },
       h('div', { className: 'kb-top' },
-        h('div', null, h('h1', null, '🗂️ My tasks'), h('div', { className: 'kb-sub' }, todos.length + ' personal task' + (todos.length === 1 ? '' : 's') + (steps.length ? ' + ' + steps.length + ' AI protocol step' + (steps.length === 1 ? '' : 's') + ' (read-only)' : '') + ' across ' + withItems.length + ' project' + (withItems.length === 1 ? '' : 's'))),
+        h('div', null, h('h1', null, '🗂️ My tasks'), h('div', { className: 'kb-sub' }, todos.length + ' task' + (todos.length === 1 ? '' : 's') + (steps.length ? ' + ' + steps.length + ' AI protocol step' + (steps.length === 1 ? '' : 's') + ' (read-only)' : '') + ' across ' + withItems.length + ' project' + (withItems.length === 1 ? '' : 's'))),
         h('button', { className: 'kb-btn pri', onClick: function () { setModal({ defaultProject: projF || '' }); } }, '+ Add task')
       ),
       h('div', { className: 'gb-bar' },

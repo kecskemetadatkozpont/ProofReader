@@ -54,7 +54,7 @@ Deno.serve(async (req) => {
       const list = papers.map((p: any, i: number) => `[${i + 1}] ${String(p.title || '').slice(0, 240)}\nAbstract: ${String(p.abstract || '(none)').slice(0, 1200)}`).join('\n\n');
       const n = Math.min(70, 14 + papers.length * 4);
       const sys = `You are writing the SCRIPT for a spoken literature-overview audiobook, in ${target}. You are given ${papers.length} papers (title + abstract). Write flowing, connected narration in ${target}: open with one or two framing sentences about the topic, then weave each paper's key contribution / method / finding into natural connected prose. NO bullet points, NO headings, NO citation markers like [12], NO "Paper 1:". Spell out unavoidable abbreviations naturally. Aim for about ${n} sentences, suitable to be read aloud. Output ONLY the narration text.`;
-      const text = await callClaude(sys, list, 4000); sb.rpc('ai_usage_bump');
+      const text = await callClaude(sys, list, 4000); await sb.rpc('ai_usage_bump');
       return json({ text });
     }
 
@@ -64,7 +64,7 @@ Deno.serve(async (req) => {
       const pdf = await fetchPdfBlock(url);
       if (!pdf) return json({ text: '', note: 'no_pdf' });
       const sys = `Extract the clean READING TEXT (main body: introduction, methods, results, discussion, conclusion) from this paper so it can be read aloud as an audiobook. SKIP the references/bibliography list, figure and table captions, author affiliations, headers/footers, page numbers, and standalone equations that do not read aloud. Keep the paper's original language. Return ONLY the readable prose — no preamble.`;
-      const text = await callClaude(sys, [pdf, { type: 'text', text: 'Return the clean reading text now.' }], 8000); sb.rpc('ai_usage_bump');
+      const text = await callClaude(sys, [pdf, { type: 'text', text: 'Return the clean reading text now.' }], 8000); await sb.rpc('ai_usage_bump');
       return json({ text });
     }
 
@@ -75,7 +75,7 @@ Deno.serve(async (req) => {
     if (!segments.length) return json({ segments: [] });
     if (segments.length > 60) return json({ error: 'too many segments (max 60 per call)' }, 400);
     const sys = `You are a professional academic translator. Translate each input text segment ${source ? 'from ' + source + ' ' : ''}into ${target}. Preserve scientific terminology, units, equations, and proper nouns; produce natural, fluent ${target} suitable for AUDIOBOOK narration (no markup, no citations like [12], spell out unavoidable abbreviations naturally). Return ONLY a JSON array of EXACTLY ${segments.length} strings, in the SAME order — no preamble, no object keys.`;
-    const out = await callClaude(sys, 'Segments (JSON array of strings):\n' + JSON.stringify(segments), 8000); sb.rpc('ai_usage_bump');
+    const out = await callClaude(sys, 'Segments (JSON array of strings):\n' + JSON.stringify(segments), 8000); await sb.rpc('ai_usage_bump');
     let arr: any = [];
     const m = out.match(/\[[\s\S]*\]/); if (m) { try { arr = JSON.parse(m[0]); } catch (e) { /* fall through */ } }
     if (!Array.isArray(arr) || arr.length !== segments.length) return json({ error: 'translation_parse_failed', raw: out.slice(0, 200) }, 502);

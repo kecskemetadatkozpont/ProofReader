@@ -40,7 +40,7 @@
     var dgS = useState(false), dragOver = dgS[0], setDragOver = dgS[1];
     var soS = useState(false), sideOpen = soS[0], setSideOpen = soS[1];     // mobile history drawer
     var hlS = useState(true), histLoading = hlS[0], setHistLoading = hlS[1];   // true until the first chat list resolves
-    var alive = useRef(true), scrollRef = useRef(null), taRef = useRef(null), fileRef = useRef(null), abortRef = useRef(null);
+    var alive = useRef(true), scrollRef = useRef(null), taRef = useRef(null), fileRef = useRef(null), abortRef = useRef(null), stopReq = useRef(false);
     useEffect(function () { return function () { alive.current = false; }; }, []);
     useEffect(function () { boot(); }, []);
 
@@ -71,9 +71,10 @@
       return sb.from('user_chats').insert({ owner_id: me.id, title: title }).select('id').maybeSingle().then(function (r) { var id = r && r.data && r.data.id; setCid(id); loadChats(); return id; });
     }
     // Stop an in-flight stream / workflow (the ■ button)
-    function stop() { if (abortRef.current) { try { abortRef.current.abort(); } catch (e) { } abortRef.current = null; } setStreaming(null); setBusy(false); }
+    function stop() { stopReq.current = true; if (abortRef.current) { try { abortRef.current.abort(); } catch (e) { } abortRef.current = null; } setStreaming(null); setBusy(false); }
     function streamReply(id) {
       sb.auth.getSession().then(function (s) {
+        if (stopReq.current) { stopReq.current = false; setBusy(false); return; }   // Stop pressed before the request went out
         var token = (s && s.data && s.data.session && s.data.session.access_token) || CFG.supabaseAnonKey;
         var ac = new AbortController(); abortRef.current = ac;
         fetch(CFG.supabaseUrl + '/functions/v1/claude-session', { method: 'POST', headers: { 'Content-Type': 'application/json', 'apikey': CFG.supabaseAnonKey, 'Authorization': 'Bearer ' + token }, body: JSON.stringify({ chat_id: id, stream: true }), signal: ac.signal }).then(function (resp) {
@@ -87,6 +88,7 @@
     // workflow (agentic) run: Publify works multi-step with file tools, then we reload the chat + files
     function runWorkflow(id) {
       sb.auth.getSession().then(function (s) {
+        if (stopReq.current) { stopReq.current = false; setBusy(false); return; }
         var token = (s && s.data && s.data.session && s.data.session.access_token) || CFG.supabaseAnonKey;
         var ac = new AbortController(); abortRef.current = ac;
         fetch(CFG.supabaseUrl + '/functions/v1/claude-session', { method: 'POST', headers: { 'Content-Type': 'application/json', 'apikey': CFG.supabaseAnonKey, 'Authorization': 'Bearer ' + token }, body: JSON.stringify({ chat_id: id, mode: 'workflow' }), signal: ac.signal })
@@ -96,7 +98,7 @@
     }
     function sendText(raw) {
       var txt = (raw || '').trim(); if (!txt || busy) return;
-      setBusy(true); setInput(''); if (taRef.current) taRef.current.style.height = 'auto';
+      stopReq.current = false; setBusy(true); setInput(''); if (taRef.current) taRef.current.style.height = 'auto';
       ensureChat(txt).then(function (id) {
         if (!id) { setBusy(false); return; }
         sb.from('user_chat_messages').insert({ chat_id: id, role: 'user', content: txt }).then(function () { loadMsgs(id); if (wf) runWorkflow(id); else streamReply(id); });

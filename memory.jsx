@@ -264,7 +264,7 @@
       return null;
     }
     var groupMap = {}, gcount = {}, glabel = {}, gcolorm = {};
-    if (groupBy !== 'none') filtered.forEach(function (n) { var gi = groupInfo(n); if (!gi) return; groupMap[n.id] = gi.key; gcount[gi.key] = (gcount[gi.key] || 0) + 1; glabel[gi.key] = gi.label; gcolorm[gi.key] = gi.color; });
+    if (groupBy !== 'none') listNodes.forEach(function (n) { var gi = groupInfo(n); if (!gi) return; groupMap[n.id] = gi.key; gcount[gi.key] = (gcount[gi.key] || 0) + 1; glabel[gi.key] = gi.label; gcolorm[gi.key] = gi.color; });
     var groups = Object.keys(gcount).sort(function (a, b) { return gcount[b] - gcount[a]; }).map(function (k) { return { key: k, label: glabel[k], color: gcolorm[k], count: gcount[k] }; });
     var groupSig = groupBy + '|' + groups.map(function (g) { return g.key; }).join(',');
 

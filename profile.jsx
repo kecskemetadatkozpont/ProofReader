@@ -352,7 +352,11 @@ function Publications(props) {
     p.then(function (r) { setSaving(false); if (r && r.error) { setErr(r.error.message); return; } location.reload(); });
   }
   function startEditPub(p) {
-    setFm({ title: p.title || '', authors: p.firstAuthor || '', year: p.year ? String(p.year) : '', journal: p.journal || '', doi: p.doi || '' });
+    // recover the FULL author string from the stored citation ("authors. title …") so multi-author
+    // pubs aren't reduced to first_author on save; fall back to first_author if the pattern doesn't match.
+    var au = p.firstAuthor || '', ci = p.citation || '';
+    if (ci && p.title) { var idx = ci.indexOf('. ' + p.title); if (idx > 0) au = ci.slice(0, idx); }
+    setFm({ title: p.title || '', authors: au, year: p.year ? String(p.year) : '', journal: p.journal || '', doi: p.doi || '' });
     setEditId(p.mtid); setAdding(true); setErr(null);
     try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch (e) { }
   }

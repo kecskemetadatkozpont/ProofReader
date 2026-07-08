@@ -41,6 +41,8 @@ returns void language sql security invoker set search_path = public as $$
   on conflict (user_id, day) do update set calls = ai_usage.calls + 1;
 $$;
 
+-- the SECURITY INVOKER functions run as the caller, so the authenticated role needs table DML too
+grant select, insert, update on table public.ai_usage to authenticated;
 grant execute on function public.ai_over_budget(int) to authenticated;
 grant execute on function public.ai_usage_bump() to authenticated;
 

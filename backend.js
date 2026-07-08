@@ -160,6 +160,9 @@
   sb.auth.getSession().then(function (res) {
     var s = res && res.data && res.data.session;
     if (s) {
+      // arrived from a password-reset email (#…&type=recovery): show the "set new password" form and
+      // do NOT reboot into cloud below (that would strip the hash and silently sign the user in).
+      if (/(?:^|[#&])type=recovery/.test(location.hash || '')) { try { sb.realtime.setAuth(s.access_token); } catch (e) { } showRecovery(); return; }
       try { sb.realtime.setAuth(s.access_token); } catch (e) { }   // RLS-protected realtime (postgres_changes) needs the user JWT, not the anon key
       var u = userFromSession(s); if (u) writeMyUser(u);
       if (mode !== 'cloud') { rebootInto(cleanUrl()); return; }   // pending/signin → become cloud
@@ -313,6 +316,8 @@
   }
   // arrived from the reset-password email → let the user set a new password (reuses the sign-in overlay styles)
   function showRecovery() {
+    if (document.getElementById('pr-rec-pw')) return;   // already showing (getSession + PASSWORD_RECOVERY can both call)
+    injectCss(); removeSplash();
     var ex = document.getElementById('pr-signin'); if (ex) ex.remove();
     var d = document.createElement('div'); d.id = 'pr-signin';
     d.innerHTML = '<div class="pr-card"><div class="pr-mk"><span></span></div><h1>Set a new password</h1>'
