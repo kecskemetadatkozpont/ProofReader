@@ -218,14 +218,31 @@
       }, function (e) { setPhase('ready'); });
     }
     function sync() {
+      // Drain ONE completed task per call: the gte-small model is memory-heavy in the edge runtime, so
+      // large batches hit WORKER_RESOURCE_LIMIT. Loop single-step until nothing's left (bounded), tolerating
+      // a cold-start error on the first call by retrying a couple of times.
       setBusy(true); toast('Distilling completed tasks into the knowledge graph…');
-      sb.functions.invoke('km-distill', { body: { limit: 12 } }).then(function (r) {
+      var totalSteps = 0, totalNodes = 0, iters = 0, coldRetries = 0;
+      function drain() {
+        if (iters >= 60) { finish(); return; }
+        iters++;
+        sb.functions.invoke('km-distill', { body: { limit: 1 } }).then(function (r) {
+          var d = r && r.data, err = (d && d.error) || (r && r.error && r.error.message) || (r && r.error);
+          if (err || !d) {
+            if (totalSteps === 0 && coldRetries < 3) { coldRetries++; toast('Warming up the distiller…'); setTimeout(drain, 1500); return; }  // cold-start OOM → retry
+            finish(); return;   // stop on error; partial progress is already persisted
+          }
+          totalSteps += d.steps_processed || 0; totalNodes += d.nodes || 0;
+          if ((d.steps_processed || 0) > 0) { drain(); }   // more to do
+          else finish();
+        }, function () { if (totalSteps === 0 && coldRetries < 3) { coldRetries++; setTimeout(drain, 1500); } else finish(); });
+      }
+      function finish() {
         setBusy(false);
-        var d = r && r.data, err = (d && d.error) || (r && r.error && r.error.message);
-        if (err) { toast('Sync failed: ' + err, { kind: 'error' }); return; }
-        toast('✓ ' + (d.steps_processed || 0) + ' task(s) → ' + (d.nodes || 0) + ' nodes, ' + (d.edges || 0) + ' edges', { kind: 'ok' });
-        load();
-      }, function (e) { setBusy(false); toast('Sync failed: ' + e, { kind: 'error' }); });
+        if (totalSteps > 0) { toast('✓ ' + totalSteps + ' task(s) distilled → ' + totalNodes + ' nodes', { kind: 'ok' }); load(); }
+        else toast('Nothing new to distill (or the distiller is busy — try again).', { kind: 'error' });
+      }
+      drain();
     }
     function runSemantic() {
       if (!q.trim()) { setSem(null); return; }

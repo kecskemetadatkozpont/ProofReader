@@ -111,7 +111,11 @@ Deno.serve(async (req) => {
       } catch (_e) { return null; }
     }
 
-    let nNodes = 0, nEdges = 0, nSteps = 0, nLlmFail = 0, nFailed = 0;
+    let nNodes = 0, nEdges = 0, nSteps = 0, nLlmFail = 0, nFailed = 0, nEmbed = 0;
+    // cap gte-small inferences per invocation — the model is memory-heavy in the edge runtime and
+    // embedding dozens of nodes in one call hits WORKER_RESOURCE_LIMIT. Uncapped nodes still store
+    // (FTS-searchable); pair this with small per-call batches (the Sync button drains one step at a time).
+    const EMBED_CAP = parseInt(Deno.env.get('KM_EMBED_CAP') || '30', 10);
     const t0 = Date.now();
 
     for (const step of steps) {
@@ -141,8 +145,10 @@ Deno.serve(async (req) => {
         const { data, error } = await svc.from('km_nodes').upsert(row, { onConflict: 'project_id,kind,norm_title' }).select('id').maybeSingle();
         if (error || !data) return null;
         nodeCache[key] = data.id; nNodes++;
-        const v = await embed(t + '. ' + (opts.body || ''));
-        if (v && v.length === 384) await svc.from('km_embeddings').upsert({ node_id: data.id, embedding: vecLiteral(v), project_id: projectId, model: 'gte-small', dim: 384 }, { onConflict: 'node_id' });
+        if (nEmbed < EMBED_CAP) {
+          const v = await embed(t + '. ' + (opts.body || ''));
+          if (v && v.length === 384) { await svc.from('km_embeddings').upsert({ node_id: data.id, embedding: vecLiteral(v), project_id: projectId, model: 'gte-small', dim: 384 }, { onConflict: 'node_id' }); nEmbed++; }
+        }
         return data.id;
       }
       async function addEdge(sourceId: string | null, targetId: string | null, rel: string, evidence?: string) {
