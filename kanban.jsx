@@ -41,6 +41,16 @@
               : key === 'done-ai' ? { assignee: 'ai', status: 'done' }
                 : key === 'done-human' ? { assignee: 'human', status: 'done' } : null;
   }
+  // AI protocol steps (research_protocol_steps) appear here read-only, so "My tasks" is ALL my tasks.
+  // Their status vocab (todo|queued|running|blocked|failed|done|skipped) maps to the same columns.
+  var STEP_ICON = { data: '🗄️', preprocess: '🧹', train: '🏋️', eval: '📊', analysis: '🔬', figure: '📈', writeup: '✍️', custom: '•' };
+  function stepColOf(s) {
+    var a = assigneeOf(s), st = s.status;
+    if (st === 'done') return a === 'human' ? 'done-human' : 'done-ai';
+    if (st === 'running') return a === 'human' ? 'prog-human' : 'prog-ai';
+    if (st === 'blocked' || st === 'failed' || (s.needs_approval && (st === 'todo' || st === 'queued'))) return 'blocked';
+    return a === 'human' ? 'todo-human' : 'todo-ai';
+  }
 
   // ---------- add / edit task modal ----------
   function TaskModal(props) {
@@ -116,6 +126,7 @@
     var phS = useState('loading'), phase = phS[0], setPhase = phS[1];
     var meS = useState(null), me = meS[0], setMe = meS[1];
     var tdS = useState([]), todos = tdS[0], setTodos = tdS[1];
+    var stS = useState([]), steps = stS[0], setSteps = stS[1];        // read-only AI protocol steps (unified view)
     var pjS = useState([]), projects = pjS[0], setProjects = pjS[1];
     var pfS = useState(null), projF = pfS[0], setProjF = pfS[1];   // null=all, ''=personal-only, else pid
     var wfS = useState('all'), who = wfS[0], setWho = wfS[1];
@@ -137,8 +148,21 @@
         sb.from('research_projects').select('id,title,owner_id').order('updated_at', { ascending: false })
       ]).then(function (res) {
         setTodos((res[0] && res[0].data) || []);
-        setProjects(((res[1] && res[1].data) || []).filter(function (p) { return p.owner_id === uid; }));
-        setPhase('ready');
+        var own = ((res[1] && res[1].data) || []).filter(function (p) { return p.owner_id === uid; });
+        setProjects(own);
+        // union in the user's own AI protocol steps (read-only) so "My tasks" is genuinely ALL my tasks
+        var pids = own.map(function (p) { return p.id; });
+        if (!pids.length) { setSteps([]); setPhase('ready'); return; }
+        sb.from('research_protocols').select('id,project_id,title').in('project_id', pids).neq('status', 'archived').then(function (pr) {
+          var prots = (pr && pr.data) || [], byId = {}; prots.forEach(function (x) { byId[x.id] = x; });
+          var protIds = prots.map(function (x) { return x.id; });
+          if (!protIds.length) { setSteps([]); setPhase('ready'); return; }
+          sb.from('research_protocol_steps').select('id,protocol_id,ord,title,kind,status,assignee,needs_approval,spec').in('protocol_id', protIds).order('ord', { ascending: true }).then(function (sr) {
+            var rows = (sr && sr.data) || [];
+            rows.forEach(function (s) { var pp = byId[s.protocol_id]; s._proj = pp ? { id: pp.project_id, title: (own.filter(function (o) { return o.id === pp.project_id; })[0] || {}).title } : null; s._prot = pp && pp.title; s.project_id = pp && pp.project_id; });
+            setSteps(rows); setPhase('ready');
+          }, function () { setSteps([]); setPhase('ready'); });
+        }, function () { setSteps([]); setPhase('ready'); });
       }, function () { setPhase('ready'); });
     }
     function reload() { if (me) load(me.id); }
@@ -149,18 +173,34 @@
     function moveToCol(t, key) { var p = colPatch(key); if (p) patch(t, p); }
 
     var projById = {}; projects.forEach(function (p) { projById[p.id] = p; });
-    // filter chips: personal + each project that has todos
-    var withTodos = [], seen = {}, cnt = {}, personalCount = 0;
-    todos.forEach(function (t) { if (t.project_id) { cnt[t.project_id] = (cnt[t.project_id] || 0) + 1; if (!seen[t.project_id]) { seen[t.project_id] = 1; if (projById[t.project_id]) withTodos.push(projById[t.project_id]); } } else personalCount++; });
+    // filter chips: personal + each project that has todos OR protocol steps
+    var withItems = [], seen = {}, cnt = {}, personalCount = 0;
+    function tally(pid) { if (pid) { cnt[pid] = (cnt[pid] || 0) + 1; if (!seen[pid]) { seen[pid] = 1; if (projById[pid]) withItems.push(projById[pid]); } } else personalCount++; }
+    todos.forEach(function (t) { tally(t.project_id); });
+    steps.forEach(function (s) { tally(s.project_id); });
+    var total = todos.length + steps.length;
     var qq = q.trim().toLowerCase();
-    function pass(t) {
-      if (projF === '') { if (t.project_id) return false; }
-      else if (projF) { if (t.project_id !== projF) return false; }
-      if (who !== 'all' && assigneeOf(t) !== who) return false;
-      if (qq && (t.title || '').toLowerCase().indexOf(qq) < 0 && (t.notes || '').toLowerCase().indexOf(qq) < 0) return false;
+    function passItem(pid, assignee, text) {
+      if (projF === '') { if (pid) return false; }
+      else if (projF) { if (pid !== projF) return false; }
+      if (who !== 'all' && (assignee === 'human' ? 'human' : 'ai') !== who) return false;
+      if (qq && (text || '').toLowerCase().indexOf(qq) < 0) return false;
       return true;
     }
-    var shown = todos.filter(pass);
+    var shownTodos = todos.filter(function (t) { return passItem(t.project_id, t.assignee, (t.title || '') + ' ' + (t.notes || '')); });
+    var shownSteps = steps.filter(function (s) { return passItem(s.project_id, s.assignee, s.title || ''); });
+
+    // read-only AI protocol-step card (edit these on the project's protocol board)
+    function stepCard(s) {
+      var a = assigneeOf(s), proj = projById[s.project_id];
+      return h('a', { key: 's-' + s.id, className: 'bcard rostep ' + (a === 'human' ? 'hu' : 'ai'), href: 'Research.html?project=' + encodeURIComponent(s.project_id || ''), title: 'Open in the project’s protocol board' },
+        h('div', { className: 'gb-proj' }, h('i', { style: { background: proj ? colorFor(proj.id) : 'var(--faint)' } }), h('span', null, proj ? proj.title : 'Project')),
+        h('div', { className: 'bcard-top' },
+          h('span', { className: 'bchip who ' + (a === 'human' ? 'hu' : 'ai') }, a === 'human' ? 'HUMAN' : 'AI'),
+          h('span', { className: 'bchip step' }, (STEP_ICON[s.kind] || '•') + ' AI step')),
+        h('div', { className: 'bcard-t' }, h('span', { style: { color: 'var(--faint)' } }, s.ord + '. '), s.title)
+      );
+    }
 
     function card(t) {
       var a = assigneeOf(t), proj = projById[t.project_id], pr = PRIO[t.priority];
@@ -189,14 +229,14 @@
 
     return h('div', { className: 'kb-wrap' },
       h('div', { className: 'kb-top' },
-        h('div', null, h('h1', null, '🗂️ My tasks'), h('div', { className: 'kb-sub' }, todos.length + ' task' + (todos.length === 1 ? '' : 's') + ' across ' + withTodos.length + ' project' + (withTodos.length === 1 ? '' : 's') + (personalCount ? ' + ' + personalCount + ' personal' : ''))),
+        h('div', null, h('h1', null, '🗂️ My tasks'), h('div', { className: 'kb-sub' }, todos.length + ' personal task' + (todos.length === 1 ? '' : 's') + (steps.length ? ' + ' + steps.length + ' AI protocol step' + (steps.length === 1 ? '' : 's') + ' (read-only)' : '') + ' across ' + withItems.length + ' project' + (withItems.length === 1 ? '' : 's'))),
         h('button', { className: 'kb-btn pri', onClick: function () { setModal({ defaultProject: projF || '' }); } }, '+ Add task')
       ),
       h('div', { className: 'gb-bar' },
         h('div', { className: 'gb-chips' },
-          h('button', { className: 'gb-chip' + (projF == null ? ' on' : ''), onClick: function () { setProjF(null); } }, 'All ', h('span', { className: 'gb-c' }, todos.length)),
+          h('button', { className: 'gb-chip' + (projF == null ? ' on' : ''), onClick: function () { setProjF(null); } }, 'All ', h('span', { className: 'gb-c' }, total)),
           personalCount ? h('button', { className: 'gb-chip' + (projF === '' ? ' on' : ''), onClick: function () { setProjF(projF === '' ? null : ''); } }, '• Personal ', h('span', { className: 'gb-c' }, personalCount)) : null,
-          withTodos.map(function (p) {
+          withItems.map(function (p) {
             return h('button', { key: p.id, className: 'gb-chip' + (projF === p.id ? ' on' : ''), title: p.title, onClick: function () { setProjF(projF === p.id ? null : p.id); } },
               h('i', { className: 'gb-dot', style: { background: colorFor(p.id) } }), h('span', { className: 'gb-nm' }, p.title), h('span', { className: 'gb-c' }, cnt[p.id] || 0));
           })
@@ -206,17 +246,19 @@
           h('input', { className: 'gb-q', value: q, placeholder: '🔍 Filter…', onChange: function (e) { setQ(e.target.value); } })
         )
       ),
-      !todos.length ? h('div', { className: 'soon' }, h('b', null, 'No tasks yet. '), 'Add your first task — tie it to a research project or keep it personal. Everything you add here stays yours; the AI runner never touches it.',
+      (!todos.length && !steps.length) ? h('div', { className: 'soon' }, h('b', null, 'No tasks yet. '), 'Add your first task — tie it to a research project or keep it personal. Your AI protocol steps also appear here (read-only) once you generate a protocol in a project.',
         h('div', { style: { marginTop: 14 } }, h('button', { className: 'kb-btn pri', onClick: function () { setModal({}); } }, '+ Add task')))
         : h('div', { className: 'bwrap' }, BOARD_COLS.map(function (col) {
-          var cards = shown.filter(function (t) { return todoCol(t) === col.key; });
+          var tc = shownTodos.filter(function (t) { return todoCol(t) === col.key; });
+          var sc = shownSteps.filter(function (s) { return stepColOf(s) === col.key; });
+          var n = tc.length + sc.length;
           return h('div', {
             key: col.key, className: 'bcol' + (over === col.key ? ' over' : '') + (' cap-' + (col.who === 'human' ? 'hu' : col.who === 'ai' ? 'ai' : 'bk')),
             onDragOver: function (e) { if (drag) { e.preventDefault(); if (over !== col.key) setOver(col.key); } },
             onDrop: function (e) { e.preventDefault(); setOver(null); if (drag) { var t = todos.filter(function (x) { return x.id === drag; })[0]; if (t) moveToCol(t, col.key); setDrag(null); } }
           },
-            h('div', { className: 'bcol-h' }, h('span', null, BCOL_IC[col.key]), h('span', { className: 'bcol-t' }, col.title), h('span', { className: 'bcol-n' }, cards.length + '')),
-            h('div', { className: 'bcol-b' }, cards.length ? cards.map(card) : h('div', { className: 'bcol-empty' }, '—'))
+            h('div', { className: 'bcol-h' }, h('span', null, BCOL_IC[col.key]), h('span', { className: 'bcol-t' }, col.title), h('span', { className: 'bcol-n' }, n + '')),
+            h('div', { className: 'bcol-b' }, n ? tc.map(card).concat(sc.map(stepCard)) : h('div', { className: 'bcol-empty' }, '—'))
           );
         })),
       modal ? h(TaskModal, { task: modal.task, defaultProject: modal.defaultProject, meId: me.id, projects: projects, onClose: function () { setModal(null); }, onSaved: function () { setModal(null); reload(); } }) : null

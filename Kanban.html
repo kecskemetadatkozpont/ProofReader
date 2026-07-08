@@ -73,6 +73,10 @@
     .bchip { font-size: 9.5px; font-weight: 700; padding: 1px 5px; border-radius: 5px; background: var(--soft); color: var(--muted); font-variant-numeric: tabular-nums; }
     .bchip.who.ai { background: #e0f3f7; color: #0a6f83; } .bchip.who.hu { background: #f1eafe; color: #6425c7; }
     .bchip.warn { background: var(--warn-bg); color: var(--warn); }
+    .bchip.step { background: var(--accent-tint); color: var(--accent); }
+    /* read-only AI protocol steps unified into "My tasks" — muted, not draggable, link out */
+    a.bcard.rostep { text-decoration: none; color: inherit; cursor: pointer; border-style: dashed; opacity: .92; }
+    a.bcard.rostep:hover { opacity: 1; border-color: var(--accent); }
 
     /* modal */
     .kb-scrim { position: fixed; inset: 0; background: rgba(8,10,16,.5); z-index: 100; display: flex; align-items: center; justify-content: center; padding: 20px; }
@@ -105,7 +109,8 @@
   <script src="backend/config.js?v=1783137934"></script>
   <script src="auth.js?v=1783137934"></script>
   <script src="backend.js?v=1783137934"></script>
-  <script type="text/babel" src="kanban.jsx?v=1783269462"></script>
+  <script src="onboarding.js?v=1783137934"></script>
+  <script type="text/babel" src="kanban.jsx?v=1783490647"></script>
 
   <script src="build.js?v=1783137934"></script>
   <script src="version-badge.js?v=1783137934"></script>

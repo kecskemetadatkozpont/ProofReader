@@ -230,8 +230,10 @@
       var cls = 'step' + (i === cur ? ' cur' : (i < cur ? ' done' : ''));
       kids.push(h('button', {
         key: i, className: cls,
-        title: name + (props.canEdit ? ' — open / set stage' : ' — open'),
-        onClick: function () { if (props.onNav) props.onNav(i); if (props.canEdit && i !== cur && props.onSet) props.onSet(i); }
+        title: name + ' — open',
+        // navigation ONLY — clicking to view never advances the recorded stage (that would silently
+        // progress the project + spam the supervisor digest). Setting the stage is the explicit Stage control.
+        onClick: function () { if (props.onNav) props.onNav(i); }
       }, h('span', { className: 'dot', 'aria-hidden': 'true' }, STAGE_ICONS[i] || (i + 1)), name));
       // intermediate "Studies" funnel between Idea and Literature — opens the study tab (NOT a lifecycle stage,
       // so it never changes the stored project.stage / shifts indices)
@@ -284,9 +286,10 @@
   // ---------- Tasks ----------
   function TasksPanel(props) {
     var x = useState(''), text = x[0], setText = x[1];
-    function add() { if (!text.trim()) return; sb.from('research_tasks').insert({ project_id: props.projectId, title: text.trim(), status: 'todo' }).then(function (r) { if (r && r.error) { window.PRUI.toast(r.error.message, { kind: 'error' }); return; } setText(''); props.onChanged(); }); }
-    function setStatus(tk, st) { sb.from('research_tasks').update({ status: st }).eq('id', tk.id).then(props.onChanged); }
-    function del(tk) { sb.from('research_tasks').delete().eq('id', tk.id).then(props.onChanged); }
+    // one human-task table: the Tasks subtab now reads/writes research_todos (same as the board + "My tasks")
+    function add() { if (!text.trim()) return; sb.from('research_todos').insert({ owner_id: props.authorId, created_by: props.authorId, project_id: props.projectId, title: text.trim(), status: 'todo', assignee: 'human' }).then(function (r) { if (r && r.error) { window.PRUI.toast(r.error.message, { kind: 'error' }); return; } setText(''); props.onChanged(); }); }
+    function setStatus(tk, st) { sb.from('research_todos').update({ status: st, updated_at: new Date().toISOString() }).eq('id', tk.id).then(props.onChanged); }
+    function del(tk) { sb.from('research_todos').delete().eq('id', tk.id).then(props.onChanged); }
     var tasks = props.tasks || [];
     var open = tasks.filter(function (t) { return t.status !== 'done'; }).length;
     return h('div', { className: 'panel' },
@@ -2493,14 +2496,18 @@
     else if (tab === 'canvas') content = window.PRCanvas ? h(window.PRCanvas, { projectId: p.id, canEdit: props.canEdit, authorId: props.authorId }) : h('div', { className: 'empty' }, 'Loading Canvas…');
     else if (tab === 'notes') content = window.PRNotes ? h(window.PRNotes, { projectId: p.id, canEdit: props.canEdit, authorId: props.authorId }) : h('div', { className: 'empty' }, 'Loading Notes…');
     else if (tab === 'log') content = h(LogPanel, { projectId: p.id, authorId: props.authorId, entries: props.log, canEdit: props.canEdit, onChanged: props.onChanged });
-    else if (tab === 'tasks') content = h(TasksPanel, { projectId: p.id, tasks: props.tasks, canEdit: props.canEdit, onChanged: props.onChanged });
+    else if (tab === 'tasks') content = h(TasksPanel, { projectId: p.id, tasks: props.tasks, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
     else content = p.goal ? h('div', { className: 'panel' }, h('h3', null, 'Goal'), h('div', { style: { fontSize: 13.5 } }, p.goal)) : h('div', { className: 'soon' }, 'No goal set yet.');
     return h('div', null,
       h('button', { className: 'back-btn', onClick: props.onBack }, '← All projects'),
       (!props.canEdit && props.viewerId && p.owner_id !== props.viewerId) ? h('div', { className: 'ro-banner' }, '👁 Supervisor view — ' + (props.studentName ? props.studentName + '’s project' : 'student’s project') + '. Read-only.') : null,
       h('div', { className: 'dhead' },
         h('div', { className: 'dt' }, h('h1', null, p.title), h('p', null, (p.field || 'No field set') + (p.keywords && p.keywords.length ? ' · ' + p.keywords.join(', ') : ''))),
-        h('div', { style: { display: 'flex', gap: 8, alignItems: 'center' } },
+        h('div', { style: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' } },
+          // explicit Stage control — recording the stage is deliberate here, not a side-effect of browsing the stepper
+          props.canEdit
+            ? h('select', { className: 'field', style: { width: 'auto', height: 32 }, title: 'Set the current stage (logs a milestone)', value: p.stage || 0, onChange: function (e) { setStage(parseInt(e.target.value, 10)); } }, STAGES.map(function (s, i) { return h('option', { key: i, value: i }, 'Stage: ' + s); }))
+            : h('span', { className: 'chip c-grey' }, 'Stage: ' + STAGES[p.stage || 0]),
           props.canEdit
             ? h('select', { className: 'field', style: { width: 'auto', height: 32 }, value: p.status, onChange: setStatus }, Object.keys(STATUS_LABEL).map(function (k) { return h('option', { key: k, value: k }, STATUS_LABEL[k]); }))
             : h('span', { className: 'chip c-grey' }, STATUS_LABEL[p.status] || p.status),
@@ -2819,7 +2826,7 @@
     function loadDetail(projectId) {
       Promise.all([
         sb.from('research_log').select('id,type,summary,ts,profile_id').eq('project_id', projectId).order('ts', { ascending: false }),
-        sb.from('research_tasks').select('id,title,status,stage,due').eq('project_id', projectId).order('sort', { ascending: true }),
+        sb.from('research_todos').select('id,title,status,due,assignee').eq('project_id', projectId).order('sort', { ascending: true }).order('created_at', { ascending: false }),
         sb.from('research_ideas').select('id,source,question,hypothesis,rationale,novelty,status').eq('project_id', projectId).order('created_at', { ascending: false }),
         sb.from('research_sources').select('id,source_api,ext_id,doi,title,authors,year,venue,cited_by,url,issn,screening').eq('project_id', projectId).order('cited_by', { ascending: false, nullsFirst: false }),
         sb.from('research_datasets').select('id,name,source,uri,size_bytes,license,status,local_path').eq('project_id', projectId).order('created_at', { ascending: false }),
@@ -2901,10 +2908,10 @@
       h('div', { className: 'main' },
         props.preview ? h('div', { className: 'preview-banner' }, '👁 Admin preview — viewing ', h('b', null, me.name), '’s Research. ', h('a', { href: 'PhD.html?adminView=1' }, 'Doctoral School'), ' · ', h('a', { href: 'Profile.html?adminView=1' }, 'Profile'), ' · ', h('a', { href: 'Admin.html' }, '← Back to admin')) : null,
         h('div', { className: 'head' },
-          h('div', null, h('h1', null, sel ? 'Project' : (board ? 'All tasks' : 'Research projects')), h('div', { className: 'sub' }, board && !sel ? 'Cross-project Kanban — every research project’s tasks in one board' : sub)),
+          h('div', null, h('h1', null, sel ? 'Project' : (board ? 'Protocol tasks' : 'Research projects')), h('div', { className: 'sub' }, board && !sel ? 'Every research project’s protocol steps in one board · personal to-dos live in “My tasks”' : sub)),
           h('div', { style: { display: 'flex', gap: 10, alignItems: 'center' } },
             h(NotifBell, null),
-            sel ? null : h('button', { className: 'btn' + (board ? ' pri' : ''), onClick: function () { setBoard(!board); }, title: 'Cross-project task board — all projects’ tasks in one Kanban' }, board ? '☷ Projects' : '🗂️ Kanban'),
+            sel ? null : h('button', { className: 'btn' + (board ? ' pri' : ''), onClick: function () { setBoard(!board); }, title: 'Protocol task board — every project’s protocol steps in one Kanban' }, board ? '☷ Projects' : '🗂️ Protocol board'),
             (sel || board || view === 'supervised') ? null : h('button', { className: 'btn pri', onClick: function () { setAdding(true); } }, '+ New project')
           )
         ),

@@ -40,6 +40,9 @@ Deno.serve(async (req) => {
     const sb = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!, { global: { headers: { Authorization: req.headers.get('Authorization') || '' } } });
     const { data: ures } = await sb.auth.getUser();
     if (!ures || !ures.user) return json({ error: 'unauthorized' }, 401);
+    // per-user daily AI budget (no-op until migration-48 is applied)
+    const { data: over } = await sb.rpc('ai_over_budget', { max_calls: parseInt(Deno.env.get('AI_DAILY_CALLS') || '200', 10) });
+    if (over === true) return json({ error: 'Daily AI limit reached — please try again tomorrow.' }, 429);
     const body = await req.json().catch(() => ({}));
     const mode = String(body.mode || 'translate');
 
@@ -51,7 +54,7 @@ Deno.serve(async (req) => {
       const list = papers.map((p: any, i: number) => `[${i + 1}] ${String(p.title || '').slice(0, 240)}\nAbstract: ${String(p.abstract || '(none)').slice(0, 1200)}`).join('\n\n');
       const n = Math.min(70, 14 + papers.length * 4);
       const sys = `You are writing the SCRIPT for a spoken literature-overview audiobook, in ${target}. You are given ${papers.length} papers (title + abstract). Write flowing, connected narration in ${target}: open with one or two framing sentences about the topic, then weave each paper's key contribution / method / finding into natural connected prose. NO bullet points, NO headings, NO citation markers like [12], NO "Paper 1:". Spell out unavoidable abbreviations naturally. Aim for about ${n} sentences, suitable to be read aloud. Output ONLY the narration text.`;
-      const text = await callClaude(sys, list, 4000);
+      const text = await callClaude(sys, list, 4000); sb.rpc('ai_usage_bump');
       return json({ text });
     }
 
@@ -61,18 +64,18 @@ Deno.serve(async (req) => {
       const pdf = await fetchPdfBlock(url);
       if (!pdf) return json({ text: '', note: 'no_pdf' });
       const sys = `Extract the clean READING TEXT (main body: introduction, methods, results, discussion, conclusion) from this paper so it can be read aloud as an audiobook. SKIP the references/bibliography list, figure and table captions, author affiliations, headers/footers, page numbers, and standalone equations that do not read aloud. Keep the paper's original language. Return ONLY the readable prose — no preamble.`;
-      const text = await callClaude(sys, [pdf, { type: 'text', text: 'Return the clean reading text now.' }], 8000);
+      const text = await callClaude(sys, [pdf, { type: 'text', text: 'Return the clean reading text now.' }], 8000); sb.rpc('ai_usage_bump');
       return json({ text });
     }
 
     // default: TRANSLATE a batch of segments
-    const segments = Array.isArray(body.segments) ? body.segments.map((x: any) => String(x || '')) : [];
+    const segments = Array.isArray(body.segments) ? body.segments.map((x: any) => String(x || '').slice(0, 2000)) : [];   // per-segment length cap bounds token cost
     const target = String(body.target_lang || 'English');
     const source = body.source_lang ? String(body.source_lang) : '';
     if (!segments.length) return json({ segments: [] });
     if (segments.length > 60) return json({ error: 'too many segments (max 60 per call)' }, 400);
     const sys = `You are a professional academic translator. Translate each input text segment ${source ? 'from ' + source + ' ' : ''}into ${target}. Preserve scientific terminology, units, equations, and proper nouns; produce natural, fluent ${target} suitable for AUDIOBOOK narration (no markup, no citations like [12], spell out unavoidable abbreviations naturally). Return ONLY a JSON array of EXACTLY ${segments.length} strings, in the SAME order — no preamble, no object keys.`;
-    const out = await callClaude(sys, 'Segments (JSON array of strings):\n' + JSON.stringify(segments), 8000);
+    const out = await callClaude(sys, 'Segments (JSON array of strings):\n' + JSON.stringify(segments), 8000); sb.rpc('ai_usage_bump');
     let arr: any = [];
     const m = out.match(/\[[\s\S]*\]/); if (m) { try { arr = JSON.parse(m[0]); } catch (e) { /* fall through */ } }
     if (!Array.isArray(arr) || arr.length !== segments.length) return json({ error: 'translation_parse_failed', raw: out.slice(0, 200) }, 502);

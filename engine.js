@@ -89,7 +89,7 @@
         var key = cmd.replace(/\*$/, '');
         if (key === 'LaTeX') { html += 'L<span class="latex-a">a</span>T<span class="latex-e">e</span>X'; spoken += 'LaTeX'; continue; }
         if (key === 'TeX') { html += 'T<span class="latex-e">e</span>X'; spoken += 'TeX'; continue; }
-        if (key === 'today') { html += 'June 2026'; spoken += 'June 2026'; continue; }
+        if (key === 'today') { var _td = new Date(), _tm = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'][_td.getMonth()] + ' ' + _td.getFullYear(); html += _tm; spoken += _tm; continue; }
         if (key === 'ldots' || key === 'dots') { html += '&hellip;'; spoken += '…'; continue; }
         if (key === 'cite' || key === 'citep' || key === 'citet' || key === 'citeauthor') { html += resolveCite(arg); continue; }
         if (key === 'ref' || key === 'eqref' || key === 'pageref' || key === 'autoref' || key === 'cref') { html += '<span class="cite">??</span>'; continue; }

@@ -100,7 +100,9 @@ Deno.serve(async (req) => {
     }
     if (action === 'dossier') {
       const jid = body.journal_id;
-      const q = jid != null ? sb.from('journals_ref').select('*').eq('id', jid) : sb.from('journals_ref').select('*').or(`issn_print.eq.${body.issn},issn_online.eq.${body.issn}`);
+      // sanitise the interpolated ISSN to valid ISSN chars only — prevents PostgREST .or() filter injection
+      const issn = String(body.issn || '').replace(/[^0-9Xx-]/g, '').slice(0, 12);
+      const q = jid != null ? sb.from('journals_ref').select('*').eq('id', jid) : sb.from('journals_ref').select('*').or(`issn_print.eq.${issn},issn_online.eq.${issn}`);
       const jr: any = ((await q.limit(1)).data || [])[0];
       if (!jr) return json({ error: 'journal not found' }, 404);
       // OpenAlex hard metrics (by ISSN)

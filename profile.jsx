@@ -316,7 +316,9 @@ function Publications(props) {
   }
   var PF = window.PRPubFiles;
   var keyOf = function (p) { return me.email + ':' + p.mtid; };
-  useEffect(function () { if (PF && pubs.length) PF.counts(pubs.map(keyOf)).then(setCounts); }, []); // eslint-disable-line
+  // re-run when the publication set resolves (liveRows arrive async / after MTMT refresh) — else the
+  // file badges never load for a researcher not in the bundled snapshot, hiding already-uploaded files.
+  useEffect(function () { if (PF && pubs.length) PF.counts(pubs.map(keyOf)).then(setCounts); }, [pubs.map(function (p) { return p.mtid; }).join(',')]);
   function loadFiles(k) { if (PF) PF.list(k).then(function (fs) { setFiles(function (m) { var n = Object.assign({}, m); n[k] = fs; return n; }); }); }
   function toggle(k) { if (open === k) { setOpen(null); return; } setOpen(k); if (files[k] === undefined) loadFiles(k); }
   function pick(k) { if (inputRef.current) { inputRef.current.value = ''; inputRef.current.dataset.k = k; inputRef.current.click(); } } // target stashed on the input, not a shared ref

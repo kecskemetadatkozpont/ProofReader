@@ -356,12 +356,12 @@
     var drop = students.filter(function (s) { return s.status === 'Lemorzsolódott'; }).length;
     var avgProg = total ? Math.round(students.reduce(function (a, s) { return a + (s.required_credits ? Math.min(1, (s.total_credits || 0) / s.required_credits) : 0); }, 0) / total * 100) : 0;
     var openTopics = props.topics.filter(function (t) { return t.status === 'OPEN'; }).length;
-    var yNow = 2026;
+    var yNow = new Date().getFullYear();
     var atRisk = students.filter(function (s) { return s.status === 'Aktív' && s.enrollment_year && (yNow - s.enrollment_year) >= 3 && (s.required_credits ? (s.total_credits || 0) / s.required_credits : 0) < 0.6; }).length;
     var STAT = ['Aktív', 'Passzív', 'Abszolutórium', 'Fokozatot szerzett', 'Lemorzsolódott'];
     var statColor = { 'Aktív': 'var(--ok)', 'Passzív': 'var(--warn)', 'Abszolutórium': '#0891b2', 'Fokozatot szerzett': 'var(--accent)', 'Lemorzsolódott': 'var(--danger)' };
     var maxStat = Math.max(1, STAT.reduce(function (m, st) { return Math.max(m, students.filter(function (x) { return x.status === st; }).length); }, 0));
-    var today = '2026-06-20';
+    var today = new Date().toISOString().slice(0, 10);
     var upcoming = ms.filter(function (m) { return m.deadline && m.status !== 'Teljesítve' && m.status !== 'Sikertelen'; }).sort(function (a, b) { return (a.deadline || '').localeCompare(b.deadline || ''); }).slice(0, 7);
     function days(d) { try { return Math.round((new Date(d) - new Date(today)) / 86400000); } catch (e) { return null; } }
 
