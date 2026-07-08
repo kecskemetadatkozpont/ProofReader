@@ -283,6 +283,7 @@ function Publications(props) {
   var [adding, setAdding] = useState(false);
   var [fm, setFm] = useState({ title: '', authors: '', year: '', journal: '', doi: '' });
   var [saving, setSaving] = useState(false);
+  var [editId, setEditId] = useState(null);   // mtid of the manual publication being edited (null = adding)
   function rowToPub(r) { return { mtid: r.mtid, title: r.title, year: r.year, firstAuthor: r.first_author, authorCount: r.author_count, journal: r.journal, volume: r.volume, issue: r.issue, pages: r.pages, doi: r.doi, citations: r.citations, indepCitations: r.indep_citations, oaType: r.oa_type, category: r.category, core: r.core, citation: r.citation, type: r.type, typeHu: r.type_hu, mtmtUrl: r.mtmt_url }; }
   // merge the bundled MTMT snapshot with the live publications table (table wins per mtid → freshest data)
   var _by = {};
@@ -331,20 +332,41 @@ function Publications(props) {
   function closeViewer() { if (viewer) { try { URL.revokeObjectURL(viewer.url); } catch (e) { } } setViewer(null); }
   function download(m) { if (PF) PF.getBlob(m.id).then(function (b) { if (b) { var u = URL.createObjectURL(b); var a = document.createElement('a'); a.href = u; a.download = m.name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function () { URL.revokeObjectURL(u); }, 5000); } }); }
   function del(id, k) { if (PF) PF.remove(id).then(function () { loadFiles(k); PF.counts(pubs.map(keyOf)).then(setCounts); }); }
-  function addPub() {
+  // authors are semicolon-separated so "Lastname, Firstname" pairs aren't miscounted as two authors
+  function savePub() {
     var B = window.PR_BACKEND;
     if (!B || !B.sb || !B.user) { setErr('Sign in to add publications.'); return; }
     if (!fm.title.trim()) { setErr('A title is required.'); return; }
     setSaving(true); setErr(null);
     var au = fm.authors.trim();
-    B.sb.from('publications').insert({
-      researcher_id: B.user.id, mtid: -Date.now(), title: fm.title.trim(),
-      year: parseInt(fm.year, 10) || null, first_author: au ? au.split(',')[0].trim() : null,
-      author_count: au ? au.split(',').length : 1, journal: fm.journal.trim() || null,
-      doi: fm.doi.trim() || null, type: 'Manual', category: 'Manual',
+    var parts = au ? au.split(';').map(function (x) { return x.trim(); }).filter(Boolean) : [];
+    var row = {
+      title: fm.title.trim(), year: parseInt(fm.year, 10) || null,
+      first_author: parts[0] || null, author_count: parts.length || 1,
+      journal: fm.journal.trim() || null, doi: fm.doi.trim() || null,
       citation: (au ? au + '. ' : '') + fm.title.trim() + (fm.year ? ' (' + fm.year + ')' : '') + (fm.journal ? ' ' + fm.journal : '')
-    }).then(function (r) { setSaving(false); if (r && r.error) { setErr(r.error.message); return; } location.reload(); });
+    };
+    var p;
+    if (editId != null) p = B.sb.from('publications').update(row).eq('researcher_id', B.user.id).eq('mtid', editId);
+    else { row.researcher_id = B.user.id; row.mtid = -Date.now(); row.type = 'Manual'; row.category = 'Manual'; p = B.sb.from('publications').insert(row); }
+    p.then(function (r) { setSaving(false); if (r && r.error) { setErr(r.error.message); return; } location.reload(); });
   }
+  function startEditPub(p) {
+    setFm({ title: p.title || '', authors: p.firstAuthor || '', year: p.year ? String(p.year) : '', journal: p.journal || '', doi: p.doi || '' });
+    setEditId(p.mtid); setAdding(true); setErr(null);
+    try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch (e) { }
+  }
+  function delPub(p) {
+    var B = window.PR_BACKEND; if (!B || !B.sb || !B.user) return;
+    window.PRUI.confirm({ title: 'Delete this publication?', body: p.title || '', danger: true, confirmLabel: 'Delete' }).then(function (ok) {
+      if (!ok) return;
+      B.sb.from('publications').delete().eq('researcher_id', B.user.id).eq('mtid', p.mtid).then(function (r) {
+        if (r && r.error) { setErr(r.error.message); return; }
+        setLiveRows(function (rows) { return (rows || []).filter(function (x) { return x.mtid !== p.mtid; }); });
+      });
+    });
+  }
+  function isManual(p) { return p.type === 'Manual' || p.mtid < 0; }
   var isCloud = !!(window.PR_BACKEND && window.PR_BACKEND.sb && window.PR_BACKEND.user);
   var refreshBtn = (isCloud && !preview) ? <button className="btn-ghost" disabled={syncing} onClick={syncMtmt} title="Refresh the publication list from MTMT (by your MTMT ID)">{syncing ? 'Refreshing…' : '🔄 Refresh from MTMT'}</button> : null;
   var syncNote = syncMsg ? <div className={'pf-note ' + (syncMsg[0] === 'ok' ? 'ok' : 'err')} style={{ margin: '6px 0 0' }}>{syncMsg[1]}</div> : null;
@@ -353,16 +375,17 @@ function Publications(props) {
     {!adding
       ? <button className="btn-ghost" onClick={function () { setAdding(true); }}>+ Add a publication manually</button>
       : <div>
+        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--pf-muted, #5b6473)', marginBottom: 8 }}>{editId != null ? 'Edit publication' : 'Add a publication'}</div>
         <input style={pin} placeholder="Title *" value={fm.title} onChange={function (e) { setFm(Object.assign({}, fm, { title: e.target.value })); }} />
-        <input style={pin} placeholder="Authors (comma-separated)" value={fm.authors} onChange={function (e) { setFm(Object.assign({}, fm, { authors: e.target.value })); }} />
+        <input style={pin} placeholder="Authors (semicolon-separated)" value={fm.authors} onChange={function (e) { setFm(Object.assign({}, fm, { authors: e.target.value })); }} />
         <div style={{ display: 'flex', gap: 8 }}>
           <input style={pin} placeholder="Year" value={fm.year} onChange={function (e) { setFm(Object.assign({}, fm, { year: e.target.value })); }} />
           <input style={pin} placeholder="Journal / venue" value={fm.journal} onChange={function (e) { setFm(Object.assign({}, fm, { journal: e.target.value })); }} />
         </div>
         <input style={pin} placeholder="DOI (optional)" value={fm.doi} onChange={function (e) { setFm(Object.assign({}, fm, { doi: e.target.value })); }} />
         <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-          <button className="btn-primary" disabled={saving} onClick={addPub}>{saving ? 'Saving…' : 'Add publication'}</button>
-          <button className="btn-ghost" onClick={function () { setAdding(false); setErr(null); }}>Cancel</button>
+          <button className="btn-primary" disabled={saving} onClick={savePub}>{saving ? 'Saving…' : (editId != null ? 'Save changes' : 'Add publication')}</button>
+          <button className="btn-ghost" onClick={function () { setAdding(false); setEditId(null); setErr(null); setFm({ title: '', authors: '', year: '', journal: '', doi: '' }); }}>Cancel</button>
         </div>
       </div>}
   </div>;
@@ -403,7 +426,10 @@ function Publications(props) {
               {p.citations ? <span className="pf-tag cit">{p.citations} cit.</span> : null}
               {p.oaType && p.oaType !== 'NONE' ? <span className="pf-tag oa">Open access</span> : null}
               {p.doi ? <a className="pf-tag link" href={'https://doi.org/' + p.doi} target="_blank" rel="noopener">DOI</a> : null}
-              <a className="pf-tag link" href={'https://m2.mtmt.hu/gui2/?mode=browse&params=publication;' + p.mtid} target="_blank" rel="noopener">MTMT</a>
+              {isManual(p) ? <span className="pf-tag">Manual</span>
+                : <a className="pf-tag link" href={'https://m2.mtmt.hu/gui2/?mode=browse&params=publication;' + p.mtid} target="_blank" rel="noopener">MTMT</a>}
+              {(!preview && isManual(p)) ? <button className="pf-tag" style={{ border: 0, cursor: 'pointer', background: 'var(--pf-soft, #f5f6f9)' }} onClick={function () { startEditPub(p); }}>✎ Edit</button> : null}
+              {(!preview && isManual(p)) ? <button className="pf-tag" style={{ border: 0, cursor: 'pointer', background: 'var(--pf-soft, #f5f6f9)', color: 'var(--danger, #b42318)' }} onClick={function () { delPub(p); }}>✕ Delete</button> : null}
             </div>
           </div>
           {n

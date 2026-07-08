@@ -38,6 +38,7 @@
     var atS = useState(false), atOpen = atS[0], setAtOpen = atS[1];        // attach menu open
     var pkS = useState(null), picker = pkS[0], setPicker = pkS[1];         // {kind, items} for the browse pickers
     var dgS = useState(false), dragOver = dgS[0], setDragOver = dgS[1];
+    var soS = useState(false), sideOpen = soS[0], setSideOpen = soS[1];     // mobile history drawer
     var hlS = useState(true), histLoading = hlS[0], setHistLoading = hlS[1];   // true until the first chat list resolves
     var alive = useRef(true), scrollRef = useRef(null), taRef = useRef(null), fileRef = useRef(null), abortRef = useRef(null);
     useEffect(function () { return function () { alive.current = false; }; }, []);
@@ -58,8 +59,8 @@
     function loadChats(done) { sb.from('user_chats').select('id,title,updated_at').order('updated_at', { ascending: false }).then(function (r) { var list = (r && r.data) || []; setChats(list); setHistLoading(false); if (done) done(list); }, function () { setHistLoading(false); }); }
     function loadMsgs(id) { sb.from('user_chat_messages').select('id,role,content,created_at').eq('chat_id', id).order('created_at', { ascending: true }).then(function (r) { setMsgs((r && r.data) || []); }); }
     function loadFiles(id) { if (!id) { setFiles([]); return; } sb.from('user_chat_files').select('id,path,content').eq('chat_id', id).order('path', { ascending: true }).then(function (r) { setFiles((r && r.data) || []); }); }
-    function openChat(id) { setCid(id); setStreaming(null); setPreview(null); loadMsgs(id); loadFiles(id); }
-    function newChat() { setCid(null); setMsgs([]); setStreaming(null); setFiles([]); setPreview(null); if (taRef.current) taRef.current.focus(); }
+    function openChat(id) { setCid(id); setStreaming(null); setPreview(null); setSideOpen(false); loadMsgs(id); loadFiles(id); }
+    function newChat() { setCid(null); setMsgs([]); setStreaming(null); setFiles([]); setPreview(null); setSideOpen(false); if (taRef.current) taRef.current.focus(); }
     function delChat(id, e) { e.stopPropagation(); window.PRUI.confirm({ title: 'Delete this conversation?', danger: true, confirmLabel: 'Delete' }).then(function (ok) { if (!ok) return; sb.from('user_chats').delete().eq('id', id).then(function () { if (cid === id) { setCid(null); setMsgs([]); } loadChats(); }); }); }
 
     useEffect(function () { var el = scrollRef.current; if (el) el.scrollTop = el.scrollHeight; }, [msgs.length, streaming]);
@@ -224,7 +225,7 @@
 
     var curTitle = (cid && (chats.filter(function (c) { return c.id === cid; })[0] || {}).title) || 'New conversation';
     var main = h('div', { className: 'main', onDragOver: function (e) { e.preventDefault(); if (!dragOver) setDragOver(true); }, onDragLeave: function (e) { if (e.target === e.currentTarget) setDragOver(false); }, onDrop: onDrop },
-      h('div', { className: 'topbar' }, h('span', null, curTitle), h('span', { className: 'mtag' }, wf ? '🛠 Workflow' : 'Publify')),
+      h('div', { className: 'topbar' }, h('button', { className: 'side-toggle', 'aria-label': 'Conversations', onClick: function () { setSideOpen(true); } }, '☰'), h('span', null, curTitle), h('span', { className: 'mtag' }, wf ? '🛠 Workflow' : 'Publify')),
       (cid && files.length) ? h('div', { className: 'files-strip' }, h('span', { className: 'fs-h' }, '🗂 Attached:'), files.map(function (f) { return h('span', { className: 'fs-chip', key: f.id },
         h('button', { className: 'fs-name', title: 'Preview', 'aria-label': 'Preview attachment', onClick: function () { setPreview(f); } }, f.path),
         h('button', { className: 'fs-x', title: 'Remove', 'aria-label': 'Remove attachment', onClick: function (e) { removeFile(f, e); } }, '×')); })) : null,
@@ -248,7 +249,9 @@
       dragOver ? h('div', { className: 'drop-ov' }, h('div', { className: 'drop-card' }, '📎 Drop files here to attach')) : null
     );
 
-    return h('div', { className: 'app' }, side, main,
+    return h('div', { className: 'app' + (sideOpen ? ' side-open' : '') },
+      sideOpen ? h('div', { className: 'side-scrim', onClick: function () { setSideOpen(false); } }) : null,
+      side, main,
       h('input', { ref: fileRef, type: 'file', multiple: true, style: { display: 'none' }, onChange: onPickedFiles }),
       preview ? h('div', { className: 'pv-scrim', onClick: function () { setPreview(null); }, onKeyDown: function (e) { if (e.key === 'Escape') setPreview(null); } }, h('div', { className: 'pv-modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'File preview', tabIndex: -1, onClick: function (e) { e.stopPropagation(); } },
         h('div', { className: 'pv-head' }, h('b', null, preview.path), h('button', { className: 'pv-x', 'aria-label': 'Close', onClick: function () { setPreview(null); } }, '×')),
