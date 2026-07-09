@@ -444,6 +444,62 @@
     );
   }
 
+  // ---------- Feature permissions (dedicated sub-section) ----------
+  // One place to toggle every feature per user with buttons. Legacy keys route to their
+  // own columns (session_workflow_mode→can_workflows, paper_figure→can_figures); the rest
+  // write the profiles.features jsonb via onSetFeature. Admins are excluded (they bypass gates).
+  function PermissionsPanel(props) {
+    var catalog = props.catalog || [];
+    var all = (props.profiles || []).filter(function (u) { return u.role !== 'admin'; });
+    var oS = useState(false), open = oS[0], setOpen = oS[1];
+    var qS = useState(''), q = qS[0], setQ = qS[1];
+    if (!catalog.length) return null;   // migration-49 not applied yet → nothing to toggle
+    var qq = q.trim().toLowerCase();
+    var users = all.filter(function (u) { return !qq || ((u.name || '') + ' ' + (u.email || '')).toLowerCase().indexOf(qq) >= 0; });
+    function featOn(u, f) {
+      if (f.key === 'session_workflow_mode') return !!u.can_workflows;
+      if (f.key === 'paper_figure') return !!u.can_figures;
+      if (u.features && Object.prototype.hasOwnProperty.call(u.features, f.key)) return !!u.features[f.key];
+      return !!f.default_on;
+    }
+    function toggle(u, f) {
+      var on = !featOn(u, f);
+      if (f.key === 'session_workflow_mode') return props.onSetWorkflows(u.id, on);
+      if (f.key === 'paper_figure') return props.onSetFigures(u.id, on);
+      props.onSetFeature(u.id, f.key, on);
+    }
+    return h('div', { className: 'perm-wrap' },
+      h('button', { className: 'perm-head', onClick: function () { setOpen(!open); }, 'aria-expanded': open ? 'true' : 'false' },
+        h('span', { className: 'perm-ic', 'aria-hidden': 'true' }, '🔐'),
+        h('span', { className: 'perm-t' }, 'Feature permissions'),
+        h('span', { className: 'perm-sub' }, all.length + ' user' + (all.length === 1 ? '' : 's') + ' · click a button to turn a feature on/off'),
+        h('span', { className: 'perm-cv', 'aria-hidden': 'true' }, open ? '▾' : '▸')
+      ),
+      open ? h('div', { className: 'perm-body' },
+        h('input', { className: 'perm-q', value: q, placeholder: '🔍 Filter users…', onChange: function (e) { setQ(e.target.value); } }),
+        h('div', { className: 'perm-legend' }, h('span', { className: 'perm-pill on', style: { pointerEvents: 'none' } }, h('span', { className: 'perm-dot' }), 'enabled'), h('span', { className: 'perm-pill', style: { pointerEvents: 'none' } }, h('span', { className: 'perm-dot' }), 'disabled'), h('span', { style: { fontSize: 11.5, color: 'var(--faint)' } }, 'Pages block the whole menu item; AI features are server-enforced.')),
+        users.length === 0 ? h('div', { className: 'empty', style: { padding: 20 } }, 'No users match.')
+          : h('div', { className: 'perm-list' }, users.map(function (u) {
+            return h('div', { className: 'perm-user', key: u.id },
+              h('div', { className: 'perm-uhead' },
+                h(Avatar, { u: u, size: 30 }),
+                h('div', { className: 'perm-uinfo' }, h('b', null, u.name || '—'), h('span', null, u.email)),
+                h('span', { className: 'perm-ustatus' }, h(Badge, { s: u.status }))
+              ),
+              h('div', { className: 'perm-pills' }, catalog.map(function (f) {
+                var on = featOn(u, f);
+                return h('button', {
+                  key: f.key, className: 'perm-pill' + (on ? ' on' : '') + (f.category === 'page' ? ' page' : ''),
+                  onClick: function () { toggle(u, f); },
+                  title: (f.category === 'page' ? 'Page access' : 'AI feature') + ' — ' + (on ? 'ON (click to disable)' : 'OFF (click to enable)')
+                }, h('span', { className: 'perm-dot', 'aria-hidden': 'true' }), f.label);
+              }))
+            );
+          }))
+      ) : null
+    );
+  }
+
   function App() {
     var ph = useState('loading'), phase = ph[0], setPhase = ph[1];
     var meS = useState(null), me = meS[0], setMe = meS[1];
@@ -644,6 +700,8 @@
         ),
 
         h(GlobalTaskBoard, { profiles: profiles }),
+
+        h(PermissionsPanel, { profiles: profiles, catalog: catalog, onSetFeature: setFeature, onSetWorkflows: setWorkflows, onSetFigures: setFigures }),
 
         pending.length > 0 && h(React.Fragment, null,
           h('div', { className: 'sec-h' }, h('h2', null, 'Pending registrations'), h('span', { className: 'count' }, pending.length + ' waiting')),
