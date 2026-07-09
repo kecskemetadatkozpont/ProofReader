@@ -207,7 +207,11 @@ async function elicitSearch(question: string, config: any, maxResults: number, m
   if (r.status === 403) return { papers: [], rate, error: 'plan' };
   if (!r.ok) return { papers: [], rate, error: 'http_' + r.status };
   const o = await r.json().catch(() => ({}));
-  return { papers: (o.papers || []).map(normElicit), rate, error: null };
+  // dedupe by ext_id (Elicit can return near-duplicates, e.g. two records sharing a DOI) so the cached
+  // + upserted set is clean and the onConflict upsert never hits a same-batch duplicate.
+  const seen = new Set<string>(); const papers: any[] = [];
+  for (const p of (o.papers || []).map(normElicit)) { if (!p.ext_id || seen.has(p.ext_id)) continue; seen.add(p.ext_id); papers.push(p); }
+  return { papers, rate, error: null };
 }
 // small stable hash for the shared search-cache key
 function hashStr(s: string): string { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0; return h.toString(36); }
@@ -406,7 +410,11 @@ Deno.serve(async (req) => {
         }
         if (!u) u = await openalexUnion(q, config, maxResults);   // default path + Elicit fallback
         relaxed = !!u.relaxed;
-        const found = u.papers;
+        // Dedupe by ext_id BEFORE the upsert: a single duplicate ext_id in one batch makes the whole
+        // onConflict upsert fail ("cannot affect row a second time") → 0 rows saved. OpenAlex already
+        // dedupes; Elicit (and cached Elicit results) can contain a repeated DOI. Guards every adapter.
+        const seenExt = new Set<string>();
+        const found = (u.papers || []).filter((p: any) => { if (!p.ext_id || seenExt.has(p.ext_id)) return false; seenExt.add(p.ext_id); return true; });
         if (found.length) {
           const srcRows = found.map((p: any) => ({
             project_id: study.project_id, source_api: p.source || config.source_adapter || 'openalex', ext_id: p.ext_id,
