@@ -347,9 +347,14 @@
                     h('input', { type: 'checkbox', checked: on, style: { marginTop: 2 }, onChange: function (e) { onSetFeature(u.id, f.key, e.target.checked); } }),
                     h('span', null,
                       h('b', null, f.label),
-                      !f.enforced ? h('span', { style: { marginLeft: 6, fontSize: 10, fontWeight: 700, letterSpacing: '.04em', color: 'var(--warn, #b26b00)', border: '1px solid var(--line)', borderRadius: 5, padding: '0 5px', verticalAlign: 'middle' } }, 'UI ONLY') : null,
+                      (f.category === 'page'
+                        ? h('span', { style: { marginLeft: 6, fontSize: 10, fontWeight: 700, letterSpacing: '.04em', color: 'var(--accent, #4f46e5)', border: '1px solid var(--line)', borderRadius: 5, padding: '0 5px', verticalAlign: 'middle' } }, 'PAGE ACCESS')
+                        : (!f.enforced ? h('span', { style: { marginLeft: 6, fontSize: 10, fontWeight: 700, letterSpacing: '.04em', color: 'var(--warn, #b26b00)', border: '1px solid var(--line)', borderRadius: 5, padding: '0 5px', verticalAlign: 'middle' } }, 'UI ONLY') : null)),
                       h('span', { style: { display: 'block', fontSize: 11.5, color: 'var(--faint)', marginTop: 1 } },
-                        (f.enforced ? 'Server-enforced' : 'Hides UI only — not a security boundary') + (explicit ? '' : ' · default ' + (f.default_on ? 'on' : 'off')))));
+                        (f.category === 'page'
+                          ? (f.enforced ? 'Blocks the page + server-enforced actions' : 'Blocks the page for this user (data stays isolated)')
+                          : (f.enforced ? 'Server-enforced' : 'Hides UI only'))
+                        + (explicit ? '' : ' · default ' + (f.default_on ? 'on' : 'off')))));
                 }))) : null,
             h('div', { className: 'kv' },
               h('div', { className: 'c' }, h('div', { className: 'l' }, 'Projects'), h('div', { className: 'v' }, agg.projCount), agg.researchCount ? h('div', { className: 's' }, agg.projects.length + ' LaTeX + ' + agg.researchCount + ' research') : null),

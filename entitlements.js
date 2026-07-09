@@ -42,6 +42,24 @@
     },
     enforced: function (key) { return !!(cache && cache.enforced[key]); },
     active: function () { return !!(cache && cache.prof.status === 'approved'); },
-    modelAllowlist: function () { return cache ? (cache.prof.model_allowlist || null) : null; }
+    modelAllowlist: function () { return cache ? (cache.prof.model_allowlist || null) : null; },
+    // full-screen "no access" block for a whole page/menu-item (idempotent). Callers decide WHEN to block
+    // (nav.js guards the current page after load; admins bypass). Data pages stay RLS-isolated regardless.
+    showBlock: function (label) {
+      if (document.getElementById('pr-ent-block')) return;
+      var el = document.createElement('div');
+      el.id = 'pr-ent-block';
+      el.setAttribute('role', 'dialog');
+      el.setAttribute('aria-modal', 'true');
+      el.style.cssText = 'position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;padding:24px;background:var(--softer,#fafbfc);color:var(--ink,#1a2030);font-family:\'IBM Plex Sans\',system-ui,-apple-system,sans-serif';
+      el.innerHTML = '<div style="max-width:440px;text-align:center">'
+        + '<div style="font-size:46px;margin-bottom:14px">🔒</div>'
+        + '<h1 style="font-size:21px;margin:0 0 8px;letter-spacing:-.2px">Ehhez a funkcióhoz nincs hozzáférésed</h1>'
+        + '<p style="font-size:14px;color:var(--muted,#5b6473);line-height:1.55;margin:0 0 22px">A(z) <b>' + (label || 'ez a') + '</b> funkciót az adminisztrátorod nem engedélyezte a fiókodhoz. Ha szükséged van rá, kérd tőle.</p>'
+        + '<a href="Profile.html" style="display:inline-block;background:var(--accent,#4f46e5);color:#fff;text-decoration:none;padding:10px 20px;border-radius:10px;font-weight:600;font-size:13.5px">Vissza a profilomhoz</a>'
+        + '</div>';
+      (document.body || document.documentElement).appendChild(el);
+      try { document.documentElement.style.overflow = 'hidden'; } catch (e) { }
+    }
   };
 })();

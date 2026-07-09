@@ -35,6 +35,18 @@
     if (fk && window.PREnt && window.PREnt.loaded() && !window.PREnt.can(fk)) return false;
     return true;
   }
+  // Block the WHOLE current page (not just the nav link) if the user isn't entitled to it — so a
+  // revoked menu item can't be reached by URL either. Admins (incl. view-as) are never blocked.
+  // Client-side gate: the AI/data behind these pages is additionally server-enforced (edge fns + RLS).
+  function guardCurrentPage(admin) {
+    if (admin || adminView()) return;
+    if (!window.PREnt || !window.PREnt.loaded()) return;
+    var here = pageKey();
+    var fk = FEATURE_OF[here];
+    if (!fk || window.PREnt.can(fk)) return;
+    var lk = null; for (var i = 0; i < LINKS.length; i++) { if (LINKS[i].key === here) { lk = LINKS[i]; break; } }
+    window.PREnt.showBlock(lk ? lk.label : 'ez a');
+  }
   // load the entitlement cache once a user + backend are available, then re-render
   var entTried = false;
   function ensureEnt(cb) {
@@ -220,7 +232,8 @@
     function render() {
       var av = adminView();
       var du = av || curUser(), admin = isAdmin();
-      ensureEnt(render);   // load entitlements once the session is up, then re-render to apply cosmetic gating
+      ensureEnt(function () { render(); guardCurrentPage(isAdmin()); });   // load entitlements, then re-render + guard the page
+      if (window.PREnt && window.PREnt.loaded()) guardCurrentPage(admin);  // already loaded → guard now (idempotent)
       document.documentElement.classList.toggle('pn-adminview', !!av);
       document.getElementById('pn-left').innerHTML = '<a class="pn-brand" href="' + withAv('Projects.html') + '" title="Home"><span class="pn-mk"><i></i></span>Publify</a>'
         + (av ? '<span class="pn-as">👁 ' + esc(av.name || av.email || '') + '</span>' : '');
