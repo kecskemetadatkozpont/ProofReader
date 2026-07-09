@@ -1331,6 +1331,90 @@
       return fetch(CFG.supabaseUrl + '/functions/v1/research-study', { method: 'POST', headers: { 'Content-Type': 'application/json', 'apikey': CFG.supabaseAnonKey, 'Authorization': 'Bearer ' + token }, body: JSON.stringify(body) }).then(function (r) { return r.json().catch(function () { return { error: 'The server response could not be parsed (possibly a timeout) — try again.' }; }); }, function () { return { error: 'network' }; });
     });
   }
+  // ---- Elicit automated reports (Phase 2) — calls the elicit-proxy edge function ----
+  function callElicit(body) {
+    var CFG = window.PR_CONFIG || {};
+    return sb.auth.getSession().then(function (s) {
+      var token = (s && s.data && s.data.session && s.data.session.access_token) || CFG.supabaseAnonKey;
+      return fetch(CFG.supabaseUrl + '/functions/v1/elicit-proxy', { method: 'POST', headers: { 'Content-Type': 'application/json', 'apikey': CFG.supabaseAnonKey, 'Authorization': 'Bearer ' + token }, body: JSON.stringify(body) }).then(function (r) { return r.json().catch(function () { return { error: 'bad response' }; }); }, function () { return { error: 'network' }; });
+    });
+  }
+  var EL_STAGE = { gathering_sources: 'Gathering sources', screening_abstract: 'Screening abstracts', screening_fulltext: 'Screening full text', extracting_data: 'Extracting data', generating_report: 'Writing report', done: 'Finishing' };
+  function ElicitReports(props) {
+    var canUse = !!(window.PREnt && window.PREnt.loaded() && window.PREnt.can('elicit_reports'));
+    var jsS = useState(null), jobs = jsS[0], setJobs = jsS[1];
+    var qS = useState(''), q = qS[0], setQ = qS[1];
+    var buS = useState(false), busy = buS[0], setBusy = buS[1];
+    var erS = useState(''), err = erS[0], setErr = erS[1];
+    var opS = useState(null), openReport = opS[0], setOpenReport = opS[1];
+    var alive = useRef(true);
+    function load() { callElicit({ action: 'report.list' }).then(function (d) { if (alive.current) setJobs((d && d.jobs) || []); }); }
+    useEffect(function () { alive.current = true; if (canUse) load(); return function () { alive.current = false; }; }, [canUse]);
+    // poll non-terminal jobs every 12s
+    useEffect(function () {
+      if (!jobs || !jobs.length) return;
+      var running = jobs.filter(function (j) { return j.status !== 'completed' && j.status !== 'failed'; });
+      if (!running.length) return;
+      var iv = setInterval(function () {
+        running.forEach(function (j) {
+          callElicit({ action: 'job.status', job_id: j.id }).then(function (d) {
+            if (!alive.current || !d || !d.job) return;
+            setJobs(function (list) { return (list || []).map(function (x) { return x.id === j.id ? Object.assign({}, x, d.job) : x; }); });
+          });
+        });
+      }, 12000);
+      return function () { clearInterval(iv); };
+    }, [jobs && jobs.map(function (j) { return j.id + j.status; }).join(',')]);
+    function create() {
+      var rq = q.trim(); if (!rq) return; setBusy(true); setErr('');
+      callElicit({ action: 'report.create', researchQuestion: rq, project_id: props.projectId, title: (props.project && props.project.title) || null }).then(function (d) {
+        setBusy(false);
+        if (!d || d.error) { setErr((d && d.error) || 'Could not start the report.'); return; }
+        setQ(''); if (d.deduped) setErr('A report for this question is already in progress.'); load();
+      });
+    }
+    function resume(j) { callElicit({ action: 'job.resume', job_id: j.id }).then(function (d) { if (d && d.error) setErr(d.error); load(); }); }
+    function saveToFiles(j) {
+      if (!j.result_body) return;
+      var path = 'reports/elicit-' + String(j.id || '').slice(0, 8) + '.md';
+      sb.from('research_files').upsert({ project_id: props.projectId, path: path, content: '# ' + (j.result_title || 'Elicit report') + '\n\n' + j.result_body, mime: 'text/markdown', size: j.result_body.length, source: 'ai', updated_at: new Date().toISOString() }, { onConflict: 'project_id,path' }).then(function (r) { setErr(r && r.error ? r.error.message : '✓ Saved to project files: ' + path); });
+    }
+    function card(j) {
+      var done = j.status === 'completed', failed = j.status === 'failed', paused = j.status === 'pausedForInsufficientQuota';
+      return h('div', { key: j.id, style: { border: '1px solid var(--line)', borderRadius: 10, padding: '10px 12px' } },
+        h('div', { style: { display: 'flex', gap: 8, alignItems: 'flex-start' } },
+          h('div', { style: { flex: 1, minWidth: 0 } },
+            h('div', { style: { fontWeight: 600, fontSize: 13.5 } }, j.result_title || j.research_question || 'Report'),
+            h('div', { style: { fontSize: 11.5, color: 'var(--muted)', marginTop: 2 } },
+              done ? '✅ Completed' : failed ? ('✗ Failed' + (j.error && j.error.message ? ' — ' + j.error.message : '')) : paused ? '⏸ Paused — the Elicit account is out of quota' : ('⏳ ' + (EL_STAGE[j.stage] || 'Processing') + '…'))),
+          j.url ? h('a', { className: 'btn', style: { padding: '4px 9px', fontSize: 12, flex: 'none' }, href: j.url, target: '_blank' }, 'Elicit ↗') : null),
+        done && j.result_summary ? h('div', { style: { fontSize: 12.5, marginTop: 6, lineHeight: 1.45 } }, j.result_summary) : null,
+        h('div', { style: { display: 'flex', gap: 7, marginTop: 8, flexWrap: 'wrap' } },
+          done && j.result_body ? h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12 }, onClick: function () { setOpenReport(j); } }, 'View full report') : null,
+          done && j.result_body && props.canEdit ? h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12 }, onClick: function () { saveToFiles(j); } }, '⤓ Save to project files') : null,
+          paused ? h('button', { className: 'btn pri', style: { padding: '4px 10px', fontSize: 12 }, onClick: function () { resume(j); } }, 'Resume') : null,
+          j.pdf_url ? h('a', { className: 'btn', style: { padding: '4px 10px', fontSize: 12 }, href: j.pdf_url, target: '_blank' }, 'PDF') : null)
+      );
+    }
+    if (!canUse) return null;
+    return h('div', { className: 'panel', style: { marginTop: 14 } },
+      h('h3', null, '📄 Elicit reports ', h('span', { style: { fontSize: 11.5, color: 'var(--faint)', fontWeight: 400 } }, '· automated literature synthesis (~5–15 min)')),
+      h('div', { style: { display: 'flex', gap: 8, margin: '8px 0 4px', flexWrap: 'wrap' } },
+        h('input', { className: 'field', style: { flex: 1, minWidth: 220 }, placeholder: 'Research question for the report…', value: q, disabled: !props.canEdit || busy, onChange: function (e) { setQ(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter') create(); } }),
+        h('button', { className: 'btn pri', disabled: !props.canEdit || busy || !q.trim(), onClick: create }, busy ? '…' : '✨ Generate report')),
+      (props.project && props.project.goal) ? h('div', { style: { fontSize: 11.5, color: 'var(--faint)', marginBottom: 6 } }, h('a', { href: '#', onClick: function (e) { e.preventDefault(); setQ(props.project.goal); } }, 'Use the project goal as the question')) : null,
+      err ? h('div', { style: { fontSize: 12.5, color: /^✓/.test(err) ? 'var(--ok, #15803d)' : 'var(--danger, #b42318)', margin: '4px 0' } }, err) : null,
+      jobs === null ? h('div', { style: { fontSize: 13, color: 'var(--muted)', padding: '8px 0' } }, 'Loading…')
+        : jobs.length === 0 ? h('div', { style: { fontSize: 13, color: 'var(--muted)', padding: '8px 0' } }, 'No reports yet — ask a question above. A report keeps running even if you leave.')
+          : h('div', { style: { display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 } }, jobs.map(card)),
+      openReport ? h('div', { className: 'scrim', onClick: function () { setOpenReport(null); } }, h('div', { className: 'modal', style: { width: 760 }, onClick: function (e) { e.stopPropagation(); } },
+        h('div', { className: 'modal-h' }, h('h3', { style: { margin: 0, flex: 1 } }, openReport.result_title || 'Elicit report'), h('button', { className: 'icon-x', 'aria-label': 'Close', onClick: function () { setOpenReport(null); } }, '✕')),
+        (window.marked && window.DOMPurify)
+          ? h('div', { style: { padding: 18, maxHeight: '72vh', overflow: 'auto', lineHeight: 1.6, fontSize: 13.5 }, dangerouslySetInnerHTML: { __html: window.DOMPurify.sanitize(window.marked.parse(openReport.result_body || '')) } })
+          : h('div', { style: { padding: 18, maxHeight: '72vh', overflow: 'auto', whiteSpace: 'pre-wrap', fontSize: 13 } }, openReport.result_body || ''))) : null
+    );
+  }
+
   function LiteratureStudy(props) {
     var studies = props.studies || [];
     var seS = useState((studies[0] && studies[0].id) || null), selId = seS[0], setSelId = seS[1];
@@ -2496,7 +2580,7 @@
     // (the visible sub-tab row is a separate array below; Data/Compute are intentionally not surfaced)
     var content;
     if (tab === 'ideas') content = h('div', null, h(ChatPanel, { projectId: p.id, supervised: !!p.student_id, canEdit: props.canEdit, authorId: props.authorId, fileOwnerId: props.fileOwnerId, sources: props.sources, onChanged: props.onChanged }), h(IdeasPanel, { projectId: p.id, ideas: props.ideas, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, onStartStudyMulti: function (ideas) { setAutoStudy(ideas || []); setTab('study'); }, onGoStudy: function () { setTab('study'); } }));
-    else if (tab === 'literature') content = h(LiteraturePanel, { projectId: p.id, sources: props.sources, studies: props.studies, canEdit: props.canEdit, myEmail: props.myEmail, onChanged: props.onChanged });
+    else if (tab === 'literature') content = h(React.Fragment, null, h(LiteraturePanel, { projectId: p.id, sources: props.sources, studies: props.studies, canEdit: props.canEdit, myEmail: props.myEmail, onChanged: props.onChanged }), h(ElicitReports, { projectId: p.id, project: p, canEdit: props.canEdit }));
     else if (tab === 'study') content = null;   // #9: rendered persistently below so a running study survives tab switches
     else if (tab === 'protocol') content = h(ProtocolPanel, { projectId: p.id, ideas: props.ideas, sources: props.sources, studies: props.studies, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
     else if (tab === 'data') content = h(DataPanel, { projectId: p.id, datasets: props.datasets, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
