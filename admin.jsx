@@ -444,6 +444,46 @@
     );
   }
 
+  // ---------- Elicit MCP (org-level OAuth connection) ----------
+  function callOAuth(action) {
+    return sb.auth.getSession().then(function (s) {
+      var token = (s && s.data && s.data.session && s.data.session.access_token) || cfg.supabaseAnonKey;
+      return fetch(cfg.supabaseUrl + '/functions/v1/elicit-oauth', { method: 'POST', headers: { 'Content-Type': 'application/json', 'apikey': cfg.supabaseAnonKey, 'Authorization': 'Bearer ' + token }, body: JSON.stringify({ action: action }) }).then(function (r) { return r.json().catch(function () { return { error: 'bad response' }; }); }, function () { return { error: 'network' }; });
+    });
+  }
+  function ElicitMcpPanel() {
+    var stS = useState(null), st = stS[0], setSt = stS[1];
+    var buS = useState(false), busy = buS[0], setBusy = buS[1];
+    var msgS = useState(''), msg = msgS[0], setMsg = msgS[1];
+    function refresh() { callOAuth('status').then(function (d) { setSt((d && !d.error) ? d : { connected: false, error: d && d.error }); }); }
+    useEffect(function () { refresh(); }, []);
+    function connect() {
+      setBusy(true); setMsg('');
+      callOAuth('start').then(function (d) {
+        setBusy(false);
+        if (!d || d.error || !d.authorize_url) { setMsg('Could not start: ' + ((d && d.error) || 'no authorize URL')); return; }
+        window.open(d.authorize_url, '_blank', 'width=560,height=760');
+        setMsg('Authorize Elicit in the opened window, then click “Refresh status”.');
+      });
+    }
+    function disconnect() { setBusy(true); callOAuth('disconnect').then(function () { setBusy(false); refresh(); }); }
+    var connected = st && st.connected;
+    return h('div', { className: 'perm-wrap', style: { marginBottom: 22 } },
+      h('div', { className: 'perm-head', style: { cursor: 'default' } },
+        h('span', { className: 'perm-ic', 'aria-hidden': 'true' }, '🔌'),
+        h('span', { className: 'perm-t' }, 'Elicit tools in Chat (MCP)'),
+        h('span', { className: 'perm-sub' }, connected ? ('Connected' + (st.expires_at ? ' · token expires ' + new Date(st.expires_at).toLocaleString() : '')) : 'Not connected'),
+        h('span', { style: { marginLeft: 'auto', display: 'inline-flex', gap: 8 } },
+          h('button', { className: 'btn', onClick: refresh }, 'Refresh'),
+          connected ? h('button', { className: 'btn dng', disabled: busy, onClick: disconnect }, 'Disconnect')
+            : h('button', { className: 'btn pri', disabled: busy, onClick: connect }, busy ? '…' : 'Connect Elicit'))),
+      h('div', { style: { padding: '0 18px 14px', fontSize: 12.5, color: 'var(--muted)', lineHeight: 1.5 } },
+        'Connect the organization’s Elicit account once (OAuth). Then grant “Elicit tools in Chat (MCP)” to users below — in Publify Chat workflow mode Claude can call Elicit’s tools directly. (Requires a Pro+ Elicit account.)',
+        msg ? h('div', { style: { marginTop: 6, color: 'var(--accent, #4f46e5)' } }, msg) : null,
+        (st && st.error) ? h('div', { style: { marginTop: 6, color: 'var(--danger, #b42318)' } }, 'Status: ' + st.error) : null)
+    );
+  }
+
   // ---------- Feature permissions (dedicated sub-section) ----------
   // One place to toggle every feature per user with buttons. Legacy keys route to their
   // own columns (session_workflow_mode→can_workflows, paper_figure→can_figures); the rest
@@ -700,6 +740,8 @@
         ),
 
         h(GlobalTaskBoard, { profiles: profiles }),
+
+        h(ElicitMcpPanel, null),
 
         h(PermissionsPanel, { profiles: profiles, catalog: catalog, onSetFeature: setFeature, onSetWorkflows: setWorkflows, onSetFigures: setFigures }),
 

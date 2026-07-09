@@ -19,6 +19,23 @@ const CORS = {
 };
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...CORS, 'Content-Type': 'application/json' } });
 
+// Org-level Elicit MCP token (migration-53) — read + refresh if near expiry. Service-role only.
+async function getOrgElicitToken(svc: any): Promise<string | null> {
+  const { data: org } = await svc.from('elicit_mcp_org').select('access_token,refresh_token,expires_at,client_id').eq('id', 1).maybeSingle();
+  if (!org || !org.access_token) return null;
+  if (org.expires_at && new Date(org.expires_at).getTime() > Date.now() + 60000) return org.access_token;
+  if (!org.refresh_token || !org.client_id) return org.access_token;
+  try {
+    const r = await fetch('https://elicit.com/api/auth/oauth/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: org.refresh_token, client_id: org.client_id }) });
+    const o = await r.json().catch(() => ({}));
+    if (r.ok && o.access_token) {
+      await svc.from('elicit_mcp_org').update({ access_token: o.access_token, refresh_token: o.refresh_token || org.refresh_token, expires_at: new Date(Date.now() + (o.expires_in || 3600) * 1000).toISOString(), updated_at: new Date().toISOString() }).eq('id', 1);
+      return o.access_token;
+    }
+  } catch (_e) { /* fall through to the stale token — Anthropic will just skip the tools */ }
+  return org.access_token;
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
   try {
@@ -83,6 +100,17 @@ Deno.serve(async (req) => {
     // ---- Workflow (agentic) mode: Claude works autonomously across steps with file tools (item 4) ----
     if (mode === 'workflow') {
       if (!profRow || !profRow.can_workflows) return json({ error: 'A workflow-mód nincs engedélyezve ehhez a felhasználóhoz.' }, 403);
+      // Optional: expose the org's Elicit MCP tools when the user is granted elicit_mcp AND the org is connected.
+      let mcpServers: any[] | null = null;
+      try {
+        const { data: entMcp } = await sb.rpc('is_feature_enabled', { p_key: 'elicit_mcp' });
+        if (entMcp === true) {
+          const svcM = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+          const tok = await getOrgElicitToken(svcM);
+          if (tok) mcpServers = [{ type: 'url', url: 'https://elicit.com/api/mcp', name: 'elicit', authorization_token: tok }];
+        }
+      } catch (_e) { /* MCP is best-effort; chat works without it */ }
+      const wfHeaders = mcpServers ? { ...headers, 'anthropic-beta': 'mcp-client-2025-04-04' } : headers;
       const TOOLS = [
         { name: 'write_file', description: 'Create or overwrite a Markdown/text file in the session workspace.', input_schema: { type: 'object', properties: { path: { type: 'string', description: 'short relative path e.g. plan.md' }, content: { type: 'string' } }, required: ['path', 'content'] } },
         { name: 'read_file', description: 'Read a file from the session workspace.', input_schema: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } },
@@ -93,7 +121,9 @@ Deno.serve(async (req) => {
       const steps: any[] = [];
       let finalText = '';
       for (let iter = 0; iter < 14; iter++) {
-        const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers, body: JSON.stringify({ model, max_tokens: MAX_TOKENS, system: sysW, tools: TOOLS, messages: convo }) });
+        const wfBody: any = { model, max_tokens: MAX_TOKENS, system: sysW, tools: TOOLS, messages: convo };
+        if (mcpServers) wfBody.mcp_servers = mcpServers;
+        const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: wfHeaders, body: JSON.stringify(wfBody) });
         const o = await r.json();
         if (o.error) return json({ error: 'anthropic: ' + (o.error.message || '') }, 502);
         const blocks = o.content || [];
