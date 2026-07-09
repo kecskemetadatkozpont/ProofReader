@@ -90,9 +90,11 @@
         return h('button', { key: o[0], type: 'button', className: f[k] === o[0] ? 'on' : '', onClick: function () { up(k, o[0]); } }, o[1]);
       }));
     };
+    function fmt(x) { try { var d = new Date(x); return isNaN(d) ? '—' : d.toLocaleString(); } catch (e) { return '—'; } }
+    var projName = f.project_id ? (((props.projects || []).filter(function (p) { return p.id === f.project_id; })[0] || {}).title || 'Project') : 'Personal (no project)';
     return h('div', { className: 'kb-scrim', onClick: props.onClose },
-      h('div', { className: 'kb-modal', role: 'dialog', 'aria-modal': 'true', onClick: function (e) { e.stopPropagation(); } },
-        h('div', { className: 'kb-mh' }, h('b', null, props.task ? 'Edit task' : 'Add task'), h('button', { className: 'kb-x', 'aria-label': 'Close', onClick: props.onClose }, '×')),
+      h('div', { className: 'kb-modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': props.task ? 'Task details' : 'Add task', onClick: function (e) { e.stopPropagation(); } },
+        h('div', { className: 'kb-mh' }, h('b', null, props.task ? 'Task details' : 'Add task'), h('button', { className: 'kb-x', 'aria-label': 'Close', onClick: props.onClose }, '×')),
         h('div', { className: 'kb-mb' },
           h('label', { className: 'kb-l' }, 'Title *'),
           h('input', { className: 'kb-in', autoFocus: true, value: f.title, onChange: function (e) { up('title', e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) save(); }, placeholder: 'What needs doing?' }),
@@ -109,7 +111,12 @@
           h('div', { className: 'kb-row' },
             h('div', null, h('label', { className: 'kb-l' }, 'Priority'), seg('priority', [['', 'None'], ['low', 'Low'], ['med', 'Med'], ['high', 'High']])),
             h('div', null, h('label', { className: 'kb-l' }, 'Due date'), h('input', { className: 'kb-in', type: 'date', value: f.due || '', onChange: function (e) { up('due', e.target.value); } }))
-          )
+          ),
+          props.task ? h('div', { className: 'kb-meta' },
+            h('div', null, h('span', null, 'Project'), h('span', null, projName)),
+            props.task.created_at ? h('div', null, h('span', null, 'Created'), h('span', null, fmt(props.task.created_at))) : null,
+            props.task.updated_at ? h('div', null, h('span', null, 'Updated'), h('span', null, fmt(props.task.updated_at))) : null
+          ) : null
         ),
         h('div', { className: 'kb-mf' },
           props.task ? h('button', { className: 'kb-btn danger', onClick: del }, 'Delete') : h('span'),
