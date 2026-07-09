@@ -128,64 +128,9 @@
     );
   }
 
-  // ---------- AI protocol-step detail drawer ----------
-  // Steps are runner-owned, but the owner CAN edit them (rpst_write RLS = research_can_write_project).
-  // We expose the board-relevant fields (status + owner) here; deep editing (spec, deps) stays on the
-  // protocol board, reachable via the "Open in protocol board" action.
-  var STEP_STATUS = [['todo', 'ToDo'], ['queued', 'Queued'], ['running', 'In progress'], ['blocked', 'Blocked'], ['failed', 'Failed'], ['done', 'Done'], ['skipped', 'Skipped']];
-  function StepModal(props) {
-    var s = props.step;
-    var fS = useState({ status: s.status || 'todo', assignee: s.assignee === 'human' ? 'human' : 'ai' }), f = fS[0], setF = fS[1];
-    var bS = useState(false), busy = bS[0], setBusy = bS[1];
-    function up(k, v) { setF(Object.assign({}, f, (function () { var o = {}; o[k] = v; return o; })())); }
-    var dirty = f.status !== (s.status || 'todo') || f.assignee !== (s.assignee === 'human' ? 'human' : 'ai');
-    function save() {
-      setBusy(true);
-      sb.from('research_protocol_steps').update({ status: f.status, assignee: f.assignee }).eq('id', s.id).then(function (r) {
-        setBusy(false);
-        if (r && r.error) { toast('Could not update step: ' + r.error.message, { kind: 'error' }); return; }
-        props.onSaved();
-      });
-    }
-    useEffect(function () { function esc(e) { if (e.key === 'Escape') props.onClose(); } window.addEventListener('keydown', esc); return function () { window.removeEventListener('keydown', esc); }; });
-    var seg = function (k, opts) {
-      return h('div', { className: 'kb-seg' }, opts.map(function (o) {
-        return h('button', { key: o[0], type: 'button', className: f[k] === o[0] ? 'on' : '', onClick: function () { up(k, o[0]); } }, o[1]);
-      }));
-    };
-    var specStr = '';
-    try { specStr = s.spec ? (typeof s.spec === 'string' ? s.spec : JSON.stringify(s.spec, null, 2)) : ''; } catch (e) { specStr = ''; }
-    if (specStr.length > 1200) specStr = specStr.slice(0, 1200) + ' …';
-    var href = 'Research.html?project=' + encodeURIComponent(s.project_id || '') + '&step=' + encodeURIComponent(s.ord || 1);
-    return h('div', { className: 'kb-scrim', onClick: props.onClose },
-      h('div', { className: 'kb-modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'AI protocol step', onClick: function (e) { e.stopPropagation(); } },
-        h('div', { className: 'kb-mh' }, h('b', null, 'AI protocol step'), h('button', { className: 'kb-x', 'aria-label': 'Close', onClick: props.onClose }, '×')),
-        h('div', { className: 'kb-mb' },
-          h('div', { className: 'kb-note' }, (STEP_ICON[s.kind] || '•') + ' Runner-owned step — status & owner are editable here; edit the spec on the protocol board.'),
-          h('label', { className: 'kb-l' }, 'Title'),
-          h('div', { className: 'kb-ro' }, h('span', { style: { color: 'var(--faint)' } }, (s.ord || '?') + '. '), s.title),
-          h('div', { className: 'kb-row' },
-            h('div', null, h('label', { className: 'kb-l' }, 'Owner'), seg('assignee', [['human', '👤 Human'], ['ai', '🤖 AI']])),
-            h('div', null, h('label', { className: 'kb-l' }, 'Kind'), h('div', { className: 'kb-ro' }, (STEP_ICON[s.kind] || '•') + ' ' + (s.kind || '—')))
-          ),
-          h('label', { className: 'kb-l' }, 'Status'),
-          seg('status', STEP_STATUS),
-          specStr ? h('div', null, h('label', { className: 'kb-l' }, 'Spec'), h('pre', { className: 'kb-pre' }, specStr)) : null,
-          h('div', { className: 'kb-meta' },
-            h('div', null, h('span', null, 'Project'), h('span', null, (s._proj && s._proj.title) || 'Project')),
-            s._prot ? h('div', null, h('span', null, 'Protocol'), h('span', null, s._prot)) : null,
-            s.needs_approval ? h('div', null, h('span', null, 'Approval'), h('span', null, 'requires approval')) : null
-          )
-        ),
-        h('div', { className: 'kb-mf' },
-          h('a', { className: 'kb-btn', href: href }, 'Open in protocol board →'),
-          h('div', { style: { display: 'flex', gap: 8 } },
-            h('button', { className: 'kb-btn', onClick: props.onClose }, 'Close'),
-            h('button', { className: 'kb-btn pri', disabled: busy || !dirty, onClick: save }, busy ? 'Saving…' : 'Save'))
-        )
-      )
-    );
-  }
+  // AI protocol steps are edited with the SAME editor the Protocol page uses (window.PRTaskEditor from
+  // task-editor.js) so "My tasks" offers identical settings — title/kind/instruction/inputs/outputs/
+  // acceptance/command/est/attachments/depends-on/approval + ✨ Refine, plus board fields (status/owner).
 
   // ---------- app ----------
   function App() {
@@ -223,7 +168,7 @@
           var prots = (pr && pr.data) || [], byId = {}; prots.forEach(function (x) { byId[x.id] = x; });
           var protIds = prots.map(function (x) { return x.id; });
           if (!protIds.length) { setSteps([]); setPhase('ready'); return; }
-          sb.from('research_protocol_steps').select('id,protocol_id,ord,title,kind,status,assignee,needs_approval,spec').in('protocol_id', protIds).order('ord', { ascending: true }).then(function (sr) {
+          sb.from('research_protocol_steps').select('id,protocol_id,ord,title,kind,status,assignee,needs_approval,spec,depends_on').in('protocol_id', protIds).order('ord', { ascending: true }).then(function (sr) {
             var rows = (sr && sr.data) || [];
             rows.forEach(function (s) { var pp = byId[s.protocol_id]; s._proj = pp ? { id: pp.project_id, title: (own.filter(function (o) { return o.id === pp.project_id; })[0] || {}).title } : null; s._prot = pp && pp.title; s.project_id = pp && pp.project_id; });
             setSteps(rows); setPhase('ready');
@@ -237,6 +182,19 @@
       sb.from('research_todos').update(Object.assign({ updated_at: new Date().toISOString() }, p)).eq('id', t.id).then(function (r) { if (r && r.error) { toast('Move failed: ' + r.error.message, { kind: 'error' }); reload(); } });
     }
     function moveToCol(t, key) { var p = colPatch(key); if (p) patch(t, p); }
+    // save an AI protocol step edited via the shared Task editor (task-editor.js) — same fields as the Protocol board
+    function saveStep(s, data) {
+      var row = {
+        title: data.title, kind: data.kind, spec: data.spec,
+        depends_on: data.depends_on || [], needs_approval: !!data.needs_approval
+      };
+      if (data.status) row.status = data.status;
+      if (data.assignee) row.assignee = data.assignee;
+      sb.from('research_protocol_steps').update(row).eq('id', s.id).then(function (r) {
+        if (r && r.error) { toast('Could not update step: ' + r.error.message, { kind: 'error' }); return; }
+        setModal(null); reload();
+      });
+    }
 
     var projById = {}; projects.forEach(function (p) { projById[p.id] = p; });
     // filter chips: personal + each project that has todos OR protocol steps
@@ -333,7 +291,13 @@
           );
         })),
       modal ? (modal.step
-        ? h(StepModal, { step: modal.step, onClose: function () { setModal(null); }, onSaved: function () { setModal(null); reload(); } })
+        ? ((window.PRTaskEditor && window.PRTaskEditor.TaskEditorModal)
+          ? h(window.PRTaskEditor.TaskEditorModal, {
+            step: modal.step, isNew: false, boardFields: true, projectId: modal.step.project_id,
+            allSteps: steps.filter(function (x) { return x.protocol_id === modal.step.protocol_id; }),
+            onSave: function (data) { saveStep(modal.step, data); }, onClose: function () { setModal(null); }
+          })
+          : null)
         : h(TaskModal, { task: modal.task, defaultProject: modal.defaultProject, meId: me.id, projects: projects, onClose: function () { setModal(null); }, onSaved: function () { setModal(null); reload(); } })) : null
     );
   }
