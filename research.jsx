@@ -2769,15 +2769,10 @@
     var content;
     if (tab === 'ideas') content = h('div', null, h(ChatPanel, { projectId: p.id, supervised: !!p.student_id, canEdit: props.canEdit, authorId: props.authorId, fileOwnerId: props.fileOwnerId, sources: props.sources, onChanged: props.onChanged }), h(IdeasPanel, { projectId: p.id, ideas: props.ideas, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, onStartStudyMulti: function (ideas) { setAutoStudy(ideas || []); setTab('study'); }, onGoStudy: function () { setTab('study'); } }));
     else if (tab === 'literature') content = h(React.Fragment, null,
-      h(ElicitSysReview, { projectId: p.id, project: p, canEdit: props.canEdit }),   // SR Studio (primary Elicit flow)
+      h(LiteraturePanel, { projectId: p.id, sources: props.sources, studies: props.studies, canEdit: props.canEdit, myEmail: props.myEmail, onChanged: props.onChanged }),
       h(ElicitReports, { projectId: p.id, project: p, canEdit: props.canEdit }),
-      h(ElicitTrials, { projectId: p.id, canEdit: props.canEdit }),
-      // OpenAlex keyword funnel — paused; collapsed so existing keyword studies stay reachable
-      h('details', { className: 'panel', style: { marginTop: 14, padding: '12px 16px' } },
-        h('summary', { style: { cursor: 'pointer', fontSize: 13, fontWeight: 600, color: 'var(--muted)' } }, '⏸ Keyword studies (OpenAlex) — paused · click to open'),
-        h('div', { style: { marginTop: 12 } }, h(LiteraturePanel, { projectId: p.id, sources: props.sources, studies: props.studies, canEdit: props.canEdit, myEmail: props.myEmail, onChanged: props.onChanged }))
-      ));
-    else if (tab === 'study') content = null;   // #9: rendered persistently below so a running study survives tab switches
+      h(ElicitTrials, { projectId: p.id, canEdit: props.canEdit }));
+    else if (tab === 'study') content = h(ElicitSysReview, { projectId: p.id, project: p, canEdit: props.canEdit });   // SR Studio (primary); the keyword funnel renders persistently below
     else if (tab === 'protocol') content = h(ProtocolPanel, { projectId: p.id, ideas: props.ideas, sources: props.sources, studies: props.studies, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
     else if (tab === 'data') content = h(DataPanel, { projectId: p.id, datasets: props.datasets, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
     else if (tab === 'compute') content = h(ComputePanel, { projectId: p.id, jobs: props.jobs, datasets: props.datasets, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
@@ -2815,7 +2810,10 @@
       content,
       // #9 — persistent Lit. study: stays mounted (just hidden) on other tabs, so a running study keeps going
       // in the background while you use the Chat / other tabs.
-      h('div', { style: { display: tab === 'study' ? 'block' : 'none' } }, h(LiteratureStudy, { projectId: p.id, project: p, studies: props.studies, sources: props.sources, ideas: props.ideas, loading: props.loading, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, autoCreateFrom: autoStudy, onAutoConsumed: function () { setAutoStudy(null); } })),
+      h('div', { style: { display: tab === 'study' ? 'block' : 'none' } },
+        h('details', { className: 'panel', style: { marginTop: 14, padding: '12px 16px' } },
+          h('summary', { style: { cursor: 'pointer', fontSize: 13, fontWeight: 600, color: 'var(--muted)' } }, '⏸ Keyword screening funnel (OpenAlex/Elicit search → screen) — paused · click to open'),
+          h('div', { style: { marginTop: 12 } }, h(LiteratureStudy, { projectId: p.id, project: p, studies: props.studies, sources: props.sources, ideas: props.ideas, loading: props.loading, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, autoCreateFrom: autoStudy, onAutoConsumed: function () { setAutoStudy(null); } })))),
       editOpen ? h(ProjectSettingsModal, { project: p, onClose: function () { setEditOpen(false); }, onSaved: function () { setEditOpen(false); props.onChanged(); } }) : null
     );
   }
