@@ -154,6 +154,56 @@ async function openalexUnion(question: string, config: any, maxResults: number) 
   return { papers: out, relaxed: false };
 }
 
+// ---- Elicit source adapter (semantic/keyword search over 138M+ papers) -------------------------------
+//  Gated by the elicit_search entitlement + a per-user daily budget (migration-50). The org key lives
+//  only here (ELICIT_API_KEY secret). On any denial / rate-limit (429) / quota (402) / plan (403) / outage
+//  the caller falls back to OpenAlex, so the study always completes. Maps Elicit Paper[] to the same
+//  normalized shape the OpenAlex/Crossref adapters produce.
+const ELICIT_KEY = Deno.env.get('ELICIT_API_KEY') || '';
+const ELICIT_BASE = Deno.env.get('ELICIT_API_BASE') || 'https://elicit.com';
+function normDoi(d: string): string { return String(d || '').toLowerCase().replace(/^https?:\/\/(dx\.)?doi\.org\//, '').trim(); }
+function normElicit(p: any) {
+  const doi = p.doi ? normDoi(p.doi) : '';
+  const urls: string[] = Array.isArray(p.urls) ? p.urls : [];
+  const pdf = urls.find((u) => /\.pdf($|\?)|\/pdf/i.test(u)) || '';
+  const ext = doi ? 'doi:' + doi : (p.elicitId ? 'elicit:' + p.elicitId : (p.pmid ? 'pmid:' + p.pmid : 'elicit:' + String(p.title || '').slice(0, 40)));
+  return {
+    ext_id: ext, doi: doi || null, title: p.title || 'Untitled',
+    authors: Array.isArray(p.authors) ? p.authors.slice(0, 8) : [],
+    year: p.year || null, venue: p.venue || null,
+    abstract: String(p.abstract || '').slice(0, 1500), cited_by: p.citedByCount || 0,
+    url: doi ? 'https://doi.org/' + doi : (urls[0] || ''), oa_pdf_url: pdf, issn: '', source: 'elicit',
+  };
+}
+function elicitFilters(config: any) {
+  const f = config.filters || {};
+  const out: any = {};
+  if (f.fromYear) out.minYear = parseInt(f.fromYear, 10);
+  if (config.maxQuartile) out.maxQuartile = parseInt(config.maxQuartile, 10);
+  return out;
+}
+async function elicitSearch(question: string, config: any, maxResults: number, mode: string) {
+  if (!ELICIT_KEY) return { papers: [] as any[], rate: null as any, error: 'no_key' };
+  const kws = (config.keywords || []).filter(Boolean);
+  const query = (kws.length ? kws.join(mode === 'keyword' ? ' OR ' : ' ') : question) || question || 'research';
+  const b: any = { query, searchMode: mode === 'keyword' ? 'keyword' : 'semantic', maxResults: Math.min(300, Math.max(1, maxResults)), corpus: config.corpus === 'pubmed' ? 'pubmed' : 'elicit' };
+  // filters and keyword mode are mutually exclusive on Elicit → only attach filters in semantic mode
+  if (b.searchMode === 'semantic') { const fl = elicitFilters(config); if (Object.keys(fl).length) b.filters = fl; }
+  let r: Response;
+  try {
+    r = await fetch(ELICIT_BASE + '/api/v1/search', { method: 'POST', headers: { 'Authorization': 'Bearer ' + ELICIT_KEY, 'Content-Type': 'application/json' }, body: JSON.stringify(b) });
+  } catch (_e) { return { papers: [], rate: null, error: 'network' }; }
+  const rate = { limit: r.headers.get('X-RateLimit-Limit'), remaining: r.headers.get('X-RateLimit-Remaining'), reset: r.headers.get('X-RateLimit-Reset') };
+  if (r.status === 429) return { papers: [], rate, error: 'rate_limited' };
+  if (r.status === 402) return { papers: [], rate, error: 'quota' };
+  if (r.status === 403) return { papers: [], rate, error: 'plan' };
+  if (!r.ok) return { papers: [], rate, error: 'http_' + r.status };
+  const o = await r.json().catch(() => ({}));
+  return { papers: (o.papers || []).map(normElicit), rate, error: null };
+}
+// small stable hash for the shared search-cache key
+function hashStr(s: string): string { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0; return h.toString(36); }
+
 async function fetchPdfBlock(url: string): Promise<any | null> {
   if (!url) return null;
   try {
@@ -305,11 +355,36 @@ Deno.serve(async (req) => {
     if (action === 'search_step1') {
       const limit = Math.min(25, Math.max(5, parseInt(String(body.limit || '20'), 10)));
       const maxResults = Math.min(400, parseInt(String(config.max_results || '200'), 10));
-      let relaxed = false;
-      // First call: fetch the per-keyword UNION once and create the unscreened candidate rows (idempotent —
+      let relaxed = false; let usedSource = 'openalex'; let elicitRate: any = null;
+      // First call: fetch the papers once and create the unscreened candidate rows (idempotent —
       // ignoreDuplicates preserves any human-overridden/already-screened rows the run's delete kept).
       if (offset === 0) {
-        const u = await openalexUnion(study.question || study.title, config, maxResults);
+        const q = study.question || study.title;
+        let u: any = null;
+        // Elicit adapter (config.source_adapter = 'elicit' | 'elicit_keyword') — gated + budgeted + cached,
+        // with a graceful OpenAlex fallback on any denial / rate-limit / quota / outage.
+        if (String(config.source_adapter || '').indexOf('elicit') === 0) {
+          const mode = config.source_adapter === 'elicit_keyword' ? 'keyword' : 'semantic';
+          const { data: entOk } = await sb.rpc('is_feature_enabled', { p_key: 'elicit_search' });
+          const cap = parseInt(Deno.env.get('ELICIT_SEARCH_DAILY') || '50', 10);
+          const { data: over } = await sb.rpc('feature_over_budget', { p_key: 'elicit_search', max_calls: cap });
+          if (entOk === true && over !== true) {
+            const cacheKey = hashStr(JSON.stringify({ q, mode, corpus: config.corpus || 'elicit', f: config.filters || {}, mq: config.maxQuartile || '', kw: config.keywords || [], n: maxResults }));
+            const { data: cached } = await sb.from('elicit_search_cache').select('results,ratelimit,fetched_at').eq('query_hash', cacheKey).maybeSingle();
+            if (cached && cached.results && (Date.now() - new Date(cached.fetched_at).getTime() < 24 * 3600 * 1000)) {
+              u = { papers: cached.results, relaxed: false }; usedSource = 'elicit'; elicitRate = cached.ratelimit || null;   // cache hit → free (no bump)
+            } else {
+              const er = await elicitSearch(q, config, maxResults, mode);
+              elicitRate = er.rate;
+              if (!er.error && er.papers.length) {
+                u = { papers: er.papers, relaxed: false }; usedSource = 'elicit';
+                await sb.rpc('feature_usage_bump', { p_key: 'elicit_search' });
+                await sb.from('elicit_search_cache').upsert({ query_hash: cacheKey, query: String(q).slice(0, 300), corpus: config.corpus || 'elicit', search_mode: mode, filters: config.filters || {}, results: er.papers, ratelimit: er.rate, fetched_at: new Date().toISOString() });
+              }
+            }
+          }
+        }
+        if (!u) u = await openalexUnion(q, config, maxResults);   // default path + Elicit fallback
         relaxed = !!u.relaxed;
         const found = u.papers;
         if (found.length) {
@@ -340,7 +415,7 @@ Deno.serve(async (req) => {
       const nextOffset = offset + screenedNow;
       const done = screenedNow < limit;   // fewer than a full batch of unscreened left → finished
       await finishBatch(sb, study_id, 1, nextOffset, stepTotal || 0, done);
-      return json({ ok: true, step: 1, fetched: stepTotal || 0, new_sources: offset === 0 ? (stepTotal || 0) : 0, counts: total_count, results, next_offset: nextOffset, done, total_estimate: stepTotal || 0, relaxed });
+      return json({ ok: true, step: 1, fetched: stepTotal || 0, new_sources: offset === 0 ? (stepTotal || 0) : 0, counts: total_count, results, next_offset: nextOffset, done, total_estimate: stepTotal || 0, relaxed, source: usedSource, elicit_rate: elicitRate });
     }
 
     // ---------------- screen_batch (steps 2, 3) ----------------

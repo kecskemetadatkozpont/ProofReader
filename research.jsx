@@ -1467,16 +1467,20 @@
         }
         sb.from('research_study_papers').delete().eq('study_id', selId).gte('step', n).eq('overridden', false).then(function () {
           var action = n === 1 ? 'search_step1' : 'screen_batch';
+          var srcUsed = 'openalex', rateInfo = null;   // captured from the first batch (source_adapter result)
           (function loop(offset) {
             if (!alive.current || stop.current) { setRunning(false); setProg(null); loadStudy(selId); return; }
             callStudy({ action: action, study_id: selId, step: n, offset: offset }).then(function (d) {
               if (!d || d.error) { setRunning(false); setProg(null); setErr((d && d.error) || 'The step failed.'); loadStudy(selId); return; }
+              if (offset === 0) { srcUsed = d.source || 'openalex'; rateInfo = d.elicit_rate || null; }
               setProg({ done: d.next_offset, total: d.total_estimate || d.next_offset, counts: d.counts });
               setTitles(function (t) { var n2 = Object.assign({}, t); (d.results || []).forEach(function (x) { if (x.title) n2[x.source_id] = x.title; }); return n2; });
               loadStudy(selId);
               if (!d.done && alive.current && !stop.current) loop(d.next_offset);
               else { setRunning(false); setProg(null); loadStudy(selId); props.onChanged();
-                if (n === 1 && !(d.total_estimate || d.new_sources || d.fetched)) setErr('0 results on OpenAlex — try broader/different keywords, or looser filters (e.g. clear “From year” or “Journals only”), then run again.');
+                if (n === 1 && srcUsed === 'elicit') setErr('✓ Searched via Elicit (' + ((cfg.source_adapter === 'elicit_keyword') ? 'keyword' : 'semantic') + ').' + (rateInfo && rateInfo.remaining != null ? ' Elicit budget: ' + rateInfo.remaining + ' searches left today.' : ''));
+                else if (n === 1 && String(cfg.source_adapter || '').indexOf('elicit') === 0) setErr('ℹ️ Elicit was unavailable (rate limit, quota, plan, or not enabled for you) — searched via OpenAlex instead.');
+                else if (n === 1 && !(d.total_estimate || d.new_sources || d.fetched)) setErr('0 results on OpenAlex — try broader/different keywords, or looser filters (e.g. clear “From year” or “Journals only”), then run again.');
                 else if (n === 1 && d.relaxed) setErr('ℹ️ The keywords/filters you gave were too narrow — I relaxed them automatically (e.g. searched without filters) to find papers. You can refine the keywords/filters and run again.'); }
             });
           })(0);
@@ -1571,6 +1575,12 @@
           h('div', { style: { flex: 1, minWidth: 220 } }, h('div', { className: 'field-label' }, '✓ Inclusion criteria'), h(CritEditor, { items: cfg.include || [], onChange: function (a) { up('include', a); }, disabled: !props.canEdit, accent: '#16a34a', placeholder: 'e.g. has a public github repo or dataset', empty: 'No inclusion criteria yet.' })),
           h('div', { style: { flex: 1, minWidth: 220 } }, h('div', { className: 'field-label' }, '✕ Exclusion criteria'), h(CritEditor, { items: cfg.exclude || [], onChange: function (a) { up('exclude', a); }, disabled: !props.canEdit, accent: '#dc2626', placeholder: 'e.g. no quantitative evaluation', empty: 'No exclusion criteria yet.' }))),
         curStep === 1 ? h('div', { className: 'lfilters', style: { marginTop: 8 } },
+          // search source — Elicit options appear only when the user is entitled (elicit_search); server enforces + falls back to OpenAlex
+          h('select', { className: 'num', style: { width: 'auto', minWidth: 148 }, disabled: !props.canEdit, value: cfg.source_adapter || 'openalex', onChange: function (e) { up('source_adapter', e.target.value); }, title: 'Search source' },
+            h('option', { value: 'openalex' }, 'Source: OpenAlex'),
+            (window.PREnt && window.PREnt.loaded() && window.PREnt.can('elicit_search')) ? h('option', { value: 'elicit' }, 'Source: Elicit (semantic)') : null,
+            (window.PREnt && window.PREnt.loaded() && window.PREnt.can('elicit_search')) ? h('option', { value: 'elicit_keyword' }, 'Source: Elicit (keyword)') : null),
+          (String(cfg.source_adapter || '').indexOf('elicit') === 0) ? h('button', { className: 'lchip' + (cfg.corpus === 'pubmed' ? ' on' : ''), disabled: !props.canEdit, title: 'Restrict Elicit search to PubMed', onClick: function () { up('corpus', cfg.corpus === 'pubmed' ? 'elicit' : 'pubmed'); } }, 'PubMed only') : null,
           h('input', { className: 'num', type: 'number', disabled: !props.canEdit, placeholder: 'From year', value: (cfg.filters || {}).fromYear || '', onChange: function (e) { upFilter('fromYear', e.target.value); } }),
           h('input', { className: 'num', type: 'number', disabled: !props.canEdit, placeholder: 'Min. cites', value: (cfg.filters || {}).minCites || '', onChange: function (e) { upFilter('minCites', e.target.value); } }),
           h('button', { className: 'lchip' + ((cfg.filters || {}).oa ? ' on' : ''), disabled: !props.canEdit, onClick: function () { upFilter('oa', !(cfg.filters || {}).oa); } }, 'Open access only'),
