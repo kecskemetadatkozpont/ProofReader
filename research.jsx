@@ -1427,10 +1427,17 @@
     var buS = useState(false), busy = buS[0], setBusy = buS[1];
     var erS = useState(''), err = erS[0], setErr = erS[1];
     var opS = useState(null), openR = opS[0], setOpenR = opS[1];
+    var caS = useState(null), cands = caS[0], setCands = caS[1];   // SR-question candidates generated from Ideas
+    var gnS = useState(false), gen = gnS[0], setGen = gnS[1];
     var alive = useRef(true);
     function upf(k, v) { setF(function (prev) { var o = Object.assign({}, prev); o[k] = v; return o; }); }
     function load() { callElicit({ action: 'sr.list' }).then(function (d) { if (alive.current) setJobs((d && d.jobs) || []); }); }
-    useEffect(function () { alive.current = true; if (canUse) load(); return function () { alive.current = false; }; }, [canUse]);
+    function loadCands() { sb.from('research_sr_candidates').select('*').eq('project_id', props.projectId).eq('dismissed', false).order('created_at', { ascending: true }).then(function (r) { if (alive.current) setCands((r && r.data) || []); }); }
+    function generate() { setGen(true); setErr(''); callStudy({ action: 'sr_suggest', project_id: props.projectId }).then(function (d) { if (!alive.current) return; setGen(false); if (d && d.error) { setErr('Generate: ' + d.error); return; } loadCands(); if (d && d.created === 0) setErr('No Ideas yet — add Ideas in the Idea stage first, then generate.'); }); }
+    function picoText(p) { if (!p) return ''; return [['P', p.population], ['I', p.intervention], ['C', p.comparison], ['O', p.outcome]].filter(function (x) { return x[1]; }).map(function (x) { return x[0] + ': ' + x[1]; }).join('\n'); }
+    function startFromCand(c) { setF({ q: c.question || '', protocol: picoText(c.pico), abs: c.abstract_criteria || [], ft: [], ex: c.extraction_questions || [], gen: true }); setOpenForm(true); setErr(''); }
+    function dismissCand(c) { setCands(function (l) { return (l || []).filter(function (x) { return x.id !== c.id; }); }); sb.from('research_sr_candidates').update({ dismissed: true }).eq('id', c.id); }
+    useEffect(function () { alive.current = true; if (canUse) { load(); loadCands(); } return function () { alive.current = false; }; }, [canUse]);
     useEffect(function () {
       if (!jobs || !jobs.length) return;
       var running = jobs.filter(function (j) { return j.status !== 'completed' && j.status !== 'failed'; });
@@ -1487,13 +1494,38 @@
         exps.length ? h('div', { style: { display: 'flex', gap: 7, marginTop: 6, flexWrap: 'wrap' } }, exps) : null
       );
     }
+    function candCard(c) {
+      var pico = c.pico || {};
+      var hasPico = pico.population || pico.intervention || pico.comparison || pico.outcome;
+      return h('div', { key: c.id, style: { border: '1px solid var(--line)', borderLeft: '3px solid var(--accent, #4f46e5)', borderRadius: 11, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 9 } },
+        h('div', { style: { fontSize: 14, fontWeight: 650, lineHeight: 1.35 } }, c.question),
+        hasPico ? h('div', { style: { display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '2px 8px', fontSize: 11.5, background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 8, padding: '7px 9px' } },
+          h('b', { style: { color: 'var(--accent)' } }, 'P'), h('span', null, pico.population || '—'),
+          h('b', { style: { color: 'var(--accent)' } }, 'I'), h('span', null, pico.intervention || '—'),
+          h('b', { style: { color: 'var(--accent)' } }, 'C'), h('span', null, pico.comparison || '—'),
+          h('b', { style: { color: 'var(--accent)' } }, 'O'), h('span', null, pico.outcome || '—')) : null,
+        (c.abstract_criteria && c.abstract_criteria.length) ? h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 5 } }, c.abstract_criteria.slice(0, 3).map(function (x, i) { return h('span', { key: i, style: { fontSize: 10.5, fontWeight: 600, padding: '2px 8px', borderRadius: 999, background: 'var(--ok-bg, #e7f6ee)', color: 'var(--ok, #15803d)' } }, '✓ ' + String(x).slice(0, 44)); })) : null,
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 12, fontSize: 11, color: 'var(--muted)' } },
+          (c.extraction_questions && c.extraction_questions.length) ? h('span', null, '📋 ' + c.extraction_questions.length + ' extraction') : null,
+          c.study_type ? h('span', { style: { fontFamily: 'monospace' } }, c.study_type) : null),
+        h('div', { style: { display: 'flex', gap: 7, marginTop: 2 } },
+          h('button', { className: 'btn pri', style: { flex: 1, justifyContent: 'center', padding: '6px 10px', fontSize: 12 }, disabled: !props.canEdit, onClick: function () { startFromCand(c); } }, '🔬 Start review'),
+          h('button', { className: 'btn', style: { padding: '6px 10px', fontSize: 12 }, disabled: !props.canEdit, title: 'Dismiss', onClick: function () { dismissCand(c); } }, '×'))
+      );
+    }
     if (!canUse) return null;
     return h('div', { className: 'panel', style: { marginTop: 14 } },
-      h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
-        h('h3', { style: { margin: 0, flex: 1 } }, '🔬 Systematic review ', h('span', { style: { fontSize: 11.5, color: 'var(--faint)', fontWeight: 400 } }, '· PRISMA pipeline (Elicit)')),
-        props.canEdit ? h('button', { className: 'btn pri', style: { padding: '5px 11px', fontSize: 12.5 }, onClick: function () { setOpenForm(!openForm); } }, openForm ? 'Cancel' : '+ New review') : null),
+      h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
+        h('h3', { style: { margin: 0, flex: 1 } }, '🔬 Systematic Review Studio ', h('span', { style: { fontSize: 11.5, color: 'var(--faint)', fontWeight: 400 } }, '· from your Ideas → Elicit PRISMA')),
+        props.canEdit ? h('button', { className: 'btn pri', style: { padding: '5px 11px', fontSize: 12.5 }, disabled: gen, onClick: generate }, gen ? '✨ Generating…' : '✨ Generate from Ideas') : null,
+        props.canEdit ? h('button', { className: 'btn', style: { padding: '5px 11px', fontSize: 12.5 }, onClick: function () { if (openForm) { setOpenForm(false); } else { setF({ q: '', protocol: '', abs: [], ft: [], ex: [], gen: true }); setOpenForm(true); } } }, openForm ? 'Cancel' : '+ Manual review') : null),
       err ? h('div', { style: { fontSize: 12.5, color: /^✓/.test(err) ? 'var(--ok, #15803d)' : 'var(--danger, #b42318)', margin: '6px 0' } }, err) : null,
-      openForm ? h('div', { style: { marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 } },
+      // review-question cards from Ideas
+      (cands && cands.length) ? h('div', { style: { marginTop: 4 } },
+        h('div', { className: 'field-label' }, 'Review questions from your Ideas'),
+        h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12, marginTop: 6 } }, cands.map(candCard))
+      ) : (cands !== null && !openForm) ? h('div', { style: { fontSize: 12.5, color: 'var(--muted)', margin: '6px 0' } }, 'No review questions yet — click “✨ Generate from Ideas” to draft systematic-review-ready questions (with PICO + criteria) from your project Ideas, then start one with a click.') : null,
+      openForm ? h('div', { style: { marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8, borderTop: '1px solid var(--line)', paddingTop: 12 } },
         h('div', null, h('div', { className: 'field-label' }, 'Research question *'), h('input', { className: 'field', style: { width: '100%', boxSizing: 'border-box' }, value: f.q, placeholder: 'The question the review investigates…', onChange: function (e) { upf('q', e.target.value); } })),
         h('div', null, h('div', { className: 'field-label' }, 'Protocol / PICO (optional)'), h('textarea', { className: 'field', rows: 2, style: { width: '100%', boxSizing: 'border-box' }, value: f.protocol, placeholder: 'Population, Intervention, Comparison, Outcome; inclusion/exclusion rationale…', onChange: function (e) { upf('protocol', e.target.value); } })),
         h('div', null, h('div', { className: 'field-label' }, 'Abstract screening criteria (optional — Elicit adds more)'), h(CritEditor, { items: f.abs, onChange: function (a) { upf('abs', a); }, placeholder: 'e.g. reports a quantitative outcome', empty: 'Auto-generated if left empty.' })),
@@ -1502,9 +1534,10 @@
         h('label', { style: { display: 'flex', gap: 7, alignItems: 'center', fontSize: 12.5 } }, h('input', { type: 'checkbox', checked: f.gen, onChange: function (e) { upf('gen', e.target.checked); } }), 'Generate a full report at the end'),
         h('div', { style: { display: 'flex', justifyContent: 'flex-end' } }, h('button', { className: 'btn pri', disabled: !props.canEdit || busy || !f.q.trim(), onClick: create }, busy ? 'Starting…' : 'Start review'))
       ) : null,
-      jobs === null ? h('div', { style: { fontSize: 13, color: 'var(--muted)', padding: '8px 0' } }, 'Loading…')
-        : jobs.length === 0 && !openForm ? h('div', { style: { fontSize: 13, color: 'var(--muted)', padding: '8px 0' } }, 'No reviews yet. A PRISMA review runs the full pipeline (search → screen → extract → report) and can take a while.')
-          : h('div', { style: { display: 'flex', flexDirection: 'column', gap: 8, marginTop: 10 } }, (jobs || []).map(card)),
+      (jobs && jobs.length) ? h('div', { style: { marginTop: 14 } },
+        h('div', { className: 'field-label' }, 'Reviews (' + jobs.length + ')'),
+        h('div', { style: { display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 } }, jobs.map(card))
+      ) : null,
       openR ? h('div', { className: 'scrim', onClick: function () { setOpenR(null); } }, h('div', { className: 'modal', style: { width: 780 }, onClick: function (e) { e.stopPropagation(); } },
         h('div', { className: 'modal-h' }, h('h3', { style: { margin: 0, flex: 1 } }, openR.result_title || 'Systematic review'), h('button', { className: 'icon-x', 'aria-label': 'Close', onClick: function () { setOpenR(null); } }, '✕')),
         (window.marked && window.DOMPurify)
@@ -2735,7 +2768,15 @@
     // (the visible sub-tab row is a separate array below; Data/Compute are intentionally not surfaced)
     var content;
     if (tab === 'ideas') content = h('div', null, h(ChatPanel, { projectId: p.id, supervised: !!p.student_id, canEdit: props.canEdit, authorId: props.authorId, fileOwnerId: props.fileOwnerId, sources: props.sources, onChanged: props.onChanged }), h(IdeasPanel, { projectId: p.id, ideas: props.ideas, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, onStartStudyMulti: function (ideas) { setAutoStudy(ideas || []); setTab('study'); }, onGoStudy: function () { setTab('study'); } }));
-    else if (tab === 'literature') content = h(React.Fragment, null, h(LiteraturePanel, { projectId: p.id, sources: props.sources, studies: props.studies, canEdit: props.canEdit, myEmail: props.myEmail, onChanged: props.onChanged }), h(ElicitTrials, { projectId: p.id, canEdit: props.canEdit }), h(ElicitReports, { projectId: p.id, project: p, canEdit: props.canEdit }), h(ElicitSysReview, { projectId: p.id, project: p, canEdit: props.canEdit }));
+    else if (tab === 'literature') content = h(React.Fragment, null,
+      h(ElicitSysReview, { projectId: p.id, project: p, canEdit: props.canEdit }),   // SR Studio (primary Elicit flow)
+      h(ElicitReports, { projectId: p.id, project: p, canEdit: props.canEdit }),
+      h(ElicitTrials, { projectId: p.id, canEdit: props.canEdit }),
+      // OpenAlex keyword funnel — paused; collapsed so existing keyword studies stay reachable
+      h('details', { className: 'panel', style: { marginTop: 14, padding: '12px 16px' } },
+        h('summary', { style: { cursor: 'pointer', fontSize: 13, fontWeight: 600, color: 'var(--muted)' } }, '⏸ Keyword studies (OpenAlex) — paused · click to open'),
+        h('div', { style: { marginTop: 12 } }, h(LiteraturePanel, { projectId: p.id, sources: props.sources, studies: props.studies, canEdit: props.canEdit, myEmail: props.myEmail, onChanged: props.onChanged }))
+      ));
     else if (tab === 'study') content = null;   // #9: rendered persistently below so a running study survives tab switches
     else if (tab === 'protocol') content = h(ProtocolPanel, { projectId: p.id, ideas: props.ideas, sources: props.sources, studies: props.studies, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
     else if (tab === 'data') content = h(DataPanel, { projectId: p.id, datasets: props.datasets, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });

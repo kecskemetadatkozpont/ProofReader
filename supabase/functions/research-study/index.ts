@@ -297,6 +297,24 @@ Return ONLY JSON, no prose. EVERY step must have non-empty include AND exclude a
   try { return JSON.parse(m[0]); } catch { return {}; }
 }
 
+// Turn each project Idea into ONE systematic-review-ready question (+ PICO, criteria, extraction). One Claude call.
+async function planSR(ideas: any[], proj: any, model: string): Promise<any[]> {
+  if (!ideas.length) return [];
+  const list = ideas.map((i, k) => `[${k}] ${String(i.question || '').slice(0, 600)}${i.hypothesis ? ' | hypothesis: ' + String(i.hypothesis).slice(0, 300) : ''}`).join('\n');
+  const prompt = `You are preparing systematic reviews. For EACH research idea below, produce ONE systematic-review-ready research question with a PICO frame, abstract-screening inclusion criteria, and data-extraction questions. Tailor to the project field.
+
+Project: "${(proj && proj.title) || ''}"${(proj && proj.field) ? ' — field: ' + proj.field : ''}.
+Ideas (index in brackets):
+${list}
+
+Return ONLY a JSON array — one object per idea, and include the bracket index as "idx":
+[{ "idx": <the [index]>, "question": "a well-formed systematic-review question (<=250 chars)", "pico": {"population":"...","intervention":"...","comparison":"...","outcome":"..."}, "abstract_criteria": ["3-5 short inclusion criteria"], "extraction_questions": ["3-5 short data-extraction questions"], "study_type": "interventional|observational|qualitative|mixed" }]`;
+  let out = '';
+  try { out = await callClaude(model, '', prompt, false, 3500); } catch { return []; }
+  const m = out.match(/\[[\s\S]*\]/); if (!m) return [];
+  try { const arr = JSON.parse(m[0]); return Array.isArray(arr) ? arr : []; } catch { return []; }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
   try {
@@ -305,6 +323,37 @@ Deno.serve(async (req) => {
     const sb = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!, { global: { headers: { Authorization: auth } } });
     const body = await req.json().catch(() => ({}));
     const action = String(body.action || '');
+
+    // ---- sr_suggest: project Ideas → SR-ready question candidates (project-level; no study_id) ----
+    if (action === 'sr_suggest') {
+      const project_id = String(body.project_id || '');
+      if (!project_id) return json({ error: 'project_id required' }, 400);
+      const { data: proj } = await sb.from('research_projects').select('id,title,field,goal').eq('id', project_id).maybeSingle();
+      if (!proj) return json({ error: 'project not found or no access' }, 404);
+      const gate0 = await assertEntitled(sb, 'literature_study'); if (gate0) return gate0;
+      const { data: ures0 } = await sb.auth.getUser();
+      const uid0 = (ures0 && ures0.user && ures0.user.id) || '';
+      const model0 = await resolveModel(sb);
+      const { data: ideas } = await sb.from('research_ideas').select('id,question,hypothesis').eq('project_id', project_id).neq('status', 'rejected').order('created_at', { ascending: true }).limit(12);
+      if (!ideas || !ideas.length) return json({ ok: true, created: 0, note: 'no ideas' });
+      const cands = await planSR(ideas, proj, model0);
+      let created = 0;
+      for (const c of cands) {
+        const idx = (typeof c.idx === 'number') ? c.idx : -1;
+        const idea = (idx >= 0 && idx < ideas.length) ? ideas[idx] : null;
+        if (!idea || !c.question) continue;
+        const row = {
+          project_id, idea_id: idea.id, question: String(c.question).slice(0, 500), pico: c.pico || null,
+          abstract_criteria: Array.isArray(c.abstract_criteria) ? c.abstract_criteria.slice(0, 8).map((x: any) => String(x)) : null,
+          extraction_questions: Array.isArray(c.extraction_questions) ? c.extraction_questions.slice(0, 8).map((x: any) => String(x)) : null,
+          study_type: c.study_type ? String(c.study_type).slice(0, 40) : null, dismissed: false, created_by: uid0, updated_at: new Date().toISOString(),
+        };
+        const { error } = await sb.from('research_sr_candidates').upsert(row, { onConflict: 'project_id,idea_id' });
+        if (!error) created++;
+      }
+      return json({ ok: true, created });
+    }
+
     const study_id = String(body.study_id || '');
     if (!study_id) return json({ error: 'study_id required' }, 400);
 
