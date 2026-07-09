@@ -182,10 +182,18 @@ function elicitFilters(config: any) {
   if (config.maxQuartile) out.maxQuartile = parseInt(config.maxQuartile, 10);
   return out;
 }
-async function elicitSearch(question: string, config: any, maxResults: number, mode: string) {
+async function elicitSearch(question: string, config: any, maxResults: number, mode: string, semantic: string) {
   if (!ELICIT_KEY) return { papers: [] as any[], rate: null as any, error: 'no_key' };
   const kws = (config.keywords || []).filter(Boolean);
-  const query = (kws.length ? kws.join(mode === 'keyword' ? ' OR ' : ' ') : question) || question || 'research';
+  // KEYWORD mode: OR-join the keyword bag (unchanged). SEMANTIC mode: prefer the natural-language
+  // query (semantic_query → study.question) — a well-formed question embeds far better than a keyword bag.
+  let query: string;
+  if (mode === 'keyword') {
+    query = (kws.length ? kws.join(' OR ') : (semantic || question)) || question || 'research';
+  } else {
+    query = ((semantic || question || '').trim()) || (kws.length ? kws.join(' ') : '') || 'research';
+  }
+  query = query.slice(0, 350);   // Elicit query cap (unconditional)
   const b: any = { query, searchMode: mode === 'keyword' ? 'keyword' : 'semantic', maxResults: Math.min(300, Math.max(1, maxResults)), corpus: config.corpus === 'pubmed' ? 'pubmed' : 'elicit' };
   // filters and keyword mode are mutually exclusive on Elicit → only attach filters in semantic mode
   if (b.searchMode === 'semantic') { const fl = elicitFilters(config); if (Object.keys(fl).length) b.filters = fl; }
@@ -274,6 +282,7 @@ ${study.question || study.title || ''}
 
 Return ONLY JSON, no prose. EVERY step must have non-empty include AND exclude arrays (short, concrete, one line each):
 {
+  "semantic_query": "ONE well-formed natural-language research question (<=300 chars) capturing the study intent — a full sentence a semantic search engine can embed, NOT a keyword list",
   "step1": { "keywords": ["6-10 precise OpenAlex search terms/phrases"], "filters": { "fromYear": <int or null>, "oa": <bool>, "journals": <bool> }, "include": ["2-4 quick title/metadata-level inclusion criteria for fast screening"], "exclude": ["2-4 quick exclusion criteria (off-topic, wrong venue/type, etc.)"] },
   "step2": { "include": ["3-5 abstract-level inclusion criteria, one short line each"], "exclude": ["2-4 exclusion criteria"] },
   "step3": { "include": ["3-5 full-text inclusion criteria"], "exclude": ["2-4 exclusion criteria"], "signals": ["has_github","has_dataset"] }
@@ -338,6 +347,14 @@ Deno.serve(async (req) => {
         if (Array.isArray(sp.signals)) next.signals = sp.signals.map((k: any) => String(k));
         await sb.from('research_study_steps').update({ config: next }).eq('study_id', study_id).eq('step', n);
       }
+      // persist the natural-language semantic query into step-1 config — OUTSIDE the loop, so a good
+      // semantic_query survives even if the model returned a malformed step1 (the loop would `continue` past it).
+      if (typeof plan.semantic_query === 'string' && plan.semantic_query.trim()) {
+        const { data: s1 } = await sb.from('research_study_steps').select('config').eq('study_id', study_id).eq('step', 1).maybeSingle();
+        const c1: any = (s1 && s1.config) || {};
+        c1.semantic_query = plan.semantic_query.trim().slice(0, 350);
+        await sb.from('research_study_steps').update({ config: c1 }).eq('study_id', study_id).eq('step', 1);
+      }
       return json({ ok: true });
     }
 
@@ -360,6 +377,8 @@ Deno.serve(async (req) => {
       // ignoreDuplicates preserves any human-overridden/already-screened rows the run's delete kept).
       if (offset === 0) {
         const q = study.question || study.title;
+        // natural-language query for SEMANTIC Elicit search: authored/planned semantic_query, else the study question
+        const semanticQ = (config.semantic_query && String(config.semantic_query).trim()) || study.question || study.title || '';
         let u: any = null;
         // Elicit adapter (config.source_adapter = 'elicit' | 'elicit_keyword') — gated + budgeted + cached,
         // with a graceful OpenAlex fallback on any denial / rate-limit / quota / outage.
@@ -369,17 +388,18 @@ Deno.serve(async (req) => {
           const cap = parseInt(Deno.env.get('ELICIT_SEARCH_DAILY') || '50', 10);
           const { data: over } = await sb.rpc('feature_over_budget', { p_key: 'elicit_search', max_calls: cap });
           if (entOk === true && over !== true) {
-            const cacheKey = hashStr(JSON.stringify({ q, mode, corpus: config.corpus || 'elicit', f: config.filters || {}, mq: config.maxQuartile || '', kw: config.keywords || [], n: maxResults }));
+            // sq only affects semantic results → include it in the key ONLY in semantic mode (keyword mode is unaffected)
+            const cacheKey = hashStr(JSON.stringify({ q, sq: mode === 'semantic' ? semanticQ : '', mode, corpus: config.corpus || 'elicit', f: config.filters || {}, mq: config.maxQuartile || '', kw: config.keywords || [], n: maxResults }));
             const { data: cached } = await sb.from('elicit_search_cache').select('results,ratelimit,fetched_at').eq('query_hash', cacheKey).maybeSingle();
             if (cached && cached.results && (Date.now() - new Date(cached.fetched_at).getTime() < 24 * 3600 * 1000)) {
               u = { papers: cached.results, relaxed: false }; usedSource = 'elicit'; elicitRate = cached.ratelimit || null;   // cache hit → free (no bump)
             } else {
-              const er = await elicitSearch(q, config, maxResults, mode);
+              const er = await elicitSearch(q, config, maxResults, mode, semanticQ);
               elicitRate = er.rate;
               if (!er.error && er.papers.length) {
                 u = { papers: er.papers, relaxed: false }; usedSource = 'elicit';
                 await sb.rpc('feature_usage_bump', { p_key: 'elicit_search' });
-                await sb.from('elicit_search_cache').upsert({ query_hash: cacheKey, query: String(q).slice(0, 300), corpus: config.corpus || 'elicit', search_mode: mode, filters: config.filters || {}, results: er.papers, ratelimit: er.rate, fetched_at: new Date().toISOString() });
+                await sb.from('elicit_search_cache').upsert({ query_hash: cacheKey, query: String((mode === 'semantic' ? semanticQ : '') || q).slice(0, 300), corpus: config.corpus || 'elicit', search_mode: mode, filters: config.filters || {}, results: er.papers, ratelimit: er.rate, fetched_at: new Date().toISOString() });
               }
             }
           }

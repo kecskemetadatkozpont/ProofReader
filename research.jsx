@@ -1321,8 +1321,10 @@
     );
   }
   function lsDefaultConfig(step, project, idea) {
-    if (step === 1) return { keywords: (project && project.keywords) || [], include: [], exclude: [], filters: { fromYear: '', minCites: '', oa: false, journals: true }, signals: ['has_github', 'has_dataset'], source_adapter: 'openalex', max_results: 150 };
-    return { keywords: [], include: [], exclude: [], filters: {}, signals: ['has_github', 'has_dataset'] };
+    if (step !== 1) return { keywords: [], include: [], exclude: [], filters: {}, signals: ['has_github', 'has_dataset'] };
+    // seed a natural-language semantic query from the idea (question + hypothesis) → project goal/title
+    var sq = (idea && String((idea.question || '') + (idea.hypothesis ? '\n\nHypothesis: ' + idea.hypothesis : '')).trim()) || (project && (project.goal || project.title)) || '';
+    return { keywords: (project && project.keywords) || [], include: [], exclude: [], filters: { fromYear: '', minCites: '', oa: false, journals: true }, signals: ['has_github', 'has_dataset'], source_adapter: 'openalex', max_results: 150, semantic_query: String(sq).slice(0, 350) };
   }
   function callStudy(body) {
     var CFG = window.PR_CONFIG || {};
@@ -1816,6 +1818,12 @@
           h('input', { className: 'num', type: 'number', disabled: !props.canEdit, placeholder: 'Min. cites', value: (cfg.filters || {}).minCites || '', onChange: function (e) { upFilter('minCites', e.target.value); } }),
           h('button', { className: 'lchip' + ((cfg.filters || {}).oa ? ' on' : ''), disabled: !props.canEdit, onClick: function () { upFilter('oa', !(cfg.filters || {}).oa); } }, 'Open access only'),
           h('button', { className: 'lchip' + ((cfg.filters || {}).journals ? ' on' : ''), disabled: !props.canEdit, onClick: function () { upFilter('journals', !(cfg.filters || {}).journals); } }, 'Journals only')
+        ) : null,
+        // natural-language query for Elicit SEMANTIC search (not shown for keyword mode — it uses the keyword bag)
+        (curStep === 1 && cfg.source_adapter === 'elicit') ? h('div', { style: { marginTop: 8 } },
+          h('div', { className: 'field-label' }, 'Search query / description (semantic)'),
+          h('textarea', { className: 'field', style: { width: '100%', minHeight: 60, resize: 'vertical', boxSizing: 'border-box' }, disabled: !props.canEdit, maxLength: 350, value: cfg.semantic_query || '', placeholder: (sel && sel.question) ? ('Defaults to the study question: ' + String(sel.question).slice(0, 110)) : 'A full-sentence research question for semantic search…', onChange: function (e) { up('semantic_query', e.target.value); } }),
+          h('div', { style: { fontSize: 11, color: 'var(--muted)', marginTop: 3 } }, 'Elicit (semantic) searches on this natural-language question (max 350 chars). The keywords above still drive OpenAlex; “✨ AI fill-in” regenerates this.')
         ) : null,
         curStep > 1 && incCount(curStep - 1) === 0 ? h('div', { style: { fontSize: 12.5, color: 'var(--warn)', marginTop: 8 } }, 'There is no “include” paper in the previous step yet — run that first.') : null,
         curStep === 3 ? h('div', { style: { fontSize: 12, color: 'var(--muted)', marginTop: 8, lineHeight: 1.45, background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 8, padding: '7px 10px' } }, '📄 Full-text screening runs on step 2’s “include” papers: it downloads the available open access (OA) PDFs and screens on the full text; where no PDF is downloadable, it falls back to the abstract. This is therefore slower (3–4 papers per batch) — in the table below you can see live which paper got “📄 full text” and which got “📝 abstract only”, and the download ratio in the header.') : null,
