@@ -15,7 +15,7 @@
     if (inflight) return inflight;
     if (!sb || !uid) return Promise.resolve(null);
     inflight = Promise.all([
-      sb.from('profiles').select('status,features,model_allowlist,ai_model,can_workflows,can_figures').eq('id', uid).maybeSingle(),
+      sb.from('profiles').select('role,status,features,model_allowlist,ai_model,can_workflows,can_figures').eq('id', uid).maybeSingle(),
       sb.from('feature_catalog').select('key,default_on,enforced')
     ]).then(function (res) {
       var prof = (res[0] && res[0].data) || {};
@@ -34,6 +34,7 @@
     // cosmetic gate — fail-open when unloaded (the server backstops enforced features)
     can: function (key) {
       if (!cache) return true;
+      if (cache.prof.role === 'admin') return true;   // admins have every feature (matches is_feature_enabled bypass)
       if (key === 'session_workflow_mode') return !!cache.prof.can_workflows;
       if (key === 'paper_figure') return !!cache.prof.can_figures;
       var f = cache.prof.features || {};
