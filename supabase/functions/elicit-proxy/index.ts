@@ -40,7 +40,7 @@ async function elicitCall(path: string, method: string, body?: any) {
 }
 // map an Elicit GetReportResponse onto our elicit_jobs columns
 function reportPatch(g: any): any {
-  const p: any = { status: g.status, stage: g.executionStage ?? null, url: g.url || null, is_public: !!g.isPublic, updated_at: new Date().toISOString() };
+  const p: any = { status: g.status, stage: g.executionStage ?? null, url: g.url || null, is_public: false, updated_at: new Date().toISOString() };
   if (g.status === 'completed' && g.result) {
     p.result_title = g.result.title || null; p.result_summary = g.result.summary || null;
     p.result_body = g.result.reportBody || null; p.result_abstract = g.result.abstract || null;
@@ -49,6 +49,26 @@ function reportPatch(g: any): any {
   if (g.status === 'failed') p.error = g.error || { message: 'Report failed' };
   return p;
 }
+// map an Elicit GetSystematicReviewResponse onto our elicit_jobs columns (staged PRISMA data + final report)
+function srPatch(g: any): any {
+  const p: any = { status: g.status, stage: g.executionStage ?? null, url: g.url || null, is_public: false, updated_at: new Date().toISOString() };
+  if (g.data) {
+    p.stages = {
+      search: g.data.search || null, screen: g.data.screen || null,
+      fulltext: g.data.fulltext || null, extract: g.data.extract || null,
+    };
+    const rep = g.data.report;
+    if (rep && rep.result) {
+      p.result_title = rep.result.title || null; p.result_summary = rep.result.summary || null;
+      p.result_body = rep.result.reportBody || null; p.result_abstract = rep.result.abstract || null;
+      p.pdf_url = rep.pdf || null; p.docx_url = rep.docx || null;
+      p.exports = { pdf: rep.pdf || null, docx: rep.docx || null, txt: rep.txt || null, bib: rep.bib || null, ris: rep.ris || null };
+    }
+  }
+  if (g.status === 'failed') p.error = g.error || { message: 'Systematic review failed' };
+  return p;
+}
+const GET_PATH: Record<string, string> = { report: '/api/v1/reports/', sysreview: '/api/v1/systematic-reviews/' };
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
@@ -64,13 +84,14 @@ Deno.serve(async (req) => {
       if (!CRON_SECRET || req.headers.get('x-elicit-secret') !== CRON_SECRET) return json({ error: 'forbidden' }, 403);
       if (!ELICIT_KEY) return json({ ok: true, refreshed: 0, note: 'no key' });
       const { data: jobs } = await svc.from('elicit_jobs').select('id,elicit_id,kind')
-        .eq('kind', 'report').in('status', ['processing', 'unknown']).order('updated_at', { ascending: true }).limit(20);
+        .in('kind', ['report', 'sysreview']).in('status', ['processing', 'unknown']).order('updated_at', { ascending: true }).limit(20);
       let refreshed = 0, done = 0;
       for (const j of jobs || []) {
-        if (!j.elicit_id) continue;
-        const g = await elicitCall('/api/v1/reports/' + encodeURIComponent(j.elicit_id) + '?include=reportBody', 'GET');
-        if (!g.ok || !g.body?.reportId) continue;
-        const patch = reportPatch(g.body);
+        if (!j.elicit_id || !GET_PATH[j.kind]) continue;
+        const g = await elicitCall(GET_PATH[j.kind] + encodeURIComponent(j.elicit_id) + '?include=reportBody', 'GET');
+        const idField = j.kind === 'sysreview' ? g.body?.reviewId : g.body?.reportId;
+        if (!g.ok || !idField) continue;
+        const patch = j.kind === 'sysreview' ? srPatch(g.body) : reportPatch(g.body);
         await svc.from('elicit_jobs').update(patch).eq('id', j.id);
         refreshed++; if (patch.status === 'completed') done++;
       }
@@ -87,7 +108,7 @@ Deno.serve(async (req) => {
     // ---- report.list (own jobs only; never the Elicit list endpoint) ----
     if (action === 'report.list') {
       const { data: rows } = await sb.from('elicit_jobs')
-        .select('id,kind,status,stage,research_question,result_title,result_summary,url,is_public,pdf_url,docx_url,error,created_at,updated_at,project_id')
+        .select('id,kind,status,stage,research_question,result_title,result_summary,result_body,result_abstract,url,is_public,pdf_url,docx_url,error,created_at,updated_at,project_id')
         .eq('user_id', uid).eq('kind', 'report').order('created_at', { ascending: false }).limit(50);
       return json({ ok: true, jobs: rows || [] });
     }
@@ -100,11 +121,6 @@ Deno.serve(async (req) => {
       const { data: over } = await sb.rpc('feature_over_budget', { p_key: 'elicit_reports', max_calls: REPORTS_DAILY });
       if (over === true) return json({ error: 'Daily Elicit report limit reached — try again tomorrow.' }, 429);
       const qh = hashStr(rq.toLowerCase().replace(/\s+/g, ' '));
-      // idempotency: reuse an in-flight job for the same question
-      const { data: dup } = await sb.from('elicit_jobs').select('id,elicit_id,status,stage,url')
-        .eq('user_id', uid).eq('kind', 'report').eq('q_hash', qh).not('status', 'in', '(completed,failed)').limit(1);
-      if (dup && dup.length) return json({ ok: true, job: dup[0], deduped: true });
-      // create on Elicit (isPublic ALWAYS false)
       const reqBody = {
         researchQuestion: rq.slice(0, 2000),
         title: body.title ? String(body.title).slice(0, 200) : undefined,
@@ -112,18 +128,29 @@ Deno.serve(async (req) => {
         maxExtractPapers: clampInt(body.maxExtractPapers, 5, 100, 30),
         isPublic: false,
       };
+      // CLAIM the slot before the expensive Elicit call — the partial unique index serializes concurrent
+      // creates, so a double-click can't spawn two paid jobs (TOCTOU-safe, unlike a SELECT-then-INSERT dedup).
+      const { data: claim, error: claimErr } = await sb.from('elicit_jobs').insert({
+        user_id: uid, project_id: body.project_id || null, kind: 'report',
+        research_question: rq.slice(0, 2000), q_hash: qh, status: 'processing', is_public: false, request: reqBody,
+      }).select('id').single();
+      if (claimErr) {
+        const { data: dup } = await sb.from('elicit_jobs').select('id,elicit_id,status,stage,url')
+          .eq('user_id', uid).eq('kind', 'report').eq('q_hash', qh).not('status', 'in', '(completed,failed)').limit(1);
+        if (dup && dup.length) return json({ ok: true, job: dup[0], deduped: true });
+        return json({ error: 'Could not create the report.' }, 500);
+      }
       const cr = await elicitCall('/api/v1/reports', 'POST', reqBody);
-      if (cr.status === 402) return json({ error: 'The Elicit account is out of quota — an admin must top it up.' }, 402);
-      if (cr.status === 403) return json({ error: 'The Elicit plan does not include reports.' }, 403);
-      if (cr.status === 429) return json({ error: 'Elicit rate limit hit — try again shortly.' }, 429);
-      if (!cr.ok || !cr.body?.reportId) return json({ error: 'Elicit report creation failed.', detail: cr.body?.error || cr.status }, 502);
+      if (!cr.ok || !cr.body?.reportId) {
+        await sb.from('elicit_jobs').delete().eq('id', claim.id);   // release the claimed slot on failure
+        if (cr.status === 402) return json({ error: 'The Elicit account is out of quota — an admin must top it up.' }, 402);
+        if (cr.status === 403) return json({ error: 'The Elicit plan does not include reports.' }, 403);
+        if (cr.status === 429) return json({ error: 'Elicit rate limit hit — try again shortly.' }, 429);
+        return json({ error: 'Elicit report creation failed.', detail: cr.status }, 502);
+      }
       await sb.rpc('feature_usage_bump', { p_key: 'elicit_reports' });
-      const { data: row, error: insErr } = await sb.from('elicit_jobs').insert({
-        user_id: uid, project_id: body.project_id || null, kind: 'report', elicit_id: cr.body.reportId,
-        research_question: rq.slice(0, 2000), q_hash: qh, status: cr.body.status || 'processing',
-        url: cr.body.url || null, is_public: false, request: reqBody,
-      }).select('id,kind,status,stage,research_question,url,is_public,created_at,updated_at,project_id').single();
-      if (insErr) return json({ ok: true, job: { elicit_id: cr.body.reportId, status: cr.body.status || 'processing', url: cr.body.url }, note: 'created (row insert raced)' });
+      const { data: row } = await sb.from('elicit_jobs').update({ elicit_id: cr.body.reportId, status: cr.body.status || 'processing', url: cr.body.url || null })
+        .eq('id', claim.id).select('id,kind,status,stage,research_question,url,is_public,created_at,updated_at,project_id').single();
       return json({ ok: true, job: row });
     }
 
@@ -139,11 +166,93 @@ Deno.serve(async (req) => {
     }
 
     if (action === 'job.resume') {
+      const gate = await assertEntitled(sb, 'elicit_reports'); if (gate) return gate;   // resume also consumes org quota → gate it
       const { data: row } = await sb.from('elicit_jobs').select('id,elicit_id,status').eq('id', body.job_id).maybeSingle();
       if (!row) return json({ error: 'job not found' }, 404);
       if (row.status !== 'pausedForInsufficientQuota') return json({ error: 'Only a paused (out-of-quota) job can be resumed.' }, 409);
       const rs = await elicitCall('/api/v1/reports/' + encodeURIComponent(row.elicit_id) + '/resume', 'POST');
       if (rs.status === 402) return json({ error: 'Still over quota — resolve the Elicit account quota, then resume.' }, 402);
+      if (rs.status === 403) return json({ error: (rs.body && rs.body.error && rs.body.error.message) || 'Resume blocked (plan limit or max concurrent jobs).' }, 403);
+      if (rs.status === 409) { await sb.from('elicit_jobs').update({ status: 'processing', updated_at: new Date().toISOString() }).eq('id', row.id); return json({ ok: true, status: 'processing', note: 'already running' }); }
+      if (!rs.ok) return json({ error: 'Resume failed.' }, 502);
+      await sb.from('elicit_jobs').update({ status: rs.body.status || 'processing', stage: rs.body.executionStage ?? null, updated_at: new Date().toISOString() }).eq('id', row.id);
+      return json({ ok: true, status: rs.body.status || 'processing' });
+    }
+
+    // ---- systematic reviews (Phase 3) ----
+    if (action === 'sr.list') {
+      const { data: rows } = await sb.from('elicit_jobs')
+        .select('id,kind,status,stage,research_question,result_title,result_summary,result_body,result_abstract,url,is_public,pdf_url,docx_url,exports,stages,error,created_at,updated_at,project_id')
+        .eq('user_id', uid).eq('kind', 'sysreview').order('created_at', { ascending: false }).limit(30);
+      return json({ ok: true, jobs: rows || [] });
+    }
+
+    if (action === 'sr.create') {
+      const gate = await assertEntitled(sb, 'elicit_sysreview'); if (gate) return gate;
+      if (!ELICIT_KEY) return json({ error: 'Elicit is not configured (no API key set on the server).' }, 503);
+      const rq = String(body.researchQuestion || '').trim();
+      if (!rq) return json({ error: 'researchQuestion required' }, 400);
+      const cap = parseInt(Deno.env.get('ELICIT_SYSREVIEW_DAILY') || '1', 10);
+      const { data: over } = await sb.rpc('feature_over_budget', { p_key: 'elicit_sysreview', max_calls: cap });
+      if (over === true) return json({ error: 'Daily systematic-review limit reached — try again tomorrow.' }, 429);
+      const qh = hashStr('sr:' + rq.toLowerCase().replace(/\s+/g, ' '));
+      const strArr = (a: any) => Array.isArray(a) ? a.map((x: any) => String(x || '').slice(0, 400)).filter(Boolean).slice(0, 20) : [];
+      const absC = strArr(body.abstractCriteria), ftC = strArr(body.fulltextCriteria), exQ = strArr(body.extractionQuestions);
+      const srBody: any = {
+        researchQuestion: rq.slice(0, 2000),
+        protocolDetails: body.protocolDetails ? String(body.protocolDetails).slice(0, 4000) : undefined,
+        // user-supplied criteria are authoritative (generate:false); auto-generate only when none given
+        abstractScreening: absC.length ? { criteria: absC, generate: false } : { generate: true },
+        fulltextScreening: ftC.length ? { criteria: ftC, reuseAbstractCriteria: false } : { reuseAbstractCriteria: true },
+        extraction: exQ.length ? { questions: exQ, generate: false } : { generate: true },
+        generateReport: body.generateReport !== false,
+        title: body.title ? String(body.title).slice(0, 200) : undefined,
+        isPublic: false,
+      };
+      // claim-first (TOCTOU-safe, unique index serializes concurrent creates)
+      const { data: claim, error: claimErr } = await sb.from('elicit_jobs').insert({
+        user_id: uid, project_id: body.project_id || null, kind: 'sysreview',
+        research_question: rq.slice(0, 2000), q_hash: qh, status: 'processing', is_public: false, request: srBody,
+      }).select('id').single();
+      if (claimErr) {
+        const { data: dup } = await sb.from('elicit_jobs').select('id,elicit_id,status,stage,url')
+          .eq('user_id', uid).eq('kind', 'sysreview').eq('q_hash', qh).not('status', 'in', '(completed,failed)').limit(1);
+        if (dup && dup.length) return json({ ok: true, job: dup[0], deduped: true });
+        return json({ error: 'Could not create the review.' }, 500);
+      }
+      const cr = await elicitCall('/api/v1/systematic-reviews', 'POST', srBody);
+      if (!cr.ok || !cr.body?.reviewId) {
+        await sb.from('elicit_jobs').delete().eq('id', claim.id);
+        if (cr.status === 402) return json({ error: 'The Elicit account is out of quota — an admin must top it up.' }, 402);
+        if (cr.status === 403) return json({ error: (cr.body && cr.body.error && cr.body.error.message) || 'Systematic reviews unavailable (plan limit or max concurrent reviews reached).' }, 403);
+        if (cr.status === 429) return json({ error: 'Elicit rate limit hit — try again shortly.' }, 429);
+        return json({ error: 'Systematic review creation failed.', detail: cr.status }, 502);
+      }
+      await sb.rpc('feature_usage_bump', { p_key: 'elicit_sysreview' });
+      const { data: row } = await sb.from('elicit_jobs').update({ elicit_id: cr.body.reviewId, status: cr.body.status || 'processing', url: cr.body.url || null })
+        .eq('id', claim.id).select('id,kind,status,stage,research_question,url,is_public,created_at,updated_at,project_id').single();
+      return json({ ok: true, job: row });
+    }
+
+    if (action === 'sr.status') {
+      const { data: row } = await sb.from('elicit_jobs').select('*').eq('id', body.job_id).maybeSingle();
+      if (!row) return json({ error: 'job not found' }, 404);
+      if (TERMINAL.has(row.status) || !row.elicit_id || !ELICIT_KEY) return json({ ok: true, job: row });
+      const g = await elicitCall('/api/v1/systematic-reviews/' + encodeURIComponent(row.elicit_id) + '?include=reportBody', 'GET');
+      if (!g.ok || !g.body?.reviewId) return json({ ok: true, job: row, stale: true });
+      const patch = srPatch(g.body);
+      await sb.from('elicit_jobs').update(patch).eq('id', row.id);
+      return json({ ok: true, job: { ...row, ...patch } });
+    }
+
+    if (action === 'sr.resume') {
+      const gate = await assertEntitled(sb, 'elicit_sysreview'); if (gate) return gate;   // resume also consumes org quota → gate it
+      const { data: row } = await sb.from('elicit_jobs').select('id,elicit_id,status').eq('id', body.job_id).maybeSingle();
+      if (!row) return json({ error: 'job not found' }, 404);
+      if (row.status !== 'pausedForInsufficientQuota') return json({ error: 'Only a paused (out-of-quota) job can be resumed.' }, 409);
+      const rs = await elicitCall('/api/v1/systematic-reviews/' + encodeURIComponent(row.elicit_id) + '/resume', 'POST');
+      if (rs.status === 402) return json({ error: 'Still over quota — resolve the Elicit account quota, then resume.' }, 402);
+      if (rs.status === 403) return json({ error: (rs.body && rs.body.error && rs.body.error.message) || 'Resume blocked (plan limit or max concurrent reviews).' }, 403);
       if (rs.status === 409) { await sb.from('elicit_jobs').update({ status: 'processing', updated_at: new Date().toISOString() }).eq('id', row.id); return json({ ok: true, status: 'processing', note: 'already running' }); }
       if (!rs.ok) return json({ error: 'Resume failed.' }, 502);
       await sb.from('elicit_jobs').update({ status: rs.body.status || 'processing', stage: rs.body.executionStage ?? null, updated_at: new Date().toISOString() }).eq('id', row.id);
@@ -152,6 +261,6 @@ Deno.serve(async (req) => {
 
     return json({ error: 'unknown action' }, 400);
   } catch (e) {
-    return json({ error: String(e) }, 500);
+    return json({ error: 'Internal error' }, 500);
   }
 });
