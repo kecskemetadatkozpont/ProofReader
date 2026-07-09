@@ -284,6 +284,7 @@
   /* ---------- user drawer ---------- */
   function UserDrawer(props) {
     var u = props.user, agg = props.agg, onClose = props.onClose, onPreview = props.onPreview, onAction = props.onAction, onSetModel = props.onSetModel, onSetWorkflows = props.onSetWorkflows, onSetFigures = props.onSetFigures;
+    var onSetFeature = props.onSetFeature, onSetAllowlist = props.onSetAllowlist, catalog = props.catalog || [];
     var open = !!u;
     useEffect(function () { if (!open) return; var onKey = function (e) { if (e.key === 'Escape') onClose(); }; window.addEventListener('keydown', onKey); return function () { window.removeEventListener('keydown', onKey); }; }, [open]);
     return h(React.Fragment, null,
@@ -304,9 +305,10 @@
               (u.status === 'suspended' || u.status === 'rejected') && h('button', { className: 'btn ok', onClick: function () { onAction(u.id, 'approved'); } }, 'Reactivate')
             ),
             h('div', { style: { marginBottom: 16 } },
-              h('div', { style: { fontSize: 12, fontWeight: 700, color: 'var(--muted)', marginBottom: 5 } }, 'AI model — research chat + analysis'),
+              h('div', { style: { fontSize: 12, fontWeight: 700, color: 'var(--muted)', marginBottom: 5 } }, 'Active AI model — research chat + analysis'),
               h('select', { value: u.ai_model || '', onChange: function (e) { onSetModel(u.id, e.target.value); }, style: { width: '100%', height: 36, border: '1px solid var(--line)', borderRadius: 8, padding: '0 10px', fontFamily: 'inherit', fontSize: 13, background: 'var(--surface)', color: 'inherit' } },
-                AI_MODELS.map(function (m) { return h('option', { key: m[0], value: m[0] }, m[1]); }))
+                AI_MODELS.filter(function (m) { var al = u.model_allowlist || null; return m[0] === '' || al === null || al.indexOf(m[0]) >= 0; })
+                  .map(function (m) { return h('option', { key: m[0], value: m[0] }, m[0] === '' ? 'Default (cheapest allowed)' : m[1]); }))
             ),
             h('div', { style: { marginBottom: 16 } },
               h('label', { style: { display: 'flex', alignItems: 'flex-start', gap: 9, fontSize: 13, cursor: 'pointer' } },
@@ -318,6 +320,37 @@
                 h('input', { type: 'checkbox', checked: !!u.can_figures, style: { marginTop: 2 }, onChange: function (e) { onSetFigures(u.id, e.target.checked); } }),
                 h('span', null, h('b', null, 'Figure generation (PaperBanana)'), h('span', { style: { display: 'block', fontSize: 11.5, color: 'var(--faint)', marginTop: 1 } }, 'Allows the user to generate publication figures with AI in the LaTeX editor.')))
             ),
+            // ---- allowed cloud models (multi-select) — migration-49 ----
+            h('div', { style: { marginBottom: 16 } },
+              h('div', { style: { fontSize: 12, fontWeight: 700, color: 'var(--muted)', marginBottom: 5 } }, 'Allowed cloud models'),
+              AI_MODELS.filter(function (m) { return m[0] !== ''; }).map(function (m) {
+                var cur = u.model_allowlist || null;
+                var on = cur === null ? true : cur.indexOf(m[0]) >= 0;
+                return h('label', { key: m[0], style: { display: 'flex', alignItems: 'center', gap: 9, fontSize: 13, cursor: 'pointer', padding: '2px 0' } },
+                  h('input', { type: 'checkbox', checked: on, onChange: function (e) {
+                    var all = AI_MODELS.filter(function (x) { return x[0] !== ''; }).map(function (x) { return x[0]; });
+                    var base = cur === null ? all.slice() : cur.slice();
+                    var next = e.target.checked ? base.concat([m[0]]).filter(function (v, i, a) { return a.indexOf(v) === i; }) : base.filter(function (x) { return x !== m[0]; });
+                    onSetAllowlist(u.id, next);
+                  } }),
+                  h('span', null, m[1]));
+              }),
+              h('div', { style: { fontSize: 11.5, color: 'var(--faint)', marginTop: 3 } }, 'All boxes checked (or all unchecked) = system default — every model allowed.')),
+            // ---- feature access matrix — migration-49 (empty until the migration is applied) ----
+            catalog.length ? h('div', { style: { marginBottom: 16 } },
+              h('h3', { className: 'dsub' }, 'Feature access'),
+              h('div', { style: { display: 'flex', flexDirection: 'column', gap: 9, marginTop: 8 } },
+                catalog.filter(function (f) { return f.key !== 'session_workflow_mode' && f.key !== 'paper_figure'; }).map(function (f) {
+                  var explicit = u.features && Object.prototype.hasOwnProperty.call(u.features, f.key);
+                  var on = explicit ? !!u.features[f.key] : !!f.default_on;
+                  return h('label', { key: f.key, style: { display: 'flex', alignItems: 'flex-start', gap: 9, fontSize: 13, cursor: 'pointer' } },
+                    h('input', { type: 'checkbox', checked: on, style: { marginTop: 2 }, onChange: function (e) { onSetFeature(u.id, f.key, e.target.checked); } }),
+                    h('span', null,
+                      h('b', null, f.label),
+                      !f.enforced ? h('span', { style: { marginLeft: 6, fontSize: 10, fontWeight: 700, letterSpacing: '.04em', color: 'var(--warn, #b26b00)', border: '1px solid var(--line)', borderRadius: 5, padding: '0 5px', verticalAlign: 'middle' } }, 'UI ONLY') : null,
+                      h('span', { style: { display: 'block', fontSize: 11.5, color: 'var(--faint)', marginTop: 1 } },
+                        (f.enforced ? 'Server-enforced' : 'Hides UI only — not a security boundary') + (explicit ? '' : ' · default ' + (f.default_on ? 'on' : 'off')))));
+                }))) : null,
             h('div', { className: 'kv' },
               h('div', { className: 'c' }, h('div', { className: 'l' }, 'Projects'), h('div', { className: 'v' }, agg.projCount), agg.researchCount ? h('div', { className: 's' }, agg.projects.length + ' LaTeX + ' + agg.researchCount + ' research') : null),
               h('div', { className: 'c' }, h('div', { className: 'l' }, 'Storage'), h('div', { className: 'v' }, fmtBytes(agg.storage))),
@@ -419,6 +452,7 @@
     var exS = useState(null), expanded = exS[0], setExpanded = exS[1];
     var pcS = useState({}), pubsCache = pcS[0], setPubsCache = pcS[1];
     var ogS = useState({}), openGroups = ogS[0], setOpenGroups = ogS[1];   // expanded affiliation groups
+    var fcS = useState([]), catalog = fcS[0], setCatalog = fcS[1];   // feature_catalog (migration-49) drives the permission matrix
     function toggleGroup(k) { setOpenGroups(function (m) { var n = Object.assign({}, m); n[k] = !n[k]; return n; }); }
 
     useEffect(function () { boot(); }, []);
@@ -443,13 +477,15 @@
         sb.from('profiles').select('*, publications(count)'),
         sb.from('projects').select('id,owner_id,title,data,created_at,updated_at,deleted_at'),
         sb.from('usage_meters').select('*'),
-        sb.from('research_projects').select('id,owner_id')
+        sb.from('research_projects').select('id,owner_id'),
+        sb.from('feature_catalog').select('key,label,category,default_on,enforced,sort').order('sort')
       ]).then(function (res) {
         if (res[0].error) { setErr(res[0].error.message); setPhase('error'); return; }
         setProfiles(res[0].data || []);
         setProjects((res[1].data || []).filter(function (p) { return !p.deleted_at; }));
         setUsage(res[2].data || []);
         setRprojects((res[3] && res[3].data) || []);
+        setCatalog((res[4] && res[4].data) || []);   // empty until migration-49 is applied → matrix simply hides
         setPhase('ready');
       }).catch(function (e) { setErr(String(e)); setPhase('error'); });
     }
@@ -484,6 +520,21 @@
       setProfiles(function (list) { return list.map(function (u) { return u.id === uid ? Object.assign({}, u, { can_figures: on }) : u; }); });
       setSelUser(function (u) { return u && u.id === uid ? Object.assign({}, u, { can_figures: on }) : u; });
       sb.from('profiles').update({ can_figures: on }).eq('id', uid).then(function (r) { if (r && r.error) { window.PRUI.toast('Update failed: ' + r.error.message, { kind: 'error' }); loadData(); } });
+    }
+    // per-user feature grant (migration-49). JSONB is replaced wholesale, so send the full merged map.
+    function setFeature(uid, key, on) {
+      var cur = null;
+      setProfiles(function (list) { return list.map(function (u) { if (u.id !== uid) return u; cur = Object.assign({}, u.features || {}); cur[key] = on; return Object.assign({}, u, { features: cur }); }); });
+      setSelUser(function (u) { if (!u || u.id !== uid) return u; var f = Object.assign({}, u.features || {}); f[key] = on; return Object.assign({}, u, { features: f }); });
+      var full = Object.assign({}, cur || {}); full[key] = on;
+      sb.from('profiles').update({ features: full }).eq('id', uid).then(function (r) { if (r && r.error) { window.PRUI.toast('Feature update failed: ' + r.error.message, { kind: 'error' }); loadData(); } });
+    }
+    // per-user model allowlist (migration-49). [] → null = all system models. A trigger evicts a now-invalid ai_model.
+    function setAllowlist(uid, arr) {
+      var v = (arr && arr.length) ? arr : null;
+      setProfiles(function (list) { return list.map(function (u) { return u.id === uid ? Object.assign({}, u, { model_allowlist: v }) : u; }); });
+      setSelUser(function (u) { return u && u.id === uid ? Object.assign({}, u, { model_allowlist: v }) : u; });
+      sb.from('profiles').update({ model_allowlist: v }).eq('id', uid).then(function (r) { if (r && r.error) { window.PRUI.toast('Allowlist update failed: ' + r.error.message, { kind: 'error' }); loadData(); } else { loadData(); } });
     }
     function loadPubs(uid) {
       if (pubsCache[uid] !== undefined) return;
@@ -620,7 +671,7 @@
         ),
         h(BugReports)
       ),
-      h(UserDrawer, { user: selUser, agg: selUser ? aggFor(selUser.id) : { projects: [], storage: 0, chars: 0, requests: 0 }, onClose: function () { setSelUser(null); }, onPreview: function (p) { setPreview(p); }, onAction: setStatus, onSetModel: setModel, onSetWorkflows: setWorkflows, onSetFigures: setFigures }),
+      h(UserDrawer, { user: selUser, agg: selUser ? aggFor(selUser.id) : { projects: [], storage: 0, chars: 0, requests: 0 }, onClose: function () { setSelUser(null); }, onPreview: function (p) { setPreview(p); }, onAction: setStatus, onSetModel: setModel, onSetWorkflows: setWorkflows, onSetFigures: setFigures, onSetFeature: setFeature, onSetAllowlist: setAllowlist, catalog: catalog }),
       preview && h(ProjectPreview, { project: preview, onClose: function () { setPreview(null); } })
     );
   }

@@ -1,12 +1,13 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2';
+import { assertEntitled, resolveModel } from '../_shared/entitlement.ts';
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type', 'Access-Control-Allow-Methods': 'POST, OPTIONS' };
 const ANTHROPIC_KEY = Deno.env.get('ANTHROPIC_API_KEY');
 const MODEL = 'claude-sonnet-4-6';
 function json(b: unknown, s = 200) { return new Response(JSON.stringify(b), { status: s, headers: { ...CORS, 'Content-Type': 'application/json' } }); }
-async function claude(system: string, content: any[], max = 3000): Promise<string> {
+async function claude(system: string, content: any[], max = 3000, model = MODEL): Promise<string> {
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST', headers: { 'x-api-key': ANTHROPIC_KEY!, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-    body: JSON.stringify({ model: MODEL, max_tokens: max, system, messages: [{ role: 'user', content }] }),
+    body: JSON.stringify({ model, max_tokens: max, system, messages: [{ role: 'user', content }] }),
   });
   const o = await r.json(); if (o.error) throw new Error(o.error.message || 'anthropic');
   return (o.content || []).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n').trim();
@@ -23,6 +24,8 @@ Deno.serve(async (req) => {
     const uid = ures.user.id;
     const body = await req.json().catch(() => ({}));
     const action = String(body.action || '');
+    const gate = await assertEntitled(sb, 'page_submissions'); if (gate) return gate;
+    const model = await resolveModel(sb);
     const isEditor = async () => !!((await sb.from('editorial_staff').select('user_id').eq('user_id', uid).eq('active', true).maybeSingle()).data);
 
     // ---- extract: prefill wizard metadata from the uploaded PDF (author confirms every field) ----
@@ -33,7 +36,7 @@ Deno.serve(async (req) => {
       const raw = await claude(sys, [
         { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: b64 } },
         { type: 'text', text: 'Extract the metadata as specified.' },
-      ], 2500);
+      ], 2500, model);
       return json({ ok: true, meta: jparse(raw) });
     }
 
@@ -60,7 +63,7 @@ Deno.serve(async (req) => {
       } catch (_e) { /* metadata-only fallback */ }
       const sys = 'You are an editorial-office assistant producing an ADVISORY desk-check (pre-review screening) report. You NEVER decide — the editor does. Assess honestly. Return ONLY JSON: {"summary":"3-4 sentence overall assessment","items":[{"check":"completeness|scope|format|declarations|language|overlap_suspicion","verdict":"ok|warn|fail","note":"one concise sentence"}]} with all six checks present.';
       content.push({ type: 'text', text: `SUBMISSION METADATA\nTitle: ${s.title}\nType: ${s.article_type}\nAbstract: ${s.abstract || '(none)'}\nKeywords: ${(s.keywords || []).join(', ')}\nAuthors: ${auth_.map((a: any) => a.name + (a.affiliation ? ' (' + a.affiliation + ')' : '')).join('; ')}\nTarget venue: ${venue || s.venue_text || '(unspecified)'}\nDeclarations: ${JSON.stringify(s.declarations)}\nCover letter: ${s.cover_letter || '(none)'}\n\nProduce the advisory report.${content.length ? ' The manuscript PDF is attached.' : ' (PDF not available — assess from metadata only.)'}` });
-      const raw = await claude(sys, content, 2000);
+      const raw = await claude(sys, content, 2000, model);
       return json({ ok: true, report: jparse(raw) });
     }
 
@@ -78,7 +81,7 @@ Deno.serve(async (req) => {
       const pool = profs.filter((p: any) => !authorIds.has(p.id) && !authorEmails.has((p.email || '').toLowerCase()));
       const sys = 'Rank candidate reviewers for a manuscript by topical fit. COI signals you can see: same affiliation/department as any author → flag, do not exclude. Return ONLY JSON: {"suggestions":[{"id":"<profile id>","name":"...","score":<0-100>,"reason":"one sentence","coi_flag":"" or "same affiliation as author X"}]} — best 6, most suitable first. Only suggest people whose interests plausibly match; if fewer than 6 match, return fewer. Advisory only — COI detection is incomplete; the editor and the invited reviewer decide.';
       const u = `MANUSCRIPT\nTitle: ${s.title}\nAbstract: ${(s.abstract || '').slice(0, 1500)}\nKeywords: ${(s.keywords || []).join(', ')}\nAuthor affiliations: ${authors.map((a: any) => a.affiliation).filter(Boolean).join('; ') || '(unknown)'}\n\nCANDIDATES (id | name | interests | department | affiliation):\n${pool.map((p: any) => `${p.id} | ${p.name} | ${(p.research_interests || '').toString().slice(0, 120)} | ${p.department || ''} | ${p.affiliation || ''}`).join('\n')}`;
-      const raw = await claude(sys, [{ type: 'text', text: u }], 2000);
+      const raw = await claude(sys, [{ type: 'text', text: u }], 2000, model);
       const out = jparse(raw);
       const valid = new Set(pool.map((p: any) => p.id));
       out.suggestions = (out.suggestions || []).filter((x: any) => valid.has(x.id));
@@ -90,7 +93,7 @@ Deno.serve(async (req) => {
       if (!(await isEditor())) return json({ error: 'editors only' }, 403);
       const sys = 'You improve an editorial letter draft: professional, warm but clear scholarly tone, keep ALL factual content (manuscript id, decision, deadlines, embedded review comments VERBATIM — never alter or summarize reviewer text), fix flow and formatting. Keep the same language as the draft. Return ONLY JSON: {"subject":"...","body":"..."}.';
       const u = `SUBJECT: ${String(body.subject || '')}\n\nDRAFT BODY:\n${String(body.body_text || '').slice(0, 12000)}`;
-      const raw = await claude(sys, [{ type: 'text', text: u }], 3000);
+      const raw = await claude(sys, [{ type: 'text', text: u }], 3000, model);
       return json({ ok: true, letter: jparse(raw) });
     }
 

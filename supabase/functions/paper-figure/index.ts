@@ -7,6 +7,7 @@
 // Secrets: supabase secrets set PAPERBANANA_ENDPOINT=https://<your-paperbanana-host>   (optional → live mode)
 //          supabase secrets set PAPERBANANA_TOKEN=<shared bearer>                       (optional)
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { assertEntitled } from '../_shared/entitlement.ts';
 
 const ENDPOINT = (Deno.env.get('PAPERBANANA_ENDPOINT') || '').replace(/\/$/, '');
 const PB_TOKEN = Deno.env.get('PAPERBANANA_TOKEN') || '';
@@ -50,6 +51,7 @@ Deno.serve(async (req) => {
     const { data: ures } = await sb.auth.getUser();
     const uid = (ures && ures.user && ures.user.id) || '';
     if (!uid) return json({ error: 'auth required' }, 401);
+    const gate = await assertEntitled(sb, 'paper_figure'); if (gate) return gate;
     const { data: prof } = await sb.from('profiles').select('can_figures').eq('id', uid).maybeSingle();
     if (!prof || !prof.can_figures) return json({ error: 'Az ábra-generálás nincs engedélyezve ehhez a felhasználóhoz (admin-kapcsoló).' }, 403);
 

@@ -1,4 +1,5 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2';
+import { assertEntitled, clampModel } from '../_shared/entitlement.ts';
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type', 'Access-Control-Allow-Methods': 'POST, OPTIONS' };
 const ANTHROPIC_KEY = Deno.env.get('ANTHROPIC_API_KEY');
 const MODEL = 'claude-sonnet-4-6';   // planning quality matters for the protocol
@@ -21,10 +22,10 @@ Return ONLY a JSON object, no prose, no markdown fences:
 ]}
 Keep it 6–12 steps. Be specific but CONCISE (instruction ≤ 2 sentences; ≤ 4 items per array). Set needs_approval conservatively (prefer true for anything expensive or destructive). Output must be a single, complete, valid JSON object.`;
 
-async function callClaude(system: string, user: string): Promise<string> {
+async function callClaude(system: string, user: string, model: string): Promise<string> {
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST', headers: { 'x-api-key': ANTHROPIC_KEY!, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-    body: JSON.stringify({ model: MODEL, max_tokens: 8000, system, messages: [{ role: 'user', content: user }] }),
+    body: JSON.stringify({ model, max_tokens: 8000, system, messages: [{ role: 'user', content: user }] }),
   });
   const o = await r.json(); if (o.error) throw new Error(o.error.message || 'anthropic');
   return (o.content || []).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n').trim();
@@ -38,6 +39,8 @@ Deno.serve(async (req) => {
     const { data: ures } = await sb.auth.getUser();
     if (!ures || !ures.user) return json({ error: 'unauthorized' }, 401);
     const body = await req.json().catch(() => ({}));
+    const gate = await assertEntitled(sb, 'protocol_runner'); if (gate) return gate;
+    const model = await clampModel(sb, 'claude-sonnet-4-6');
     const action = String(body.action || 'generate');
     const projectId = String(body.project_id || '');
     if (!projectId) return json({ error: 'project_id required' }, 400);
@@ -64,7 +67,7 @@ Deno.serve(async (req) => {
         + `DATASETS ALREADY REGISTERED:\n${dsTxt}\n\n`
         + `Plan the executable protocol now.`;
 
-      const raw = await callClaude(SYS, user);
+      const raw = await callClaude(SYS, user, model);
       const m = raw.match(/\{[\s\S]*\}/);
       if (!m) return json({ error: 'model did not return JSON' }, 502);
       let parsed: any; try { parsed = JSON.parse(m[0]); } catch (e) { return json({ error: 'bad JSON from model: ' + e }, 502); }
@@ -99,7 +102,7 @@ Deno.serve(async (req) => {
       const ctx = (pq.data && pq.data.context_snapshot) || {};
       const sys = 'You are improving ONE step of an executable research protocol. Keep its intent; make it more precise and runnable. Return ONLY a JSON object: {"title","kind","instruction","inputs":[],"expected_outputs":[],"acceptance":[],"command_hint":"","est_minutes":N,"needs_approval":bool}. Be concise.';
       const u = `PROTOCOL GOAL: ${(pq.data && pq.data.goal) || ''}\nIDEA: ${(ctx.idea && ctx.idea.question) || ''}\n\nCURRENT STEP:\n${JSON.stringify({ title: s.title, kind: s.kind, ...sx }, null, 1)}\n\n${hint ? 'FOCUS: ' + hint + '\n\n' : ''}Return the improved step.`;
-      const raw = await callClaude(sys, u); const m = raw.match(/\{[\s\S]*\}/);
+      const raw = await callClaude(sys, u, model); const m = raw.match(/\{[\s\S]*\}/);
       if (!m) return json({ error: 'model returned no JSON' }, 502);
       let p: any; try { p = JSON.parse(m[0]); } catch (e) { return json({ error: 'bad JSON: ' + e }, 502); }
       return json({ ok: true, step: p });
@@ -113,7 +116,7 @@ Deno.serve(async (req) => {
       const ex = (exq.data || []); const ctx = (pq.data && pq.data.context_snapshot) || {};
       const sys = `Propose NEW steps to add to an existing executable research protocol. Return ONLY a JSON object {"steps":[{"title","kind","instruction","inputs":[],"expected_outputs":[],"acceptance":[],"command_hint":"","est_minutes":N,"depends_on":[],"needs_approval":bool}]}. Use depends_on with the 1-based positions of EXISTING steps if relevant. At most ${count} steps, concise.`;
       const u = `PROTOCOL GOAL: ${(pq.data && pq.data.goal) || ''}\nIDEA: ${(ctx.idea && ctx.idea.question) || ''}\n\nEXISTING STEPS:\n${ex.map((e: any) => `${e.ord}. [${e.kind}] ${e.title}`).join('\n') || '(none)'}\n\nADD STEPS FOR: ${prompt}`;
-      const raw = await callClaude(sys, u); const m = raw.match(/\{[\s\S]*\}/);
+      const raw = await callClaude(sys, u, model); const m = raw.match(/\{[\s\S]*\}/);
       if (!m) return json({ error: 'model returned no JSON' }, 502);
       let p: any; try { p = JSON.parse(m[0]); } catch (e) { return json({ error: 'bad JSON: ' + e }, 502); }
       return json({ ok: true, steps: (Array.isArray(p.steps) ? p.steps : []).slice(0, count) });
@@ -127,7 +130,7 @@ Deno.serve(async (req) => {
       const s = stq.data; const sx = s.spec || {};
       const sys = 'Split ONE protocol step into 2–4 smaller, ordered sub-steps that together accomplish it. Return ONLY {"steps":[{"title","kind","instruction","inputs":[],"expected_outputs":[],"acceptance":[],"command_hint":"","est_minutes":N,"needs_approval":bool}]}. Concise; each sub-step runnable on its own.';
       const u = `STEP TO SPLIT:\n${JSON.stringify({ title: s.title, kind: s.kind, ...sx }, null, 1)}`;
-      const raw = await callClaude(sys, u); const m = raw.match(/\{[\s\S]*\}/);
+      const raw = await callClaude(sys, u, model); const m = raw.match(/\{[\s\S]*\}/);
       if (!m) return json({ error: 'model returned no JSON' }, 502);
       let p: any; try { p = JSON.parse(m[0]); } catch (e) { return json({ error: 'bad JSON: ' + e }, 502); }
       return json({ ok: true, steps: (Array.isArray(p.steps) ? p.steps : []).slice(0, 4) });

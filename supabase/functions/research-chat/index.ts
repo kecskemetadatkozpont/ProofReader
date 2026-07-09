@@ -12,6 +12,7 @@
 //          supabase secrets set RESEARCH_MAX_TOKENS=8192               (output cap per reply; default 4096)
 //          supabase secrets set RESEARCH_HISTORY=12                    (last N messages sent; default 12)
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { assertEntitled, resolveModel } from '../_shared/entitlement.ts';
 
 const ANTHROPIC_KEY = Deno.env.get('ANTHROPIC_API_KEY');
 const CONSENSUS_TOKEN = Deno.env.get('CONSENSUS_MCP_TOKEN');
@@ -42,6 +43,7 @@ Deno.serve(async (req) => {
     if (!chat) return json({ error: 'chat not found or no access' }, 404);
     const { data: ures } = await sb.auth.getUser();
     const callerUid: string = (ures && ures.user && ures.user.id) || '';
+    const gate = await assertEntitled(sb, 'research_chat_ideas'); if (gate) return gate;
     // service client for reading attachment files (caller-JWT storage RLS is unreliable; we path-guard instead)
     const svc = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
     const { data: proj } = await sb.from('research_projects').select('title,field,goal,keywords').eq('id', chat.project_id).maybeSingle();
@@ -51,7 +53,7 @@ Deno.serve(async (req) => {
     const userPrompt = ((spRow && spRow.prompt) || '').trim();
     // per-user model assigned by an admin (profiles.ai_model); fall back to the env default if unset/invalid
     const { data: profRow } = await sb.from('profiles').select('ai_model').eq('id', callerUid).maybeSingle();
-    const userModel = (profRow && profRow.ai_model && ALLOWED_MODELS.has(profRow.ai_model)) ? profRow.ai_model : MODEL;
+    const userModel = await resolveModel(sb);
 
     const ctx = proj ? `\n\nCurrent project — Title: ${proj.title}; Field: ${proj.field ?? '—'}; Goal: ${proj.goal ?? '—'}; Keywords: ${(proj.keywords ?? []).join(', ')}` : '';
     let rows: any[] = (history || []).filter((m: any) => m.content);

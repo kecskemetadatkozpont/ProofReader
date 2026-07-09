@@ -1,4 +1,5 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2';
+import { assertEntitled, clampModel } from '../_shared/entitlement.ts';
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type', 'Access-Control-Allow-Methods': 'POST, OPTIONS' };
 const ANTHROPIC_KEY = Deno.env.get('ANTHROPIC_API_KEY');
 const MODEL = 'claude-sonnet-4-6';   // writing quality matters here
@@ -14,10 +15,10 @@ const ACTIONS: Record<string, string> = {
   simplify: 'Rewrite the following text to be clearer and easier to read (plainer, shorter sentences) without dumbing it down.',
 };
 
-async function callClaude(system: string, text: string): Promise<string> {
+async function callClaude(system: string, text: string, model: string): Promise<string> {
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST', headers: { 'x-api-key': ANTHROPIC_KEY!, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-    body: JSON.stringify({ model: MODEL, max_tokens: 2000, system, messages: [{ role: 'user', content: text }] }),
+    body: JSON.stringify({ model, max_tokens: 2000, system, messages: [{ role: 'user', content: text }] }),
   });
   const o = await r.json(); if (o.error) throw new Error(o.error.message || 'anthropic');
   return (o.content || []).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n').trim();
@@ -34,9 +35,11 @@ Deno.serve(async (req) => {
     const text = String(body.text || '').slice(0, 12000);
     const action = String(body.action || 'improve');
     if (!text.trim()) return json({ error: 'no text' }, 400);
+    const gate = await assertEntitled(sb, 'ai_writing_assist'); if (gate) return gate;
+    const model = await clampModel(sb, MODEL);
     const instr = ACTIONS[action] || ACTIONS.improve;
     const system = `You are an expert academic copy-editor helping a researcher revise a manuscript. ${instr}\n\n${RULES}`;
-    const result = await callClaude(system, text);
+    const result = await callClaude(system, text, model);
     return json({ result });
   } catch (e) { return json({ error: String(e) }, 500); }
 });

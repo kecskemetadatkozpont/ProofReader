@@ -4,6 +4,7 @@
 //
 // Deploy:  supabase functions deploy claude-session --no-verify-jwt
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { assertEntitled, resolveModel } from '../_shared/entitlement.ts';
 
 const ANTHROPIC_KEY = Deno.env.get('ANTHROPIC_API_KEY');
 const MODEL = Deno.env.get('RESEARCH_AI_MODEL') || 'claude-sonnet-4-6';
@@ -31,8 +32,9 @@ Deno.serve(async (req) => {
     if (!chat) return json({ error: 'chat not found or no access' }, 404);
     const { data: ures } = await sb.auth.getUser();
     const uid = (ures && ures.user && ures.user.id) || '';
+    const gate = await assertEntitled(sb, 'page_session'); if (gate) return gate;
     const { data: profRow } = await sb.from('profiles').select('ai_model,can_workflows').eq('id', uid).maybeSingle();
-    const model = (profRow && profRow.ai_model && ALLOWED_MODELS.has(profRow.ai_model)) ? profRow.ai_model : MODEL;
+    const model = await resolveModel(sb);
 
     const { data: history } = await sb.from('user_chat_messages').select('role,content').eq('chat_id', chat_id).order('created_at', { ascending: true });
     let rows = (history || []).filter((m: any) => m.content);

@@ -13,6 +13,7 @@
 // Deploy:  supabase functions deploy research-study --no-verify-jwt
 // Secrets: ANTHROPIC_API_KEY (reused); CONSENSUS_MCP_TOKEN (optional, grounds the review).
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { assertEntitled, resolveModel } from '../_shared/entitlement.ts';
 
 const ANTHROPIC_KEY = Deno.env.get('ANTHROPIC_API_KEY');
 const CONSENSUS_TOKEN = Deno.env.get('CONSENSUS_MCP_TOKEN');
@@ -249,8 +250,8 @@ Deno.serve(async (req) => {
     if (!study) return json({ error: 'study not found or no access' }, 404);
     const { data: ures } = await sb.auth.getUser();
     const uid = (ures && ures.user && ures.user.id) || '';
-    const { data: prof } = await sb.from('profiles').select('ai_model').eq('id', uid).maybeSingle();
-    const model = (prof && prof.ai_model && ALLOWED_MODELS.has(prof.ai_model)) ? prof.ai_model : DEFAULT_MODEL;
+    const gate = await assertEntitled(sb, 'literature_study'); if (gate) return gate;
+    const model = await resolveModel(sb);
 
     // ---------------- generate_review (step 4) ----------------
     if (action === 'generate_review') {

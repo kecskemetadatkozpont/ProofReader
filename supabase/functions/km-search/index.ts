@@ -6,6 +6,7 @@
 // Deploy:  supabase functions deploy km-search
 // Invoke:  POST { query: string, project_id?: uuid, kinds?: string[], limit?: number }  (with the user JWT)
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { assertEntitled } from '../_shared/entitlement.ts';
 
 // deno-lint-ignore no-explicit-any
 declare const Supabase: any;   // Supabase Edge runtime gte-small inference
@@ -31,6 +32,10 @@ Deno.serve(async (req) => {
     const limit = Math.min(Math.max(parseInt(String(body.limit ?? 24), 10) || 24, 1), 60);
     const filterProject = body.project_id || null;
     const filterKinds = Array.isArray(body.kinds) && body.kinds.length ? body.kinds : null;
+
+    const { data: ures } = await sb.auth.getUser();
+    if (!ures?.user?.id) return json({ error: 'unauthenticated' }, 401);
+    const gate = await assertEntitled(sb, 'page_memory'); if (gate) return gate;
 
     // embed the query with gte-small (compute only, no data → no RLS concern)
     let emb: string | null = null;

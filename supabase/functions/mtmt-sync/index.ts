@@ -3,6 +3,7 @@
 // Runs server-side so MTMT's no-CORS API is reachable. Called via supabase.functions.invoke('mtmt-sync').
 // Deploy:  supabase functions deploy mtmt-sync --no-verify-jwt
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { assertEntitled } from '../_shared/entitlement.ts';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -77,6 +78,7 @@ Deno.serve(async (req) => {
     const { data: ures } = await sb.auth.getUser();
     const uid = ures?.user?.id;
     if (!uid) return json({ error: 'not signed in' }, 401);
+    const gate = await assertEntitled(sb, 'mtmt_sync'); if (gate) return gate;
     const { data: prof } = await sb.from('profiles').select('mtmt_id').eq('id', uid).maybeSingle();
     const mtmtId = prof?.mtmt_id;
     if (!mtmtId) return json({ error: 'no_mtmt_id', message: 'Állítsd be az MTMT azonosítód a profilodban.' }, 400);

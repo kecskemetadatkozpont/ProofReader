@@ -1,14 +1,15 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2';
+import { assertEntitled, clampModel } from '../_shared/entitlement.ts';
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type', 'Access-Control-Allow-Methods': 'POST, OPTIONS' };
 const ANTHROPIC_KEY = Deno.env.get('ANTHROPIC_API_KEY');
 const OA_KEY = Deno.env.get('OPENALEX_API_KEY') || '';
 const oaKey = OA_KEY ? '&api_key=' + OA_KEY : '';
 const MODEL = 'claude-sonnet-4-6';
 function json(b: unknown, s = 200) { return new Response(JSON.stringify(b), { status: s, headers: { ...CORS, 'Content-Type': 'application/json' } }); }
-async function callClaude(system: string, user: string, max = 4000): Promise<string> {
+async function callClaude(system: string, user: string, max = 4000, model = MODEL): Promise<string> {
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST', headers: { 'x-api-key': ANTHROPIC_KEY!, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-    body: JSON.stringify({ model: MODEL, max_tokens: max, system, messages: [{ role: 'user', content: user }] }),
+    body: JSON.stringify({ model, max_tokens: max, system, messages: [{ role: 'user', content: user }] }),
   });
   const o = await r.json(); if (o.error) throw new Error(o.error.message || 'anthropic');
   return (o.content || []).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n').trim();
@@ -45,6 +46,8 @@ Deno.serve(async (req) => {
     const sb = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!, { global: { headers: { Authorization: req.headers.get('Authorization') || '' } } });
     const { data: ures } = await sb.auth.getUser();
     if (!ures || !ures.user) return json({ error: 'unauthorized' }, 401);
+    const gate = await assertEntitled(sb, 'journal_matching'); if (gate) return gate;
+    const model = await clampModel(sb, 'claude-sonnet-4-6');
     const body = await req.json().catch(() => ({}));
     const action = String(body.action || 'recommend');
     const projectId = String(body.project_id || '');
@@ -69,7 +72,7 @@ Deno.serve(async (req) => {
       const allFields: string[] = ((await sb.rpc('distinct_journal_fields')).data || []);
       const sys1 = 'You map a research project to the most relevant scientific PUBLICATION FIELDS. Choose ONLY from the provided list, copied EXACTLY (verbatim). Return ONLY JSON: {"fields":["<up to 3 exact field names from the list>"],"keywords":["<5-8 topical keywords>"],"summary":"<2-sentence research summary used to judge journal fit>"}.';
       const u1 = `${ctx}\n\nVALID FIELDS (choose exactly from these strings):\n${allFields.join('\n')}`;
-      const r1 = await callClaude(sys1, u1, 1500);
+      const r1 = await callClaude(sys1, u1, 1500, model);
       const m1 = r1.match(/\{[\s\S]*\}/); if (!m1) return json({ error: 'field-mapping returned no JSON' }, 502);
       const fm: any = JSON.parse(m1[0]);
       const fields: string[] = (fm.fields || []).filter((f: string) => allFields.includes(f));
@@ -92,7 +95,7 @@ Deno.serve(async (req) => {
       const sys2 = 'You are a scholarly publishing advisor. Rank the candidate journals by suitability for publishing the described research. Weigh topical/scope fit highest, then prestige (Norwegian level 2 > level 1) and impact (higher 2-year mean citedness / h-index). Only recommend genuinely on-topic venues. Return ONLY JSON: {"ranked":[{"id":<journal id>,"fit_score":<integer 0-100>,"fit_reason":"<one concise sentence: why it fits this research>"}]} for the BEST 12, most suitable first.';
       const u2 = `RESEARCH: ${fm.summary}\nKEYWORDS: ${kwList.join(', ')}\n\nCANDIDATES (id | title | field | NorwegianLevel | impact(2yr citedness) | h-index | country | OA):\n` +
         cand.map((c) => `${c.id} | ${c.title} | ${c.field || ''} | L${c.npi_level} | ${c.impact != null ? c.impact : '-'} | ${c.h_index != null ? c.h_index : '-'} | ${c.country || ''} | ${c.open_access || ''}`).join('\n');
-      const r2 = await callClaude(sys2, u2, 4000);
+      const r2 = await callClaude(sys2, u2, 4000, model);
       const m2 = r2.match(/\{[\s\S]*\}/); if (!m2) return json({ error: 'ranking returned no JSON' }, 502);
       const ranked: any[] = (JSON.parse(m2[0]).ranked || []);
       const out = ranked.map((x) => { const j = byId.get(x.id); return j ? { ...j, fit_score: x.fit_score, fit_reason: x.fit_reason } : null; }).filter(Boolean).slice(0, 12);
@@ -124,7 +127,7 @@ Deno.serve(async (req) => {
       const sys = 'You are a scholarly-publishing librarian. For the given journal, provide its aims/scope and the details that are NOT in bibliometric APIs, using your knowledge. Mark every figure as an estimate. Return ONLY JSON: {"scope":"2-3 sentence aims & scope","peer_review":"e.g. single-blind / double-blind (estimated)","acceptance_rate":"e.g. ~20% (estimated) or unknown","first_decision":"e.g. ~8 weeks (estimated) or unknown","apc":"e.g. $2500 APC / hybrid / free (estimated) or unknown","submission_url":"best-known author-guidelines or submission URL (or empty)","template":{"family":"one of IEEEtran|elsarticle|sn-jnl (Springer Nature)|mdpi|acmart|wiley-njd|tf (Taylor & Francis)|generic-latex|word","official_url":"official author-template page URL (or empty)","overleaf_url":"Overleaf template gallery URL for this family (or empty)","notes":"1 line on format (columns, length, refs style)"}}';
       const u = `JOURNAL: ${jr.title}\nPUBLISHER: ${oa.publisher || jr.publisher || ''}\nFIELD: ${jr.field || ''}\nCOUNTRY: ${jr.country || ''}\nISSN: ${issns.join(', ')}\nHOMEPAGE: ${oa.homepage_url || jr.url || ''}\nOPENALEX TOPICS: ${(oa.topics || []).join(', ')}`;
       let ai: any = {};
-      try { const raw = await callClaude(sys, u, 1500); const m = raw.match(/\{[\s\S]*\}/); if (m) ai = JSON.parse(m[0]); } catch (_e) { /* ai optional */ }
+      try { const raw = await callClaude(sys, u, 1500, model); const m = raw.match(/\{[\s\S]*\}/); if (m) ai = JSON.parse(m[0]); } catch (_e) { /* ai optional */ }
       return json({ ok: true, journal: jr, openalex: oa, ai });
     }
 

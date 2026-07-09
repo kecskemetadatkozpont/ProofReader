@@ -22,6 +22,28 @@
     { key: 'publications', label: 'Publications', href: 'Projects.html' },
     { key: 'admin', label: 'Admin', href: 'Admin.html', adminOnly: true }
   ];
+  // nav key → feature_catalog key (migration-49). A nav item is hidden if the user isn't entitled.
+  // COSMETIC ONLY: the server enforces enforced=true features regardless. Fail-open when unloaded.
+  var FEATURE_OF = {
+    research: 'page_research', kanban: 'page_kanban', memory: 'page_memory', submissions: 'page_submissions',
+    session: 'page_session', media: 'page_media', compare: 'page_compare', phd: 'page_phd', publications: 'page_publications'
+  };
+  function linkVisible(l, admin) {
+    if (l.adminOnly && !admin) return false;
+    if (admin) return true;                              // admins see everything
+    var fk = FEATURE_OF[l.key];
+    if (fk && window.PREnt && window.PREnt.loaded() && !window.PREnt.can(fk)) return false;
+    return true;
+  }
+  // load the entitlement cache once a user + backend are available, then re-render
+  var entTried = false;
+  function ensureEnt(cb) {
+    if (entTried || !window.PREnt) return;
+    var BE = window.PR_BACKEND, u = (BE && BE.user) || null;
+    if (!BE || !BE.sb || !u || !u.id) return;           // wait until the session is up
+    entTried = true;
+    window.PREnt.load(BE.sb, u.id).then(function () { if (cb) cb(); });
+  }
   function pageKey() {
     var p = (location.pathname.split('/').pop() || '').toLowerCase();
     if (p.indexOf('profile') === 0) return 'profile';
@@ -198,16 +220,17 @@
     function render() {
       var av = adminView();
       var du = av || curUser(), admin = isAdmin();
+      ensureEnt(render);   // load entitlements once the session is up, then re-render to apply cosmetic gating
       document.documentElement.classList.toggle('pn-adminview', !!av);
       document.getElementById('pn-left').innerHTML = '<a class="pn-brand" href="' + withAv('Projects.html') + '" title="Home"><span class="pn-mk"><i></i></span>Publify</a>'
         + (av ? '<span class="pn-as">👁 ' + esc(av.name || av.email || '') + '</span>' : '');
       var SHORT = { profile: 'Profile', research: 'Research', kanban: 'Tasks', memory: 'Memory', session: 'Chat', media: 'Media', compare: 'Compare', phd: 'Doctoral', publications: 'Publications', admin: 'Admin' };
-      var barNav = LINKS.filter(function (l) { return !l.adminOnly || admin; }).map(function (l) {
+      var barNav = LINKS.filter(function (l) { return linkVisible(l, admin); }).map(function (l) {
         return '<a href="' + withAv(l.href) + '"' + (l.key === here ? ' class="on" aria-current="page"' : '') + '>' + esc(SHORT[l.key] || l.label) + '</a>';
       }).join('');
       var pnNav = document.getElementById('pn-nav'); if (pnNav) pnNav.innerHTML = barNav;
       document.getElementById('pn-prof').innerHTML = avHtml(du) + '<span class="pn-nm">' + esc((du && du.name) || 'Menu') + '</span><span class="pn-cv" aria-hidden="true">' + (av ? '👁' : '▾') + '</span>';
-      var links = LINKS.filter(function (l) { return !l.adminOnly || admin; }).map(function (l) {
+      var links = LINKS.filter(function (l) { return linkVisible(l, admin); }).map(function (l) {
         return '<a href="' + withAv(l.href) + '"' + (l.key === here ? ' class="on" aria-current="page"' : '') + '>' + (ICONS[l.key] || '') + esc(l.label) + '</a>';
       }).join('');
       var dark = window.PRTheme ? window.PRTheme.isDark() : document.documentElement.classList.contains('dark');

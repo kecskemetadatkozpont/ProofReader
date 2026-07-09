@@ -8,6 +8,7 @@
 // Secret:  supabase secrets set ANTHROPIC_API_KEY=sk-ant-...
 // (Model override optional:  supabase secrets set RESEARCH_AI_MODEL=claude-sonnet-4-6)
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { assertEntitled, resolveModel } from '../_shared/entitlement.ts';
 
 const ANTHROPIC_KEY = Deno.env.get('ANTHROPIC_API_KEY');
 const MODEL = Deno.env.get('RESEARCH_AI_MODEL') || 'claude-sonnet-4-6';
@@ -42,8 +43,9 @@ Deno.serve(async (req) => {
 
     // per-user model assigned by an admin (profiles.ai_model); fall back to the env default if unset/invalid
     const { data: ures } = await sb.auth.getUser();
+    const gate = await assertEntitled(sb, 'research_chat_ideas'); if (gate) return gate;
     const { data: profRow } = await sb.from('profiles').select('ai_model').eq('id', ures?.user?.id ?? '').maybeSingle();
-    const userModel = (profRow && profRow.ai_model && ALLOWED_MODELS.has(profRow.ai_model)) ? profRow.ai_model : MODEL;
+    const userModel = await resolveModel(sb);
 
     // Research Canvas: free-text summary of the edgeless whiteboard (no DB writes).
     if (action === 'canvas-summary') {
