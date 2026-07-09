@@ -218,7 +218,8 @@
     bar.innerHTML = '<div class="pn-left" id="pn-left"></div>'
       + '<div class="pn-right"><nav class="pn-nav" id="pn-nav" aria-label="Primary navigation"></nav>'
       + '<button class="pn-iconbtn" id="pn-theme-top" aria-label="Toggle dark mode" aria-pressed="false" title="Toggle dark mode">◐</button>'
-      + '<button class="pn-prof" id="pn-prof" aria-label="Open account menu" aria-haspopup="dialog" aria-expanded="false"></button></div>';
+      + '<button class="pn-iconbtn" id="pn-menu" aria-label="Open menu" aria-haspopup="dialog" aria-expanded="false" title="Menu">☰</button>'
+      + '<button class="pn-prof" id="pn-prof" aria-label="Open your profile" title="Open your profile"></button></div>';
 
     var scrim = document.createElement('div'); scrim.id = 'pn-scrim';
     var drawer = document.createElement('aside'); drawer.id = 'pn-drawer'; drawer.setAttribute('role', 'dialog'); drawer.setAttribute('aria-modal', 'true'); drawer.setAttribute('aria-label', 'Navigation');
@@ -235,14 +236,14 @@
       ensureEnt(function () { render(); guardCurrentPage(isAdmin()); });   // load entitlements, then re-render + guard the page
       if (window.PREnt && window.PREnt.loaded()) guardCurrentPage(admin);  // already loaded → guard now (idempotent)
       document.documentElement.classList.toggle('pn-adminview', !!av);
-      document.getElementById('pn-left').innerHTML = '<a class="pn-brand" href="' + withAv('Projects.html') + '" title="Home"><span class="pn-mk"><i></i></span>Publify</a>'
+      document.getElementById('pn-left').innerHTML = '<a class="pn-brand" href="' + withAv('Profile.html') + '" title="Open your profile"><span class="pn-mk"><i></i></span>Publify</a>'
         + (av ? '<span class="pn-as">👁 ' + esc(av.name || av.email || '') + '</span>' : '');
       var SHORT = { profile: 'Profile', research: 'Research', kanban: 'Tasks', memory: 'Memory', session: 'Chat', media: 'Media', compare: 'Compare', phd: 'Doctoral', publications: 'Publications', admin: 'Admin' };
       var barNav = LINKS.filter(function (l) { return linkVisible(l, admin); }).map(function (l) {
         return '<a href="' + withAv(l.href) + '"' + (l.key === here ? ' class="on" aria-current="page"' : '') + '>' + esc(SHORT[l.key] || l.label) + '</a>';
       }).join('');
       var pnNav = document.getElementById('pn-nav'); if (pnNav) pnNav.innerHTML = barNav;
-      document.getElementById('pn-prof').innerHTML = avHtml(du) + '<span class="pn-nm">' + esc((du && du.name) || 'Menu') + '</span><span class="pn-cv" aria-hidden="true">' + (av ? '👁' : '▾') + '</span>';
+      document.getElementById('pn-prof').innerHTML = avHtml(du) + '<span class="pn-nm">' + esc((du && du.name) || 'Profile') + '</span>' + (av ? '<span class="pn-cv" aria-hidden="true">👁</span>' : '');
       var links = LINKS.filter(function (l) { return linkVisible(l, admin); }).map(function (l) {
         return '<a href="' + withAv(l.href) + '"' + (l.key === here ? ' class="on" aria-current="page"' : '') + '>' + (ICONS[l.key] || '') + esc(l.label) + '</a>';
       }).join('');
@@ -259,8 +260,8 @@
     }
     var lastFocus = null;
     function onDrawerKey(e) { if (e.key === 'Escape') { close(); return; } trapFocus(drawer, e); }
-    function open() { lastFocus = document.activeElement; scrim.classList.add('on'); drawer.classList.add('on'); document.addEventListener('keydown', onDrawerKey); var pf = document.getElementById('pn-prof'); if (pf) pf.setAttribute('aria-expanded', 'true'); var c = document.getElementById('pn-close'); if (c) c.focus(); }
-    function close() { scrim.classList.remove('on'); drawer.classList.remove('on'); document.removeEventListener('keydown', onDrawerKey); var pf = document.getElementById('pn-prof'); if (pf) pf.setAttribute('aria-expanded', 'false'); if (lastFocus && lastFocus.focus) lastFocus.focus(); }
+    function open() { lastFocus = document.activeElement; scrim.classList.add('on'); drawer.classList.add('on'); document.addEventListener('keydown', onDrawerKey); var pf = document.getElementById('pn-menu'); if (pf) pf.setAttribute('aria-expanded', 'true'); var c = document.getElementById('pn-close'); if (c) c.focus(); }
+    function close() { scrim.classList.remove('on'); drawer.classList.remove('on'); document.removeEventListener('keydown', onDrawerKey); var pf = document.getElementById('pn-menu'); if (pf) pf.setAttribute('aria-expanded', 'false'); if (lastFocus && lastFocus.focus) lastFocus.focus(); }
     function wire() {
       var t = document.getElementById('pn-theme');
       if (t) t.onclick = function () { if (window.PRTheme) window.PRTheme.toggle(); render(); };
@@ -274,7 +275,8 @@
 
     document.body.appendChild(bar); document.body.appendChild(scrim); document.body.appendChild(drawer);
     render();
-    document.getElementById('pn-prof').onclick = open;
+    document.getElementById('pn-prof').onclick = function () { location.href = withAv('Profile.html'); };   // avatar → profile
+    var pm = document.getElementById('pn-menu'); if (pm) pm.onclick = open;                                   // ☰ → drawer (nav + sign out)
     var ptt = document.getElementById('pn-theme-top'); if (ptt) ptt.onclick = function () { if (window.PRTheme) window.PRTheme.toggle(); render(); };
     scrim.onclick = close;
     window.addEventListener('pr-theme', render);
