@@ -74,9 +74,10 @@
     .bchip.who.ai { background: #e0f3f7; color: #0a6f83; } .bchip.who.hu { background: #f1eafe; color: #6425c7; }
     .bchip.warn { background: var(--warn-bg); color: var(--warn); }
     .bchip.step { background: var(--accent-tint); color: var(--accent); }
-    /* read-only AI protocol steps unified into "My tasks" — muted, not draggable, link out */
-    a.bcard.rostep { text-decoration: none; color: inherit; cursor: pointer; border-style: dashed; opacity: .92; }
-    a.bcard.rostep:hover { opacity: 1; border-color: var(--accent); }
+    /* AI protocol steps unified into "My tasks" — muted, dashed, open a detail drawer */
+    .bcard.rostep { text-decoration: none; color: inherit; cursor: pointer; border-style: dashed; opacity: .92; }
+    .bcard.rostep:hover { opacity: 1; border-color: var(--accent); }
+    .bcard.rostep:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
     /* side drawer (task detail / edit) */
     .kb-scrim { position: fixed; inset: 0; background: rgba(8,10,16,.5); z-index: 100; display: flex; align-items: stretch; justify-content: flex-end; padding: 0; animation: kbScrimIn .2s ease; }
@@ -87,12 +88,15 @@
     .kb-mh { display: flex; align-items: center; padding: 16px 18px; border-bottom: 1px solid var(--line); flex: 0 0 auto; }
     .kb-mh b { font-size: 15px; } .kb-x { margin-left: auto; border: 0; background: var(--soft); color: var(--muted); width: 28px; height: 28px; border-radius: 8px; font-size: 16px; cursor: pointer; }
     .kb-mb { padding: 16px 18px; display: flex; flex-direction: column; gap: 4px; overflow: auto; flex: 1 1 auto; }
-    .kb-l { font-size: 11.5px; font-weight: 700; color: var(--faint); text-transform: uppercase; letter-spacing: .04em; margin: 10px 0 4px; }
+    .kb-l { display: block; font-size: 11.5px; font-weight: 700; color: var(--faint); text-transform: uppercase; letter-spacing: .04em; margin: 10px 0 4px; }
     .kb-mb .kb-l:first-child { margin-top: 0; }
     .kb-in { width: 100%; border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 9px; padding: 9px 11px; font: inherit; font-size: 13.5px; }
     .kb-in:focus { outline: none; border-color: var(--accent); }
     textarea.kb-in { resize: vertical; }
     .kb-row { display: flex; gap: 14px; flex-wrap: wrap; } .kb-row > div { flex: 1; min-width: 150px; }
+    .kb-note { font-size: 12px; line-height: 1.5; color: var(--muted); background: var(--accent-tint); border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent); border-radius: 9px; padding: 8px 11px; margin-bottom: 4px; }
+    .kb-ro { border: 1px solid var(--line); background: var(--soft); color: var(--ink); border-radius: 9px; padding: 9px 11px; font-size: 13.5px; }
+    .kb-pre { margin: 0; border: 1px solid var(--line); background: var(--soft); color: var(--muted); border-radius: 9px; padding: 9px 11px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; max-height: 220px; overflow: auto; }
     .kb-meta { margin-top: 16px; padding-top: 12px; border-top: 1px dashed var(--line); display: flex; flex-direction: column; gap: 5px; }
     .kb-meta div { font-size: 11.5px; color: var(--faint); display: flex; gap: 8px; }
     .kb-meta div span:first-child { min-width: 78px; font-weight: 600; color: var(--muted); }
@@ -116,7 +120,7 @@
   <script src="auth.js?v=1783137934"></script>
   <script src="backend.js?v=1783539952"></script>
   <script src="onboarding.js?v=1783137934"></script>
-  <script type="text/babel" src="kanban.jsx?v=1783577536"></script>
+  <script type="text/babel" src="kanban.jsx?v=1783579511"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>

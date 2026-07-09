@@ -128,6 +128,65 @@
     );
   }
 
+  // ---------- AI protocol-step detail drawer ----------
+  // Steps are runner-owned, but the owner CAN edit them (rpst_write RLS = research_can_write_project).
+  // We expose the board-relevant fields (status + owner) here; deep editing (spec, deps) stays on the
+  // protocol board, reachable via the "Open in protocol board" action.
+  var STEP_STATUS = [['todo', 'ToDo'], ['queued', 'Queued'], ['running', 'In progress'], ['blocked', 'Blocked'], ['failed', 'Failed'], ['done', 'Done'], ['skipped', 'Skipped']];
+  function StepModal(props) {
+    var s = props.step;
+    var fS = useState({ status: s.status || 'todo', assignee: s.assignee === 'human' ? 'human' : 'ai' }), f = fS[0], setF = fS[1];
+    var bS = useState(false), busy = bS[0], setBusy = bS[1];
+    function up(k, v) { setF(Object.assign({}, f, (function () { var o = {}; o[k] = v; return o; })())); }
+    var dirty = f.status !== (s.status || 'todo') || f.assignee !== (s.assignee === 'human' ? 'human' : 'ai');
+    function save() {
+      setBusy(true);
+      sb.from('research_protocol_steps').update({ status: f.status, assignee: f.assignee }).eq('id', s.id).then(function (r) {
+        setBusy(false);
+        if (r && r.error) { toast('Could not update step: ' + r.error.message, { kind: 'error' }); return; }
+        props.onSaved();
+      });
+    }
+    useEffect(function () { function esc(e) { if (e.key === 'Escape') props.onClose(); } window.addEventListener('keydown', esc); return function () { window.removeEventListener('keydown', esc); }; });
+    var seg = function (k, opts) {
+      return h('div', { className: 'kb-seg' }, opts.map(function (o) {
+        return h('button', { key: o[0], type: 'button', className: f[k] === o[0] ? 'on' : '', onClick: function () { up(k, o[0]); } }, o[1]);
+      }));
+    };
+    var specStr = '';
+    try { specStr = s.spec ? (typeof s.spec === 'string' ? s.spec : JSON.stringify(s.spec, null, 2)) : ''; } catch (e) { specStr = ''; }
+    if (specStr.length > 1200) specStr = specStr.slice(0, 1200) + ' …';
+    var href = 'Research.html?project=' + encodeURIComponent(s.project_id || '') + '&step=' + encodeURIComponent(s.ord || 1);
+    return h('div', { className: 'kb-scrim', onClick: props.onClose },
+      h('div', { className: 'kb-modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'AI protocol step', onClick: function (e) { e.stopPropagation(); } },
+        h('div', { className: 'kb-mh' }, h('b', null, 'AI protocol step'), h('button', { className: 'kb-x', 'aria-label': 'Close', onClick: props.onClose }, '×')),
+        h('div', { className: 'kb-mb' },
+          h('div', { className: 'kb-note' }, (STEP_ICON[s.kind] || '•') + ' Runner-owned step — status & owner are editable here; edit the spec on the protocol board.'),
+          h('label', { className: 'kb-l' }, 'Title'),
+          h('div', { className: 'kb-ro' }, h('span', { style: { color: 'var(--faint)' } }, (s.ord || '?') + '. '), s.title),
+          h('div', { className: 'kb-row' },
+            h('div', null, h('label', { className: 'kb-l' }, 'Owner'), seg('assignee', [['human', '👤 Human'], ['ai', '🤖 AI']])),
+            h('div', null, h('label', { className: 'kb-l' }, 'Kind'), h('div', { className: 'kb-ro' }, (STEP_ICON[s.kind] || '•') + ' ' + (s.kind || '—')))
+          ),
+          h('label', { className: 'kb-l' }, 'Status'),
+          seg('status', STEP_STATUS),
+          specStr ? h('div', null, h('label', { className: 'kb-l' }, 'Spec'), h('pre', { className: 'kb-pre' }, specStr)) : null,
+          h('div', { className: 'kb-meta' },
+            h('div', null, h('span', null, 'Project'), h('span', null, (s._proj && s._proj.title) || 'Project')),
+            s._prot ? h('div', null, h('span', null, 'Protocol'), h('span', null, s._prot)) : null,
+            s.needs_approval ? h('div', null, h('span', null, 'Approval'), h('span', null, 'requires approval')) : null
+          )
+        ),
+        h('div', { className: 'kb-mf' },
+          h('a', { className: 'kb-btn', href: href }, 'Open in protocol board →'),
+          h('div', { style: { display: 'flex', gap: 8 } },
+            h('button', { className: 'kb-btn', onClick: props.onClose }, 'Close'),
+            h('button', { className: 'kb-btn pri', disabled: busy || !dirty, onClick: save }, busy ? 'Saving…' : 'Save'))
+        )
+      )
+    );
+  }
+
   // ---------- app ----------
   function App() {
     var phS = useState('loading'), phase = phS[0], setPhase = phS[1];
@@ -197,10 +256,15 @@
     var shownTodos = todos.filter(function (t) { return passItem(t.project_id, t.assignee, (t.title || '') + ' ' + (t.notes || '')); });
     var shownSteps = steps.filter(function (s) { return passItem(s.project_id, s.assignee, s.title || ''); });
 
-    // read-only AI protocol-step card (edit these on the project's protocol board)
+    // AI protocol-step card — opens a detail drawer (status/owner editable; deep edit on the protocol board)
     function stepCard(s) {
       var a = assigneeOf(s), proj = projById[s.project_id];
-      return h('a', { key: 's-' + s.id, className: 'bcard rostep ' + (a === 'human' ? 'hu' : 'ai'), href: 'Research.html?project=' + encodeURIComponent(s.project_id || '') + '&step=' + encodeURIComponent(s.ord || 1), title: 'Open in the project’s protocol board' },
+      return h('div', {
+        key: 's-' + s.id, className: 'bcard rostep ' + (a === 'human' ? 'hu' : 'ai'), title: 'AI protocol step — open details',
+        role: 'button', tabIndex: 0,
+        onClick: function () { setModal({ step: s }); },
+        onKeyDown: function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setModal({ step: s }); } }
+      },
         h('div', { className: 'gb-proj' }, h('i', { style: { background: proj ? colorFor(proj.id) : 'var(--faint)' } }), h('span', null, proj ? proj.title : 'Project')),
         h('div', { className: 'bcard-top' },
           h('span', { className: 'bchip who ' + (a === 'human' ? 'hu' : 'ai') }, a === 'human' ? 'HUMAN' : 'AI'),
@@ -268,7 +332,9 @@
             h('div', { className: 'bcol-b' }, n ? tc.map(card).concat(sc.map(stepCard)) : h('div', { className: 'bcol-empty' }, '—'))
           );
         })),
-      modal ? h(TaskModal, { task: modal.task, defaultProject: modal.defaultProject, meId: me.id, projects: projects, onClose: function () { setModal(null); }, onSaved: function () { setModal(null); reload(); } }) : null
+      modal ? (modal.step
+        ? h(StepModal, { step: modal.step, onClose: function () { setModal(null); }, onSaved: function () { setModal(null); reload(); } })
+        : h(TaskModal, { task: modal.task, defaultProject: modal.defaultProject, meId: me.id, projects: projects, onClose: function () { setModal(null); }, onSaved: function () { setModal(null); reload(); } })) : null
     );
   }
 
