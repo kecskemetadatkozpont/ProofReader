@@ -244,17 +244,25 @@ Deno.serve(async (req) => {
       const qh = hashStr('sr:' + rq.toLowerCase().replace(/\s+/g, ' '));
       const strArr = (a: any) => Array.isArray(a) ? a.map((x: any) => String(x || '').slice(0, 400)).filter(Boolean).slice(0, 20) : [];
       const absC = strArr(body.abstractCriteria), ftC = strArr(body.fulltextCriteria), exQ = strArr(body.extractionQuestions);
+      // explicit AI-generate control (default ON); if no criteria/questions are given, generate is forced ON
+      // (a screening/extraction stage can't be empty). useFigures = let extraction consult figures (slower).
+      const genA = body.genAbstract !== false, genE = body.genExtraction !== false, useFig = body.useFigures === true;
+      const runFT = body.runFullText !== false;   // omit fulltextScreening entirely to skip the full-text stage
+      const abstractScreening: any = { generate: absC.length ? genA : true };
+      if (absC.length) abstractScreening.criteria = absC;
+      const extraction: any = { generate: exQ.length ? genE : true };
+      if (exQ.length) extraction.questions = exQ;
+      if (useFig) extraction.useFigures = true;
       const srBody: any = {
         researchQuestion: rq.slice(0, 2000),
         protocolDetails: body.protocolDetails ? String(body.protocolDetails).slice(0, 4000) : undefined,
-        // user-supplied criteria are authoritative (generate:false); auto-generate only when none given
-        abstractScreening: absC.length ? { criteria: absC, generate: false } : { generate: true },
-        fulltextScreening: ftC.length ? { criteria: ftC, reuseAbstractCriteria: false } : { reuseAbstractCriteria: true },
-        extraction: exQ.length ? { questions: exQ, generate: false } : { generate: true },
+        abstractScreening,
+        extraction,
         generateReport: body.generateReport !== false,
         title: body.title ? String(body.title).slice(0, 200) : undefined,
         isPublic: false,
       };
+      if (runFT) srBody.fulltextScreening = ftC.length ? { criteria: ftC, reuseAbstractCriteria: false } : { reuseAbstractCriteria: true };
       // claim-first (TOCTOU-safe, unique index serializes concurrent creates)
       const { data: claim, error: claimErr } = await sb.from('elicit_jobs').insert({
         user_id: uid, project_id: body.project_id || null, kind: 'sysreview',
