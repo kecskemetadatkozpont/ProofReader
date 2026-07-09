@@ -36,7 +36,18 @@ async function elicitCall(path: string, method: string, body?: any) {
     body: body ? JSON.stringify(body) : undefined,
   });
   const o = await r.json().catch(() => ({}));
-  return { status: r.status, ok: r.ok, body: o as any };
+  const rate = { limit: r.headers.get('X-RateLimit-Limit'), remaining: r.headers.get('X-RateLimit-Remaining'), reset: r.headers.get('X-RateLimit-Reset') };
+  return { status: r.status, ok: r.ok, body: o as any, rate };
+}
+// clinical trial → compact shape for the UI
+function normTrial(t: any) {
+  return {
+    nctId: t.nctId || null, title: t.title || 'Untitled trial', summary: t.summary ? String(t.summary).slice(0, 600) : null, url: t.url || null,
+    status: t.overallStatus || null, phase: Array.isArray(t.phase) ? t.phase : [], studyType: t.studyType || null,
+    enrollment: (t.enrollmentCount != null ? t.enrollmentCount : null), conditions: Array.isArray(t.conditions) ? t.conditions.slice(0, 8) : [],
+    interventions: Array.isArray(t.interventions) ? t.interventions.slice(0, 8) : [], sponsor: t.leadSponsor || null,
+    startDate: t.startDate || null, completionDate: t.completionDate || null, hasResults: !!t.hasResults,
+  };
 }
 // map an Elicit GetReportResponse onto our elicit_jobs columns
 function reportPatch(g: any): any {
@@ -111,6 +122,41 @@ Deno.serve(async (req) => {
         .select('id,kind,status,stage,research_question,result_title,result_summary,result_body,result_abstract,url,is_public,pdf_url,docx_url,error,created_at,updated_at,project_id')
         .eq('user_id', uid).eq('kind', 'report').order('created_at', { ascending: false }).limit(50);
       return json({ ok: true, jobs: rows || [] });
+    }
+
+    // ---- clinical-trials search (synchronous; shares Elicit's search rate-limit bucket) ----
+    if (action === 'trials.search') {
+      const gate = await assertEntitled(sb, 'elicit_trials'); if (gate) return gate;
+      if (!ELICIT_KEY) return json({ error: 'Elicit is not configured (no API key set on the server).' }, 503);
+      const query = String(body.query || '').trim();
+      if (!query) return json({ error: 'query required' }, 400);
+      const cap = parseInt(Deno.env.get('ELICIT_TRIALS_DAILY') || '50', 10);
+      const { data: over } = await sb.rpc('feature_over_budget', { p_key: 'elicit_trials', max_calls: cap });
+      if (over === true) return json({ error: 'Daily Elicit trials-search limit reached — try again tomorrow.' }, 429);
+      const mode = body.searchMode === 'keyword' ? 'keyword' : 'semantic';
+      const maxResults = clampInt(body.maxResults, 1, 200, 50);
+      const arr = (a: any) => Array.isArray(a) ? a.map((x: any) => String(x)).filter(Boolean).slice(0, 20) : [];
+      const tf: any = {};
+      if (arr(body.phase).length) tf.phase = arr(body.phase);
+      if (arr(body.recruitmentStatus).length) tf.recruitmentStatus = arr(body.recruitmentStatus);
+      if (body.hasResults === true) tf.hasResults = true;
+      const reqBody: any = { query: query.slice(0, 1000), searchMode: mode, maxResults };
+      // filters + keyword mode are mutually exclusive on Elicit → only attach in semantic mode
+      if (mode === 'semantic' && Object.keys(tf).length) reqBody.trialFilters = tf;
+      const cacheKey = hashStr('trials:' + JSON.stringify({ query, mode, tf, n: maxResults }));
+      const { data: cached } = await sb.from('elicit_search_cache').select('results,ratelimit,fetched_at').eq('query_hash', cacheKey).maybeSingle();
+      if (cached && cached.results && (Date.now() - new Date(cached.fetched_at).getTime() < 24 * 3600 * 1000)) {
+        return json({ ok: true, trials: cached.results, rate: cached.ratelimit || null, cached: true });   // cache hit → free
+      }
+      const r = await elicitCall('/api/v1/search/trials', 'POST', reqBody);
+      if (r.status === 402) return json({ error: 'The Elicit account is out of quota — an admin must top it up.' }, 402);
+      if (r.status === 403) return json({ error: 'The Elicit plan does not include trials search.' }, 403);
+      if (r.status === 429) return json({ error: 'Elicit rate limit hit — try again shortly.', rate: r.rate }, 429);
+      if (!r.ok) return json({ error: 'Trials search failed.', detail: r.status }, 502);
+      const trials = (r.body.trials || []).map(normTrial);
+      await sb.rpc('feature_usage_bump', { p_key: 'elicit_trials' });
+      await sb.from('elicit_search_cache').upsert({ query_hash: cacheKey, query: query.slice(0, 300), corpus: 'trials', search_mode: mode, filters: tf, results: trials, ratelimit: r.rate, fetched_at: new Date().toISOString() });
+      return json({ ok: true, trials, rate: r.rate });
     }
 
     if (action === 'report.create') {

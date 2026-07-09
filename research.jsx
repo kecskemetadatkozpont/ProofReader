@@ -1511,6 +1511,57 @@
     );
   }
 
+  // ---- Elicit clinical-trials search (Phase 1b) ----
+  var TRIAL_PHASES = ['EARLY_PHASE1', 'PHASE1', 'PHASE2', 'PHASE3', 'PHASE4'];
+  var PH_LABEL = { EARLY_PHASE1: 'Early P1', PHASE1: 'P1', PHASE2: 'P2', PHASE3: 'P3', PHASE4: 'P4' };
+  var TRIAL_STATUS = [['RECRUITING', 'Recruiting'], ['NOT_YET_RECRUITING', 'Not yet recruiting'], ['ACTIVE_NOT_RECRUITING', 'Active, not recruiting'], ['COMPLETED', 'Completed'], ['TERMINATED', 'Terminated']];
+  function ElicitTrials(props) {
+    var canUse = !!(window.PREnt && window.PREnt.loaded() && window.PREnt.can('elicit_trials'));
+    var qS = useState(''), q = qS[0], setQ = qS[1];
+    var phS = useState([]), phase = phS[0], setPhase = phS[1];
+    var rsS = useState([]), rstat = rsS[0], setRstat = rsS[1];
+    var hrS = useState(false), hasRes = hrS[0], setHasRes = hrS[1];
+    var reS = useState(null), res = reS[0], setRes = reS[1];
+    var buS = useState(false), busy = buS[0], setBusy = buS[1];
+    var erS = useState(''), err = erS[0], setErr = erS[1];
+    var alive = useRef(true);
+    useEffect(function () { alive.current = true; return function () { alive.current = false; }; }, []);
+    function tog(arr, set, v) { set(arr.indexOf(v) >= 0 ? arr.filter(function (x) { return x !== v; }) : arr.concat([v])); }
+    function run() {
+      var query = q.trim(); if (!query) return; setBusy(true); setErr('');
+      callElicit({ action: 'trials.search', query: query, phase: phase, recruitmentStatus: rstat, hasResults: hasRes, maxResults: 50 }).then(function (d) {
+        if (!alive.current) return; setBusy(false);
+        if (!d || d.error) { setErr((d && d.error) || 'Search failed.'); setRes([]); return; }
+        setRes(d.trials || []);
+        if (d.rate && d.rate.remaining != null) setErr('Elicit budget: ' + d.rate.remaining + ' searches left today.');
+      });
+    }
+    function chip(key, label, on, onClick) { return h('button', { key: key, className: 'lchip' + (on ? ' on' : ''), disabled: !props.canEdit, style: { fontSize: 11 }, onClick: onClick }, label); }
+    function tcard(t) {
+      return h('div', { key: t.nctId || t.title, style: { border: '1px solid var(--line)', borderRadius: 10, padding: '10px 12px' } },
+        h('div', { style: { display: 'flex', gap: 8, alignItems: 'baseline' } },
+          h('div', { style: { flex: 1, minWidth: 0 } }, t.url ? h('a', { href: t.url, target: '_blank', style: { fontWeight: 600, fontSize: 13.5 } }, t.title) : h('span', { style: { fontWeight: 600, fontSize: 13.5 } }, t.title)),
+          t.status ? h('span', { className: 'lchip', style: { fontSize: 10, flex: 'none' } }, t.status) : null),
+        h('div', { style: { fontSize: 11, color: 'var(--muted)', marginTop: 3 } }, [t.nctId, (t.phase || []).map(function (p) { return PH_LABEL[p] || p; }).join('/'), t.studyType, (t.enrollment != null ? 'n=' + t.enrollment : null)].filter(Boolean).join(' · ')),
+        (t.conditions && t.conditions.length) ? h('div', { style: { fontSize: 11.5, marginTop: 4 } }, h('b', null, 'Conditions: '), t.conditions.join(', ')) : null,
+        (t.interventions && t.interventions.length) ? h('div', { style: { fontSize: 11.5, marginTop: 2 } }, h('b', null, 'Interventions: '), t.interventions.join(', ')) : null,
+        h('div', { style: { fontSize: 11, color: 'var(--faint)', marginTop: 4 } }, [t.sponsor, (t.startDate ? 'start ' + t.startDate : null), (t.completionDate ? 'end ' + t.completionDate : null), (t.hasResults ? '✓ has results' : null)].filter(Boolean).join(' · '))
+      );
+    }
+    if (!canUse) return null;
+    return h('div', { className: 'panel', style: { marginTop: 14 } },
+      h('h3', null, '🧪 Clinical trials ', h('span', { style: { fontSize: 11.5, color: 'var(--faint)', fontWeight: 400 } }, '· Elicit trials search')),
+      h('div', { style: { display: 'flex', gap: 8, margin: '8px 0', flexWrap: 'wrap' } },
+        h('input', { className: 'field', style: { flex: 1, minWidth: 220 }, placeholder: 'Search clinical trials…', value: q, disabled: !props.canEdit || busy, onChange: function (e) { setQ(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter') run(); } }),
+        h('button', { className: 'btn pri', disabled: !props.canEdit || busy || !q.trim(), onClick: run }, busy ? '…' : 'Search')),
+      h('div', { style: { display: 'flex', gap: 5, flexWrap: 'wrap', marginBottom: 4 } }, TRIAL_PHASES.map(function (p) { return chip(p, PH_LABEL[p], phase.indexOf(p) >= 0, function () { tog(phase, setPhase, p); }); })),
+      h('div', { style: { display: 'flex', gap: 5, flexWrap: 'wrap', marginBottom: 4 } }, TRIAL_STATUS.map(function (s) { return chip(s[0], s[1], rstat.indexOf(s[0]) >= 0, function () { tog(rstat, setRstat, s[0]); }); }).concat([chip('_hr', 'Has results', hasRes, function () { setHasRes(!hasRes); })])),
+      err ? h('div', { style: { fontSize: 12, color: /left today/.test(err) ? 'var(--muted)' : 'var(--danger, #b42318)', margin: '4px 0' } }, err) : null,
+      res === null ? null : res.length === 0 ? h('div', { style: { fontSize: 13, color: 'var(--muted)', padding: '6px 0' } }, 'No trials found — try different terms or clear filters.')
+        : h('div', { style: { display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 } }, res.map(tcard))
+    );
+  }
+
   function LiteratureStudy(props) {
     var studies = props.studies || [];
     var seS = useState((studies[0] && studies[0].id) || null), selId = seS[0], setSelId = seS[1];
@@ -2676,7 +2727,7 @@
     // (the visible sub-tab row is a separate array below; Data/Compute are intentionally not surfaced)
     var content;
     if (tab === 'ideas') content = h('div', null, h(ChatPanel, { projectId: p.id, supervised: !!p.student_id, canEdit: props.canEdit, authorId: props.authorId, fileOwnerId: props.fileOwnerId, sources: props.sources, onChanged: props.onChanged }), h(IdeasPanel, { projectId: p.id, ideas: props.ideas, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, onStartStudyMulti: function (ideas) { setAutoStudy(ideas || []); setTab('study'); }, onGoStudy: function () { setTab('study'); } }));
-    else if (tab === 'literature') content = h(React.Fragment, null, h(LiteraturePanel, { projectId: p.id, sources: props.sources, studies: props.studies, canEdit: props.canEdit, myEmail: props.myEmail, onChanged: props.onChanged }), h(ElicitReports, { projectId: p.id, project: p, canEdit: props.canEdit }), h(ElicitSysReview, { projectId: p.id, project: p, canEdit: props.canEdit }));
+    else if (tab === 'literature') content = h(React.Fragment, null, h(LiteraturePanel, { projectId: p.id, sources: props.sources, studies: props.studies, canEdit: props.canEdit, myEmail: props.myEmail, onChanged: props.onChanged }), h(ElicitTrials, { projectId: p.id, canEdit: props.canEdit }), h(ElicitReports, { projectId: p.id, project: p, canEdit: props.canEdit }), h(ElicitSysReview, { projectId: p.id, project: p, canEdit: props.canEdit }));
     else if (tab === 'study') content = null;   // #9: rendered persistently below so a running study survives tab switches
     else if (tab === 'protocol') content = h(ProtocolPanel, { projectId: p.id, ideas: props.ideas, sources: props.sources, studies: props.studies, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
     else if (tab === 'data') content = h(DataPanel, { projectId: p.id, datasets: props.datasets, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
