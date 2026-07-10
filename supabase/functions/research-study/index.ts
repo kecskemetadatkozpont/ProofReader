@@ -194,7 +194,8 @@ async function elicitSearch(question: string, config: any, maxResults: number, m
     query = ((semantic || question || '').trim()) || (kws.length ? kws.join(' ') : '') || 'research';
   }
   query = query.slice(0, 350);   // Elicit query cap (unconditional)
-  const b: any = { query, searchMode: mode === 'keyword' ? 'keyword' : 'semantic', maxResults: Math.min(10000, Math.max(1, maxResults)), corpus: config.corpus === 'pubmed' ? 'pubmed' : 'elicit' };   // /api/v1/search allows up to 10000
+  // /api/v1/search is capped at 500 results/request for our plan tier — sending more 400s ("maxResults must be at most 500"). Clamp so it never fails.
+  const b: any = { query, searchMode: mode === 'keyword' ? 'keyword' : 'semantic', maxResults: Math.min(500, Math.max(1, maxResults)), corpus: config.corpus === 'pubmed' ? 'pubmed' : 'elicit' };
   // filters and keyword mode are mutually exclusive on Elicit → only attach filters in semantic mode
   if (b.searchMode === 'semantic') { const fl = elicitFilters(config); if (Object.keys(fl).length) b.filters = fl; }
   let r: Response;
@@ -478,7 +479,7 @@ Return ONLY JSON, no prose:
       const limit = Math.min(25, Math.max(5, parseInt(String(body.limit || '20'), 10)));
       // Elicit fetches maxResults in ONE request (up to 10000); OpenAlex paginates per keyword → keep it modest so it stays fast.
       const isElicitSrc = String(config.source_adapter || '').indexOf('elicit') === 0;
-      const maxResults = Math.min(isElicitSrc ? 10000 : 400, Math.max(1, parseInt(String(config.max_results || '200'), 10)));
+      const maxResults = Math.min(isElicitSrc ? 500 : 400, Math.max(1, parseInt(String(config.max_results || '200'), 10)));   // Elicit search plan cap = 500/request
       let relaxed = false; let usedSource = 'openalex'; let elicitRate: any = null;
       // First call: fetch the papers once and create the unscreened candidate rows (idempotent —
       // ignoreDuplicates preserves any human-overridden/already-screened rows the run's delete kept).
