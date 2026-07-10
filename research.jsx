@@ -1576,7 +1576,9 @@
           h('label', { style: { display: 'flex', gap: 7, alignItems: 'center', fontSize: 12.5 } }, h('input', { type: 'checkbox', checked: f.genEx, onChange: function (e) { upf('genEx', e.target.checked); } }), 'Let Elicit generate extra extraction columns'),
           h('label', { style: { display: 'flex', gap: 7, alignItems: 'center', fontSize: 12.5 } }, h('input', { type: 'checkbox', checked: f.useFig, onChange: function (e) { upf('useFig', e.target.checked); } }), 'Consult figures during extraction ', h('span', { style: { color: 'var(--faint)', fontSize: 11 } }, '(higher quality, slower)'))),
         h('label', { style: { display: 'flex', gap: 7, alignItems: 'center', fontSize: 12.5 } }, h('input', { type: 'checkbox', checked: f.gen, onChange: function (e) { upf('gen', e.target.checked); } }), 'Generate a full report at the end'),
-        h('div', { style: { display: 'flex', justifyContent: 'flex-end' } }, h('button', { className: 'btn pri', disabled: !props.canEdit || busy || !f.q.trim(), onClick: create }, busy ? 'Starting…' : 'Start review'))
+        h('div', { style: { display: 'flex', gap: 10, justifyContent: 'flex-end', alignItems: 'center', flexWrap: 'wrap' } },
+          err ? h('div', { style: { flex: 1, minWidth: 0, fontSize: 12, color: /^✓/.test(err) ? 'var(--ok, #15803d)' : 'var(--danger, #b42318)' } }, err) : null,
+          h('button', { className: 'btn pri', disabled: !props.canEdit || busy || !f.q.trim(), onClick: create }, busy ? 'Starting…' : 'Start review'))
       ) : null,
       (jobs && jobs.length) ? h('div', { style: { marginTop: 14 } },
         h('div', { className: 'field-label' }, 'Reviews (' + jobs.length + ')'),
