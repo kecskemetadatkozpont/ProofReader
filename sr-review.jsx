@@ -17,6 +17,31 @@
     });
   }
   function mdHtml(t) { try { return window.DOMPurify.sanitize(window.marked.parse(t || '')); } catch (e) { return ''; } }
+  // strip Elicit {64-hex_N} citation markers, collapse the long per-study table, link each study name
+  function enhanceReport(md) {
+    var html;
+    try { html = window.DOMPurify.sanitize(window.marked.parse(String(md || '').replace(/\s*\{[0-9a-f]{40,}(?:_\d+)?\}/gi, ''))); } catch (e) { return mdHtml(md); }
+    try {
+      var doc = new DOMParser().parseFromString(html, 'text/html');
+      Array.prototype.forEach.call(doc.querySelectorAll('table'), function (tbl) {
+        var fr = tbl.querySelector('tr');
+        var firstHead = (fr && fr.children[0] && fr.children[0].textContent || '').trim().toLowerCase();
+        var rows = tbl.querySelectorAll('tbody tr'); if (!rows.length) rows = Array.prototype.slice.call(tbl.querySelectorAll('tr')).slice(1);
+        var n = rows.length;
+        if (!(firstHead.indexOf('study') === 0 || n > 8)) return;
+        Array.prototype.forEach.call(rows, function (tr) {
+          var td = tr.querySelector('td'); if (!td || td.querySelector('a')) return;
+          var name = td.textContent.trim(); if (name.length < 3) return;
+          var a = doc.createElement('a'); a.setAttribute('href', 'https://scholar.google.com/scholar?q=' + encodeURIComponent(name)); a.setAttribute('target', '_blank'); a.setAttribute('rel', 'noopener'); a.textContent = name;
+          while (td.firstChild) td.removeChild(td.firstChild); td.appendChild(a);
+        });
+        var det = doc.createElement('details'); det.className = 'md-tbl-collapse';
+        var sum = doc.createElement('summary'); sum.textContent = n + ' included studies — click to expand';
+        tbl.parentNode.insertBefore(det, tbl); det.appendChild(sum); det.appendChild(tbl);
+      });
+      return doc.body.innerHTML;
+    } catch (e) { return html; }
+  }
   function jobId() { try { return new URLSearchParams(location.search).get('job'); } catch (e) { return null; } }
   function nfmt(n) { return (n == null) ? '—' : String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
   function relTime(ts) { if (!ts) return ''; var t = new Date(ts).getTime(); if (isNaN(t)) return ''; var s = Math.max(0, Math.round((Date.now() - t) / 1000)); if (s < 60) return 'just now'; var m = Math.round(s / 60); if (m < 60) return m + ' min ago'; var hh = Math.round(m / 60); if (hh < 24) return hh + ' h ago'; return Math.round(hh / 24) + ' d ago'; }
@@ -172,7 +197,7 @@
           (!done ? h('div', { className: 'prose' }, h('h3', null, 'In progress'), h('p', null, 'This review is still running — the funnel above tracks each stage. Tables and the report appear here as each stage finishes.')) : null)
       );
     } else if (tab === 'report') {
-      panel = job.result_body ? h('div', { className: 'prose', dangerouslySetInnerHTML: { __html: mdHtml(job.result_body) } }) : h('div', { className: 'empty' }, done ? 'No report was generated for this review.' : 'The report is written after extraction — not ready yet.');
+      panel = job.result_body ? h('div', { className: 'prose', dangerouslySetInnerHTML: { __html: enhanceReport(job.result_body) } }) : h('div', { className: 'empty' }, done ? 'No report was generated for this review.' : 'The report is written after extraction — not ready yet.');
     } else {
       panel = stageReached(job, STAGES.filter(function (s) { return s.k === tab; })[0].exec) ? stageTable(tab) : h('div', { className: 'empty' }, 'This stage has not run yet.');
     }

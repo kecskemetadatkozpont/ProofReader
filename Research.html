@@ -179,6 +179,14 @@
     .md-report pre code { background: none; padding: 0; }
     .md-report h1 { font-size: 19px; margin: 4px 0 10px; } .md-report h2 { font-size: 16px; margin: 18px 0 8px; } .md-report h3 { font-size: 14px; color: var(--muted); margin: 14px 0 6px; }
     .md-report img { max-width: 100%; height: auto; }
+    /* the long per-study table in a report is collapsed by default; study names link to a search */
+    details.md-tbl-collapse { margin: 14px 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+    details.md-tbl-collapse > summary { cursor: pointer; padding: 9px 13px; font-size: 12.5px; font-weight: 650; color: var(--accent); background: var(--surface-2); list-style: none; user-select: none; }
+    details.md-tbl-collapse > summary::-webkit-details-marker { display: none; }
+    details.md-tbl-collapse > summary::before { content: '📋 ▸ '; }
+    details.md-tbl-collapse[open] > summary::before { content: '📋 ▾ '; }
+    details.md-tbl-collapse[open] > summary { border-bottom: 1px solid var(--line); }
+    details.md-tbl-collapse > table { margin: 0; }
     .report-doc hr { border: 0; border-top: 1px solid var(--line); margin: 26px 0; }
     .report-doc strong { font-weight: 600; }
     /* in-flow report pane (integrated into the page; slides in from the side) */
@@ -500,7 +508,7 @@
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script type="text/babel" src="canvas.jsx?v=1783137934"></script>
   <script type="text/babel" src="notes.jsx?v=1783137934"></script>
-  <script type="text/babel" src="research.jsx?v=1783679218"></script>
+  <script type="text/babel" src="research.jsx?v=1783679669"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>

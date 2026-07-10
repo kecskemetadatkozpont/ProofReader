@@ -381,6 +381,40 @@
     try { if (window.marked && window.DOMPurify) return window.DOMPurify.sanitize(window.marked.parse(s, { breaks: false }), { ADD_DATA_URI_TAGS: ['img'] }); } catch (e) { }
     return mdHtml(s);
   }
+  // Elicit reports embed {64-hex_N} citation markers and a long per-study table. Strip the markers, collapse
+  // the study table (so the report reads as prose, not a wall of every paper), and link each study name.
+  function stripCiteMarks(md) { return String(md == null ? '' : md).replace(/\s*\{[0-9a-f]{40,}(?:_\d+)?\}/gi, ''); }
+  function enhanceReport(md) {
+    var html;
+    try { html = window.DOMPurify.sanitize(window.marked.parse(stripCiteMarks(md), { breaks: false })); } catch (e) { return mdHtml(md); }
+    try {
+      var doc = new DOMParser().parseFromString(html, 'text/html');
+      Array.prototype.forEach.call(doc.querySelectorAll('table'), function (tbl) {
+        var firstRow = tbl.querySelector('tr');
+        var firstHead = (firstRow && firstRow.children[0] && firstRow.children[0].textContent || '').trim().toLowerCase();
+        var rows = tbl.querySelectorAll('tbody tr');
+        if (!rows.length) rows = Array.prototype.slice.call(tbl.querySelectorAll('tr')).slice(1);
+        var n = rows.length;
+        if (!(firstHead.indexOf('study') === 0 || n > 8)) return;   // only the long per-study list
+        Array.prototype.forEach.call(rows, function (tr) {
+          var td = tr.querySelector('td');
+          if (!td || td.querySelector('a')) return;
+          var name = td.textContent.trim();
+          if (name.length < 3) return;
+          var a = doc.createElement('a');
+          a.setAttribute('href', 'https://scholar.google.com/scholar?q=' + encodeURIComponent(name));
+          a.setAttribute('target', '_blank'); a.setAttribute('rel', 'noopener');
+          a.textContent = name;
+          while (td.firstChild) td.removeChild(td.firstChild);
+          td.appendChild(a);
+        });
+        var det = doc.createElement('details'); det.className = 'md-tbl-collapse';
+        var sum = doc.createElement('summary'); sum.textContent = n + ' included studies — click to expand';
+        tbl.parentNode.insertBefore(det, tbl); det.appendChild(sum); det.appendChild(tbl);
+      });
+      return doc.body.innerHTML;
+    } catch (e) { return html; }
+  }
   // Render report markdown, inject heading ids, and collect a table of contents (jump links).
   function buildDoc(md) {
     var html = mdReport(md); var toc = []; var i = 0;
@@ -1557,7 +1591,7 @@
       openReport ? h('div', { className: 'scrim', onClick: function () { setOpenReport(null); } }, h('div', { className: 'modal', style: { width: 760 }, onClick: function (e) { e.stopPropagation(); } },
         h('div', { className: 'modal-h' }, h('h3', { style: { margin: 0, flex: 1 } }, openReport.result_title || 'Report'), h('button', { className: 'icon-x', 'aria-label': 'Close', onClick: function () { setOpenReport(null); } }, '✕')),
         (window.marked && window.DOMPurify)
-          ? h('div', { className: 'md-report', style: { padding: 18, maxHeight: '72vh', overflow: 'auto', lineHeight: 1.6, fontSize: 13.5 }, dangerouslySetInnerHTML: { __html: window.DOMPurify.sanitize(window.marked.parse(openReport.result_body || '')) } })
+          ? h('div', { className: 'md-report', style: { padding: 18, maxHeight: '72vh', overflow: 'auto', lineHeight: 1.6, fontSize: 13.5 }, dangerouslySetInnerHTML: { __html: enhanceReport(openReport.result_body || '') } })
           : h('div', { style: { padding: 18, maxHeight: '72vh', overflow: 'auto', whiteSpace: 'pre-wrap', fontSize: 13 } }, openReport.result_body || ''))) : null
     );
   }
@@ -1772,7 +1806,7 @@
       openR ? h('div', { className: 'scrim', onClick: function () { setOpenR(null); } }, h('div', { className: 'modal', style: { width: 780 }, onClick: function (e) { e.stopPropagation(); } },
         h('div', { className: 'modal-h' }, h('h3', { style: { margin: 0, flex: 1 } }, openR.result_title || 'Systematic review'), h('button', { className: 'icon-x', 'aria-label': 'Close', onClick: function () { setOpenR(null); } }, '✕')),
         (window.marked && window.DOMPurify)
-          ? h('div', { className: 'md-report', style: { padding: 18, maxHeight: '72vh', overflow: 'auto', lineHeight: 1.6, fontSize: 13.5 }, dangerouslySetInnerHTML: { __html: window.DOMPurify.sanitize(window.marked.parse(openR.result_body || '')) } })
+          ? h('div', { className: 'md-report', style: { padding: 18, maxHeight: '72vh', overflow: 'auto', lineHeight: 1.6, fontSize: 13.5 }, dangerouslySetInnerHTML: { __html: enhanceReport(openR.result_body || '') } })
           : h('div', { style: { padding: 18, maxHeight: '72vh', overflow: 'auto', whiteSpace: 'pre-wrap', fontSize: 13 } }, openR.result_body || ''))) : null
     );
   }

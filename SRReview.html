@@ -96,6 +96,13 @@
     .prose thead th { background:var(--surface-2); font-weight:700; }
     .prose pre { background:var(--surface-2); padding:12px 14px; border-radius:8px; overflow:auto; }
     .prose img { max-width:100%; height:auto; }
+    details.md-tbl-collapse { margin:14px 0; border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+    details.md-tbl-collapse > summary { cursor:pointer; padding:9px 13px; font-size:12.5px; font-weight:650; color:var(--accent); background:var(--surface-2); list-style:none; user-select:none; }
+    details.md-tbl-collapse > summary::-webkit-details-marker { display:none; }
+    details.md-tbl-collapse > summary::before { content:'📋 ▸ '; }
+    details.md-tbl-collapse[open] > summary::before { content:'📋 ▾ '; }
+    details.md-tbl-collapse[open] > summary { border-bottom:1px solid var(--line); }
+    details.md-tbl-collapse > table { margin:0; }
 
     .dr-scrim { position:fixed; inset:0; background:rgba(15,20,40,.42); z-index:40; display:flex; justify-content:flex-end; animation:sc .18s ease; }
     @keyframes sc { from { background:rgba(15,20,40,0); } }
@@ -134,7 +141,7 @@
   <script src="backend/config.js?v=1783137934"></script>
   <script src="auth.js?v=1783137934"></script>
   <script src="backend.js?v=1783539952"></script>
-  <script type="text/babel" src="sr-review.jsx?v=1783677407"></script>
+  <script type="text/babel" src="sr-review.jsx?v=1783679669"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>
