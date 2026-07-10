@@ -267,8 +267,14 @@ Deno.serve(async (req) => {
       const { data: over } = await sb.rpc('feature_over_budget', { p_key: 'elicit_sysreview', max_calls: cap });
       if (over === true) return json({ error: 'Daily systematic-review limit reached — try again tomorrow.' }, 429);
       const qh = hashStr('sr:' + rq.toLowerCase().replace(/\s+/g, ' '));
-      const strArr = (a: any) => Array.isArray(a) ? a.map((x: any) => String(x || '').slice(0, 400)).filter(Boolean).slice(0, 20) : [];
-      const absC = strArr(body.abstractCriteria), ftC = strArr(body.fulltextCriteria), exQ = strArr(body.extractionQuestions);
+      // Elicit wants each criterion / extraction question as an OBJECT {name(≤200), instructions(≤2000)},
+      // NOT a plain string (a string 400s with "Expected object, received string"). The UI/candidates give
+      // full-sentence strings → derive a short `name` label + keep the full sentence as `instructions`.
+      const critArr = (a: any) => Array.isArray(a) ? a.map((x: any) => String(x || '').trim()).filter(Boolean).slice(0, 20) : [];
+      const toItem = (s: string) => ({ name: (s.length <= 90 ? s : s.slice(0, 88).replace(/\s+\S*$/, '') + '…').slice(0, 200), instructions: s.slice(0, 2000) });
+      const absC = critArr(body.abstractCriteria).map(toItem);
+      const ftC = critArr(body.fulltextCriteria).map(toItem);
+      const exQ = critArr(body.extractionQuestions).map(toItem);
       // explicit AI-generate control (default ON); if no criteria/questions are given, generate is forced ON
       // (a screening/extraction stage can't be empty). useFigures = let extraction consult figures (slower).
       const genA = body.genAbstract !== false, genE = body.genExtraction !== false, useFig = body.useFigures === true;
