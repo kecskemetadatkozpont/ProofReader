@@ -108,7 +108,7 @@
     var figQ = sb.from('research_figures').select('*').eq('project_id', pid).order('ord', { ascending: true });
     if (!S.showHidden) figQ = figQ.eq('hidden', false);
     return Promise.all([
-      sb.from('research_sources').select('id,project_id,title,authors,year,doi,url,venue').eq('project_id', pid).order('year', { ascending: false, nullsFirst: false }),
+      sb.from('research_sources').select('id,project_id,title,authors,year,doi,url,venue,cited_by,issn,abstract').eq('project_id', pid).order('year', { ascending: false, nullsFirst: false }),
       figQ,
       sb.from('research_figures').select('id', { count: 'exact', head: true }).eq('project_id', pid).eq('hidden', true)
     ]).then(function (r) {
@@ -167,6 +167,24 @@
   // ---------- render ----------
   var world, canvasEl, sideEl, statEl, extractBtn, progEl;
   function fmtAuthors(a) { return (a && a.length) ? (a[0] + (a.length > 1 ? ' et al.' : '')) : ''; }
+  // Scopus quartile (SCImago) from research_sources.issn — same logic + map as research.jsx.
+  var SCIMAGO = {};
+  function loadScimago() { return fetch('scimago-scopus.json').then(function (r) { return r.ok ? r.json() : {}; }).then(function (m) { SCIMAGO = m || {}; }, function () { SCIMAGO = {}; }); }
+  function quartileOf(p) {
+    var issn = p && p.issn; if (!issn) return null;
+    var parts = String(issn).split(',');
+    for (var i = 0; i < parts.length; i++) { var n = parts[i].replace(/[^0-9Xx]/g, '').toUpperCase(); if (n && SCIMAGO[n]) return SCIMAGO[n]; }
+    return null;
+  }
+  // metric badges (journal · Q · citations) as an HTML string; compact drops the journal name
+  function metricRow(p, compact) {
+    if (!p) return '';
+    var t = [], q = quartileOf(p);
+    if (!compact && p.venue) t.push('<span class="mtag jrnl" title="Journal / venue">' + esc(String(p.venue).slice(0, 44)) + '</span>');
+    if (q) t.push('<span class="mtag q q' + esc(String(q)) + '" title="Scopus quartile (SCImago Journal Rank) — Q1 is the top 25% by SJR in its field">Q' + esc(String(q)) + '</span>');
+    if (p.cited_by != null) t.push('<span class="mtag cite" title="Citation count">' + (+p.cited_by) + ' cites</span>');
+    return t.length ? '<div class="mrow">' + t.join('') + '</div>' : '';
+  }
   var EMPTY = '<div class="cluster" style="left:40px;top:40px;width:440px;padding:26px 24px"><b style="font-size:14px">No figures yet</b><div style="font-size:12.5px;color:var(--muted);margin-top:8px;line-height:1.5">Hit <b>Extract figures from Library</b> on the left. Publify finds each paper’s open-access PDF and pulls its figures onto this board.</div></div>';
   var thumb = function (f) { var u = S.urls[f.storage_path]; return '<div class="thumb">' + (u ? '<img src="' + u + '" alt="' + esc(f.fig_label) + '" loading="lazy">' : '<div class="ph">…</div>') + '</div>'; };
   var activeReflow = function () { }, reflowT;
@@ -200,12 +218,16 @@
         return '<div class="fig' + (f.hidden ? ' dim' : '') + '" data-pid="' + p.id + '" data-i="' + i + '">' + thumb(f)
           + '<div class="cap"><span class="pg">p.' + (f.page || '?') + ' · ' + esc(f.fig_label || 'Figure') + (f.hidden ? ' · hidden' : '') + '</span><br>' + esc((f.caption || '').replace(/^Fig(ure|\.)?\s*\d+[\.:\s]*/i, '')) + '</div></div>';
       }).join('');
-      c.innerHTML = '<div class="cl-head"><div style="min-width:0"><b>' + esc(p.title || 'Untitled') + '</b><span>' + esc(fmtAuthors(p.authors) + (p.year ? ' · ' + p.year : '')) + ' · ' + figs.length + ' fig</span></div>'
+      c.innerHTML = '<div class="cl-head"><div style="min-width:0"><b>' + esc(p.title || 'Untitled') + '</b><span>' + esc(fmtAuthors(p.authors) + (p.year ? ' · ' + p.year : '')) + ' · ' + figs.length + ' fig</span>' + metricRow(p) + '</div>'
         + '<button class="cl-pin" data-pid="' + p.id + '" data-title="' + esc(p.title || '') + '" title="Pin all figures from this paper to the research Canvas">📌 Pin all</button></div>'
-        + '<div class="cl-box"><div class="figrow">' + thumbs + '</div></div>';
+        + '<div class="cl-box">'
+        + (p.abstract ? '<details class="abs"><summary>📄 Abstract</summary><div class="abs-body">' + esc(p.abstract) + '</div></details>' : '')
+        + '<div class="figrow">' + thumbs + '</div></div>';
       world.appendChild(c);
     });
-    wireCards('.fig'); reflow(); apply();
+    wireCards('.fig');
+    world.querySelectorAll('details.abs').forEach(function (d) { d.addEventListener('toggle', scheduleReflow); });
+    reflow(); apply();
   }
   // All-figures gallery: flat masonry of every figure thumbnail.
   function layoutGallery() {
@@ -216,7 +238,7 @@
     all.forEach(function (o) {
       var f = o.f, p = o.p;
       var c = el('div', 'gcard' + (f.hidden ? ' dim' : '')); c.dataset.pid = p.id; c.dataset.i = o.i;
-      c.innerHTML = thumb(f) + '<div class="gcap"><span class="pg">' + esc(f.fig_label || 'Figure') + (f.hidden ? ' · hidden' : '') + '</span> ' + esc((p.title || '').slice(0, 52)) + '</div>';
+      c.innerHTML = thumb(f) + '<div class="gcap"><span class="pg">' + esc(f.fig_label || 'Figure') + (f.hidden ? ' · hidden' : '') + '</span> ' + esc((p.title || '').slice(0, 52)) + metricRow(p, true) + '</div>';
       world.appendChild(c);
     });
     wireCards('.gcard'); reflowGallery(); apply();
@@ -236,7 +258,7 @@
       var figs = S.byPaper[p.id] || [], n = figs.length, hasDoi = !!p.doi;
       var st = n ? 'ok' : (hasDoi ? 'idle' : 'nodoi'), ico = n ? '✓' : (hasDoi ? '↧' : '–');
       return '<div class="paper" data-pid="' + p.id + '"><span class="st ' + st + '">' + ico + '</span>'
-        + '<span class="pt"><b>' + esc(p.title || 'Untitled') + '</b><span>' + esc(fmtAuthors(p.authors)) + (n ? ' · ' + n + ' figures' : hasDoi ? ' · not extracted' : ' · no DOI') + '</span></span></div>';
+        + '<span class="pt"><b>' + esc(p.title || 'Untitled') + '</b><span>' + esc(fmtAuthors(p.authors)) + (n ? ' · ' + n + ' figures' : hasDoi ? ' · not extracted' : ' · no DOI') + '</span>' + metricRow(p, true) + '</span></div>';
     }).join('');
     sideEl.innerHTML = '<div class="extract-card"><div class="lead">Pull the figures out of your <b>Library</b> papers. Publify finds each open-access PDF and extracts its figures onto this board.</div>'
       + '<button class="btn pri" id="extract">✨ Extract figures from Library</button><div class="prog" id="prog"></div></div>'
@@ -289,6 +311,7 @@
     document.getElementById('drfig').innerHTML = u ? '<img src="' + u + '">' : '';
     document.getElementById('drbody').innerHTML = '<div class="tag ok">◆ Extracted from OA PDF</div>'
       + '<h3>' + esc(f.fig_label || 'Figure') + '</h3><div class="dr-src">from <b>' + esc(p ? p.title : '') + '</b><br>' + esc(fmtAuthors(p && p.authors)) + (p && p.venue ? ' · ' + esc(p.venue) : '') + '</div>'
+      + metricRow(p)
       + (f.caption ? '<div class="dr-cap">' + esc(f.caption) + '</div>' : '')
       + '<div class="kvs"><div class="kv"><span>Page</span><b>' + (f.page || '?') + '</b></div>'
       + (p && p.doi ? '<div class="kv"><span>DOI</span><b class="mono"><a href="https://doi.org/' + esc(bareDoi(p.doi)) + '" target="_blank" rel="noopener">' + esc(bareDoi(p.doi)) + '</a></b></div>' : '')
@@ -356,5 +379,5 @@
   if (!projId()) { root.innerHTML = '<div class="center"><div class="box"><h1>No project</h1><p>Open the Figure Board from Research → a project → Literature.</p><a class="btn" href="Research.html">← Research</a></div></div>'; return; }
   shell();
   progEl = null;
-  load().then(function () { sidebar(); render(); }, function () { root.innerHTML = '<div class="center"><div class="box"><h1>Could not load</h1><p>This project may not exist or you may not have access.</p><a class="btn" href="Research.html">← Research</a></div></div>'; });
+  Promise.all([load(), loadScimago()]).then(function () { sidebar(); render(); }, function () { root.innerHTML = '<div class="center"><div class="box"><h1>Could not load</h1><p>This project may not exist or you may not have access.</p><a class="btn" href="Research.html">← Research</a></div></div>'; });
 })();
