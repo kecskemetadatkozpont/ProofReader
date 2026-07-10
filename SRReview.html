@@ -89,7 +89,13 @@
     .prose { border:1px solid var(--line); border-radius:14px; background:var(--surface); padding:20px 24px; margin-top:14px; max-width:80ch; line-height:1.6; }
     .prose h3 { margin:0 0 8px; font-size:16px; } .prose h1,.prose h2 { font-size:18px; margin:18px 0 8px; }
     .prose p { color:var(--muted); margin:0 0 12px; } .prose .lead { color:var(--ink); font-size:14.5px; }
-    .prose a { color:var(--accent); } .prose table { font-size:12.5px; }
+    .prose a { color:var(--accent); }
+    .prose { overflow-wrap:anywhere; }
+    .prose table { display:block; width:max-content; max-width:100%; overflow-x:auto; border-collapse:collapse; margin:12px 0; font-size:12.5px; }
+    .prose th, .prose td { border:1px solid var(--line); padding:5px 9px; text-align:left; vertical-align:top; }
+    .prose thead th { background:var(--surface-2); font-weight:700; }
+    .prose pre { background:var(--surface-2); padding:12px 14px; border-radius:8px; overflow:auto; }
+    .prose img { max-width:100%; height:auto; }
 
     .dr-scrim { position:fixed; inset:0; background:rgba(15,20,40,.42); z-index:40; display:flex; justify-content:flex-end; animation:sc .18s ease; }
     @keyframes sc { from { background:rgba(15,20,40,0); } }

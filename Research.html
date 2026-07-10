@@ -165,10 +165,20 @@
     .report-doc code { background: var(--soft); padding: 1.5px 5px; border-radius: 4px; font-size: 12.5px; }
     .report-doc pre { background: var(--soft); padding: 12px 14px; border-radius: 8px; overflow: auto; }
     .report-doc pre code { background: none; padding: 0; }
-    .report-doc table { border-collapse: collapse; margin: 14px 0; font-size: 13px; }
+    .report-doc table { border-collapse: collapse; margin: 14px 0; font-size: 13px; display: block; width: max-content; max-width: 100%; overflow-x: auto; }
     .report-doc th, .report-doc td { border: 1px solid var(--line); padding: 6px 12px; text-align: left; }
     .report-doc th { background: var(--surface-2); font-weight: 600; }
     .report-doc img { max-width: 100%; height: auto; display: block; margin: 16px auto; border: 1px solid var(--line); border-radius: 8px; }
+    /* rendered markdown inside the Elicit report/SR modals — wide tables scroll inside the modal instead of spilling out */
+    .md-report { overflow-wrap: anywhere; }
+    .md-report table { display: block; width: max-content; max-width: 100%; overflow-x: auto; border-collapse: collapse; margin: 12px 0; font-size: 12.5px; -webkit-overflow-scrolling: touch; }
+    .md-report th, .md-report td { border: 1px solid var(--line); padding: 5px 9px; text-align: left; vertical-align: top; }
+    .md-report thead th { background: var(--surface-2); font-weight: 700; }
+    .md-report code { background: var(--soft); padding: 1.5px 5px; border-radius: 4px; font-size: 12.5px; }
+    .md-report pre { background: var(--soft); padding: 12px 14px; border-radius: 8px; overflow: auto; }
+    .md-report pre code { background: none; padding: 0; }
+    .md-report h1 { font-size: 19px; margin: 4px 0 10px; } .md-report h2 { font-size: 16px; margin: 18px 0 8px; } .md-report h3 { font-size: 14px; color: var(--muted); margin: 14px 0 6px; }
+    .md-report img { max-width: 100%; height: auto; }
     .report-doc hr { border: 0; border-top: 1px solid var(--line); margin: 26px 0; }
     .report-doc strong { font-weight: 600; }
     /* in-flow report pane (integrated into the page; slides in from the side) */
@@ -490,7 +500,7 @@
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script type="text/babel" src="canvas.jsx?v=1783137934"></script>
   <script type="text/babel" src="notes.jsx?v=1783137934"></script>
-  <script type="text/babel" src="research.jsx?v=1783677407"></script>
+  <script type="text/babel" src="research.jsx?v=1783679218"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>

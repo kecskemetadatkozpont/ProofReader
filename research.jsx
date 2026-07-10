@@ -1557,7 +1557,7 @@
       openReport ? h('div', { className: 'scrim', onClick: function () { setOpenReport(null); } }, h('div', { className: 'modal', style: { width: 760 }, onClick: function (e) { e.stopPropagation(); } },
         h('div', { className: 'modal-h' }, h('h3', { style: { margin: 0, flex: 1 } }, openReport.result_title || 'Report'), h('button', { className: 'icon-x', 'aria-label': 'Close', onClick: function () { setOpenReport(null); } }, '✕')),
         (window.marked && window.DOMPurify)
-          ? h('div', { style: { padding: 18, maxHeight: '72vh', overflow: 'auto', lineHeight: 1.6, fontSize: 13.5 }, dangerouslySetInnerHTML: { __html: window.DOMPurify.sanitize(window.marked.parse(openReport.result_body || '')) } })
+          ? h('div', { className: 'md-report', style: { padding: 18, maxHeight: '72vh', overflow: 'auto', lineHeight: 1.6, fontSize: 13.5 }, dangerouslySetInnerHTML: { __html: window.DOMPurify.sanitize(window.marked.parse(openReport.result_body || '')) } })
           : h('div', { style: { padding: 18, maxHeight: '72vh', overflow: 'auto', whiteSpace: 'pre-wrap', fontSize: 13 } }, openReport.result_body || ''))) : null
     );
   }
@@ -1772,7 +1772,7 @@
       openR ? h('div', { className: 'scrim', onClick: function () { setOpenR(null); } }, h('div', { className: 'modal', style: { width: 780 }, onClick: function (e) { e.stopPropagation(); } },
         h('div', { className: 'modal-h' }, h('h3', { style: { margin: 0, flex: 1 } }, openR.result_title || 'Systematic review'), h('button', { className: 'icon-x', 'aria-label': 'Close', onClick: function () { setOpenR(null); } }, '✕')),
         (window.marked && window.DOMPurify)
-          ? h('div', { style: { padding: 18, maxHeight: '72vh', overflow: 'auto', lineHeight: 1.6, fontSize: 13.5 }, dangerouslySetInnerHTML: { __html: window.DOMPurify.sanitize(window.marked.parse(openR.result_body || '')) } })
+          ? h('div', { className: 'md-report', style: { padding: 18, maxHeight: '72vh', overflow: 'auto', lineHeight: 1.6, fontSize: 13.5 }, dangerouslySetInnerHTML: { __html: window.DOMPurify.sanitize(window.marked.parse(openR.result_body || '')) } })
           : h('div', { style: { padding: 18, maxHeight: '72vh', overflow: 'auto', whiteSpace: 'pre-wrap', fontSize: 13 } }, openR.result_body || ''))) : null
     );
   }
