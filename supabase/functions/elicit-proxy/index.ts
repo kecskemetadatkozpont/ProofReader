@@ -29,6 +29,50 @@ const TERMINAL = new Set(['completed', 'failed']);
 function hashStr(s: string): string { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0; return h.toString(36); }
 function clampInt(v: any, lo: number, hi: number, def: number): number { const n = parseInt(String(v), 10); return Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : def; }
 
+// ---- SR stage CSV → structured data for the in-app results viewer ----
+function csvRows(text: string): string[][] {
+  const rows: string[][] = []; let row: string[] = [], cur = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) { if (c === '"') { if (text[i + 1] === '"') { cur += '"'; i++; } else q = false; } else cur += c; }
+    else if (c === '"') q = true;
+    else if (c === ',') { row.push(cur); cur = ''; }
+    else if (c === '\n') { row.push(cur); rows.push(row); row = []; cur = ''; }
+    else if (c !== '\r') cur += c;
+  }
+  if (cur.length || row.length) { row.push(cur); rows.push(row); }
+  return rows;
+}
+// Elicit stage CSVs pack each extraction question / screening criterion as a quartet of columns:
+//   "<Name>"  ·  Supporting quotes for "<Name>"  ·  Supporting tables for "<Name>"  ·  Reasoning for "<Name>"
+// Group them so the table shows the answer and the drawer unpacks quotes + reasoning per field.
+function parseStage(text: string, countOnly: boolean) {
+  const raw = csvRows(text).filter((r) => !(r.length === 1 && r[0] === ''));
+  if (!raw.length) return { columns: [], questions: [], rows: [], total: 0 };
+  const header = raw[0].map((h, i) => (i === 0 ? h.replace(/^﻿/, '') : h));
+  const total = raw.length - 1;
+  if (countOnly) return { columns: [], questions: [], rows: [], total };
+  const MAX = 2000;
+  const idx: Record<string, number> = {}; header.forEach((h, i) => { if (!(h in idx)) idx[h] = i; });
+  const questions: any[] = []; const grouped = new Set<number>();
+  header.forEach((h, i) => {
+    const m = h.match(/^Reasoning for "(.+)"$/);
+    if (!m) return;
+    const name = m[1];
+    const at = (k: string) => (idx[k] != null ? idx[k] : -1);
+    const ansI = at(name), quI = at('Supporting quotes for "' + name + '"'), taI = at('Supporting tables for "' + name + '"');
+    questions.push({ name, ansI, quI, taI, reI: i });
+    [ansI, quI, taI, i].forEach((x) => { if (x >= 0) grouped.add(x); });
+  });
+  const metaCols = header.map((h, i) => ({ h, i })).filter((c) => !grouped.has(c.i));
+  const clip = (s: any) => String(s || '').slice(0, 4000);
+  const rows = raw.slice(1, 1 + MAX).map((r) => ({
+    meta: metaCols.map((c) => clip(r[c.i])),
+    fields: questions.map((q) => ({ name: q.name, answer: clip(q.ansI >= 0 ? r[q.ansI] : ''), quotes: clip(q.quI >= 0 ? r[q.quI] : ''), tables: clip(q.taI >= 0 ? r[q.taI] : ''), reasoning: clip(q.reI >= 0 ? r[q.reI] : '') })),
+  }));
+  return { columns: metaCols.map((c) => c.h), questions: questions.map((q) => q.name), rows, total, capped: total > MAX };
+}
+
 async function elicitCall(path: string, method: string, body?: any) {
   const r = await fetch(ELICIT_BASE + path, {
     method,
@@ -262,6 +306,33 @@ Deno.serve(async (req) => {
       qb = body.project_id ? qb.eq('project_id', String(body.project_id)) : qb.eq('user_id', uid);
       const { data: rows } = await qb.order('created_at', { ascending: false }).limit(30);
       return json({ ok: true, jobs: rows || [] });
+    }
+
+    // ---- sr.get: one review by id (for the results page deep-link) ----
+    if (action === 'sr.get') {
+      const { data: row } = await sb.from('elicit_jobs').select('*').eq('id', body.job_id).eq('kind', 'sysreview').maybeSingle();
+      if (!row) return json({ error: 'not found' }, 404);   // RLS = own or admin
+      return json({ ok: true, job: row });
+    }
+
+    // ---- sr.stage_data: a stage's CSV → structured rows for the in-app results tables ----
+    if (action === 'sr.stage_data') {
+      const { data: row } = await sb.from('elicit_jobs').select('id,elicit_id,kind,stages').eq('id', body.job_id).eq('kind', 'sysreview').maybeSingle();
+      if (!row) return json({ error: 'not found' }, 404);   // RLS = own or admin
+      const stage = String(body.stage || 'extract');
+      if (!['search', 'screen', 'fulltext', 'extract'].includes(stage)) return json({ error: 'bad stage' }, 400);
+      // Try the STORED presigned URL first (no Elicit round-trip). Presigned URLs expire in 7 days → on a
+      // fetch failure, refresh once from Elicit and retry. Keeps a page load to ≤4 S3 downloads, no Elicit burst.
+      let text: string | null = null;
+      const stored = (row.stages && row.stages[stage] && row.stages[stage].csv) || null;
+      if (stored) { try { const cr = await fetch(stored); if (cr.ok) text = await cr.text(); } catch (_e) { /* refresh below */ } }
+      if (text == null && row.elicit_id && ELICIT_KEY) {
+        const g = await elicitCall('/api/v1/systematic-reviews/' + encodeURIComponent(row.elicit_id), 'GET');
+        const fresh = g.ok && g.body?.data && g.body.data[stage] && g.body.data[stage].csv;
+        if (fresh) { try { const cr2 = await fetch(g.body.data[stage].csv); if (cr2.ok) text = await cr2.text(); } catch (_e) { /* give up below */ } }
+      }
+      if (text == null) return json({ ok: true, stage, columns: [], questions: [], rows: [], total: 0, note: 'No data for this stage yet.' });
+      return json({ ok: true, stage, ...parseStage(text, body.countOnly === true) });
     }
 
     if (action === 'sr.create') {

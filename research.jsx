@@ -1688,6 +1688,8 @@
     function card(j) {
       var done = j.status === 'completed', failed = j.status === 'failed', paused = j.status === 'pausedForInsufficientQuota';
       var acts = [];
+      // dedicated results page: tracks the PRISMA pipeline live + renders screening/extraction tables + report on the web
+      acts.push(h('a', { key: 'res', className: 'btn pri', style: { padding: '4px 10px', fontSize: 12, textDecoration: 'none' }, href: 'SRReview.html?job=' + encodeURIComponent(j.id), title: 'Track the pipeline and view the results in Publify' }, (done ? '📊 Open results' : '📊 Track progress')));
       if (done && j.result_body) acts.push(h('button', { key: 'v', className: 'btn', style: { padding: '4px 10px', fontSize: 12 }, onClick: function () { setOpenR(j); } }, 'View full report'));
       if (done) acts.push(h('button', { key: 'rf', className: 'btn', style: { padding: '4px 10px', fontSize: 12 }, title: 'Re-fetch the download links (they expire after 7 days)', onClick: function () { refreshJob(j); } }, '↻ Refresh downloads'));
       if (paused) acts.push(h('button', { key: 'r', className: 'btn pri', style: { padding: '4px 10px', fontSize: 12 }, onClick: function () { resume(j); } }, 'Resume'));
