@@ -13,7 +13,7 @@
 // Deploy:  supabase functions deploy research-study --no-verify-jwt
 // Secrets: ANTHROPIC_API_KEY (reused); CONSENSUS_MCP_TOKEN (optional, grounds the review).
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { assertEntitled, resolveModel } from '../_shared/entitlement.ts';
+import { assertEntitled, assertActive, resolveModel } from '../_shared/entitlement.ts';
 
 const ANTHROPIC_KEY = Deno.env.get('ANTHROPIC_API_KEY');
 const CONSENSUS_TOKEN = Deno.env.get('CONSENSUS_MCP_TOKEN');
@@ -379,7 +379,9 @@ Return ONLY JSON, no prose: {"detected_language":"<language name>","suggestions"
 
     // ---- file_intake: a just-uploaded file → 1-line summary + 1-2 clarifying questions about what to do with it ----
     if (action === 'file_intake') {
-      const gate = await assertEntitled(sb, 'literature_study'); if (gate) return gate;
+      // shared helper: reachable from BOTH the Ideas (literature_study) and Protocol (protocol_runner) tabs, so
+      // gate on account-active only — otherwise a protocol-entitled-but-not-literature user gets a 403 modal.
+      const gate = await assertActive(sb); if (gate) return gate;
       const filename = String(body.filename || 'file').slice(0, 200);
       const content = String(body.content || '').slice(0, 12000);   // extracted text (truncated); empty for binaries/images
       const context = String(body.context || '').slice(0, 800);      // where it's used: a task title/instruction, or "a research idea"
