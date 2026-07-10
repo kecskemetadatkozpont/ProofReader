@@ -521,6 +521,46 @@
           h('button', { className: 'icon-x', 'aria-label': 'Close', onClick: props.onClose }, '✕')),
         h('div', { className: 'pv-body' }, body))), document.body);
   }
+  // Shared "file intake" modal: after a file is uploaded (Idea or Protocol task), the AI summarizes it and
+  // asks 1-2 clarifying questions about what to do with it. onComplete({summary, qa:[{question,answer}]}).
+  function FileIntake(props) {
+    var stS = useState('loading'), st = stS[0], setSt = stS[1];
+    var smS = useState(''), summary = smS[0], setSummary = smS[1];
+    var qsS = useState([]), qs = qsS[0], setQs = qsS[1];
+    var erS = useState(''), er = erS[0], setEr = erS[1];
+    useEffect(function () {
+      var alive = true;
+      callStudy({ action: 'file_intake', filename: (props.file && props.file.path) || 'file', content: (props.file && props.file.content) || '', context: props.context || '', intent: props.intent || '' }).then(function (d) {
+        if (!alive) return;
+        if (!d || d.error) { setEr((d && d.error) || 'Could not analyze the file.'); setSt('error'); return; }
+        setSummary(d.summary || ''); setQs(((d && d.questions) || []).map(function (q) { return { q: q, a: '' }; })); setSt('ask');
+      }, function () { if (alive) { setEr('Analysis failed.'); setSt('error'); } });
+      return function () { alive = false; };
+    }, []);
+    function setA(i, v) { setQs(function (l) { return l.map(function (x, k) { return k === i ? Object.assign({}, x, { a: v }) : x; }); }); }
+    function finish(skip) {
+      var qa = skip ? [] : qs.filter(function (x) { return (x.a || '').trim(); }).map(function (x) { return { question: x.q, answer: x.a.trim() }; });
+      props.onComplete({ summary: summary, qa: qa });
+    }
+    return ReactDOM.createPortal(h('div', { className: 'scrim', onClick: function () { props.onClose(); } },
+      h('div', { className: 'modal', style: { width: 560, maxWidth: '100%' }, onClick: function (e) { e.stopPropagation(); } },
+        h('div', { className: 'modal-h' }, h('h3', { style: { margin: 0, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, '📎 About “' + ((props.file && props.file.path) || 'file') + '”'), h('button', { className: 'icon-x', 'aria-label': 'Close', onClick: props.onClose }, '✕')),
+        h('div', { style: { padding: 18 } },
+          st === 'loading' ? h(AiThinking, { label: 'Reading the file & preparing a couple of questions', mini: true }) :
+            st === 'error' ? h('div', { style: { fontSize: 13, color: 'var(--danger)' } }, er) :
+              h('div', null,
+                summary ? h('div', { style: { fontSize: 12.5, color: 'var(--muted)', background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 8, padding: '8px 10px', marginBottom: 12 } }, summary) : null,
+                qs.length ? h('div', { style: { fontSize: 12.5, fontWeight: 600, marginBottom: 6 } }, 'A couple of clarifying questions:') : h('div', { style: { fontSize: 12.5, color: 'var(--muted)', marginBottom: 6 } }, 'No clarifying questions — you can continue.'),
+                qs.map(function (x, i) {
+                  return h('div', { key: i, style: { marginBottom: 10 } },
+                    h('div', { style: { fontSize: 12.5, marginBottom: 3 } }, (i + 1) + '. ' + x.q),
+                    h('textarea', { className: 'field', rows: 2, style: { width: '100%', boxSizing: 'border-box' }, value: x.a, placeholder: 'Your answer (optional)…', onChange: function (e) { setA(i, e.target.value); } }));
+                }),
+                h('div', { style: { display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 6 } },
+                  h('button', { className: 'btn', onClick: function () { finish(true); } }, 'Skip'),
+                  h('button', { className: 'btn pri', onClick: function () { finish(false); } }, 'Save answers')))
+        ))), document.body);
+  }
   // Reusable "the AI is working" indicator: pulsing orb + animated label + indeterminate bar + honest elapsed timer.
   function AiThinking(props) {
     var t = useState(0), sec = t[0], setSec = t[1];
@@ -567,6 +607,14 @@
     var adS = useState(false), added = adS[0], setAdded = adS[1];   // #8: brief "added to ideas" feedback
     var spS = useState(null), selPop = spS[0], setSelPop = spS[1];   // #1: text selection in the MD preview → "add to idea" popup
     var upRef = useRef(null);
+    var skS = useState(null), intake = skS[0], setIntake = skS[1];   // file-intake clarifying questions after an upload
+    function intakeDone(result) {
+      var it = intake; setIntake(null);
+      if (!it || !result || !result.qa || !result.qa.length || !props.onAddIdea) return;
+      var note = '📎 File “' + it.path + '”' + (result.summary ? ' — ' + result.summary : '') + '\n' + result.qa.map(function (x) { return '• ' + x.question + '\n  → ' + x.answer; }).join('\n');
+      props.onAddIdea(note);
+      window.PRUI.toast('Saved your file notes as an idea.', { kind: 'ok' });
+    }
     function onPreviewMouseUp() {
       if (!(props.canEdit && props.onAddIdea)) return;
       setTimeout(function () {
@@ -589,14 +637,14 @@
       var sp = props.projectId + '/files/' + Date.now() + '_' + f.name.replace(/[^A-Za-z0-9._-]/g, '_');
       sb.storage.from('research-data').upload(sp, f).then(function (res) {
         if (res && res.error) { window.PRUI.toast(res.error.message, { kind: 'error' }); return; }
-        sb.from('research_files').upsert({ project_id: props.projectId, path: f.name, storage_path: sp, mime: f.type || 'application/octet-stream', size: f.size, source: 'upload', created_by: props.authorId, updated_by: props.authorId, updated_at: new Date().toISOString() }, { onConflict: 'project_id,path' }).then(load);
+        sb.from('research_files').upsert({ project_id: props.projectId, path: f.name, storage_path: sp, mime: f.type || 'application/octet-stream', size: f.size, source: 'upload', created_by: props.authorId, updated_by: props.authorId, updated_at: new Date().toISOString() }, { onConflict: 'project_id,path' }).then(function () { load(); if (props.onAddIdea) setIntake({ path: f.name, content: '' }); });
       });
     }
     // Office (Word/Excel/PowerPoint) → editable markdown/CSV stored as a text file (shared PROffice util)
     function importOffice(f) {
       window.PROffice.extract(f).then(function (r) {
         var name = f.name.replace(/\.(docx|xlsx|xlsm|xls|pptx)$/i, '') + '.' + (r.ext || 'md');
-        sb.from('research_files').upsert({ project_id: props.projectId, path: name, content: r.text || '', mime: r.ext === 'csv' ? 'text/csv' : 'text/markdown', source: 'upload', created_by: props.authorId, updated_by: props.authorId, updated_at: new Date().toISOString() }, { onConflict: 'project_id,path' }).then(function (rr) { if (rr && rr.error) { window.PRUI.toast(rr.error.message, { kind: 'error' }); return; } load(); });
+        sb.from('research_files').upsert({ project_id: props.projectId, path: name, content: r.text || '', mime: r.ext === 'csv' ? 'text/csv' : 'text/markdown', source: 'upload', created_by: props.authorId, updated_by: props.authorId, updated_at: new Date().toISOString() }, { onConflict: 'project_id,path' }).then(function (rr) { if (rr && rr.error) { window.PRUI.toast(rr.error.message, { kind: 'error' }); return; } load(); if (props.onAddIdea) setIntake({ path: name, content: r.text || '' }); });
       }, function (er) { window.PRUI.toast('Office processing error: ' + ((er && er.message) || er), { kind: 'error' }); });
     }
     function del(f) {
@@ -639,7 +687,8 @@
       ) : null,
       // #1 — floating "add the selected passage to a research idea" button, popped on a text selection in the preview
       selPop ? h('button', { className: 'sel-idea-btn', style: { position: 'fixed', left: selPop.x, top: selPop.y - 40, transform: 'translateX(-50%)', zIndex: 60 }, onMouseDown: function (e) { e.preventDefault(); }, onClick: function () { props.onAddIdea(selPop.text); setSelPop(null); try { window.getSelection().removeAllRanges(); } catch (e) { } } }, '✚ To idea') : null,
-      rvDoc ? h(ReportViewer, { md: rvDoc.content, title: rvDoc.path, onClose: function () { setRvDoc(null); } }) : null
+      rvDoc ? h(ReportViewer, { md: rvDoc.content, title: rvDoc.path, onClose: function () { setRvDoc(null); } }) : null,
+      intake ? h(FileIntake, { file: intake, context: 'a research idea / literature note in this project', onComplete: intakeDone, onClose: function () { setIntake(null); } }) : null
     );
   }
 
@@ -2321,6 +2370,16 @@
     var rfS = useState([]), rfiles = rfS[0], setRfiles = rfS[1];         // project deliverable files
     var pfS = useState(null), prevFile = pfS[0], setPrevFile = pfS[1];   // deliverable open in the rich preview modal
     var zpS = useState(false), zipping = zpS[0], setZipping = zpS[1];    // ZIP-all in progress
+    var ikS = useState(null), intake = ikS[0], setIntake = ikS[1];       // file-intake clarifying-questions modal {file, stepId, context}
+    function intakeDone(result) {
+      var it = intake; setIntake(null);
+      var s = it && steps.filter(function (x) { return x.id === it.stepId; })[0];
+      if (!s || !result || !result.qa || !result.qa.length) return;   // skipped / no answers → nothing to store
+      var note = '\n\n[Uploaded file “' + it.file.path + '”' + (result.summary ? ' — ' + result.summary : '') + ']\n' + result.qa.map(function (x) { return '• ' + x.question + '\n  → ' + x.answer; }).join('\n');
+      var sx = Object.assign({}, s.spec || {}); sx.instruction = ((sx.instruction || '') + note).slice(0, 8000);
+      patchStep(s, { spec: sx });
+      window.PRUI.toast('Saved your file notes to task ' + s.ord + '.', { kind: 'ok' });
+    }
     var ntS = useState({}), noteDraft = ntS[0], setNoteDraft = ntS[1];   // per-step composer { <id>: { kind, body } }
     var ndS = useState({}), notesData = ndS[0], setNotesData = ndS[1];   // review notes keyed by step id
     var bdS = useState(null), boardDrag = bdS[0], setBoardDrag = bdS[1];  // task-board drag: 'step:<id>' | 'todo:<id>'
@@ -2382,6 +2441,8 @@
             var sx = Object.assign({}, s.spec || {}); sx.attachments = (sx.attachments || []).concat(added);
             patchStep(s, { spec: sx });
             window.PRUI.toast('📎 ' + added.length + ' file(s) attached to task ' + s.ord, { kind: 'ok' });
+            // clarify what to do with it: summarize + ask 1-2 questions, saved back into the task instruction
+            setIntake({ stepId: s.id, file: { path: added[0].name }, context: 'Protocol task ' + s.ord + ': ' + s.title + ((s.spec && s.spec.instruction) ? ' — ' + String(s.spec.instruction).slice(0, 400) : '') });
           }
           return;
         }
@@ -2761,7 +2822,8 @@
         h('img', { src: lb.src, alt: lb.cap || '', onClick: function (e) { e.stopPropagation(); } }),
         lb.cap ? h('div', { className: 'fig-lb-cap' }, lb.cap) : null), document.body) : null,
       editing ? h(TaskEditorModal, { step: editing.step, isNew: editing.isNew, allSteps: steps, projectId: props.projectId, onSave: saveTask, onClose: function () { setEditing(null); } }) : null,
-      prevFile ? h(FilePreviewModal, { file: prevFile, onClose: function () { setPrevFile(null); } }) : null
+      prevFile ? h(FilePreviewModal, { file: prevFile, onClose: function () { setPrevFile(null); } }) : null,
+      intake ? h(FileIntake, { file: intake.file, context: intake.context, onComplete: intakeDone, onClose: function () { setIntake(null); } }) : null
     );
   }
 

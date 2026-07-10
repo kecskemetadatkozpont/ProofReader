@@ -377,6 +377,33 @@ Return ONLY JSON, no prose: {"detected_language":"<language name>","suggestions"
       return json({ ok: true, suggestions, detected_language: parsed.detected_language || null });
     }
 
+    // ---- file_intake: a just-uploaded file → 1-line summary + 1-2 clarifying questions about what to do with it ----
+    if (action === 'file_intake') {
+      const gate = await assertEntitled(sb, 'literature_study'); if (gate) return gate;
+      const filename = String(body.filename || 'file').slice(0, 200);
+      const content = String(body.content || '').slice(0, 12000);   // extracted text (truncated); empty for binaries/images
+      const context = String(body.context || '').slice(0, 800);      // where it's used: a task title/instruction, or "a research idea"
+      const intent = String(body.intent || '').slice(0, 800);        // what the user already said to do with it (may be empty)
+      const model = await resolveModel(sb);
+      const prompt = `A researcher just uploaded a file into their research workspace. Read it and help clarify what to do with it.
+File name: ${filename}
+Where it is being used: ${context || '(not specified)'}
+What the user already said to do with it: ${intent || '(the user gave NO instruction)'}
+--- FILE CONTENT (may be truncated) ---
+${content || '(no extractable text — likely a binary/image; base your questions on the filename and the context)'}
+--- END ---
+ALWAYS return 1-2 clarifying questions, even when the user gave an instruction (ask what is still ambiguous: which columns/sections/figures matter, the intended goal, the expected output/deliverable, how it relates to the task). If they gave no instruction, ask what they want done with it.
+Return ONLY JSON, no prose:
+{"summary":"one concise sentence: what this file is and its apparent role","questions":["short specific clarifying question 1","optional question 2"]}`;
+      let out = '';
+      try { out = await callClaude(model, '', prompt, false, 700); } catch { return json({ error: 'AI is unavailable — try again.' }, 502); }
+      const m = out.match(/\{[\s\S]*\}/);
+      let parsed: any = {};
+      if (m) { try { parsed = JSON.parse(m[0]); } catch { parsed = {}; } }
+      const questions = Array.isArray(parsed.questions) ? parsed.questions.map((x: any) => String(x || '').trim()).filter(Boolean).slice(0, 2) : [];
+      return json({ ok: true, summary: String(parsed.summary || '').slice(0, 400), questions });
+    }
+
     const study_id = String(body.study_id || '');
     if (!study_id) return json({ error: 'study_id required' }, 400);
 
