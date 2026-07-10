@@ -11,6 +11,8 @@
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (x) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[x]; }); }
   function projId() { try { return new URLSearchParams(location.search).get('project'); } catch (e) { return null; } }
   function bareDoi(d) { return String(d || '').trim().replace(/^https?:\/\/(dx\.)?doi\.org\//i, '').replace(/^doi:/i, ''); }
+  // only http(s) links may become an href — blocks javascript:/data: schemes from user-supplied source URLs
+  function safeHref(u) { u = String(u || '').trim(); return /^https?:\/\//i.test(u) ? u : ''; }
 
   function proxy(body, binary) {
     return sb.auth.getSession().then(function (s) {
@@ -98,7 +100,7 @@
   }
 
   // ---------- data ----------
-  var S = { papers: [], figs: [], byPaper: {}, urls: {}, view: { x: 40, y: 24, k: 0.9 }, group: 'paper', showHidden: false, curFig: null, curPaper: null, hiddenCount: 0 };
+  var S = { papers: [], figs: [], byPaper: {}, urls: {}, view: { x: 40, y: 24, k: 0.9 }, group: 'paper', showHidden: false, curFig: null, curPaper: null, hiddenCount: 0, moved: false };
   function uid() { return 'n' + Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-4); }
   function toast(msg, ok) { var t = el('div', 'fb-toast' + (ok === false ? ' err' : '')); t.textContent = msg; document.body.appendChild(t); requestAnimationFrame(function () { t.classList.add('show'); }); setTimeout(function () { t.classList.remove('show'); setTimeout(function () { if (t.parentNode) t.parentNode.removeChild(t); }, 260); }, 2400); }
   function load() {
@@ -170,8 +172,8 @@
   var activeReflow = function () { }, reflowT;
   function scheduleReflow() { if (reflowT) clearTimeout(reflowT); reflowT = setTimeout(function () { activeReflow(); }, 60); }
   function wireCards(sel) {
-    world.querySelectorAll(sel).forEach(function (f) { f.onclick = function () { openFig(f.dataset.pid, +f.dataset.i); }; });
-    world.querySelectorAll('.cl-pin').forEach(function (b) { b.onclick = function (e) { e.stopPropagation(); pinFigs(S.byPaper[b.dataset.pid] || [], (b.dataset.title || '').slice(0, 40)); }; });
+    world.querySelectorAll(sel).forEach(function (f) { f.onclick = function () { if (S.moved) return; openFig(f.dataset.pid, +f.dataset.i); }; });
+    world.querySelectorAll('.cl-pin').forEach(function (b) { b.onclick = function (e) { e.stopPropagation(); if (S.moved) return; pinFigs(S.byPaper[b.dataset.pid] || [], (b.dataset.title || '').slice(0, 40)); }; });
     world.querySelectorAll('img').forEach(function (im) { im.addEventListener('load', scheduleReflow); im.addEventListener('error', scheduleReflow); });
   }
   function render() { if (S.group === 'all') layoutGallery(); else layout(); }
@@ -292,8 +294,8 @@
       + (p && p.doi ? '<div class="kv"><span>DOI</span><b class="mono"><a href="https://doi.org/' + esc(bareDoi(p.doi)) + '" target="_blank" rel="noopener">' + esc(bareDoi(p.doi)) + '</a></b></div>' : '')
       + '<div class="kv"><span>Size</span><b>' + f.width + ' × ' + f.height + ' px</b></div></div>'
       + '<div class="dr-actions"><button class="btn pri" id="drpin">📌 Pin to Canvas</button>'
-      + '<a class="btn" href="' + (u || '#') + '" download="' + esc((f.fig_label || 'figure').replace(/\s/g, '_')) + '.png" target="_blank">⬇ Download</a>'
-      + (p && p.url ? '<a class="btn" href="' + esc(p.url) + '" target="_blank" rel="noopener">↗ Open paper</a>' : '')
+      + '<a class="btn" href="' + esc(u || '#') + '" download="' + esc((f.fig_label || 'figure').replace(/\s/g, '_')) + '.png" target="_blank">⬇ Download</a>'
+      + (p && safeHref(p.url) ? '<a class="btn" href="' + esc(safeHref(p.url)) + '" target="_blank" rel="noopener">↗ Open paper</a>' : '')
       + '<button class="btn ' + (f.hidden ? 'restore' : 'ghost') + '" id="drhide">' + (f.hidden ? '↩ Restore' : '🙈 Hide') + '</button></div>';
     var pinB = document.getElementById('drpin'); if (pinB) pinB.onclick = function () { pinFigs([f], f.fig_label); };
     var hideB = document.getElementById('drhide'); if (hideB) hideB.onclick = function () { closeD(); setHidden(f, !f.hidden); };
@@ -316,10 +318,11 @@
       + '<div class="zoom"><button id="zin">+</button><div class="lvl" id="zlvl">90%</div><button id="zout">−</button><button id="zfit">⤢</button></div></div></div>'
       + '<div class="scrim" id="scrim"></div><aside class="drawer" id="drawer"><button class="dr-close" id="drclose">✕</button><div class="dr-fig" id="drfig"></div><div class="dr-body" id="drbody"></div></aside>';
     world = document.getElementById('world'); canvasEl = document.getElementById('canvas'); sideEl = document.getElementById('side'); statEl = document.getElementById('stat');
-    // pan/zoom
+    // pan/zoom — a movement threshold distinguishes a click (opens a figure) from a drag (pans the board),
+    // so panning can start anywhere, including on a figure card, without spuriously opening its drawer.
     var drag = false, sx, sy, ox, oy;
-    canvasEl.addEventListener('mousedown', function (e) { if (e.target.closest('.fig') || e.target.closest('.zoom')) return; drag = true; canvasEl.classList.add('grab'); sx = e.clientX; sy = e.clientY; ox = S.view.x; oy = S.view.y; });
-    window.addEventListener('mousemove', function (e) { if (!drag) return; S.view.x = ox + (e.clientX - sx); S.view.y = oy + (e.clientY - sy); apply(); });
+    canvasEl.addEventListener('mousedown', function (e) { if (e.button !== 0 || e.target.closest('.zoom')) return; drag = true; S.moved = false; sx = e.clientX; sy = e.clientY; ox = S.view.x; oy = S.view.y; });
+    window.addEventListener('mousemove', function (e) { if (!drag) return; var dx = e.clientX - sx, dy = e.clientY - sy; if (!S.moved && (dx * dx + dy * dy) > 16) { S.moved = true; canvasEl.classList.add('grab'); } if (!S.moved) return; S.view.x = ox + dx; S.view.y = oy + dy; apply(); });
     window.addEventListener('mouseup', function () { drag = false; canvasEl.classList.remove('grab'); });
     canvasEl.addEventListener('wheel', function (e) { e.preventDefault(); var r = canvasEl.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top, f = Math.exp(-e.deltaY * 0.0016), nk = Math.max(0.22, Math.min(2.6, S.view.k * f)), s = nk / S.view.k; S.view.x = mx - (mx - S.view.x) * s; S.view.y = my - (my - S.view.y) * s; S.view.k = nk; apply(); }, { passive: false });
     function zoomBy(f) { var r = canvasEl.getBoundingClientRect(), mx = r.width / 2, my = r.height / 2, nk = Math.max(0.22, Math.min(2.6, S.view.k * f)), s = nk / S.view.k; S.view.x = mx - (mx - S.view.x) * s; S.view.y = my - (my - S.view.y) * s; S.view.k = nk; apply(); }
