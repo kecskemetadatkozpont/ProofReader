@@ -96,6 +96,44 @@
       });
     }, [job && job.id, job && job.status, job && job.stage]);
 
+    var mfS = useState('inc'), metFilter = mfS[0], setMetFilter = mfS[1];   // 'all' | 'inc' (met all criteria)
+    var imS = useState(false), importing = imS[0], setImporting = imS[1];
+    var imMsg = useState(''), importMsg = imMsg[0], setImportMsg = imMsg[1];
+    // a row "met all criteria" when its screening judgement is Include (extract rows have no judgement → already included)
+    function isIncluded(r) {
+      var f = (r.fields || []).filter(function (x) { return String(x.name).toLowerCase().indexOf('screening judgement') >= 0; })[0];
+      if (!f) return true;   // extract/full-text with no explicit judgement column → it's in the included set
+      return String(f.answer || '').toLowerCase().indexOf('includ') >= 0;
+    }
+    function importToLibrary(stage) {
+      var d = data[stage]; if (!d || !d.rows) return;
+      if (!job.project_id) { setImportMsg('This review is not tied to a project, so there is no Library to import into.'); return; }
+      var cols = d.columns;
+      var iTitle = metaIdx(cols, 'title'), iAuth = metaIdx(cols, 'author'), iYear = metaIdx(cols, 'year'), iCite = metaIdx(cols, 'citation'), iDoi = metaIdx(cols, 'doi'), iDoiLink = metaIdx(cols, 'doi link'), iVenue = metaIdx(cols, 'venue');
+      var inc = d.rows.filter(isIncluded);
+      if (!inc.length) { setImportMsg('No papers met all the criteria in this stage — nothing to import.'); return; }
+      var rows = inc.map(function (r) {
+        var doi = (iDoi >= 0 && r.meta[iDoi]) ? String(r.meta[iDoi]).trim() : ((iDoiLink >= 0 && r.meta[iDoiLink]) ? String(r.meta[iDoiLink]).replace(/^https?:\/\/(dx\.)?doi\.org\//i, '').trim() : '');
+        var title = (iTitle >= 0 ? r.meta[iTitle] : r.meta[0]) || 'Untitled';
+        return {
+          project_id: job.project_id, source_api: 'elicit', ext_id: 'sr:' + (doi || (job.id + ':' + String(title).slice(0, 80))),
+          doi: doi || null, title: String(title).slice(0, 500),
+          authors: (iAuth >= 0 && r.meta[iAuth]) ? String(r.meta[iAuth]).split(/[,;]\s*/).map(function (a) { return a.trim(); }).filter(Boolean).slice(0, 25) : null,
+          year: iYear >= 0 ? (parseInt(r.meta[iYear], 10) || null) : null,
+          venue: iVenue >= 0 ? (r.meta[iVenue] || null) : null,
+          cited_by: iCite >= 0 ? (parseInt(r.meta[iCite], 10) || null) : null,
+          url: (iDoiLink >= 0 && r.meta[iDoiLink]) ? r.meta[iDoiLink] : (doi ? 'https://doi.org/' + doi : null),
+          screening: 'include'
+        };
+      });
+      setImporting(true); setImportMsg('');
+      sb.from('research_sources').upsert(rows, { onConflict: 'project_id,ext_id', ignoreDuplicates: true }).select('id').then(function (res) {
+        if (!alive.current) return; setImporting(false);
+        if (res && res.error) { setImportMsg('Import failed: ' + res.error.message); return; }
+        var n = (res && res.data) ? res.data.length : 0, dup = rows.length - n;
+        setImportMsg('✓ Imported ' + n + ' paper' + (n === 1 ? '' : 's') + ' into the project Library as “included”' + (dup > 0 ? ' (' + dup + ' already there)' : '') + '. Open Research → Literature to see them.');
+      }, function () { if (alive.current) { setImporting(false); setImportMsg('Import failed.'); } });
+    }
     function loadStage(stage) {
       if (data[stage] && !data[stage].error) return;
       setData(function (p) { var n = Object.assign({}, p); n[stage] = { loading: true }; return n; });
@@ -143,7 +181,9 @@
       var iTitle = metaIdx(cols, 'title'), iAuth = metaIdx(cols, 'author'), iYear = metaIdx(cols, 'year'), iCite = metaIdx(cols, 'citation'), iDoi = metaIdx(cols, 'doi link'), iDecide = metaIdx(cols, 'screening judgement'), iScore = metaIdx(cols, 'screening score'), iExcl = metaIdx(cols, 'exclusion reason');
       var isScreen = iDecide >= 0 || iScore >= 0;
       var ql = q.trim().toLowerCase();
+      var incCount = isScreen ? d.rows.filter(isIncluded).length : d.rows.length;
       var rows = d.rows.map(function (r, ri) { return { r: r, ri: ri }; }).filter(function (x) {
+        if (isScreen && metFilter === 'inc' && !isIncluded(x.r)) return false;
         if (!ql) return true;
         var hay = x.r.meta.join(' ') + ' ' + x.r.fields.map(function (f) { return f.answer; }).join(' ');
         return hay.toLowerCase().indexOf(ql) >= 0;
@@ -159,9 +199,13 @@
       return h('div', null,
         h('div', { className: 'toolbar' },
           h('input', { className: 'srch', placeholder: 'Search ' + nfmt(d.total) + ' papers, authors, values…', value: q, onChange: function (ev) { setQ(ev.target.value); } }),
-          h('span', { className: 'cnt' }, h('b', null, nfmt(rows.length)), ' of ' + nfmt(d.total) + (d.capped ? ' (first 2,000 shown)' : '')),
+          isScreen ? h('div', { className: 'seg' },
+            h('button', { className: metFilter === 'inc' ? 'on' : '', onClick: function () { setMetFilter('inc'); } }, '✓ Met all criteria (' + nfmt(incCount) + ')'),
+            h('button', { className: metFilter === 'all' ? 'on' : '', onClick: function () { setMetFilter('all'); } }, 'All (' + nfmt(d.total) + ')')) : null,
+          h('span', { className: 'cnt' }, h('b', null, nfmt(rows.length)), ' shown' + (d.capped ? ' · first 2,000' : '')),
           h('span', { style: { flex: 1 } }),
-          h('span', { className: 'hint' }, '↳ click a row for the evidence per column')),
+          h('button', { className: 'btn', disabled: importing || !job.project_id, title: job.project_id ? 'Add the papers that met all criteria to the project’s reference Library' : 'This review has no linked project', onClick: function () { importToLibrary(stage); } }, importing ? '⏳ Importing…' : ('⤓ Import ' + nfmt(incCount) + ' to Library'))),
+        importMsg ? h('div', { style: { fontSize: 12.5, margin: '0 0 10px', color: /^✓/.test(importMsg) ? 'var(--ok)' : 'var(--danger)' } }, importMsg) : null,
         h('div', { className: 'tbl-wrap' }, h('div', { className: 'tbl-scroll' }, h('table', null,
           h('thead', null, h('tr', null, head)),
           h('tbody', null, rows.map(function (x) {
