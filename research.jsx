@@ -1432,7 +1432,7 @@
     var canUse = !!(window.PREnt && window.PREnt.loaded() && window.PREnt.can('elicit_sysreview'));
     var jsS = useState(null), jobs = jsS[0], setJobs = jsS[1];
     var openFormS = useState(false), openForm = openFormS[0], setOpenForm = openFormS[1];
-    var fS = useState({ q: '', protocol: '', abs: [], ft: [], ex: [], gen: true, genAbs: true, genEx: true, useFig: false, runFT: true }), f = fS[0], setF = fS[1];
+    var fS = useState({ q: '', protocol: '', abs: [], ft: [], ex: [], gen: true, genAbs: true, genEx: true, useFig: false, runFT: true, maxResults: '' }), f = fS[0], setF = fS[1];
     var buS = useState(false), busy = buS[0], setBusy = buS[1];
     var erS = useState(''), err = erS[0], setErr = erS[1];
     var opS = useState(null), openR = opS[0], setOpenR = opS[1];
@@ -1444,7 +1444,7 @@
     function loadCands() { sb.from('research_sr_candidates').select('*').eq('project_id', props.projectId).eq('dismissed', false).order('created_at', { ascending: true }).then(function (r) { if (alive.current) setCands((r && r.data) || []); }); }
     function generate() { setGen(true); setErr(''); callStudy({ action: 'sr_suggest', project_id: props.projectId }).then(function (d) { if (!alive.current) return; setGen(false); if (d && d.error) { setErr('Generate: ' + d.error); return; } loadCands(); if (d && d.created === 0) setErr('No Ideas yet — add Ideas in the Idea stage first, then generate.'); }); }
     function picoText(p) { if (!p) return ''; return [['P', p.population], ['I', p.intervention], ['C', p.comparison], ['O', p.outcome]].filter(function (x) { return x[1]; }).map(function (x) { return x[0] + ': ' + x[1]; }).join('\n'); }
-    function startFromCand(c) { setF({ q: c.question || '', protocol: picoText(c.pico), abs: c.abstract_criteria || [], ft: [], ex: c.extraction_questions || [], gen: true, genAbs: true, genEx: true, useFig: false, runFT: true }); setOpenForm(true); setErr(''); }
+    function startFromCand(c) { setF({ q: c.question || '', protocol: picoText(c.pico), abs: c.abstract_criteria || [], ft: [], ex: c.extraction_questions || [], gen: true, genAbs: true, genEx: true, useFig: false, runFT: true, maxResults: '' }); setOpenForm(true); setErr(''); }
     function dismissCand(c) { setCands(function (l) { return (l || []).filter(function (x) { return x.id !== c.id; }); }); sb.from('research_sr_candidates').update({ dismissed: true }).eq('id', c.id); }
     useEffect(function () { alive.current = true; ensureSrCss(); if (canUse) { load(); loadCands(); } return function () { alive.current = false; }; }, [canUse]);
     useEffect(function () {
@@ -1463,10 +1463,10 @@
     }, [jobs && jobs.map(function (j) { return j.id + j.status + j.stage; }).join(',')]);
     function create() {
       var rq = f.q.trim(); if (!rq) return; setBusy(true); setErr('');
-      callElicit({ action: 'sr.create', researchQuestion: rq, protocolDetails: f.protocol || null, abstractCriteria: f.abs, fulltextCriteria: f.ft, extractionQuestions: f.ex, generateReport: f.gen, genAbstract: f.genAbs, genExtraction: f.genEx, useFigures: f.useFig, runFullText: f.runFT, project_id: props.projectId, title: (props.project && props.project.title) || null }).then(function (d) {
+      callElicit({ action: 'sr.create', researchQuestion: rq, protocolDetails: f.protocol || null, abstractCriteria: f.abs, fulltextCriteria: f.ft, extractionQuestions: f.ex, generateReport: f.gen, genAbstract: f.genAbs, genExtraction: f.genEx, useFigures: f.useFig, runFullText: f.runFT, maxResults: f.maxResults ? parseInt(f.maxResults, 10) : undefined, project_id: props.projectId, title: (props.project && props.project.title) || null }).then(function (d) {
         setBusy(false);
         if (!d || d.error) { setErr((d && d.error) || 'Could not start the review.'); return; }
-        setOpenForm(false); setF({ q: '', protocol: '', abs: [], ft: [], ex: [], gen: true, genAbs: true, genEx: true, useFig: false, runFT: true }); if (d.deduped) setErr('A review for this question is already in progress.'); load();
+        setOpenForm(false); setF({ q: '', protocol: '', abs: [], ft: [], ex: [], gen: true, genAbs: true, genEx: true, useFig: false, runFT: true, maxResults: '' }); if (d.deduped) setErr('A review for this question is already in progress.'); load();
       });
     }
     function resume(j) { callElicit({ action: 'sr.resume', job_id: j.id }).then(function (d) { if (d && d.error) setErr(d.error); load(); }); }
@@ -1554,7 +1554,7 @@
       h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
         h('h3', { style: { margin: 0, flex: 1 } }, '🔬 Systematic Review Studio ', h('span', { style: { fontSize: 11.5, color: 'var(--faint)', fontWeight: 400 } }, '· from your Ideas → Elicit PRISMA')),
         props.canEdit ? h('button', { className: 'btn pri', style: { padding: '5px 11px', fontSize: 12.5 }, disabled: gen, onClick: generate }, gen ? '✨ Generating…' : '✨ Generate from Ideas') : null,
-        props.canEdit ? h('button', { className: 'btn', style: { padding: '5px 11px', fontSize: 12.5 }, onClick: function () { if (openForm) { setOpenForm(false); } else { setF({ q: '', protocol: '', abs: [], ft: [], ex: [], gen: true, genAbs: true, genEx: true, useFig: false, runFT: true }); setOpenForm(true); } } }, openForm ? 'Cancel' : '+ Manual review') : null),
+        props.canEdit ? h('button', { className: 'btn', style: { padding: '5px 11px', fontSize: 12.5 }, onClick: function () { if (openForm) { setOpenForm(false); } else { setF({ q: '', protocol: '', abs: [], ft: [], ex: [], gen: true, genAbs: true, genEx: true, useFig: false, runFT: true, maxResults: '' }); setOpenForm(true); } } }, openForm ? 'Cancel' : '+ Manual review') : null),
       err ? h('div', { style: { fontSize: 12.5, color: /^✓/.test(err) ? 'var(--ok, #15803d)' : 'var(--danger, #b42318)', margin: '6px 0' } }, err) : null,
       // review-question cards from Ideas
       (cands && cands.length) ? h('div', { style: { marginTop: 4 } },
@@ -1567,6 +1567,9 @@
         h('div', null, h('div', { className: 'field-label' }, 'Abstract screening criteria (optional — Elicit adds more)'), h(CritEditor, { items: f.abs, onChange: function (a) { upf('abs', a); }, placeholder: 'e.g. reports a quantitative outcome', empty: 'Auto-generated if left empty.' })),
         f.runFT ? h('div', null, h('div', { className: 'field-label' }, 'Full-text screening criteria (optional)'), h(CritEditor, { items: f.ft, onChange: function (a) { upf('ft', a); }, placeholder: 'e.g. sample size ≥ 100', empty: 'Reuses the abstract criteria if empty.' })) : null,
         h('div', null, h('div', { className: 'field-label' }, 'Extraction questions (optional)'), h(CritEditor, { items: f.ex, onChange: function (a) { upf('ex', a); }, accent: '#16a34a', placeholder: 'e.g. What was the effect size?', empty: 'Auto-generated if left empty.' })),
+        h('div', null, h('div', { className: 'field-label' }, 'Max papers to search (optional)'),
+          h('input', { className: 'field', type: 'number', min: 1, max: 10000, step: 100, style: { width: 160, boxSizing: 'border-box' }, value: f.maxResults, placeholder: 'plan default (~5000)', onChange: function (e) { upf('maxResults', e.target.value); } }),
+          h('div', { style: { fontSize: 11, color: 'var(--faint)', marginTop: 3 } }, 'How many papers Elicit retrieves in the search phase. Blank = your plan’s default (~5000); up to 10000. Higher = more comprehensive but slower and more quota.')),
         h('div', { style: { display: 'flex', flexDirection: 'column', gap: 5, marginTop: 2, padding: '8px 10px', background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 8 } },
           h('label', { style: { display: 'flex', gap: 7, alignItems: 'center', fontSize: 12.5 } }, h('input', { type: 'checkbox', checked: f.runFT, onChange: function (e) { upf('runFT', e.target.checked); } }), 'Run full-text screening stage ', h('span', { style: { color: 'var(--faint)', fontSize: 11 } }, '(off = abstract-level only, faster)')),
           h('label', { style: { display: 'flex', gap: 7, alignItems: 'center', fontSize: 12.5 } }, h('input', { type: 'checkbox', checked: f.genAbs, onChange: function (e) { upf('genAbs', e.target.checked); } }), 'Let Elicit generate extra abstract-screening criteria'),

@@ -195,7 +195,7 @@ Deno.serve(async (req) => {
         researchQuestion: rq.slice(0, 2000),
         title: body.title ? String(body.title).slice(0, 200) : undefined,
         maxSearchPapers: clampInt(body.maxSearchPapers, 10, 400, 200),
-        maxExtractPapers: clampInt(body.maxExtractPapers, 5, 100, 30),
+        maxExtractPapers: clampInt(body.maxExtractPapers, 5, 80, 30),   // API max is 80
         isPublic: false,
       };
       // CLAIM the slot before the expensive Elicit call — the partial unique index serializes concurrent
@@ -288,6 +288,10 @@ Deno.serve(async (req) => {
         isPublic: false,
       };
       if (runFT) srBody.fulltextScreening = ftC.length ? { criteria: ftC, reuseAbstractCriteria: false } : { reuseAbstractCriteria: true };
+      // explicit search size: build one semantic search over the elicit corpus at the requested maxResults.
+      // Omitted/blank (maxR===0) → leave `searches` unset so Elicit runs its default plan-limited search (~thousands).
+      const maxR = clampInt(body.maxResults, 1, 10000, 0);
+      if (maxR >= 1) srBody.searches = [{ query: rq.slice(0, 2000), corpus: 'elicit', searchMode: 'semantic', maxResults: maxR }];
       // claim-first (TOCTOU-safe, unique index serializes concurrent creates)
       const { data: claim, error: claimErr } = await sb.from('elicit_jobs').insert({
         user_id: uid, project_id: body.project_id || null, kind: 'sysreview',
