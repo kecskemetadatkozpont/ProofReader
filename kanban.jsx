@@ -51,6 +51,17 @@
     if (st === 'blocked' || st === 'failed' || (s.needs_approval && (st === 'todo' || st === 'queued'))) return 'blocked';
     return a === 'human' ? 'todo-human' : 'todo-ai';
   }
+  // Elicit jobs (elicit_jobs: systematic reviews + reports) appear read-only as AI cards.
+  var ELICIT_KIND = { sysreview: '🔬 Systematic Review', report: '📄 Report' };
+  function elicitColOf(j) {
+    if (j.status === 'completed') return 'done-ai';
+    if (j.status === 'failed' || j.status === 'pausedForInsufficientQuota') return 'blocked';
+    return 'prog-ai';   // processing | unknown → in progress
+  }
+  function elicitStatusLbl(j) {
+    return j.status === 'completed' ? 'Completed' : j.status === 'failed' ? 'Failed'
+      : j.status === 'pausedForInsufficientQuota' ? 'Paused (quota)' : (j.stage ? 'Running' : 'Starting');
+  }
 
   // ---------- add / edit task modal ----------
   function TaskModal(props) {
@@ -152,6 +163,7 @@
     var meS = useState(null), me = meS[0], setMe = meS[1];
     var tdS = useState([]), todos = tdS[0], setTodos = tdS[1];
     var stS = useState([]), steps = stS[0], setSteps = stS[1];        // read-only AI protocol steps (unified view)
+    var ejS = useState([]), elicitJobs = ejS[0], setElicitJobs = ejS[1];   // read-only research studies (systematic reviews + reports)
     var pjS = useState([]), projects = pjS[0], setProjects = pjS[1];
     var pfS = useState(null), projF = pfS[0], setProjF = pfS[1];   // null=all, ''=personal-only, else pid
     var wfS = useState('all'), who = wfS[0], setWho = wfS[1];
@@ -181,9 +193,11 @@
     function load(uid) {
       Promise.all([
         sb.from('research_todos').select('*').eq('owner_id', uid).order('sort', { ascending: true }).order('created_at', { ascending: false }),
-        sb.from('research_projects').select('id,title,owner_id').order('updated_at', { ascending: false })
+        sb.from('research_projects').select('id,title,owner_id').order('updated_at', { ascending: false }),
+        sb.from('elicit_jobs').select('id,kind,status,stage,research_question,result_title,url,project_id,created_at').eq('user_id', uid).order('created_at', { ascending: false })
       ]).then(function (res) {
         setTodos((res[0] && res[0].data) || []);
+        setElicitJobs((res[2] && res[2].data) || []);
         var own = ((res[1] && res[1].data) || []).filter(function (p) { return p.owner_id === uid; });
         setProjects(own);
         // union in the user's own AI protocol steps (read-only) so "My tasks" is genuinely ALL my tasks
@@ -229,7 +243,8 @@
     function tally(pid) { if (pid) { cnt[pid] = (cnt[pid] || 0) + 1; if (!seen[pid]) { seen[pid] = 1; if (projById[pid]) withItems.push(projById[pid]); } } else personalCount++; }
     todos.forEach(function (t) { tally(t.project_id); });
     steps.forEach(function (s) { tally(s.project_id); });
-    var total = todos.length + steps.length;
+    elicitJobs.forEach(function (j) { tally(j.project_id); });
+    var total = todos.length + steps.length + elicitJobs.length;
     var qq = q.trim().toLowerCase();
     function passItem(pid, assignee, text) {
       if (projF === '') { if (pid) return false; }
@@ -240,6 +255,7 @@
     }
     var shownTodos = todos.filter(function (t) { return passItem(t.project_id, t.assignee, (t.title || '') + ' ' + (t.notes || '')); });
     var shownSteps = steps.filter(function (s) { return passItem(s.project_id, s.assignee, s.title || ''); });
+    var shownElicit = elicitJobs.filter(function (j) { return passItem(j.project_id, 'ai', (j.result_title || '') + ' ' + (j.research_question || '')); });
 
     // AI protocol-step card — opens a detail drawer (status/owner editable; deep edit on the protocol board)
     function stepCard(s) {
@@ -255,6 +271,26 @@
           h('span', { className: 'bchip who ' + (a === 'human' ? 'hu' : 'ai') }, a === 'human' ? 'HUMAN' : 'AI'),
           h('span', { className: 'bchip step' }, (STEP_ICON[s.kind] || '•') + ' AI step')),
         h('div', { className: 'bcard-t' }, h('span', { style: { color: 'var(--faint)' } }, s.ord + '. '), s.title)
+      );
+    }
+    // Research study card (systematic review / report) — read-only; opens the project's Studies tab.
+    function elicitCard(j) {
+      var proj = projById[j.project_id];
+      var kindLbl = ELICIT_KIND[j.kind] || '🔎 Study';
+      var av = /[?&]adminView=1/.test(location.search) ? '&adminView=1' : '';
+      var target = j.project_id ? ('Research.html?project=' + encodeURIComponent(j.project_id) + av) : (j.url || null);
+      function open() { if (!target) return; if (/^https?:/.test(target)) window.open(target, '_blank'); else window.location.href = target; }
+      return h('div', {
+        key: 'e-' + j.id, className: 'bcard rostep ai', title: kindLbl + ' — open in Studies',
+        role: 'button', tabIndex: 0, onClick: open,
+        onKeyDown: function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } }
+      },
+        h('div', { className: 'gb-proj' }, h('i', { style: { background: proj ? colorFor(proj.id) : 'var(--faint)' } }), h('span', null, proj ? proj.title : 'Personal')),
+        h('div', { className: 'bcard-top' },
+          h('span', { className: 'bchip who ai' }, 'STUDY'),
+          h('span', { className: 'bchip step' }, kindLbl)),
+        h('div', { className: 'bcard-t' }, j.result_title || j.research_question || 'Research study'),
+        h('div', { style: { fontSize: 11, color: 'var(--faint)', marginTop: 3 } }, elicitStatusLbl(j))
       );
     }
 
@@ -289,7 +325,7 @@
         '👁 Admin preview — viewing ', h('b', null, (me && me.name) || 'user'), '’s tasks (read-only). ',
         h('a', { href: 'Admin.html', style: { color: 'var(--warn)' } }, '← Back to admin')) : null,
       h('div', { className: 'kb-top' },
-        h('div', null, h('h1', null, ro ? ((me && me.name ? me.name + '’s tasks' : 'Tasks')) : '🗂️ My tasks'), h('div', { className: 'kb-sub' }, todos.length + ' task' + (todos.length === 1 ? '' : 's') + (steps.length ? ' + ' + steps.length + ' AI protocol step' + (steps.length === 1 ? '' : 's') + ' (read-only)' : '') + ' across ' + withItems.length + ' project' + (withItems.length === 1 ? '' : 's'))),
+        h('div', null, h('h1', null, ro ? ((me && me.name ? me.name + '’s tasks' : 'Tasks')) : '🗂️ My tasks'), h('div', { className: 'kb-sub' }, todos.length + ' task' + (todos.length === 1 ? '' : 's') + (steps.length ? ' + ' + steps.length + ' AI protocol step' + (steps.length === 1 ? '' : 's') : '') + (elicitJobs.length ? ' + ' + elicitJobs.length + ' study' + (elicitJobs.length === 1 ? '' : ' studies') : '') + ((steps.length || elicitJobs.length) ? ' (read-only)' : '') + ' across ' + withItems.length + ' project' + (withItems.length === 1 ? '' : 's'))),
         ro ? null : h('button', { className: 'kb-btn pri', onClick: function () { setModal({ defaultProject: projF || '' }); } }, '+ Add task')
       ),
       h('div', { className: 'gb-bar' },
@@ -306,21 +342,22 @@
           h('input', { className: 'gb-q', value: q, placeholder: '🔍 Filter…', onChange: function (e) { setQ(e.target.value); } })
         )
       ),
-      (!todos.length && !steps.length) ? (ro
+      (!todos.length && !steps.length && !elicitJobs.length) ? (ro
         ? h('div', { className: 'soon' }, h('b', null, 'No tasks. '), 'This user has no tasks yet.')
         : h('div', { className: 'soon' }, h('b', null, 'No tasks yet. '), 'Add your first task — tie it to a research project or keep it personal. Your AI protocol steps also appear here (read-only) once you generate a protocol in a project.',
           h('div', { style: { marginTop: 14 } }, h('button', { className: 'kb-btn pri', onClick: function () { setModal({}); } }, '+ Add task'))))
         : h('div', { className: 'bwrap' }, BOARD_COLS.map(function (col) {
           var tc = shownTodos.filter(function (t) { return todoCol(t) === col.key; });
           var sc = shownSteps.filter(function (s) { return stepColOf(s) === col.key; });
-          var n = tc.length + sc.length;
+          var ec = shownElicit.filter(function (j) { return elicitColOf(j) === col.key; });
+          var n = tc.length + sc.length + ec.length;
           return h('div', {
             key: col.key, className: 'bcol' + (over === col.key ? ' over' : '') + (' cap-' + (col.who === 'human' ? 'hu' : col.who === 'ai' ? 'ai' : 'bk')),
             onDragOver: function (e) { if (drag) { e.preventDefault(); if (over !== col.key) setOver(col.key); } },
             onDrop: function (e) { e.preventDefault(); setOver(null); if (drag) { var t = todos.filter(function (x) { return x.id === drag; })[0]; if (t) moveToCol(t, col.key); setDrag(null); } }
           },
             h('div', { className: 'bcol-h' }, h('span', null, BCOL_IC[col.key]), h('span', { className: 'bcol-t' }, col.title), h('span', { className: 'bcol-n' }, n + '')),
-            h('div', { className: 'bcol-b' }, n ? tc.map(card).concat(sc.map(stepCard)) : h('div', { className: 'bcol-empty' }, '—'))
+            h('div', { className: 'bcol-b' }, n ? tc.map(card).concat(sc.map(stepCard)).concat(ec.map(elicitCard)) : h('div', { className: 'bcol-empty' }, '—'))
           );
         })),
       modal ? (modal.step
