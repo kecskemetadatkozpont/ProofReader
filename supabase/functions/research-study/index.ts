@@ -378,6 +378,42 @@ Return ONLY JSON, no prose: {"detected_language":"<language name>","suggestions"
       return json({ ok: true, suggestions, detected_language: parsed.detected_language || null });
     }
 
+    // ---- relevance_batch: <=2-sentence "why relevant to this project" per source; cached in research_sources.relevance ----
+    if (action === 'relevance_batch') {
+      const project_id = String(body.project_id || '');
+      if (!project_id) return json({ error: 'project_id required' }, 400);
+      const gate = await assertActive(sb); if (gate) return gate;
+      const { data: proj } = await sb.from('research_projects').select('id,title,field,goal,keywords').eq('id', project_id).maybeSingle();
+      if (!proj) return json({ error: 'project not found or no access' }, 404);
+      const cap = Math.min(80, Math.max(1, parseInt(String(body.limit || '60'), 10) || 60));
+      const { data: srcs } = await sb.from('research_sources').select('id,title,venue,year,abstract').eq('project_id', project_id).is('relevance', null).order('cited_by', { ascending: false, nullsFirst: false }).limit(cap);
+      if (!srcs || !srcs.length) return json({ ok: true, generated: 0, relevance: {} });
+      const model = await resolveModel(sb);
+      const kw = ((proj.keywords) || []).join(', ');
+      const ctx = `Project: "${proj.title || ''}"${proj.field ? ' — field: ' + proj.field : ''}.${proj.goal ? ' Goal: ' + proj.goal + '.' : ''}${kw ? ' Keywords: ' + kw + '.' : ''}`;
+      const out: Record<string, string> = {};
+      const CHUNK = 25;
+      for (let off = 0; off < srcs.length; off += CHUNK) {
+        const batch = srcs.slice(off, off + CHUNK);
+        const list = batch.map((s: any, k: number) => `[${k}] ${String(s.title || '').slice(0, 240)} (${s.venue || 'n/a'}${s.year ? ', ' + s.year : ''}). ${s.abstract ? 'Abstract: ' + String(s.abstract).slice(0, 600) : '(no abstract)'}`).join('\n');
+        const prompt = `You explain, for a specific research project, why each publication is relevant to it. Be concrete and specific about the methodological or topical connection; do NOT just restate the paper's title. If a paper is only loosely related, state how it still connects.
+${ctx}
+Papers (index in brackets):
+${list}
+For EACH paper write AT MOST TWO sentences. Return ONLY a JSON array: [{"i":0,"relevance":"<=2 sentences on why it is relevant to THIS project>"}]`;
+        let txt = '';
+        try { txt = await callClaude(model, '', prompt, false, 2400); } catch { continue; }
+        const arr = parseDecisions(txt) as any[];
+        for (const it of arr) {
+          const idx = typeof it.i === 'number' ? it.i : -1;
+          const s = batch[idx];
+          const rel = String((it && it.relevance) || '').trim().slice(0, 700);
+          if (s && rel) { out[s.id] = rel; await sb.from('research_sources').update({ relevance: rel }).eq('id', s.id); }
+        }
+      }
+      return json({ ok: true, generated: Object.keys(out).length, relevance: out });
+    }
+
     // ---- file_intake: a just-uploaded file → 1-line summary + 1-2 clarifying questions about what to do with it ----
     if (action === 'file_intake') {
       // shared helper: reachable from BOTH the Ideas (literature_study) and Protocol (protocol_runner) tabs, so

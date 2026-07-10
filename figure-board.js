@@ -21,6 +21,12 @@
         .then(function (r) { return binary ? (r.ok ? r.arrayBuffer() : r.json().then(function (e) { throw new Error((e && e.error) || 'fetch failed'); })) : r.json(); });
     });
   }
+  function callFn(fn, body) {
+    return sb.auth.getSession().then(function (s) {
+      var token = (s && s.data && s.data.session && s.data.session.access_token) || CFG.supabaseAnonKey;
+      return fetch(CFG.supabaseUrl + '/functions/v1/' + fn, { method: 'POST', headers: { 'Content-Type': 'application/json', 'apikey': CFG.supabaseAnonKey, 'Authorization': 'Bearer ' + token }, body: JSON.stringify(body) }).then(function (r) { return r.json(); });
+    });
+  }
 
   // ---------- pdf.js extraction ----------
   function ensurePdfjs() { if (window.pdfjsLib) { window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js'; return Promise.resolve(window.pdfjsLib); } return Promise.reject(new Error('pdf.js not loaded')); }
@@ -108,7 +114,7 @@
     var figQ = sb.from('research_figures').select('*').eq('project_id', pid).order('ord', { ascending: true });
     if (!S.showHidden) figQ = figQ.eq('hidden', false);
     return Promise.all([
-      sb.from('research_sources').select('id,project_id,title,authors,year,doi,url,venue,cited_by,issn,abstract').eq('project_id', pid).order('year', { ascending: false, nullsFirst: false }),
+      sb.from('research_sources').select('*').eq('project_id', pid).order('year', { ascending: false, nullsFirst: false }),
       figQ,
       sb.from('research_figures').select('id', { count: 'exact', head: true }).eq('project_id', pid).eq('hidden', true)
     ]).then(function (r) {
@@ -249,6 +255,7 @@
       c.innerHTML = '<div class="cl-head"><div style="min-width:0"><b>' + esc(p.title || 'Untitled') + '</b><span>' + esc(fmtAuthors(p.authors) + (p.year ? ' · ' + p.year : '')) + ' · ' + figs.length + ' fig</span>' + metricRow(p) + '</div>'
         + '<button class="cl-pin" data-pid="' + p.id + '" data-title="' + esc(p.title || '') + '" title="Pin all figures from this paper to the research Canvas">📌 Pin all</button></div>'
         + '<div class="cl-box">'
+        + (p.relevance ? '<div class="relbox"><span class="rk">✨ Why relevant</span>' + esc(p.relevance) + '</div>' : '')
         + ((p.abstract || p.doi) ? '<details class="abs" data-pid="' + p.id + '"><summary>📄 Abstract</summary><div class="abs-body">' + (p.abstract ? esc(p.abstract) : '<span class="abs-load">Click to load the abstract…</span>') + '</div></details>' : '')
         + '<div class="figrow">' + thumbs + '</div></div>';
       world.appendChild(c);
@@ -294,6 +301,20 @@
     });
   }
   function apply() { var v = S.view; world.style.transform = 'translate(' + v.x + 'px,' + v.y + 'px) scale(' + v.k + ')'; canvasEl.style.backgroundSize = (26 * v.k) + 'px ' + (26 * v.k) + 'px'; canvasEl.style.backgroundPosition = v.x + 'px ' + v.y + 'px'; document.getElementById('zlvl').textContent = Math.round(v.k * 100) + '%'; }
+
+  // one-shot per session: generate the "why relevant" blurbs for papers that don't have one yet
+  var relevanceTried = false;
+  function ensureRelevance() {
+    if (relevanceTried) return;
+    if (!S.papers.some(function (p) { return !p.relevance; })) return;
+    relevanceTried = true;
+    callFn('research-study', { action: 'relevance_batch', project_id: projId() }).then(function (res) {
+      if (!res || !res.relevance) return;
+      var any = false;
+      S.papers.forEach(function (p) { if (res.relevance[p.id]) { p.relevance = res.relevance[p.id]; any = true; } });
+      if (any) { sidebar(); render(); toast('✨ Added a relevance note to ' + res.generated + ' paper' + (res.generated === 1 ? '' : 's')); }
+    }, function () { });
+  }
 
   var SORTS = [['cites', 'Most cited'], ['year', 'Newest'], ['figs', 'Most figures'], ['q', 'Best quartile'], ['title', 'Title A–Z']];
   function sidebar() {
@@ -358,6 +379,7 @@
     document.getElementById('drbody').innerHTML = '<div class="tag ok">◆ Extracted from OA PDF</div>'
       + '<h3>' + esc(f.fig_label || 'Figure') + '</h3><div class="dr-src">from <b>' + esc(p ? p.title : '') + '</b><br>' + esc(fmtAuthors(p && p.authors)) + (p && p.venue ? ' · ' + esc(p.venue) : '') + '</div>'
       + metricRow(p)
+      + (p && p.relevance ? '<div class="relbox"><span class="rk">✨ Why relevant</span>' + esc(p.relevance) + '</div>' : '')
       + (f.caption ? '<div class="dr-cap">' + esc(f.caption) + '</div>' : '')
       + '<div class="kvs"><div class="kv"><span>Page</span><b>' + (f.page || '?') + '</b></div>'
       + (p && p.doi ? '<div class="kv"><span>DOI</span><b class="mono"><a href="https://doi.org/' + esc(bareDoi(p.doi)) + '" target="_blank" rel="noopener">' + esc(bareDoi(p.doi)) + '</a></b></div>' : '')
@@ -425,5 +447,5 @@
   if (!projId()) { root.innerHTML = '<div class="center"><div class="box"><h1>No project</h1><p>Open the Figure Board from Research → a project → Literature.</p><a class="btn" href="Research.html">← Research</a></div></div>'; return; }
   shell();
   progEl = null;
-  Promise.all([load(), loadScimago()]).then(function () { sidebar(); render(); }, function () { root.innerHTML = '<div class="center"><div class="box"><h1>Could not load</h1><p>This project may not exist or you may not have access.</p><a class="btn" href="Research.html">← Research</a></div></div>'; });
+  Promise.all([load(), loadScimago()]).then(function () { sidebar(); render(); ensureRelevance(); }, function () { root.innerHTML = '<div class="center"><div class="box"><h1>Could not load</h1><p>This project may not exist or you may not have access.</p><a class="btn" href="Research.html">← Research</a></div></div>'; });
 })();
