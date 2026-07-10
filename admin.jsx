@@ -507,7 +507,7 @@
         setBusy(false);
         if (!d || d.error || !d.authorize_url) { setMsg('Could not start: ' + ((d && d.error) || 'no authorize URL')); return; }
         window.open(d.authorize_url, '_blank', 'width=560,height=760');
-        setMsg('Authorize Elicit in the opened window, then click “Refresh status”.');
+        setMsg('Authorize the connection in the opened window, then click “Refresh status”.');
       });
     }
     function disconnect() { setBusy(true); callOAuth('disconnect').then(function () { setBusy(false); refresh(); }); }
@@ -515,14 +515,14 @@
     return h('div', { className: 'perm-wrap', style: { marginBottom: 22 } },
       h('div', { className: 'perm-head', style: { cursor: 'default' } },
         h('span', { className: 'perm-ic', 'aria-hidden': 'true' }, '🔌'),
-        h('span', { className: 'perm-t' }, 'Elicit tools in Chat (MCP)'),
+        h('span', { className: 'perm-t' }, 'Research tools in Chat (MCP)'),
         h('span', { className: 'perm-sub' }, connected ? ('Connected' + (st.expires_at ? ' · token expires ' + new Date(st.expires_at).toLocaleString() : '')) : 'Not connected'),
         h('span', { style: { marginLeft: 'auto', display: 'inline-flex', gap: 8 } },
           h('button', { className: 'btn', onClick: refresh }, 'Refresh'),
           connected ? h('button', { className: 'btn dng', disabled: busy, onClick: disconnect }, 'Disconnect')
-            : h('button', { className: 'btn pri', disabled: busy, onClick: connect }, busy ? '…' : 'Connect Elicit'))),
+            : h('button', { className: 'btn pri', disabled: busy, onClick: connect }, busy ? '…' : 'Connect'))),
       h('div', { style: { padding: '0 18px 14px', fontSize: 12.5, color: 'var(--muted)', lineHeight: 1.5 } },
-        'Connect the organization’s Elicit account once (OAuth). Then grant “Elicit tools in Chat (MCP)” to users below — in Publify Chat workflow mode Claude can call Elicit’s tools directly. (Requires a Pro+ Elicit account.)',
+        'Connect the organization’s research account once (OAuth). Then grant “Research tools in Chat (MCP)” to users below — in Publify Chat workflow mode Claude can call the research tools directly. (Requires a Pro+ research account.)',
         msg ? h('div', { style: { marginTop: 6, color: 'var(--accent, #4f46e5)' } }, msg) : null,
         (st && st.error) ? h('div', { style: { marginTop: 6, color: 'var(--danger, #b42318)' } }, 'Status: ' + st.error) : null)
     );

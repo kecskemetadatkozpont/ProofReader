@@ -151,12 +151,12 @@ Deno.serve(async (req) => {
     // ---- clinical-trials search (synchronous; shares Elicit's search rate-limit bucket) ----
     if (action === 'trials.search') {
       const gate = await assertEntitled(sb, 'elicit_trials'); if (gate) return gate;
-      if (!ELICIT_KEY) return json({ error: 'Elicit is not configured (no API key set on the server).' }, 503);
+      if (!ELICIT_KEY) return json({ error: 'The research engine is not configured on the server.' }, 503);
       const query = String(body.query || '').trim();
       if (!query) return json({ error: 'query required' }, 400);
       const cap = parseInt(Deno.env.get('ELICIT_TRIALS_DAILY') || '50', 10);
       const { data: over } = await sb.rpc('feature_over_budget', { p_key: 'elicit_trials', max_calls: cap });
-      if (over === true) return json({ error: 'Daily Elicit trials-search limit reached — try again tomorrow.' }, 429);
+      if (over === true) return json({ error: 'Daily trials-search limit reached — try again tomorrow.' }, 429);
       const mode = body.searchMode === 'keyword' ? 'keyword' : 'semantic';
       const maxResults = clampInt(body.maxResults, 1, 200, 50);
       const arr = (a: any) => Array.isArray(a) ? a.map((x: any) => String(x)).filter(Boolean).slice(0, 20) : [];
@@ -173,9 +173,9 @@ Deno.serve(async (req) => {
         return json({ ok: true, trials: cached.results, rate: cached.ratelimit || null, cached: true });   // cache hit → free
       }
       const r = await elicitCall('/api/v1/search/trials', 'POST', reqBody);
-      if (r.status === 402) return json({ error: 'The Elicit account is out of quota — an admin must top it up.' }, 402);
-      if (r.status === 403) return json({ error: 'The Elicit plan does not include trials search.' }, 403);
-      if (r.status === 429) return json({ error: 'Elicit rate limit hit — try again shortly.', rate: r.rate }, 429);
+      if (r.status === 402) return json({ error: 'Out of quota — an admin must top it up.' }, 402);
+      if (r.status === 403) return json({ error: 'Trials search is not available on this plan.' }, 403);
+      if (r.status === 429) return json({ error: 'Rate limit hit — try again shortly.', rate: r.rate }, 429);
       if (!r.ok) return json({ error: 'Trials search failed.', detail: r.status }, 502);
       const trials = (r.body.trials || []).map(normTrial);
       await sb.rpc('feature_usage_bump', { p_key: 'elicit_trials' });
@@ -185,11 +185,11 @@ Deno.serve(async (req) => {
 
     if (action === 'report.create') {
       const gate = await assertEntitled(sb, 'elicit_reports'); if (gate) return gate;
-      if (!ELICIT_KEY) return json({ error: 'Elicit is not configured (no API key set on the server).' }, 503);
+      if (!ELICIT_KEY) return json({ error: 'The research engine is not configured on the server.' }, 503);
       const rq = String(body.researchQuestion || '').trim();
       if (!rq) return json({ error: 'researchQuestion required' }, 400);
       const { data: over } = await sb.rpc('feature_over_budget', { p_key: 'elicit_reports', max_calls: REPORTS_DAILY });
-      if (over === true) return json({ error: 'Daily Elicit report limit reached — try again tomorrow.' }, 429);
+      if (over === true) return json({ error: 'Daily report limit reached — try again tomorrow.' }, 429);
       const qh = hashStr(rq.toLowerCase().replace(/\s+/g, ' '));
       const reqBody = {
         researchQuestion: rq.slice(0, 2000),
@@ -213,10 +213,10 @@ Deno.serve(async (req) => {
       const cr = await elicitCall('/api/v1/reports', 'POST', reqBody);
       if (!cr.ok || !cr.body?.reportId) {
         await sb.from('elicit_jobs').delete().eq('id', claim.id);   // release the claimed slot on failure
-        if (cr.status === 402) return json({ error: 'The Elicit account is out of quota — an admin must top it up.' }, 402);
-        if (cr.status === 403) return json({ error: 'The Elicit plan does not include reports.' }, 403);
-        if (cr.status === 429) return json({ error: 'Elicit rate limit hit — try again shortly.' }, 429);
-        return json({ error: 'Elicit report creation failed.', detail: cr.status }, 502);
+        if (cr.status === 402) return json({ error: 'Out of quota — an admin must top it up.' }, 402);
+        if (cr.status === 403) return json({ error: 'Reports are not available on this plan.' }, 403);
+        if (cr.status === 429) return json({ error: 'Rate limit hit — try again shortly.' }, 429);
+        return json({ error: 'Report creation failed.', detail: cr.status }, 502);
       }
       await sb.rpc('feature_usage_bump', { p_key: 'elicit_reports' });
       const { data: row } = await sb.from('elicit_jobs').update({ elicit_id: cr.body.reportId, status: cr.body.status || 'processing', url: cr.body.url || null })
@@ -242,7 +242,7 @@ Deno.serve(async (req) => {
       if (!row) return json({ error: 'job not found' }, 404);
       if (row.status !== 'pausedForInsufficientQuota') return json({ error: 'Only a paused (out-of-quota) job can be resumed.' }, 409);
       const rs = await elicitCall('/api/v1/reports/' + encodeURIComponent(row.elicit_id) + '/resume', 'POST');
-      if (rs.status === 402) return json({ error: 'Still over quota — resolve the Elicit account quota, then resume.' }, 402);
+      if (rs.status === 402) return json({ error: 'Still over quota — resolve the account quota, then resume.' }, 402);
       if (rs.status === 403) return json({ error: (rs.body && rs.body.error && rs.body.error.message) || 'Resume blocked (plan limit or max concurrent jobs).' }, 403);
       if (rs.status === 409) { await sb.from('elicit_jobs').update({ status: 'processing', updated_at: new Date().toISOString() }).eq('id', row.id); return json({ ok: true, status: 'processing', note: 'already running' }); }
       if (!rs.ok) return json({ error: 'Resume failed.' }, 502);
@@ -260,7 +260,7 @@ Deno.serve(async (req) => {
 
     if (action === 'sr.create') {
       const gate = await assertEntitled(sb, 'elicit_sysreview'); if (gate) return gate;
-      if (!ELICIT_KEY) return json({ error: 'Elicit is not configured (no API key set on the server).' }, 503);
+      if (!ELICIT_KEY) return json({ error: 'The research engine is not configured on the server.' }, 503);
       const rq = String(body.researchQuestion || '').trim();
       if (!rq) return json({ error: 'researchQuestion required' }, 400);
       const cap = parseInt(Deno.env.get('ELICIT_SYSREVIEW_DAILY') || '1', 10);
@@ -306,9 +306,9 @@ Deno.serve(async (req) => {
       const cr = await elicitCall('/api/v1/systematic-reviews', 'POST', srBody);
       if (!cr.ok || !cr.body?.reviewId) {
         await sb.from('elicit_jobs').delete().eq('id', claim.id);
-        if (cr.status === 402) return json({ error: 'The Elicit account is out of quota — an admin must top it up.' }, 402);
+        if (cr.status === 402) return json({ error: 'Out of quota — an admin must top it up.' }, 402);
         if (cr.status === 403) return json({ error: (cr.body && cr.body.error && cr.body.error.message) || 'Systematic reviews unavailable (plan limit or max concurrent reviews reached).' }, 403);
-        if (cr.status === 429) return json({ error: 'Elicit rate limit hit — try again shortly.' }, 429);
+        if (cr.status === 429) return json({ error: 'Rate limit hit — try again shortly.' }, 429);
         return json({ error: 'Systematic review creation failed.', detail: cr.status }, 502);
       }
       await sb.rpc('feature_usage_bump', { p_key: 'elicit_sysreview' });
@@ -335,7 +335,7 @@ Deno.serve(async (req) => {
       if (!row) return json({ error: 'job not found' }, 404);
       if (row.status !== 'pausedForInsufficientQuota') return json({ error: 'Only a paused (out-of-quota) job can be resumed.' }, 409);
       const rs = await elicitCall('/api/v1/systematic-reviews/' + encodeURIComponent(row.elicit_id) + '/resume', 'POST');
-      if (rs.status === 402) return json({ error: 'Still over quota — resolve the Elicit account quota, then resume.' }, 402);
+      if (rs.status === 402) return json({ error: 'Still over quota — resolve the account quota, then resume.' }, 402);
       if (rs.status === 403) return json({ error: (rs.body && rs.body.error && rs.body.error.message) || 'Resume blocked (plan limit or max concurrent reviews).' }, 403);
       if (rs.status === 409) { await sb.from('elicit_jobs').update({ status: 'processing', updated_at: new Date().toISOString() }).eq('id', row.id); return json({ ok: true, status: 'processing', note: 'already running' }); }
       if (!rs.ok) return json({ error: 'Resume failed.' }, 502);

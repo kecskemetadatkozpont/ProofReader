@@ -1379,7 +1379,7 @@
     function saveToFiles(j) {
       if (!j.result_body) return;
       var path = 'reports/elicit-' + String(j.id || '').slice(0, 8) + '.md';
-      sb.from('research_files').upsert({ project_id: props.projectId, path: path, content: '# ' + (j.result_title || 'Elicit report') + '\n\n' + j.result_body, mime: 'text/markdown', size: j.result_body.length, source: 'ai', updated_at: new Date().toISOString() }, { onConflict: 'project_id,path' }).then(function (r) { setErr(r && r.error ? r.error.message : '✓ Saved to project files: ' + path); });
+      sb.from('research_files').upsert({ project_id: props.projectId, path: path, content: '# ' + (j.result_title || 'Publify report') + '\n\n' + j.result_body, mime: 'text/markdown', size: j.result_body.length, source: 'ai', updated_at: new Date().toISOString() }, { onConflict: 'project_id,path' }).then(function (r) { setErr(r && r.error ? r.error.message : '✓ Saved to project files: ' + path); });
     }
     function card(j) {
       var done = j.status === 'completed', failed = j.status === 'failed', paused = j.status === 'pausedForInsufficientQuota';
@@ -1388,8 +1388,8 @@
           h('div', { style: { flex: 1, minWidth: 0 } },
             h('div', { style: { fontWeight: 600, fontSize: 13.5 } }, j.result_title || j.research_question || 'Report'),
             h('div', { style: { fontSize: 11.5, color: 'var(--muted)', marginTop: 2 } },
-              done ? '✅ Completed' : failed ? ('✗ Failed' + (j.error && j.error.message ? ' — ' + j.error.message : '')) : paused ? '⏸ Paused — the Elicit account is out of quota' : ('⏳ ' + (EL_STAGE[j.stage] || 'Processing') + '…'))),
-          j.url ? h('a', { className: 'btn', style: { padding: '4px 9px', fontSize: 12, flex: 'none' }, href: j.url, target: '_blank' }, 'Elicit ↗') : null),
+              done ? '✅ Completed' : failed ? ('✗ Failed' + (j.error && j.error.message ? ' — ' + j.error.message : '')) : paused ? '⏸ Paused — out of quota' : ('⏳ ' + (EL_STAGE[j.stage] || 'Processing') + '…'))),
+          j.url ? h('a', { className: 'btn', style: { padding: '4px 9px', fontSize: 12, flex: 'none' }, href: j.url, target: '_blank' }, 'Open ↗') : null),
         done && j.result_summary ? h('div', { style: { fontSize: 12.5, marginTop: 6, lineHeight: 1.45 } }, j.result_summary) : null,
         h('div', { style: { display: 'flex', gap: 7, marginTop: 8, flexWrap: 'wrap' } },
           done && j.result_body ? h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12 }, onClick: function () { setOpenReport(j); } }, 'View full report') : null,
@@ -1400,7 +1400,7 @@
     }
     if (!canUse) return null;
     return h('div', { className: 'panel', style: { marginTop: 14 } },
-      h('h3', null, '📄 Elicit reports ', h('span', { style: { fontSize: 11.5, color: 'var(--faint)', fontWeight: 400 } }, '· automated literature synthesis (~5–15 min)')),
+      h('h3', null, '📄 Reports ', h('span', { style: { fontSize: 11.5, color: 'var(--faint)', fontWeight: 400 } }, '· automated literature synthesis (~5–15 min)')),
       h('div', { style: { display: 'flex', gap: 8, margin: '8px 0 4px', flexWrap: 'wrap' } },
         h('input', { className: 'field', style: { flex: 1, minWidth: 220 }, placeholder: 'Research question for the report…', value: q, disabled: !props.canEdit || busy, onChange: function (e) { setQ(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter') create(); } }),
         h('button', { className: 'btn pri', disabled: !props.canEdit || busy || !q.trim(), onClick: create }, busy ? '…' : '✨ Generate report')),
@@ -1410,7 +1410,7 @@
         : jobs.length === 0 ? h('div', { style: { fontSize: 13, color: 'var(--muted)', padding: '8px 0' } }, 'No reports yet — ask a question above. A report keeps running even if you leave.')
           : h('div', { style: { display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 } }, jobs.map(card)),
       openReport ? h('div', { className: 'scrim', onClick: function () { setOpenReport(null); } }, h('div', { className: 'modal', style: { width: 760 }, onClick: function (e) { e.stopPropagation(); } },
-        h('div', { className: 'modal-h' }, h('h3', { style: { margin: 0, flex: 1 } }, openReport.result_title || 'Elicit report'), h('button', { className: 'icon-x', 'aria-label': 'Close', onClick: function () { setOpenReport(null); } }, '✕')),
+        h('div', { className: 'modal-h' }, h('h3', { style: { margin: 0, flex: 1 } }, openReport.result_title || 'Report'), h('button', { className: 'icon-x', 'aria-label': 'Close', onClick: function () { setOpenReport(null); } }, '✕')),
         (window.marked && window.DOMPurify)
           ? h('div', { style: { padding: 18, maxHeight: '72vh', overflow: 'auto', lineHeight: 1.6, fontSize: 13.5 }, dangerouslySetInnerHTML: { __html: window.DOMPurify.sanitize(window.marked.parse(openReport.result_body || '')) } })
           : h('div', { style: { padding: 18, maxHeight: '72vh', overflow: 'auto', whiteSpace: 'pre-wrap', fontSize: 13 } }, openReport.result_body || ''))) : null
@@ -1491,7 +1491,7 @@
       var done = j.status === 'completed', failed = j.status === 'failed', paused = j.status === 'pausedForInsufficientQuota';
       if (done) return h('div', { style: { fontSize: 11.5, color: 'var(--muted)', marginTop: 2 } }, '✅ Completed' + (j.updated_at ? ' · ' + relTime(j.updated_at) : ''));
       if (failed) return h('div', { style: { fontSize: 11.5, color: 'var(--danger, #b42318)', marginTop: 2 } }, '✗ Failed' + (j.error && j.error.message ? ' — ' + j.error.message : ''));
-      if (paused) return h('div', { style: { fontSize: 11.5, color: 'var(--muted)', marginTop: 2 } }, '⏸ Paused — the Elicit account is out of quota. Click Resume once it is topped up.');
+      if (paused) return h('div', { style: { fontSize: 11.5, color: 'var(--muted)', marginTop: 2 } }, '⏸ Paused — out of quota. Click Resume once it is topped up.');
       var meta = []; var el = elapsedStr(j.created_at); if (el) meta.push('running ' + el);
       if (j.data_freshness) meta.push('updated ' + relTime(j.data_freshness));
       var metaEl = meta.length ? h('div', { style: { fontSize: 11, color: 'var(--faint)', marginTop: 1 } }, meta.join(' · ')) : null;
@@ -1499,7 +1499,7 @@
       if (j.status === 'unknown') {
         var li = srStageIdx(j.stage);
         return h('div', { style: { marginTop: 2 } },
-          h('div', { style: { fontSize: 12, color: 'var(--muted)', fontWeight: 600 } }, '⚠️ Waiting for Elicit to report status…' + (li >= 0 ? ' · last stage: ' + SR_STAGES[li][1] : '')),
+          h('div', { style: { fontSize: 12, color: 'var(--muted)', fontWeight: 600 } }, '⚠️ Waiting for status…' + (li >= 0 ? ' · last stage: ' + SR_STAGES[li][1] : '')),
           metaEl);
       }
       // running: name the current stage + step-of. When the stage is not yet known, say "Starting…" only
@@ -1522,7 +1522,7 @@
         h('div', { style: { display: 'flex', gap: 8, alignItems: 'flex-start' } },
           h('div', { style: { flex: 1, minWidth: 0 } }, h('div', { style: { fontWeight: 600, fontSize: 13.5 } }, j.result_title || j.research_question || 'Systematic review'),
             statusLine(j)),
-          j.url ? h('a', { className: 'btn', style: { padding: '4px 9px', fontSize: 12, flex: 'none' }, href: j.url, target: '_blank' }, 'Elicit ↗') : null),
+          j.url ? h('a', { className: 'btn', style: { padding: '4px 9px', fontSize: 12, flex: 'none' }, href: j.url, target: '_blank' }, 'Open ↗') : null),
         !failed ? tracker(j) : null,
         stageLinks(j),
         (done && j.result_summary) ? h('div', { style: { fontSize: 12.5, marginTop: 6, lineHeight: 1.45 } }, j.result_summary) : null,
@@ -1552,7 +1552,7 @@
     if (!canUse) return null;
     return h('div', { className: 'panel', style: { marginTop: 14 } },
       h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
-        h('h3', { style: { margin: 0, flex: 1 } }, '🔬 Systematic Review Studio ', h('span', { style: { fontSize: 11.5, color: 'var(--faint)', fontWeight: 400 } }, '· from your Ideas → Elicit PRISMA')),
+        h('h3', { style: { margin: 0, flex: 1 } }, '🔬 Systematic Review Studio ', h('span', { style: { fontSize: 11.5, color: 'var(--faint)', fontWeight: 400 } }, '· from your Ideas → PRISMA')),
         props.canEdit ? h('button', { className: 'btn pri', style: { padding: '5px 11px', fontSize: 12.5 }, disabled: gen, onClick: generate }, gen ? '✨ Generating…' : '✨ Generate from Ideas') : null,
         props.canEdit ? h('button', { className: 'btn', style: { padding: '5px 11px', fontSize: 12.5 }, onClick: function () { if (openForm) { setOpenForm(false); } else { setF({ q: '', protocol: '', abs: [], ft: [], ex: [], gen: true, genAbs: true, genEx: true, useFig: false, runFT: true, maxResults: '' }); setOpenForm(true); } } }, openForm ? 'Cancel' : '+ Manual review') : null),
       err ? h('div', { style: { fontSize: 12.5, color: /^✓/.test(err) ? 'var(--ok, #15803d)' : 'var(--danger, #b42318)', margin: '6px 0' } }, err) : null,
@@ -1564,16 +1564,16 @@
       openForm ? h('div', { style: { marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8, borderTop: '1px solid var(--line)', paddingTop: 12 } },
         h('div', null, h('div', { className: 'field-label' }, 'Research question *'), h('input', { className: 'field', style: { width: '100%', boxSizing: 'border-box' }, value: f.q, placeholder: 'The question the review investigates…', onChange: function (e) { upf('q', e.target.value); } })),
         h('div', null, h('div', { className: 'field-label' }, 'Protocol / PICO (optional)'), h('textarea', { className: 'field', rows: 2, style: { width: '100%', boxSizing: 'border-box' }, value: f.protocol, placeholder: 'Population, Intervention, Comparison, Outcome; inclusion/exclusion rationale…', onChange: function (e) { upf('protocol', e.target.value); } })),
-        h('div', null, h('div', { className: 'field-label' }, 'Abstract screening criteria (optional — Elicit adds more)'), h(CritEditor, { items: f.abs, onChange: function (a) { upf('abs', a); }, placeholder: 'e.g. reports a quantitative outcome', empty: 'Auto-generated if left empty.' })),
+        h('div', null, h('div', { className: 'field-label' }, 'Abstract screening criteria (optional — AI adds more)'), h(CritEditor, { items: f.abs, onChange: function (a) { upf('abs', a); }, placeholder: 'e.g. reports a quantitative outcome', empty: 'Auto-generated if left empty.' })),
         f.runFT ? h('div', null, h('div', { className: 'field-label' }, 'Full-text screening criteria (optional)'), h(CritEditor, { items: f.ft, onChange: function (a) { upf('ft', a); }, placeholder: 'e.g. sample size ≥ 100', empty: 'Reuses the abstract criteria if empty.' })) : null,
         h('div', null, h('div', { className: 'field-label' }, 'Extraction questions (optional)'), h(CritEditor, { items: f.ex, onChange: function (a) { upf('ex', a); }, accent: '#16a34a', placeholder: 'e.g. What was the effect size?', empty: 'Auto-generated if left empty.' })),
         h('div', null, h('div', { className: 'field-label' }, 'Max papers to search (optional)'),
           h('input', { className: 'field', type: 'number', min: 1, max: 10000, step: 100, style: { width: 160, boxSizing: 'border-box' }, value: f.maxResults, placeholder: 'plan default (~5000)', onChange: function (e) { upf('maxResults', e.target.value); } }),
-          h('div', { style: { fontSize: 11, color: 'var(--faint)', marginTop: 3 } }, 'How many papers Elicit retrieves in the search phase. Blank = your plan’s default (~5000); up to 10000. Higher = more comprehensive but slower and more quota.')),
+          h('div', { style: { fontSize: 11, color: 'var(--faint)', marginTop: 3 } }, 'How many papers to retrieve in the search phase. Blank = the default (~5000); up to 10000. Higher = more comprehensive but slower and more quota.')),
         h('div', { style: { display: 'flex', flexDirection: 'column', gap: 5, marginTop: 2, padding: '8px 10px', background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 8 } },
           h('label', { style: { display: 'flex', gap: 7, alignItems: 'center', fontSize: 12.5 } }, h('input', { type: 'checkbox', checked: f.runFT, onChange: function (e) { upf('runFT', e.target.checked); } }), 'Run full-text screening stage ', h('span', { style: { color: 'var(--faint)', fontSize: 11 } }, '(off = abstract-level only, faster)')),
-          h('label', { style: { display: 'flex', gap: 7, alignItems: 'center', fontSize: 12.5 } }, h('input', { type: 'checkbox', checked: f.genAbs, onChange: function (e) { upf('genAbs', e.target.checked); } }), 'Let Elicit generate extra abstract-screening criteria'),
-          h('label', { style: { display: 'flex', gap: 7, alignItems: 'center', fontSize: 12.5 } }, h('input', { type: 'checkbox', checked: f.genEx, onChange: function (e) { upf('genEx', e.target.checked); } }), 'Let Elicit generate extra extraction columns'),
+          h('label', { style: { display: 'flex', gap: 7, alignItems: 'center', fontSize: 12.5 } }, h('input', { type: 'checkbox', checked: f.genAbs, onChange: function (e) { upf('genAbs', e.target.checked); } }), 'Auto-generate extra abstract-screening criteria'),
+          h('label', { style: { display: 'flex', gap: 7, alignItems: 'center', fontSize: 12.5 } }, h('input', { type: 'checkbox', checked: f.genEx, onChange: function (e) { upf('genEx', e.target.checked); } }), 'Auto-generate extra extraction columns'),
           h('label', { style: { display: 'flex', gap: 7, alignItems: 'center', fontSize: 12.5 } }, h('input', { type: 'checkbox', checked: f.useFig, onChange: function (e) { upf('useFig', e.target.checked); } }), 'Consult figures during extraction ', h('span', { style: { color: 'var(--faint)', fontSize: 11 } }, '(higher quality, slower)'))),
         h('label', { style: { display: 'flex', gap: 7, alignItems: 'center', fontSize: 12.5 } }, h('input', { type: 'checkbox', checked: f.gen, onChange: function (e) { upf('gen', e.target.checked); } }), 'Generate a full report at the end'),
         h('div', { style: { display: 'flex', gap: 10, justifyContent: 'flex-end', alignItems: 'center', flexWrap: 'wrap' } },
@@ -1614,7 +1614,7 @@
         if (!alive.current) return; setBusy(false);
         if (!d || d.error) { setErr((d && d.error) || 'Search failed.'); setRes([]); return; }
         setRes(d.trials || []);
-        if (d.rate && d.rate.remaining != null) setErr('Elicit budget: ' + d.rate.remaining + ' searches left today.');
+        if (d.rate && d.rate.remaining != null) setErr('Search budget: ' + d.rate.remaining + ' searches left today.');
       });
     }
     function chip(key, label, on, onClick) { return h('button', { key: key, className: 'lchip' + (on ? ' on' : ''), disabled: !props.canEdit, style: { fontSize: 11 }, onClick: onClick }, label); }
@@ -1631,7 +1631,7 @@
     }
     if (!canUse) return null;
     return h('div', { className: 'panel', style: { marginTop: 14 } },
-      h('h3', null, '🧪 Clinical trials ', h('span', { style: { fontSize: 11.5, color: 'var(--faint)', fontWeight: 400 } }, '· Elicit trials search')),
+      h('h3', null, '🧪 Clinical trials ', h('span', { style: { fontSize: 11.5, color: 'var(--faint)', fontWeight: 400 } }, '· clinical-trials search')),
       h('div', { style: { display: 'flex', gap: 8, margin: '8px 0', flexWrap: 'wrap' } },
         h('input', { className: 'field', style: { flex: 1, minWidth: 220 }, placeholder: 'Search clinical trials…', value: q, disabled: !props.canEdit || busy, onChange: function (e) { setQ(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter') run(); } }),
         h('button', { className: 'btn pri', disabled: !props.canEdit || busy || !q.trim(), onClick: run }, busy ? '…' : 'Search')),
@@ -1790,8 +1790,8 @@
               loadStudy(selId);
               if (!d.done && alive.current && !stop.current) loop(d.next_offset);
               else { setRunning(false); setProg(null); loadStudy(selId); props.onChanged();
-                if (n === 1 && srcUsed === 'elicit') setErr('✓ Searched via Elicit (' + ((cfg.source_adapter === 'elicit_keyword') ? 'keyword' : 'semantic') + ').' + (rateInfo && rateInfo.remaining != null ? ' Elicit budget: ' + rateInfo.remaining + ' searches left today.' : ''));
-                else if (n === 1 && String(cfg.source_adapter || '').indexOf('elicit') === 0) setErr('ℹ️ Elicit was unavailable (rate limit, quota, plan, or not enabled for you) — searched via OpenAlex instead.');
+                if (n === 1 && srcUsed === 'elicit') setErr('✓ Searched via Publify (' + ((cfg.source_adapter === 'elicit_keyword') ? 'keyword' : 'semantic') + ').' + (rateInfo && rateInfo.remaining != null ? ' Search budget: ' + rateInfo.remaining + ' searches left today.' : ''));
+                else if (n === 1 && String(cfg.source_adapter || '').indexOf('elicit') === 0) setErr('ℹ️ Semantic search was unavailable (rate limit, quota, plan, or not enabled for you) — searched via OpenAlex instead.');
                 else if (n === 1 && !(d.total_estimate || d.new_sources || d.fetched)) setErr('0 results on OpenAlex — try broader/different keywords, or looser filters (e.g. clear “From year” or “Journals only”), then run again.');
                 else if (n === 1 && d.relaxed) setErr('ℹ️ The keywords/filters you gave were too narrow — I relaxed them automatically (e.g. searched without filters) to find papers. You can refine the keywords/filters and run again.'); }
             });
@@ -1890,9 +1890,9 @@
           // search source — Elicit options appear only when the user is entitled (elicit_search); server enforces + falls back to OpenAlex
           h('select', { className: 'num', style: { width: 'auto', minWidth: 148 }, disabled: !props.canEdit, value: cfg.source_adapter || 'openalex', onChange: function (e) { up('source_adapter', e.target.value); }, title: 'Search source' },
             h('option', { value: 'openalex' }, 'Source: OpenAlex'),
-            (window.PREnt && window.PREnt.loaded() && window.PREnt.can('elicit_search')) ? h('option', { value: 'elicit' }, 'Source: Elicit (semantic)') : null,
-            (window.PREnt && window.PREnt.loaded() && window.PREnt.can('elicit_search')) ? h('option', { value: 'elicit_keyword' }, 'Source: Elicit (keyword)') : null),
-          (String(cfg.source_adapter || '').indexOf('elicit') === 0) ? h('button', { className: 'lchip' + (cfg.corpus === 'pubmed' ? ' on' : ''), disabled: !props.canEdit, title: 'Restrict Elicit search to PubMed', onClick: function () { up('corpus', cfg.corpus === 'pubmed' ? 'elicit' : 'pubmed'); } }, 'PubMed only') : null,
+            (window.PREnt && window.PREnt.loaded() && window.PREnt.can('elicit_search')) ? h('option', { value: 'elicit' }, 'Source: Publify (semantic)') : null,
+            (window.PREnt && window.PREnt.loaded() && window.PREnt.can('elicit_search')) ? h('option', { value: 'elicit_keyword' }, 'Source: Publify (keyword)') : null),
+          (String(cfg.source_adapter || '').indexOf('elicit') === 0) ? h('button', { className: 'lchip' + (cfg.corpus === 'pubmed' ? ' on' : ''), disabled: !props.canEdit, title: 'Restrict search to PubMed', onClick: function () { up('corpus', cfg.corpus === 'pubmed' ? 'elicit' : 'pubmed'); } }, 'PubMed only') : null,
           h('input', { className: 'num', type: 'number', disabled: !props.canEdit, placeholder: 'From year', value: (cfg.filters || {}).fromYear || '', onChange: function (e) { upFilter('fromYear', e.target.value); } }),
           h('input', { className: 'num', type: 'number', disabled: !props.canEdit, placeholder: 'Min. cites', value: (cfg.filters || {}).minCites || '', onChange: function (e) { upFilter('minCites', e.target.value); } }),
           h('button', { className: 'lchip' + ((cfg.filters || {}).oa ? ' on' : ''), disabled: !props.canEdit, onClick: function () { upFilter('oa', !(cfg.filters || {}).oa); } }, 'Open access only'),
@@ -1902,7 +1902,7 @@
         (curStep === 1 && cfg.source_adapter === 'elicit') ? h('div', { style: { marginTop: 8 } },
           h('div', { className: 'field-label' }, 'Search query / description (semantic)'),
           h('textarea', { className: 'field', style: { width: '100%', minHeight: 60, resize: 'vertical', boxSizing: 'border-box' }, disabled: !props.canEdit, maxLength: 350, value: cfg.semantic_query || '', placeholder: (sel && sel.question) ? ('Defaults to the study question: ' + String(sel.question).slice(0, 110)) : 'A full-sentence research question for semantic search…', onChange: function (e) { up('semantic_query', e.target.value); } }),
-          h('div', { style: { fontSize: 11, color: 'var(--muted)', marginTop: 3 } }, 'Elicit (semantic) searches on this natural-language question (max 350 chars). The keywords above still drive OpenAlex; “✨ AI fill-in” regenerates this.')
+          h('div', { style: { fontSize: 11, color: 'var(--muted)', marginTop: 3 } }, 'Semantic search uses this natural-language question (max 350 chars). The keywords above still drive OpenAlex; “✨ AI fill-in” regenerates this.')
         ) : null,
         curStep > 1 && incCount(curStep - 1) === 0 ? h('div', { style: { fontSize: 12.5, color: 'var(--warn)', marginTop: 8 } }, 'There is no “include” paper in the previous step yet — run that first.') : null,
         curStep === 3 ? h('div', { style: { fontSize: 12, color: 'var(--muted)', marginTop: 8, lineHeight: 1.45, background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 8, padding: '7px 10px' } }, '📄 Full-text screening runs on step 2’s “include” papers: it downloads the available open access (OA) PDFs and screens on the full text; where no PDF is downloadable, it falls back to the abstract. This is therefore slower (3–4 papers per batch) — in the table below you can see live which paper got “📄 full text” and which got “📝 abstract only”, and the download ratio in the header.') : null,
@@ -2858,7 +2858,7 @@
       // in the background while you use the Chat / other tabs.
       h('div', { style: { display: tab === 'study' ? 'block' : 'none' } },
         h('details', { className: 'panel', style: { marginTop: 14, padding: '12px 16px' } },
-          h('summary', { style: { cursor: 'pointer', fontSize: 13, fontWeight: 600, color: 'var(--muted)' } }, '⏸ Keyword screening funnel (OpenAlex/Elicit search → screen) — paused · click to open'),
+          h('summary', { style: { cursor: 'pointer', fontSize: 13, fontWeight: 600, color: 'var(--muted)' } }, '⏸ Keyword screening funnel (OpenAlex search → screen) — paused · click to open'),
           h('div', { style: { marginTop: 12 } }, h(LiteratureStudy, { projectId: p.id, project: p, studies: props.studies, sources: props.sources, ideas: props.ideas, loading: props.loading, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, autoCreateFrom: autoStudy, onAutoConsumed: function () { setAutoStudy(null); } })))),
       editOpen ? h(ProjectSettingsModal, { project: p, onClose: function () { setEditOpen(false); }, onSaved: function () { setEditOpen(false); props.onChanged(); } }) : null
     );
