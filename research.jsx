@@ -424,6 +424,103 @@
     return ReactDOM.createPortal(h('div', { className: 'rv-scrim', onClick: props.onClose },
       h('div', { className: 'rv-shell', onClick: function (e) { e.stopPropagation(); } }, bar, main)), document.body);
   }
+  // ---------- rich file preview + downloads (images / PDF / CSV / JSON / text) ----------
+  function fileKind(f) {
+    var p = (f.path || '').toLowerCase(), m = (f.mime || '').toLowerCase();
+    if (m.indexOf('image/') === 0 || /\.(png|jpe?g|gif|webp|svg|bmp|avif)$/.test(p)) return 'image';
+    if (m === 'application/pdf' || /\.pdf$/.test(p)) return 'pdf';
+    if (/\.(csv|tsv)$/.test(p) || m === 'text/csv') return 'csv';
+    if (/\.json$/.test(p) || m === 'application/json') return 'json';
+    if (/\.(md|markdown)$/.test(p)) return 'md';
+    if (f.content != null || /\.(txt|log|tex|bib|py|js|ts|r|yaml|yml|html?|xml|gexf|sh)$/.test(p)) return 'text';
+    return 'binary';
+  }
+  function fileIcon(f) {
+    var k = fileKind(f);
+    return k === 'image' ? '🖼' : k === 'pdf' ? '📕' : k === 'csv' ? '📊' : k === 'json' ? '◧' : k === 'md' ? '📄' : /\.tex$/i.test(f.path) ? '📐' : /\.bib$/i.test(f.path) ? '📚' : /\.html?$/i.test(f.path) ? '🌐' : /\.gexf$/i.test(f.path) ? '🕸' : k === 'text' ? '📄' : '📎';
+  }
+  function csvToRows(text) {
+    var delim = (text.indexOf('\t') >= 0 && text.indexOf(',') < 0) ? '\t' : ',';
+    var rows = [], row = [], cur = '', q = false;
+    for (var i = 0; i < text.length; i++) {
+      var c = text[i];
+      if (q) { if (c === '"') { if (text[i + 1] === '"') { cur += '"'; i++; } else q = false; } else cur += c; }
+      else if (c === '"') q = true;
+      else if (c === delim) { row.push(cur); cur = ''; }
+      else if (c === '\n') { row.push(cur); rows.push(row); row = []; cur = ''; }
+      else if (c !== '\r') cur += c;
+    }
+    if (cur.length || row.length) { row.push(cur); rows.push(row); }
+    return rows.filter(function (r) { return !(r.length === 1 && r[0] === ''); });
+  }
+  function csvTable(text) {
+    var rows = csvToRows(text || '');
+    if (!rows.length) return h('div', { className: 'empty', style: { padding: 24 } }, 'Empty file.');
+    var head = rows[0], body = rows.slice(1, 501);
+    return h('div', { style: { overflow: 'auto', maxHeight: '70vh' } },
+      h('table', { className: 'csvt' },
+        h('thead', null, h('tr', null, head.map(function (c, i) { return h('th', { key: i }, c); }))),
+        h('tbody', null, body.map(function (r, ri) { return h('tr', { key: ri }, head.map(function (_, ci) { return h('td', { key: ci }, r[ci] != null ? r[ci] : ''); })); }))),
+      rows.length > 501 ? h('div', { style: { fontSize: 11, color: 'var(--faint)', padding: '6px 2px' } }, 'Showing first 500 of ' + (rows.length - 1) + ' rows.') : null);
+  }
+  function downloadBlob(name, blob) {
+    var u = URL.createObjectURL(blob); var a = document.createElement('a'); a.href = u; a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function () { URL.revokeObjectURL(u); }, 4000);
+  }
+  function baseName(p) { return String(p || 'file').split('/').pop(); }
+  function downloadFile(f) {
+    if (f.content != null) { downloadBlob(baseName(f.path), new Blob([f.content], { type: f.mime || 'text/plain;charset=utf-8' })); return; }
+    if (f.storage_path) sb.storage.from('research-data').createSignedUrl(f.storage_path, 3600, { download: baseName(f.path) }).then(function (r) { if (r && r.data && r.data.signedUrl) window.open(r.data.signedUrl, '_blank'); });
+  }
+  function zipFiles(files, zipName) {
+    if (!window.JSZip) { window.PRUI.toast('Preparing the download failed (library not ready) — try again.', { kind: 'error' }); return Promise.resolve(); }
+    var zip = new window.JSZip();
+    return Promise.all((files || []).map(function (f) {
+      var name = (f.path || 'file').replace(/^\/+/, '');
+      if (f.content != null) { zip.file(name, f.content); return Promise.resolve(); }
+      if (f.storage_path) return sb.storage.from('research-data').download(f.storage_path).then(function (r) { if (r && r.data) zip.file(name, r.data); }, function () { });
+      return Promise.resolve();
+    })).then(function () { return zip.generateAsync({ type: 'blob' }); }).then(function (blob) { downloadBlob((zipName || 'deliverables') + '.zip', blob); });
+  }
+  function ensurePvCss() {
+    if (typeof document === 'undefined' || document.getElementById('pv-css')) return;
+    var s = document.createElement('style'); s.id = 'pv-css';
+    s.textContent = '.pv-shell{width:980px;max-width:100%;max-height:100%;background:var(--surface);border-radius:14px;box-shadow:0 24px 70px rgba(0,0,0,.32);display:flex;flex-direction:column;overflow:hidden}'
+      + '.pv-body{flex:1;min-height:0;overflow:auto;padding:16px;background:var(--softer)}'
+      + '.pv-pre{margin:0;white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.5;color:var(--ink)}'
+      + '.csvt{border-collapse:collapse;font-size:12px;width:100%;background:var(--surface)}'
+      + '.csvt th,.csvt td{border:1px solid var(--line);padding:4px 8px;text-align:left;vertical-align:top}'
+      + '.csvt th{background:var(--surface-2);position:sticky;top:0;font-weight:700}';
+    document.head.appendChild(s);
+  }
+  // Modal that renders a file by type: image inline, PDF embedded, CSV as a table, JSON/text as code, MD rendered.
+  function FilePreviewModal(props) {
+    var f = props.file;
+    var uS = useState(null), url = uS[0], setUrl = uS[1];
+    var kind = fileKind(f);
+    useEffect(function () {
+      ensurePvCss();
+      if ((kind === 'image' || kind === 'pdf' || kind === 'binary') && f.storage_path && f.content == null) {
+        var alive = true;
+        sb.storage.from('research-data').createSignedUrl(f.storage_path, 3600).then(function (r) { if (alive && r && r.data) setUrl(r.data.signedUrl); });
+        return function () { alive = false; };
+      }
+    }, [f.id]);
+    var body;
+    if (kind === 'image') body = url ? h('img', { src: url, alt: f.path, style: { maxWidth: '100%', maxHeight: '74vh', display: 'block', margin: '0 auto', borderRadius: 6 } }) : h('div', { className: 'empty', style: { padding: 30 } }, 'Loading image…');
+    else if (kind === 'pdf') body = url ? h('iframe', { src: url, title: f.path, style: { width: '100%', height: '74vh', border: 0, borderRadius: 6, background: '#fff' } }) : h('div', { className: 'empty', style: { padding: 30 } }, 'Loading PDF…');
+    else if (kind === 'csv') body = csvTable(f.content || '');
+    else if (kind === 'json') { var pj; try { pj = JSON.stringify(JSON.parse(f.content || ''), null, 2); } catch (e) { pj = f.content || ''; } body = h('pre', { className: 'pv-pre' }, pj); }
+    else if (kind === 'md') body = h('article', { className: 'report-doc', style: { padding: 4 }, dangerouslySetInnerHTML: { __html: mdReport(f.content || '') } });
+    else if (kind === 'text') body = h('pre', { className: 'pv-pre' }, f.content || '');
+    else body = h('div', { className: 'empty', style: { padding: 30 } }, 'No inline preview for this file type — use ⬇ to download.');
+    return ReactDOM.createPortal(h('div', { className: 'rv-scrim', onClick: props.onClose },
+      h('div', { className: 'pv-shell', onClick: function (e) { e.stopPropagation(); } },
+        h('div', { className: 'rv-bar' },
+          h('b', { style: { flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, fileIcon(f) + ' ' + f.path),
+          h('button', { className: 'btn', style: { padding: '4px 9px', fontSize: 13, flex: 'none' }, title: 'Download (native format)', onClick: function () { downloadFile(f); } }, '⬇'),
+          h('button', { className: 'icon-x', 'aria-label': 'Close', onClick: props.onClose }, '✕')),
+        h('div', { className: 'pv-body' }, body))), document.body);
+  }
   // Reusable "the AI is working" indicator: pulsing orb + animated label + indeterminate bar + honest elapsed timer.
   function AiThinking(props) {
     var t = useState(0), sec = t[0], setSec = t[1];
@@ -2186,6 +2283,8 @@
     var pvS = useState('overview'), pview = pvS[0], setPview = pvS[1];   // sub-view: 'overview' | 'steps'
     var lbS = useState(null), lb = lbS[0], setLb = lbS[1];               // figure lightbox { src, cap }
     var rfS = useState([]), rfiles = rfS[0], setRfiles = rfS[1];         // project deliverable files
+    var pfS = useState(null), prevFile = pfS[0], setPrevFile = pfS[1];   // deliverable open in the rich preview modal
+    var zpS = useState(false), zipping = zpS[0], setZipping = zpS[1];    // ZIP-all in progress
     var ntS = useState({}), noteDraft = ntS[0], setNoteDraft = ntS[1];   // per-step composer { <id>: { kind, body } }
     var ndS = useState({}), notesData = ndS[0], setNotesData = ndS[1];   // review notes keyed by step id
     var bdS = useState(null), boardDrag = bdS[0], setBoardDrag = bdS[1];  // task-board drag: 'step:<id>' | 'todo:<id>'
@@ -2381,12 +2480,13 @@
     function renderOverview() {
       var allpass = stt.acTot > 0 && stt.acPass === stt.acTot;
       var doc = buildDoc(buildFullReport());
-      var deliv = rfiles.filter(function (f) { return f.content != null || /\.(md|txt|csv|tsv|tex|bib|json|html?|gexf)$/i.test(f.path); });
+      var deliv = rfiles;   // every project file is a deliverable (text, data, images, PDFs, binaries)
       return h('div', null,
         h('div', { className: 'panel' },
           h('div', { style: { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 12 } },
             stt.acTot ? h('span', { className: 'chip ' + (allpass ? 'c-ok' : 'c-warn'), style: { fontSize: 12, padding: '5px 11px' } }, (allpass ? '✓ ' : '⚠ ') + stt.acPass + '/' + stt.acTot + ' acceptance checks passed') : null,
-            h('span', { style: { fontSize: 12, color: 'var(--muted)' } }, stt.done + '/' + steps.length + ' tasks complete' + (stt.dev ? ' · ' + stt.dev + ' documented deviations' : '') + (stt.fig ? ' · ' + stt.fig + ' figures' : ''))
+            h('span', { style: { fontSize: 12, color: 'var(--muted)' } }, stt.done + '/' + steps.length + ' tasks complete' + (stt.dev ? ' · ' + stt.dev + ' documented deviations' : '') + (stt.fig ? ' · ' + stt.fig + ' figures' : '')),
+            ce ? h('button', { className: 'btn', style: { marginLeft: 'auto', padding: '4px 10px', fontSize: 12, flex: 'none' }, title: 'Add a new task (even after the protocol has finished — use “Re-open & run” to execute it)', onClick: function () { setEditing({ step: {}, isNew: true, after: null }); } }, '+ Add task') : null
           ),
           h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 6 } }, steps.map(function (s) {
             var a = acOf(s); var bad = a && a.pass < a.total; var col = s.status === 'done' ? (bad ? 'var(--warn)' : 'var(--ok)') : (s.status === 'running' || s.status === 'queued' ? 'var(--accent)' : 'var(--faint)');
@@ -2396,18 +2496,21 @@
           }))
         ),
         deliv.length ? h('div', { className: 'panel' },
-          h('h3', null, '📦 Deliverables', h('span', { style: { fontWeight: 600, color: 'var(--faint)' } }, deliv.length + '')),
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 8 } },
+            h('h3', { style: { margin: 0 } }, '📦 Deliverables', h('span', { style: { fontWeight: 600, color: 'var(--faint)', marginLeft: 6 } }, deliv.length + '')),
+            h('button', { className: 'btn', style: { marginLeft: 'auto', padding: '4px 10px', fontSize: 12, flex: 'none' }, disabled: zipping, title: 'Download every deliverable as one ZIP', onClick: function () { setZipping(true); zipFiles(deliv, (prot.title || 'protocol').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 50) || 'deliverables').then(function () { setZipping(false); }, function () { setZipping(false); window.PRUI.toast('Could not build the ZIP.', { kind: 'error' }); }); } }, zipping ? '⏳ Zipping…' : '⬇ Download all (ZIP)')),
           h('div', { style: { display: 'flex', flexDirection: 'column', gap: 7 } }, deliv.map(function (f) {
-            var ic = /\.md$|\.txt$/i.test(f.path) ? '📄' : /\.(csv|tsv)$/i.test(f.path) ? '📊' : /\.json$/i.test(f.path) ? '◧' : /\.tex$/i.test(f.path) ? '📐' : /\.bib$/i.test(f.path) ? '📚' : /\.html?$/i.test(f.path) ? '🌐' : /\.gexf$/i.test(f.path) ? '🕸' : '📎';
-            var canRead = f.content != null;
-            return h('div', { key: f.id, className: 'deliv' + (canRead ? ' click' : ''), onClick: canRead ? function () { setRvMd(f.content); } : null },
-              h('span', { className: 'deliv-ic' }, ic),
+            return h('div', { key: f.id, className: 'deliv click', onClick: function () { setPrevFile(f); } },
+              h('span', { className: 'deliv-ic' }, fileIcon(f)),
               h('span', { style: { flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, h('b', { style: { fontSize: 12.5 } }, f.path), f.size ? h('span', { style: { fontSize: 11, color: 'var(--faint)', marginLeft: 6 } }, Math.round(f.size / 1024) + ' KB') : null),
-              canRead ? h('span', { className: 'btn', style: { padding: '2px 9px', fontSize: 11, flex: 'none' } }, '👁 Open') : (f.storage_path ? h('span', { className: 'btn', style: { padding: '2px 9px', fontSize: 11, flex: 'none' }, onClick: function (e) { e.stopPropagation(); sb.storage.from('research-data').createSignedUrl(f.storage_path, 3600, { download: f.path }).then(function (r) { if (r && r.data && r.data.signedUrl) window.open(r.data.signedUrl, '_blank'); }); } }, '⬇') : null));
+              h('span', { className: 'btn', style: { padding: '2px 9px', fontSize: 11, flex: 'none' }, title: 'Preview' }, '👁 Open'),
+              h('span', { className: 'btn', style: { padding: '2px 9px', fontSize: 11, flex: 'none' }, title: 'Download (native format)', onClick: function (e) { e.stopPropagation(); downloadFile(f); } }, '⬇'));
           }))
         ) : null,
         hasResults ? h('div', { className: 'panel' },
-          h('h3', null, '📄 Full report', h('button', { className: 'btn', style: { marginLeft: 'auto', padding: '3px 9px', fontSize: 11.5, flex: 'none' }, title: 'Open full screen', onClick: function () { setRvMd(buildFullReport()); } }, '⛶ Full screen')),
+          h('h3', null, '📄 Full report',
+            h('button', { className: 'btn', style: { marginLeft: 'auto', padding: '3px 9px', fontSize: 11.5, flex: 'none' }, title: 'Download the report as PDF (opens the print dialog)', onClick: function () { setRvMd(buildFullReport()); setTimeout(function () { try { window.print(); } catch (e) { } }, 350); } }, '⬇ PDF'),
+            h('button', { className: 'btn', style: { padding: '3px 9px', fontSize: 11.5, flex: 'none' }, title: 'Open full screen', onClick: function () { setRvMd(buildFullReport()); } }, '⛶ Full screen')),
           h('div', { className: 'doc-embed-wrap' }, h('div', { className: 'doc-embed' },
             doc.toc.length > 2 ? h('nav', { className: 'rv-toc doc-embed-toc' }, h('div', { className: 'rv-toc-h' }, 'Contents'), doc.toc.map(function (t) { return h('button', { key: t.id, className: 'rv-toc-i lvl' + t.level, onClick: function () { var el = document.getElementById(t.id); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); } }, t.text); })) : null,
             h('article', { className: 'report-doc', dangerouslySetInnerHTML: { __html: doc.html } })
@@ -2497,6 +2600,7 @@
           steps.some(function (s) { return s.result && (s.result.report || s.result.summary); }) ? h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12, flex: 'none' }, title: 'Open the full formatted result report', onClick: function () { setRvMd(buildFullReport()); } }, '📄 Report') : null,
           ce ? h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12, flex: 'none' }, disabled: busy, title: 'Re-generate (archives the current one)', onClick: generate }, busy ? '✨…' : '↻ Re-generate') : null,
           (ce && (prot.status === 'draft' || prot.status === 'paused')) ? h('button', { className: 'btn pri', style: { padding: '4px 10px', fontSize: 12, flex: 'none' }, title: 'Make it claimable by your dedicated runner', onClick: function () { setPStatus('ready'); } }, '▶ Mark ready') : null,
+          (ce && (prot.status === 'done' || prot.status === 'failed')) ? h('button', { className: 'btn pri', style: { padding: '4px 10px', fontSize: 12, flex: 'none' }, title: 'Re-open this protocol so the runner picks up newly added tasks', onClick: function () { setPStatus('ready'); } }, '▶ Re-open & run') : null,
           (ce && (prot.status === 'ready' || prot.status === 'running')) ? h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12, flex: 'none' }, onClick: function () { setPStatus('paused'); } }, '⏸ Pause') : null
         ),
         prot.goal ? h('div', { style: { fontSize: 12.5, color: 'var(--muted)', marginTop: 4 } }, prot.goal) : null,
@@ -2620,7 +2724,8 @@
         h('button', { className: 'fig-lb-x', 'aria-label': 'Close', onClick: function () { setLb(null); } }, '✕'),
         h('img', { src: lb.src, alt: lb.cap || '', onClick: function (e) { e.stopPropagation(); } }),
         lb.cap ? h('div', { className: 'fig-lb-cap' }, lb.cap) : null), document.body) : null,
-      editing ? h(TaskEditorModal, { step: editing.step, isNew: editing.isNew, allSteps: steps, projectId: props.projectId, onSave: saveTask, onClose: function () { setEditing(null); } }) : null
+      editing ? h(TaskEditorModal, { step: editing.step, isNew: editing.isNew, allSteps: steps, projectId: props.projectId, onSave: saveTask, onClose: function () { setEditing(null); } }) : null,
+      prevFile ? h(FilePreviewModal, { file: prevFile, onClose: function () { setPrevFile(null); } }) : null
     );
   }
 
