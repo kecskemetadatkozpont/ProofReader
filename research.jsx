@@ -1496,7 +1496,7 @@
     var erS = useState(''), err = erS[0], setErr = erS[1];
     var opS = useState(null), openReport = opS[0], setOpenReport = opS[1];
     var alive = useRef(true);
-    function load() { callElicit({ action: 'report.list' }).then(function (d) { if (alive.current) setJobs((d && d.jobs) || []); }); }
+    function load() { callElicit({ action: 'report.list', project_id: props.projectId }).then(function (d) { if (alive.current) setJobs((d && d.jobs) || []); }); }
     useEffect(function () { alive.current = true; if (canUse) load(); return function () { alive.current = false; }; }, [canUse]);
     // poll non-terminal jobs every 12s
     useEffect(function () {
@@ -1597,7 +1597,7 @@
         setEnh((d.suggestions && d.suggestions.length) ? d.suggestions : []);
       }, function () { if (alive.current) { setEnhBusy(false); setErr('Improve failed.'); } });
     }
-    function load() { callElicit({ action: 'sr.list' }).then(function (d) { if (alive.current) setJobs((d && d.jobs) || []); }); }
+    function load() { callElicit({ action: 'sr.list', project_id: props.projectId }).then(function (d) { if (alive.current) setJobs((d && d.jobs) || []); }); }
     function loadCands() { sb.from('research_sr_candidates').select('*').eq('project_id', props.projectId).eq('dismissed', false).order('created_at', { ascending: true }).then(function (r) { if (alive.current) setCands((r && r.data) || []); }); }
     function generate() { setGen(true); setErr(''); callStudy({ action: 'sr_suggest', project_id: props.projectId }).then(function (d) { if (!alive.current) return; setGen(false); if (d && d.error) { setErr('Generate: ' + d.error); return; } loadCands(); if (d && d.created === 0) setErr('No Ideas yet — add Ideas in the Idea stage first, then generate.'); }); }
     function picoText(p) { if (!p) return ''; return [['P', p.population], ['I', p.intervention], ['C', p.comparison], ['O', p.outcome]].filter(function (x) { return x[1]; }).map(function (x) { return x[0] + ': ' + x[1]; }).join('\n'); }

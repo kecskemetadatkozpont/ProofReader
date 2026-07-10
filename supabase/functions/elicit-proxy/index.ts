@@ -142,9 +142,11 @@ Deno.serve(async (req) => {
 
     // ---- report.list (own jobs only; never the Elicit list endpoint) ----
     if (action === 'report.list') {
-      const { data: rows } = await sb.from('elicit_jobs')
+      let qb = sb.from('elicit_jobs')
         .select('id,kind,status,stage,research_question,result_title,result_summary,result_body,result_abstract,url,is_public,pdf_url,docx_url,error,created_at,updated_at,project_id')
-        .eq('user_id', uid).eq('kind', 'report').order('created_at', { ascending: false }).limit(50);
+        .eq('kind', 'report');
+      qb = body.project_id ? qb.eq('project_id', String(body.project_id)) : qb.eq('user_id', uid);   // project-scoped (RLS = own or admin), same as sr.list
+      const { data: rows } = await qb.order('created_at', { ascending: false }).limit(50);
       return json({ ok: true, jobs: rows || [] });
     }
 
@@ -252,9 +254,13 @@ Deno.serve(async (req) => {
 
     // ---- systematic reviews (Phase 3) ----
     if (action === 'sr.list') {
-      const { data: rows } = await sb.from('elicit_jobs')
+      // Project-scoped when a project_id is given (Studies is per-project): RLS (own OR admin) then decides who —
+      // a normal user sees only their own jobs in that project; an admin (incl. "view as") sees the project's jobs.
+      let qb = sb.from('elicit_jobs')
         .select('id,kind,status,stage,research_question,result_title,result_summary,result_body,result_abstract,url,is_public,pdf_url,docx_url,exports,stages,error,created_at,updated_at,data_freshness,project_id')
-        .eq('user_id', uid).eq('kind', 'sysreview').order('created_at', { ascending: false }).limit(30);
+        .eq('kind', 'sysreview');
+      qb = body.project_id ? qb.eq('project_id', String(body.project_id)) : qb.eq('user_id', uid);
+      const { data: rows } = await qb.order('created_at', { ascending: false }).limit(30);
       return json({ ok: true, jobs: rows || [] });
     }
 
