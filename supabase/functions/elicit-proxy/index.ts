@@ -372,9 +372,10 @@ Deno.serve(async (req) => {
       };
       if (runFT) srBody.fulltextScreening = ftC.length ? { criteria: ftC, reuseAbstractCriteria: false } : { reuseAbstractCriteria: true };
       // explicit search size: one semantic search over the elicit corpus at the requested maxResults.
-      // Blank (maxR===0) → leave `searches` unset so Elicit runs its own default search (its plan-default size).
-      // An EXPLICIT per-search size is plan-capped at 500 (same tier limit as /api/v1/search) — clamp to avoid a create 400.
-      const maxR = clampInt(body.maxResults, 1, 500, 0);
+      // Blank (maxR===0) → leave `searches` unset → Elicit's OWN default, which is only 200 (verified live).
+      // The SR endpoint accepts maxResults up to 10000 (unlike /api/v1/search's 500 cap — verified: 5000 is
+      // not rejected at validation), so pass the requested size through to actually examine more than 200.
+      const maxR = clampInt(body.maxResults, 1, 10000, 0);
       if (maxR >= 1) srBody.searches = [{ query: rq.slice(0, 2000), corpus: 'elicit', searchMode: 'semantic', maxResults: maxR }];
       // claim-first (TOCTOU-safe, unique index serializes concurrent creates)
       const { data: claim, error: claimErr } = await sb.from('elicit_jobs').insert({
