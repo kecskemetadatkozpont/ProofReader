@@ -2403,10 +2403,10 @@
         ) : null,
         hasResults ? h('div', { className: 'panel' },
           h('h3', null, '📄 Full report', h('button', { className: 'btn', style: { marginLeft: 'auto', padding: '3px 9px', fontSize: 11.5, flex: 'none' }, title: 'Open full screen', onClick: function () { setRvMd(buildFullReport()); } }, '⛶ Full screen')),
-          h('div', { className: 'doc-embed' },
+          h('div', { className: 'doc-embed-wrap' }, h('div', { className: 'doc-embed' },
             doc.toc.length > 2 ? h('nav', { className: 'rv-toc doc-embed-toc' }, h('div', { className: 'rv-toc-h' }, 'Contents'), doc.toc.map(function (t) { return h('button', { key: t.id, className: 'rv-toc-i lvl' + t.level, onClick: function () { var el = document.getElementById(t.id); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); } }, t.text); })) : null,
             h('article', { className: 'report-doc', dangerouslySetInnerHTML: { __html: doc.html } })
-          )
+          ))
         ) : null
       );
     }
