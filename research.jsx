@@ -1485,8 +1485,7 @@
           h('div', { style: { flex: 1, minWidth: 0 } },
             h('div', { style: { fontWeight: 600, fontSize: 13.5 } }, j.result_title || j.research_question || 'Report'),
             h('div', { style: { fontSize: 11.5, color: 'var(--muted)', marginTop: 2 } },
-              done ? '✅ Completed' : failed ? ('✗ Failed' + (j.error && j.error.message ? ' — ' + j.error.message : '')) : paused ? '⏸ Paused — out of quota' : ('⏳ ' + (EL_STAGE[j.stage] || 'Processing') + '…'))),
-          j.url ? h('a', { className: 'btn', style: { padding: '4px 9px', fontSize: 12, flex: 'none' }, href: j.url, target: '_blank' }, 'Open ↗') : null),
+              done ? '✅ Completed' : failed ? ('✗ Failed' + (j.error && j.error.message ? ' — ' + j.error.message : '')) : paused ? '⏸ Paused — out of quota' : ('⏳ ' + (EL_STAGE[j.stage] || 'Processing') + '…')))),
         done && j.result_summary ? h('div', { style: { fontSize: 12.5, marginTop: 6, lineHeight: 1.45 } }, j.result_summary) : null,
         h('div', { style: { display: 'flex', gap: 7, marginTop: 8, flexWrap: 'wrap' } },
           done && j.result_body ? h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12 }, onClick: function () { setOpenReport(j); } }, 'View full report') : null,
@@ -1558,6 +1557,23 @@
       }, 20000);
       return function () { clearInterval(iv); };
     }, [jobs && jobs.map(function (j) { return j.id + j.status + j.stage; }).join(',')]);
+    // A review's export URLs (pdf/docx/…) may not have been ready at the completion poll → null exports.
+    // Re-fetch once per completed job that has a report but no download links, so they appear for everyone.
+    var refreshed = useRef({});
+    function refreshJob(j) {
+      callElicit({ action: 'sr.status', job_id: j.id, refresh: true }).then(function (d) {
+        if (!alive.current || !d || !d.job) return;
+        setJobs(function (list) { return (list || []).map(function (x) { return x.id === j.id ? Object.assign({}, x, d.job) : x; }); });
+      });
+    }
+    useEffect(function () {
+      (jobs || []).forEach(function (j) {
+        if (j.status === 'completed' && j.result_body && !refreshed.current[j.id]) {
+          var e = j.exports || {};
+          if (!(e.pdf || e.docx || e.bib || e.ris)) { refreshed.current[j.id] = 1; refreshJob(j); }
+        }
+      });
+    }, [jobs && jobs.map(function (j) { return j.id + j.status + ((j.exports && j.exports.pdf) ? '1' : '0'); }).join(',')]);
     function create() {
       var rq = f.q.trim(); if (!rq) return; setBusy(true); setErr('');
       callElicit({ action: 'sr.create', researchQuestion: rq, protocolDetails: f.protocol || null, abstractCriteria: f.abs, fulltextCriteria: f.ft, extractionQuestions: f.ex, generateReport: f.gen, genAbstract: f.genAbs, genExtraction: f.genEx, useFigures: f.useFig, runFullText: f.runFT, maxResults: f.maxResults ? parseInt(f.maxResults, 10) : undefined, project_id: props.projectId, title: (props.project && props.project.title) || null }).then(function (d) {
@@ -1612,14 +1628,14 @@
       var done = j.status === 'completed', failed = j.status === 'failed', paused = j.status === 'pausedForInsufficientQuota';
       var acts = [];
       if (done && j.result_body) acts.push(h('button', { key: 'v', className: 'btn', style: { padding: '4px 10px', fontSize: 12 }, onClick: function () { setOpenR(j); } }, 'View full report'));
+      if (done) acts.push(h('button', { key: 'rf', className: 'btn', style: { padding: '4px 10px', fontSize: 12 }, title: 'Re-fetch the download links (they expire after 7 days)', onClick: function () { refreshJob(j); } }, '↻ Refresh downloads'));
       if (paused) acts.push(h('button', { key: 'r', className: 'btn pri', style: { padding: '4px 10px', fontSize: 12 }, onClick: function () { resume(j); } }, 'Resume'));
       var e = j.exports || {};
       var exps = [['pdf', 'PDF'], ['docx', 'DOCX'], ['bib', 'BibTeX'], ['ris', 'RIS']].map(function (x) { return e[x[0]] ? h('a', { key: x[0], className: 'btn', style: { padding: '4px 9px', fontSize: 12 }, href: e[x[0]], target: '_blank' }, x[1]) : null; }).filter(Boolean);
       return h('div', { key: j.id, style: { border: '1px solid var(--line)', borderRadius: 10, padding: '10px 12px' } },
         h('div', { style: { display: 'flex', gap: 8, alignItems: 'flex-start' } },
           h('div', { style: { flex: 1, minWidth: 0 } }, h('div', { style: { fontWeight: 600, fontSize: 13.5 } }, j.result_title || j.research_question || 'Systematic review'),
-            statusLine(j)),
-          j.url ? h('a', { className: 'btn', style: { padding: '4px 9px', fontSize: 12, flex: 'none' }, href: j.url, target: '_blank' }, 'Open ↗') : null),
+            statusLine(j))),
         !failed ? tracker(j) : null,
         stageLinks(j),
         (done && j.result_summary) ? h('div', { style: { fontSize: 12.5, marginTop: 6, lineHeight: 1.45 } }, j.result_summary) : null,

@@ -326,7 +326,11 @@ Deno.serve(async (req) => {
     if (action === 'sr.status') {
       const { data: row } = await sb.from('elicit_jobs').select('*').eq('id', body.job_id).maybeSingle();
       if (!row) return json({ error: 'job not found' }, 404);
-      if (TERMINAL.has(row.status) || !row.elicit_id || !ELICIT_KEY) return json({ ok: true, job: row });
+      // a COMPLETED review can still be re-fetched on demand (refresh:true) — its export URLs (pdf/docx/…)
+      // are presigned + expire in 7 days, AND may not have been ready at the completion poll (→ null exports).
+      const wantRefresh = body.refresh === true;
+      const skip = !row.elicit_id || !ELICIT_KEY || row.status === 'failed' || (row.status === 'completed' && !wantRefresh);
+      if (skip) return json({ ok: true, job: row });
       const g = await elicitCall('/api/v1/systematic-reviews/' + encodeURIComponent(row.elicit_id) + '?include=reportBody', 'GET');
       if (!g.ok || !g.body?.reviewId) return json({ ok: true, job: row, stale: true });
       const patch = srPatch(g.body);
