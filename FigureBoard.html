@@ -36,6 +36,9 @@
 
     .side { grid-row:2; grid-column:1; border-right:1px solid var(--line); background:var(--surface); overflow-y:auto; padding:16px; }
     .side h2 { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--faint); margin:20px 0 8px; }
+    .side-head { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+    .sortsel { font-family:inherit; font-size:11.5px; font-weight:600; color:var(--ink); background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:4px 6px; cursor:pointer; }
+    .sortsel:hover { border-color:var(--line-2); }
     .extract-card { border:1px solid var(--line); border-radius:14px; background:linear-gradient(180deg,var(--accent-tint),var(--surface)); padding:15px; }
     .extract-card .lead { font-size:12.5px; color:var(--muted); line-height:1.5; margin-bottom:12px; } .extract-card .lead b { color:var(--ink); }
     .extract-card .btn.pri { width:100%; justify-content:center; height:38px; }
@@ -149,7 +152,7 @@
   <script src="backend/config.js?v=1783137934"></script>
   <script src="auth.js?v=1783137934"></script>
   <script src="backend.js?v=1783539952"></script>
-  <script src="figure-board.js?v=1783683000"></script>
+  <script src="figure-board.js?v=1783683600"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>

@@ -100,7 +100,7 @@
   }
 
   // ---------- data ----------
-  var S = { papers: [], figs: [], byPaper: {}, urls: {}, view: { x: 40, y: 24, k: 0.9 }, group: 'paper', showHidden: false, curFig: null, curPaper: null, hiddenCount: 0, moved: false };
+  var S = { papers: [], figs: [], byPaper: {}, urls: {}, view: { x: 40, y: 24, k: 0.9 }, group: 'paper', showHidden: false, curFig: null, curPaper: null, hiddenCount: 0, moved: false, sort: 'cites' };
   function uid() { return 'n' + Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-4); }
   function toast(msg, ok) { var t = el('div', 'fb-toast' + (ok === false ? ' err' : '')); t.textContent = msg; document.body.appendChild(t); requestAnimationFrame(function () { t.classList.add('show'); }); setTimeout(function () { t.classList.remove('show'); setTimeout(function () { if (t.parentNode) t.parentNode.removeChild(t); }, 260); }, 2400); }
   function load() {
@@ -185,6 +185,18 @@
     if (p.cited_by != null) t.push('<span class="mtag cite" title="Citation count">' + (+p.cited_by) + ' cites</span>');
     return t.length ? '<div class="mrow">' + t.join('') + '</div>' : '';
   }
+  // order the papers by the current sort key (applied to both the sidebar list and the canvas layout)
+  function ordered(list) {
+    var arr = (list || S.papers).slice(), by = S.sort;
+    arr.sort(function (a, b) {
+      if (by === 'cites') return (b.cited_by || 0) - (a.cited_by || 0);
+      if (by === 'q') return (quartileOf(a) || 9) - (quartileOf(b) || 9);
+      if (by === 'figs') return ((S.byPaper[b.id] || []).length) - ((S.byPaper[a.id] || []).length);
+      if (by === 'title') return String(a.title || '').localeCompare(String(b.title || ''));
+      return (b.year || 0) - (a.year || 0);  // 'year'
+    });
+    return arr;
+  }
   var EMPTY = '<div class="cluster" style="left:40px;top:40px;width:440px;padding:26px 24px"><b style="font-size:14px">No figures yet</b><div style="font-size:12.5px;color:var(--muted);margin-top:8px;line-height:1.5">Hit <b>Extract figures from Library</b> on the left. Publify finds each paper’s open-access PDF and pulls its figures onto this board.</div></div>';
   var thumb = function (f) { var u = S.urls[f.storage_path]; return '<div class="thumb">' + (u ? '<img src="' + u + '" alt="' + esc(f.fig_label) + '" loading="lazy">' : '<div class="ph">…</div>') + '</div>'; };
   var activeReflow = function () { }, reflowT;
@@ -208,7 +220,7 @@
   // By-paper view: one card per paper, its figures in a row.
   function layout() {
     activeReflow = reflow;
-    var withFigs = S.papers.filter(function (p) { return (S.byPaper[p.id] || []).length; });
+    var withFigs = ordered(S.papers).filter(function (p) { return (S.byPaper[p.id] || []).length; });
     world.innerHTML = '';
     if (!withFigs.length) { world.innerHTML = EMPTY; apply(); return; }
     withFigs.forEach(function (p) {
@@ -233,7 +245,7 @@
   function layoutGallery() {
     activeReflow = reflowGallery;
     world.innerHTML = '';
-    var all = []; S.papers.forEach(function (p) { (S.byPaper[p.id] || []).forEach(function (f, i) { all.push({ p: p, f: f, i: i }); }); });
+    var all = []; ordered(S.papers).forEach(function (p) { (S.byPaper[p.id] || []).forEach(function (f, i) { all.push({ p: p, f: f, i: i }); }); });
     if (!all.length) { world.innerHTML = EMPTY; apply(); return; }
     all.forEach(function (o) {
       var f = o.f, p = o.p;
@@ -252,18 +264,21 @@
   }
   function apply() { var v = S.view; world.style.transform = 'translate(' + v.x + 'px,' + v.y + 'px) scale(' + v.k + ')'; canvasEl.style.backgroundSize = (26 * v.k) + 'px ' + (26 * v.k) + 'px'; canvasEl.style.backgroundPosition = v.x + 'px ' + v.y + 'px'; document.getElementById('zlvl').textContent = Math.round(v.k * 100) + '%'; }
 
+  var SORTS = [['cites', 'Most cited'], ['year', 'Newest'], ['figs', 'Most figures'], ['q', 'Best quartile'], ['title', 'Title A–Z']];
   function sidebar() {
     var pid = projId();
-    var rows = S.papers.map(function (p) {
+    var rows = ordered(S.papers).map(function (p) {
       var figs = S.byPaper[p.id] || [], n = figs.length, hasDoi = !!p.doi;
       var st = n ? 'ok' : (hasDoi ? 'idle' : 'nodoi'), ico = n ? '✓' : (hasDoi ? '↧' : '–');
       return '<div class="paper" data-pid="' + p.id + '"><span class="st ' + st + '">' + ico + '</span>'
         + '<span class="pt"><b>' + esc(p.title || 'Untitled') + '</b><span>' + esc(fmtAuthors(p.authors)) + (n ? ' · ' + n + ' figures' : hasDoi ? ' · not extracted' : ' · no DOI') + '</span>' + metricRow(p, true) + '</span></div>';
     }).join('');
+    var sortOpts = SORTS.map(function (o) { return '<option value="' + o[0] + '"' + (S.sort === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('');
     sideEl.innerHTML = '<div class="extract-card"><div class="lead">Pull the figures out of your <b>Library</b> papers. Publify finds each open-access PDF and extracts its figures onto this board.</div>'
       + '<button class="btn pri" id="extract">✨ Extract figures from Library</button><div class="prog" id="prog"></div></div>'
-      + '<h2>Library papers (' + S.papers.length + ')</h2>' + rows;
+      + '<div class="side-head"><h2>Library papers (' + S.papers.length + ')</h2><select class="sortsel" id="sortsel" title="Sort the list">' + sortOpts + '</select></div>' + rows;
     document.getElementById('extract').onclick = extractAll;
+    document.getElementById('sortsel').onchange = function (e) { S.sort = e.target.value; sidebar(); render(); };
     progEl = document.getElementById('prog');
     sideEl.querySelectorAll('.paper').forEach(function (el2) { el2.onclick = function () { flyTo(el2.dataset.pid); }; });
     var withFigs = S.papers.filter(function (p) { return (S.byPaper[p.id] || []).length; }).length;
