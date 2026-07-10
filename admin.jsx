@@ -668,18 +668,29 @@
     }
     // per-user feature grant (migration-49). JSONB is replaced wholesale, so send the full merged map.
     function setFeature(uid, key, on) {
-      var cur = null;
-      setProfiles(function (list) { return list.map(function (u) { if (u.id !== uid) return u; cur = Object.assign({}, u.features || {}); cur[key] = on; return Object.assign({}, u, { features: cur }); }); });
-      setSelUser(function (u) { if (!u || u.id !== uid) return u; var f = Object.assign({}, u.features || {}); f[key] = on; return Object.assign({}, u, { features: f }); });
-      var full = Object.assign({}, cur || {}); full[key] = on;
-      sb.from('profiles').update({ features: full }).eq('id', uid).then(function (r) { if (r && r.error) { window.PRUI.toast('Feature update failed: ' + r.error.message, { kind: 'error' }); loadData(); } });
+      // compute the new features from the CURRENT loaded profile (not a functional-setState closure, which
+      // may not have run yet → would drop the user's other features).
+      var u0 = (profiles || []).filter(function (u) { return u.id === uid; })[0];
+      var full = Object.assign({}, (u0 && u0.features) || {}); full[key] = on;
+      setProfiles(function (list) { return list.map(function (u) { return u.id === uid ? Object.assign({}, u, { features: full }) : u; }); });
+      setSelUser(function (u) { return (u && u.id === uid) ? Object.assign({}, u, { features: full }) : u; });
+      // .select() so a silently-blocked write (RLS matched 0 rows → no error) is caught instead of looking saved.
+      sb.from('profiles').update({ features: full }).eq('id', uid).select('id').then(function (r) {
+        if (r && r.error) { window.PRUI.toast('Feature update failed: ' + r.error.message, { kind: 'error' }); loadData(); return; }
+        if (!r || !r.data || !r.data.length) { window.PRUI.toast('Not saved — the change was blocked by row security. Apply backend/migration-58 (admin profile-write policy), then retry.', { kind: 'error' }); loadData(); return; }
+        window.PRUI.toast((on ? 'Enabled ' : 'Disabled ') + '“' + key + '” — the user must reload to see it.', { kind: 'ok' });
+      });
     }
     // per-user model allowlist (migration-49). [] → null = all system models. A trigger evicts a now-invalid ai_model.
     function setAllowlist(uid, arr) {
       var v = (arr && arr.length) ? arr : null;
       setProfiles(function (list) { return list.map(function (u) { return u.id === uid ? Object.assign({}, u, { model_allowlist: v }) : u; }); });
       setSelUser(function (u) { return u && u.id === uid ? Object.assign({}, u, { model_allowlist: v }) : u; });
-      sb.from('profiles').update({ model_allowlist: v }).eq('id', uid).then(function (r) { if (r && r.error) { window.PRUI.toast('Allowlist update failed: ' + r.error.message, { kind: 'error' }); loadData(); } else { loadData(); } });
+      sb.from('profiles').update({ model_allowlist: v }).eq('id', uid).select('id').then(function (r) {
+        if (r && r.error) { window.PRUI.toast('Allowlist update failed: ' + r.error.message, { kind: 'error' }); }
+        else if (!r || !r.data || !r.data.length) { window.PRUI.toast('Not saved — blocked by row security. Apply backend/migration-58, then retry.', { kind: 'error' }); }
+        loadData();
+      });
     }
     function loadPubs(uid) {
       if (pubsCache[uid] !== undefined) return;
