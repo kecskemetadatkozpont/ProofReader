@@ -98,15 +98,21 @@
   }
 
   // ---------- data ----------
-  var S = { papers: [], figs: [], byPaper: {}, urls: {}, view: { x: 40, y: 24, k: 0.9 }, sel: null };
+  var S = { papers: [], figs: [], byPaper: {}, urls: {}, view: { x: 40, y: 24, k: 0.9 }, group: 'paper', showHidden: false, curFig: null, curPaper: null, hiddenCount: 0 };
+  function uid() { return 'n' + Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-4); }
+  function toast(msg, ok) { var t = el('div', 'fb-toast' + (ok === false ? ' err' : '')); t.textContent = msg; document.body.appendChild(t); requestAnimationFrame(function () { t.classList.add('show'); }); setTimeout(function () { t.classList.remove('show'); setTimeout(function () { if (t.parentNode) t.parentNode.removeChild(t); }, 260); }, 2400); }
   function load() {
     var pid = projId(); if (!pid) return Promise.reject('no project');
+    var figQ = sb.from('research_figures').select('*').eq('project_id', pid).order('ord', { ascending: true });
+    if (!S.showHidden) figQ = figQ.eq('hidden', false);
     return Promise.all([
       sb.from('research_sources').select('id,project_id,title,authors,year,doi,url,venue').eq('project_id', pid).order('year', { ascending: false, nullsFirst: false }),
-      sb.from('research_figures').select('*').eq('project_id', pid).eq('hidden', false).order('ord', { ascending: true })
+      figQ,
+      sb.from('research_figures').select('id', { count: 'exact', head: true }).eq('project_id', pid).eq('hidden', true)
     ]).then(function (r) {
       S.papers = (r[0] && r[0].data) || [];
       S.figs = (r[1] && r[1].data) || [];
+      S.hiddenCount = (r[2] && r[2].count) || 0;
       S.byPaper = {}; S.figs.forEach(function (f) { (S.byPaper[f.source_id] = S.byPaper[f.source_id] || []).push(f); });
       return signUrls();
     });
@@ -119,9 +125,57 @@
     });
   }
 
+  // ---------- curate: pin to research Canvas + hide/unhide ----------
+  // Appends image nodes to the project's research_canvas blob (migration-21). Read-modify-write:
+  // the canvas is a single jsonb doc, so a concurrently-open Canvas tab could clobber; we re-read
+  // immediately before writing to keep that window small.
+  function pinToCanvas(figs) {
+    var pid = projId(); if (!figs || !figs.length) return Promise.resolve(0);
+    return sb.from('research_canvas').select('data').eq('project_id', pid).maybeSingle().then(function (r) {
+      var d = (r && r.data && r.data.data) || {};
+      var nodes = Array.isArray(d.nodes) ? d.nodes : [], edges = Array.isArray(d.edges) ? d.edges : [], view = d.view || {};
+      var maxX = 40; nodes.forEach(function (n) { if (typeof n.x === 'number') maxX = Math.max(maxX, n.x + (n.w || 200)); });
+      var baseX = nodes.length ? maxX + 80 : 80, baseY = 80, COLS = 4, GAP = 26, W = 260, added = [];
+      figs.forEach(function (f, i) {
+        var col = i % COLS, row = Math.floor(i / COLS);
+        var aspect = (f.width && f.height) ? (f.height / f.width) : 0.7;
+        var hgt = Math.round(Math.min(300, Math.max(120, W * aspect)));
+        added.push({ id: uid(), type: 'image', x: baseX + col * (W + GAP), y: baseY + row * (300 + GAP), w: W, h: hgt, path: f.storage_path, name: f.fig_label || 'Figure', mime: 'image/png' });
+      });
+      var out = { nodes: nodes.concat(added), edges: edges, view: view };
+      return sb.from('research_canvas').upsert({ project_id: pid, data: out, updated_at: new Date().toISOString(), updated_by: (BE.user && BE.user.id) || null }, { onConflict: 'project_id' }).then(function (rr) {
+        if (rr && rr.error) throw new Error(rr.error.message);
+        return added.length;
+      });
+    });
+  }
+  function pinFigs(figs, label) {
+    pinToCanvas(figs).then(function (n) {
+      toast('📌 Pinned ' + n + ' figure' + (n === 1 ? '' : 's') + ' to the research Canvas' + (label ? ' — ' + label : ''));
+    }, function (e) { toast('Could not pin: ' + ((e && e.message) || 'failed'), false); });
+  }
+  function setHidden(f, hidden) {
+    return sb.from('research_figures').update({ hidden: hidden }).eq('id', f.id).then(function (r) {
+      if (r && r.error) { toast(r.error.message, false); return; }
+      toast(hidden ? '🙈 Figure hidden' : '↩ Figure restored');
+      return load().then(function () { sidebar(); render(); });
+    });
+  }
+
   // ---------- render ----------
   var world, canvasEl, sideEl, statEl, extractBtn, progEl;
   function fmtAuthors(a) { return (a && a.length) ? (a[0] + (a.length > 1 ? ' et al.' : '')) : ''; }
+  var EMPTY = '<div class="cluster" style="left:40px;top:40px;width:440px;padding:26px 24px"><b style="font-size:14px">No figures yet</b><div style="font-size:12.5px;color:var(--muted);margin-top:8px;line-height:1.5">Hit <b>Extract figures from Library</b> on the left. Publify finds each paper’s open-access PDF and pulls its figures onto this board.</div></div>';
+  var thumb = function (f) { var u = S.urls[f.storage_path]; return '<div class="thumb">' + (u ? '<img src="' + u + '" alt="' + esc(f.fig_label) + '" loading="lazy">' : '<div class="ph">…</div>') + '</div>'; };
+  var activeReflow = function () { }, reflowT;
+  function scheduleReflow() { if (reflowT) clearTimeout(reflowT); reflowT = setTimeout(function () { activeReflow(); }, 60); }
+  function wireCards(sel) {
+    world.querySelectorAll(sel).forEach(function (f) { f.onclick = function () { openFig(f.dataset.pid, +f.dataset.i); }; });
+    world.querySelectorAll('.cl-pin').forEach(function (b) { b.onclick = function (e) { e.stopPropagation(); pinFigs(S.byPaper[b.dataset.pid] || [], (b.dataset.title || '').slice(0, 40)); }; });
+    world.querySelectorAll('img').forEach(function (im) { im.addEventListener('load', scheduleReflow); im.addEventListener('error', scheduleReflow); });
+  }
+  function render() { if (S.group === 'all') layoutGallery(); else layout(); }
+
   // shortest-column masonry over the actual (post-image-load) cluster heights → no overlap
   function reflow() {
     var COLW = 620, cx = 40, colH = [30, 30];
@@ -131,27 +185,46 @@
       colH[ci] += c.offsetHeight + 40;
     });
   }
-  var reflowT;
-  function scheduleReflow() { if (reflowT) clearTimeout(reflowT); reflowT = setTimeout(reflow, 60); }
+  // By-paper view: one card per paper, its figures in a row.
   function layout() {
+    activeReflow = reflow;
     var withFigs = S.papers.filter(function (p) { return (S.byPaper[p.id] || []).length; });
     world.innerHTML = '';
-    if (!withFigs.length) { world.innerHTML = '<div class="cluster" style="left:40px;top:40px;width:440px;padding:26px 24px"><b style="font-size:14px">No figures yet</b><div style="font-size:12.5px;color:var(--muted);margin-top:8px;line-height:1.5">Hit <b>Extract figures from Library</b> on the left. Publify finds each paper’s open-access PDF and pulls its figures onto this board.</div></div>'; apply(); return; }
+    if (!withFigs.length) { world.innerHTML = EMPTY; apply(); return; }
     withFigs.forEach(function (p) {
       var figs = S.byPaper[p.id] || [];
       var c = el('div', 'cluster'); c.dataset.pid = p.id;
       var thumbs = figs.map(function (f, i) {
-        var u = S.urls[f.storage_path];
-        return '<div class="fig" data-pid="' + p.id + '" data-i="' + i + '"><div class="thumb">' + (u ? '<img src="' + u + '" alt="' + esc(f.fig_label) + '" loading="lazy">' : '<div class="ph">…</div>') + '</div>'
-          + '<div class="cap"><span class="pg">p.' + (f.page || '?') + ' · ' + esc(f.fig_label || 'Figure') + '</span><br>' + esc((f.caption || '').replace(/^Fig(ure|\.)?\s*\d+[\.:\s]*/i, '')) + '</div></div>';
+        return '<div class="fig' + (f.hidden ? ' dim' : '') + '" data-pid="' + p.id + '" data-i="' + i + '">' + thumb(f)
+          + '<div class="cap"><span class="pg">p.' + (f.page || '?') + ' · ' + esc(f.fig_label || 'Figure') + (f.hidden ? ' · hidden' : '') + '</span><br>' + esc((f.caption || '').replace(/^Fig(ure|\.)?\s*\d+[\.:\s]*/i, '')) + '</div></div>';
       }).join('');
-      c.innerHTML = '<div class="cl-head"><b>' + esc(p.title || 'Untitled') + '</b><span>' + esc(fmtAuthors(p.authors) + (p.year ? ' · ' + p.year : '')) + ' · ' + figs.length + ' fig</span></div>'
+      c.innerHTML = '<div class="cl-head"><div style="min-width:0"><b>' + esc(p.title || 'Untitled') + '</b><span>' + esc(fmtAuthors(p.authors) + (p.year ? ' · ' + p.year : '')) + ' · ' + figs.length + ' fig</span></div>'
+        + '<button class="cl-pin" data-pid="' + p.id + '" data-title="' + esc(p.title || '') + '" title="Pin all figures from this paper to the research Canvas">📌 Pin all</button></div>'
         + '<div class="cl-box"><div class="figrow">' + thumbs + '</div></div>';
       world.appendChild(c);
     });
-    world.querySelectorAll('.fig').forEach(function (f) { f.onclick = function () { openFig(f.dataset.pid, +f.dataset.i); }; });
-    world.querySelectorAll('img').forEach(function (im) { im.addEventListener('load', scheduleReflow); im.addEventListener('error', scheduleReflow); });
-    reflow(); apply();
+    wireCards('.fig'); reflow(); apply();
+  }
+  // All-figures gallery: flat masonry of every figure thumbnail.
+  function layoutGallery() {
+    activeReflow = reflowGallery;
+    world.innerHTML = '';
+    var all = []; S.papers.forEach(function (p) { (S.byPaper[p.id] || []).forEach(function (f, i) { all.push({ p: p, f: f, i: i }); }); });
+    if (!all.length) { world.innerHTML = EMPTY; apply(); return; }
+    all.forEach(function (o) {
+      var f = o.f, p = o.p;
+      var c = el('div', 'gcard' + (f.hidden ? ' dim' : '')); c.dataset.pid = p.id; c.dataset.i = o.i;
+      c.innerHTML = thumb(f) + '<div class="gcap"><span class="pg">' + esc(f.fig_label || 'Figure') + (f.hidden ? ' · hidden' : '') + '</span> ' + esc((p.title || '').slice(0, 52)) + '</div>';
+      world.appendChild(c);
+    });
+    wireCards('.gcard'); reflowGallery(); apply();
+  }
+  function reflowGallery() {
+    var COLW = 284, cols = 4, colH = []; for (var i = 0; i < cols; i++) colH.push(30);
+    world.querySelectorAll('.gcard').forEach(function (c) {
+      var ci = 0; for (var j = 1; j < cols; j++) if (colH[j] < colH[ci]) ci = j;
+      c.style.left = (40 + ci * COLW) + 'px'; c.style.top = colH[ci] + 'px'; colH[ci] += c.offsetHeight + 22;
+    });
   }
   function apply() { var v = S.view; world.style.transform = 'translate(' + v.x + 'px,' + v.y + 'px) scale(' + v.k + ')'; canvasEl.style.backgroundSize = (26 * v.k) + 'px ' + (26 * v.k) + 'px'; canvasEl.style.backgroundPosition = v.x + 'px ' + v.y + 'px'; document.getElementById('zlvl').textContent = Math.round(v.k * 100) + '%'; }
 
@@ -172,6 +245,8 @@
     var withFigs = S.papers.filter(function (p) { return (S.byPaper[p.id] || []).length; }).length;
     var withDoi = S.papers.filter(function (p) { return !!p.doi; }).length;
     statEl.innerHTML = '<span class="dot" style="background:var(--ok)"></span><b>' + withFigs + '</b> papers extracted · <b>' + S.figs.length + '</b> figures · ' + withDoi + ' have a DOI';
+    var th = document.getElementById('toghide');
+    if (th) { th.classList.toggle('on', S.showHidden); th.textContent = S.showHidden ? 'Hide hidden' : ('Show hidden' + (S.hiddenCount ? ' (' + S.hiddenCount + ')' : '')); th.style.display = (S.showHidden || S.hiddenCount) ? '' : 'none'; }
   }
 
   var extracting = false;
@@ -184,7 +259,7 @@
       if (i >= todo.length) {
         progEl.innerHTML = '✓ Done — ' + added + ' figures across ' + todo.length + ' papers.';
         extracting = false;
-        load().then(function () { sidebar(); layout(); });
+        load().then(function () { sidebar(); render(); });
         return;
       }
       var p = todo[i];
@@ -197,7 +272,7 @@
   }
 
   function flyTo(pid) {
-    var c = world.querySelector('.cluster[data-pid="' + pid + '"]');
+    var c = world.querySelector('.cluster[data-pid="' + pid + '"]') || world.querySelector('.gcard[data-pid="' + pid + '"]');
     if (!c) return;
     var r = canvasEl.getBoundingClientRect(); S.view.k = 0.85;
     S.view.x = r.width / 2 - (c.offsetLeft + c.offsetWidth / 2) * S.view.k;
@@ -207,6 +282,7 @@
   // ---------- drawer ----------
   function openFig(pid, i) {
     var f = (S.byPaper[pid] || [])[i], p = S.papers.filter(function (x) { return x.id === pid; })[0]; if (!f) return;
+    S.curFig = f; S.curPaper = p;
     var u = S.urls[f.storage_path];
     document.getElementById('drfig').innerHTML = u ? '<img src="' + u + '">' : '';
     document.getElementById('drbody').innerHTML = '<div class="tag ok">◆ Extracted from OA PDF</div>'
@@ -215,8 +291,12 @@
       + '<div class="kvs"><div class="kv"><span>Page</span><b>' + (f.page || '?') + '</b></div>'
       + (p && p.doi ? '<div class="kv"><span>DOI</span><b class="mono"><a href="https://doi.org/' + esc(bareDoi(p.doi)) + '" target="_blank" rel="noopener">' + esc(bareDoi(p.doi)) + '</a></b></div>' : '')
       + '<div class="kv"><span>Size</span><b>' + f.width + ' × ' + f.height + ' px</b></div></div>'
-      + '<div class="dr-actions"><a class="btn pri" href="' + (u || '#') + '" download="' + esc((f.fig_label || 'figure').replace(/\s/g, '_')) + '.png" target="_blank">⬇ Download</a>'
-      + (p && p.url ? '<a class="btn" href="' + esc(p.url) + '" target="_blank" rel="noopener">↗ Open paper</a>' : '') + '</div>';
+      + '<div class="dr-actions"><button class="btn pri" id="drpin">📌 Pin to Canvas</button>'
+      + '<a class="btn" href="' + (u || '#') + '" download="' + esc((f.fig_label || 'figure').replace(/\s/g, '_')) + '.png" target="_blank">⬇ Download</a>'
+      + (p && p.url ? '<a class="btn" href="' + esc(p.url) + '" target="_blank" rel="noopener">↗ Open paper</a>' : '')
+      + '<button class="btn ' + (f.hidden ? 'restore' : 'ghost') + '" id="drhide">' + (f.hidden ? '↩ Restore' : '🙈 Hide') + '</button></div>';
+    var pinB = document.getElementById('drpin'); if (pinB) pinB.onclick = function () { pinFigs([f], f.fig_label); };
+    var hideB = document.getElementById('drhide'); if (hideB) hideB.onclick = function () { closeD(); setHidden(f, !f.hidden); };
     document.getElementById('scrim').classList.add('open'); document.getElementById('drawer').classList.add('open');
   }
   function closeD() { document.getElementById('scrim').classList.remove('open'); document.getElementById('drawer').classList.remove('open'); }
@@ -227,6 +307,8 @@
       + '<div class="app"><div class="topbar">'
       + '<a class="brand" href="Research.html?project=' + esc(projId() || '') + '"><span class="mk"><i></i></span><span>Publify<small>Figure Board</small></span></a>'
       + '<span class="tstat" id="stat"></span><span class="spring"></span>'
+      + '<div class="seg" id="grpseg"><button data-g="paper" class="on">▦ By paper</button><button data-g="all">▨ All figures</button></div>'
+      + '<button class="btn" id="toghide" title="Show figures you have hidden">Show hidden</button>'
       + '<a class="btn" href="Research.html?project=' + esc(projId() || '') + '">← Research</a></div>'
       + '<aside class="side" id="side"></aside>'
       + '<div class="canvas" id="canvas"><div class="world" id="world"></div>'
@@ -245,6 +327,24 @@
     document.getElementById('zfit').onclick = function () { S.view = { x: 40, y: 24, k: 0.6 }; apply(); };
     document.getElementById('scrim').onclick = closeD; document.getElementById('drclose').onclick = closeD;
     addEventListener('keydown', function (e) { if (e.key === 'Escape') closeD(); });
+    // group segmented control
+    document.getElementById('grpseg').querySelectorAll('button').forEach(function (b) {
+      b.onclick = function () {
+        if (S.group === b.dataset.g) return;
+        S.group = b.dataset.g;
+        document.getElementById('grpseg').querySelectorAll('button').forEach(function (x) { x.classList.toggle('on', x.dataset.g === S.group); });
+        render();
+      };
+    });
+    // show/hide hidden figures
+    var th = document.getElementById('toghide');
+    th.onclick = function () {
+      S.showHidden = !S.showHidden;
+      th.classList.toggle('on', S.showHidden);
+      th.textContent = S.showHidden ? 'Hide hidden' : 'Show hidden';
+      load().then(function () { sidebar(); render(); });
+    };
+    window.addEventListener('resize', scheduleReflow);
   }
 
   // ---------- boot ----------
@@ -253,5 +353,5 @@
   if (!projId()) { root.innerHTML = '<div class="center"><div class="box"><h1>No project</h1><p>Open the Figure Board from Research → a project → Literature.</p><a class="btn" href="Research.html">← Research</a></div></div>'; return; }
   shell();
   progEl = null;
-  load().then(function () { sidebar(); layout(); }, function () { root.innerHTML = '<div class="center"><div class="box"><h1>Could not load</h1><p>This project may not exist or you may not have access.</p><a class="btn" href="Research.html">← Research</a></div></div>'; });
+  load().then(function () { sidebar(); render(); }, function () { root.innerHTML = '<div class="center"><div class="box"><h1>Could not load</h1><p>This project may not exist or you may not have access.</p><a class="btn" href="Research.html">← Research</a></div></div>'; });
 })();
