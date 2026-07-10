@@ -52,8 +52,9 @@ function useNotifications(uid) {
 }
 function notifTitle(n) { const p = n.payload || {}; if (n.kind === 'share') return p.title || 'Shared document'; if (n.kind === 'digest') return 'Daily research summary'; return p.title || n.kind; }
 function notifSumm(n) { const p = n.payload || {}; if (n.kind === 'share') return (p.by ? p.by + ' ' : '') + 'shared a document with you · ' + (p.role || 'editor'); if (n.kind === 'digest') return (p.day || '') + ' · ' + (p.students || 0) + ' students'; return p.body || ''; }
-// Where a notification's "View" link goes (null → no link). Share → open the shared document.
-function notifTarget(n) { const p = n.payload || {}; if (n.kind === 'share' && p.project_id) return 'ProofReader.html?p=' + p.project_id; return null; }
+// Where a notification's "View" link goes (null → no link). Share → open the shared document;
+// job (Elicit report/review done) → open the research project (from there: Studies → SR Studio).
+function notifTarget(n) { const p = n.payload || {}; if (n.kind === 'share' && p.project_id) return 'ProofReader.html?p=' + p.project_id; if (n.kind === 'job' && p.project_id) return 'Research.html?project=' + p.project_id; return null; }
 
 // Always-visible bell next to the profile avatar: red count when unread, dropdown lists notifications
 // with "Elfogad" (accept invitation) + "Megnyit" (open) actions. Cloud only.

@@ -1419,6 +1419,15 @@
 
   // ---- Elicit Systematic Review (Phase 3) — PRISMA pipeline via elicit-proxy ----
   var SR_STAGES = [['gathering_sources', 'Sources'], ['screening_abstract', 'Abstract'], ['screening_fulltext', 'Full text'], ['extracting_data', 'Extract'], ['generating_report', 'Report'], ['done', 'Done']];
+  // one-line "what is happening right now" per Elicit executionStage
+  var SR_STAGE_DESC = { gathering_sources: 'Searching the literature and gathering candidate papers…', screening_abstract: 'Reading abstracts and applying your inclusion criteria…', screening_fulltext: 'Screening full texts against your criteria…', extracting_data: 'Extracting data into your review columns…', generating_report: 'Writing the synthesis report…', done: 'Finishing up…' };
+  function srStageIdx(stage) { for (var i = 0; i < SR_STAGES.length; i++) { if (SR_STAGES[i][0] === stage) return i; } return -1; }
+  function relTime(ts) { if (!ts) return ''; var t = new Date(ts).getTime(); if (isNaN(t)) return ''; var s = Math.max(0, Math.round((Date.now() - t) / 1000)); if (s < 60) return 'just now'; var m = Math.round(s / 60); if (m < 60) return m + ' min ago'; var hh = Math.round(m / 60); if (hh < 24) return hh + ' h ago'; return Math.round(hh / 24) + ' d ago'; }
+  function elapsedStr(ts) { if (!ts) return ''; var t = new Date(ts).getTime(); if (isNaN(t)) return ''; var s = Math.max(0, Math.round((Date.now() - t) / 1000)); var m = Math.floor(s / 60); if (m < 1) return '<1 min'; if (m < 60) return m + ' min'; var hh = Math.floor(m / 60); return hh + ' h ' + (m % 60) + ' min'; }
+  // pulse a soft ring (box-shadow) around the current step — NOT group opacity, which would fade the
+  // accent-on-tint label below WCAG-AA contrast at the trough. Text stays fully opaque.
+  function ensureSrCss() { if (typeof document === 'undefined' || document.getElementById('sr-pulse-css')) return; var s = document.createElement('style'); s.id = 'sr-pulse-css'; s.textContent = '@keyframes srPulse{0%,100%{box-shadow:0 0 0 0 rgba(99,102,241,0)}50%{box-shadow:0 0 0 3px rgba(99,102,241,.30)}} .sr-cur-pill{animation:srPulse 1.4s ease-in-out infinite} @media (prefers-reduced-motion: reduce){.sr-cur-pill{animation:none}}'; document.head.appendChild(s); }
+  function elapsedMin(ts) { if (!ts) return 0; var t = new Date(ts).getTime(); if (isNaN(t)) return 0; return Math.floor((Date.now() - t) / 60000); }
   function ElicitSysReview(props) {
     var canUse = !!(window.PREnt && window.PREnt.loaded() && window.PREnt.can('elicit_sysreview'));
     var jsS = useState(null), jobs = jsS[0], setJobs = jsS[1];
@@ -1437,7 +1446,7 @@
     function picoText(p) { if (!p) return ''; return [['P', p.population], ['I', p.intervention], ['C', p.comparison], ['O', p.outcome]].filter(function (x) { return x[1]; }).map(function (x) { return x[0] + ': ' + x[1]; }).join('\n'); }
     function startFromCand(c) { setF({ q: c.question || '', protocol: picoText(c.pico), abs: c.abstract_criteria || [], ft: [], ex: c.extraction_questions || [], gen: true, genAbs: true, genEx: true, useFig: false, runFT: true }); setOpenForm(true); setErr(''); }
     function dismissCand(c) { setCands(function (l) { return (l || []).filter(function (x) { return x.id !== c.id; }); }); sb.from('research_sr_candidates').update({ dismissed: true }).eq('id', c.id); }
-    useEffect(function () { alive.current = true; if (canUse) { load(); loadCands(); } return function () { alive.current = false; }; }, [canUse]);
+    useEffect(function () { alive.current = true; ensureSrCss(); if (canUse) { load(); loadCands(); } return function () { alive.current = false; }; }, [canUse]);
     useEffect(function () {
       if (!jobs || !jobs.length) return;
       var running = jobs.filter(function (j) { return j.status !== 'completed' && j.status !== 'failed'; });
@@ -1462,11 +1471,14 @@
     }
     function resume(j) { callElicit({ action: 'sr.resume', job_id: j.id }).then(function (d) { if (d && d.error) setErr(d.error); load(); }); }
     function tracker(j) {
-      var idx = 0; for (var i = 0; i < SR_STAGES.length; i++) { if (SR_STAGES[i][0] === j.stage) { idx = i; break; } }
+      var rawIdx = srStageIdx(j.stage);              // -1 when the stage is null/unknown
+      var idx = rawIdx < 0 ? 0 : rawIdx;
       if (j.status === 'completed') idx = SR_STAGES.length - 1;
+      // pulse ONLY when actively working on a KNOWN stage — don't animate a guessed "Sources" for a null/unknown stage
+      var pulse = j.status === 'processing' && rawIdx >= 0;
       return h('div', { style: { display: 'flex', gap: 5, flexWrap: 'wrap', margin: '8px 0' } }, SR_STAGES.map(function (s, i) {
         var dn = (i < idx) || j.status === 'completed', cur = i === idx && j.status !== 'completed';
-        return h('span', { key: s[0], style: { fontSize: 11, fontWeight: 600, padding: '3px 9px', borderRadius: 999, border: '1px solid ' + (dn ? 'var(--ok, #15803d)' : cur ? 'var(--accent, #4f46e5)' : 'var(--line)'), color: dn ? 'var(--ok, #15803d)' : cur ? 'var(--accent, #4f46e5)' : 'var(--faint)', background: cur ? 'var(--accent-tint, #eef0ff)' : 'transparent' } }, (dn ? '✓ ' : cur ? '⏳ ' : '') + s[1]);
+        return h('span', { key: s[0], className: (cur && pulse) ? 'sr-cur-pill' : undefined, style: { fontSize: 11, fontWeight: 600, padding: '3px 9px', borderRadius: 999, border: '1px solid ' + (dn ? 'var(--ok, #15803d)' : cur ? 'var(--accent, #4f46e5)' : 'var(--line)'), color: dn ? 'var(--ok, #15803d)' : cur ? 'var(--accent, #4f46e5)' : 'var(--faint)', background: cur ? 'var(--accent-tint, #eef0ff)' : 'transparent' } }, (dn ? '✓ ' : cur ? '⏳ ' : '') + s[1]);
       }));
     }
     function stageLinks(j) {
@@ -1474,6 +1486,30 @@
       var rows = [['search', 'Search'], ['screen', 'Abstract'], ['fulltext', 'Full-text'], ['extract', 'Extract']];
       var links = rows.map(function (r) { var s = st[r[0]]; if (!s || (!s.csv && !s.xlsx)) return null; return h('span', { key: r[0], style: { fontSize: 11.5, marginRight: 12 } }, r[1] + ': ', s.csv ? h('a', { href: s.csv, target: '_blank' }, 'CSV') : null, (s.csv && s.xlsx) ? ' · ' : '', s.xlsx ? h('a', { href: s.xlsx, target: '_blank' }, 'XLSX') : null); }).filter(Boolean);
       return links.length ? h('div', { style: { marginTop: 6 } }, links) : null;
+    }
+    function statusLine(j) {
+      var done = j.status === 'completed', failed = j.status === 'failed', paused = j.status === 'pausedForInsufficientQuota';
+      if (done) return h('div', { style: { fontSize: 11.5, color: 'var(--muted)', marginTop: 2 } }, '✅ Completed' + (j.updated_at ? ' · ' + relTime(j.updated_at) : ''));
+      if (failed) return h('div', { style: { fontSize: 11.5, color: 'var(--danger, #b42318)', marginTop: 2 } }, '✗ Failed' + (j.error && j.error.message ? ' — ' + j.error.message : ''));
+      if (paused) return h('div', { style: { fontSize: 11.5, color: 'var(--muted)', marginTop: 2 } }, '⏸ Paused — the Elicit account is out of quota. Click Resume once it is topped up.');
+      var meta = []; var el = elapsedStr(j.created_at); if (el) meta.push('running ' + el);
+      if (j.data_freshness) meta.push('updated ' + relTime(j.data_freshness));
+      var metaEl = meta.length ? h('div', { style: { fontSize: 11, color: 'var(--faint)', marginTop: 1 } }, meta.join(' · ')) : null;
+      // 'unknown' = Elicit can't report progress right now → don't paint it as healthy live progress
+      if (j.status === 'unknown') {
+        var li = srStageIdx(j.stage);
+        return h('div', { style: { marginTop: 2 } },
+          h('div', { style: { fontSize: 12, color: 'var(--muted)', fontWeight: 600 } }, '⚠️ Waiting for Elicit to report status…' + (li >= 0 ? ' · last stage: ' + SR_STAGES[li][1] : '')),
+          metaEl);
+      }
+      // running: name the current stage + step-of. When the stage is not yet known, say "Starting…" only
+      // early on — a long-running job with a momentarily-null stage should read "Working…", not restart.
+      var idx = srStageIdx(j.stage);
+      var stepTxt = idx >= 0 ? ('Step ' + (idx + 1) + ' of ' + SR_STAGES.length + ' · ') : '';
+      var desc = idx >= 0 ? SR_STAGE_DESC[j.stage] : (elapsedMin(j.created_at) < 2 ? 'Starting the review…' : 'Working…');
+      return h('div', { style: { marginTop: 2 } },
+        h('div', { style: { fontSize: 12, color: 'var(--accent, #4f46e5)', fontWeight: 600 } }, '⏳ ' + stepTxt + desc),
+        metaEl);
     }
     function card(j) {
       var done = j.status === 'completed', failed = j.status === 'failed', paused = j.status === 'pausedForInsufficientQuota';
@@ -1485,7 +1521,7 @@
       return h('div', { key: j.id, style: { border: '1px solid var(--line)', borderRadius: 10, padding: '10px 12px' } },
         h('div', { style: { display: 'flex', gap: 8, alignItems: 'flex-start' } },
           h('div', { style: { flex: 1, minWidth: 0 } }, h('div', { style: { fontWeight: 600, fontSize: 13.5 } }, j.result_title || j.research_question || 'Systematic review'),
-            h('div', { style: { fontSize: 11.5, color: 'var(--muted)', marginTop: 2 } }, done ? '✅ Completed' : failed ? ('✗ Failed' + (j.error && j.error.message ? ' — ' + j.error.message : '')) : paused ? '⏸ Paused — the Elicit account is out of quota' : '⏳ Running — a systematic review can take a while.')),
+            statusLine(j)),
           j.url ? h('a', { className: 'btn', style: { padding: '4px 9px', fontSize: 12, flex: 'none' }, href: j.url, target: '_blank' }, 'Elicit ↗') : null),
         !failed ? tracker(j) : null,
         stageLinks(j),

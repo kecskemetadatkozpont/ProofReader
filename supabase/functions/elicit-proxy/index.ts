@@ -51,7 +51,9 @@ function normTrial(t: any) {
 }
 // map an Elicit GetReportResponse onto our elicit_jobs columns
 function reportPatch(g: any): any {
-  const p: any = { status: g.status, stage: g.executionStage ?? null, url: g.url || null, is_public: false, updated_at: new Date().toISOString() };
+  const p: any = { status: g.status, url: g.url || null, is_public: false, updated_at: new Date().toISOString() };
+  // only advance the stage when the API reports one — never clobber a known stage with null (avoids a "reset to step 1")
+  if (g.executionStage) p.stage = g.executionStage;
   if (g.status === 'completed' && g.result) {
     p.result_title = g.result.title || null; p.result_summary = g.result.summary || null;
     p.result_body = g.result.reportBody || null; p.result_abstract = g.result.abstract || null;
@@ -62,7 +64,11 @@ function reportPatch(g: any): any {
 }
 // map an Elicit GetSystematicReviewResponse onto our elicit_jobs columns (staged PRISMA data + final report)
 function srPatch(g: any): any {
-  const p: any = { status: g.status, stage: g.executionStage ?? null, url: g.url || null, is_public: false, updated_at: new Date().toISOString() };
+  const p: any = { status: g.status, url: g.url || null, is_public: false, updated_at: new Date().toISOString() };
+  // only advance the stage when the API reports one — never clobber a known stage with null (avoids a "reset to step 1")
+  if (g.executionStage) p.stage = g.executionStage;
+  // dataFreshness = when Elicit last wrote stage exports to S3 → persisted so the UI shows "updated Xm ago" on first paint
+  if (g.dataFreshness !== undefined) p.data_freshness = g.dataFreshness ?? null;
   if (g.data) {
     p.stages = {
       search: g.data.search || null, screen: g.data.screen || null,
@@ -79,6 +85,23 @@ function srPatch(g: any): any {
   if (g.status === 'failed') p.error = g.error || { message: 'Systematic review failed' };
   return p;
 }
+// Emit a one-shot in-app notification when a job crosses non-terminal → terminal.
+// Called by every poll (foreground sr.status/job.status + the cron sweep) with the PRE-patch row;
+// each caller only reaches this after a non-terminal guard, and the row is terminal once written, so the
+// transition fires once. A payload-scoped existence check guards the rare cron/foreground double-poll race.
+async function notifyDone(svc: any, row: any, patch: any, kind: string): Promise<void> {
+  try {
+    if (!TERMINAL.has(patch.status) || !row?.user_id) return;
+    const { data: ex } = await svc.from('notifications').select('id')
+      .eq('recipient_id', row.user_id).eq('kind', 'job').contains('payload', { job_id: row.id }).limit(1);
+    if (ex && ex.length) return;
+    const isSR = kind === 'sysreview';
+    const ok = patch.status === 'completed';
+    const title = (isSR ? 'Systematic review ' : 'Report ') + (ok ? 'ready' : 'failed');
+    const body = String((ok ? (patch.result_title || row.result_title || row.research_question) : ((patch.error && patch.error.message) || (row.error && row.error.message) || 'The job could not be completed')) || '').slice(0, 300);
+    await svc.from('notifications').insert({ recipient_id: row.user_id, kind: 'job', payload: { title, body, project_id: row.project_id || null, job_id: row.id, job_kind: kind, status: patch.status } });
+  } catch (_e) { /* notifications are best-effort — never fail the poll on a notify error */ }
+}
 const GET_PATH: Record<string, string> = { report: '/api/v1/reports/', sysreview: '/api/v1/systematic-reviews/' };
 
 Deno.serve(async (req) => {
@@ -94,7 +117,7 @@ Deno.serve(async (req) => {
     if (action === 'cron_sweep') {
       if (!CRON_SECRET || req.headers.get('x-elicit-secret') !== CRON_SECRET) return json({ error: 'forbidden' }, 403);
       if (!ELICIT_KEY) return json({ ok: true, refreshed: 0, note: 'no key' });
-      const { data: jobs } = await svc.from('elicit_jobs').select('id,elicit_id,kind')
+      const { data: jobs } = await svc.from('elicit_jobs').select('id,elicit_id,kind,user_id,project_id,research_question,result_title,error')
         .in('kind', ['report', 'sysreview']).in('status', ['processing', 'unknown']).order('updated_at', { ascending: true }).limit(20);
       let refreshed = 0, done = 0;
       for (const j of jobs || []) {
@@ -104,6 +127,7 @@ Deno.serve(async (req) => {
         if (!g.ok || !idField) continue;
         const patch = j.kind === 'sysreview' ? srPatch(g.body) : reportPatch(g.body);
         await svc.from('elicit_jobs').update(patch).eq('id', j.id);
+        await notifyDone(svc, j, patch, j.kind);   // notify the owner when it just finished — even with no tab open
         refreshed++; if (patch.status === 'completed') done++;
       }
       return json({ ok: true, refreshed, done });
@@ -208,6 +232,7 @@ Deno.serve(async (req) => {
       if (!g.ok || !g.body?.reportId) return json({ ok: true, job: row, stale: true });
       const patch = reportPatch(g.body);
       await sb.from('elicit_jobs').update(patch).eq('id', row.id);
+      await notifyDone(svc, row, patch, 'report');   // in case the foreground poll is the one that observes completion
       return json({ ok: true, job: { ...row, ...patch } });
     }
 
@@ -228,7 +253,7 @@ Deno.serve(async (req) => {
     // ---- systematic reviews (Phase 3) ----
     if (action === 'sr.list') {
       const { data: rows } = await sb.from('elicit_jobs')
-        .select('id,kind,status,stage,research_question,result_title,result_summary,result_body,result_abstract,url,is_public,pdf_url,docx_url,exports,stages,error,created_at,updated_at,project_id')
+        .select('id,kind,status,stage,research_question,result_title,result_summary,result_body,result_abstract,url,is_public,pdf_url,docx_url,exports,stages,error,created_at,updated_at,data_freshness,project_id')
         .eq('user_id', uid).eq('kind', 'sysreview').order('created_at', { ascending: false }).limit(30);
       return json({ ok: true, jobs: rows || [] });
     }
@@ -296,6 +321,7 @@ Deno.serve(async (req) => {
       if (!g.ok || !g.body?.reviewId) return json({ ok: true, job: row, stale: true });
       const patch = srPatch(g.body);
       await sb.from('elicit_jobs').update(patch).eq('id', row.id);
+      await notifyDone(svc, row, patch, 'sysreview');   // in case the foreground poll is the one that observes completion
       return json({ ok: true, job: { ...row, ...patch } });
     }
 
