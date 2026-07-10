@@ -197,6 +197,22 @@
     });
     return arr;
   }
+  // Abstracts are often missing (e.g. SR-imported sources). Reconstruct from OpenAlex on demand by DOI,
+  // then backfill research_sources.abstract so it persists for next time + the rest of the app.
+  function abstractFromInverted(inv) {
+    if (!inv) return '';
+    var words = [], max = 0;
+    Object.keys(inv).forEach(function (w) { (inv[w] || []).forEach(function (pos) { words[pos] = w; if (pos > max) max = pos; }); });
+    var out = []; for (var i = 0; i <= max; i++) out.push(words[i] || '');
+    return out.join(' ').replace(/\s+/g, ' ').trim();
+  }
+  function fetchAbstract(p) {
+    var d = bareDoi(p && p.doi); if (!d) return Promise.resolve('');
+    return fetch('https://api.openalex.org/works/doi:' + encodeURIComponent(d) + '?mailto=kecskemet.adatkozpont@gmail.com')
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (w) { return (w && abstractFromInverted(w.abstract_inverted_index)) || ''; }, function () { return ''; });
+  }
+  function persistAbstract(p, txt) { try { sb.from('research_sources').update({ abstract: String(txt).slice(0, 20000) }).eq('id', p.id).then(function () { }, function () { }); } catch (e) { } }
   var EMPTY = '<div class="cluster" style="left:40px;top:40px;width:440px;padding:26px 24px"><b style="font-size:14px">No figures yet</b><div style="font-size:12.5px;color:var(--muted);margin-top:8px;line-height:1.5">Hit <b>Extract figures from Library</b> on the left. Publify finds each paper’s open-access PDF and pulls its figures onto this board.</div></div>';
   var thumb = function (f) { var u = S.urls[f.storage_path]; return '<div class="thumb">' + (u ? '<img src="' + u + '" alt="' + esc(f.fig_label) + '" loading="lazy">' : '<div class="ph">…</div>') + '</div>'; };
   var activeReflow = function () { }, reflowT;
@@ -233,12 +249,12 @@
       c.innerHTML = '<div class="cl-head"><div style="min-width:0"><b>' + esc(p.title || 'Untitled') + '</b><span>' + esc(fmtAuthors(p.authors) + (p.year ? ' · ' + p.year : '')) + ' · ' + figs.length + ' fig</span>' + metricRow(p) + '</div>'
         + '<button class="cl-pin" data-pid="' + p.id + '" data-title="' + esc(p.title || '') + '" title="Pin all figures from this paper to the research Canvas">📌 Pin all</button></div>'
         + '<div class="cl-box">'
-        + (p.abstract ? '<details class="abs"><summary>📄 Abstract</summary><div class="abs-body">' + esc(p.abstract) + '</div></details>' : '')
+        + ((p.abstract || p.doi) ? '<details class="abs" data-pid="' + p.id + '"><summary>📄 Abstract</summary><div class="abs-body">' + (p.abstract ? esc(p.abstract) : '<span class="abs-load">Click to load the abstract…</span>') + '</div></details>' : '')
         + '<div class="figrow">' + thumbs + '</div></div>';
       world.appendChild(c);
     });
     wireCards('.fig');
-    world.querySelectorAll('details.abs').forEach(function (d) { d.addEventListener('toggle', scheduleReflow); });
+    world.querySelectorAll('details.abs').forEach(function (d) { d.addEventListener('toggle', function () { onAbstractToggle(d); }); });
     reflow(); apply();
   }
   // All-figures gallery: flat masonry of every figure thumbnail.
@@ -260,6 +276,21 @@
     world.querySelectorAll('.gcard').forEach(function (c) {
       var ci = 0; for (var j = 1; j < cols; j++) if (colH[j] < colH[ci]) ci = j;
       c.style.left = (40 + ci * COLW) + 'px'; c.style.top = colH[ci] + 'px'; colH[ci] += c.offsetHeight + 22;
+    });
+  }
+  // lazy-load a cluster's abstract from OpenAlex on first open (many sources have none stored)
+  function onAbstractToggle(d) {
+    scheduleReflow();
+    if (!d.open || d.dataset.loaded) return;
+    var pid = d.dataset.pid, p = S.papers.filter(function (x) { return x.id === pid; })[0];
+    if (!p || p.abstract) return;
+    d.dataset.loaded = '1';
+    var body = d.querySelector('.abs-body');
+    if (body) body.innerHTML = '<span class="abs-load">Loading abstract…</span>';
+    fetchAbstract(p).then(function (txt) {
+      if (txt) { p.abstract = txt; if (body) body.textContent = txt; persistAbstract(p, txt); }
+      else if (body) body.innerHTML = '<span class="abs-load">No abstract available for this paper.</span>';
+      scheduleReflow();
     });
   }
   function apply() { var v = S.view; world.style.transform = 'translate(' + v.x + 'px,' + v.y + 'px) scale(' + v.k + ')'; canvasEl.style.backgroundSize = (26 * v.k) + 'px ' + (26 * v.k) + 'px'; canvasEl.style.backgroundPosition = v.x + 'px ' + v.y + 'px'; document.getElementById('zlvl').textContent = Math.round(v.k * 100) + '%'; }
