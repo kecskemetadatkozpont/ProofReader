@@ -354,6 +354,29 @@ Deno.serve(async (req) => {
       return json({ ok: true, created });
     }
 
+    // ---- sr_enhance: a raw (possibly Hungarian, possibly vague) SR question → 2-3 sharper English questions ----
+    if (action === 'sr_enhance') {
+      const q = String(body.question || '').trim();
+      if (!q) return json({ error: 'question required' }, 400);
+      const gate = await assertEntitled(sb, 'literature_study'); if (gate) return gate;
+      const model = await resolveModel(sb);
+      const prompt = `A researcher proposes a question for a systematic literature review. It may be written in Hungarian (or another language) and may be broad or vague.
+Rewrite it into 2-3 IMPROVED, self-contained systematic-review research questions, each IN ENGLISH, that:
+- sharpen the scope and make Population / Intervention / Comparison / Outcome explicit where it makes sense,
+- are answerable by screening the published literature,
+- stay faithful to the researcher's original intent (do not invent a new topic).
+Order them from the closest faithful rewrite to the most specific/scoped.
+Original question: "${q.slice(0, 800)}"
+Return ONLY JSON, no prose: {"detected_language":"<language name>","suggestions":["question 1","question 2","question 3"]}`;
+      let out = '';
+      try { out = await callClaude(model, '', prompt, false, 900); } catch { return json({ error: 'AI is unavailable — try again.' }, 502); }
+      const m = out.match(/\{[\s\S]*\}/);
+      let parsed: any = {};
+      if (m) { try { parsed = JSON.parse(m[0]); } catch { parsed = {}; } }
+      const suggestions = Array.isArray(parsed.suggestions) ? parsed.suggestions.map((x: any) => String(x || '').trim()).filter(Boolean).slice(0, 3) : [];
+      return json({ ok: true, suggestions, detected_language: parsed.detected_language || null });
+    }
+
     const study_id = String(body.study_id || '');
     if (!study_id) return json({ error: 'study_id required' }, 400);
 

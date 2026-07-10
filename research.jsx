@@ -1534,8 +1534,20 @@
     var opS = useState(null), openR = opS[0], setOpenR = opS[1];
     var caS = useState(null), cands = caS[0], setCands = caS[1];   // SR-question candidates generated from Ideas
     var gnS = useState(false), gen = gnS[0], setGen = gnS[1];
+    var ehS = useState(null), enh = ehS[0], setEnh = ehS[1];       // AI-suggested sharper questions (item 4)
+    var ebS = useState(false), enhBusy = ebS[0], setEnhBusy = ebS[1];
     var alive = useRef(true);
     function upf(k, v) { setF(function (prev) { var o = Object.assign({}, prev); o[k] = v; return o; }); }
+    // Improve the manual question: accepts Hungarian, returns 2-3 sharper English SR questions to pick from.
+    function enhanceQ() {
+      var q = (f.q || '').trim(); if (!q) { setErr('Type a question first, then Improve.'); return; }
+      setEnhBusy(true); setEnh(null); setErr('');
+      callStudy({ action: 'sr_enhance', question: q }).then(function (d) {
+        if (!alive.current) return; setEnhBusy(false);
+        if (!d || d.error) { setErr('Improve: ' + ((d && d.error) || 'failed')); return; }
+        setEnh((d.suggestions && d.suggestions.length) ? d.suggestions : []);
+      }, function () { if (alive.current) { setEnhBusy(false); setErr('Improve failed.'); } });
+    }
     function load() { callElicit({ action: 'sr.list' }).then(function (d) { if (alive.current) setJobs((d && d.jobs) || []); }); }
     function loadCands() { sb.from('research_sr_candidates').select('*').eq('project_id', props.projectId).eq('dismissed', false).order('created_at', { ascending: true }).then(function (r) { if (alive.current) setCands((r && r.data) || []); }); }
     function generate() { setGen(true); setErr(''); callStudy({ action: 'sr_suggest', project_id: props.projectId }).then(function (d) { if (!alive.current) return; setGen(false); if (d && d.error) { setErr('Generate: ' + d.error); return; } loadCands(); if (d && d.created === 0) setErr('No Ideas yet — add Ideas in the Idea stage first, then generate.'); }); }
@@ -1675,7 +1687,14 @@
         h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12, marginTop: 6 } }, cands.map(candCard))
       ) : (cands !== null && !openForm) ? h('div', { style: { fontSize: 12.5, color: 'var(--muted)', margin: '6px 0' } }, 'No review questions yet — click “✨ Generate from Ideas” to draft systematic-review-ready questions (with PICO + criteria) from your project Ideas, then start one with a click.') : null,
       openForm ? h('div', { style: { marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8, borderTop: '1px solid var(--line)', paddingTop: 12 } },
-        h('div', null, h('div', { className: 'field-label' }, 'Research question *'), h('input', { className: 'field', style: { width: '100%', boxSizing: 'border-box' }, value: f.q, placeholder: 'The question the review investigates…', onChange: function (e) { upf('q', e.target.value); } })),
+        h('div', null,
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
+            h('div', { className: 'field-label', style: { flex: 1, margin: 0 } }, 'Research question *'),
+            h('button', { className: 'btn', style: { padding: '3px 9px', fontSize: 11.5, flex: 'none' }, disabled: enhBusy || !f.q.trim(), title: 'Rephrase into sharper questions (you can type in Hungarian)', onClick: enhanceQ }, enhBusy ? '✨ Improving…' : '✨ Improve')),
+          h('input', { className: 'field', style: { width: '100%', boxSizing: 'border-box', marginTop: 4 }, value: f.q, placeholder: 'The question the review investigates… (Hungarian is fine — use ✨ Improve)', onChange: function (e) { upf('q', e.target.value); } }),
+          enh !== null ? h('div', { style: { marginTop: 6, display: 'flex', flexDirection: 'column', gap: 5 } },
+            enh.length ? h('div', { style: { fontSize: 11, color: 'var(--faint)' } }, 'Suggested — click to use:') : h('div', { style: { fontSize: 11.5, color: 'var(--muted)' } }, 'No suggestion — the question looks clear already.'),
+            enh.map(function (s, i) { return h('button', { key: i, className: 'btn', style: { textAlign: 'left', padding: '6px 9px', fontSize: 12, lineHeight: 1.35, whiteSpace: 'normal' }, onClick: function () { upf('q', s); setEnh(null); } }, '➕ ' + s); })) : null),
         h('div', null, h('div', { className: 'field-label' }, 'Protocol / PICO (optional)'), h('textarea', { className: 'field', rows: 2, style: { width: '100%', boxSizing: 'border-box' }, value: f.protocol, placeholder: 'Population, Intervention, Comparison, Outcome; inclusion/exclusion rationale…', onChange: function (e) { upf('protocol', e.target.value); } })),
         h('div', null, h('div', { className: 'field-label' }, 'Abstract screening criteria (optional — AI adds more)'), h(CritEditor, { items: f.abs, onChange: function (a) { upf('abs', a); }, placeholder: 'e.g. reports a quantitative outcome', empty: 'Auto-generated if left empty.' })),
         f.runFT ? h('div', null, h('div', { className: 'field-label' }, 'Full-text screening criteria (optional)'), h(CritEditor, { items: f.ft, onChange: function (a) { upf('ft', a); }, placeholder: 'e.g. sample size ≥ 100', empty: 'Reuses the abstract criteria if empty.' })) : null,
