@@ -62,6 +62,7 @@
     var bS = useState(false), busy = bS[0], setBusy = bS[1];
     function up(k, v) { setF(Object.assign({}, f, (function () { var o = {}; o[k] = v; return o; })())); }
     function save() {
+      if (props.readOnly) return;
       if (!f.title.trim()) return;
       setBusy(true);
       var row = {
@@ -78,7 +79,7 @@
       });
     }
     function del() {
-      if (!props.task) return;
+      if (props.readOnly || !props.task) return;
       window.PRUI.confirm({ title: 'Delete this task?', body: props.task.title, danger: true, confirmLabel: 'Delete' }).then(function (ok) {
         if (!ok) return;
         sb.from('research_todos').delete().eq('id', props.task.id).then(function (r) { if (r && r.error) { toast(r.error.message, { kind: 'error' }); return; } props.onSaved(); });
@@ -94,7 +95,7 @@
     var projName = f.project_id ? (((props.projects || []).filter(function (p) { return p.id === f.project_id; })[0] || {}).title || 'Project') : 'Personal (no project)';
     return h('div', { className: 'kb-scrim', onClick: props.onClose },
       h('div', { className: 'kb-modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': props.task ? 'Task details' : 'Add task', onClick: function (e) { e.stopPropagation(); } },
-        h('div', { className: 'kb-mh' }, h('b', null, props.task ? 'Task details' : 'Add task'), h('button', { className: 'kb-x', 'aria-label': 'Close', onClick: props.onClose }, '×')),
+        h('div', { className: 'kb-mh' }, h('b', null, props.task ? (props.readOnly ? 'Task details (read-only)' : 'Task details') : 'Add task'), h('button', { className: 'kb-x', 'aria-label': 'Close', onClick: props.onClose }, '×')),
         h('div', { className: 'kb-mb' },
           h('label', { className: 'kb-l' }, 'Title *'),
           h('input', { className: 'kb-in', autoFocus: true, value: f.title, onChange: function (e) { up('title', e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) save(); }, placeholder: 'What needs doing?' }),
@@ -119,10 +120,10 @@
           ) : null
         ),
         h('div', { className: 'kb-mf' },
-          props.task ? h('button', { className: 'kb-btn danger', onClick: del }, 'Delete') : h('span'),
+          (props.task && !props.readOnly) ? h('button', { className: 'kb-btn danger', onClick: del }, 'Delete') : h('span'),
           h('div', { style: { display: 'flex', gap: 8 } },
-            h('button', { className: 'kb-btn', onClick: props.onClose }, 'Cancel'),
-            h('button', { className: 'kb-btn pri', disabled: busy || !f.title.trim(), onClick: save }, busy ? 'Saving…' : (props.task ? 'Save' : 'Add task')))
+            h('button', { className: 'kb-btn', onClick: props.onClose }, props.readOnly ? 'Close' : 'Cancel'),
+            props.readOnly ? null : h('button', { className: 'kb-btn pri', disabled: busy || !f.title.trim(), onClick: save }, busy ? 'Saving…' : (props.task ? 'Save' : 'Add task')))
         )
       )
     );
@@ -131,6 +132,19 @@
   // AI protocol steps are edited with the SAME editor the Protocol page uses (window.PRTaskEditor from
   // task-editor.js) so "My tasks" offers identical settings — title/kind/instruction/inputs/outputs/
   // acceptance/command/est/attachments/depends-on/approval + ✨ Refine, plus board fields (status/owner).
+
+  // Admin "view as": opened from Admin with ?adminView=1 + a stored target. Admin-only (a non-admin who
+  // forges the localStorage gets nothing — the check below AND RLS on research_todos both block it).
+  // Returns the VIEWED user {id,name,email} so "My tasks" shows THAT user's tasks, not the admin's own.
+  function adminTargetUser() {
+    try {
+      if (!/[?&]adminView=1/.test(location.search)) return null;
+      var u = BE && BE.user; if (!u) return null;
+      if (!(u.role === 'admin' || (BE.profiles && BE.profiles[u.id] && BE.profiles[u.id].role === 'admin'))) return null;
+      var t = JSON.parse(localStorage.getItem('pr-admin-view') || 'null');
+      return t && t.id ? t : null;
+    } catch (e) { return null; }
+  }
 
   // ---------- app ----------
   function App() {
@@ -146,12 +160,23 @@
     var dragS = useState(null), drag = dragS[0], setDrag = dragS[1];
     var overS = useState(null), over = overS[0], setOver = overS[1];
 
-    useEffect(function () { boot(); }, []);
+    useEffect(function () {
+      boot();
+      // the admin role can resolve slightly after mount (async refreshMe); re-boot once it does so a
+      // fresh "view as" reliably switches to the viewed user instead of briefly showing the admin's own.
+      if (/[?&]adminView=1/.test(location.search)) {
+        var reboot = function () { boot(); };
+        window.addEventListener('pr-profile', reboot);
+        return function () { window.removeEventListener('pr-profile', reboot); };
+      }
+    }, []);
     function boot() {
       if (!BE || !BE.sb) { setPhase('nobackend'); return; }
       if (BE.mode !== 'cloud' || !BE.user) { setPhase('signin'); return; }
-      setMe({ id: BE.user.id, name: BE.user.name });
-      load(BE.user.id);
+      var tgt = adminTargetUser();                       // admin viewing another user → that user; else null
+      var vid = tgt ? tgt.id : BE.user.id;               // whose tasks to show (never blindly the logged-in id)
+      setMe({ id: vid, name: tgt ? (tgt.name || tgt.email || 'user') : BE.user.name, viewing: !!tgt });
+      load(vid);
     }
     function load(uid) {
       Promise.all([
@@ -178,12 +203,14 @@
     }
     function reload() { if (me) load(me.id); }
     function patch(t, p) {
+      if (me && me.viewing) { toast('Read-only preview — you are viewing another user’s tasks.', { kind: 'warn' }); return; }
       setTodos(function (l) { return l.map(function (x) { return x.id === t.id ? Object.assign({}, x, p) : x; }); });   // optimistic
       sb.from('research_todos').update(Object.assign({ updated_at: new Date().toISOString() }, p)).eq('id', t.id).then(function (r) { if (r && r.error) { toast('Move failed: ' + r.error.message, { kind: 'error' }); reload(); } });
     }
     function moveToCol(t, key) { var p = colPatch(key); if (p) patch(t, p); }
     // save an AI protocol step edited via the shared Task editor (task-editor.js) — same fields as the Protocol board
     function saveStep(s, data) {
+      if (me && me.viewing) { toast('Read-only preview — cannot edit another user’s tasks.', { kind: 'warn' }); return; }
       var row = {
         title: data.title, kind: data.kind, spec: data.spec,
         depends_on: data.depends_on || [], needs_approval: !!data.needs_approval
@@ -238,7 +265,7 @@
       if (t.due) chips.push(h('span', { key: 'd', className: 'bchip' + (overdue ? ' warn' : '') }, '📅 ' + t.due));
       if (t.notes) chips.push(h('span', { key: 'n', className: 'bchip' }, '📝'));
       return h('div', {
-        key: t.id, className: 'bcard ' + (a === 'human' ? 'hu' : 'ai'), draggable: true,
+        key: t.id, className: 'bcard ' + (a === 'human' ? 'hu' : 'ai'), draggable: !(me && me.viewing),
         onDragStart: function (e) { setDrag(t.id); try { e.dataTransfer.effectAllowed = 'move'; } catch (x) { } },
         onDragEnd: function () { setDrag(null); setOver(null); },
         onClick: function () { setModal({ task: t }); }, title: 'Edit task'
@@ -256,10 +283,14 @@
     if (phase === 'nobackend') return h('div', { className: 'center' }, h('div', { className: 'box' }, h('div', { className: 'mk' }, h('span')), h('h1', null, 'Kanban'), h('p', null, 'The cloud backend is unavailable.')));
     if (phase === 'signin') return h('div', { className: 'center' }, h('div', { className: 'box' }, h('div', { className: 'mk' }, h('span')), h('h1', null, 'Sign in'), h('p', null, 'Your task board needs your account.'), h('a', { className: 'kb-btn pri', href: 'Landing.html' }, 'Sign in')));
 
+    var ro = !!(me && me.viewing);
     return h('div', { className: 'kb-wrap' },
+      ro ? h('div', { style: { background: 'var(--warn-bg)', color: 'var(--warn)', padding: '9px 14px', fontSize: 13, fontWeight: 600, borderRadius: 10, margin: '0 0 14px' } },
+        '👁 Admin preview — viewing ', h('b', null, (me && me.name) || 'user'), '’s tasks (read-only). ',
+        h('a', { href: 'Admin.html', style: { color: 'var(--warn)' } }, '← Back to admin')) : null,
       h('div', { className: 'kb-top' },
-        h('div', null, h('h1', null, '🗂️ My tasks'), h('div', { className: 'kb-sub' }, todos.length + ' task' + (todos.length === 1 ? '' : 's') + (steps.length ? ' + ' + steps.length + ' AI protocol step' + (steps.length === 1 ? '' : 's') + ' (read-only)' : '') + ' across ' + withItems.length + ' project' + (withItems.length === 1 ? '' : 's'))),
-        h('button', { className: 'kb-btn pri', onClick: function () { setModal({ defaultProject: projF || '' }); } }, '+ Add task')
+        h('div', null, h('h1', null, ro ? ((me && me.name ? me.name + '’s tasks' : 'Tasks')) : '🗂️ My tasks'), h('div', { className: 'kb-sub' }, todos.length + ' task' + (todos.length === 1 ? '' : 's') + (steps.length ? ' + ' + steps.length + ' AI protocol step' + (steps.length === 1 ? '' : 's') + ' (read-only)' : '') + ' across ' + withItems.length + ' project' + (withItems.length === 1 ? '' : 's'))),
+        ro ? null : h('button', { className: 'kb-btn pri', onClick: function () { setModal({ defaultProject: projF || '' }); } }, '+ Add task')
       ),
       h('div', { className: 'gb-bar' },
         h('div', { className: 'gb-chips' },
@@ -275,8 +306,10 @@
           h('input', { className: 'gb-q', value: q, placeholder: '🔍 Filter…', onChange: function (e) { setQ(e.target.value); } })
         )
       ),
-      (!todos.length && !steps.length) ? h('div', { className: 'soon' }, h('b', null, 'No tasks yet. '), 'Add your first task — tie it to a research project or keep it personal. Your AI protocol steps also appear here (read-only) once you generate a protocol in a project.',
-        h('div', { style: { marginTop: 14 } }, h('button', { className: 'kb-btn pri', onClick: function () { setModal({}); } }, '+ Add task')))
+      (!todos.length && !steps.length) ? (ro
+        ? h('div', { className: 'soon' }, h('b', null, 'No tasks. '), 'This user has no tasks yet.')
+        : h('div', { className: 'soon' }, h('b', null, 'No tasks yet. '), 'Add your first task — tie it to a research project or keep it personal. Your AI protocol steps also appear here (read-only) once you generate a protocol in a project.',
+          h('div', { style: { marginTop: 14 } }, h('button', { className: 'kb-btn pri', onClick: function () { setModal({}); } }, '+ Add task'))))
         : h('div', { className: 'bwrap' }, BOARD_COLS.map(function (col) {
           var tc = shownTodos.filter(function (t) { return todoCol(t) === col.key; });
           var sc = shownSteps.filter(function (s) { return stepColOf(s) === col.key; });
@@ -298,7 +331,7 @@
             onSave: function (data) { saveStep(modal.step, data); }, onClose: function () { setModal(null); }
           })
           : null)
-        : h(TaskModal, { task: modal.task, defaultProject: modal.defaultProject, meId: me.id, projects: projects, onClose: function () { setModal(null); }, onSaved: function () { setModal(null); reload(); } })) : null
+        : h(TaskModal, { task: modal.task, defaultProject: modal.defaultProject, meId: me.id, projects: projects, readOnly: ro, onClose: function () { setModal(null); }, onSaved: function () { setModal(null); reload(); } })) : null
     );
   }
 
