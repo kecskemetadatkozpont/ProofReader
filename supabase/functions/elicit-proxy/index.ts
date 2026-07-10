@@ -415,7 +415,22 @@ Deno.serve(async (req) => {
       const patch = srPatch(g.body);
       await sb.from('elicit_jobs').update(patch).eq('id', row.id);
       await notifyDone(svc, row, patch, 'sysreview');   // in case the foreground poll is the one that observes completion
-      return json({ ok: true, job: { ...row, ...patch } });
+      // Dead-end detection: a review stalls forever at screening_abstract when EVERY abstract is excluded
+      // (nothing passes to full-text). Elicit keeps it "processing" with no error → looks hung. Surface it.
+      let warning: any = null;
+      const d0 = g.body.data;
+      if (g.body.status === 'processing' && d0 && d0.screen && d0.screen.csv && !(d0.fulltext && d0.fulltext.csv)) {
+        try {
+          const scr = await fetch(d0.screen.csv);
+          if (scr.ok) {
+            const parsed = parseStage(await scr.text(), false);
+            let inc = 0, judged = 0;
+            parsed.rows.forEach((r: any) => { const f = (r.fields || []).find((x: any) => String(x.name).toLowerCase().indexOf('screening judgement') >= 0); if (f) { judged++; if (String(f.answer || '').toLowerCase().indexOf('includ') >= 0) inc++; } });
+            if (judged > 0 && inc === 0) warning = { code: 'all_excluded', screened: parsed.total };
+          }
+        } catch (_e) { /* best-effort */ }
+      }
+      return json({ ok: true, job: { ...row, ...patch, warning } });
     }
 
     if (action === 'sr.resume') {

@@ -198,6 +198,10 @@
             failed && job.error ? h('span', { style: { color: 'var(--danger)' } }, job.error.message || 'failed') : null),
           funnel()
         ),
+        (job.warning && job.warning.code === 'all_excluded') ? h('div', { className: 'banner warn' },
+          h('b', null, '⚠️ The review is stuck — all ' + job.warning.screened + ' abstracts were excluded.'),
+          ' None of the retrieved papers passed abstract screening, so there is nothing to full-text screen or extract. Elicit leaves such a review “processing” indefinitely (it will not finish or error on its own). ',
+          h('b', null, 'To get results:'), ' loosen the abstract-screening criteria, broaden the research question, or increase “Max papers to search”, then start a new review from the Studies board.') : null,
         h('div', { className: 'tabs' }, [['overview', 'Overview'], ['screen', 'Abstract screening'], ['fulltext', 'Full-text'], ['extract', 'Extraction'], ['report', 'Report']].map(function (t) {
           var c = t[0] === 'screen' ? counts.screen : t[0] === 'fulltext' ? counts.fulltext : t[0] === 'extract' ? counts.extract : null;
           return h('button', { key: t[0], className: 'tab' + (tab === t[0] ? ' on' : ''), onClick: function () { setQ(''); setTab(t[0]); } }, t[1], (c != null) ? h('span', { className: 'tc num' }, nfmt(c)) : null);

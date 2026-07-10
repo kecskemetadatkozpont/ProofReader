@@ -1700,6 +1700,8 @@
           h('div', { style: { flex: 1, minWidth: 0 } }, h('div', { style: { fontWeight: 600, fontSize: 13.5 } }, j.result_title || j.research_question || 'Systematic review'),
             statusLine(j))),
         !failed ? tracker(j) : null,
+        (j.warning && j.warning.code === 'all_excluded') ? h('div', { style: { marginTop: 8, fontSize: 12, lineHeight: 1.5, background: 'var(--warn-bg, #fbf1dd)', color: 'var(--warn, #b45309)', border: '1px solid color-mix(in srgb, var(--warn, #b45309) 30%, transparent)', borderRadius: 9, padding: '9px 11px' } },
+          h('b', null, '⚠️ Stuck: all ' + j.warning.screened + ' abstracts were excluded.'), ' None passed abstract screening, so the review can’t advance to full-text — Elicit leaves it “processing” indefinitely. Fix: loosen the abstract-screening criteria, broaden the question, or raise “Max papers to search”, then start a new review.') : null,
         stageLinks(j),
         (done && j.result_summary) ? h('div', { style: { fontSize: 12.5, marginTop: 6, lineHeight: 1.45 } }, j.result_summary) : null,
         acts.length ? h('div', { style: { display: 'flex', gap: 7, marginTop: 8, flexWrap: 'wrap' } }, acts) : null,
