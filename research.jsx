@@ -2640,16 +2640,23 @@
     function aiUploadData(fileList) {
       var items = Array.prototype.slice.call(fileList || []); if (!items.length) return;
       var batch = String(Date.now()) + '_' + Math.random().toString(36).slice(2, 7);
-      var added = [], done = 0; setAiUpBusy('0/' + items.length);
+      var added = [], done = 0, total = items.length;
+      setAiUpBusy({ done: 0, total: total, name: (items[0].webkitRelativePath || items[0].name) });
       (function next(i) {
-        if (i >= items.length) { if (added.length) setAiFiles(function (a) { return a.concat(added); }); setAiUpBusy(''); return; }
+        if (i >= total) {
+          if (added.length) setAiFiles(function (a) { return a.concat(added); });
+          setAiUpBusy(null);
+          window.PRUI.toast(added.length < total ? (total - added.length) + ' file(s) failed to upload' : '✓ Uploaded ' + added.length + ' file' + (added.length === 1 ? '' : 's'), { kind: added.length < total ? 'error' : 'ok' });
+          return;
+        }
         var f = items[i]; var rel = f.webkitRelativePath || f.name;
+        setAiUpBusy({ done: done, total: total, name: rel });
         var sp = props.projectId + '/protocol/' + batch + '/' + rel.replace(/[^A-Za-z0-9._\/-]/g, '_');
         sb.storage.from('research-data').upload(sp, f).then(function (res) {
-          done++; setAiUpBusy(done + '/' + items.length);
+          done++; setAiUpBusy({ done: done, total: total, name: rel });
           if (!(res && res.error)) added.push({ name: rel, storage_path: sp, mime: f.type || '', size: f.size, note: '' });
           next(i + 1);
-        }, function () { done++; next(i + 1); });
+        }, function () { done++; setAiUpBusy({ done: done, total: total, name: rel }); next(i + 1); });
       })(0);
     }
     function removeAiFile(i) { var a = aiFiles[i]; if (a && a.storage_path) { try { sb.storage.from('research-data').remove([a.storage_path]); } catch (e) { } } setAiFiles(function (x) { return x.filter(function (_, j) { return j !== i; }); }); }
@@ -2938,9 +2945,15 @@
           h('div', { style: { fontSize: 11.5, color: 'var(--faint)', marginBottom: 7 } }, 'Describe what you need — or attach data and the AI drafts a small pipeline to process it. (For a single task by hand, use “+ Add task” above.)'),
           h('div', { style: { display: 'flex', gap: 6 } },
             h('input', { className: 'field', style: { flex: 1, minWidth: 0 }, placeholder: aiFiles.length ? 'Optional: how to process the attached data…' : 'e.g. "add an ablation comparing fusion variants" or attach a dataset →', value: aiPrompt, disabled: aiBusy, onChange: function (e) { setAiPrompt(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter') aiAppend(); } }),
-            h('button', { className: 'btn', style: { flex: 'none' }, title: 'Attach data — the AI generates tasks to process it', disabled: aiBusy, onClick: function () { if (aiFileRef.current) aiFileRef.current.click(); } }, aiUpBusy ? ('⤒ ' + aiUpBusy) : '⤒ Data'),
+            h('button', { className: 'btn', style: { flex: 'none' }, title: 'Attach data — the AI generates tasks to process it', disabled: aiBusy || !!aiUpBusy, onClick: function () { if (aiFileRef.current) aiFileRef.current.click(); } }, aiUpBusy ? '⤒ …' : '⤒ Data'),
             h('input', { ref: aiFileRef, type: 'file', multiple: true, style: { display: 'none' }, onChange: function (e) { aiUploadData(e.target.files); if (e.target) e.target.value = ''; } }),
-            h('button', { className: 'btn pri', style: { flex: 'none' }, disabled: aiBusy || (!aiPrompt.trim() && !aiFiles.length), onClick: aiAppend }, aiBusy ? '✨ Working…' : '✨ Generate')),
+            h('button', { className: 'btn pri', style: { flex: 'none' }, disabled: aiBusy || !!aiUpBusy || (!aiPrompt.trim() && !aiFiles.length), onClick: aiAppend }, aiBusy ? '✨ Working…' : '✨ Generate')),
+          aiUpBusy ? h('div', { style: { marginTop: 8 } },
+            h('div', { style: { display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 11.5, color: 'var(--muted)', marginBottom: 4 } },
+              h('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }, title: aiUpBusy.name }, '⤒ Uploading ' + ((aiUpBusy.name || '').split('/').pop())),
+              h('span', { style: { flex: 'none', fontVariantNumeric: 'tabular-nums' } }, aiUpBusy.done + ' / ' + aiUpBusy.total)),
+            h('div', { style: { height: 6, background: 'var(--surface-3)', borderRadius: 999, overflow: 'hidden' } },
+              h('div', { style: { height: '100%', width: (aiUpBusy.total ? Math.round(100 * aiUpBusy.done / aiUpBusy.total) : 0) + '%', background: 'var(--accent)', borderRadius: 999, transition: 'width .2s' } }))) : null,
           aiFiles.length ? h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 7 } }, aiFiles.map(function (a, i) {
             return h('span', { key: i, className: 'lchip', style: { fontSize: 11 }, title: a.name }, '📎 ' + ((a.name || '').split('/').pop().slice(0, 28)),
               h('button', { 'aria-label': 'Remove', style: { marginLeft: 5, border: 0, background: 'transparent', cursor: 'pointer', color: 'var(--muted)' }, onClick: function () { removeAiFile(i); } }, '×'));
