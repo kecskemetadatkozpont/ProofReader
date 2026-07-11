@@ -91,12 +91,17 @@ Deno.serve(async (req) => {
         .order('cited_by', { ascending: false }).limit(10);
       if (!srcs || !srcs.length) return json({ error: 'no_included', message: 'No included papers with a citation count to analyze.' }, 400);
 
-      // resolve to Semantic Scholar (one batch call)
+      // resolve to Semantic Scholar (one batch call). A TRANSIENT failure (429/outage) must NOT be recorded
+      // as a permanent "not indexed" verdict — bail with a retryable error and create no report, so the
+      // client can simply try again. Only a SUCCESSFUL batch lets us mark a missing paper genuinely not-indexed.
       const refList = srcs.map(s2ref);
       const validRefs = refList.filter(Boolean) as string[];
       const resolved: Record<string, any> = {};
       if (validRefs.length) {
-        try { const batch = await s2batch(validRefs); validRefs.forEach((ref, i) => { if (batch[i] && batch[i].paperId) resolved[ref] = batch[i]; }); } catch (_e) { /* leave unresolved */ }
+        let batch: any[];
+        try { batch = await s2batch(validRefs); }
+        catch (_e) { return json({ error: 's2_unavailable', retryable: true, message: 'Semantic Scholar is rate-limiting right now. Wait a moment and start the analysis again.' }, 503); }
+        validRefs.forEach((ref, i) => { if (batch[i] && batch[i].paperId) resolved[ref] = batch[i]; });
       }
 
       const { data: rep, error: rerr } = await sb.from('citation_reports').insert({ project_id, status: 'processing', stats: { papers: srcs.length } }).select('id').single();
@@ -121,9 +126,17 @@ Deno.serve(async (req) => {
       if (ins.done) return json({ ok: true, skipped: true });
       if (!ins.s2_id) { await sb.from('citation_paper_insights').update({ done: true }).eq('id', insight_id); return json({ ok: true, skipped: true }); }
 
+      // A transient S2 failure must stay RETRYABLE — never persist it as a real zero with done=true. The
+      // client retries; only after a few attempts do we mark the paper done with an honest, distinguishable
+      // "unavailable" note (null counts, NOT 0) so finalize doesn't fold a rate-limit in as a genuine zero.
+      const attempt = parseInt(String(body.attempt || '0'), 10) || 0;
       let cites: any[] = [];
       try { const cj = await s2get('/paper/' + encodeURIComponent(ins.s2_id) + '/citations?fields=contexts,isInfluential,intents,citingPaper.title,citingPaper.year&limit=400'); cites = cj.data || []; }
-      catch (_e) { await sb.from('citation_paper_insights').update({ done: true, summary: 'Citation contexts were unavailable (rate-limited or none indexed).', citing_count: 0, influential: 0, intent_mix: emptyMix(), contributions: [], contexts: [] }).eq('id', insight_id); return json({ ok: true, note: 's2 fetch failed' }); }
+      catch (_e) {
+        if (attempt < 2) return json({ ok: false, retryable: true, error: 's2_rate_limited', message: 'Semantic Scholar rate limit — retry this paper.' });
+        await sb.from('citation_paper_insights').update({ done: true, summary: 'Citation contexts were unavailable (Semantic Scholar rate limit) — re-run the analysis later to include this paper.', citing_count: null, influential: null, intent_mix: null, contributions: [], contexts: [] }).eq('id', insight_id);
+        return json({ ok: true, gave_up: true });
+      }
 
       const withCtx = cites.filter((c) => c.contexts && c.contexts.length);
       const influential = cites.filter((c) => c.isInfluential).length;
@@ -156,6 +169,11 @@ Return ONLY JSON: {"classifications":[{"i":0,"intent":"method"}],"contributions"
           contributions = Array.isArray(cls.contributions) ? cls.contributions.slice(0, 6) : [];
           summary = String(cls.summary || '').slice(0, 700);
         } catch (_e) { /* keep empty mix/summary */ }
+      } else {
+        // successful fetch, but no readable context sentences — a genuine zero, distinct from a rate-limit
+        summary = cites.length
+          ? 'Indexed in Semantic Scholar with ' + cites.length + ' citing papers, but none had a readable context sentence to analyze.'
+          : 'No citations are indexed for this paper yet.';
       }
       const ctxStore = picked.slice(0, 12).map((c, i) => ({ sentence: String(c.contexts[0] || '').replace(/\s+/g, ' ').slice(0, 320), intent: intentByIdx[i] || '', citing_title: String((c.citingPaper && c.citingPaper.title) || '').slice(0, 160), year: (c.citingPaper && c.citingPaper.year) || null, influential: !!c.isInfluential }));
 
