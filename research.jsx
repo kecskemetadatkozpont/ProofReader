@@ -2461,9 +2461,11 @@
     var edS = useState(null), editing = edS[0], setEditing = edS[1];   // { step, isNew, after }
     var apS = useState(''), aiPrompt = apS[0], setAiPrompt = apS[1];
     var abS = useState(false), aiBusy = abS[0], setAiBusy = abS[1];
-    var afS = useState([]), aiFiles = afS[0], setAiFiles = afS[1];     // data uploaded for AI task generation
-    var aubS = useState(''), aiUpBusy = aubS[0], setAiUpBusy = aubS[1];
+    var afS = useState([]), aiFiles = afS[0], setAiFiles = afS[1];     // data for AI task generation: uploaded {storage_path} or referenced {url}
+    var aubS = useState(''), aiUpBusy = aubS[0], setAiUpBusy = aubS[1];   // null | {done,total,name,pct}
     var aiFileRef = useRef(null);
+    var lkoS = useState(false), linkOpen = lkoS[0], setLinkOpen = lkoS[1];
+    var lkuS = useState(''), linkUrl = lkuS[0], setLinkUrl = lkuS[1];
     var rvS = useState(null), rvMd = rvS[0], setRvMd = rvS[1];   // full-report reader markdown
     var dsS = useState(null), dropStep = dsS[0], setDropStep = dsS[1];   // step id a file is being dragged over
     var usS = useState(null), upStep = usS[0], setUpStep = usS[1];       // { id, msg } while uploading onto a step
@@ -2637,39 +2639,65 @@
         });
       }, function (e) { setBusy(false); window.PRUI.toast('Split failed: ' + e, { kind: 'error' }); });
     }
+    // resumable (TUS) upload → large files go through, chunked, with real byte progress
+    function tusUpload(file, path, token, onProg) {
+      return new Promise(function (resolve, reject) {
+        var up = new window.tus.Upload(file, {
+          endpoint: (window.PR_CONFIG || {}).supabaseUrl + '/storage/v1/upload/resumable',
+          retryDelays: [0, 3000, 5000, 10000, 20000],
+          headers: { authorization: 'Bearer ' + token, 'x-upsert': 'true' },
+          uploadDataDuringCreation: true, removeFingerprintOnSuccess: true, chunkSize: 6 * 1024 * 1024,
+          metadata: { bucketName: 'research-data', objectName: path, contentType: file.type || 'application/octet-stream' },
+          onError: reject, onProgress: function (s, t) { onProg(t ? s / t : 0); }, onSuccess: function () { resolve(); }
+        });
+        up.findPreviousUploads().then(function (prev) { if (prev && prev.length) up.resumeFromPreviousUpload(prev[0]); up.start(); }, function () { up.start(); });
+      });
+    }
     function aiUploadData(fileList) {
       var items = Array.prototype.slice.call(fileList || []); if (!items.length) return;
       var batch = String(Date.now()) + '_' + Math.random().toString(36).slice(2, 7);
-      var added = [], done = 0, total = items.length;
-      setAiUpBusy({ done: 0, total: total, name: (items[0].webkitRelativePath || items[0].name) });
-      (function next(i) {
-        if (i >= total) {
-          if (added.length) setAiFiles(function (a) { return a.concat(added); });
-          setAiUpBusy(null);
-          window.PRUI.toast(added.length < total ? (total - added.length) + ' file(s) failed to upload' : '✓ Uploaded ' + added.length + ' file' + (added.length === 1 ? '' : 's'), { kind: added.length < total ? 'error' : 'ok' });
-          return;
-        }
-        var f = items[i]; var rel = f.webkitRelativePath || f.name;
-        setAiUpBusy({ done: done, total: total, name: rel });
-        var sp = props.projectId + '/protocol/' + batch + '/' + rel.replace(/[^A-Za-z0-9._\/-]/g, '_');
-        sb.storage.from('research-data').upload(sp, f).then(function (res) {
-          done++; setAiUpBusy({ done: done, total: total, name: rel });
-          if (!(res && res.error)) added.push({ name: rel, storage_path: sp, mime: f.type || '', size: f.size, note: '' });
-          next(i + 1);
-        }, function () { done++; setAiUpBusy({ done: done, total: total, name: rel }); next(i + 1); });
-      })(0);
+      var added = [], done = 0, total = items.length, CFG = window.PR_CONFIG || {};
+      function endFinish() {
+        if (added.length) setAiFiles(function (a) { return a.concat(added); });
+        setAiUpBusy(null);
+        window.PRUI.toast(added.length < total ? (total - added.length) + ' file(s) failed to upload' : '✓ Uploaded ' + added.length + ' file' + (added.length === 1 ? '' : 's'), { kind: added.length < total ? 'error' : 'ok' });
+      }
+      sb.auth.getSession().then(function (sess) {
+        var token = (sess && sess.data && sess.data.session && sess.data.session.access_token) || CFG.supabaseAnonKey;
+        setAiUpBusy({ done: 0, total: total, name: (items[0].webkitRelativePath || items[0].name), pct: 0 });
+        (function next(i) {
+          if (i >= total) { endFinish(); return; }
+          var f = items[i], rel = f.webkitRelativePath || f.name;
+          var sp = props.projectId + '/protocol/' + batch + '/' + rel.replace(/[^A-Za-z0-9._\/-]/g, '_');
+          setAiUpBusy({ done: done, total: total, name: rel, pct: 0 });
+          var ok = function () { done++; added.push({ name: rel, storage_path: sp, mime: f.type || '', size: f.size, note: '' }); setAiUpBusy({ done: done, total: total, name: rel, pct: 0 }); next(i + 1); };
+          var fail = function (err) { done++; window.PRUI.toast(rel + ': ' + ((err && err.message) || 'upload failed'), { kind: 'error' }); setAiUpBusy({ done: done, total: total, name: rel, pct: 0 }); next(i + 1); };
+          if (f.size > 6 * 1024 * 1024 && window.tus) {
+            tusUpload(f, sp, token, function (p) { setAiUpBusy({ done: done, total: total, name: rel, pct: p }); }).then(ok, fail);
+          } else {
+            sb.storage.from('research-data').upload(sp, f, { upsert: true }).then(function (res) { if (res && res.error) fail(res.error); else ok(); }, fail);
+          }
+        })(0);
+      });
+    }
+    function addLink() {
+      var u = (linkUrl || '').trim(); if (!/^https?:\/\//i.test(u)) { window.PRUI.toast('Paste an http(s) data link', { kind: 'error' }); return; }
+      var nm = (decodeURIComponent(u.split('?')[0].split('#')[0].split('/').pop() || '') || u).slice(0, 80);
+      setAiFiles(function (a) { return a.concat([{ name: nm, url: u, note: '' }]); });
+      setLinkUrl(''); setLinkOpen(false);
     }
     function removeAiFile(i) { var a = aiFiles[i]; if (a && a.storage_path) { try { sb.storage.from('research-data').remove([a.storage_path]); } catch (e) { } } setAiFiles(function (x) { return x.filter(function (_, j) { return j !== i; }); }); }
     function dlAiFile(a) { if (!a || !a.storage_path) return; sb.storage.from('research-data').createSignedUrl(a.storage_path, 3600, { download: (a.name || '').split('/').pop() }).then(function (r) { if (r && r.data && r.data.signedUrl) window.open(r.data.signedUrl, '_blank'); }); }
     function aiAppend() {
       var p = aiPrompt.trim(); if ((!p && !aiFiles.length) || aiBusy) return; setAiBusy(true);
       var files = aiFiles;
-      sb.functions.invoke('research-protocol', { body: { action: 'append_steps', protocol_id: prot.id, project_id: props.projectId, prompt: p, files: files.map(function (a) { return { name: a.name, mime: a.mime, size: a.size, note: a.note }; }) } }).then(function (r) {
+      sb.functions.invoke('research-protocol', { body: { action: 'append_steps', protocol_id: prot.id, project_id: props.projectId, prompt: p, files: files.map(function (a) { return { name: a.name, mime: a.mime, size: a.size, note: a.note, url: a.url }; }) } }).then(function (r) {
         var subs = r && r.data && r.data.steps;
         if (!subs || !subs.length) { setAiBusy(false); window.PRUI.toast('No tasks suggested: ' + ((r && r.data && r.data.error) || ''), { kind: 'error' }); return; }
-        // attach the uploaded data to the first generated (data-ingest) step so the runner has it
-        if (files.length && subs[0]) { var s0 = subs[0]; subs[0].spec = { instruction: s0.instruction || '', inputs: s0.inputs || [], expected_outputs: s0.expected_outputs || [], acceptance: s0.acceptance || [], command_hint: s0.command_hint || '', est_minutes: (s0.est_minutes != null ? s0.est_minutes : null), attachments: files }; }
-        insertSteps(subs, null).then(function () { setAiBusy(false); setAiPrompt(''); setAiFiles([]); window.PRUI.toast('Added ' + subs.length + ' task' + (subs.length === 1 ? '' : 's') + (files.length ? ' — your data is attached to the first' : ''), { kind: 'ok' }); });
+        // attach UPLOADED data (not URL references) to the first generated (data-ingest) step so the runner has it
+        var upl = files.filter(function (a) { return a.storage_path; });
+        if (upl.length && subs[0]) { var s0 = subs[0]; subs[0].spec = { instruction: s0.instruction || '', inputs: s0.inputs || [], expected_outputs: s0.expected_outputs || [], acceptance: s0.acceptance || [], command_hint: s0.command_hint || '', est_minutes: (s0.est_minutes != null ? s0.est_minutes : null), attachments: upl }; }
+        insertSteps(subs, null).then(function () { setAiBusy(false); setAiPrompt(''); setAiFiles([]); window.PRUI.toast('Added ' + subs.length + ' task' + (subs.length === 1 ? '' : 's') + (upl.length ? ' — your data is attached to the first' : ''), { kind: 'ok' }); });
       }, function (e) { setAiBusy(false); window.PRUI.toast('Add failed: ' + e, { kind: 'error' }); });
     }
 
@@ -2949,20 +2977,25 @@
             h('input', { className: 'field', style: { flex: 1, minWidth: 0 }, placeholder: aiFiles.length ? 'Optional: how to process the attached data…' : 'e.g. "add an ablation comparing fusion variants" or attach a dataset →', value: aiPrompt, disabled: aiBusy, onChange: function (e) { setAiPrompt(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter') aiAppend(); } }),
             h('button', { className: 'btn', style: { flex: 'none' }, title: 'Attach data — the AI generates tasks to process it', disabled: aiBusy || !!aiUpBusy, onClick: function () { if (aiFileRef.current) aiFileRef.current.click(); } }, aiUpBusy ? '⤒ …' : '⤒ Data'),
             h('input', { ref: aiFileRef, type: 'file', multiple: true, style: { display: 'none' }, onChange: function (e) { aiUploadData(e.target.files); if (e.target) e.target.value = ''; } }),
+            h('button', { className: 'btn' + (linkOpen ? ' pri' : ''), style: { flex: 'none' }, title: 'Reference a dataset by URL instead of uploading (no size limit — best for large data)', disabled: aiBusy || !!aiUpBusy, onClick: function () { setLinkOpen(!linkOpen); } }, '🔗 Link'),
             h('button', { className: 'btn pri', style: { flex: 'none' }, disabled: aiBusy || !!aiUpBusy || (!aiPrompt.trim() && !aiFiles.length), onClick: aiAppend }, aiBusy ? '✨ Working…' : '✨ Generate')),
+          linkOpen ? h('div', { style: { display: 'flex', gap: 6, marginTop: 6 } },
+            h('input', { className: 'field', style: { flex: 1, minWidth: 0 }, placeholder: 'Paste a data URL (http/https) — a dataset, HuggingFace / Kaggle / Zenodo link…', value: linkUrl, onChange: function (e) { setLinkUrl(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter') addLink(); } }),
+            h('button', { className: 'btn pri', style: { flex: 'none' }, disabled: !linkUrl.trim(), onClick: addLink }, '＋ Add link')) : null,
           aiUpBusy ? h('div', { style: { marginTop: 8 } },
             h('div', { style: { display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 11.5, color: 'var(--muted)', marginBottom: 4 } },
-              h('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }, title: aiUpBusy.name }, '⤒ Uploading ' + ((aiUpBusy.name || '').split('/').pop())),
+              h('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }, title: aiUpBusy.name }, '⤒ Uploading ' + ((aiUpBusy.name || '').split('/').pop()) + (aiUpBusy.pct ? ' · ' + Math.round(aiUpBusy.pct * 100) + '%' : '')),
               h('span', { style: { flex: 'none', fontVariantNumeric: 'tabular-nums' } }, aiUpBusy.done + ' / ' + aiUpBusy.total)),
             h('div', { style: { height: 6, background: 'var(--surface-3)', borderRadius: 999, overflow: 'hidden' } },
-              h('div', { style: { height: '100%', width: (aiUpBusy.total ? Math.round(100 * aiUpBusy.done / aiUpBusy.total) : 0) + '%', background: 'var(--accent)', borderRadius: 999, transition: 'width .2s' } }))) : null,
+              h('div', { style: { height: '100%', width: (aiUpBusy.total ? Math.round(100 * (aiUpBusy.done + (aiUpBusy.pct || 0)) / aiUpBusy.total) : 0) + '%', background: 'var(--accent)', borderRadius: 999, transition: 'width .2s' } }))) : null,
           aiFiles.length ? h('div', { style: { marginTop: 8, border: '1px solid var(--line)', borderRadius: 8, padding: '8px 10px', background: 'var(--soft)' } },
-            h('div', { style: { fontSize: 11, fontWeight: 700, color: 'var(--muted)', marginBottom: 6 } }, '📎 Uploaded data (' + aiFiles.length + ') — will be attached to the generated data step'),
+            h('div', { style: { fontSize: 11, fontWeight: 700, color: 'var(--muted)', marginBottom: 6 } }, '📎 Data sources (' + aiFiles.length + ') — uploaded files attach to the generated data step; links are passed to the AI'),
             h('div', { style: { display: 'flex', flexDirection: 'column', gap: 4 } }, aiFiles.map(function (a, i) {
+              var isRef = !!a.url;
               return h('div', { key: i, style: { display: 'flex', gap: 8, alignItems: 'center', fontSize: 11.5 } },
-                h('span', { style: { flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, title: a.name }, '📄 ' + ((a.name || '').split('/').pop())),
-                h('span', { style: { color: 'var(--faint)', flex: 'none' } }, (a.mime ? ((a.mime.split('/').pop() || a.mime) + ' · ') : '') + (a.size != null ? (a.size >= 1048576 ? (Math.round(a.size / 104857.6) / 10 + ' MB') : (Math.max(1, Math.round(a.size / 1024)) + ' KB')) : '')),
-                h('button', { className: 'fb-mini', 'aria-label': 'Download', title: 'Download', onClick: function () { dlAiFile(a); } }, '⬇'),
+                h('span', { style: { flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, title: a.url || a.name }, (isRef ? '🔗 ' : '📄 ') + (((a.name || '').split('/').pop()) || a.url)),
+                h('span', { style: { color: 'var(--faint)', flex: 'none' } }, isRef ? 'link' : ((a.mime ? ((a.mime.split('/').pop() || a.mime) + ' · ') : '') + (a.size != null ? (a.size >= 1048576 ? (Math.round(a.size / 104857.6) / 10 + ' MB') : (Math.max(1, Math.round(a.size / 1024)) + ' KB')) : ''))),
+                isRef ? h('a', { className: 'fb-mini', href: a.url, target: '_blank', rel: 'noopener', 'aria-label': 'Open link', title: 'Open' }, '↗') : h('button', { className: 'fb-mini', 'aria-label': 'Download', title: 'Download', onClick: function () { dlAiFile(a); } }, '⬇'),
                 h('button', { className: 'fb-mini', 'aria-label': 'Remove', title: 'Remove', onClick: function () { removeAiFile(i); } }, '×'));
             }))) : null,
           aiBusy ? h('div', { style: { marginTop: 8 } }, h(AiThinking, { label: aiFiles.length ? 'Drafting a pipeline to process your data' : 'Drafting new tasks from your prompt' })) : null
