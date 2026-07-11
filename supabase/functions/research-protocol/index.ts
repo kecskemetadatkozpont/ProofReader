@@ -136,6 +136,27 @@ Deno.serve(async (req) => {
       return json({ ok: true, steps: (Array.isArray(p.steps) ? p.steps : []).slice(0, 4) });
     }
 
+    // ---- task_assist: conversational helper for ONE task draft in the editor (discuss, ask clarifying
+    //      questions about uploaded data, and propose concrete field values) ----
+    if (action === 'task_assist') {
+      const task = (body.task && typeof body.task === 'object') ? body.task : {};
+      const msg = String(body.message || '').slice(0, 4000);
+      const history = Array.isArray(body.history) ? body.history.slice(-8) : [];
+      const files = Array.isArray(body.files) ? body.files.slice(0, 20) : [];
+      const arr = (v: any) => Array.isArray(v) ? v.filter(Boolean) : [];
+      const filesTxt = files.map((f: any) => `- ${String(f.name || 'file')} (${f.mime || 'type?'}${f.size ? ', ' + Math.round(f.size / 1024) + ' KB' : ''})${f.note ? ' — note: ' + String(f.note).slice(0, 300) : ''}`).join('\n');
+      const taskTxt = `Title: ${task.title || '(untitled)'}\nKind: ${task.kind || 'custom'}\nInstruction: ${task.instruction || '(empty)'}\nInputs: ${arr(task.inputs).join('; ') || '(none)'}\nExpected outputs: ${arr(task.expected_outputs).join('; ') || '(none)'}\nAcceptance: ${arr(task.acceptance).join('; ') || '(none)'}\nCommand hint: ${task.command_hint || '(none)'}`;
+      const KINDS = 'data | preprocess | train | eval | analysis | figure | writeup | custom';
+      const system = `You are Publify's task assistant. You help a researcher define ONE task in an executable research protocol (a Claude agent will later run it on a machine). Be concise, concrete and practical — talk like a helpful collaborator, not a form. When the task is underspecified — ESPECIALLY when files/data were just uploaded — ask 1–3 focused clarifying questions (for a dataset: the target/label, what the columns mean, the split, the metric, the format). When you have enough to sharpen the task, propose improved field values (only the fields you would actually change; kind must be one of: ${KINDS}). Never invent file contents you were not told about.`;
+      const user = `Current task draft:\n${taskTxt}\n\n${filesTxt ? `Files attached to this task:\n${filesTxt}\n\n` : ''}${history.length ? `Conversation so far:\n${history.map((m: any) => `${m.role === 'user' ? 'Researcher' : 'Assistant'}: ${String(m.content || '').slice(0, 1500)}`).join('\n')}\n\n` : ''}Researcher: ${msg || '(They just opened the assistant or attached a file and have not typed anything. Greet in one short sentence, then — if a file is attached or the task is vague — ask your clarifying questions.)'}\n\nReturn ONLY JSON: {"reply":"<your conversational reply>","questions":["<0–3 short clarifying questions>"],"suggestion":{<only the task fields to change: "title"?, "kind"?, "instruction"?, "inputs"?:[], "expected_outputs"?:[], "acceptance"?:[], "command_hint"? — or {} if nothing to propose yet>}}`;
+      let out = '';
+      try { out = await callClaude(system, user, model); } catch (_e) { return json({ error: 'AI is unavailable — try again.' }, 502); }
+      const mm = out.match(/\{[\s\S]*\}/); let p: any = {};
+      if (mm) { try { p = JSON.parse(mm[0]); } catch { p = {}; } }
+      const sug = (p.suggestion && typeof p.suggestion === 'object' && Object.keys(p.suggestion).length) ? p.suggestion : null;
+      return json({ ok: true, reply: String(p.reply || out || '').slice(0, 4000), questions: Array.isArray(p.questions) ? p.questions.map((x: any) => String(x || '').slice(0, 300)).filter(Boolean).slice(0, 3) : [], suggestion: sug });
+    }
+
     return json({ error: 'unknown action: ' + action }, 400);
   } catch (e) { return json({ error: String(e) }, 500); }
 });

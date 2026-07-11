@@ -2289,13 +2289,45 @@
     var ubA = useState(''), upBusy = ubA[0], setUpBusy = ubA[1];
     var dgA = useState(false), dragOver = dgA[0], setDragOver = dgA[1];
     var fileRef = useRef(null), folderRef = useRef(null);
+    // ---- task assistant (ephemeral, task-scoped AI chat inside the editor) ----
+    var cmS = useState([]), cmsgs = cmS[0], setCmsgs = cmS[1];   // [{role,content,questions?,suggestion?}]
+    var ciS = useState(''), cinput = ciS[0], setCinput = ciS[1];
+    var cbS = useState(false), cbusy = cbS[0], setCbusy = cbS[1];
+    var cscroll = useRef(null);
+    useEffect(function () { var el = cscroll.current; if (el) el.scrollTop = el.scrollHeight; }, [cmsgs, cbusy]);
+    function applySuggestion(sug) {
+      if (!sug) return;
+      if (sug.title) setTitle(String(sug.title));
+      if (sug.kind && PROT_KINDS.indexOf(sug.kind) >= 0) setKind(sug.kind);
+      if (sug.instruction != null) setInstr(String(sug.instruction));
+      if (Array.isArray(sug.inputs)) setInputs(sug.inputs.filter(Boolean));
+      if (Array.isArray(sug.expected_outputs)) setOuts(sug.expected_outputs.filter(Boolean));
+      if (Array.isArray(sug.acceptance)) setAccept(sug.acceptance.filter(Boolean));
+      if (sug.command_hint != null) setCmd(String(sug.command_hint));
+      window.PRUI.toast('Applied the assistant’s suggestions — review & Save', { kind: 'ok' });
+    }
+    function askAssistant(text, opts) {
+      opts = opts || {};
+      var files = opts.files || att;
+      var bubble = opts.userBubble != null ? opts.userBubble : text;
+      var history = cmsgs.map(function (m) { return { role: m.role, content: m.content }; });
+      if (bubble) setCmsgs(function (m) { return m.concat([{ role: 'user', content: bubble }]); });
+      setCbusy(true);
+      var task = { title: title, kind: kind, instruction: instr, inputs: inputs, expected_outputs: outs, acceptance: accept, command_hint: cmd };
+      sb.functions.invoke('research-protocol', { body: { action: 'task_assist', project_id: props.projectId, task: task, message: text, history: history, files: files.map(function (a) { return { name: a.name, mime: a.mime, size: a.size, note: a.note }; }) } }).then(function (r) {
+        setCbusy(false); var d = r && r.data;
+        if (!d || d.error) { setCmsgs(function (m) { return m.concat([{ role: 'assistant', content: 'AI is unavailable' + (d && d.error ? ': ' + d.error : '') + '.' }]); }); return; }
+        setCmsgs(function (m) { return m.concat([{ role: 'assistant', content: d.reply || '…', questions: d.questions || [], suggestion: d.suggestion || null }]); });
+      }, function () { setCbusy(false); setCmsgs(function (m) { return m.concat([{ role: 'assistant', content: 'AI connection failed — is research-protocol deployed?' }]); }); });
+    }
+    function sendChat() { var t = cinput.trim(); if (!t || cbusy) return; setCinput(''); askAssistant(t); }
     function toggleDep(o) { setDeps(function (d) { return d.indexOf(o) >= 0 ? d.filter(function (x) { return x !== o; }) : d.concat([o]); }); }
     function uploadList(items) {   // items: [{file, relpath}] — shared by the inputs and the drop zone
       if (!items.length) return;
       var batch = String(Date.now()) + '_' + Math.random().toString(36).slice(2, 7);
       var added = [], done = 0; setUpBusy('Uploading 0/' + items.length);
       (function next(i) {
-        if (i >= items.length) { if (added.length) setAtt(function (a) { return a.concat(added); }); setUpBusy(''); return; }
+        if (i >= items.length) { if (added.length) { setAtt(function (a) { return a.concat(added); }); askAssistant('I just uploaded ' + added.length + ' file(s) for this task: ' + added.map(function (x) { return x.name; }).join(', ') + '. What do you need to know to define the task around this data?', { files: att.concat(added), userBubble: '📎 Uploaded: ' + added.map(function (x) { return x.name; }).join(', ') }); } setUpBusy(''); return; }
         var f = items[i].file; var rel = items[i].relpath || f.name;
         var sp = props.projectId + '/protocol/' + batch + '/' + rel.replace(/[^A-Za-z0-9._\/-]/g, '_');
         sb.storage.from('research-data').upload(sp, f).then(function (res) {
@@ -2335,8 +2367,32 @@
         window.PRUI.toast('Refined — review and Save', { kind: 'ok' });
       }, function (e) { setRefining(false); window.PRUI.toast('Refine failed: ' + e, { kind: 'error' }); });
     }
+    function sugSummary(s) { var p = []; if (s.title) p.push('title'); if (s.kind) p.push('kind'); if (s.instruction != null) p.push('instruction'); if (s.inputs) p.push('inputs'); if (s.expected_outputs) p.push('outputs'); if (s.acceptance) p.push('acceptance'); if (s.command_hint != null) p.push('command'); return 'Fills: ' + (p.join(', ') || '—'); }
+    var msgBubble = function (m, i) {
+      var mine = m.role === 'user';
+      return h('div', { key: i, style: { display: 'flex', justifyContent: mine ? 'flex-end' : 'flex-start', marginBottom: 8 } },
+        h('div', { style: { maxWidth: '88%' } },
+          h('div', { style: { background: mine ? 'var(--accent)' : 'var(--surface)', color: mine ? '#fff' : 'var(--ink)', border: mine ? 'none' : '1px solid var(--line)', borderRadius: 12, padding: '8px 11px', fontSize: 12.5, lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, m.content),
+          (!mine && m.questions && m.questions.length) ? h('div', { style: { marginTop: 6, display: 'flex', flexDirection: 'column', gap: 4 } }, m.questions.map(function (q, qi) {
+            return h('button', { key: qi, style: { textAlign: 'left', fontSize: 11.5, color: 'var(--accent)', background: 'var(--accent-tint)', border: '1px solid color-mix(in srgb,var(--accent) 25%,transparent)', borderRadius: 8, padding: '5px 9px', cursor: 'pointer' }, title: 'Put this in the box to answer it', onClick: function () { setCinput(q + ' '); } }, '❓ ' + q);
+          })) : null,
+          (!mine && m.suggestion) ? h('div', { style: { marginTop: 6, background: 'var(--accent-tint)', border: '1px solid color-mix(in srgb,var(--accent) 25%,transparent)', borderRadius: 10, padding: '9px 11px' } },
+            h('div', { style: { fontSize: 11, fontWeight: 700, color: 'var(--accent)', marginBottom: 5 } }, '✨ Suggested task fields'),
+            h('div', { style: { fontSize: 11.5, color: 'var(--muted)', marginBottom: 7, lineHeight: 1.5 } }, sugSummary(m.suggestion)),
+            h('button', { className: 'btn pri', style: { padding: '4px 11px', fontSize: 12 }, onClick: function () { applySuggestion(m.suggestion); } }, '↧ Apply to task')) : null));
+    };
+    var chatPane = h('div', { style: { flex: '1 1 44%', minWidth: 300, borderLeft: '1px solid var(--line)', display: 'flex', flexDirection: 'column', background: 'var(--softer, #f7f8fb)' } },
+      h('div', { style: { padding: '11px 14px', borderBottom: '1px solid var(--line)', flex: 'none' } },
+        h('div', { style: { fontWeight: 700, fontSize: 13 } }, '💬 Task assistant'),
+        h('div', { style: { fontSize: 11, color: 'var(--faint)', marginTop: 1 } }, 'Discuss this task, attach data, get clarifying questions')),
+      h('div', { ref: cscroll, style: { flex: 1, overflow: 'auto', padding: 14, minHeight: 0 } },
+        cmsgs.length ? cmsgs.map(msgBubble) : h('div', { style: { fontSize: 12, color: 'var(--faint)', textAlign: 'center', padding: '28px 12px', lineHeight: 1.6 } }, 'Ask me to help define this task — e.g. “what should the acceptance checks be?” — or attach data and I’ll ask what I need to know.'),
+        cbusy ? h('div', { style: { fontSize: 12, color: 'var(--muted)', fontStyle: 'italic', padding: '2px 4px' } }, '✨ Assistant is thinking…') : null),
+      h('div', { style: { borderTop: '1px solid var(--line)', padding: 10, display: 'flex', gap: 7, alignItems: 'flex-end', flex: 'none' } },
+        h('textarea', { className: 'field', rows: 2, style: { flex: 1, boxSizing: 'border-box', fontSize: 12.5, resize: 'none' }, placeholder: 'Message the assistant…  (Enter to send)', value: cinput, disabled: cbusy, onChange: function (e) { setCinput(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); } } }),
+        h('button', { className: 'btn pri', style: { flex: 'none', height: 34 }, disabled: cbusy || !cinput.trim(), onClick: sendChat }, '➤')));
     return h('div', { className: 'scrim', onClick: props.onClose }, h('div', {
-      className: 'modal', style: { width: 620 }, onClick: function (e) { e.stopPropagation(); },
+      className: 'modal', style: { width: 'min(1000px, 96vw)' }, onClick: function (e) { e.stopPropagation(); },
       // the WHOLE editor accepts drops (files or folders) — the zone below is just the visual target
       onDragOver: function (e) { e.preventDefault(); if (!dragOver) setDragOver(true); },
       onDragLeave: function (e) { if (e.relatedTarget && e.currentTarget.contains(e.relatedTarget)) return; setDragOver(false); },
@@ -2346,7 +2402,8 @@
         h('h3', { style: { margin: 0, flex: 1 } }, props.isNew ? 'New task' : 'Edit task'),
         st.id ? h('button', { className: 'btn', style: { padding: '4px 9px', fontSize: 12, flex: 'none' }, disabled: refining, title: 'Let Publify improve this step', onClick: refine }, refining ? '✨…' : '✨ Refine') : null,
         h('button', { className: 'icon-x', 'aria-label': 'Close', onClick: props.onClose }, '✕')),
-      h('div', { style: { padding: 16, display: 'flex', flexDirection: 'column', gap: 10, maxHeight: '70vh', overflow: 'auto' } },
+      h('div', { style: { display: 'flex', maxHeight: '74vh', minHeight: 340 } },
+        h('div', { style: { padding: 16, display: 'flex', flexDirection: 'column', gap: 10, overflow: 'auto', flex: '1 1 56%', minWidth: 0 } },
         refining ? h(AiThinking, { label: 'Refining this task', mini: true }) : null,
         h('div', { style: { display: 'flex', gap: 8 } },
           h('input', { className: 'field', style: { flex: 1 }, placeholder: 'Task title', value: title, onChange: function (e) { setTitle(e.target.value); } }),
@@ -2381,6 +2438,8 @@
           h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 6 } }, props.allSteps.filter(function (x) { return x.id !== st.id; }).map(function (x) {
             return h('button', { key: x.id, className: 'lchip' + (deps.indexOf(x.ord) >= 0 ? ' on' : ''), style: { fontSize: 11 }, onClick: function () { toggleDep(x.ord); } }, x.ord + '. ' + (x.title || '').slice(0, 26));
           }))) : null
+        ),
+        chatPane
       ),
       h('div', { style: { display: 'flex', gap: 8, justifyContent: 'flex-end', padding: '12px 16px', borderTop: '1px solid var(--line)' } },
         h('button', { className: 'btn', onClick: props.onClose }, 'Cancel'),
