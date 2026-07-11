@@ -2660,6 +2660,7 @@
       })(0);
     }
     function removeAiFile(i) { var a = aiFiles[i]; if (a && a.storage_path) { try { sb.storage.from('research-data').remove([a.storage_path]); } catch (e) { } } setAiFiles(function (x) { return x.filter(function (_, j) { return j !== i; }); }); }
+    function dlAiFile(a) { if (!a || !a.storage_path) return; sb.storage.from('research-data').createSignedUrl(a.storage_path, 3600, { download: (a.name || '').split('/').pop() }).then(function (r) { if (r && r.data && r.data.signedUrl) window.open(r.data.signedUrl, '_blank'); }); }
     function aiAppend() {
       var p = aiPrompt.trim(); if ((!p && !aiFiles.length) || aiBusy) return; setAiBusy(true);
       var files = aiFiles;
@@ -2864,6 +2865,7 @@
               h('span', { 'aria-hidden': 'true', title: s.kind, style: { fontSize: 14, flex: 'none' } }, STEP_ICON[s.kind] || '•'),
               h('button', { style: { flex: 1, minWidth: 0, textAlign: 'left', border: 0, background: 'transparent', font: 'inherit', cursor: 'pointer', color: 'var(--ink)', fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }, onClick: function () { setExp(function (p) { var n = Object.assign({}, p); n[s.id] = !n[s.id]; return n; }); } }, (open ? '▾ ' : '▸ ') + s.title),
               (sx.origin === 'citation-optimizer') ? h('span', { className: 'chip', style: { fontSize: 10, flex: 'none', background: 'var(--accent-tint)', color: 'var(--accent)', border: '1px solid color-mix(in srgb, var(--accent) 30%, transparent)' }, title: 'Added by the Citation Optimizer' }, '🔗 Citation') : null,
+              (sx.attachments && sx.attachments.length) ? h('span', { className: 'chip', style: { fontSize: 10, flex: 'none' }, title: sx.attachments.map(function (a) { return a.name; }).join(', ') }, '📎 ' + sx.attachments.length) : null,
               s.needs_approval ? h('span', { className: 'chip c-warn', style: { fontSize: 10, flex: 'none' }, title: 'Requires your approval before the runner executes it' }, '⏸') : null,
               (s.depends_on && s.depends_on.length) ? h('span', { style: { fontSize: 10.5, color: 'var(--faint)', flex: 'none' }, title: 'Runs after these steps' }, 'after ' + s.depends_on.join(',')) : null,
               h('span', { className: 'chip ' + pst[0], style: { fontSize: 10, flex: 'none' } }, pst[1])
@@ -2954,10 +2956,15 @@
               h('span', { style: { flex: 'none', fontVariantNumeric: 'tabular-nums' } }, aiUpBusy.done + ' / ' + aiUpBusy.total)),
             h('div', { style: { height: 6, background: 'var(--surface-3)', borderRadius: 999, overflow: 'hidden' } },
               h('div', { style: { height: '100%', width: (aiUpBusy.total ? Math.round(100 * aiUpBusy.done / aiUpBusy.total) : 0) + '%', background: 'var(--accent)', borderRadius: 999, transition: 'width .2s' } }))) : null,
-          aiFiles.length ? h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 7 } }, aiFiles.map(function (a, i) {
-            return h('span', { key: i, className: 'lchip', style: { fontSize: 11 }, title: a.name }, '📎 ' + ((a.name || '').split('/').pop().slice(0, 28)),
-              h('button', { 'aria-label': 'Remove', style: { marginLeft: 5, border: 0, background: 'transparent', cursor: 'pointer', color: 'var(--muted)' }, onClick: function () { removeAiFile(i); } }, '×'));
-          })) : null,
+          aiFiles.length ? h('div', { style: { marginTop: 8, border: '1px solid var(--line)', borderRadius: 8, padding: '8px 10px', background: 'var(--soft)' } },
+            h('div', { style: { fontSize: 11, fontWeight: 700, color: 'var(--muted)', marginBottom: 6 } }, '📎 Uploaded data (' + aiFiles.length + ') — will be attached to the generated data step'),
+            h('div', { style: { display: 'flex', flexDirection: 'column', gap: 4 } }, aiFiles.map(function (a, i) {
+              return h('div', { key: i, style: { display: 'flex', gap: 8, alignItems: 'center', fontSize: 11.5 } },
+                h('span', { style: { flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, title: a.name }, '📄 ' + ((a.name || '').split('/').pop())),
+                h('span', { style: { color: 'var(--faint)', flex: 'none' } }, (a.mime ? ((a.mime.split('/').pop() || a.mime) + ' · ') : '') + (a.size != null ? (a.size >= 1048576 ? (Math.round(a.size / 104857.6) / 10 + ' MB') : (Math.max(1, Math.round(a.size / 1024)) + ' KB')) : '')),
+                h('button', { className: 'fb-mini', 'aria-label': 'Download', title: 'Download', onClick: function () { dlAiFile(a); } }, '⬇'),
+                h('button', { className: 'fb-mini', 'aria-label': 'Remove', title: 'Remove', onClick: function () { removeAiFile(i); } }, '×'));
+            }))) : null,
           aiBusy ? h('div', { style: { marginTop: 8 } }, h(AiThinking, { label: aiFiles.length ? 'Drafting a pipeline to process your data' : 'Drafting new tasks from your prompt' })) : null
         ) : null
       ) : null,
