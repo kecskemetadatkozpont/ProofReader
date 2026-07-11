@@ -69,23 +69,40 @@
     });
   }
   function applyPlan(plan) {
+    var applyBtn = document.getElementById('mApply'); if (applyBtn) { applyBtn.disabled = true; applyBtn.textContent = 'Applying…'; }
+    var restore = function (lbl) { if (applyBtn) { applyBtn.disabled = false; applyBtn.textContent = lbl; } };
     var uid = (BE.user && BE.user.id) || null;
     var jobs = [saveBrief(plan.target)];
     if (plan.target === 'protocol' && plan.protocol) {
       var maxOrd = (plan.allSteps || []).reduce(function (m, x) { return Math.max(m, x.ord || 0); }, 0);
-      jobs.push(sb.from('research_protocol_steps').insert({ protocol_id: plan.protocol.id, ord: maxOrd + 1, title: plan.newTask.title, kind: 'writeup', spec: { instruction: plan.directive }, depends_on: [], needs_approval: true }));
+      // tag the step + notes with origin so the Protocol panel can mark them
+      jobs.push(sb.from('research_protocol_steps').insert({ protocol_id: plan.protocol.id, ord: maxOrd + 1, title: plan.newTask.title, kind: 'writeup', spec: { instruction: plan.directive, origin: 'citation-optimizer' }, depends_on: [], needs_approval: true }));
       (plan.steps || []).forEach(function (s) {
         jobs.push(sb.from('research_protocol_notes').insert({ project_id: projId(), protocol_id: plan.protocol.id, step_id: s.id, author_id: uid, author_name: 'Citation Optimizer', kind: 'dir', body: plan.directive }));
       });
     }
     Promise.all(jobs).then(function (rs) {
       var err = rs.find(function (r) { return r && r.error; });
-      closeModal();
-      if (err) { toast('Some changes failed: ' + err.error.message, false); return; }
-      if (plan.target === 'writing') toast('✓ Saved a positioning brief to your Writing documents.');
-      else if (plan.protocol) toast('✓ Added 1 task + ' + (plan.steps.length) + ' instruction' + (plan.steps.length === 1 ? '' : 's') + ' + a brief to your Protocol.');
-      else toast('✓ Saved the citation brief to your Protocol documents.');
-    }, function (e) { closeModal(); toast('Could not apply: ' + ((e && e.message) || e), false); });
+      if (err) { restore(plan.protocol ? 'Apply to Protocol' : 'Save document'); toast('Some changes failed: ' + err.error.message, false); return; }
+      showSuccess(plan);
+    }, function (e) { restore(plan.protocol ? 'Apply to Protocol' : 'Save document'); toast('Could not apply: ' + ((e && e.message) || e), false); });
+  }
+  function showSuccess(plan) {
+    if (!modalEl) { toast('✓ Applied.'); return; }
+    var pid = projId(), isProt = plan.target === 'protocol' && plan.protocol;
+    var added = isProt
+      ? '<ul class="cm-done"><li><b>➕ 1 new task</b> — ' + esc(plan.newTask.title) + '</li>' + (plan.steps.length ? '<li><b>📌 ' + plan.steps.length + ' instruction' + (plan.steps.length === 1 ? '' : 's') + '</b> — added to your write-up task' + (plan.steps.length === 1 ? '' : 's') + '</li>' : '') + '<li><b>📄 1 document</b> — ' + esc(plan.doc) + '</li></ul>'
+      : '<ul class="cm-done"><li><b>📄 1 document</b> — ' + esc(plan.doc) + '</li></ul>';
+    var openBtn = isProt
+      ? '<a class="btn pri" href="Research.html?project=' + encodeURIComponent(pid) + '&step=1">Open Protocol →</a>'
+      : '<a class="btn pri" href="Research.html?project=' + encodeURIComponent(pid) + '">Open Research →</a>';
+    modalEl.querySelector('.co-modal').innerHTML =
+      '<div class="cm-head"><b>Applied to your ' + (plan.target === 'protocol' ? 'Protocol' : 'Writing') + '</b><button class="cm-x" id="mX2" aria-label="Close">✕</button></div>'
+      + '<div class="cm-body"><div class="cm-success"><div class="cm-check">✓</div><div style="flex:1"><b>Done — here is what was added:</b>' + added
+      + (isProt ? '<p class="cm-hint">In the <b>Protocol</b> tab these are marked with a <span class="cm-badge">🔗 Citation Optimizer</span> tag so you can spot them.</p>' : '') + '</div></div></div>'
+      + '<div class="cm-foot"><button class="btn" id="mDone">Done</button>' + openBtn + '</div>';
+    document.getElementById('mX2').onclick = closeModal;
+    document.getElementById('mDone').onclick = closeModal;
   }
 
   // ---- preview modal: shows EXACTLY what "Use in ..." will add, before it applies ----

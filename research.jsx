@@ -2775,6 +2775,7 @@
               h('span', { style: { width: 18, textAlign: 'right', color: 'var(--faint)', fontSize: 12, flex: 'none' } }, s.ord),
               h('span', { 'aria-hidden': 'true', title: s.kind, style: { fontSize: 14, flex: 'none' } }, STEP_ICON[s.kind] || '•'),
               h('button', { style: { flex: 1, minWidth: 0, textAlign: 'left', border: 0, background: 'transparent', font: 'inherit', cursor: 'pointer', color: 'var(--ink)', fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }, onClick: function () { setExp(function (p) { var n = Object.assign({}, p); n[s.id] = !n[s.id]; return n; }); } }, (open ? '▾ ' : '▸ ') + s.title),
+              (sx.origin === 'citation-optimizer') ? h('span', { className: 'chip', style: { fontSize: 10, flex: 'none', background: 'var(--accent-tint)', color: 'var(--accent)', border: '1px solid color-mix(in srgb, var(--accent) 30%, transparent)' }, title: 'Added by the Citation Optimizer' }, '🔗 Citation') : null,
               s.needs_approval ? h('span', { className: 'chip c-warn', style: { fontSize: 10, flex: 'none' }, title: 'Requires your approval before the runner executes it' }, '⏸') : null,
               (s.depends_on && s.depends_on.length) ? h('span', { style: { fontSize: 10.5, color: 'var(--faint)', flex: 'none' }, title: 'Runs after these steps' }, 'after ' + s.depends_on.join(',')) : null,
               h('span', { className: 'chip ' + pst[0], style: { fontSize: 10, flex: 'none' } }, pst[1])
@@ -2819,8 +2820,9 @@
                 h('div', { className: 'res-h', style: { color: 'var(--accent)' } }, '🧭 Concerns, notes & new directions'),
                 notesOf(s).length ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 7, marginBottom: 9 } }, notesOf(s).map(function (n, k) {
                   var kl = n.kind === 'obs' ? ['💬', 'note'] : n.kind === 'dir' ? ['🧭', 'direction'] : ['⚠', 'concern'];
-                  return h('div', { key: n.id || k, className: 'note' }, h('span', { className: 'note-k' }, kl[0]), h('div', { style: { flex: 1 } },
-                    h('div', { style: { display: 'flex', gap: 7, alignItems: 'baseline', flexWrap: 'wrap' } }, h('span', { className: 'note-who' }, n.author_name || 'Member'), h('span', { className: 'note-kd' }, kl[1]), n.created_at ? h('span', { className: 'note-when' }, new Date(n.created_at).toLocaleDateString()) : null),
+                  var isCO = n.author_name === 'Citation Optimizer';
+                  return h('div', { key: n.id || k, className: 'note', style: isCO ? { borderLeft: '3px solid var(--accent)', paddingLeft: 9, background: 'var(--accent-tint)', borderRadius: 8 } : null }, h('span', { className: 'note-k' }, isCO ? '🔗' : kl[0]), h('div', { style: { flex: 1 } },
+                    h('div', { style: { display: 'flex', gap: 7, alignItems: 'baseline', flexWrap: 'wrap' } }, h('span', { className: 'note-who' }, n.author_name || 'Member'), h('span', { className: 'note-kd' }, isCO ? 'citation strategy' : kl[1]), n.created_at ? h('span', { className: 'note-when' }, new Date(n.created_at).toLocaleDateString()) : null),
                     h('div', { className: 'note-b' }, n.body)));
                 })) : null,
                 (function () {
