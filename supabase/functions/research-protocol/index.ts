@@ -109,13 +109,16 @@ Deno.serve(async (req) => {
     }
 
     if (action === 'append_steps') {
-      const pid = String(body.protocol_id || ''); const prompt = String(body.prompt || '').slice(0, 1500); const count = Math.min(6, Math.max(1, parseInt(body.count, 10) || 3));
-      if (!pid || !prompt) return json({ error: 'protocol_id + prompt required' }, 400);
+      const pid = String(body.protocol_id || ''); const prompt = String(body.prompt || '').slice(0, 1500);
+      const files = Array.isArray(body.files) ? body.files.slice(0, 20) : [];
+      const count = Math.min(6, Math.max(1, parseInt(body.count, 10) || (files.length ? 5 : 3)));
+      if (!pid || (!prompt && !files.length)) return json({ error: 'protocol_id + prompt or files required' }, 400);
       const pq = await sb.from('research_protocols').select('goal,context_snapshot').eq('id', pid).single();
       const exq = await sb.from('research_protocol_steps').select('ord,title,kind').eq('protocol_id', pid).order('ord');
       const ex = (exq.data || []); const ctx = (pq.data && pq.data.context_snapshot) || {};
-      const sys = `Propose NEW steps to add to an existing executable research protocol. Return ONLY a JSON object {"steps":[{"title","kind","instruction","inputs":[],"expected_outputs":[],"acceptance":[],"command_hint":"","est_minutes":N,"depends_on":[],"needs_approval":bool}]}. Use depends_on with the 1-based positions of EXISTING steps if relevant. At most ${count} steps, concise.`;
-      const u = `PROTOCOL GOAL: ${(pq.data && pq.data.goal) || ''}\nIDEA: ${(ctx.idea && ctx.idea.question) || ''}\n\nEXISTING STEPS:\n${ex.map((e: any) => `${e.ord}. [${e.kind}] ${e.title}`).join('\n') || '(none)'}\n\nADD STEPS FOR: ${prompt}`;
+      const filesTxt = files.length ? `\n\nThe researcher UPLOADED these data files for these tasks. Generate a small pipeline that LOADS and PROCESSES this specific data — a "data" step first (the files will be attached to it), then the preprocessing/analysis/eval steps that consume it. Reference the file names in the instructions.\n${files.map((f: any) => `- ${String(f.name || 'file')} (${f.mime || 'type?'}${f.size ? ', ' + Math.round(f.size / 1024) + ' KB' : ''})${f.note ? ' — ' + String(f.note).slice(0, 200) : ''}`).join('\n')}` : '';
+      const sys = `Propose NEW steps to add to an existing executable research protocol. Return ONLY a JSON object {"steps":[{"title","kind","instruction","inputs":[],"expected_outputs":[],"acceptance":[],"command_hint":"","est_minutes":N,"depends_on":[],"needs_approval":bool}]}. Use depends_on with the 1-based positions of EXISTING steps if relevant. At most ${count} steps, concise. When data files are provided, the FIRST step must be kind:"data" (data ingestion/validation of those files).`;
+      const u = `PROTOCOL GOAL: ${(pq.data && pq.data.goal) || ''}\nIDEA: ${(ctx.idea && ctx.idea.question) || ''}\n\nEXISTING STEPS:\n${ex.map((e: any) => `${e.ord}. [${e.kind}] ${e.title}`).join('\n') || '(none)'}\n\nADD STEPS FOR: ${prompt || '(process the uploaded data below)'}${filesTxt}`;
       const raw = await callClaude(sys, u, model); const m = raw.match(/\{[\s\S]*\}/);
       if (!m) return json({ error: 'model returned no JSON' }, 502);
       let p: any; try { p = JSON.parse(m[0]); } catch (e) { return json({ error: 'bad JSON: ' + e }, 502); }

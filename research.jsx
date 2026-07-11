@@ -2461,6 +2461,9 @@
     var edS = useState(null), editing = edS[0], setEditing = edS[1];   // { step, isNew, after }
     var apS = useState(''), aiPrompt = apS[0], setAiPrompt = apS[1];
     var abS = useState(false), aiBusy = abS[0], setAiBusy = abS[1];
+    var afS = useState([]), aiFiles = afS[0], setAiFiles = afS[1];     // data uploaded for AI task generation
+    var aubS = useState(''), aiUpBusy = aubS[0], setAiUpBusy = aubS[1];
+    var aiFileRef = useRef(null);
     var rvS = useState(null), rvMd = rvS[0], setRvMd = rvS[1];   // full-report reader markdown
     var dsS = useState(null), dropStep = dsS[0], setDropStep = dsS[1];   // step id a file is being dragged over
     var usS = useState(null), upStep = usS[0], setUpStep = usS[1];       // { id, msg } while uploading onto a step
@@ -2634,12 +2637,31 @@
         });
       }, function (e) { setBusy(false); window.PRUI.toast('Split failed: ' + e, { kind: 'error' }); });
     }
+    function aiUploadData(fileList) {
+      var items = Array.prototype.slice.call(fileList || []); if (!items.length) return;
+      var batch = String(Date.now()) + '_' + Math.random().toString(36).slice(2, 7);
+      var added = [], done = 0; setAiUpBusy('0/' + items.length);
+      (function next(i) {
+        if (i >= items.length) { if (added.length) setAiFiles(function (a) { return a.concat(added); }); setAiUpBusy(''); return; }
+        var f = items[i]; var rel = f.webkitRelativePath || f.name;
+        var sp = props.projectId + '/protocol/' + batch + '/' + rel.replace(/[^A-Za-z0-9._\/-]/g, '_');
+        sb.storage.from('research-data').upload(sp, f).then(function (res) {
+          done++; setAiUpBusy(done + '/' + items.length);
+          if (!(res && res.error)) added.push({ name: rel, storage_path: sp, mime: f.type || '', size: f.size, note: '' });
+          next(i + 1);
+        }, function () { done++; next(i + 1); });
+      })(0);
+    }
+    function removeAiFile(i) { var a = aiFiles[i]; if (a && a.storage_path) { try { sb.storage.from('research-data').remove([a.storage_path]); } catch (e) { } } setAiFiles(function (x) { return x.filter(function (_, j) { return j !== i; }); }); }
     function aiAppend() {
-      var p = aiPrompt.trim(); if (!p || aiBusy) return; setAiBusy(true);
-      sb.functions.invoke('research-protocol', { body: { action: 'append_steps', protocol_id: prot.id, project_id: props.projectId, prompt: p } }).then(function (r) {
+      var p = aiPrompt.trim(); if ((!p && !aiFiles.length) || aiBusy) return; setAiBusy(true);
+      var files = aiFiles;
+      sb.functions.invoke('research-protocol', { body: { action: 'append_steps', protocol_id: prot.id, project_id: props.projectId, prompt: p, files: files.map(function (a) { return { name: a.name, mime: a.mime, size: a.size, note: a.note }; }) } }).then(function (r) {
         var subs = r && r.data && r.data.steps;
         if (!subs || !subs.length) { setAiBusy(false); window.PRUI.toast('No tasks suggested: ' + ((r && r.data && r.data.error) || ''), { kind: 'error' }); return; }
-        insertSteps(subs, null).then(function () { setAiBusy(false); setAiPrompt(''); });
+        // attach the uploaded data to the first generated (data-ingest) step so the runner has it
+        if (files.length && subs[0]) { var s0 = subs[0]; subs[0].spec = { instruction: s0.instruction || '', inputs: s0.inputs || [], expected_outputs: s0.expected_outputs || [], acceptance: s0.acceptance || [], command_hint: s0.command_hint || '', est_minutes: (s0.est_minutes != null ? s0.est_minutes : null), attachments: files }; }
+        insertSteps(subs, null).then(function () { setAiBusy(false); setAiPrompt(''); setAiFiles([]); window.PRUI.toast('Added ' + subs.length + ' task' + (subs.length === 1 ? '' : 's') + (files.length ? ' — your data is attached to the first' : ''), { kind: 'ok' }); });
       }, function (e) { setAiBusy(false); window.PRUI.toast('Add failed: ' + e, { kind: 'error' }); });
     }
 
@@ -2911,11 +2933,19 @@
             ) : null
           );
         }) : h('div', { className: 'empty' }, 'No steps.'),
-        ce ? h('div', { style: { marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--line)' } },
+        ce ? h('div', { style: { marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--line)' } },
+          h('div', { style: { fontSize: 11.5, fontWeight: 700, color: 'var(--accent)', marginBottom: 2 } }, '✨ Generate tasks with AI'),
+          h('div', { style: { fontSize: 11.5, color: 'var(--faint)', marginBottom: 7 } }, 'Describe what you need — or attach data and the AI drafts a small pipeline to process it. (For a single task by hand, use “+ Add task” above.)'),
           h('div', { style: { display: 'flex', gap: 6 } },
-            h('input', { className: 'field', style: { flex: 1, minWidth: 0 }, placeholder: '✨ Describe task(s) to add — e.g. "add an ablation comparing fusion variants"', value: aiPrompt, disabled: aiBusy, onChange: function (e) { setAiPrompt(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter') aiAppend(); } }),
-            h('button', { className: 'btn', style: { flex: 'none' }, disabled: aiBusy || !aiPrompt.trim(), onClick: aiAppend }, aiBusy ? '✨ Working…' : '✨ Add tasks')),
-          aiBusy ? h('div', { style: { marginTop: 8 } }, h(AiThinking, { label: 'Drafting new tasks from your prompt' })) : null
+            h('input', { className: 'field', style: { flex: 1, minWidth: 0 }, placeholder: aiFiles.length ? 'Optional: how to process the attached data…' : 'e.g. "add an ablation comparing fusion variants" or attach a dataset →', value: aiPrompt, disabled: aiBusy, onChange: function (e) { setAiPrompt(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter') aiAppend(); } }),
+            h('button', { className: 'btn', style: { flex: 'none' }, title: 'Attach data — the AI generates tasks to process it', disabled: aiBusy, onClick: function () { if (aiFileRef.current) aiFileRef.current.click(); } }, aiUpBusy ? ('⤒ ' + aiUpBusy) : '⤒ Data'),
+            h('input', { ref: aiFileRef, type: 'file', multiple: true, style: { display: 'none' }, onChange: function (e) { aiUploadData(e.target.files); if (e.target) e.target.value = ''; } }),
+            h('button', { className: 'btn pri', style: { flex: 'none' }, disabled: aiBusy || (!aiPrompt.trim() && !aiFiles.length), onClick: aiAppend }, aiBusy ? '✨ Working…' : '✨ Generate')),
+          aiFiles.length ? h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 7 } }, aiFiles.map(function (a, i) {
+            return h('span', { key: i, className: 'lchip', style: { fontSize: 11 }, title: a.name }, '📎 ' + ((a.name || '').split('/').pop().slice(0, 28)),
+              h('button', { 'aria-label': 'Remove', style: { marginLeft: 5, border: 0, background: 'transparent', cursor: 'pointer', color: 'var(--muted)' }, onClick: function () { removeAiFile(i); } }, '×'));
+          })) : null,
+          aiBusy ? h('div', { style: { marginTop: 8 } }, h(AiThinking, { label: aiFiles.length ? 'Drafting a pipeline to process your data' : 'Drafting new tasks from your prompt' })) : null
         ) : null
       ) : null,
       lb ? ReactDOM.createPortal(h('div', { className: 'fig-lb', onClick: function () { setLb(null); } },
