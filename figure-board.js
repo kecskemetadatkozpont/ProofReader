@@ -469,6 +469,12 @@
         var pro = b.dataset.m === 'pro'; if (pro === S.pro) return;
         S.pro = pro; var app = document.querySelector('.app'); app.classList.toggle('pro', pro); app.classList.toggle('simple', !pro);
         ms.querySelectorAll('button').forEach(function (x) { x.classList.toggle('on', (x.dataset.m === 'pro') === pro); });
+        if (!pro) {
+          // entering Simple → snap back to the essentials so no advanced-only state is left stranded
+          S.group = 'paper';
+          var gs = document.getElementById('grpseg'); if (gs) gs.querySelectorAll('button').forEach(function (x) { x.classList.toggle('on', x.dataset.g === 'paper'); });
+          if (S.showHidden) { S.showHidden = false; load().then(function () { sidebar(); render(); }); return; }
+        }
         sidebar(); render();
       };
     });
