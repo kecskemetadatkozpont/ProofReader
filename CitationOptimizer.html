@@ -27,6 +27,8 @@
     .btn { display:inline-flex; align-items:center; gap:7px; height:36px; border:1px solid var(--line); background:var(--surface); color:var(--ink); border-radius:10px; padding:0 14px; font-family:inherit; font-size:13px; font-weight:650; cursor:pointer; text-decoration:none; }
     .btn:hover { border-color:var(--line-2); } .btn:disabled { opacity:.5; cursor:default; }
     .btn.pri { background:var(--accent); border-color:var(--accent); color:#fff; } .btn.pri:hover { background:var(--accent-d); }
+    .btn.ic { width:36px; padding:0; justify-content:center; font-size:15px; flex:none; }
+    .btn.ic.on { background:var(--accent-tint); border-color:var(--accent); color:var(--accent); }
 
     .topbar { position:sticky; top:0; z-index:20; background:color-mix(in srgb,var(--surface) 90%,transparent); backdrop-filter:blur(8px); border-bottom:1px solid var(--line); }
     .topbar-in { max-width:1080px; margin:0 auto; padding:0 22px; display:flex; align-items:center; gap:13px; height:56px; }
@@ -137,7 +139,7 @@
   <script src="backend/config.js?v=1783137934"></script>
   <script src="auth.js?v=1783137934"></script>
   <script src="backend.js?v=1783539952"></script>
-  <script src="citation-optimizer.js?v=1783702600"></script>
+  <script src="citation-optimizer.js?v=1783723800"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>

@@ -193,11 +193,17 @@
   function setBusy(msg, done, total) { S.busy = { msg: msg, done: done, total: total }; render(); }
 
   // ---- render ----
+  function nd() { return !!(window.PRDesign && window.PRDesign.isNew()); }
   function shell(contentHTML) {
     root.innerHTML = '<div class="topbar"><div class="topbar-in">'
       + '<a class="brand" href="Research.html?project=' + esc(projId() || '') + '"><span class="mk"><i></i></span><span>Publify<small>Citation Optimizer</small></span></a>'
-      + '<span class="spring"></span><a class="btn" href="Research.html?project=' + esc(projId() || '') + '">← Research</a></div></div>'
+      + '<span class="spring"></span>'
+      + '<button class="btn ic" id="co-dark" title="Toggle dark mode" aria-label="Toggle dark mode">◐</button>'
+      + '<button class="btn ic' + (nd() ? ' on' : '') + '" id="co-design" title="Toggle the new design (beta)" aria-label="Toggle the new design">✨</button>'
+      + '<a class="btn" href="Research.html?project=' + esc(projId() || '') + '">← Research</a></div></div>'
       + '<div class="wrap" id="wrap">' + contentHTML + '</div>';
+    var cd = document.getElementById('co-dark'); if (cd) cd.onclick = function () { if (window.PRTheme) window.PRTheme.toggle(); };
+    var cg = document.getElementById('co-design'); if (cg) cg.onclick = function () { if (window.PRDesign) { window.PRDesign.toggle(); cg.classList.toggle('on', window.PRDesign.isNew()); } };
   }
 
   function intentMix(mix) {

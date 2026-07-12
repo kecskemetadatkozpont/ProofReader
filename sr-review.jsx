@@ -252,6 +252,8 @@
         h('a', { className: 'brand', href: back }, h('span', { className: 'mk' }, h('span')), h('span', null, 'Publify', h('small', null, 'Review results'))),
         h('a', { className: 'crumb', href: back }, '← Back to Studies'),
         h('span', { style: { flex: 1 } }),
+        h('button', { className: 'btn ic', title: 'Toggle dark mode', 'aria-label': 'Toggle dark mode', onClick: function () { if (window.PRTheme) window.PRTheme.toggle(); } }, '◐'),
+        h('button', { className: 'btn ic' + (window.PRDesign && window.PRDesign.isNew() ? ' on' : ''), title: 'Toggle the new design (beta)', 'aria-label': 'Toggle the new design', onClick: function (ev) { if (window.PRDesign) { window.PRDesign.toggle(); ev.currentTarget.classList.toggle('on', window.PRDesign.isNew()); } } }, '✨'),
         e.pdf ? h('a', { className: 'btn', href: e.pdf, target: '_blank' }, 'PDF') : null,
         e.docx ? h('a', { className: 'btn', href: e.docx, target: '_blank' }, 'DOCX') : null
       )),
