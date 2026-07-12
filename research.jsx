@@ -12,6 +12,7 @@
   var STAGES = ['Setup', 'Idea', 'Literature', 'Protocol', 'Journal', 'Writing', 'Submission'];
   // clicking a workflow step opens the matching panel (the old redundant tab row is gone)
   var STAGE_TAB = ['overview', 'ideas', 'literature', 'protocol', 'journal', 'writing', 'submission'];
+  function nd() { return !!(window.PRDesign && window.PRDesign.isNew()); }   // "New design" flag → Academic Data-Dense redesign (behind the toggle; reads at render time, flip triggers a reload)
   function svg() { var args = Array.prototype.slice.call(arguments); return h('svg', { viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round', strokeLinejoin: 'round' }, args.map(function (d, i) { return h('path', { key: i, d: d }); })); }
   var STAGE_ICONS = [
     svg('M4 14V2.5', 'M4 3h7l-1.4 2.3L11 7.6H4'),                                         // Setup — flag
@@ -1142,6 +1143,10 @@
     var fl = useState({ minCites: '', fromYear: '', indexed: false, oa: false, journals: false }), flt = fl[0], setFlt = fl[1];
     var sm = useState(null), scimap = sm[0], setScimap = sm[1];
     var sq = useState(0), scopusMax = sq[0], setScopusMax = sq[1];
+    // Redesigned Library (New design flag): sort key/dir + screening/quartile filters for the dense sortable table
+    var lsS = useState({ key: 'cites', dir: -1 }), libSort = lsS[0], setLibSort = lsS[1];
+    var lfS = useState('all'), libScreen = lfS[0], setLibScreen = lfS[1];   // all|include|maybe|exclude|unscreened
+    var lqS = useState(0), libQmax = lqS[0], setLibQmax = lqS[1];           // 0 = any, else max quartile
     useEffect(function () { loadScimago().then(setScimap); }, []);
     // source_ids that were selected in a Study (AI-included in any step, or the user's "Your decision" override) —
     // these float to the top of the Library and are highlighted.
@@ -1192,6 +1197,77 @@
     var lib = (props.sources || []).slice().sort(function (a, b) { return ((studyInc[b.id] && studyInc[b.id].length) ? 1 : 0) - ((studyInc[a.id] && studyInc[a.id].length) ? 1 : 0); });   // study-selected sources first
     var hasSci = scimap && Object.keys(scimap).length > 0;
     var shown = results ? (scopusMax ? results.filter(function (w) { var qq = scopusQ(scimap, w); return qq != null && qq <= scopusMax; }) : results) : null;
+    // ---- Redesigned Library (New design flag): filter sidebar + dense sortable table, wired to the SAME props.sources / setScreen / del ----
+    function libScreenOf(s) { return (s.screening === 'include' || s.screening === 'maybe' || s.screening === 'exclude') ? s.screening : 'unscreened'; }
+    function libQOf(s) { return quartileFromIssn(scimap, s.issn); }   // 1..4 or null (derived from ISSN via SCImago map)
+    function libNewBody() {
+      var counts = { all: lib.length, include: 0, maybe: 0, exclude: 0, unscreened: 0 };
+      lib.forEach(function (s) { counts[libScreenOf(s)]++; });
+      var rows = lib.filter(function (s) {
+        if (libScreen !== 'all' && libScreenOf(s) !== libScreen) return false;
+        if (libQmax) { var q = libQOf(s); if (!(q && q <= libQmax)) return false; }
+        return true;
+      });
+      var SK = libSort.key, dir = libSort.dir;
+      var SORD = { include: 0, maybe: 1, unscreened: 2, exclude: 3 };
+      rows = rows.slice().sort(function (a, b) {
+        if (SK === 'title') { var at = (a.title || '').toLowerCase(), bt = (b.title || '').toLowerCase(); return (at < bt ? -1 : at > bt ? 1 : 0) * dir; }
+        var av, bv;
+        if (SK === 'year') { av = a.year || 0; bv = b.year || 0; }
+        else if (SK === 'q') { av = libQOf(a) || 9; bv = libQOf(b) || 9; }
+        else if (SK === 'screen') { av = SORD[libScreenOf(a)]; bv = SORD[libScreenOf(b)]; }
+        else { av = a.cited_by || 0; bv = b.cited_by || 0; }   // 'cites' (default)
+        return (av - bv) * dir;
+      });
+      function sortTh(label, key, align) {
+        var on = SK === key;
+        return h('th', { className: 'rv-th sortable' + (align === 'r' ? ' r' : align === 'c' ? ' c' : ''), 'aria-sort': on ? (dir < 0 ? 'descending' : 'ascending') : null, onClick: function () { setLibSort(on ? { key: key, dir: -dir } : { key: key, dir: key === 'title' ? 1 : -1 }); } }, label, on ? h('span', { className: 'rv-caret' }, dir < 0 ? ' ▾' : ' ▴') : null);
+      }
+      var FILTERS = [['all', 'All'], ['include', 'Included'], ['maybe', 'Maybe'], ['exclude', 'Excluded'], ['unscreened', 'Unscreened']];
+      return h('div', { className: 'rv-lib' },
+        h('aside', { className: 'rv-lib-side' },
+          h('div', { className: 'rv-fl' }, 'Filters'),
+          h('div', { className: 'rv-fgrp' },
+            h('div', { className: 'rv-fk' }, 'Decision'),
+            FILTERS.map(function (f) { return h('button', { key: f[0], className: 'rv-chk' + (libScreen === f[0] ? ' on' : ''), 'aria-pressed': libScreen === f[0], onClick: function () { setLibScreen(f[0]); } }, h('span', null, f[1]), h('span', { className: 'n' }, String(counts[f[0]]))); })
+          ),
+          hasSci ? h('div', { className: 'rv-fgrp' },
+            h('div', { className: 'rv-fk' }, 'Journal quartile'),
+            [[0, 'Any'], [1, 'Q1'], [2, 'Q1–Q2'], [3, 'Q1–Q3'], [4, 'Q1–Q4']].map(function (o) { return h('button', { key: o[0], className: 'rv-chk' + (libQmax === o[0] ? ' on' : ''), 'aria-pressed': libQmax === o[0], onClick: function () { setLibQmax(o[0]); } }, h('span', null, o[1])); })
+          ) : null
+        ),
+        h('div', { className: 'rv-lib-main' },
+          rows.length ? h('div', { className: 'rv-tblwrap' }, h('table', { className: 'rv-ltable' },
+            h('thead', null, h('tr', null,
+              sortTh('Title', 'title', 'l'),
+              h('th', { className: 'rv-th' }, 'Authors'),
+              sortTh('Year', 'year', 'r'),
+              h('th', { className: 'rv-th' }, 'Venue'),
+              sortTh('Cites', 'cites', 'r'),
+              hasSci ? sortTh('Q', 'q', 'c') : null,
+              sortTh('Decision', 'screen', 'l'),
+              props.canEdit ? h('th', { className: 'rv-th' }, '') : null
+            )),
+            h('tbody', null, rows.map(function (s) {
+              var q = libQOf(s);
+              return h('tr', { key: s.id, className: studyInc[s.id] ? 'rv-study' : null },
+                h('td', { className: 'rv-ti' }, s.url ? h('a', { href: s.url, target: '_blank' }, s.title) : s.title,
+                  (studyInc[s.id] && studyInc[s.id].length) ? h('span', { className: 'rv-instudy', title: 'Selected in study: ' + studyInc[s.id].join(', ') }, '★ in study') : null),
+                h('td', { className: 'rv-au' }, (s.authors && s.authors.length) ? s.authors.slice(0, 3).join(', ') : '—'),
+                h('td', { className: 'rv-n' }, s.year || '—'),
+                h('td', { className: 'rv-ve' }, s.venue || '—'),
+                h('td', { className: 'rv-n' }, s.cited_by != null ? s.cited_by : '–'),
+                hasSci ? h('td', { className: 'rv-qc' }, q ? h('span', { className: 'rv-qb q' + q }, 'Q' + q) : h('span', { className: 'rv-qb q0' }, '–')) : null,
+                h('td', null, props.canEdit
+                  ? h('div', { className: 'seg rv-seg', role: 'group', 'aria-label': 'Screening decision' }, ['include', 'maybe', 'exclude'].map(function (v) { return h('button', { key: v, className: s.screening === v ? 'on' : '', 'aria-pressed': s.screening === v, 'aria-label': v, onClick: function () { setScreen(s, v); } }, v); }))
+                  : h('span', { className: 'chip c-grey' }, s.screening || 'unscreened')),
+                props.canEdit ? h('td', null, h('button', { className: 'icon-x', 'aria-label': 'Delete source', onClick: function () { del(s); } }, '✕')) : null
+              );
+            }))
+          )) : h('div', { className: 'rv-empty' }, lib.length ? 'No sources match these filters.' : 'No sources saved yet — search above and Add.')
+        )
+      );
+    }
     return h('div', null,
       h('div', { className: 'panel' },
         h('h3', null, 'Literature search', h('span', { style: { fontWeight: 600, color: 'var(--faint)' } }, 'OpenAlex')),
@@ -1228,7 +1304,7 @@
           lib.length ? h('a', { className: 'btn', style: { padding: '4px 10px', fontSize: 12, textDecoration: 'none' }, href: 'CitationOptimizer.html?project=' + encodeURIComponent(props.projectId), title: 'Analyze what your top-cited included papers are cited FOR' }, '🔗 Citation Optimizer') : null,
           lib.length ? h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12 }, title: 'Export included (or all) as BibTeX', onClick: function () { var inc = lib.filter(function (x) { return x.screening === 'include'; }); downloadText('library.bib', genBibtex(inc.length ? inc : lib)); } }, '⬇ BibTeX') : null
         )),
-        lib.length ? lib.map(function (s) {
+        nd() ? libNewBody() : (lib.length ? lib.map(function (s) {
           return h('div', { className: 'src' + (studyInc[s.id] ? ' src-study' : ''), style: { alignItems: 'flex-start' }, key: s.id },
             h('div', { style: { flex: 1, minWidth: 0 } },
               h('b', { style: { fontSize: 13 } }, s.url ? h('a', { href: s.url, target: '_blank' }, s.title) : s.title),
@@ -1239,7 +1315,7 @@
             props.canEdit ? h('div', { className: 'seg', role: 'group', 'aria-label': 'Screening decision', style: { flex: 'none' } }, ['include', 'maybe', 'exclude'].map(function (v) { return h('button', { key: v, className: s.screening === v ? 'on' : '', 'aria-pressed': s.screening === v, 'aria-label': v, onClick: function () { setScreen(s, v); } }, v); })) : h('span', { className: 'chip c-grey' }, s.screening),
             props.canEdit ? h('button', { className: 'icon-x', 'aria-label': 'Delete source', style: { flex: 'none' }, onClick: function () { del(s); } }, '✕') : null
           );
-        }) : h('div', { style: { fontSize: 13, color: 'var(--faint)', padding: '8px 0' } }, 'No sources saved yet — search above and Add.')
+        }) : h('div', { style: { fontSize: 13, color: 'var(--faint)', padding: '8px 0' } }, 'No sources saved yet — search above and Add.'))
       ),
       pubsOpen ? h(MyPubsModal, { pubs: myPubs, saved: saved, onAdd: addPub, onClose: function () { setPubsOpen(false); } }) : null
     );
@@ -3305,6 +3381,20 @@
       h('div', { className: 'subtabs' }, [['overview', 'Overview', null], ['canvas', 'Canvas', null], ['notes', 'Notes', null], ['log', 'Log', (props.log || []).length], ['tasks', 'Tasks', openTasks]].map(function (t) {
         return h('button', { key: t[0], className: tab === t[0] ? 'on' : '', onClick: function () { setTab(t[0]); } }, t[1], t[2] ? h('span', { className: 'c' }, t[2]) : null);
       })),
+      nd() ? (function () {
+        var srcs = props.sources || [];
+        var kpi = [
+          ['Sources', srcs.length],
+          ['Included', srcs.filter(function (s) { return s.screening === 'include'; }).length],
+          ['Screened', srcs.filter(function (s) { return s.screening && s.screening !== 'unscreened'; }).length],
+          ['Ideas', (props.ideas || []).length],
+          ['Studies', (props.studies || []).length],
+          ['Open tasks', openTasks]
+        ];
+        return h('div', { className: 'rv-kpi' }, kpi.map(function (k) {
+          return h('div', { className: 'rv-kpi-c', key: k[0] }, h('div', { className: 'k' }, k[0]), h('div', { className: 'v' }, String(k[1])));
+        }));
+      })() : null,
       content,
       // #9 — persistent Lit. study: stays mounted (just hidden) on other tabs, so a running study keeps going
       // in the background while you use the Chat / other tabs.
@@ -3714,5 +3804,6 @@
 
   var ICp = h('svg', { 'aria-hidden': 'true', viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5 }, h('path', { d: 'M2 4.5A1.5 1.5 0 0 1 3.5 3H7l1.5 1.5h4A1.5 1.5 0 0 1 14 6v5.5A1.5 1.5 0 0 1 12.5 13h-9A1.5 1.5 0 0 1 2 11.5z' }));
 
+  window.addEventListener('pr-design', function () { location.reload(); });   // New-design flag flipped → re-init the Research page cleanly (nd() is read at render time)
   ReactDOM.createRoot(document.getElementById('root')).render(h(App));
 })();

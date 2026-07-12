@@ -8,6 +8,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <!-- New design (Academic Data-Dense): serif headings (Crimson Pro) + highly readable body (Atkinson Hyperlegible); applied only under html.newdesign -->
+  <link href="https://fonts.googleapis.com/css2?family=Crimson+Pro:wght@500;600;700&family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet" />
   <style>
     :root { --surface:#fff; --surface-2:#f5f6f9; --surface-3:#fafbfc; --accent-tint:#eef0ff; --ok:#15803d; --ok-bg:#e7f6ee; --warn:#b45309; --warn-bg:#fdf6e3; --danger:#b42318; --danger-bg:#fdeef0;
       --accent: #4f46e5; --accent-d: #4338ca; --ink: #1a2030; --muted: #5b6473; --faint: #8a92a0;
@@ -482,6 +484,78 @@
     .gb-proj { display: flex; align-items: center; gap: 5px; font-size: 10.5px; font-weight: 700; color: var(--muted); margin-bottom: 5px; overflow: hidden; }
     .gb-proj i { width: 7px; height: 7px; border-radius: 50%; flex: none; }
     .gb-proj span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    /* ============================================================
+       ACADEMIC DATA-DENSE REDESIGN — scoped to html.newdesign
+       (skill: Data-Dense Dashboard · type: Crimson Pro + Atkinson
+       Hyperlegible · palette tokens come from theme.js html.newdesign,
+       light + dark). Only structural/type rules live here; colours use
+       CSS variables so both themes adapt automatically.
+       ============================================================ */
+    html.newdesign body,
+    html.newdesign .app,
+    html.newdesign .main { font-family: 'Atkinson Hyperlegible', system-ui, sans-serif; }
+    /* controls otherwise keep theme.js's Plus Jakarta (element rule) — make them follow Atkinson too */
+    html.newdesign button, html.newdesign input, html.newdesign select, html.newdesign textarea { font-family: inherit; }
+    html.newdesign .dhead h1,
+    html.newdesign .head h1,
+    html.newdesign .rv-fl,
+    html.newdesign .rv-kpi-c .v { font-family: 'Crimson Pro', Georgia, serif; font-weight: 600; letter-spacing: -.2px; }
+    html.newdesign .dhead h1 { font-size: 26px; line-height: 1.12; }
+    /* Direction A is flat/academic — neutralize theme.js's Aurora-Pro frosted glass on panels/cards in dark so the page reads consistently with the flat KPI + table surfaces */
+    html.newdesign.dark .panel, html.newdesign.dark .card { background: var(--surface) !important; backdrop-filter: none !important; border: 1px solid var(--line) !important; box-shadow: none !important; }
+
+    /* KPI strip (new component under the sub-tabs) */
+    html.newdesign .rv-kpi { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 10px; margin: 14px 0 4px; }
+    html.newdesign .rv-kpi-c { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 11px 14px; }
+    html.newdesign .rv-kpi-c .k { font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 700; }
+    html.newdesign .rv-kpi-c .v { font-size: 26px; letter-spacing: -.5px; font-variant-numeric: tabular-nums; margin-top: 1px; color: var(--ink); }
+
+    /* Library: filter sidebar + dense sortable table (replaces div.src flex rows) */
+    html.newdesign .rv-lib { display: grid; grid-template-columns: 190px 1fr; gap: 16px; margin-top: 6px; }
+    html.newdesign .rv-lib-side { border-right: 1px solid var(--line); padding-right: 14px; }
+    html.newdesign .rv-fl { font-size: 14px; margin-bottom: 8px; color: var(--ink); }
+    html.newdesign .rv-fgrp { margin-bottom: 16px; }
+    html.newdesign .rv-fk { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 700; margin-bottom: 6px; }
+    html.newdesign .rv-chk { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; background: transparent; border: 1px solid transparent; border-radius: 7px; padding: 5px 8px; font-family: inherit; font-size: 12.5px; color: var(--ink); cursor: pointer; }
+    html.newdesign .rv-chk:hover { background: var(--surface-2); }
+    html.newdesign .rv-chk.on { background: var(--accent-tint); color: var(--accent); border-color: color-mix(in srgb, var(--accent) 30%, transparent); font-weight: 700; }
+    html.newdesign .rv-chk .n { margin-left: auto; font-variant-numeric: tabular-nums; color: var(--faint); }
+    html.newdesign .rv-chk.on .n { color: var(--accent); }
+
+    html.newdesign .rv-tblwrap { border: 1px solid var(--line); border-radius: 12px; overflow: auto; max-height: 65vh; background: var(--surface); }
+    html.newdesign .rv-ltable { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+    html.newdesign .rv-ltable thead th { position: sticky; top: 0; z-index: 1; background: var(--surface-2); text-align: left; font-size: 10.5px; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); font-weight: 700; padding: 9px 11px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+    html.newdesign .rv-ltable th.sortable { cursor: pointer; }
+    html.newdesign .rv-ltable th.sortable:hover { color: var(--ink); }
+    html.newdesign .rv-ltable th.r, html.newdesign .rv-ltable td.rv-n { text-align: right; }
+    html.newdesign .rv-ltable th.c, html.newdesign .rv-ltable td.rv-qc { text-align: center; }
+    html.newdesign .rv-caret { color: var(--accent); }
+    html.newdesign .rv-ltable tbody td { padding: 9px 11px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    html.newdesign .rv-ltable tbody tr:last-child td { border-bottom: 0; }
+    html.newdesign .rv-ltable tbody tr:hover td { background: var(--surface-2); }
+    html.newdesign .rv-ltable tbody tr.rv-study td { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+    html.newdesign .rv-ti { font-weight: 700; color: var(--ink); max-width: 340px; }
+    html.newdesign .rv-ti a { color: var(--ink); }
+    html.newdesign .rv-ti a:hover { color: var(--accent); }
+    html.newdesign .rv-instudy { display: inline-block; margin-left: 7px; font-size: 10px; font-weight: 700; color: var(--accent); background: var(--accent-tint); border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent); border-radius: 5px; padding: 1px 6px; vertical-align: middle; }
+    html.newdesign .rv-au { color: var(--muted); max-width: 150px; }
+    html.newdesign .rv-ve { color: var(--muted); max-width: 160px; }
+    html.newdesign td.rv-n { font-variant-numeric: tabular-nums; color: var(--muted); white-space: nowrap; }
+    html.newdesign .rv-qb { display: inline-block; font-size: 10.5px; font-weight: 800; padding: 2px 6px; border-radius: 5px; border: 1px solid color-mix(in srgb, currentColor 28%, transparent); }
+    html.newdesign .rv-qb.q1 { background: var(--ok-bg); color: var(--ok); }
+    html.newdesign .rv-qb.q2 { background: var(--accent-tint); color: var(--accent); }
+    html.newdesign .rv-qb.q3 { background: var(--warn-bg); color: var(--warn); }
+    html.newdesign .rv-qb.q4 { background: var(--surface-3); color: var(--muted); }
+    html.newdesign .rv-qb.q0 { color: var(--faint); }
+    html.newdesign .rv-seg { flex: none; }
+    html.newdesign .rv-empty { padding: 28px; text-align: center; color: var(--faint); font-size: 13px; }
+
+    @media (max-width: 720px) {
+      html.newdesign .rv-lib { grid-template-columns: 1fr; }
+      html.newdesign .rv-lib-side { border-right: 0; border-bottom: 1px solid var(--line); padding-right: 0; padding-bottom: 12px; }
+      html.newdesign .rv-lib-side .rv-fgrp { display: inline-block; vertical-align: top; margin-right: 18px; }
+    }
   </style>
   <script src="theme.js?v=1783721200"></script>
   <script src="nav.js?v=1783720000"></script>
@@ -509,7 +583,7 @@
   <script src="https://cdn.jsdelivr.net/npm/tus-js-client@4.1.0/dist/tus.min.js"></script>
   <script type="text/babel" src="canvas.jsx?v=1783137934"></script>
   <script type="text/babel" src="notes.jsx?v=1783137934"></script>
-  <script type="text/babel" src="research.jsx?v=1783707600"></script>
+  <script type="text/babel" src="research.jsx?v=1783881950"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>
