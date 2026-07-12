@@ -426,6 +426,8 @@
       + (NEW ? '<div class="seg mode" id="modeseg" title="Simple shows the essentials; Pro reveals sorting, the gallery, hidden figures and bulk actions"><button data-m="simple"' + (S.pro ? '' : ' class="on"') + '>Simple</button><button data-m="pro"' + (S.pro ? ' class="on"' : '') + '>Pro</button></div>' : '')
       + '<div class="seg adv" id="grpseg"><button data-g="paper"' + (S.group === 'paper' ? ' class="on"' : '') + '>▦ By paper</button><button data-g="all"' + (S.group === 'all' ? ' class="on"' : '') + '>▨ All figures</button></div>'
       + '<button class="btn adv" id="toghide" title="Show figures you have hidden">Show hidden</button>'
+      + '<button class="btn ic" id="fb-dark" title="Toggle dark mode" aria-label="Toggle dark mode">◐</button>'
+      + '<button class="btn ic' + (nd() ? ' on' : '') + '" id="fb-design" title="Toggle the new design (beta)" aria-label="Toggle the new design">✨</button>'
       + '<a class="btn" href="Research.html?project=' + esc(projId() || '') + '">← Research</a></div>'
       + '<aside class="side" id="side"></aside>'
       + '<div class="canvas" id="canvas"><div class="world" id="world"></div>'
@@ -462,6 +464,9 @@
       th.textContent = S.showHidden ? 'Hide hidden' : 'Show hidden';
       load().then(function () { sidebar(); render(); });
     };
+    // theme + design toggles (this standalone page has no nav drawer, so expose them here)
+    var fbd = document.getElementById('fb-dark'); if (fbd) fbd.onclick = function () { if (window.PRTheme) window.PRTheme.toggle(); };
+    var fbg = document.getElementById('fb-design'); if (fbg) fbg.onclick = function () { if (window.PRDesign) window.PRDesign.toggle(); };
     // Simple ⇄ Pro (new design) — progressive disclosure of the advanced controls
     var ms = document.getElementById('modeseg');
     if (ms) ms.querySelectorAll('button').forEach(function (b) {
