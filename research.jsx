@@ -2295,7 +2295,7 @@
     var cbS = useState(false), cbusy = cbS[0], setCbusy = cbS[1];
     var cscroll = useRef(null);
     useEffect(function () { var el = cscroll.current; if (el) el.scrollTop = el.scrollHeight; }, [cmsgs, cbusy]);
-    function applySuggestion(sug) {
+    function applySuggestion(sug, silent) {
       if (!sug) return;
       if (sug.title) setTitle(String(sug.title));
       if (sug.kind && PROT_KINDS.indexOf(sug.kind) >= 0) setKind(sug.kind);
@@ -2304,8 +2304,10 @@
       if (Array.isArray(sug.expected_outputs)) setOuts(sug.expected_outputs.filter(Boolean));
       if (Array.isArray(sug.acceptance)) setAccept(sug.acceptance.filter(Boolean));
       if (sug.command_hint != null) setCmd(String(sug.command_hint));
-      window.PRUI.toast('Applied the assistant’s suggestions — review & Save', { kind: 'ok' });
+      if (!silent) window.PRUI.toast('Applied the assistant’s suggestions — review & Save', { kind: 'ok' });
     }
+    // send a picked answer to a clarifying question (question kept as context for the AI)
+    function answerQuestion(q, opt) { if (cbusy) return; askAssistant('For "' + q + '": ' + opt, { userBubble: opt }); }
     function askAssistant(text, opts) {
       opts = opts || {};
       var files = opts.files || att;
@@ -2317,7 +2319,10 @@
       sb.functions.invoke('research-protocol', { body: { action: 'task_assist', project_id: props.projectId, task: task, message: text, history: history, files: files.map(function (a) { return { name: a.name, mime: a.mime, size: a.size, note: a.note }; }) } }).then(function (r) {
         setCbusy(false); var d = r && r.data;
         if (!d || d.error) { setCmsgs(function (m) { return m.concat([{ role: 'assistant', content: 'AI is unavailable' + (d && d.error ? ': ' + d.error : '') + '.' }]); }); return; }
-        setCmsgs(function (m) { return m.concat([{ role: 'assistant', content: d.reply || '…', questions: d.questions || [], suggestion: d.suggestion || null }]); });
+        // auto-fill the task fields as soon as the assistant has enough (no button click needed)
+        var applied = '';
+        if (d.suggestion) { applySuggestion(d.suggestion, true); applied = sugSummary(d.suggestion).replace(/^Fills: /, ''); }
+        setCmsgs(function (m) { return m.concat([{ role: 'assistant', content: d.reply || '…', questions: d.questions || [], applied: applied }]); });
       }, function () { setCbusy(false); setCmsgs(function (m) { return m.concat([{ role: 'assistant', content: 'AI connection failed — is research-protocol deployed?' }]); }); });
     }
     function sendChat() { var t = cinput.trim(); if (!t || cbusy) return; setCinput(''); askAssistant(t); }
@@ -2371,20 +2376,22 @@
     var msgBubble = function (m, i) {
       var mine = m.role === 'user';
       return h('div', { key: i, style: { display: 'flex', justifyContent: mine ? 'flex-end' : 'flex-start', marginBottom: 8 } },
-        h('div', { style: { maxWidth: '88%' } },
+        h('div', { style: { maxWidth: '90%' } },
           h('div', { style: { background: mine ? 'var(--accent)' : 'var(--surface)', color: mine ? '#fff' : 'var(--ink)', border: mine ? 'none' : '1px solid var(--line)', borderRadius: 12, padding: '8px 11px', fontSize: 12.5, lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, m.content),
-          (!mine && m.questions && m.questions.length) ? h('div', { style: { marginTop: 6, display: 'flex', flexDirection: 'column', gap: 4 } }, m.questions.map(function (q, qi) {
-            return h('button', { key: qi, style: { textAlign: 'left', fontSize: 11.5, color: 'var(--accent)', background: 'var(--accent-tint)', border: '1px solid color-mix(in srgb,var(--accent) 25%,transparent)', borderRadius: 8, padding: '5px 9px', cursor: 'pointer' }, title: 'Put this in the box to answer it', onClick: function () { setCinput(q + ' '); } }, '❓ ' + q);
+          (!mine && m.questions && m.questions.length) ? h('div', { style: { marginTop: 6, display: 'flex', flexDirection: 'column', gap: 7 } }, m.questions.map(function (qq, qi) {
+            var q = typeof qq === 'string' ? qq : ((qq && qq.q) || ''); var opts = (qq && qq.options) || [];
+            return h('div', { key: qi, style: { background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 10, padding: '8px 10px' } },
+              h('div', { style: { fontSize: 12, fontWeight: 600, color: 'var(--ink)', marginBottom: opts.length ? 6 : 2 } }, '❓ ' + q),
+              opts.length ? h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 5 } }, opts.map(function (o, oi) {
+                return h('button', { key: oi, disabled: cbusy, title: 'Pick this answer — the task auto-fills', style: { fontSize: 11.5, color: 'var(--accent)', background: 'var(--accent-tint)', border: '1px solid color-mix(in srgb,var(--accent) 25%,transparent)', borderRadius: 999, padding: '4px 11px', cursor: cbusy ? 'default' : 'pointer' }, onClick: function () { answerQuestion(q, o); } }, o);
+              })) : h('div', { style: { fontSize: 11, color: 'var(--faint)' } }, '↓ Type your answer below'));
           })) : null,
-          (!mine && m.suggestion) ? h('div', { style: { marginTop: 6, background: 'var(--accent-tint)', border: '1px solid color-mix(in srgb,var(--accent) 25%,transparent)', borderRadius: 10, padding: '9px 11px' } },
-            h('div', { style: { fontSize: 11, fontWeight: 700, color: 'var(--accent)', marginBottom: 5 } }, '✨ Suggested task fields'),
-            h('div', { style: { fontSize: 11.5, color: 'var(--muted)', marginBottom: 7, lineHeight: 1.5 } }, sugSummary(m.suggestion)),
-            h('button', { className: 'btn pri', style: { padding: '4px 11px', fontSize: 12 }, onClick: function () { applySuggestion(m.suggestion); } }, '↧ Apply to task')) : null));
+          (!mine && m.applied && m.applied !== '—') ? h('div', { style: { marginTop: 6, display: 'flex', alignItems: 'baseline', gap: 7, background: 'var(--ok-bg)', border: '1px solid color-mix(in srgb,var(--ok) 30%,transparent)', borderRadius: 10, padding: '7px 11px', fontSize: 11.5, color: 'var(--ok)', lineHeight: 1.45 } }, h('span', { style: { flex: 'none' } }, '✓'), h('span', null, 'Auto-filled the task — ' + m.applied + '. Review on the left & Save.')) : null));
     };
     var chatPane = h('div', { style: { flex: '1 1 44%', minWidth: 300, borderLeft: '1px solid var(--line)', display: 'flex', flexDirection: 'column', background: 'var(--softer, #f7f8fb)' } },
       h('div', { style: { padding: '11px 14px', borderBottom: '1px solid var(--line)', flex: 'none' } },
         h('div', { style: { fontWeight: 700, fontSize: 13 } }, '💬 Task assistant'),
-        h('div', { style: { fontSize: 11, color: 'var(--faint)', marginTop: 1 } }, 'Discuss this task, attach data, get clarifying questions')),
+        h('div', { style: { fontSize: 11, color: 'var(--faint)', marginTop: 1 } }, 'Answer the questions (pick an option) and the task fills in automatically')),
       h('div', { ref: cscroll, style: { flex: 1, overflow: 'auto', padding: 14, minHeight: 0 } },
         cmsgs.length ? cmsgs.map(msgBubble) : h('div', { style: { fontSize: 12, color: 'var(--faint)', textAlign: 'center', padding: '28px 12px', lineHeight: 1.6 } }, 'Ask me to help define this task — e.g. “what should the acceptance checks be?” — or attach data and I’ll ask what I need to know.'),
         cbusy ? h('div', { style: { fontSize: 12, color: 'var(--muted)', fontStyle: 'italic', padding: '2px 4px' } }, '✨ Assistant is thinking…') : null),
