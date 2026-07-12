@@ -174,6 +174,7 @@
     '.pnd-sw.on { background: var(--accent, #4f46e5); }',
     '.pnd-sw i { position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; transition: transform .15s; box-shadow: 0 1px 3px rgba(0,0,0,.3); }',
     '.pnd-sw.on i { transform: translateX(20px); }',
+    '.pnd-beta { font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--accent, #4f46e5); background: var(--accent-tint, #eef0ff); padding: 1px 6px; border-radius: 999px; margin-left: 6px; vertical-align: middle; }',
     '.pnd-signout { width: 100%; margin-top: 4px; padding: 10px; border: 1px solid var(--line, #e6e8ee); background: transparent; border-radius: 10px; color: var(--muted, #5b6473); font-family: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer; }',
     '.pnd-signout:hover { color: var(--danger, #b42318); border-color: var(--danger, #b42318); }',
     '.pnd-asbar { margin: 0 12px; padding: 9px 12px; border-radius: 10px; background: var(--warn-bg, #fdf6e3); color: var(--warn, #b45309); font-size: 12px; font-weight: 600; line-height: 1.4; }',
@@ -248,6 +249,7 @@
         return '<a href="' + withAv(l.href) + '"' + (l.key === here ? ' class="on" aria-current="page"' : '') + '>' + (ICONS[l.key] || '') + esc(l.label) + '</a>';
       }).join('');
       var dark = window.PRTheme ? window.PRTheme.isDark() : document.documentElement.classList.contains('dark');
+      var newd = window.PRDesign ? window.PRDesign.isNew() : document.documentElement.classList.contains('newdesign');
       var tt = document.getElementById('pn-theme-top'); if (tt) tt.setAttribute('aria-pressed', dark ? 'true' : 'false');
       drawer.innerHTML = '<div class="pnd-head">' + avHtml(du)
         + '<div style="min-width:0"><b>' + esc((du && du.name) || 'Not signed in') + '</b><span>' + esc((du && du.email) || '') + '</span></div>'
@@ -255,6 +257,7 @@
         + (av ? '<div class="pnd-asbar">👁 Admin view — browsing this researcher’s workspace read-only</div>' : '')
         + '<nav class="pnd-nav">' + links + '</nav>'
         + '<div class="pnd-foot"><div class="pnd-theme">Dark mode<button class="pnd-sw' + (dark ? ' on' : '') + '" id="pn-theme" role="switch" aria-checked="' + dark + '"><i></i></button></div>'
+        + '<div class="pnd-theme"><span>New design <span class="pnd-beta">beta</span></span><button class="pnd-sw' + (newd ? ' on' : '') + '" id="pn-design" role="switch" aria-checked="' + newd + '" title="Preview the new visual language across the app"><i></i></button></div>'
         + (av ? '<a class="pnd-backadmin" href="Admin.html">← Back to admin</a>' : '<button class="pnd-signout" id="pn-signout">Sign out</button>') + '</div>';
       wire();
     }
@@ -265,6 +268,8 @@
     function wire() {
       var t = document.getElementById('pn-theme');
       if (t) t.onclick = function () { if (window.PRTheme) window.PRTheme.toggle(); render(); };
+      var dg = document.getElementById('pn-design');
+      if (dg) dg.onclick = function () { if (window.PRDesign) window.PRDesign.toggle(); render(); };
       var c = document.getElementById('pn-close'); if (c) c.onclick = close;
       var so = document.getElementById('pn-signout');
       if (so) so.onclick = function () {
@@ -280,6 +285,7 @@
     var ptt = document.getElementById('pn-theme-top'); if (ptt) ptt.onclick = function () { if (window.PRTheme) window.PRTheme.toggle(); render(); };
     scrim.onclick = close;
     window.addEventListener('pr-theme', render);
+    window.addEventListener('pr-design', render);
     window.addEventListener('pr-profile', render);
     // user/admin may resolve after auth loads — refresh a few times
     var tries = 0; var iv = setInterval(function () { tries++; render(); if (tries > 12 || (curUser() && curUser().name)) clearInterval(iv); }, 700);

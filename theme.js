@@ -110,6 +110,29 @@
   var st = document.createElement('style'); st.id = 'pr-theme-style'; st.textContent = css;
   (document.head || document.documentElement).appendChild(st);
 
+  // ---- New design (beta): an OPT-IN visual language that re-skins the app via token overrides ----
+  // Orthogonal to dark mode; toggled from the nav drawer next to "Dark mode". Default = current design.
+  var DKEY = 'pr-design';
+  function isNewDesign() { return document.documentElement.classList.contains('newdesign'); }
+  function applyDesign(v) { document.documentElement.classList.toggle('newdesign', v === 'new'); }
+  var savedD = null; try { savedD = localStorage.getItem(DKEY); } catch (e) { }
+  applyDesign(savedD);   // opt-in: only 'new' turns it on
+  var dcss = [
+    // crisp system sans (vs. the current Plus Jakarta) — the biggest perceptible shift, zero extra load
+    'html.newdesign body, html.newdesign button, html.newdesign input, html.newdesign select, html.newdesign textarea, html.newdesign h1, html.newdesign h2, html.newdesign h3, html.newdesign h4, html.newdesign h5 { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; letter-spacing: -.006em; }',
+    // new LIGHT palette — cooler neutrals + refined semantic colours
+    'html.newdesign { --ink:#141a28; --muted:#556074; --faint:#8b93a6; --dim:#8b93a6; --line:#e4e7f1; --be:#e4e7f1; --surface:#ffffff; --surface-2:#f1f3f9; --surface-3:#e9edf6; --soft:#f1f3f9; --softer:#f6f8fc; --bg:#f6f8fc; --app-bg:#eef1f8; --paper:#ffffff; --pane:#ffffff; --paper-bg:#ffffff; --accent:#4f46e5; --accent-d:#3f39c0; --accent-l:#7c78f0; --accent-tint:#edecfe; --ok:#0f7a4a; --ok-bg:#e4f5ec; --green:#0f7a4a; --green-bg:#e4f5ec; --warn:#b26a09; --warn-bg:#fbefda; --danger:#c0355e; --danger-bg:#fce9ef; --shadow:0 1px 2px rgba(20,26,40,.05),0 10px 30px rgba(20,26,40,.07); }',
+    // new DARK palette — cooler slate
+    'html.newdesign.dark { --ink:#e9edf7; --muted:#a2abc0; --faint:#727d94; --dim:#727d94; --line:#28304a; --be:#28304a; --surface:#151b29; --surface-2:#1d2436; --surface-3:#101623; --soft:#1d2436; --softer:#101623; --bg:#0d111c; --app-bg:#0b0f18; --paper:#151b29; --pane:#151b29; --paper-bg:#151b29; --accent:#8b88f2; --accent-d:#a5a2f6; --accent-l:#a5a2f6; --accent-tint:#20213c; --ok:#43b483; --ok-bg:#12301f; --green:#43b483; --green-bg:#12301f; --warn:#d69a3f; --warn-bg:#33270f; --danger:#e8688c; --danger-bg:#331823; --shadow:0 10px 30px rgba(0,0,0,.42); }',
+    // feel — a touch crisper/flatter than the current rounded look
+    'html.newdesign .btn, html.newdesign .field { border-radius: 8px; }',
+    'html.newdesign .card, html.newdesign .panel, html.newdesign .modal { border-radius: 12px; }',
+    'html.newdesign .chip, html.newdesign .tag, html.newdesign .pill { border-radius: 6px; }'
+  ].join('\n');
+  var dst = document.createElement('style'); dst.id = 'pr-design-style'; dst.textContent = dcss; (document.head || document.documentElement).appendChild(dst);
+  function setDesign(v) { applyDesign(v); try { localStorage.setItem(DKEY, v === 'new' ? 'new' : 'current'); } catch (e) { } window.dispatchEvent(new CustomEvent('pr-design', { detail: { 'new': isNewDesign() } })); }
+  window.PRDesign = { isNew: isNewDesign, set: setDesign, toggle: function () { setDesign(isNewDesign() ? 'current' : 'new'); } };
+
   // shared, themed toast + confirm — drop-in replacements for native alert()/confirm()
   function uiHost() { var h = document.getElementById('pr-ui'); if (!h) { h = document.createElement('div'); h.id = 'pr-ui'; (document.body || document.documentElement).appendChild(h); } return h; }
   function toast(msg, opts) {
