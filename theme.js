@@ -118,8 +118,7 @@
   var savedD = null; try { savedD = localStorage.getItem(DKEY); } catch (e) { }
   applyDesign(savedD);   // opt-in: only 'new' turns it on
   var dcss = [
-    // crisp system sans (vs. the current Plus Jakarta) — the biggest perceptible shift, zero extra load
-    'html.newdesign body, html.newdesign button, html.newdesign input, html.newdesign select, html.newdesign textarea, html.newdesign h1, html.newdesign h2, html.newdesign h3, html.newdesign h4, html.newdesign h5 { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; letter-spacing: -.006em; }',
+    // (font unchanged — keep Plus Jakarta so nothing shrinks; the real redesign will set typography per-page)
     // new LIGHT palette — cooler neutrals + refined semantic colours
     'html.newdesign { --ink:#141a28; --muted:#556074; --faint:#8b93a6; --dim:#8b93a6; --line:#e4e7f1; --be:#e4e7f1; --surface:#ffffff; --surface-2:#f1f3f9; --surface-3:#e9edf6; --soft:#f1f3f9; --softer:#f6f8fc; --bg:#f6f8fc; --app-bg:#eef1f8; --paper:#ffffff; --pane:#ffffff; --paper-bg:#ffffff; --accent:#4f46e5; --accent-d:#3f39c0; --accent-l:#7c78f0; --accent-tint:#edecfe; --ok:#0f7a4a; --ok-bg:#e4f5ec; --green:#0f7a4a; --green-bg:#e4f5ec; --warn:#8f5407; --warn-bg:#fbefda; --danger:#c0355e; --danger-bg:#fce9ef; --shadow:0 1px 2px rgba(20,26,40,.05),0 10px 30px rgba(20,26,40,.07); }',
     // new DARK palette — cooler slate
