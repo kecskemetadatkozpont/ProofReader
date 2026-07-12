@@ -106,7 +106,8 @@
   }
 
   // ---------- data ----------
-  var S = { papers: [], figs: [], byPaper: {}, urls: {}, view: { x: 40, y: 24, k: 0.9 }, group: 'paper', showHidden: false, curFig: null, curPaper: null, hiddenCount: 0, moved: false, sort: 'cites' };
+  var S = { papers: [], figs: [], byPaper: {}, urls: {}, view: { x: 40, y: 24, k: 0.9 }, group: 'paper', showHidden: false, curFig: null, curPaper: null, hiddenCount: 0, moved: false, sort: 'cites', pro: false };
+  function nd() { return !!(window.PRDesign && window.PRDesign.isNew()); }   // "New design" flag
   function uid() { return 'n' + Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-4); }
   function toast(msg, ok) { var t = el('div', 'fb-toast' + (ok === false ? ' err' : '')); t.textContent = msg; document.body.appendChild(t); requestAnimationFrame(function () { t.classList.add('show'); }); setTimeout(function () { t.classList.remove('show'); setTimeout(function () { if (t.parentNode) t.parentNode.removeChild(t); }, 260); }, 2400); }
   function load() {
@@ -220,6 +221,26 @@
   }
   function persistAbstract(p, txt) { try { sb.from('research_sources').update({ abstract: String(txt).slice(0, 20000) }).eq('id', p.id).then(function () { }, function () { }); } catch (e) { } }
   var EMPTY = '<div class="cluster" style="left:40px;top:40px;width:440px;padding:26px 24px"><b style="font-size:14px">No figures yet</b><div style="font-size:12.5px;color:var(--muted);margin-top:8px;line-height:1.5">Hit <b>Extract figures from Library</b> on the left. Publify finds each paper’s open-access PDF and pulls its figures onto this board.</div></div>';
+  // New-design onboarding: a guided first-run panel instead of the terse empty state
+  function onboardHTML() {
+    var withDoi = S.papers.filter(function (p) { return !!p.doi; }).length;
+    return '<div class="fb-onboard"><div class="ob-badge">Figure Board</div>'
+      + '<h1>Every figure from your papers, on one canvas</h1>'
+      + '<p>Publify opens each open-access PDF in your Library and pulls out its figures — grouped by paper, with citations, a relevance note and the abstract, ready to pin into your writing.</p>'
+      + '<div class="ob-steps">'
+      + '<div class="ob-step"><span class="obn">1</span><div><b>Extract</b><i>from your ' + withDoi + ' paper' + (withDoi === 1 ? '' : 's') + ' with a DOI</i></div></div>'
+      + '<div class="ob-step"><span class="obn">2</span><div><b>Browse</b><i>by paper — see why each figure is relevant</i></div></div>'
+      + '<div class="ob-step"><span class="obn">3</span><div><b>Pin</b><i>the best ones into your research Canvas</i></div></div></div>'
+      + '<button class="btn pri ob-cta" id="ob-extract">✨ Extract figures from Library</button>'
+      + '<div class="ob-hint">' + S.papers.length + ' paper' + (S.papers.length === 1 ? '' : 's') + ' in your Library · ' + withDoi + ' can be extracted right now</div></div>';
+  }
+  function renderEmpty() {
+    world.innerHTML = '';
+    var prev = canvasEl.querySelector('.fb-ob-wrap'); if (prev) prev.remove();
+    if (nd()) { var ov = el('div', 'fb-ob-wrap', onboardHTML()); canvasEl.appendChild(ov); var b = ov.querySelector('#ob-extract'); if (b) b.onclick = extractAll; }
+    else { world.innerHTML = EMPTY; }
+    apply();
+  }
   var thumb = function (f) { var u = S.urls[f.storage_path]; return '<div class="thumb">' + (u ? '<img src="' + u + '" alt="' + esc(f.fig_label) + '" loading="lazy">' : '<div class="ph">…</div>') + '</div>'; };
   var activeReflow = function () { }, reflowT;
   function scheduleReflow() { if (reflowT) clearTimeout(reflowT); reflowT = setTimeout(function () { activeReflow(); }, 60); }
@@ -228,7 +249,7 @@
     world.querySelectorAll('.cl-pin').forEach(function (b) { b.onclick = function (e) { e.stopPropagation(); if (S.moved) return; pinFigs(S.byPaper[b.dataset.pid] || [], (b.dataset.title || '').slice(0, 40)); }; });
     world.querySelectorAll('img').forEach(function (im) { im.addEventListener('load', scheduleReflow); im.addEventListener('error', scheduleReflow); });
   }
-  function render() { if (S.group === 'all') layoutGallery(); else layout(); }
+  function render() { var ob = canvasEl.querySelector('.fb-ob-wrap'); if (ob) ob.remove(); if (S.group === 'all') layoutGallery(); else layout(); }
 
   // shortest-column masonry over the actual (post-image-load) cluster heights → no overlap
   function reflow() {
@@ -244,7 +265,7 @@
     activeReflow = reflow;
     var withFigs = ordered(S.papers).filter(function (p) { return (S.byPaper[p.id] || []).length; });
     world.innerHTML = '';
-    if (!withFigs.length) { world.innerHTML = EMPTY; apply(); return; }
+    if (!withFigs.length) { renderEmpty(); return; }
     withFigs.forEach(function (p) {
       var figs = S.byPaper[p.id] || [];
       var c = el('div', 'cluster'); c.dataset.pid = p.id;
@@ -269,7 +290,7 @@
     activeReflow = reflowGallery;
     world.innerHTML = '';
     var all = []; ordered(S.papers).forEach(function (p) { (S.byPaper[p.id] || []).forEach(function (f, i) { all.push({ p: p, f: f, i: i }); }); });
-    if (!all.length) { world.innerHTML = EMPTY; apply(); return; }
+    if (!all.length) { renderEmpty(); return; }
     all.forEach(function (o) {
       var f = o.f, p = o.p;
       var c = el('div', 'gcard' + (f.hidden ? ' dim' : '')); c.dataset.pid = p.id; c.dataset.i = o.i;
@@ -328,7 +349,7 @@
     var sortOpts = SORTS.map(function (o) { return '<option value="' + o[0] + '"' + (S.sort === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('');
     sideEl.innerHTML = '<div class="extract-card"><div class="lead">Pull the figures out of your <b>Library</b> papers. Publify finds each open-access PDF and extracts its figures onto this board.</div>'
       + '<button class="btn pri" id="extract">✨ Extract figures from Library</button><div class="prog" id="prog"></div></div>'
-      + '<div class="side-head"><h2>Library papers (' + S.papers.length + ')</h2><select class="sortsel" id="sortsel" title="Sort the list">' + sortOpts + '</select></div>' + rows;
+      + '<div class="side-head"><h2>Library papers (' + S.papers.length + ')</h2><select class="sortsel adv" id="sortsel" title="Sort the list">' + sortOpts + '</select></div>' + rows;
     document.getElementById('extract').onclick = extractAll;
     document.getElementById('sortsel').onchange = function (e) { S.sort = e.target.value; sidebar(); render(); };
     progEl = document.getElementById('prog');
@@ -396,12 +417,15 @@
 
   // ---------- shell ----------
   function shell() {
+    var NEW = nd();
     root.innerHTML = ''
-      + '<div class="app"><div class="topbar">'
+      + '<div class="app' + (NEW ? ' newdesign ' + (S.pro ? 'pro' : 'simple') : '') + '"><div class="topbar">'
       + '<a class="brand" href="Research.html?project=' + esc(projId() || '') + '"><span class="mk"><i></i></span><span>Publify<small>Figure Board</small></span></a>'
+      + (NEW ? '<span class="crumb">Figure Board</span>' : '')
       + '<span class="tstat" id="stat"></span><span class="spring"></span>'
-      + '<div class="seg" id="grpseg"><button data-g="paper" class="on">▦ By paper</button><button data-g="all">▨ All figures</button></div>'
-      + '<button class="btn" id="toghide" title="Show figures you have hidden">Show hidden</button>'
+      + (NEW ? '<div class="seg mode" id="modeseg" title="Simple shows the essentials; Pro reveals sorting, the gallery, hidden figures and bulk actions"><button data-m="simple"' + (S.pro ? '' : ' class="on"') + '>Simple</button><button data-m="pro"' + (S.pro ? ' class="on"' : '') + '>Pro</button></div>' : '')
+      + '<div class="seg adv" id="grpseg"><button data-g="paper"' + (S.group === 'paper' ? ' class="on"' : '') + '>▦ By paper</button><button data-g="all"' + (S.group === 'all' ? ' class="on"' : '') + '>▨ All figures</button></div>'
+      + '<button class="btn adv" id="toghide" title="Show figures you have hidden">Show hidden</button>'
       + '<a class="btn" href="Research.html?project=' + esc(projId() || '') + '">← Research</a></div>'
       + '<aside class="side" id="side"></aside>'
       + '<div class="canvas" id="canvas"><div class="world" id="world"></div>'
@@ -438,6 +462,16 @@
       th.textContent = S.showHidden ? 'Hide hidden' : 'Show hidden';
       load().then(function () { sidebar(); render(); });
     };
+    // Simple ⇄ Pro (new design) — progressive disclosure of the advanced controls
+    var ms = document.getElementById('modeseg');
+    if (ms) ms.querySelectorAll('button').forEach(function (b) {
+      b.onclick = function () {
+        var pro = b.dataset.m === 'pro'; if (pro === S.pro) return;
+        S.pro = pro; var app = document.querySelector('.app'); app.classList.toggle('pro', pro); app.classList.toggle('simple', !pro);
+        ms.querySelectorAll('button').forEach(function (x) { x.classList.toggle('on', (x.dataset.m === 'pro') === pro); });
+        sidebar(); render();
+      };
+    });
     window.addEventListener('resize', scheduleReflow);
   }
 
@@ -445,6 +479,7 @@
   if (!BE || !BE.sb) { root.innerHTML = '<div class="center"><div class="box"><h1>Backend unavailable</h1></div></div>'; return; }
   if (BE.mode !== 'cloud' || !BE.user) { root.innerHTML = '<div class="center"><div class="box"><div class="mk"><i></i></div><h1>Sign in</h1><p>Open the Figure Board from a project.</p><a class="btn" href="Landing.html">Sign in</a></div></div>'; return; }
   if (!projId()) { root.innerHTML = '<div class="center"><div class="box"><h1>No project</h1><p>Open the Figure Board from Research → a project → Literature.</p><a class="btn" href="Research.html">← Research</a></div></div>'; return; }
+  window.addEventListener('pr-design', function () { location.reload(); });   // re-init cleanly when the New-design flag flips
   shell();
   progEl = null;
   Promise.all([load(), loadScimago()]).then(function () { sidebar(); render(); ensureRelevance(); }, function () { root.innerHTML = '<div class="center"><div class="box"><h1>Could not load</h1><p>This project may not exist or you may not have access.</p><a class="btn" href="Research.html">← Research</a></div></div>'; });

@@ -143,6 +143,42 @@
     @media (prefers-reduced-motion:reduce) { .fb-toast { transition:none; } }
 
     @media (max-width:820px) { .app { grid-template-columns:1fr; grid-template-rows:auto auto 1fr; } .topbar { grid-column:1; flex-wrap:wrap; height:auto; padding:8px 12px; } .side { grid-row:2; grid-column:1; border-right:0; border-bottom:1px solid var(--line); max-height:220px; } .canvas { grid-row:3; grid-column:1; } }
+
+    /* ================= NEW DESIGN (beta) — a real, restructured Figure Board ================= */
+    html.newdesign .app.simple .adv { display:none !important; }        /* progressive disclosure */
+    html.newdesign .topbar { height:60px; padding:0 22px; gap:15px; background:var(--surface); border-bottom:1px solid var(--line); }
+    html.newdesign .brand small { color:var(--accent); }
+    html.newdesign .crumb { font-size:12.5px; font-weight:600; color:var(--faint); position:relative; padding-left:15px; }
+    html.newdesign .crumb::before { content:'/'; position:absolute; left:3px; color:var(--line-2); }
+    html.newdesign .seg.mode { background:var(--surface-2); border:1px solid var(--line); border-radius:999px; padding:3px; }
+    html.newdesign .seg.mode button { border-radius:999px; padding:6px 15px; font-weight:650; color:var(--muted); }
+    html.newdesign .seg.mode button.on { background:var(--accent); color:#fff; box-shadow:0 1px 3px rgba(79,70,229,.3); }
+    html.newdesign .seg:not(.mode) { border-radius:10px; }
+    html.newdesign .side { padding:20px 16px; }
+    html.newdesign .extract-card { border-radius:16px; border:1px solid color-mix(in srgb,var(--accent) 22%,var(--line)); box-shadow:0 1px 2px rgba(20,26,40,.04); padding:18px; }
+    html.newdesign .extract-card .btn.pri { height:40px; border-radius:11px; }
+    html.newdesign .side h2 { font-size:11px; letter-spacing:.06em; margin:22px 0 9px; }
+    html.newdesign .paper { border-radius:12px; padding:10px; } html.newdesign .paper .st { border-radius:8px; }
+    html.newdesign .cluster { border-radius:18px; box-shadow:0 1px 2px rgba(20,26,40,.04),0 16px 38px rgba(20,26,40,.07); }
+    html.newdesign .cl-head { padding:15px 18px; } html.newdesign .cl-head b { font-size:14.5px; letter-spacing:-.2px; }
+    html.newdesign .cl-pin { border-radius:999px; }
+    html.newdesign .fig { border-radius:14px; transition:transform .14s, box-shadow .14s, border-color .14s; }
+    html.newdesign .fig:hover { transform:translateY(-2px); box-shadow:0 12px 26px rgba(79,70,229,.16); border-color:var(--accent); }
+    html.newdesign .relbox { border-radius:0 12px 12px 0; } html.newdesign .gcard { border-radius:14px; }
+    html.newdesign .drawer { border-radius:20px 0 0 20px; }
+    html.newdesign .zoom { border-radius:14px; } html.newdesign .hintbar { border-radius:999px; }
+    /* onboarding — a guided first-run panel overlaid on the canvas (not the panning world) */
+    html.newdesign .fb-ob-wrap { position:absolute; inset:0; display:grid; place-items:start center; padding:6vh 20px 20px; pointer-events:none; z-index:5; }
+    html.newdesign .fb-onboard { pointer-events:auto; width:min(560px,100%); background:var(--surface); border:1px solid var(--line); border-radius:22px; padding:34px 34px 30px; box-shadow:0 1px 2px rgba(20,26,40,.05),0 26px 64px rgba(20,26,40,.14); }
+    html.newdesign .fb-onboard .ob-badge { display:inline-block; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--accent); background:var(--accent-tint); padding:4px 11px; border-radius:999px; }
+    html.newdesign .fb-onboard h1 { font-size:26px; letter-spacing:-.5px; line-height:1.15; margin:16px 0 8px; }
+    html.newdesign .fb-onboard p { font-size:14px; color:var(--muted); line-height:1.55; margin:0 0 20px; max-width:52ch; }
+    html.newdesign .ob-steps { display:grid; gap:12px; margin-bottom:22px; }
+    html.newdesign .ob-step { display:grid; grid-template-columns:auto 1fr; gap:13px; align-items:center; }
+    html.newdesign .ob-step .obn { width:28px; height:28px; border-radius:50%; background:var(--accent-tint); color:var(--accent); display:grid; place-items:center; font-weight:750; font-size:13px; flex:none; }
+    html.newdesign .ob-step b { font-size:13.5px; display:block; } html.newdesign .ob-step i { font-style:normal; font-size:12.5px; color:var(--muted); }
+    html.newdesign .ob-cta { height:44px; font-size:14px; padding:0 20px; border-radius:12px; }
+    html.newdesign .ob-hint { font-size:12px; color:var(--faint); margin-top:12px; }
   </style>
   <script src="theme.js?v=1783721200"></script>
 </head>
@@ -157,7 +193,7 @@
   <script src="backend/config.js?v=1783137934"></script>
   <script src="auth.js?v=1783137934"></script>
   <script src="backend.js?v=1783539952"></script>
-  <script src="figure-board.js?v=1783684900"></script>
+  <script src="figure-board.js?v=1783722000"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>
