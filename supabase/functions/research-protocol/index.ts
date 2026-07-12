@@ -168,6 +168,29 @@ As soon as the researcher's answers give you enough to sharpen the task, POPULAT
       return json({ ok: true, reply: String(p.reply || out || '').slice(0, 4000), questions, suggestion: sug });
     }
 
+    // ---- protocol_chat: talk to the whole protocol — the AI sees every task's status/result/notes ----
+    if (action === 'protocol_chat') {
+      const protocol_id = String(body.protocol_id || '');
+      if (!protocol_id) return json({ error: 'protocol_id required' }, 400);
+      const msg = String(body.message || '').slice(0, 4000);
+      const history = Array.isArray(body.history) ? body.history.slice(-8) : [];
+      const pq = await sb.from('research_protocols').select('title,goal').eq('id', protocol_id).single();
+      const sq = await sb.from('research_protocol_steps').select('id,ord,title,kind,status,spec,result,needs_approval,depends_on').eq('protocol_id', protocol_id).order('ord');
+      const nq = await sb.from('research_protocol_notes').select('step_id,kind,body,author_name').eq('protocol_id', protocol_id).order('created_at');
+      const steps = (sq.data || []); const notes = (nq.data || []);
+      const noteByStep: Record<string, any[]> = {}; notes.forEach((n: any) => { (noteByStep[n.step_id] = noteByStep[n.step_id] || []).push(n); });
+      const snap = steps.map((s: any) => {
+        const sx = s.spec || {}, r = s.result || {};
+        const ns = (noteByStep[s.id] || []).map((n: any) => `\n   • ${n.author_name || 'member'} (${n.kind}): ${String(n.body || '').slice(0, 200)}`).join('');
+        return `Task ${s.ord} [${s.kind}] "${s.title}" — status: ${s.status}${s.needs_approval ? ' (needs approval)' : ''}${(s.depends_on && s.depends_on.length) ? ' (after ' + s.depends_on.join(',') + ')' : ''}${sx.instruction ? '\n   instruction: ' + String(sx.instruction).slice(0, 300) : ''}${r.summary ? '\n   result: ' + String(r.summary).slice(0, 300) : ''}${r.error ? '\n   ERROR: ' + String(r.error).slice(0, 200) : ''}${r.adaptation ? '\n   adaptation: ' + String(r.adaptation).slice(0, 150) : ''}${ns}`;
+      }).join('\n');
+      const system = `You are Publify's Protocol assistant. You can see the ENTIRE executable research protocol — every task with its kind, status, instruction, result, error, and notes. Answer the researcher's question about ANY or ALL of the tasks: current status, what the runner did and why, why a task failed, what is waiting for approval, and what to do next. Be concise and specific; reference tasks by their number (e.g. "Task 3"). Never invent results you cannot see in the snapshot.`;
+      const user = `PROTOCOL: ${(pq.data && pq.data.title) || ''}${(pq.data && pq.data.goal) ? '\nGOAL: ' + pq.data.goal : ''}\n\nALL TASKS (${steps.length}):\n${snap || '(no tasks yet)'}\n\n${history.length ? 'Conversation so far:\n' + history.map((m: any) => `${m.role === 'user' ? 'Researcher' : 'Assistant'}: ${String(m.content || '').slice(0, 1500)}`).join('\n') + '\n\n' : ''}Researcher: ${msg || 'Give me a brief status of the protocol — what is done, running, blocked, or waiting for approval, and what I should look at next.'}`;
+      let out = '';
+      try { out = await callClaude(system, user, model); } catch (_e) { return json({ error: 'AI is unavailable — try again.' }, 502); }
+      return json({ ok: true, reply: out });
+    }
+
     return json({ error: 'unknown action: ' + action }, 400);
   } catch (e) { return json({ error: String(e) }, 500); }
 });

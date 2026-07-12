@@ -2473,6 +2473,11 @@
     var aiFileRef = useRef(null);
     var lkoS = useState(false), linkOpen = lkoS[0], setLinkOpen = lkoS[1];
     var lkuS = useState(''), linkUrl = lkuS[0], setLinkUrl = lkuS[1];
+    var pcmS = useState([]), pcMsgs = pcmS[0], setPcMsgs = pcmS[1];   // protocol-wide chat (ephemeral)
+    var pciS = useState(''), pcInput = pciS[0], setPcInput = pciS[1];
+    var pcbS = useState(false), pcBusy = pcbS[0], setPcBusy = pcbS[1];
+    var pcoS = useState(true), pcOpen = pcoS[0], setPcOpen = pcoS[1];
+    var pcScroll = useRef(null);
     var rvS = useState(null), rvMd = rvS[0], setRvMd = rvS[1];   // full-report reader markdown
     var dsS = useState(null), dropStep = dsS[0], setDropStep = dsS[1];   // step id a file is being dragged over
     var usS = useState(null), upStep = usS[0], setUpStep = usS[1];       // { id, msg } while uploading onto a step
@@ -2693,6 +2698,37 @@
       setAiFiles(function (a) { return a.concat([{ name: nm, url: u, note: '' }]); });
       setLinkUrl(''); setLinkOpen(false);
     }
+    // ---- protocol-wide chat: a live activity feed (from the tasks' state) + a task-aware AI conversation ----
+    function pcEvents() {
+      var ev = [];
+      (steps || []).forEach(function (s) {
+        var pst = PST[s.status] || PST.todo, r = s.result || {};
+        ev.push({ id: 'st' + s.id + s.status, icon: STEP_ICON[s.kind] || '•', when: s.finished_at || s.started_at || s.created_at, title: 'Task ' + s.ord + ' · ' + s.title, body: 'Status: ' + pst[1] + (s.needs_approval && (s.status === 'todo' || s.status === 'blocked') ? ' — waiting for your approval' : '') });
+        if (r.summary) ev.push({ id: 'rs' + s.id, icon: '📋', when: s.finished_at, title: 'Task ' + s.ord + ' — result', body: r.summary });
+        if (r.error) ev.push({ id: 'er' + s.id, icon: '⚠️', when: s.finished_at, title: 'Task ' + s.ord + ' — failed', body: r.error });
+        if (r.adaptation) ev.push({ id: 'ad' + s.id, icon: '⚙️', when: s.finished_at, title: 'Task ' + s.ord + ' — adaptation', body: r.adaptation });
+        (notesOf(s) || []).forEach(function (n) {
+          ev.push({ id: 'nt' + n.id, icon: n.author_name === 'Citation Optimizer' ? '🔗' : (n.kind === 'dir' ? '🧭' : n.kind === 'obs' ? '💬' : '⚠'), when: n.created_at, title: (n.author_name || 'Member') + ' → task ' + s.ord, body: n.body });
+        });
+      });
+      ev.sort(function (a, b) { return (a.when ? Date.parse(a.when) : 0) - (b.when ? Date.parse(b.when) : 0); });
+      return ev;
+    }
+    function pcSend() {
+      var t = (pcInput || '').trim(); if (!t || pcBusy || !prot) return;
+      var history = pcMsgs.map(function (m) { return { role: m.role, content: m.content }; });
+      setPcMsgs(function (m) { return m.concat([{ role: 'user', content: t }]); }); setPcInput(''); setPcBusy(true);
+      sb.functions.invoke('research-protocol', { body: { action: 'protocol_chat', project_id: props.projectId, protocol_id: prot.id, message: t, history: history } }).then(function (r) {
+        setPcBusy(false); var d = r && r.data;
+        setPcMsgs(function (m) { return m.concat([{ role: 'assistant', content: (d && d.reply) || ('AI is unavailable' + (d && d.error ? ': ' + d.error : '') + '.') }]); });
+      }, function () { setPcBusy(false); setPcMsgs(function (m) { return m.concat([{ role: 'assistant', content: 'AI connection failed — is research-protocol deployed?' }]); }); });
+    }
+    useEffect(function () { var el = pcScroll.current; if (el) el.scrollTop = el.scrollHeight; }, [pcMsgs, pcBusy]);
+    useEffect(function () {   // keep the activity feed fresh while tasks are actually running
+      if (!pcOpen || !prot || !(steps || []).some(function (s) { return s.status === 'running' || s.status === 'queued'; })) return;
+      var t = setInterval(function () { load(); }, 12000);
+      return function () { clearInterval(t); };
+    }, [pcOpen, steps, prot]);   // eslint-disable-line
     function removeAiFile(i) { var a = aiFiles[i]; if (a && a.storage_path) { try { sb.storage.from('research-data').remove([a.storage_path]); } catch (e) { } } setAiFiles(function (x) { return x.filter(function (_, j) { return j !== i; }); }); }
     function dlAiFile(a) { if (!a || !a.storage_path) return; sb.storage.from('research-data').createSignedUrl(a.storage_path, 3600, { download: (a.name || '').split('/').pop() }).then(function (r) { if (r && r.data && r.data.signedUrl) window.open(r.data.signedUrl, '_blank'); }); }
     function aiAppend() {
@@ -3008,6 +3044,28 @@
           aiBusy ? h('div', { style: { marginTop: 8 } }, h(AiThinking, { label: aiFiles.length ? 'Drafting a pipeline to process your data' : 'Drafting new tasks from your prompt' })) : null
         ) : null
       ) : null,
+      h('div', { className: 'panel' },
+        h('h3', null, '💬 Protocol chat',
+          h('span', { style: { marginLeft: 8, fontSize: 10.5, fontWeight: 400, color: 'var(--faint)', textTransform: 'none', letterSpacing: 0 } }, 'a live log of what’s happening + ask about any task'),
+          h('button', { className: 'btn', style: { marginLeft: 'auto', padding: '3px 9px', fontSize: 11.5, flex: 'none' }, onClick: function () { setPcOpen(!pcOpen); } }, pcOpen ? '▾ Hide' : '▸ Show')),
+        pcOpen ? h('div', { className: 'chat-msgs', ref: pcScroll, style: { maxHeight: 440, minHeight: 160 } },
+          pcEvents().map(function (e) {
+            return h('div', { key: e.id, style: { display: 'flex', gap: 9, alignItems: 'flex-start', padding: '7px 2px', borderBottom: '1px solid var(--line)' } },
+              h('span', { style: { flex: 'none', fontSize: 13, marginTop: 1 } }, e.icon),
+              h('div', { style: { minWidth: 0, flex: 1 } },
+                h('div', { style: { fontSize: 11.5, fontWeight: 600, color: 'var(--ink)' } }, e.title),
+                h('div', { style: { fontSize: 11.5, color: 'var(--muted)', lineHeight: 1.45, whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, String(e.body || '').slice(0, 600))));
+          }),
+          pcMsgs.length ? h('div', { style: { height: 1, background: 'var(--line)', margin: '4px 0' } }) : null,
+          pcMsgs.map(function (m, i) {
+            return h('div', { key: 'pm' + i, className: 'bubble ' + (m.role === 'assistant' ? 'ai' : 'user') },
+              (m.role === 'assistant') ? h('div', { className: 'btxt md', dangerouslySetInnerHTML: { __html: mdHtml(m.content || '') } }) : h('div', { className: 'btxt' }, m.content));
+          }),
+          pcBusy ? h('div', { className: 'bubble ai' }, h('div', { className: 'btxt', style: { color: 'var(--faint)' } }, 'Publify is thinking…')) : null
+        ) : null,
+        pcOpen ? h('div', { className: 'chat-input', style: { marginTop: 8 } },
+          h('textarea', { value: pcInput, rows: 1, placeholder: 'Ask about your tasks — e.g. “what’s waiting for approval?” or “why did task 3 fail?”', disabled: pcBusy, onChange: function (e) { setPcInput(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); pcSend(); } } }),
+          h('button', { className: 'btn pri', disabled: pcBusy || !pcInput.trim(), onClick: pcSend }, 'Send')) : null),
       lb ? ReactDOM.createPortal(h('div', { className: 'fig-lb', onClick: function () { setLb(null); } },
         h('button', { className: 'fig-lb-x', 'aria-label': 'Close', onClick: function () { setLb(null); } }, '✕'),
         h('img', { src: lb.src, alt: lb.cap || '', onClick: function (e) { e.stopPropagation(); } }),
