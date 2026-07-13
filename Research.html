@@ -696,7 +696,7 @@
     html.newdesign .rv-2t > * { min-width: 0; }
     @media (max-width: 860px) { html.newdesign .rv-2t { grid-template-columns: 1fr; } html.newdesign .rv-ctx { position: static; } }
     html.newdesign .rv-ctx { position: sticky; top: 12px; display: flex; flex-direction: column; gap: 4px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px 12px; }
-    html.newdesign .rv-ctx-back { align-self: flex-start; font-family: inherit; font-size: 12px; font-weight: 700; color: var(--muted); background: transparent; border: 0; padding: 4px 6px; border-radius: 7px; cursor: pointer; }
+    html.newdesign .rv-ctx-back { font-family: inherit; font-size: 12px; font-weight: 700; color: var(--muted); background: transparent; border: 0; padding: 4px 6px; border-radius: 7px; cursor: pointer; }
     html.newdesign .rv-ctx-back:hover { color: var(--accent); background: var(--accent-tint); }
     /* one unified sidebar: hide the thin icon-rail in the project view; the global bits (brand + Projects + account) live in the context panel */
     html.newdesign .app.rv-hasproj .side { display: none; }
@@ -705,7 +705,8 @@
     html.newdesign .rv-ctx-foot { display: flex; align-items: center; gap: 9px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
     html.newdesign .rv-ctx-acct { flex: 1; min-width: 0; }
     html.newdesign .rv-ctx-acct b { font-size: 12.5px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
-    html.newdesign .rv-ctx-acct span { font-size: 11px; color: var(--faint); display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    html.newdesign .rv-ctx-acct span { font-size: 11px; color: var(--muted); display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    html.newdesign .rv-ctx-brand .mk { width: 26px; height: 26px; border-radius: 8px; }
     html.newdesign .rv-ctx-exit { flex: none; color: var(--muted); font-weight: 700; text-decoration: none; font-size: 15px; padding: 4px 7px; border-radius: 7px; }
     html.newdesign .rv-ctx-exit:hover { color: var(--accent); background: var(--accent-tint); }
     html.newdesign .rv-ctx-proj { padding: 8px 6px 12px; border-bottom: 1px solid var(--line); margin-bottom: 8px; }
@@ -767,7 +768,7 @@
   <script src="https://cdn.jsdelivr.net/npm/tus-js-client@4.1.0/dist/tus.min.js"></script>
   <script type="text/babel" src="canvas.jsx?v=1783137934"></script>
   <script type="text/babel" src="notes.jsx?v=1783137934"></script>
-  <script type="text/babel" src="research.jsx?v=1783952253"></script>
+  <script type="text/babel" src="research.jsx?v=1783952853"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>

@@ -4044,7 +4044,7 @@
       h('div', { className: 'main' },
         props.preview ? h('div', { className: 'preview-banner' }, '👁 Admin preview — viewing ', h('b', null, me.name), '’s Research. ', h('a', { href: 'PhD.html?adminView=1' }, 'Doctoral School'), ' · ', h('a', { href: 'Profile.html?adminView=1' }, 'Profile'), ' · ', h('a', { href: 'Admin.html' }, '← Back to admin')) : null,
         h('div', { className: 'head' },
-          (nd() && sel) ? h('div', { className: 'rv-crumb' }, 'Research ', h('span', { className: 'rv-crumb-sep' }, '›'), ' ', h('b', null, sel.title || 'Project')) : h('div', null, h('h1', null, sel ? 'Project' : (board ? 'Protocol tasks' : 'Research projects')), h('div', { className: 'sub' }, board && !sel ? 'Every research project’s protocol steps in one board · personal to-dos live in “My tasks”' : sub)),
+          (nd() && sel) ? h('div', { className: 'rv-crumb' }, h('b', null, 'Research')) : h('div', null, h('h1', null, sel ? 'Project' : (board ? 'Protocol tasks' : 'Research projects')), h('div', { className: 'sub' }, board && !sel ? 'Every research project’s protocol steps in one board · personal to-dos live in “My tasks”' : sub)),
           h('div', { style: { display: 'flex', gap: 10, alignItems: 'center' } },
             h(NotifBell, null),
             sel ? null : h('button', { className: 'btn' + (board ? ' pri' : ''), onClick: function () { setBoard(!board); }, title: 'Protocol task board — every project’s protocol steps in one Kanban' }, board ? '☷ Projects' : '🗂️ Protocol board'),
