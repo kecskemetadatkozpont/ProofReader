@@ -3560,6 +3560,59 @@
     else if (tab === 'log') content = h(LogPanel, { projectId: p.id, authorId: props.authorId, entries: props.log, canEdit: props.canEdit, onChanged: props.onChanged });
     else if (tab === 'tasks') content = h(TasksPanel, { projectId: p.id, tasks: props.tasks, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
     else content = nd() ? setupOverview() : (p.goal ? h('div', { className: 'panel' }, h('h3', null, 'Goal'), h('div', { style: { fontSize: 13.5 } }, p.goal)) : h('div', { className: 'soon' }, 'No goal set yet.'));
+    // ---- Two-tier chrome (New design flag, direction B): the project nav moves into a left context panel beside the content (the AppShell sidebar becomes a thin icon rail via CSS). Classic (flag-OFF) return is unchanged below. ----
+    function stageNav() {
+      var kids = [];
+      STAGES.forEach(function (name, i) {
+        var isDone = i < (p.stage || 0);
+        var active = STAGE_TAB[i] === tab;
+        kids.push(h('button', { key: i, className: 'rv-st' + (active ? ' cur' : '') + (isDone ? ' done' : ''), onClick: function () { setTab(STAGE_TAB[i] || 'overview'); } },
+          h('span', { className: 'rv-st-dot' }, isDone ? '✓' : (i + 1)), h('span', { className: 'rv-st-lbl' }, name)));
+        if (i === 1) kids.push(h('button', { key: 'study', className: 'rv-st sub' + (tab === 'study' ? ' cur' : ''), onClick: function () { setTab('study'); } },
+          h('span', { className: 'rv-st-dot' }, '›'), h('span', { className: 'rv-st-lbl' }, 'Studies')));
+      });
+      return h('div', { className: 'rv-stnav' }, kids);
+    }
+    function subNav() {
+      return h('div', { className: 'rv-subnav' }, [['overview', 'Overview', null], ['canvas', 'Canvas', null], ['notes', 'Notes', null], ['log', 'Log', (props.log || []).length], ['tasks', 'Tasks', openTasks]].map(function (t) {
+        return h('button', { key: t[0], className: 'rv-sub' + (tab === t[0] ? ' on' : ''), onClick: function () { setTab(t[0]); } }, h('span', null, t[1]), t[2] ? h('span', { className: 'rv-sub-c' }, t[2]) : null);
+      }));
+    }
+    if (nd()) {
+      var roBannerN = (!props.canEdit && props.viewerId && p.owner_id !== props.viewerId) ? h('div', { className: 'ro-banner' }, '👁 Supervisor view — ' + (props.studentName ? props.studentName + '’s project' : 'student’s project') + '. Read-only.') : null;
+      var kpiN = h('div', { className: 'rv-kpi' }, [
+        ['Sources', (props.sources || []).length],
+        ['Included', (props.sources || []).filter(function (s) { return s.screening === 'include'; }).length],
+        ['Screened', (props.sources || []).filter(function (s) { return s.screening && s.screening !== 'unscreened'; }).length],
+        ['Ideas', (props.ideas || []).length],
+        ['Studies', (props.studies || []).length],
+        ['Open tasks', openTasks]
+      ].map(function (k) { return h('div', { className: 'rv-kpi-c', key: k[0] }, h('div', { className: 'k' }, k[0]), h('div', { className: 'v' }, String(k[1]))); }));
+      var funnelN = h('div', { style: { display: tab === 'study' ? 'block' : 'none' } },
+        h('details', { className: 'panel', style: { marginTop: 14, padding: '12px 16px' } },
+          h('summary', { style: { cursor: 'pointer', fontSize: 13, fontWeight: 600, color: 'var(--muted)' } }, '⏸ Keyword screening funnel (OpenAlex search → screen) — paused · click to open'),
+          h('div', { style: { marginTop: 12 } }, h(LiteratureStudy, { projectId: p.id, project: p, studies: props.studies, sources: props.sources, ideas: props.ideas, loading: props.loading, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, autoCreateFrom: autoStudy, onAutoConsumed: function () { setAutoStudy(null); } }))));
+      return h('div', { className: 'rv-2t' },
+        h('aside', { className: 'rv-ctx' },
+          h('button', { className: 'rv-ctx-back', onClick: props.onBack }, '← All projects'),
+          h('div', { className: 'rv-ctx-proj' },
+            h('div', { className: 'rv-ctx-title' }, p.title),
+            h('div', { className: 'rv-ctx-field' }, (p.field || 'No field set') + (p.keywords && p.keywords.length ? ' · ' + p.keywords.join(', ') : '')),
+            h('div', { className: 'rv-ctx-pills' },
+              props.canEdit ? h('select', { className: 'field rv-ctx-sel', title: 'Set the current stage (logs a milestone)', value: p.stage || 0, onChange: function (e) { setStage(parseInt(e.target.value, 10)); } }, STAGES.map(function (s, i) { return h('option', { key: i, value: i }, 'Stage: ' + s); })) : h('span', { className: 'chip c-grey' }, 'Stage: ' + STAGES[p.stage || 0]),
+              props.canEdit ? h('select', { className: 'field rv-ctx-sel', value: p.status, onChange: setStatus }, Object.keys(STATUS_LABEL).map(function (k) { return h('option', { key: k, value: k }, STATUS_LABEL[k]); })) : h('span', { className: 'chip c-grey' }, STATUS_LABEL[p.status] || p.status),
+              props.canEdit ? h('button', { className: 'btn rv-ctx-set', title: 'Project base settings (title, field, keywords, goal)', onClick: function () { setEditOpen(true); } }, '✎ Settings') : null
+            )
+          ),
+          h('div', { className: 'rv-ctx-lbl' }, 'Workflow'),
+          stageNav(),
+          h('div', { className: 'rv-ctx-lbl' }, 'Views'),
+          subNav()
+        ),
+        h('div', { className: 'rv-cmain' }, roBannerN, kpiN, content, funnelN),
+        editOpen ? h(ProjectSettingsModal, { project: p, onClose: function () { setEditOpen(false); }, onSaved: function () { setEditOpen(false); props.onChanged(); } }) : null
+      );
+    }
     return h('div', null,
       h('button', { className: 'back-btn', onClick: props.onBack }, '← All projects'),
       (!props.canEdit && props.viewerId && p.owner_id !== props.viewerId) ? h('div', { className: 'ro-banner' }, '👁 Supervisor view — ' + (props.studentName ? props.studentName + '’s project' : 'student’s project') + '. Read-only.') : null,
@@ -3988,7 +4041,7 @@
       h('div', { className: 'main' },
         props.preview ? h('div', { className: 'preview-banner' }, '👁 Admin preview — viewing ', h('b', null, me.name), '’s Research. ', h('a', { href: 'PhD.html?adminView=1' }, 'Doctoral School'), ' · ', h('a', { href: 'Profile.html?adminView=1' }, 'Profile'), ' · ', h('a', { href: 'Admin.html' }, '← Back to admin')) : null,
         h('div', { className: 'head' },
-          h('div', null, h('h1', null, sel ? 'Project' : (board ? 'Protocol tasks' : 'Research projects')), h('div', { className: 'sub' }, board && !sel ? 'Every research project’s protocol steps in one board · personal to-dos live in “My tasks”' : sub)),
+          (nd() && sel) ? h('div', { className: 'rv-crumb' }, 'Research ', h('span', { className: 'rv-crumb-sep' }, '›'), ' ', h('b', null, sel.title || 'Project')) : h('div', null, h('h1', null, sel ? 'Project' : (board ? 'Protocol tasks' : 'Research projects')), h('div', { className: 'sub' }, board && !sel ? 'Every research project’s protocol steps in one board · personal to-dos live in “My tasks”' : sub)),
           h('div', { style: { display: 'flex', gap: 10, alignItems: 'center' } },
             h(NotifBell, null),
             sel ? null : h('button', { className: 'btn' + (board ? ' pri' : ''), onClick: function () { setBoard(!board); }, title: 'Protocol task board — every project’s protocol steps in one Kanban' }, board ? '☷ Projects' : '🗂️ Protocol board'),

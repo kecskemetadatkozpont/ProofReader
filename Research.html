@@ -678,6 +678,48 @@
     html.newdesign .ex-acfail { color: var(--danger); font-size: 11.5px; margin-top: 2px; }
     html.newdesign .ex-acts { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
     html.newdesign .ex-empty { padding: 26px; text-align: center; color: var(--faint); font-size: 13px; }
+
+    /* ===== Two-tier chrome (direction B): thin icon-rail sidebar + project context panel ===== */
+    html.newdesign .side { width: 66px; align-items: center; }
+    html.newdesign .side-brand { padding: 16px 0 12px; justify-content: center; }
+    html.newdesign .side-brand > div:not(.mk) { display: none; }
+    html.newdesign .nav { padding: 8px; width: 100%; }
+    html.newdesign .nav button { justify-content: center; padding: 9px 0; }
+    html.newdesign .nav button span { display: none; }
+    html.newdesign .side-foot { flex-direction: column; padding: 12px 8px; gap: 8px; }
+    html.newdesign .side-foot .who { display: none; }
+    html.newdesign .side-foot a.exit { margin: 0; }
+    html.newdesign .rv-crumb { font-size: 13px; color: var(--muted); font-weight: 600; }
+    html.newdesign .rv-crumb b { color: var(--ink); font-weight: 700; }
+    html.newdesign .rv-crumb-sep { color: var(--faint); }
+    html.newdesign .rv-2t { display: grid; grid-template-columns: 236px 1fr; gap: 20px; align-items: start; }
+    html.newdesign .rv-2t > * { min-width: 0; }
+    @media (max-width: 860px) { html.newdesign .rv-2t { grid-template-columns: 1fr; } html.newdesign .rv-ctx { position: static; } }
+    html.newdesign .rv-ctx { position: sticky; top: 12px; display: flex; flex-direction: column; gap: 4px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px 12px; }
+    html.newdesign .rv-ctx-back { align-self: flex-start; font-family: inherit; font-size: 12px; font-weight: 700; color: var(--muted); background: transparent; border: 0; padding: 4px 6px; border-radius: 7px; cursor: pointer; }
+    html.newdesign .rv-ctx-back:hover { color: var(--accent); background: var(--accent-tint); }
+    html.newdesign .rv-ctx-proj { padding: 8px 6px 12px; border-bottom: 1px solid var(--line); margin-bottom: 8px; }
+    html.newdesign .rv-ctx-title { font-family: 'Crimson Pro', Georgia, serif; font-weight: 600; font-size: 19px; line-height: 1.2; color: var(--ink); }
+    html.newdesign .rv-ctx-field { font-size: 11.5px; color: var(--muted); margin-top: 5px; line-height: 1.4; }
+    html.newdesign .rv-ctx-pills { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; align-items: center; }
+    html.newdesign .rv-ctx-sel { height: 28px !important; font-size: 11.5px !important; width: auto !important; padding: 0 6px !important; }
+    html.newdesign .rv-ctx-set { padding: 4px 9px !important; height: 28px; font-size: 11.5px; flex: none; }
+    html.newdesign .rv-ctx-lbl { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--faint); padding: 8px 8px 4px; }
+    html.newdesign .rv-stnav, html.newdesign .rv-subnav { display: flex; flex-direction: column; gap: 1px; }
+    html.newdesign .rv-st, html.newdesign .rv-sub { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; background: transparent; border: 0; font-family: inherit; font-size: 13px; font-weight: 600; color: var(--muted); padding: 7px 9px; border-radius: 9px; cursor: pointer; }
+    html.newdesign .rv-st:hover, html.newdesign .rv-sub:hover { background: var(--surface-2); color: var(--ink); }
+    html.newdesign .rv-st.cur, html.newdesign .rv-sub.on { background: var(--accent-tint); color: var(--accent); font-weight: 800; }
+    html.newdesign .rv-st-dot { flex: none; width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; font-weight: 800; background: var(--surface); border: 1.5px solid var(--line); color: var(--muted); font-variant-numeric: tabular-nums; }
+    html.newdesign .rv-st.done .rv-st-dot { background: var(--ok); border-color: var(--ok); color: #fff; }
+    html.newdesign.dark .rv-st.done .rv-st-dot { color: #0d2018; }
+    html.newdesign .rv-st.cur .rv-st-dot { background: var(--accent); border-color: var(--accent); color: #fff; }
+    html.newdesign .rv-st.done .rv-st-lbl { color: var(--muted); }
+    html.newdesign .rv-st.sub { margin-left: 16px; font-size: 12.5px; }
+    html.newdesign .rv-st.sub .rv-st-dot { border: 0; background: transparent; color: var(--faint); width: 16px; height: 16px; }
+    html.newdesign .rv-st-lbl { flex: 1; min-width: 0; }
+    html.newdesign .rv-sub-c { margin-left: auto; font-size: 11px; font-weight: 800; color: var(--faint); background: var(--surface-2); border: 1px solid var(--line); border-radius: 999px; padding: 0 7px; }
+    html.newdesign .rv-sub.on .rv-sub-c { color: var(--accent); }
+    html.newdesign .rv-cmain { min-width: 0; }
     /* dark newdesign: white-on-accent primary buttons need a darker fill (dark --accent #8b88f2 gives only ~3:1 with #fff) — systemic, covers the Ideas primaries too */
     html.newdesign.dark .sr-rcstart, html.newdesign.dark .idb-addbtn, html.newdesign.dark .idb-cta { background: #4f46e5; color: #fff; }
 
@@ -713,7 +755,7 @@
   <script src="https://cdn.jsdelivr.net/npm/tus-js-client@4.1.0/dist/tus.min.js"></script>
   <script type="text/babel" src="canvas.jsx?v=1783137934"></script>
   <script type="text/babel" src="notes.jsx?v=1783137934"></script>
-  <script type="text/babel" src="research.jsx?v=1783943241"></script>
+  <script type="text/babel" src="research.jsx?v=1783945401"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>
