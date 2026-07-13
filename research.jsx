@@ -3030,16 +3030,28 @@
                 h('td', { className: 'r ex-ord' }, s.ord),
                 h('td', { className: 'ex-ti' }, h('span', { 'aria-hidden': 'true', style: { marginRight: 6 } }, STEP_ICON[s.kind] || '•'), (open ? '▾ ' : '▸ ') + s.title,
                   s.needs_approval ? h('span', { className: 'chip c-warn', style: { fontSize: 9.5, marginLeft: 6, flex: 'none' } }, '⏸') : null,
+                  (sx.origin === 'citation-optimizer') ? h('span', { className: 'chip', style: { fontSize: 9.5, marginLeft: 6, background: 'var(--accent-tint)', color: 'var(--accent)' }, title: 'Added by the Citation Optimizer' }, '🔗') : null,
+                  (sx.attachments && sx.attachments.length) ? h('span', { className: 'chip', style: { fontSize: 9.5, marginLeft: 5 }, title: 'Attachments' }, '📎 ' + sx.attachments.length) : null,
                   (s.depends_on && s.depends_on.length) ? h('span', { className: 'ex-dep' }, 'after ' + s.depends_on.join(',')) : null),
                 h('td', null, h('span', { className: 'ex-own ' + (ai ? 'ai' : 'hu') }, ai ? 'AI' : 'HUMAN')),
                 h('td', null, h('span', { className: 'chip ' + pst[0], style: { fontSize: 10 } }, pst[1])),
                 h('td', { className: 'r ex-chk' }, a ? (a.pass + '/' + a.total) : '—')
               )];
-              if (open) out.push(h('tr', { key: s.id + '-d', className: 'ex-drow' }, h('td', { colSpan: 5, className: 'ex-detail' },
-                sx.instruction ? h('div', null, sx.instruction) : null,
-                (s.result && s.result.summary) ? h('div', { style: { marginTop: 6 } }, h('b', null, 'Result: '), s.result.summary) : null,
-                (!sx.instruction && !(s.result && s.result.summary)) ? h('span', { style: { color: 'var(--faint)' } }, 'No details yet.') : null
-              )));
+              if (open) {
+                var res = s.result || {};
+                var acFails = (a && a.items) ? a.items.filter(function (it) { return !it.ok; }) : [];
+                out.push(h('tr', { key: s.id + '-d', className: 'ex-drow' }, h('td', { colSpan: 5, className: 'ex-detail' },
+                  sx.instruction ? h('div', null, sx.instruction) : null,
+                  res.summary ? h('div', { style: { marginTop: 6 } }, h('b', null, 'Result: '), res.summary) : null,
+                  res.error ? h('div', { className: 'ex-err', style: { marginTop: 6 } }, h('b', null, '✗ Error: '), String(res.error.message || res.error)) : null,
+                  acFails.length ? h('div', { style: { marginTop: 6 } }, h('b', { style: { color: 'var(--danger)' } }, 'Failed checks: '), acFails.map(function (it, k) { return h('div', { key: k, className: 'ex-acfail' }, '• ' + it.crit + (it.reason ? ' — ' + it.reason : '')); })) : null,
+                  (!sx.instruction && !res.summary && !res.error && !acFails.length) ? h('div', { style: { color: 'var(--faint)' } }, 'No details yet.') : null,
+                  ce ? h('div', { className: 'ex-acts' },
+                    (s.status === 'blocked' || (s.needs_approval && s.status === 'todo')) ? h('button', { className: 'btn pri', style: { padding: '3px 10px', fontSize: 12 }, title: 'Approve so the runner may execute this step', onClick: function (e) { e.stopPropagation(); patchStep(s, { status: 'queued' }); } }, '✓ Approve to run') : null,
+                    h('button', { className: 'btn', style: { padding: '3px 10px', fontSize: 12 }, onClick: function (e) { e.stopPropagation(); setEditing({ step: s, isNew: false }); } }, '✎ Edit')
+                  ) : null
+                )));
+              }
               return out;
             }))
           )) : h('div', { className: 'ex-empty' }, 'No tasks yet — add one, or generate the protocol.')
@@ -3504,9 +3516,9 @@
         { done: !!(p.goal && p.goal.trim()), label: 'Set a research goal', note: (p.goal && p.goal.trim()) ? 'Goal is set' : 'Describe what the project investigates', tab: null, act: '✎ in Settings' },
         { done: (props.ideas || []).length > 0, label: 'Capture research ideas', note: (props.ideas || []).length + ' idea' + ((props.ideas || []).length === 1 ? '' : 's'), tab: 'ideas', act: 'Add ideas' },
         { done: srcs.length > 0, label: 'Build your literature library', note: srcs.length + ' source' + (srcs.length === 1 ? '' : 's') + ' · ' + inc + ' included', tab: 'literature', act: 'Search literature' },
-        { done: (props.studies || []).length > 0, label: 'Run a screening study', note: (props.studies || []).length + ' study' + ((props.studies || []).length === 1 ? '' : ' studies'), tab: 'study', act: 'Open Studies' },
+        { done: (props.studies || []).length > 0, label: 'Run a screening study', note: (props.studies || []).length + ((props.studies || []).length === 1 ? ' study' : ' studies'), tab: 'study', act: 'Open Studies' },
         { done: (props.datasets || []).length > 0, label: 'Add a dataset', note: (props.datasets || []).length + ' dataset' + ((props.datasets || []).length === 1 ? '' : 's'), tab: 'data', act: 'Add data' },
-        { done: (p.stage || 0) >= 3, label: 'Draft the experimental protocol', note: (p.stage || 0) >= 3 ? 'In progress' : 'Not started yet', tab: 'protocol', act: 'Open Protocol' }
+        { done: (p.stage || 0) >= 3, label: 'Draft the experimental protocol', note: (p.stage || 0) >= 3 ? 'Protocol stage reached' : 'Not started yet', tab: 'protocol', act: 'Open Protocol' }
       ];
       var doneN = CHK.filter(function (c) { return c.done; }).length;
       var pct = Math.round(doneN / CHK.length * 100);
