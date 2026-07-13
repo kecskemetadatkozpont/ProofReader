@@ -1738,6 +1738,7 @@
   function ElicitSysReview(props) {
     var canUse = !!(window.PREnt && window.PREnt.loaded() && window.PREnt.can('elicit_sysreview'));
     var jsS = useState(null), jobs = jsS[0], setJobs = jsS[1];
+    var sjS = useState(null), selJob = sjS[0], setSelJob = sjS[1];   // selected review in the master-detail workspace (New design, direction B)
     var openFormS = useState(false), openForm = openFormS[0], setOpenForm = openFormS[1];
     var fS = useState({ q: '', protocol: '', abs: [], ft: [], ex: [], gen: true, genAbs: true, genEx: true, useFig: false, runFT: true, maxResults: '1000' }), f = fS[0], setF = fS[1];
     var buS = useState(false), busy = buS[0], setBusy = buS[1];
@@ -1890,6 +1891,60 @@
       );
     }
     if (!canUse) return null;
+    // ---- Review Workspace (New design flag, direction B): master-detail — a rail of reviews + candidates on the left, the selected review's full detail on the right. Reuses card()/SR_STAGES/startFromCand/dismissCand. When creating a review (openForm) we fall back to the classic full-width layout that owns the form. ----
+    function railRow(j) {
+      var isSel = selJob ? selJob === j.id : (jobs && jobs[0] && jobs[0].id === j.id);
+      var st = j.status;
+      var lab = st === 'completed' ? 'Done' : st === 'failed' ? 'Failed' : st === 'pausedForInsufficientQuota' ? 'Paused' : (function () { var i = srStageIdx(j.stage); return i >= 0 ? 'Step ' + (i + 1) + '/' + SR_STAGES.length : 'Working'; })();
+      var cls = st === 'completed' ? 'ok' : st === 'failed' ? 'fail' : st === 'pausedForInsufficientQuota' ? 'pause' : 'run';
+      var idx = st === 'completed' ? SR_STAGES.length - 1 : (srStageIdx(j.stage) < 0 ? 0 : srStageIdx(j.stage));
+      return h('button', { key: j.id, className: 'sr-rrow' + (isSel ? ' on' : ''), onClick: function () { setSelJob(j.id); } },
+        h('div', { className: 'sr-rrow-t' }, j.result_title || j.research_question || 'Systematic review'),
+        h('div', { className: 'sr-rrow-b' },
+          h('span', { className: 'sr-rst ' + cls }, lab),
+          h('span', { className: 'sr-dots', 'aria-hidden': 'true' }, SR_STAGES.map(function (s, i) { var d = (i < idx) || st === 'completed'; var c = i === idx && st !== 'completed'; return h('i', { key: i, className: 'sr-dot' + (d ? ' d' : '') + (c ? ' c' : '') }); }))
+        )
+      );
+    }
+    function railCand(c) {
+      return h('div', { key: c.id, className: 'sr-rcand' },
+        h('div', { className: 'sr-rcand-q' }, c.question),
+        h('div', { className: 'sr-rcand-a' },
+          h('button', { className: 'sr-rcstart', disabled: !props.canEdit, onClick: function () { startFromCand(c); } }, '🔬 Start review'),
+          h('button', { className: 'sr-rcx', disabled: !props.canEdit, title: 'Dismiss', onClick: function () { dismissCand(c); } }, '×'))
+      );
+    }
+    function srWorkspace() {
+      var sel = (jobs && jobs.length) ? ((selJob && jobs.filter(function (x) { return x.id === selJob; })[0]) || jobs[0]) : null;
+      return h('div', { className: 'panel sr2-panel', style: { marginTop: 14 } },
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
+          h('h3', { style: { margin: 0, flex: 1 } }, '🔬 Systematic Review Studio ', h('span', { style: { fontSize: 11.5, color: 'var(--faint)', fontWeight: 400 } }, '· from your Ideas → PRISMA')),
+          props.canEdit ? h('button', { className: 'btn pri', style: { padding: '5px 11px', fontSize: 12.5 }, disabled: gen, onClick: generate }, gen ? '✨ Generating…' : '✨ Generate from Ideas') : null,
+          props.canEdit ? h('button', { className: 'btn', style: { padding: '5px 11px', fontSize: 12.5 }, onClick: function () { setF({ q: '', protocol: '', abs: [], ft: [], ex: [], gen: true, genAbs: true, genEx: true, useFig: false, runFT: true, maxResults: '1000' }); setOpenForm(true); } }, '+ Manual review') : null),
+        err ? h('div', { style: { fontSize: 12.5, color: /^✓/.test(err) ? 'var(--ok, #15803d)' : 'var(--danger, #b42318)', margin: '6px 0' } }, err) : null,
+        h('div', { className: 'sr2' },
+          h('div', { className: 'sr-rail' },
+            (jobs && jobs.length) ? h('div', null,
+              h('div', { className: 'sr-rail-hd' }, 'Reviews ', h('span', { className: 'sr-rail-c' }, jobs.length)),
+              h('div', { className: 'sr-rlist' }, jobs.map(railRow))) : (jobs ? h('div', { className: 'sr-rail-empty' }, 'No reviews yet.') : h('div', { className: 'sr-rail-empty' }, 'Loading…')),
+            (cands && cands.length) ? h('div', { className: 'sr-rail-sec' },
+              h('div', { className: 'sr-rail-hd' }, 'From your Ideas ', h('span', { className: 'sr-rail-c' }, cands.length)),
+              cands.map(railCand)) : null
+          ),
+          h('div', { className: 'sr-detail' },
+            sel ? card(sel) :
+              (cands && cands.length) ? h('div', { className: 'sr-detail-empty' }, 'Pick a review question on the left and press “🔬 Start review”, or “+ Manual review”.') :
+                h('div', { className: 'sr-detail-empty' }, 'No reviews yet. Click “✨ Generate from Ideas” to draft review questions from your project Ideas, then start one.')
+          )
+        ),
+        openR ? h('div', { className: 'scrim', onClick: function () { setOpenR(null); } }, h('div', { className: 'modal', style: { width: 780 }, onClick: function (e) { e.stopPropagation(); } },
+          h('div', { className: 'modal-h' }, h('h3', { style: { margin: 0, flex: 1 } }, openR.result_title || 'Systematic review'), h('button', { className: 'icon-x', 'aria-label': 'Close', onClick: function () { setOpenR(null); } }, '✕')),
+          (window.marked && window.DOMPurify)
+            ? h('div', { className: 'md-report', style: { padding: 18, maxHeight: '72vh', overflow: 'auto', lineHeight: 1.6, fontSize: 13.5 }, dangerouslySetInnerHTML: { __html: enhanceReport(openR.result_body || '') } })
+            : h('div', { style: { padding: 18, maxHeight: '72vh', overflow: 'auto', whiteSpace: 'pre-wrap', fontSize: 13 } }, openR.result_body || ''))) : null
+      );
+    }
+    if (nd() && !openForm) return srWorkspace();
     return h('div', { className: 'panel', style: { marginTop: 14 } },
       h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
         h('h3', { style: { margin: 0, flex: 1 } }, '🔬 Systematic Review Studio ', h('span', { style: { fontSize: 11.5, color: 'var(--faint)', fontWeight: 400 } }, '· from your Ideas → PRISMA')),
