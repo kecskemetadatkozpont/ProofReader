@@ -745,7 +745,9 @@
     html.newdesign .jt tbody tr:last-child td { border-bottom: 0; }
     html.newdesign .jt tbody tr:hover td { background: var(--surface-2); }
     html.newdesign .jt tbody tr.jt-sel td { background: var(--accent-tint); }
+    html.newdesign.dark .jt tbody tr.jt-sel td { background: color-mix(in srgb, var(--accent) 14%, var(--surface)); }
     html.newdesign .jt tbody tr.jt-sel td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+    html.newdesign .jt .jl-lvl.lvl1 { border: 1px solid var(--line); }
     html.newdesign .jt-jr { max-width: 360px; }
     html.newdesign .jt-jtitle { font-weight: 700; font-size: 13.5px; color: var(--ink); line-height: 1.3; }
     html.newdesign .jt-jtitle:hover { color: var(--accent); }
@@ -758,7 +760,7 @@
     html.newdesign .jt-fitpct { font-size: 12.5px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; min-width: 34px; text-align: right; }
     html.newdesign .jt-num { font-variant-numeric: tabular-nums; color: var(--muted); white-space: nowrap; }
     html.newdesign .jt-oa { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); background: var(--surface); white-space: nowrap; }
-    html.newdesign .jt-dash { color: var(--faint); }
+    html.newdesign .jt-dash { color: var(--muted); }
     html.newdesign .jt-act { white-space: nowrap; }
     html.newdesign .jt-ib { padding: 3px 8px !important; font-size: 12px; }
     html.newdesign .jt-ib + .jt-ib, html.newdesign .jt-picked { margin-left: 5px; }
@@ -798,7 +800,7 @@
   <script src="https://cdn.jsdelivr.net/npm/tus-js-client@4.1.0/dist/tus.min.js"></script>
   <script type="text/babel" src="canvas.jsx?v=1783137934"></script>
   <script type="text/babel" src="notes.jsx?v=1783137934"></script>
-  <script type="text/babel" src="research.jsx?v=1783954324"></script>
+  <script type="text/babel" src="research.jsx?v=1783954934"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>

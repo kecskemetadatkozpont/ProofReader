@@ -3457,8 +3457,8 @@
           h('th', { className: 'jt-r jt-sorted' }, 'Fit ▾'),
           h('th', null, 'Level'),
           h('th', { className: 'jt-c' }, 'Q'),
-          h('th', { className: 'jt-r' }, '⌀ Impact'),
-          h('th', { className: 'jt-r' }, 'h-index'),
+          h('th', { className: 'jt-r', title: '2-year mean citedness (OpenAlex)' }, '⌀ Impact'),
+          h('th', { className: 'jt-r', title: 'h-index (OpenAlex)' }, 'h-index'),
           h('th', null, 'OA'),
           ce ? h('th', { className: 'jt-r' }, '') : null
         )),
@@ -3477,7 +3477,7 @@
             h('td', null, j.open_access ? h('span', { className: 'jt-oa' }, j.open_access) : h('span', { className: 'jt-dash' }, '–')),
             ce ? h('td', { className: 'jt-r jt-act' },
               h('button', { className: 'btn jt-ib', title: 'Details & template', onClick: function () { openDossier(j); } }, '🔎'),
-              picked ? h('span', { className: 'chip c-ok jt-picked', title: 'Shortlisted' }, '★') : h('button', { className: 'btn jt-ib', title: 'Add to shortlist', onClick: function () { shortlist(j); } }, '★')
+              picked ? h('span', { className: 'chip c-ok jt-picked', title: 'Shortlisted' }, '★') : h('button', { className: 'btn jt-ib', title: 'Add to shortlist', onClick: function () { shortlist(j); } }, '☆')
             ) : null
           );
         }))
