@@ -3566,7 +3566,7 @@
       STAGES.forEach(function (name, i) {
         var isDone = i < (p.stage || 0);
         var active = STAGE_TAB[i] === tab;
-        kids.push(h('button', { key: i, className: 'rv-st' + (active ? ' cur' : '') + (isDone ? ' done' : ''), onClick: function () { setTab(STAGE_TAB[i] || 'overview'); } },
+        kids.push(h('button', { key: i, className: 'rv-st' + (active ? ' cur' : '') + (isDone ? ' done' : '') + (i === (p.stage || 0) ? ' atstage' : ''), 'aria-current': active ? 'page' : null, onClick: function () { setTab(STAGE_TAB[i] || 'overview'); } },
           h('span', { className: 'rv-st-dot' }, isDone ? '✓' : (i + 1)), h('span', { className: 'rv-st-lbl' }, name)));
         if (i === 1) kids.push(h('button', { key: 'study', className: 'rv-st sub' + (tab === 'study' ? ' cur' : ''), onClick: function () { setTab('study'); } },
           h('span', { className: 'rv-st-dot' }, '›'), h('span', { className: 'rv-st-lbl' }, 'Studies')));
@@ -3574,7 +3574,7 @@
       return h('div', { className: 'rv-stnav' }, kids);
     }
     function subNav() {
-      return h('div', { className: 'rv-subnav' }, [['overview', 'Overview', null], ['canvas', 'Canvas', null], ['notes', 'Notes', null], ['log', 'Log', (props.log || []).length], ['tasks', 'Tasks', openTasks]].map(function (t) {
+      return h('div', { className: 'rv-subnav' }, [['canvas', 'Canvas', null], ['notes', 'Notes', null], ['data', 'Data', (props.datasets || []).length], ['log', 'Log', (props.log || []).length], ['tasks', 'Tasks', openTasks]].map(function (t) {
         return h('button', { key: t[0], className: 'rv-sub' + (tab === t[0] ? ' on' : ''), onClick: function () { setTab(t[0]); } }, h('span', null, t[1]), t[2] ? h('span', { className: 'rv-sub-c' }, t[2]) : null);
       }));
     }
@@ -4034,7 +4034,7 @@
       h('div', { className: 'side' },
         h('div', { className: 'side-brand' }, h('div', { className: 'mk' }, h('span')), h('div', null, h('b', null, 'Publify'), h('i', null, 'Research'))),
         h('nav', { className: 'nav' },
-          h('button', { className: 'on', onClick: props.onBack }, ICp, h('span', null, 'Projects'))
+          h('button', { className: 'on', title: 'Projects', 'aria-label': 'Projects', onClick: props.onBack }, ICp, h('span', null, 'Projects'))
         ),
         h('div', { className: 'side-foot' }, h(Avatar, { u: me, size: 32 }), h('div', { className: 'who' }, h('b', null, me.name), h('span', null, roleLabel)), h('a', { className: 'exit', href: 'Projects.html', title: 'Back to Publify' }, '←'))
       ),

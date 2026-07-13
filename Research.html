@@ -713,7 +713,9 @@
     html.newdesign .rv-st.done .rv-st-dot { background: var(--ok); border-color: var(--ok); color: #fff; }
     html.newdesign.dark .rv-st.done .rv-st-dot { color: #0d2018; }
     html.newdesign .rv-st.cur .rv-st-dot { background: var(--accent); border-color: var(--accent); color: #fff; }
-    html.newdesign .rv-st.done .rv-st-lbl { color: var(--muted); }
+    html.newdesign.dark .rv-st.cur .rv-st-dot { color: #0d1233; }
+    html.newdesign .rv-st.atstage:not(.cur) .rv-st-dot { border-color: var(--accent); color: var(--accent); box-shadow: 0 0 0 3px var(--accent-tint); }
+    html.newdesign .rv-st.done:not(.cur) .rv-st-lbl { color: var(--muted); }
     html.newdesign .rv-st.sub { margin-left: 16px; font-size: 12.5px; }
     html.newdesign .rv-st.sub .rv-st-dot { border: 0; background: transparent; color: var(--faint); width: 16px; height: 16px; }
     html.newdesign .rv-st-lbl { flex: 1; min-width: 0; }
@@ -755,7 +757,7 @@
   <script src="https://cdn.jsdelivr.net/npm/tus-js-client@4.1.0/dist/tus.min.js"></script>
   <script type="text/babel" src="canvas.jsx?v=1783137934"></script>
   <script type="text/babel" src="notes.jsx?v=1783137934"></script>
-  <script type="text/babel" src="research.jsx?v=1783945401"></script>
+  <script type="text/babel" src="research.jsx?v=1783946207"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>
