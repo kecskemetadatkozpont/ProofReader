@@ -991,10 +991,13 @@
           ) : null,
           rest.length ? rest.map(function (idea) {
             var rej = idea.status === 'rejected';
+            var xp = expanded[idea.id] === true;   // default collapsed (clamped) in the rail; click the question to expand full text (reuses feature #10 state)
             return h('div', { className: 'idb-sl' + (rej ? ' rej' : ''), key: idea.id },
               h('span', { className: 'idb-nd' }),
               h('div', { className: 'idb-body' },
-                h('div', { className: 'idb-q' }, idea.question),
+                h('div', { className: 'idb-q' + (xp ? '' : ' clamp'), title: xp ? '' : idea.question, onClick: function () { toggle(idea.id); } }, idea.question),
+                idea.hypothesis ? h('div', { className: 'idb-h2' + (xp ? '' : ' clamp') }, idea.hypothesis) : null,
+                idea.rationale ? h('div', { className: 'idb-r2' + (xp ? '' : ' clamp') }, idea.rationale) : null,
                 h('div', { className: 'idb-meta' }, srcLabel(idea.source), idea.novelty != null ? ' · novelty ' + idea.novelty : '', rej ? h('span', { className: 'idb-rejtag' }, ' · rejected') : ''),
                 props.canEdit ? h('div', { className: 'idb-acts' },
                   h('button', { className: 'sel', onClick: function () { setStatus(idea, 'selected'); } }, 'Select'),
