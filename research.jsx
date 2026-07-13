@@ -3594,7 +3594,9 @@
           h('div', { style: { marginTop: 12 } }, h(LiteratureStudy, { projectId: p.id, project: p, studies: props.studies, sources: props.sources, ideas: props.ideas, loading: props.loading, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, autoCreateFrom: autoStudy, onAutoConsumed: function () { setAutoStudy(null); } }))));
       return h('div', { className: 'rv-2t' },
         h('aside', { className: 'rv-ctx' },
-          h('button', { className: 'rv-ctx-back', onClick: props.onBack }, '← All projects'),
+          h('div', { className: 'rv-ctx-top' },
+            h('div', { className: 'rv-ctx-brand' }, h('div', { className: 'mk' }, h('span')), h('b', null, 'Publify')),
+            h('button', { className: 'rv-ctx-back', onClick: props.onBack, title: 'Back to all projects' }, '‹ Projects')),
           h('div', { className: 'rv-ctx-proj' },
             h('div', { className: 'rv-ctx-title' }, p.title),
             h('div', { className: 'rv-ctx-field' }, (p.field || 'No field set') + (p.keywords && p.keywords.length ? ' · ' + p.keywords.join(', ') : '')),
@@ -3607,7 +3609,8 @@
           h('div', { className: 'rv-ctx-lbl' }, 'Workflow'),
           stageNav(),
           h('div', { className: 'rv-ctx-lbl' }, 'Views'),
-          subNav()
+          subNav(),
+          props.me ? h('div', { className: 'rv-ctx-foot' }, h(Avatar, { u: props.me, size: 28 }), h('div', { className: 'rv-ctx-acct' }, h('b', null, props.me.name), h('span', null, props.me.email)), h('a', { className: 'rv-ctx-exit', href: 'Projects.html', title: 'Back to Publify' }, '←')) : null
         ),
         h('div', { className: 'rv-cmain' }, roBannerN, kpiN, content, funnelN),
         editOpen ? h(ProjectSettingsModal, { project: p, onClose: function () { setEditOpen(false); }, onSaved: function () { setEditOpen(false); props.onChanged(); } }) : null
@@ -4019,7 +4022,7 @@
     var body;
     if (sel) {
       var initTab = (function () { try { var sp = new URLSearchParams(location.search); return (sp.get('step') && sp.get('project') === sel.id) ? 'protocol' : null; } catch (e) { return null; } })();
-      body = h(ProjectDetail, { project: sel, initTab: initTab, log: props.detail.log, tasks: props.detail.tasks, ideas: props.detail.ideas, sources: props.detail.sources, datasets: props.detail.datasets, jobs: props.detail.jobs, studies: props.detail.studies, loading: props.detail.loading, canEdit: props.canEdit(sel), viewerId: meId, fileOwnerId: meId, studentName: (studentById[sel.student_id] && studentById[sel.student_id].name) || null, authorId: props.authorId, myEmail: props.me.email, onBack: props.onBack, onChanged: props.refreshAll });
+      body = h(ProjectDetail, { project: sel, initTab: initTab, me: me, log: props.detail.log, tasks: props.detail.tasks, ideas: props.detail.ideas, sources: props.detail.sources, datasets: props.detail.datasets, jobs: props.detail.jobs, studies: props.detail.studies, loading: props.detail.loading, canEdit: props.canEdit(sel), viewerId: meId, fileOwnerId: meId, studentName: (studentById[sel.student_id] && studentById[sel.student_id].name) || null, authorId: props.authorId, myEmail: props.me.email, onBack: props.onBack, onChanged: props.refreshAll });
     } else if (board) {
       body = h(GlobalBoard, { projects: props.projects, canEditProject: props.canEdit, onOpenProject: props.openProject });
     } else if (view === 'supervised') {
@@ -4030,7 +4033,7 @@
       body = h('div', null, seg, h('div', { className: 'grid' }, mineProjects.map(function (p) { return h(ProjectCard, { key: p.id, project: p, meId: meId, studentById: studentById, onOpen: props.openProject }); })));
     }
 
-    return h('div', { className: 'app' },
+    return h('div', { className: 'app' + (nd() && sel ? ' rv-hasproj' : '') },
       h('div', { className: 'side' },
         h('div', { className: 'side-brand' }, h('div', { className: 'mk' }, h('span')), h('div', null, h('b', null, 'Publify'), h('i', null, 'Research'))),
         h('nav', { className: 'nav' },
