@@ -3449,6 +3449,40 @@
           h('button', { className: 'btn', style: { padding: '3px 10px', fontSize: 12 }, onClick: function () { openDossier(j); } }, '🔎 Details & template'),
           ce ? (picked ? h('span', { className: 'chip c-ok' }, '★ Shortlisted') : h('button', { className: 'btn', style: { padding: '3px 10px', fontSize: 12 }, onClick: function () { shortlist(j); } }, '★ Shortlist')) : null));
     }
+    // ---- Venue Comparison Table (New design flag, direction A): recommendations as a dense sortable-looking table instead of stacked cards. Same j fields + openDossier/shortlist/levelBadge/quartile. ----
+    function journalTable(list) {
+      return h('div', { className: 'jt-wrap' }, h('table', { className: 'jt' },
+        h('thead', null, h('tr', null,
+          h('th', null, 'Journal'),
+          h('th', { className: 'jt-r jt-sorted' }, 'Fit ▾'),
+          h('th', null, 'Level'),
+          h('th', { className: 'jt-c' }, 'Q'),
+          h('th', { className: 'jt-r' }, '⌀ Impact'),
+          h('th', { className: 'jt-r' }, 'h-index'),
+          h('th', null, 'OA'),
+          ce ? h('th', { className: 'jt-r' }, '') : null
+        )),
+        h('tbody', null, list.map(function (j) {
+          var picked = !!pickedIds[j.id];
+          return h('tr', { key: j.id, className: picked ? 'jt-sel' : null },
+            h('td', { className: 'jt-jr' },
+              h('a', { href: j.url || '#', target: '_blank', rel: 'noopener noreferrer', className: 'jt-jtitle' }, j.title),
+              h('div', { className: 'jt-jmeta' }, [j.field, j.publisher, j.country].filter(Boolean).join(' · ')),
+              j.fit_reason ? h('div', { className: 'jt-jreason' }, j.fit_reason) : null),
+            h('td', { className: 'jt-r jt-fitcell' }, j.fit_score != null ? h('div', { className: 'jt-fit' }, h('span', { className: 'jt-fitbar' }, h('i', { style: { width: j.fit_score + '%' } })), h('span', { className: 'jt-fitpct' }, j.fit_score + '%')) : h('span', { className: 'jt-dash' }, '–')),
+            h('td', null, levelBadge(j.npi_level)),
+            h('td', { className: 'jt-c' }, quartile(j.sjr_quartile) || h('span', { className: 'jt-dash' }, '–')),
+            h('td', { className: 'jt-r jt-num' }, j.impact != null ? j.impact : '–'),
+            h('td', { className: 'jt-r jt-num' }, j.h_index != null ? j.h_index : '–'),
+            h('td', null, j.open_access ? h('span', { className: 'jt-oa' }, j.open_access) : h('span', { className: 'jt-dash' }, '–')),
+            ce ? h('td', { className: 'jt-r jt-act' },
+              h('button', { className: 'btn jt-ib', title: 'Details & template', onClick: function () { openDossier(j); } }, '🔎'),
+              picked ? h('span', { className: 'chip c-ok jt-picked', title: 'Shortlisted' }, '★') : h('button', { className: 'btn jt-ib', title: 'Add to shortlist', onClick: function () { shortlist(j); } }, '★')
+            ) : null
+          );
+        }))
+      ));
+    }
     if (dv) return dossierPane();
     if (loading) return h('div', { className: 'empty' }, 'Loading…');
     return h('div', null,
@@ -3464,7 +3498,7 @@
       rec ? h('div', { className: 'panel' },
         h('div', { style: { fontSize: 12.5, color: 'var(--muted)', marginBottom: 3 } }, h('b', null, 'Matched fields: '), (rec.fields || []).join(', ') || '—'),
         rec.summary ? h('div', { style: { fontSize: 12, color: 'var(--faint)', marginBottom: 10 } }, rec.summary) : null,
-        (rec.journals && rec.journals.length) ? rec.journals.map(function (j) { return card(j, !!pickedIds[j.id]); }) : h('div', { className: 'empty' }, rec.note || 'No matching journals found — try a broader preference.')
+        (rec.journals && rec.journals.length) ? (nd() ? journalTable(rec.journals) : rec.journals.map(function (j) { return card(j, !!pickedIds[j.id]); })) : h('div', { className: 'empty' }, rec.note || 'No matching journals found — try a broader preference.')
       ) : null,
       picks.length ? h('div', { className: 'panel' },
         h('h3', null, '★ Shortlist (' + picks.length + ')'),

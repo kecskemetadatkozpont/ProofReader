@@ -733,6 +733,36 @@
     html.newdesign .rv-sub-c { margin-left: auto; font-size: 11px; font-weight: 800; color: var(--faint); background: var(--surface-2); border: 1px solid var(--line); border-radius: 999px; padding: 0 7px; }
     html.newdesign .rv-sub.on .rv-sub-c { color: var(--accent); }
     html.newdesign .rv-cmain { min-width: 0; }
+
+    /* ===== Journal — Venue Comparison Table (direction A) ===== */
+    html.newdesign .jt-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; }
+    html.newdesign .jt { border-collapse: separate; border-spacing: 0; width: 100%; min-width: 820px; font-size: 13px; }
+    html.newdesign .jt thead th { background: var(--surface-2); text-align: left; font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); padding: 10px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+    html.newdesign .jt th.jt-r, html.newdesign .jt td.jt-r { text-align: right; }
+    html.newdesign .jt th.jt-c, html.newdesign .jt td.jt-c { text-align: center; }
+    html.newdesign .jt th.jt-sorted { color: var(--accent); }
+    html.newdesign .jt tbody td { padding: 11px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    html.newdesign .jt tbody tr:last-child td { border-bottom: 0; }
+    html.newdesign .jt tbody tr:hover td { background: var(--surface-2); }
+    html.newdesign .jt tbody tr.jt-sel td { background: var(--accent-tint); }
+    html.newdesign .jt tbody tr.jt-sel td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+    html.newdesign .jt-jr { max-width: 360px; }
+    html.newdesign .jt-jtitle { font-weight: 700; font-size: 13.5px; color: var(--ink); line-height: 1.3; }
+    html.newdesign .jt-jtitle:hover { color: var(--accent); }
+    html.newdesign .jt-jmeta { font-size: 11.5px; color: var(--muted); margin-top: 3px; }
+    html.newdesign .jt-jreason { font-size: 11.5px; color: var(--muted); margin-top: 6px; line-height: 1.4; max-width: 46ch; }
+    html.newdesign .jt-fitcell { width: 132px; min-width: 120px; }
+    html.newdesign .jt-fit { display: flex; align-items: center; gap: 9px; justify-content: flex-end; }
+    html.newdesign .jt-fitbar { flex: 1; height: 7px; background: var(--line); border-radius: 999px; overflow: hidden; min-width: 44px; }
+    html.newdesign .jt-fitbar i { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
+    html.newdesign .jt-fitpct { font-size: 12.5px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; min-width: 34px; text-align: right; }
+    html.newdesign .jt-num { font-variant-numeric: tabular-nums; color: var(--muted); white-space: nowrap; }
+    html.newdesign .jt-oa { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); background: var(--surface); white-space: nowrap; }
+    html.newdesign .jt-dash { color: var(--faint); }
+    html.newdesign .jt-act { white-space: nowrap; }
+    html.newdesign .jt-ib { padding: 3px 8px !important; font-size: 12px; }
+    html.newdesign .jt-ib + .jt-ib, html.newdesign .jt-picked { margin-left: 5px; }
+    html.newdesign .jt-picked { font-size: 11px; }
     /* dark newdesign: white-on-accent primary buttons need a darker fill (dark --accent #8b88f2 gives only ~3:1 with #fff) — systemic, covers the Ideas primaries too */
     html.newdesign.dark .sr-rcstart, html.newdesign.dark .idb-addbtn, html.newdesign.dark .idb-cta { background: #4f46e5; color: #fff; }
 
@@ -768,7 +798,7 @@
   <script src="https://cdn.jsdelivr.net/npm/tus-js-client@4.1.0/dist/tus.min.js"></script>
   <script type="text/babel" src="canvas.jsx?v=1783137934"></script>
   <script type="text/babel" src="notes.jsx?v=1783137934"></script>
-  <script type="text/babel" src="research.jsx?v=1783952853"></script>
+  <script type="text/babel" src="research.jsx?v=1783954324"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>
