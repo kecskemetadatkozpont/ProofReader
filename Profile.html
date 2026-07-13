@@ -9,6 +9,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <!-- New design (Bento Account): Plus Jakarta Sans; applied only under html.newdesign -->
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
 
   <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
   <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
@@ -199,6 +201,58 @@
       .pf-stats { grid-template-columns: repeat(2, 1fr); } .pf-cards { grid-template-columns: 1fr; }
       .pf-id { flex-wrap: wrap; } .pf-head-actions { margin-left: 0; width: 100%; }
     }
+
+    /* ============================================================
+       BENTO ACCOUNT redesign — scoped to html.newdesign (skill: Bento
+       Box Grid · type: Plus Jakarta Sans). Colours from theme.js
+       html.newdesign tokens (light + dark) — only structure/type here.
+       ============================================================ */
+    html.newdesign body { font-family: 'Plus Jakarta Sans', system-ui, sans-serif; }
+    html.newdesign .pfa-wrap { max-width: 1080px; }
+    html.newdesign .pfa-hello { font-size: 22px; font-weight: 800; letter-spacing: -.02em; margin: 0 0 16px; color: var(--ink); }
+    html.newdesign .pfa-bento { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; align-items: stretch; }
+    html.newdesign .pfa-bento > * { min-width: 0; }
+    html.newdesign .pfa-card { background: var(--surface); border: 1px solid var(--line); border-radius: 18px; padding: 18px; box-shadow: 0 1px 3px rgba(20, 26, 40, .05), 0 10px 26px rgba(20, 26, 40, .035); }
+    html.newdesign.dark .pfa-card { box-shadow: 0 10px 26px rgba(0, 0, 0, .35); }
+    html.newdesign .pfa-span2 { grid-column: span 2; }
+    html.newdesign .pfa-stat { display: flex; flex-direction: column; justify-content: flex-start; min-height: 118px; }
+    html.newdesign .pfa-stat-n { font-size: 34px; font-weight: 800; letter-spacing: -.02em; line-height: 1; color: var(--ink); font-variant-numeric: tabular-nums; }
+    html.newdesign .pfa-stat-n.sm { font-size: 28px; }
+    html.newdesign .pfa-stat-l { font-size: 12px; font-weight: 600; color: var(--muted); margin-top: 8px; line-height: 1.35; }
+    html.newdesign .pfa-mbar { height: 6px; background: var(--surface-3, var(--surface-2)); border-radius: 999px; overflow: hidden; margin-top: auto; }
+    html.newdesign .pfa-stat .pfa-mbar { margin-top: 11px; }
+    html.newdesign .pfa-mfill { display: block; height: 100%; border-radius: 999px; background: var(--accent); }
+    html.newdesign .pfa-mfill.warn { background: var(--danger); }
+    html.newdesign .pfa-card-t { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin-bottom: 13px; }
+    html.newdesign .pfa-warn-card { background: var(--warn-bg); border-color: color-mix(in srgb, var(--warn) 24%, transparent); display: flex; flex-direction: column; gap: 8px; justify-content: center; }
+    html.newdesign .pfa-warn-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; font-weight: 600; color: var(--warn); }
+    html.newdesign .pfa-warn-row button { font-family: inherit; font-size: 12.5px; font-weight: 700; color: var(--warn); background: transparent; border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent); border-radius: 8px; padding: 5px 11px; cursor: pointer; white-space: nowrap; }
+    html.newdesign .pfa-ritem { display: flex; align-items: center; gap: 12px; padding: 11px 0; border-top: 1px solid var(--line); text-decoration: none; }
+    html.newdesign .pfa-ritem:first-of-type { border-top: 0; padding-top: 0; }
+    html.newdesign .pfa-rthumb { width: 36px; height: 36px; border-radius: 11px; background: var(--accent-tint); color: var(--accent); font-weight: 800; font-size: 15px; display: flex; align-items: center; justify-content: center; flex: none; }
+    html.newdesign .pfa-rbody { min-width: 0; display: flex; flex-direction: column; }
+    html.newdesign .pfa-rtitle { font-size: 13.5px; font-weight: 700; color: var(--ink); display: flex; align-items: center; gap: 8px; }
+    html.newdesign .pfa-rmeta { font-size: 12px; color: var(--muted); margin-top: 2px; }
+    html.newdesign .pfa-shared { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--accent); background: var(--accent-tint); border-radius: 5px; padding: 1px 6px; }
+    html.newdesign .pfa-cta-row { margin-top: 13px; }
+    html.newdesign .pfa-cta { font-size: 13px; font-weight: 700; color: var(--accent); text-decoration: none; }
+    html.newdesign .pfa-cta:hover { text-decoration: underline; }
+    html.newdesign .pfa-proj { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; text-decoration: none; }
+    html.newdesign .pfa-proj + .pfa-proj { margin-top: 8px; }
+    html.newdesign .pfa-proj-t { font-size: 13.5px; font-weight: 700; color: var(--ink); min-width: 0; }
+    html.newdesign .pfa-proj-m { display: flex; gap: 7px; flex: none; }
+    html.newdesign .pfa-tag { font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+    html.newdesign .pfa-tag.active { color: var(--ok); background: var(--ok-bg); border-color: color-mix(in srgb, var(--ok) 24%, transparent); }
+    html.newdesign .pfa-empty { font-size: 13px; color: var(--muted); padding: 6px 0; }
+    html.newdesign .pfa-empty a { color: var(--accent); }
+    @media (max-width: 900px) {
+      html.newdesign .pfa-bento { grid-template-columns: repeat(2, 1fr); }
+      html.newdesign .pfa-span2 { grid-column: span 2; }
+    }
+    @media (max-width: 560px) {
+      html.newdesign .pfa-bento { grid-template-columns: 1fr; }
+      html.newdesign .pfa-span2 { grid-column: span 1; }
+    }
   </style>
   <script src="theme.js?v=1783721200"></script>
   <script src="nav.js?v=1783720000"></script>
@@ -228,7 +282,7 @@
   <script src="pubfiles-cloud.js?v=1783137934"></script>
   <script src="pubs-cloud.js?v=1783137934"></script>
 
-  <script type="text/babel" src="profile.jsx?v=1783539952"></script>
+  <script type="text/babel" src="profile.jsx?v=1783928564"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>

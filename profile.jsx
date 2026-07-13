@@ -20,6 +20,7 @@ function rel(ts) {
   return Math.floor(d / 30) + ' mo ago';
 }
 function over80(u) { return (u.storageLimit && u.storageBytes / u.storageLimit > 0.8) || (u.charLimit && u.chars / u.charLimit > 0.8); }
+function nd() { return !!(window.PRDesign && window.PRDesign.isNew()); }   // "New design" flag → Bento Account redesign (behind the toggle; nd() read at render time, flip triggers a reload)
 
 const IC = {
   overview: <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><rect x="2" y="2" width="5" height="5" rx="1" /><rect x="9" y="2" width="5" height="5" rx="1" /><rect x="2" y="9" width="5" height="5" rx="1" /><rect x="9" y="9" width="5" height="5" rx="1" /></svg>,
@@ -98,6 +99,58 @@ function Overview(props) {
   if (E && (pr.engine === 'eleven' || !pr.engine) && !E.hasKey()) flags.push(['ElevenLabs is selected but no API key is set.', 'Add it in Settings', 'settings']);
   if (stPct > 80) flags.push(['Storage is over 80% of your plan.', 'See usage', 'usage']);
   if (chPct > 80) flags.push(['Voice characters are over 80% of this month.', 'See usage', 'usage']);
+  // ---- Bento Account (New design flag, direction A): the Overview becomes an Apple-style bento grid of cards, wired to the SAME stats / recent / projects / flags. ----
+  function bentoOverview() {
+    var STG = ['Setup', 'Idea', 'Literature', 'Protocol', 'Data', 'Compute', 'Analysis', 'Writing', 'Submission'];
+    var researchHref = adminTargetUser() ? 'Research.html?adminView=1' : 'Research.html';
+    return <div className="pfa-wrap">
+      <h2 className="pfa-hello">Welcome back, {me.name.split(' ')[0]}</h2>
+      <div className="pfa-bento">
+        <div className="pfa-card pfa-stat"><div className="pfa-stat-n">{owned}</div><div className="pfa-stat-l">Publications</div></div>
+        <div className="pfa-card pfa-stat"><div className="pfa-stat-n">{shared}</div><div className="pfa-stat-l">Shared with me</div></div>
+        <div className="pfa-card pfa-stat">
+          <div className="pfa-stat-n sm">{Math.round(stPct)}%</div>
+          <div className="pfa-stat-l">Storage · {fmtBytes(usage.storageBytes)} / {fmtBytes(usage.storageLimit)}</div>
+          <div className="pfa-mbar"><i className={'pfa-mfill' + (stPct > 80 ? ' warn' : '')} style={{ width: stPct + '%' }} /></div>
+        </div>
+        <div className="pfa-card pfa-stat">
+          <div className="pfa-stat-n sm">{Math.round(chPct)}%</div>
+          <div className="pfa-stat-l">Voice chars/mo · {(usage.chars || 0).toLocaleString()} / {(usage.charLimit || 0).toLocaleString()}</div>
+          <div className="pfa-mbar"><i className={'pfa-mfill' + (chPct > 80 ? ' warn' : '')} style={{ width: chPct + '%' }} /></div>
+        </div>
+        {flags.length ? <div className="pfa-card pfa-span2 pfa-warn-card">
+          {flags.map(function (f, i) { return <div className="pfa-warn-row" key={i}><span>⚠ {f[0]}</span><button onClick={function () { go(f[2]); }}>{f[1]} →</button></div>; })}
+        </div> : null}
+        <div className="pfa-card pfa-span2">
+          <div className="pfa-card-t">Continue where you left off</div>
+          {recent.length === 0
+            ? <div className="pfa-empty">No publications yet. <a href="Projects.html">Create your first publication →</a></div>
+            : recent.map(function (p) {
+              var r = Store.getReading ? Store.getReading(me.id, p.id) : null;
+              return <a className="pfa-ritem" key={p.id} href={'ProofReader.html?p=' + encodeURIComponent(p.id)}>
+                <span className="pfa-rthumb">{(p.title || '?').slice(0, 1).toUpperCase()}</span>
+                <span className="pfa-rbody">
+                  <span className="pfa-rtitle">{p.title}{p._shared ? <span className="pfa-shared">shared</span> : null}</span>
+                  <span className="pfa-rmeta">{r ? 'Resume at sentence ' + (r.idx + 1) + ' · ' + rel(r.at) : 'Updated ' + rel(p.updated)}</span>
+                </span>
+              </a>;
+            })}
+          <div className="pfa-cta-row"><a className="pfa-cta" href="Projects.html">All publications &amp; new →</a></div>
+        </div>
+        {rprojects.length ? <div className="pfa-card pfa-span2">
+          <div className="pfa-card-t">Research projects</div>
+          {rprojects.map(function (p) {
+            return <a className="pfa-proj" key={p.id} href={researchHref}>
+              <span className="pfa-proj-t">{p.title}</span>
+              <span className="pfa-proj-m"><span className="pfa-tag active">{p.status || 'active'}</span><span className="pfa-tag">{STG[p.stage] || 'Setup'}</span></span>
+            </a>;
+          })}
+          <div className="pfa-cta-row"><a className="pfa-cta" href={researchHref}>Open Research →</a></div>
+        </div> : null}
+      </div>
+    </div>;
+  }
+  if (nd()) return bentoOverview();
   return <div>
     <h2 className="pf-h">Welcome back, {me.name.split(' ')[0]}</h2>
     {flags.length ? <div className="pf-flags">{flags.map(function (f, i) { return <div className="pf-flag" key={i}><span>{f[0]}</span><button onClick={function () { go(f[2]); }}>{f[1]} →</button></div>; })}</div> : null}
@@ -891,4 +944,5 @@ function App() {
   </div>;
 }
 
+window.addEventListener('pr-design', function () { location.reload(); });   // New-design flag flipped → re-init cleanly (nd() is read at render time)
 ReactDOM.createRoot(document.getElementById('root')).render(<App />);
