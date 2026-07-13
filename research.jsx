@@ -3008,6 +3008,44 @@
         ) : null
       );
     }
+    // ---- Execution Dashboard (New design flag, direction A): KPI row + a dense task table replacing the step list. Same steps / acOf / assigneeOf / PST. ----
+    function execDashboard() {
+      return h('div', null,
+        h('div', { className: 'ex-kpi' },
+          h('div', { className: 'ex-k' }, h('div', { className: 'ex-kn' }, stt.acTot ? (stt.acPass + '/' + stt.acTot) : '—'), h('div', { className: 'ex-kl' }, 'Acceptance checks')),
+          h('div', { className: 'ex-k' }, h('div', { className: 'ex-kn' }, done + '/' + steps.length), h('div', { className: 'ex-kl' }, 'Tasks complete')),
+          h('div', { className: 'ex-k' }, h('div', { className: 'ex-kn' }, String(stt.dev)), h('div', { className: 'ex-kl' }, 'Deviations')),
+          h('div', { className: 'ex-k' }, h('div', { className: 'ex-kn' }, String(stt.fig)), h('div', { className: 'ex-kl' }, 'Figures'))
+        ),
+        h('div', { className: 'panel', style: { padding: '12px 14px' } },
+          h('div', { className: 'ex-thd' },
+            h('h3', { style: { margin: 0 } }, 'Tasks', h('span', { style: { fontWeight: 600, color: 'var(--faint)', marginLeft: 6 } }, steps.length)),
+            ce ? h('button', { className: 'btn', style: { marginLeft: 'auto', padding: '3px 9px', fontSize: 11.5, flex: 'none' }, onClick: function () { setEditing({ step: {}, isNew: true, after: null }); } }, '+ Add task') : null),
+          steps.length ? h('div', { className: 'ex-tblwrap' }, h('table', { className: 'ex-tbl' },
+            h('thead', null, h('tr', null,
+              h('th', { className: 'r' }, '#'), h('th', null, 'Task'), h('th', null, 'Owner'), h('th', null, 'Status'), h('th', { className: 'r' }, 'Checks'))),
+            h('tbody', null, steps.map(function (s) {
+              var open = !!exp[s.id]; var pst = PST[s.status] || PST.todo; var a = acOf(s); var ai = assigneeOf(s) === 'ai'; var sx = s.spec || {};
+              var out = [h('tr', { key: s.id, className: 'ex-row', onClick: function () { setExp(function (p) { var n = Object.assign({}, p); n[s.id] = !n[s.id]; return n; }); } },
+                h('td', { className: 'r ex-ord' }, s.ord),
+                h('td', { className: 'ex-ti' }, h('span', { 'aria-hidden': 'true', style: { marginRight: 6 } }, STEP_ICON[s.kind] || '•'), (open ? '▾ ' : '▸ ') + s.title,
+                  s.needs_approval ? h('span', { className: 'chip c-warn', style: { fontSize: 9.5, marginLeft: 6, flex: 'none' } }, '⏸') : null,
+                  (s.depends_on && s.depends_on.length) ? h('span', { className: 'ex-dep' }, 'after ' + s.depends_on.join(',')) : null),
+                h('td', null, h('span', { className: 'ex-own ' + (ai ? 'ai' : 'hu') }, ai ? 'AI' : 'HUMAN')),
+                h('td', null, h('span', { className: 'chip ' + pst[0], style: { fontSize: 10 } }, pst[1])),
+                h('td', { className: 'r ex-chk' }, a ? (a.pass + '/' + a.total) : '—')
+              )];
+              if (open) out.push(h('tr', { key: s.id + '-d', className: 'ex-drow' }, h('td', { colSpan: 5, className: 'ex-detail' },
+                sx.instruction ? h('div', null, sx.instruction) : null,
+                (s.result && s.result.summary) ? h('div', { style: { marginTop: 6 } }, h('b', null, 'Result: '), s.result.summary) : null,
+                (!sx.instruction && !(s.result && s.result.summary)) ? h('span', { style: { color: 'var(--faint)' } }, 'No details yet.') : null
+              )));
+              return out;
+            }))
+          )) : h('div', { className: 'ex-empty' }, 'No tasks yet — add one, or generate the protocol.')
+        )
+      );
+    }
     // ---- Task board (Kanban): human↔AI columns via the shared BOARD_COLS / stepCol / colPatch (module scope) ----
     // moving a card to a column encodes (assignee, status) via colPatch(). Writing `assignee` needs migration-44.
     function moveToCol(s, key) { if (!ce) return; var patch = colPatch(key); if (patch) patchStep(s, patch); }
@@ -3111,7 +3149,8 @@
       ),
       (hasResults && pview === 'overview') ? renderOverview() : null,
       (hasResults && pview === 'board') ? renderBoard() : null,
-      (!hasResults || pview === 'steps') ? h('div', { className: 'panel' },
+      (nd() && (!hasResults || pview === 'steps')) ? execDashboard() : null,
+      (!nd() && (!hasResults || pview === 'steps')) ? h('div', { className: 'panel' },
         h('h3', null, 'Steps (' + steps.length + ')', ce ? h('span', { style: { marginLeft: 10, fontSize: 10.5, color: 'var(--faint)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 } }, '⤓ drop files on a task to attach') : null, ce ? h('button', { className: 'btn', style: { marginLeft: 'auto', padding: '3px 9px', fontSize: 11.5, flex: 'none' }, onClick: function () { setEditing({ step: {}, isNew: true, after: null }); } }, '+ Add task') : null),
         steps.length ? steps.map(function (s, i) {
           var open = !!exp[s.id]; var pst = PST[s.status] || PST.todo; var sx = s.spec || {};
@@ -3457,6 +3496,37 @@
       });
     }
     // (the visible sub-tab row is a separate array below; Data/Compute are intentionally not surfaced)
+    // ---- Setup Checklist (New design flag, direction B): the sparse Overview/Setup tab becomes a guided getting-started checklist + Goal, driven by real project state. ----
+    function setupOverview() {
+      var srcs = props.sources || [];
+      var inc = srcs.filter(function (s) { return s.screening === 'include'; }).length;
+      var CHK = [
+        { done: !!(p.goal && p.goal.trim()), label: 'Set a research goal', note: (p.goal && p.goal.trim()) ? 'Goal is set' : 'Describe what the project investigates', tab: null, act: '✎ in Settings' },
+        { done: (props.ideas || []).length > 0, label: 'Capture research ideas', note: (props.ideas || []).length + ' idea' + ((props.ideas || []).length === 1 ? '' : 's'), tab: 'ideas', act: 'Add ideas' },
+        { done: srcs.length > 0, label: 'Build your literature library', note: srcs.length + ' source' + (srcs.length === 1 ? '' : 's') + ' · ' + inc + ' included', tab: 'literature', act: 'Search literature' },
+        { done: (props.studies || []).length > 0, label: 'Run a screening study', note: (props.studies || []).length + ' study' + ((props.studies || []).length === 1 ? '' : ' studies'), tab: 'study', act: 'Open Studies' },
+        { done: (props.datasets || []).length > 0, label: 'Add a dataset', note: (props.datasets || []).length + ' dataset' + ((props.datasets || []).length === 1 ? '' : 's'), tab: 'data', act: 'Add data' },
+        { done: (p.stage || 0) >= 3, label: 'Draft the experimental protocol', note: (p.stage || 0) >= 3 ? 'In progress' : 'Not started yet', tab: 'protocol', act: 'Open Protocol' }
+      ];
+      var doneN = CHK.filter(function (c) { return c.done; }).length;
+      var pct = Math.round(doneN / CHK.length * 100);
+      return h('div', null,
+        h('div', { className: 'panel su-card' },
+          h('div', { className: 'su-head' },
+            h('div', null, h('h3', { className: 'su-title' }, 'Get set up'), h('div', { className: 'su-sub' }, doneN + ' of ' + CHK.length + ' setup steps done')),
+            h('div', { className: 'su-pctwrap' }, h('div', { className: 'su-pct' }, pct + '%'), h('div', { className: 'su-bar' }, h('i', { style: { width: pct + '%' } })))),
+          h('div', { className: 'su-list' }, CHK.map(function (c, i) {
+            return h('div', { className: 'su-item' + (c.done ? ' done' : ''), key: i },
+              h('span', { className: 'su-check', 'aria-hidden': 'true' }, c.done ? '✓' : ''),
+              h('div', { className: 'su-body' }, h('div', { className: 'su-lbl' }, c.label), h('div', { className: 'su-note' }, c.note)),
+              c.done ? h('span', { className: 'su-donetag' }, 'Done')
+                : (c.tab && props.canEdit) ? h('button', { className: 'su-go', onClick: function () { setTab(c.tab); } }, c.act + ' →')
+                  : h('span', { className: 'su-next' }, c.act));
+          }))),
+        p.goal ? h('div', { className: 'panel', style: { marginTop: 10 } }, h('h3', null, 'Goal'), h('div', { style: { fontSize: 13.5, lineHeight: 1.55 } }, p.goal))
+          : h('div', { className: 'panel', style: { marginTop: 10 } }, h('div', { className: 'soon' }, 'No goal set yet — add one with ✎ Settings above.'))
+      );
+    }
     var content;
     if (tab === 'ideas') content = h('div', { className: nd() ? 'ideas2' : null }, h(ChatPanel, { projectId: p.id, supervised: !!p.student_id, canEdit: props.canEdit, authorId: props.authorId, fileOwnerId: props.fileOwnerId, sources: props.sources, onChanged: props.onChanged }), h(IdeasPanel, { projectId: p.id, ideas: props.ideas, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, onStartStudyMulti: function (ideas) { setAutoStudy(ideas || []); setTab('study'); }, onGoStudy: function () { setTab('study'); } }));
     else if (tab === 'literature') content = h(React.Fragment, null,
@@ -3477,7 +3547,7 @@
     else if (tab === 'notes') content = window.PRNotes ? h(window.PRNotes, { projectId: p.id, canEdit: props.canEdit, authorId: props.authorId }) : h('div', { className: 'empty' }, 'Loading Notes…');
     else if (tab === 'log') content = h(LogPanel, { projectId: p.id, authorId: props.authorId, entries: props.log, canEdit: props.canEdit, onChanged: props.onChanged });
     else if (tab === 'tasks') content = h(TasksPanel, { projectId: p.id, tasks: props.tasks, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
-    else content = p.goal ? h('div', { className: 'panel' }, h('h3', null, 'Goal'), h('div', { style: { fontSize: 13.5 } }, p.goal)) : h('div', { className: 'soon' }, 'No goal set yet.');
+    else content = nd() ? setupOverview() : (p.goal ? h('div', { className: 'panel' }, h('h3', null, 'Goal'), h('div', { style: { fontSize: 13.5 } }, p.goal)) : h('div', { className: 'soon' }, 'No goal set yet.'));
     return h('div', null,
       h('button', { className: 'back-btn', onClick: props.onBack }, '← All projects'),
       (!props.canEdit && props.viewerId && p.owner_id !== props.viewerId) ? h('div', { className: 'ro-banner' }, '👁 Supervisor view — ' + (props.studentName ? props.studentName + '’s project' : 'student’s project') + '. Read-only.') : null,

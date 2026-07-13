@@ -627,6 +627,53 @@
     html.newdesign .sr-rcx { font-family: inherit; font-size: 13px; color: var(--muted); background: var(--surface); border: 1px solid var(--line); border-radius: 7px; padding: 6px 10px; cursor: pointer; }
     html.newdesign .sr-rcstart:disabled, html.newdesign .sr-rcx:disabled { opacity: .5; cursor: default; }
     html.newdesign .sr-detail-empty { border: 1px dashed var(--line); border-radius: 12px; padding: 34px 20px; text-align: center; color: var(--muted); font-size: 13px; line-height: 1.5; }
+
+    /* ===== Overview/Setup — Setup Checklist (direction B) ===== */
+    html.newdesign .su-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
+    html.newdesign .su-title { margin: 0; }
+    html.newdesign .su-sub { font-size: 12.5px; color: var(--muted); margin-top: 3px; }
+    html.newdesign .su-pctwrap { min-width: 140px; text-align: right; }
+    html.newdesign .su-pct { font-size: 22px; font-weight: 800; letter-spacing: -.4px; color: var(--accent); font-variant-numeric: tabular-nums; line-height: 1; }
+    html.newdesign .su-bar { height: 6px; background: color-mix(in srgb, var(--ink) 9%, transparent); border-radius: 999px; overflow: hidden; margin-top: 7px; }
+    html.newdesign .su-bar i { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
+    html.newdesign .su-list { display: flex; flex-direction: column; }
+    html.newdesign .su-item { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid var(--line); }
+    html.newdesign .su-item:first-child { border-top: 0; }
+    html.newdesign .su-check { width: 22px; height: 22px; border-radius: 50%; flex: none; display: grid; place-items: center; border: 1.5px solid var(--line); color: var(--faint); font-size: 12px; font-weight: 800; }
+    html.newdesign .su-item.done .su-check { background: var(--ok); border-color: var(--ok); color: #fff; }
+    html.newdesign .su-body { flex: 1; min-width: 0; }
+    html.newdesign .su-lbl { font-size: 13.5px; font-weight: 700; color: var(--ink); }
+    html.newdesign .su-item.done .su-lbl { color: var(--muted); }
+    html.newdesign .su-note { font-size: 12px; color: var(--muted); margin-top: 1px; }
+    html.newdesign .su-go { font-family: inherit; font-size: 12px; font-weight: 700; color: var(--accent); background: var(--accent-tint); border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent); border-radius: 8px; padding: 6px 11px; cursor: pointer; white-space: nowrap; flex: none; }
+    html.newdesign .su-donetag { font-size: 11px; font-weight: 700; color: var(--ok); flex: none; }
+    html.newdesign .su-next { font-size: 11.5px; color: var(--faint); flex: none; white-space: nowrap; }
+
+    /* ===== Protocol — Execution Dashboard (direction A) ===== */
+    html.newdesign .ex-kpi { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 12px; }
+    @media (max-width: 640px) { html.newdesign .ex-kpi { grid-template-columns: repeat(2, 1fr); } }
+    html.newdesign .ex-k { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+    html.newdesign .ex-kn { font-size: 24px; font-weight: 800; letter-spacing: -.5px; color: var(--ink); font-variant-numeric: tabular-nums; line-height: 1; }
+    html.newdesign .ex-kl { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-top: 6px; }
+    html.newdesign .ex-thd { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+    html.newdesign .ex-tblwrap { border: 1px solid var(--line); border-radius: 11px; overflow: auto; max-height: 60vh; }
+    html.newdesign .ex-tbl { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+    html.newdesign .ex-tbl thead th { position: sticky; top: 0; z-index: 1; background: var(--surface-2); text-align: left; font-size: 10.5px; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); font-weight: 700; padding: 9px 11px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+    html.newdesign .ex-tbl th.r, html.newdesign .ex-tbl td.r { text-align: right; font-variant-numeric: tabular-nums; }
+    html.newdesign .ex-tbl tbody td { padding: 9px 11px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    html.newdesign .ex-row { cursor: pointer; }
+    html.newdesign .ex-row:hover td { background: var(--surface-2); }
+    html.newdesign .ex-ord { color: var(--faint); width: 34px; }
+    html.newdesign .ex-ti { font-weight: 650; color: var(--ink); max-width: 420px; }
+    html.newdesign .ex-dep { font-size: 10.5px; color: var(--faint); margin-left: 7px; }
+    html.newdesign .ex-chk { color: var(--muted); white-space: nowrap; }
+    html.newdesign .ex-own { font-size: 10px; font-weight: 800; letter-spacing: .04em; padding: 2px 7px; border-radius: 5px; }
+    html.newdesign .ex-own.ai { color: var(--accent); background: var(--accent-tint); }
+    html.newdesign .ex-own.hu { color: #0e7490; background: color-mix(in srgb, #0e7490 12%, transparent); }
+    html.newdesign.dark .ex-own.hu { color: #67d3e8; }
+    html.newdesign .ex-drow td { background: var(--surface-2); }
+    html.newdesign .ex-detail { font-size: 12px; color: var(--muted); line-height: 1.5; padding: 4px 11px 12px 45px !important; }
+    html.newdesign .ex-empty { padding: 26px; text-align: center; color: var(--faint); font-size: 13px; }
     /* dark newdesign: white-on-accent primary buttons need a darker fill (dark --accent #8b88f2 gives only ~3:1 with #fff) — systemic, covers the Ideas primaries too */
     html.newdesign.dark .sr-rcstart, html.newdesign.dark .idb-addbtn, html.newdesign.dark .idb-cta { background: #4f46e5; color: #fff; }
 
@@ -662,7 +709,7 @@
   <script src="https://cdn.jsdelivr.net/npm/tus-js-client@4.1.0/dist/tus.min.js"></script>
   <script type="text/babel" src="canvas.jsx?v=1783137934"></script>
   <script type="text/babel" src="notes.jsx?v=1783137934"></script>
-  <script type="text/babel" src="research.jsx?v=1783924150"></script>
+  <script type="text/babel" src="research.jsx?v=1783942405"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>
