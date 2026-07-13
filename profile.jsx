@@ -106,6 +106,9 @@ function Overview(props) {
     return <div className="pfa-wrap">
       <h2 className="pfa-hello">Welcome back, {me.name.split(' ')[0]}</h2>
       <div className="pfa-bento">
+        {flags.length ? <div className="pfa-card pfa-warn-card">
+          {flags.map(function (f, i) { return <div className="pfa-warn-row" key={i}><span>⚠ {f[0]}</span><button onClick={function () { go(f[2]); }}>{f[1]} →</button></div>; })}
+        </div> : null}
         <div className="pfa-card pfa-stat"><div className="pfa-stat-n">{owned}</div><div className="pfa-stat-l">Publications</div></div>
         <div className="pfa-card pfa-stat"><div className="pfa-stat-n">{shared}</div><div className="pfa-stat-l">Shared with me</div></div>
         <div className="pfa-card pfa-stat">
@@ -118,9 +121,6 @@ function Overview(props) {
           <div className="pfa-stat-l">Voice chars/mo · {(usage.chars || 0).toLocaleString()} / {(usage.charLimit || 0).toLocaleString()}</div>
           <div className="pfa-mbar"><i className={'pfa-mfill' + (chPct > 80 ? ' warn' : '')} style={{ width: chPct + '%' }} /></div>
         </div>
-        {flags.length ? <div className="pfa-card pfa-span2 pfa-warn-card">
-          {flags.map(function (f, i) { return <div className="pfa-warn-row" key={i}><span>⚠ {f[0]}</span><button onClick={function () { go(f[2]); }}>{f[1]} →</button></div>; })}
-        </div> : null}
         <div className="pfa-card pfa-span2">
           <div className="pfa-card-t">Continue where you left off</div>
           {recent.length === 0
@@ -142,7 +142,7 @@ function Overview(props) {
           {rprojects.map(function (p) {
             return <a className="pfa-proj" key={p.id} href={researchHref}>
               <span className="pfa-proj-t">{p.title}</span>
-              <span className="pfa-proj-m"><span className="pfa-tag active">{p.status || 'active'}</span><span className="pfa-tag">{STG[p.stage] || 'Setup'}</span></span>
+              <span className="pfa-proj-m"><span className="pfa-tag">{STG[p.stage] || 'Setup'}</span><span className="pfa-tag active">{p.status || 'active'}</span></span>
             </a>;
           })}
           <div className="pfa-cta-row"><a className="pfa-cta" href={researchHref}>Open Research →</a></div>
@@ -569,7 +569,7 @@ function orderReading(spans, pageW) {
   return spans.slice().sort(byTopLeft);
 }
 // Words that end in "." but do NOT end a sentence.
-var SENT_ABBR = { 'e.g': 1, 'i.e': 1, 'al': 1, 'vs': 1, 'cf': 1, 'fig': 1, 'figs': 1, 'eq': 1, 'eqs': 1, 'no': 1, 'nos': 1, 'pp': 1, 'p': 1, 'dr': 1, 'prof': 1, 'mr': 1, 'mrs': 1, 'ms': 1, 'st': 1, 'vol': 1, 'ed': 1, 'eds': 1, 'approx': 1, 'inc': 1, 'ltd': 1, 'co': 1, 'etc': 1, 'ref': 1, 'refs': 1, 'sec': 1, 'ch': 1, 'tab': 1, 'resp': 1, 'al': 1, 'phd': 1, 'msc': 1, 'bsc': 1 };
+var SENT_ABBR = { 'e.g': 1, 'i.e': 1, 'al': 1, 'vs': 1, 'cf': 1, 'fig': 1, 'figs': 1, 'eq': 1, 'eqs': 1, 'no': 1, 'nos': 1, 'pp': 1, 'p': 1, 'dr': 1, 'prof': 1, 'mr': 1, 'mrs': 1, 'ms': 1, 'st': 1, 'vol': 1, 'ed': 1, 'eds': 1, 'approx': 1, 'inc': 1, 'ltd': 1, 'co': 1, 'etc': 1, 'ref': 1, 'refs': 1, 'sec': 1, 'ch': 1, 'tab': 1, 'resp': 1, 'phd': 1, 'msc': 1, 'bsc': 1 };
 function endsSentence(buf) {
   var t = buf.replace(/[)\]"'»“”’]+$/, '');
   if (!/[.!?]$/.test(t)) return false;
