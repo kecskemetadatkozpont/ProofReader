@@ -1892,30 +1892,41 @@
     }
     if (!canUse) return null;
     // ---- Review Workspace (New design flag, direction B): master-detail — a rail of reviews + candidates on the left, the selected review's full detail on the right. Reuses card()/SR_STAGES/startFromCand/dismissCand. When creating a review (openForm) we fall back to the classic full-width layout that owns the form. ----
-    function railRow(j) {
-      var isSel = selJob ? selJob === j.id : (jobs && jobs[0] && jobs[0].id === j.id);
+    function railRow(j, selId) {
+      var isSel = j.id === selId;
       var st = j.status;
-      var lab = st === 'completed' ? 'Done' : st === 'failed' ? 'Failed' : st === 'pausedForInsufficientQuota' ? 'Paused' : (function () { var i = srStageIdx(j.stage); return i >= 0 ? 'Step ' + (i + 1) + '/' + SR_STAGES.length : 'Working'; })();
-      var cls = st === 'completed' ? 'ok' : st === 'failed' ? 'fail' : st === 'pausedForInsufficientQuota' ? 'pause' : 'run';
+      var stuck = !!(j.warning && j.warning.code === 'all_excluded');   // surface an all-excluded review as Stuck, not "running"
+      var cls = stuck ? 'warn' : st === 'completed' ? 'ok' : st === 'failed' ? 'fail' : st === 'pausedForInsufficientQuota' ? 'pause' : 'run';
+      var lab = stuck ? '⚠ Stuck' : st === 'completed' ? 'Done' : st === 'failed' ? 'Failed' : st === 'pausedForInsufficientQuota' ? 'Paused' : (function () { var i = srStageIdx(j.stage); return i >= 0 ? 'Step ' + (i + 1) + '/' + SR_STAGES.length : 'Working'; })();
       var idx = st === 'completed' ? SR_STAGES.length - 1 : (srStageIdx(j.stage) < 0 ? 0 : srStageIdx(j.stage));
       return h('button', { key: j.id, className: 'sr-rrow' + (isSel ? ' on' : ''), onClick: function () { setSelJob(j.id); } },
         h('div', { className: 'sr-rrow-t' }, j.result_title || j.research_question || 'Systematic review'),
         h('div', { className: 'sr-rrow-b' },
           h('span', { className: 'sr-rst ' + cls }, lab),
-          h('span', { className: 'sr-dots', 'aria-hidden': 'true' }, SR_STAGES.map(function (s, i) { var d = (i < idx) || st === 'completed'; var c = i === idx && st !== 'completed'; return h('i', { key: i, className: 'sr-dot' + (d ? ' d' : '') + (c ? ' c' : '') }); }))
+          h('span', { className: 'sr-dots', 'aria-hidden': 'true' }, SR_STAGES.map(function (s, i) { var d = (i < idx) || st === 'completed'; var c = i === idx && st !== 'completed' && st !== 'failed'; return h('i', { key: i, className: 'sr-dot' + (d ? ' d' : '') + (c ? ' c' : '') }); }))
         )
       );
     }
     function railCand(c) {
+      var pico = c.pico || {};
+      var picoBits = [pico.population, pico.intervention, pico.outcome].filter(Boolean).slice(0, 3).join(' · ');
+      var meta = [];
+      if (c.study_type) meta.push(c.study_type);
+      if (c.abstract_criteria && c.abstract_criteria.length) meta.push('✓ ' + c.abstract_criteria.length + ' criteria');
+      if (c.extraction_questions && c.extraction_questions.length) meta.push('📋 ' + c.extraction_questions.length + ' extraction');
       return h('div', { key: c.id, className: 'sr-rcand' },
         h('div', { className: 'sr-rcand-q' }, c.question),
+        picoBits ? h('div', { className: 'sr-rcand-pico' }, picoBits) : null,
+        meta.length ? h('div', { className: 'sr-rcand-meta' }, meta.join(' · ')) : null,
         h('div', { className: 'sr-rcand-a' },
           h('button', { className: 'sr-rcstart', disabled: !props.canEdit, onClick: function () { startFromCand(c); } }, '🔬 Start review'),
           h('button', { className: 'sr-rcx', disabled: !props.canEdit, title: 'Dismiss', onClick: function () { dismissCand(c); } }, '×'))
       );
     }
     function srWorkspace() {
-      var sel = (jobs && jobs.length) ? ((selJob && jobs.filter(function (x) { return x.id === selJob; })[0]) || jobs[0]) : null;
+      // resolve ONE effective selection so the highlighted rail row and the detail pane can never disagree (stale selJob → jobs[0])
+      var selId = (jobs && jobs.some(function (x) { return x.id === selJob; })) ? selJob : ((jobs && jobs[0] && jobs[0].id) || null);
+      var sel = (jobs && jobs.length) ? (jobs.filter(function (x) { return x.id === selId; })[0] || jobs[0]) : null;
       return h('div', { className: 'panel sr2-panel', style: { marginTop: 14 } },
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
           h('h3', { style: { margin: 0, flex: 1 } }, '🔬 Systematic Review Studio ', h('span', { style: { fontSize: 11.5, color: 'var(--faint)', fontWeight: 400 } }, '· from your Ideas → PRISMA')),
@@ -1926,15 +1937,16 @@
           h('div', { className: 'sr-rail' },
             (jobs && jobs.length) ? h('div', null,
               h('div', { className: 'sr-rail-hd' }, 'Reviews ', h('span', { className: 'sr-rail-c' }, jobs.length)),
-              h('div', { className: 'sr-rlist' }, jobs.map(railRow))) : (jobs ? h('div', { className: 'sr-rail-empty' }, 'No reviews yet.') : h('div', { className: 'sr-rail-empty' }, 'Loading…')),
+              h('div', { className: 'sr-rlist' }, jobs.map(function (j) { return railRow(j, selId); }))) : (jobs ? h('div', { className: 'sr-rail-empty' }, 'No reviews yet.') : h('div', { className: 'sr-rail-empty' }, 'Loading…')),
             (cands && cands.length) ? h('div', { className: 'sr-rail-sec' },
               h('div', { className: 'sr-rail-hd' }, 'From your Ideas ', h('span', { className: 'sr-rail-c' }, cands.length)),
               cands.map(railCand)) : null
           ),
           h('div', { className: 'sr-detail' },
             sel ? card(sel) :
-              (cands && cands.length) ? h('div', { className: 'sr-detail-empty' }, 'Pick a review question on the left and press “🔬 Start review”, or “+ Manual review”.') :
-                h('div', { className: 'sr-detail-empty' }, 'No reviews yet. Click “✨ Generate from Ideas” to draft review questions from your project Ideas, then start one.')
+              (jobs === null) ? h('div', { className: 'sr-detail-empty' }, 'Loading reviews…') :
+                (cands && cands.length) ? h('div', { className: 'sr-detail-empty' }, 'Pick a review question on the left and press “🔬 Start review”, or “+ Manual review”.') :
+                  h('div', { className: 'sr-detail-empty' }, 'No reviews yet. Click “✨ Generate from Ideas” to draft review questions from your project Ideas, then start one.')
           )
         ),
         openR ? h('div', { className: 'scrim', onClick: function () { setOpenR(null); } }, h('div', { className: 'modal', style: { width: 780 }, onClick: function (e) { e.stopPropagation(); } },
