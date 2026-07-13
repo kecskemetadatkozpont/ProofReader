@@ -976,6 +976,53 @@
     var ideas = props.ideas || [];
     var selected = ideas.filter(function (i) { return i.status === 'selected'; });
     var rest = ideas.filter(function (i) { return i.status !== 'selected'; });
+    // ---- AI-Native Brainstorm (New design flag, direction B): IdeasPanel becomes the right-hand "Shortlist + Study basis" rail beside the chat. Same data + handlers. ----
+    function srcLabel(s) { return s === 'chat' ? '💡 AI (chat)' : s === 'gap' ? '💡 AI (gap)' : s === 'own' ? 'own' : (s || 'own'); }
+    function railRender() {
+      return h('div', { className: 'idb-rail' },
+        h('div', { className: 'idb-card' },
+          h('div', { className: 'idb-h' }, h('span', null, 'Shortlist'), h('span', { className: 'idb-c' }, String(rest.length)),
+            props.canEdit ? h('button', { className: 'idb-gap', disabled: busy, onClick: gap }, '✨ Gap analysis') : null),
+          msg ? h('div', { className: 'idb-msg' }, msg) : null,
+          props.canEdit ? h('div', { className: 'idb-add' },
+            h('textarea', { rows: 2, className: 'idb-in', value: form.question, placeholder: 'A research question…  (⌘/Ctrl+Enter)', onChange: function (e) { setForm(Object.assign({}, form, { question: e.target.value })); }, onKeyDown: onKey }),
+            form.question.trim() ? h('textarea', { rows: 2, className: 'idb-in', value: form.hypothesis, placeholder: 'Hypothesis (optional)', onChange: function (e) { setForm(Object.assign({}, form, { hypothesis: e.target.value })); }, onKeyDown: onKey }) : null,
+            h('button', { className: 'idb-addbtn', onClick: add }, '+ Add idea')
+          ) : null,
+          rest.length ? rest.map(function (idea) {
+            var rej = idea.status === 'rejected';
+            return h('div', { className: 'idb-sl' + (rej ? ' rej' : ''), key: idea.id },
+              h('span', { className: 'idb-nd' }),
+              h('div', { className: 'idb-body' },
+                h('div', { className: 'idb-q' }, idea.question),
+                h('div', { className: 'idb-meta' }, srcLabel(idea.source), idea.novelty != null ? ' · novelty ' + idea.novelty : '', rej ? h('span', { className: 'idb-rejtag' }, ' · rejected') : ''),
+                props.canEdit ? h('div', { className: 'idb-acts' },
+                  h('button', { className: 'sel', onClick: function () { setStatus(idea, 'selected'); } }, 'Select'),
+                  rej ? h('button', { onClick: function () { setStatus(idea, 'candidate'); } }, 'Reset') : h('button', { onClick: function () { setStatus(idea, 'rejected'); } }, 'Reject'),
+                  h('button', { className: 'del', 'aria-label': 'Delete idea', onClick: function () { del(idea); } }, '✕')
+                ) : null
+              )
+            );
+          }) : h('div', { className: 'idb-empty' }, 'No ideas yet — brainstorm in the chat, run a gap analysis, or add one above.')
+        ),
+        h('div', { className: 'idb-card idb-basis' },
+          h('div', { className: 'idb-h' }, h('span', null, '📌 Study basis'), h('span', { className: 'idb-c' }, String(selected.length)),
+            props.onGoStudy ? h('button', { className: 'idb-studies', onClick: function () { props.onGoStudy(); } }, '📚 Studies →') : null),
+          selected.length ? h('div', null,
+            selected.map(function (idea) {
+              return h('div', { className: 'idb-bitem', key: idea.id },
+                h('div', { style: { flex: 1, minWidth: 0 } },
+                  h('div', { className: 'idb-bq' }, idea.question),
+                  idea.hypothesis ? h('div', { className: 'idb-bh' }, idea.hypothesis) : null),
+                props.canEdit ? h('button', { className: 'del', 'aria-label': 'Remove from basis', title: 'Remove from basis', onClick: function () { setStatus(idea, 'candidate'); } }, '✕') : null
+              );
+            }),
+            props.onStartStudyMulti ? h('button', { className: 'idb-cta', onClick: function () { props.onStartStudyMulti(selected); } }, '🔬 Start a study from these ideas →') : null
+          ) : h('div', { className: 'idb-bempty' }, 'Press “Select” on a shortlisted idea — it becomes the study basis.')
+        )
+      );
+    }
+    if (nd()) return railRender();
     return h('div', null,
       // 📌 separate "study basis" window — collects the ideas chosen (Select) as the study's foundation
       h('div', { className: 'panel', style: { marginBottom: 10, border: '1.5px solid var(--accent)' } },
@@ -3341,7 +3388,7 @@
     }
     // (the visible sub-tab row is a separate array below; Data/Compute are intentionally not surfaced)
     var content;
-    if (tab === 'ideas') content = h('div', null, h(ChatPanel, { projectId: p.id, supervised: !!p.student_id, canEdit: props.canEdit, authorId: props.authorId, fileOwnerId: props.fileOwnerId, sources: props.sources, onChanged: props.onChanged }), h(IdeasPanel, { projectId: p.id, ideas: props.ideas, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, onStartStudyMulti: function (ideas) { setAutoStudy(ideas || []); setTab('study'); }, onGoStudy: function () { setTab('study'); } }));
+    if (tab === 'ideas') content = h('div', { className: nd() ? 'ideas2' : null }, h(ChatPanel, { projectId: p.id, supervised: !!p.student_id, canEdit: props.canEdit, authorId: props.authorId, fileOwnerId: props.fileOwnerId, sources: props.sources, onChanged: props.onChanged }), h(IdeasPanel, { projectId: p.id, ideas: props.ideas, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, onStartStudyMulti: function (ideas) { setAutoStudy(ideas || []); setTab('study'); }, onGoStudy: function () { setTab('study'); } }));
     else if (tab === 'literature') content = h(React.Fragment, null,
       h(LiteraturePanel, { projectId: p.id, sources: props.sources, studies: props.studies, canEdit: props.canEdit, myEmail: props.myEmail, onChanged: props.onChanged }),
       h(ElicitReports, { projectId: p.id, project: p, canEdit: props.canEdit }),
