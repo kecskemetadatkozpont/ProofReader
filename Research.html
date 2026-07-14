@@ -317,7 +317,9 @@
     .bubble .btxt.md table { border-collapse: collapse; font-size: 12px; margin: 6px 0; } .bubble .btxt.md th, .bubble .btxt.md td { border: 1px solid var(--line); padding: 3px 7px; }
     /* session file browser (Antigravity-style) next to the chat */
     .chatwrap { display: flex; gap: 14px; align-items: flex-start; }
-    .chat-col { flex: 1; min-width: 0; }
+    .chat-col { flex: 1; min-width: 0; position: relative; }
+    .chat-dropzone { position: absolute; inset: 0; z-index: 20; background: color-mix(in srgb, var(--accent-tint) 90%, transparent); border: 2px dashed var(--accent); border-radius: 12px; display: grid; place-items: center; backdrop-filter: blur(2px); }
+    .cdz-inner { text-align: center; color: var(--accent); pointer-events: none; } .cdz-inner b { display: block; font-size: 15px; margin: 6px 0 3px; } .cdz-inner span { font-size: 12px; color: var(--muted); }
     .filebrowser { flex: none; width: 256px; align-self: stretch; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); padding: 10px; max-height: 640px; overflow-y: auto; }
     .fb-head { display: flex; align-items: center; gap: 4px; margin-bottom: 8px; }
     .fb-head b { font-size: 12.5px; }
@@ -560,7 +562,34 @@
     html.newdesign .ideas2 .chat-col { min-height: 0; display: flex; flex-direction: column; }
     html.newdesign .ideas2 .chat-msgs { flex: 1 1 auto; min-height: 0; max-height: none; }
     html.newdesign .ideas2 .filebrowser { align-self: stretch; overflow-y: auto; }
+    html.newdesign .ideas2 .filebrowser.fbx { overflow: hidden; display: flex; flex-direction: column; }
     html.newdesign .ideas2 > :nth-child(2) { overflow-y: auto; }
+
+    /* VS-Code-Light explorer (New design): folder tree + type-aware viewer/editor */
+    html.newdesign .filebrowser.fbx { display: flex; flex-direction: column; min-height: 0; }
+    html.newdesign .fbx-tree { flex: 1 1 auto; min-height: 60px; overflow-y: auto; margin: 4px 0 6px; }
+    html.newdesign .fbx-row { display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 6px; border-radius: 6px; cursor: pointer; white-space: nowrap; color: var(--ink); user-select: none; font-size: 12.5px; }
+    html.newdesign .fbx-row:hover { background: var(--surface-2); } html.newdesign .fbx-row.sel { background: var(--accent-tint); }
+    html.newdesign .fbx-row.drop { box-shadow: inset 0 0 0 1.5px var(--accent); background: var(--accent-tint); }
+    html.newdesign .fbx-chev { width: 12px; flex: none; color: var(--faint); font-size: 9px; transition: transform .12s; }
+    html.newdesign .fbx-folder.open .fbx-chev { transform: rotate(90deg); }
+    html.newdesign .fbx-ic { flex: none; font-size: 13px; width: 16px; text-align: center; }
+    html.newdesign .fbx-nm { overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }
+    html.newdesign .fbx-badge { flex: none; font-size: 8.5px; font-weight: 800; color: var(--accent); background: var(--accent-tint); padding: 1px 5px; border-radius: 999px; }
+    html.newdesign .fbx-acts { display: none; gap: 1px; flex: none; }
+    html.newdesign .fbx-row:hover .fbx-acts, html.newdesign .fbx-row:focus-within .fbx-acts { display: flex; }
+    html.newdesign .fbx-viewer { flex: 0 1 auto; min-height: 120px; max-height: 56%; display: flex; flex-direction: column; border-top: 1px solid var(--line); padding-top: 6px; }
+    html.newdesign .fbx-vh { display: flex; align-items: center; gap: 4px; padding: 2px 2px 8px; }
+    html.newdesign .fbx-vt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 12px; font-weight: 700; }
+    html.newdesign .fbx-vbody { flex: 1; min-height: 0; overflow: auto; }
+    html.newdesign .fbx-md { font-size: 12.5px; padding: 2px 2px 8px; line-height: 1.55; }
+    html.newdesign .fbx-code { margin: 0; padding: 8px 10px; font-size: 11.5px; line-height: 1.55; white-space: pre; overflow: auto; background: var(--surface-2); border-radius: 8px; }
+    html.newdesign .fbx-edit { width: 100%; min-height: 200px; height: 100%; box-sizing: border-box; border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px; font-size: 12px; line-height: 1.55; resize: none; outline: 0; background: var(--surface); color: var(--ink); }
+    html.newdesign .fbx-edit:focus { border-color: var(--accent); }
+    html.newdesign .fbx-csvwrap { overflow: auto; padding: 2px; }
+    html.newdesign .fbx-tbl { border-collapse: collapse; font-size: 11.5px; } html.newdesign .fbx-tbl th, html.newdesign .fbx-tbl td { border: 1px solid var(--line); padding: 4px 9px; text-align: left; white-space: nowrap; } html.newdesign .fbx-tbl th { background: var(--surface-2); font-weight: 700; }
+    html.newdesign .fbx-bin { display: grid; place-items: center; padding: 20px; text-align: center; color: var(--muted); }
+    html.newdesign .fbx-noview { padding: 20px 8px; font-size: 12px; color: var(--faint); text-align: center; }
     @media (max-width: 900px) { html.newdesign .ideas2 { grid-template-columns: 1fr; height: auto; } html.newdesign .ideas2 .chatwrap { height: auto; } html.newdesign .ideas2 .chat-msgs { max-height: 60vh; } html.newdesign .ideas2 .filebrowser { overflow-y: visible; } }
     html.newdesign .idb-rail { display: flex; flex-direction: column; gap: 12px; position: sticky; top: 12px; }
     html.newdesign .idb-card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 13px 14px; }
@@ -856,7 +885,7 @@
   <script type="text/babel" src="canvas.jsx?v=1783137934"></script>
   <script type="text/babel" src="notes.jsx?v=1783137934"></script>
   <script src="autopilot-core.js?v=1784160000"></script>
-  <script type="text/babel" src="research.jsx?v=1784160000"></script>
+  <script type="text/babel" src="research.jsx?v=1784170000"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>

@@ -642,6 +642,9 @@
     var adS = useState(false), added = adS[0], setAdded = adS[1];   // #8: brief "added to ideas" feedback
     var spS = useState(null), selPop = spS[0], setSelPop = spS[1];   // #1: text selection in the MD preview → "add to idea" popup
     var upRef = useRef(null);
+    var opS = useState({}), openF = opS[0], setOpenF = opS[1];       // VS-Code-Light (nd()): expanded folders {folderKey: bool}
+    var edS2 = useState(null), edit = edS2[0], setEdit = edS2[1];    // inline text/MD editor { id, path, text }
+    var dragF = useRef(null);                                        // the file currently being dragged onto a folder
     var skS = useState(null), intake = skS[0], setIntake = skS[1];   // file-intake clarifying questions after an upload
     function intakeDone(result) {
       var it = intake; setIntake(null);
@@ -696,6 +699,90 @@
     }
     function attach(f) { props.onAttach({ kind: f.content != null ? 'projectfile' : 'file', file_id: f.id, bucket: 'research-data', path: f.storage_path, name: f.path, title: f.path, label: f.path }); }
     function icon(f) { var p = (f.path || '').toLowerCase(); if (/\.md$|\.txt$/.test(p)) return '📄'; if (/\.(png|jpe?g|gif|webp|svg)$/.test(p)) return '🖼'; if (/\.pdf$/.test(p)) return '📕'; if (/\.(csv|tsv|xlsx?)$/.test(p)) return '📊'; return '📎'; }
+    // ===== VS-Code-Light explorer (New design): folder tree + drag-move + rename + type-aware viewer/editor =====
+    function baseName(p) { var i = String(p).lastIndexOf('/'); return i < 0 ? p : p.slice(i + 1); }
+    function toggleF(k) { setOpenF(function (o) { var n = Object.assign({}, o); n[k] = (k in o) ? !o[k] : false; return n; }); }
+    function buildTree(fs) {
+      var root = { folders: {}, files: [] };
+      (fs || []).forEach(function (f) { var parts = String(f.path || '').split('/'); var node = root; for (var i = 0; i < parts.length - 1; i++) { var key = parts.slice(0, i + 1).join('/'); node.folders[key] = node.folders[key] || { name: parts[i], key: key, folders: {}, files: [] }; node = node.folders[key]; } node.files.push(f); });
+      return root;
+    }
+    function moveTo(f, folderKey) {
+      var np = (folderKey ? folderKey + '/' : '') + baseName(f.path); if (np === f.path) return;
+      sb.from('research_files').update({ path: np, updated_at: new Date().toISOString() }).eq('id', f.id).then(function (r) {
+        if (r && r.error) { window.PRUI.toast(/duplicate|unique/i.test(r.error.message) ? 'Már van ilyen nevű fájl a mappában.' : r.error.message, { kind: 'error' }); return; }
+        if (folderKey) setOpenF(function (o) { var n = Object.assign({}, o); n[folderKey] = true; return n; }); load();
+      });
+    }
+    function renameFile(f) {
+      var np = (window.prompt('Útvonal (mappa/fájlnév — új mappához írj „mappa/" prefixet):', f.path) || '').trim(); if (!np || np === f.path) return;
+      sb.from('research_files').update({ path: np, updated_at: new Date().toISOString() }).eq('id', f.id).then(function (r) { if (r && r.error) { window.PRUI.toast(/duplicate|unique/i.test(r.error.message) ? 'Már foglalt útvonal.' : r.error.message, { kind: 'error' }); return; } load(); });
+    }
+    function saveEdit() {
+      if (!edit) return; var e = edit;
+      sb.from('research_files').update({ content: e.text, size: (e.text || '').length, updated_at: new Date().toISOString() }).eq('id', e.id).then(function (r) { if (r && r.error) { window.PRUI.toast(r.error.message, { kind: 'error' }); return; } setEdit(null); load(); window.PRUI.toast('✓ Mentve', { kind: 'ok' }); });
+    }
+    function fkind(f) { var p = (f.path || '').toLowerCase(); if (f.content != null) { if (/\.(md|markdown|txt)$/.test(p)) return 'md'; if (/\.csv$/.test(p)) return 'csv'; return 'code'; } return /\.(png|jpe?g|gif|webp|svg|pdf)$/.test(p) ? 'bin' : 'bin'; }
+    function fileRow(f, depth) {
+      return h('div', { key: 'f' + f.id, className: 'fbx-row fbx-file' + (preview && preview.id === f.id ? ' sel' : ''), style: { paddingLeft: (6 + depth * 13 + 13) + 'px' }, draggable: props.canEdit,
+        onDragStart: function () { dragF.current = f; }, onDragEnd: function () { dragF.current = null; }, onClick: function () { setPreview(f); setEdit(null); } },
+        h('span', { className: 'fbx-ic' }, icon(f)), h('span', { className: 'fbx-nm', title: f.path }, baseName(f.path)), f.source === 'ai' ? h('span', { className: 'fbx-badge' }, 'AI') : null,
+        h('span', { className: 'fbx-acts' },
+          props.canEdit ? h('button', { className: 'fb-mini', title: 'Átnevezés / áthelyezés', onClick: function (e) { e.stopPropagation(); renameFile(f); } }, '✎') : null,
+          props.canEdit ? h('button', { className: 'fb-mini', title: 'Csatolás a chathez', onClick: function (e) { e.stopPropagation(); attach(f); } }, '📎') : null,
+          h('button', { className: 'fb-mini', title: 'Letöltés', onClick: function (e) { e.stopPropagation(); download(f); } }, '⬇'),
+          props.canEdit ? h('button', { className: 'fb-mini', title: 'Törlés', onClick: function (e) { e.stopPropagation(); del(f); } }, '×') : null));
+    }
+    function treeNodes(node, depth) {
+      var out = [];
+      Object.keys(node.folders).sort().forEach(function (k) {
+        var fo = node.folders[k], isOpen = (k in openF) ? openF[k] : (depth === 0);
+        out.push(h('div', { key: 'd' + k, className: 'fbx-row fbx-folder' + (isOpen ? ' open' : ''), style: { paddingLeft: (6 + depth * 13) + 'px' },
+          onClick: function () { toggleF(k); },
+          onDragOver: function (e) { if (dragF.current) { e.preventDefault(); e.currentTarget.classList.add('drop'); } },
+          onDragLeave: function (e) { e.currentTarget.classList.remove('drop'); },
+          onDrop: function (e) { e.currentTarget.classList.remove('drop'); if (dragF.current) { e.preventDefault(); moveTo(dragF.current, k); dragF.current = null; } } },
+          h('span', { className: 'fbx-chev' }, '▶'), h('span', { className: 'fbx-ic' }, isOpen ? '📂' : '📁'), h('span', { className: 'fbx-nm' }, fo.name)));
+        if (isOpen) { out = out.concat(treeNodes(fo, depth + 1)); fo.files.forEach(function (f) { out.push(fileRow(f, depth + 1)); }); }
+      });
+      return out;
+    }
+    function csvTable(src) {
+      var rows = String(src).trim().split('\n').map(function (r) { return r.split(','); });
+      return h('div', { className: 'fbx-csvwrap' }, h('table', { className: 'fbx-tbl mono' },
+        h('thead', null, h('tr', null, (rows[0] || []).map(function (c, i) { return h('th', { key: i }, c); }))),
+        h('tbody', null, rows.slice(1).map(function (r, i) { return h('tr', { key: i }, r.map(function (c, j) { return h('td', { key: j }, c); })); }))));
+    }
+    function viewerEl() {
+      if (!preview) return h('div', { className: 'fbx-noview' }, 'Válassz egy fájlt a fából a megnyitáshoz.');
+      var f = preview, k = fkind(f);
+      var body;
+      if (edit) body = h('textarea', { className: 'fbx-edit mono', value: edit.text, spellCheck: false, onChange: function (e) { var v = e.target.value; setEdit(function (o) { return Object.assign({}, o, { text: v }); }); } });
+      else if (k === 'md') body = h('div', { className: 'btxt md fbx-md', onMouseUp: onPreviewMouseUp, onScroll: function () { if (selPop) setSelPop(null); }, dangerouslySetInnerHTML: { __html: mdReport(f.content || '') } });
+      else if (k === 'csv') body = csvTable(f.content || '');
+      else if (k === 'code') body = h('pre', { className: 'fbx-code mono' }, f.content || '');
+      else body = h('div', { className: 'fbx-bin' }, h('div', { style: { fontSize: 40 } }, /\.pdf$/i.test(f.path) ? '📕' : /\.(png|jpe?g|gif|webp|svg)$/i.test(f.path) ? '🖼' : '📎'), h('button', { className: 'btn', style: { fontSize: 12, marginTop: 10 }, onClick: function () { openSigned(f.storage_path); } }, 'Megnyitás / letöltés →'));
+      return h('div', { className: 'fbx-viewer' },
+        h('div', { className: 'fbx-vh' }, h('span', { className: 'fbx-ic' }, icon(f)), h('span', { className: 'fbx-vt', title: f.path }, f.path),
+          (props.canEdit && f.content != null && !edit) ? h('button', { className: 'fb-mini', title: 'Szerkesztés', onClick: function () { setEdit({ id: f.id, path: f.path, text: f.content || '' }); } }, '✎') : null,
+          edit ? h('button', { className: 'fb-mini', title: 'Mentés', style: { color: 'var(--accent)' }, onClick: saveEdit } , '💾') : null,
+          edit ? h('button', { className: 'fb-mini', title: 'Mégse', onClick: function () { setEdit(null); } }, '↩') : null,
+          h('button', { className: 'fb-mini', title: 'Bezárás', onClick: function () { setPreview(null); setEdit(null); } }, '×')),
+        h('div', { className: 'fbx-vbody' }, body));
+    }
+    if (nd()) return h('div', { className: 'filebrowser fbx', style: { width: (props.width || 300) } },
+      h('div', { className: 'fb-head' }, h('b', null, '🗂 Files'), h('span', { style: { flex: 1 } }),
+        props.canEdit ? h('button', { className: 'fb-mini', title: 'Új fájl (mappához: „mappa/név.md")', onClick: newFile }, '✚') : null,
+        props.canEdit ? h('button', { className: 'fb-mini', title: 'Feltöltés', onClick: function () { if (upRef.current) upRef.current.click(); } }, '⤒') : null,
+        h('input', { ref: upRef, type: 'file', style: { display: 'none' }, onChange: onUpload })),
+      files === null ? h('div', { className: 'fb-empty' }, 'Betöltés…')
+        : (files.length ? h('div', { className: 'fbx-tree' }, treeNodes(buildTree(files), 0)) : h('div', { className: 'fb-empty' }, 'Nincs fájl. Húzz be egyet a chatbe, vagy „✚".')),
+      viewerEl(),
+      selPop ? h('button', { className: 'sel-idea-btn', style: { position: 'fixed', left: selPop.x, top: selPop.y - 40, transform: 'translateX(-50%)', zIndex: 60 }, onMouseDown: function (e) { e.preventDefault(); }, onClick: function () { props.onAddIdea(selPop.text); setSelPop(null); try { window.getSelection().removeAllRanges(); } catch (e) { } } }, '✚ To idea') : null,
+      rvDoc ? h(ReportViewer, { md: rvDoc.content, title: rvDoc.path, onClose: function () { setRvDoc(null); } }) : null,
+      intake ? h(FileIntake, { file: intake, context: 'a research idea / literature note in this project', onComplete: intakeDone, onClose: function () { setIntake(null); } }) : null
+    );
+
     return h('div', { className: 'filebrowser', style: { width: (props.width || 256) } },
       h('div', { className: 'fb-head' }, h('b', null, 'Files'), h('span', { style: { flex: 1 } }),
         props.canEdit ? h('button', { className: 'fb-mini', 'aria-label': 'New file', title: 'New file', onClick: newFile }, '+') : null,
@@ -740,6 +827,7 @@
     var fbwS = useState(function () { try { return parseInt(localStorage.getItem('pr-fb-width') || '280', 10) || 280; } catch (e) { return 280; } }), fbWidth = fbwS[0], setFbWidth = fbwS[1];   // resizable file-browser width
     var spS = useState(null), selPop = spS[0], setSelPop = spS[1];   // { text, x, y } floating "add selection to ideas" button
     var atS = useState([]), attach = atS[0], setAttach = atS[1];          // pending attachments for the next message
+    var ddS = useState(false), dropActive = ddS[0], setDropActive = ddS[1];   // P2: drag files onto the chat → upload to the file manager
     var pkS = useState(false), picker = pkS[0], setPicker = pkS[1];
     var enS = useState(false), enhancing = enS[0], setEnhancing = enS[1];   // #6: prompt enhancement in flight
     var firstLoad = useRef(true), animated = useRef({}), alive = useRef(true), scrollRef = useRef(null), taRef = useRef(null), justStreamed = useRef(false);
@@ -813,6 +901,29 @@
       Promise.all(fs.map(function (f) {
         return sb.from('research_files').upsert({ project_id: props.projectId, path: f.path, content: f.content, mime: 'text/markdown', size: (f.content || '').length, source: 'ai', created_by: props.authorId, updated_by: props.authorId, updated_at: new Date().toISOString() }, { onConflict: 'project_id,path' });
       })).then(function () { setFilesVersion(function (v) { return v + 1; }); });
+    }
+    // P2: files dropped on the chat → upload to storage + research_files (uploads/), refresh the file manager, attach to the next message.
+    function chatUpload(fileList) {
+      var arr = [].slice.call(fileList || []); if (!arr.length) return; setDropActive(false);
+      arr.forEach(function (f) {
+        if (window.PROffice && window.PROffice.isOffice(f.name)) {
+          window.PROffice.extract(f).then(function (r) {
+            var name = 'uploads/' + f.name.replace(/\.(docx|xlsx|xlsm|xls|pptx)$/i, '') + '.' + (r.ext || 'md');
+            sb.from('research_files').upsert({ project_id: props.projectId, path: name, content: r.text || '', mime: r.ext === 'csv' ? 'text/csv' : 'text/markdown', source: 'upload', created_by: props.authorId, updated_by: props.authorId, updated_at: new Date().toISOString() }, { onConflict: 'project_id,path' }).then(function () { setFilesVersion(function (v) { return v + 1; }); });
+          }, function () { window.PRUI.toast('Office-feldolgozási hiba: ' + f.name, { kind: 'error' }); });
+          return;
+        }
+        var sp = props.projectId + '/files/' + Date.now() + '_' + f.name.replace(/[^A-Za-z0-9._-]/g, '_');
+        sb.storage.from('research-data').upload(sp, f).then(function (res) {
+          if (res && res.error) { window.PRUI.toast(res.error.message, { kind: 'error' }); return; }
+          sb.from('research_files').upsert({ project_id: props.projectId, path: 'uploads/' + f.name, storage_path: sp, mime: f.type || 'application/octet-stream', size: f.size, source: 'upload', created_by: props.authorId, updated_by: props.authorId, updated_at: new Date().toISOString() }, { onConflict: 'project_id,path' }).then(function (rr) {
+            if (rr && rr.error) { window.PRUI.toast(rr.error.message, { kind: 'error' }); return; }
+            setFilesVersion(function (v) { return v + 1; });
+            setAttach(function (p) { return p.concat([{ kind: 'file', bucket: 'research-data', path: sp, name: f.name, mime: f.type, label: f.name }]); });
+          });
+        });
+      });
+      window.PRUI.toast(arr.length + ' fájl feltöltve az uploads/ mappába', { kind: 'ok' });
     }
     // Real token streaming: POST to the Edge function and append text deltas to a live bubble as they arrive.
     function streamReply(cid) {
@@ -894,7 +1005,9 @@
       }, 1);
     }
     return h('div', { className: 'panel chatwrap' },
-      h('div', { className: 'chat-col' },
+      h('div', { className: 'chat-col', onDragOver: function (e) { if (props.canEdit && e.dataTransfer && [].slice.call(e.dataTransfer.types || []).indexOf('Files') >= 0) { e.preventDefault(); if (!dropActive) setDropActive(true); } } },
+      (dropActive && props.canEdit) ? h('div', { className: 'chat-dropzone', onDragOver: function (e) { e.preventDefault(); }, onDragLeave: function () { setDropActive(false); }, onDrop: function (e) { e.preventDefault(); chatUpload(e.dataTransfer.files); } },
+        h('div', { className: 'cdz-inner' }, h('div', { style: { fontSize: 30 } }, '📎'), h('b', null, 'Engedd el a fájlokat'), h('span', null, 'Feltöltés az uploads/ mappába + csatolás az üzenethez'))) : null,
       h('h3', null, 'Chat with Publify', h('span', { style: { fontWeight: 600, color: 'var(--faint)' } }, 'research assistant')),
       props.canEdit ? h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' } },
         h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12 }, disabled: sgBusy || !msgs.length, title: 'Suggests ideas for the Ideas list from the current conversation (manually, not continuously)', onClick: suggestIdeas }, sgBusy ? '💡 Generating…' : '💡 Generate ideas from the conversation'),
