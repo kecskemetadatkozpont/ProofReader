@@ -3587,15 +3587,44 @@
     var efS = useState({}), eform = efS[0], setEform = efS[1];
     var bmS = useState(0), bump = bmS[0], setBump = bmS[1];   // reload after a save
     var rnS = useState(null), run = rnS[0], setRun = rnS[1];   // P1b: the project's active Autopilot run (live)
-    var drag = useRef(null), stageRef = useRef(null), alive = useRef(true), bumpT = useRef(null);
-    useEffect(function () { return function () { alive.current = false; if (bumpT.current) clearTimeout(bumpT.current); }; }, []);
+    var mdS = useState(function () { try { return localStorage.getItem('pr-rmap-mode') === 'free' ? 'free' : 'lane'; } catch (e) { return 'lane'; } }), mode = mdS[0], setMode = mdS[1];   // 'lane' (swimlane) | 'free' (freeform)
+    var drag = useRef(null), stageRef = useRef(null), alive = useRef(true), bumpT = useRef(null), driving = useRef(false), mapDriver = useRef(null);
+    if (!mapDriver.current) mapDriver.current = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : ('00000000-0000-4000-8000-' + String(Date.now()).slice(-12));
+    useEffect(function () { return function () { alive.current = false; driving.current = false; if (bumpT.current) clearTimeout(bumpT.current); }; }, []);
     // debounced re-materialize: as the orchestrator writes rows, coalesce rapid events into one reload so nodes grow live
     function bumpSoon() { if (bumpT.current) return; bumpT.current = setTimeout(function () { bumpT.current = null; if (alive.current) setBump(function (x) { return x + 1; }); }, 1400); }
+    // P1b+: the Map can itself DRIVE the run (via the shared PRAutopilotCore), not just view it. Same single-driver
+    // lease as the dashboard → Map + dashboard never double-drive. Only an editor who is the run OWNER drives.
+    function ensureDrive(r) {
+      var CORE = window.PRAutopilotCore;
+      if (CORE && CORE.apStep && r && r.status === 'running' && props.canEdit && r.owner_id === props.viewerId && !driving.current) { driving.current = true; driveMap(r.id); }
+    }
+    function driveMap(runId) {
+      if (!alive.current || !driving.current) { driving.current = false; return; }
+      var CORE = window.PRAutopilotCore, tok = mapDriver.current, stale = new Date(Date.now() - 30000).toISOString();
+      sb.from('research_autopilot_runs').update({ driver_token: tok, driver_beat: new Date().toISOString() }).eq('id', runId).eq('status', 'running').or('driver_token.is.null,driver_token.eq.' + tok + ',driver_beat.lt.' + stale).select('*').then(function (rr) {
+        var r = rr && rr.data && rr.data[0];
+        if (!alive.current || !driving.current) { driving.current = false; return; }
+        if (!r) { driving.current = false; return; }   // lost the lease (dashboard/another tab drives) → stay a viewer
+        CORE.apStep(r, props.project).then(function (res) {
+          if (!alive.current) { driving.current = false; return; }
+          var evs = (res.events || []).map(function (e) { return { run_id: r.id, project_id: r.project_id, phase: e.phase || null, level: e.level || 'run', message: String(e.message || '').slice(0, 500) }; });
+          (evs.length ? sb.from('research_autopilot_events').insert(evs) : Promise.resolve()).then(function () {
+            sb.from('research_autopilot_runs').update(Object.assign({ updated_at: new Date().toISOString(), driver_beat: new Date().toISOString() }, res.patch || {})).eq('id', r.id).eq('driver_token', tok).then(function () { setTimeout(function () { driveMap(runId); }, 950); });
+          });
+        }, function (err) {
+          var pk = (r.phases[r.phase_index] || {}).key;
+          sb.from('research_autopilot_events').insert([{ run_id: r.id, project_id: r.project_id, phase: pk, level: 'error', message: 'Hiba: ' + ((err && err.message) || err) }]).then(function () {
+            sb.from('research_autopilot_runs').update({ status: 'failed', error: String((err && err.message) || err), updated_at: new Date().toISOString() }).eq('id', r.id).then(function () { driving.current = false; });
+          });
+        });
+      }, function () { driving.current = false; });
+    }
     useEffect(function () {
       var pid = props.projectId;
-      sb.from('research_autopilot_runs').select('*').eq('project_id', pid).not('status', 'in', '("done","failed","cancelled")').order('updated_at', { ascending: false }).limit(1).maybeSingle().then(function (r) { if (alive.current) setRun((r && r.data) || null); });
+      sb.from('research_autopilot_runs').select('*').eq('project_id', pid).not('status', 'in', '("done","failed","cancelled")').order('updated_at', { ascending: false }).limit(1).maybeSingle().then(function (r) { if (alive.current) { setRun((r && r.data) || null); ensureDrive(r && r.data); } });
       var ch = sb.channel('rmap-ap:' + pid)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'research_autopilot_runs', filter: 'project_id=eq.' + pid }, function (p) { if (alive.current && p.new) { setRun(p.new); bumpSoon(); } })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'research_autopilot_runs', filter: 'project_id=eq.' + pid }, function (p) { if (alive.current && p.new) { setRun(p.new); ensureDrive(p.new); bumpSoon(); } })
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'research_autopilot_events', filter: 'project_id=eq.' + pid }, function () { if (alive.current) bumpSoon(); })
         .subscribe();
       return function () { try { sb.removeChannel(ch); } catch (e) { } };
@@ -3641,6 +3670,13 @@
       var lastStep = (d.protocol && d.steps.length) ? ('r' + d.steps[d.steps.length - 1].id) : (hasSR ? 'sr' : null);
       d.wfiles.forEach(function (f) { var nm = String(f.path).replace(/^writing\//, '').replace(/\.(md|tex)$/, ''); N.push({ id: 'w' + f.id, t: 'section', ph: 5, title: nm || 'szekció', m: { Fájl: f.path, Méret: (f.size || 0) + ' B' }, ref: f }); if (lastStep) E.push([lastStep, 'w' + f.id]); });
       var LANEW = 252, ROWH = 104, cnt = {};
+      if (mode === 'free') {   // (B) freeform: organic per-phase clusters instead of lanes
+        var CEN = [{ x: 40, y: 60 }, { x: 470, y: 240 }, { x: 220, y: 560 }, { x: 860, y: 110 }, { x: 1140, y: 470 }, { x: 780, y: 650 }];
+        N.forEach(function (n) { var o = (cnt[n.ph] = (cnt[n.ph] || 0)); var c = CEN[n.ph] || { x: n.ph * 260, y: 80 }; n.x = c.x + (o % 2) * 172; n.y = c.y + Math.floor(o / 2) * 112 + ((o % 2) ? 26 : 0); cnt[n.ph] = o + 1; });
+        var mY = 640; N.forEach(function (n) { mY = Math.max(mY, n.y + 120); });
+        var byF = {}; N.forEach(function (n) { byF[n.id] = n; });
+        return { N: N, E: E, laneW: LANEW, height: mY, by: byF, free: true };
+      }
       N.forEach(function (n) { var o = (cnt[n.ph] = (cnt[n.ph] || 0)); n.x = n.ph * LANEW + 22; n.y = 66 + o * ROWH; cnt[n.ph] = o + 1; });
       var maxRows = Math.max.apply(null, [1].concat(Object.keys(cnt).map(function (k) { return cnt[k]; })));
       var by = {}; N.forEach(function (n) { by[n.id] = n; });
@@ -3719,7 +3755,7 @@
     return h('div', { className: 'rmap-wrap' },
       h('div', { className: 'rmap-stage', ref: stageRef, onMouseDown: onDown, onWheel: onWheel },
         h('div', { className: 'rmap-world', style: { transform: 'translate(' + view.tx + 'px,' + view.ty + 'px) scale(' + view.k + ')' } },
-          RMAP_PHASES.map(function (p, i) { var stt = runPhase[p[0]]; return h('div', { className: 'rmap-lane' + (i % 2 ? ' alt' : '') + (activeKey === p[0] ? ' active' : ''), key: p[0], style: { left: (i * g.laneW) + 'px', width: g.laneW + 'px', height: g.height + 'px' } }, h('div', { className: 'rmap-lh' }, p[2] + ' ' + p[1], stt ? h('span', { className: 'rmap-lh-st ' + stt }, LANE_BADGE[stt] || '') : null)); }),
+          g.free ? null : RMAP_PHASES.map(function (p, i) { var stt = runPhase[p[0]]; return h('div', { className: 'rmap-lane' + (i % 2 ? ' alt' : '') + (activeKey === p[0] ? ' active' : ''), key: p[0], style: { left: (i * g.laneW) + 'px', width: g.laneW + 'px', height: g.height + 'px' } }, h('div', { className: 'rmap-lh' }, p[2] + ' ' + p[1], stt ? h('span', { className: 'rmap-lh-st ' + stt }, LANE_BADGE[stt] || '') : null)); }),
           h('svg', { className: 'rmap-edges', width: svgW, height: g.height }, edgeEls),
           g.N.map(function (n) { return h('div', { key: n.id, className: 'rmap-node t-' + n.t + (sel === n.id ? ' sel' : '') + (activeKey && n.ph === RMAP_PHASE_IDX[activeKey] ? ' inphase' : ''), style: { left: n.x + 'px', top: n.y + 'px' }, onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); setSel(n.id); } }, body(n)); })),
         run && runActive ? h('div', { className: 'rmap-runbar' + (run.status === 'awaiting_approval' ? ' gate' : '') },
@@ -3727,8 +3763,10 @@
           h('span', { className: 'rmap-rb-st' }, (AP_ST_LABEL[run.status] || run.status) + (activeLabel ? ' · ' + activeLabel : '') + (runProg ? ' · ' + runProg : '')),
           (run.status === 'awaiting_approval' && run.gate && props.canEdit) ? h('button', { className: 'btn pri', style: { padding: '3px 10px', fontSize: 11.5, marginLeft: 4 }, onClick: approveGate }, '✓ ' + (run.gate.title || 'Jóváhagyás')) : null,
           h('a', { className: 'btn', style: { padding: '3px 10px', fontSize: 11.5, textDecoration: 'none', marginLeft: 'auto' }, href: 'Autopilot.html?run=' + run.id, target: '_blank', rel: 'noopener' }, 'Dashboard ↗')) : null,
-        h('div', { className: 'rmap-zoom' }, h('button', { onClick: function () { zoom(1.18); } }, '+'), h('button', { onClick: function () { zoom(0.85); } }, '−')),
-        h('div', { className: 'rmap-hint' }, 'Húzd = pan · görgő = zoom · kattints egy node-ra')),
+        h('div', { className: 'rmap-zoom' },
+          h('button', { title: mode === 'lane' ? 'Szabad elrendezés (B)' : 'Sávos elrendezés', onClick: function () { var nm = mode === 'lane' ? 'free' : 'lane'; setMode(nm); try { localStorage.setItem('pr-rmap-mode', nm); } catch (e) { } } }, mode === 'lane' ? '⊙' : '☰'),
+          h('button', { onClick: function () { zoom(1.18); } }, '+'), h('button', { onClick: function () { zoom(0.85); } }, '−')),
+        h('div', { className: 'rmap-hint' }, 'Húzd = pan · görgő = zoom · ' + (mode === 'lane' ? 'sávos' : 'szabad') + ' nézet · kattints egy node-ra')),
       sn ? h('div', { className: 'rmap-insp' },
         h('div', { className: 'rmap-insp-h' }, h('span', { className: 'rmap-ni' }, RMAP_TYPE[sn.t].ic), h('div', { style: { minWidth: 0 } }, h('b', null, sn.title), h('div', { className: 'rmap-insp-ty' }, RMAP_TYPE[sn.t].lab)), h('button', { className: 'rmap-insp-x', onClick: function () { setSel(null); } }, '×')),
         h('div', { className: 'rmap-insp-b' },
@@ -3821,7 +3859,7 @@
       h('h3', { style: { marginTop: 0 } }, '📤 Submission'),
       h('p', { style: { fontSize: 13.5, color: 'var(--muted)', lineHeight: 1.55 } }, 'When the manuscript is ready, submit and track it in the Érkeztető (submission) workflow — desk-check, reviewers, decisions and camera-ready.'),
       h('a', { className: 'btn pri', href: 'Submissions.html' + (/[?&]adminView=1/.test(location.search) ? '?adminView=1' : ''), style: { textDecoration: 'none', display: 'inline-block' } }, 'Open the submission workflow →'));
-    else if (tab === 'map') content = h(PipelineCanvas, { projectId: p.id, project: p, canEdit: props.canEdit, authorId: props.authorId, onGoTab: function (t) { setTab(t); } });
+    else if (tab === 'map') content = h(PipelineCanvas, { projectId: p.id, project: p, canEdit: props.canEdit, authorId: props.authorId, viewerId: props.me && props.me.id, onGoTab: function (t) { setTab(t); } });
     else if (tab === 'canvas') content = window.PRCanvas ? h(window.PRCanvas, { projectId: p.id, canEdit: props.canEdit, authorId: props.authorId }) : h('div', { className: 'empty' }, 'Loading Canvas…');
     else if (tab === 'notes') content = window.PRNotes ? h(window.PRNotes, { projectId: p.id, canEdit: props.canEdit, authorId: props.authorId }) : h('div', { className: 'empty' }, 'Loading Notes…');
     else if (tab === 'log') content = h(LogPanel, { projectId: p.id, authorId: props.authorId, entries: props.log, canEdit: props.canEdit, onChanged: props.onChanged });
