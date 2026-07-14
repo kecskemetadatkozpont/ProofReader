@@ -554,12 +554,14 @@
     /* ===== Ideas surface — AI-Native Brainstorm (direction B): two-pane chat + shortlist/basis rail ===== */
     html.newdesign .ideas2 { display: grid; grid-template-columns: 1.6fr 1fr; gap: 16px; align-items: stretch; height: calc(100vh - 230px); min-height: 460px; }
     html.newdesign .ideas2 > * { min-width: 0; min-height: 0; }
-    /* the Ideas chat fills the column's full height (thread grows; header + input stay fixed) instead of the 500px cap */
-    html.newdesign .ideas2 .chatwrap { display: flex; flex-direction: column; overflow: hidden; }
-    html.newdesign .ideas2 .chat-col { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+    /* .chatwrap is a HORIZONTAL split [chat-col | resizer | file browser] — keep it a row; just fill the height.
+       The chat-col becomes a flex column so the thread grows to fill (header + input fixed) instead of the 500px cap. */
+    html.newdesign .ideas2 .chatwrap { height: 100%; align-items: stretch; overflow: hidden; }
+    html.newdesign .ideas2 .chat-col { min-height: 0; display: flex; flex-direction: column; }
     html.newdesign .ideas2 .chat-msgs { flex: 1 1 auto; min-height: 0; max-height: none; }
+    html.newdesign .ideas2 .filebrowser { align-self: stretch; overflow-y: auto; }
     html.newdesign .ideas2 > :nth-child(2) { overflow-y: auto; }
-    @media (max-width: 900px) { html.newdesign .ideas2 { grid-template-columns: 1fr; height: auto; } html.newdesign .ideas2 .chat-msgs { max-height: 60vh; } }
+    @media (max-width: 900px) { html.newdesign .ideas2 { grid-template-columns: 1fr; height: auto; } html.newdesign .ideas2 .chatwrap { height: auto; } html.newdesign .ideas2 .chat-msgs { max-height: 60vh; } html.newdesign .ideas2 .filebrowser { overflow-y: visible; } }
     html.newdesign .idb-rail { display: flex; flex-direction: column; gap: 12px; position: sticky; top: 12px; }
     html.newdesign .idb-card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 13px 14px; }
     html.newdesign .idb-h { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; font-size: 12px; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; color: var(--muted); }
