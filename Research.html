@@ -804,6 +804,22 @@
     .rmap-insp-b { padding: 13px 14px; overflow-y: auto; }
     .rmap-kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 11px; font-size: 12px; margin-bottom: 13px; } .rmap-kv .k { color: var(--faint); font-weight: 600; } .rmap-kv .v { color: var(--ink); word-break: break-word; }
     .rmap-insp-acts { display: flex; flex-direction: column; gap: 8px; } .rmap-insp-note { font-size: 11px; color: var(--faint); line-height: 1.5; margin: 13px 0 0; border-top: 1px solid var(--line); padding-top: 11px; }
+    /* P1b — live Autopilot overlay: node grow-in, active-phase highlight, lane status, run bar */
+    @keyframes rmap-in { from { opacity: 0; transform: scale(.85); } to { opacity: 1; transform: none; } }
+    .rmap-node { animation: rmap-in .4s ease; }
+    .rmap-node.inphase { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 20%, transparent), 0 10px 26px -20px rgba(20,26,40,.5); }
+    .rmap-lane.active { background: color-mix(in srgb, var(--accent) 7%, transparent); } .rmap-lane.active .rmap-lh { color: var(--accent); }
+    .rmap-lh-st { margin-left: 7px; font-size: 10px; font-weight: 800; padding: 1px 6px; border-radius: 6px; }
+    .rmap-lh-st.done { color: var(--ok, #0f7a4a); background: color-mix(in srgb, var(--ok, #0f7a4a) 14%, transparent); }
+    .rmap-lh-st.running { color: var(--accent); background: var(--accent-tint); animation: rmap-pulse 1.4s infinite; }
+    .rmap-lh-st.gate { color: var(--warn, #8f5407); background: color-mix(in srgb, var(--warn, #8f5407) 15%, transparent); }
+    .rmap-lh-st.skipped { color: var(--faint); background: var(--surface-2); }
+    @keyframes rmap-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
+    .rmap-runbar { position: absolute; top: 12px; left: 12px; right: 12px; display: flex; align-items: center; gap: 9px; flex-wrap: wrap; background: color-mix(in srgb, var(--surface) 92%, transparent); backdrop-filter: blur(8px); border: 1px solid var(--line); border-radius: 11px; padding: 8px 13px; box-shadow: 0 8px 26px -16px rgba(20,26,40,.45); font-size: 12.5px; z-index: 10; }
+    .rmap-runbar.gate { border-color: color-mix(in srgb, var(--warn, #8f5407) 40%, var(--line)); }
+    .rmap-runbar b { font-size: 13px; } .rmap-rb-st { color: var(--muted); }
+    .rmap-rb-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); animation: rmap-pulse 1.4s infinite; flex: none; } .rmap-runbar.gate .rmap-rb-dot { background: var(--warn, #8f5407); }
+    @media (prefers-reduced-motion: reduce) { .rmap-node, .rmap-lh-st.running, .rmap-rb-dot { animation: none; } }
     @media (max-width: 900px) { .rmap-wrap { flex-direction: column; } .rmap-insp { width: auto; } }
   </style>
   <script src="theme.js?v=1783721200"></script>
@@ -832,7 +848,7 @@
   <script src="https://cdn.jsdelivr.net/npm/tus-js-client@4.1.0/dist/tus.min.js"></script>
   <script type="text/babel" src="canvas.jsx?v=1783137934"></script>
   <script type="text/babel" src="notes.jsx?v=1783137934"></script>
-  <script type="text/babel" src="research.jsx?v=1784140000"></script>
+  <script type="text/babel" src="research.jsx?v=1784150000"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>

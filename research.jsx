@@ -3577,6 +3577,7 @@
   // Reads the project's real tables → typed nodes + provenance edges → 6 swimlanes + pan/zoom + a docked inspector.
   // Read-only view for now (P2 = inline edit + phase actions replacing modals). New-design flag only.
   var RMAP_PHASES = [['ideas', 'Ideas', '💡'], ['literature', 'Literature', '📚'], ['sr', 'Systematic review', '🔬'], ['protocol', 'Protocol', '🧪'], ['journal', 'Journal', '🎯'], ['writing', 'Writing', '✍️']];
+  var RMAP_PHASE_IDX = {}; RMAP_PHASES.forEach(function (p, i) { RMAP_PHASE_IDX[p[0]] = i; });
   var RMAP_TYPE = { idea: { ic: '💡', lab: 'Ötlet', tab: 'ideas' }, paper: { ic: '📄', lab: 'Cikk', tab: 'literature' }, study: { ic: '🔎', lab: 'Irodalom', tab: 'literature' }, review: { ic: '📝', lab: 'Áttekintés', tab: 'study' }, step: { ic: '🧪', lab: 'Protokoll-lépés', tab: 'protocol' }, venue: { ic: '🎯', lab: 'Folyóirat', tab: 'journal' }, section: { ic: '✍️', lab: 'Draft-szekció', tab: 'writing' } };
   function PipelineCanvas(props) {
     var dS = useState(null), data = dS[0], setData = dS[1];   // null = loading
@@ -3585,8 +3586,21 @@
     var edS = useState(null), editing = edS[0], setEditing = edS[1];   // {spec} — the open edit dialog (P2)
     var efS = useState({}), eform = efS[0], setEform = efS[1];
     var bmS = useState(0), bump = bmS[0], setBump = bmS[1];   // reload after a save
-    var drag = useRef(null), stageRef = useRef(null), alive = useRef(true);
-    useEffect(function () { return function () { alive.current = false; }; }, []);
+    var rnS = useState(null), run = rnS[0], setRun = rnS[1];   // P1b: the project's active Autopilot run (live)
+    var drag = useRef(null), stageRef = useRef(null), alive = useRef(true), bumpT = useRef(null);
+    useEffect(function () { return function () { alive.current = false; if (bumpT.current) clearTimeout(bumpT.current); }; }, []);
+    // debounced re-materialize: as the orchestrator writes rows, coalesce rapid events into one reload so nodes grow live
+    function bumpSoon() { if (bumpT.current) return; bumpT.current = setTimeout(function () { bumpT.current = null; if (alive.current) setBump(function (x) { return x + 1; }); }, 1400); }
+    useEffect(function () {
+      var pid = props.projectId;
+      sb.from('research_autopilot_runs').select('*').eq('project_id', pid).not('status', 'in', '("done","failed","cancelled")').order('updated_at', { ascending: false }).limit(1).maybeSingle().then(function (r) { if (alive.current) setRun((r && r.data) || null); });
+      var ch = sb.channel('rmap-ap:' + pid)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'research_autopilot_runs', filter: 'project_id=eq.' + pid }, function (p) { if (alive.current && p.new) { setRun(p.new); bumpSoon(); } })
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'research_autopilot_events', filter: 'project_id=eq.' + pid }, function () { if (alive.current) bumpSoon(); })
+        .subscribe();
+      return function () { try { sb.removeChannel(ch); } catch (e) { } };
+    }, [props.projectId]);
+    function approveGate() { if (run) sb.from('research_autopilot_runs').update({ status: 'running', gate: null, updated_at: new Date().toISOString() }).eq('id', run.id); }
     useEffect(function () {
       var pid = props.projectId;
       Promise.all([
@@ -3691,13 +3705,28 @@
       else if (n.t === 'review') k.push(h('div', { className: 'rmap-nm', key: 'm' }, n.m.Studies + ' study'));
       return k;
     }
+    // P1b: overlay the active run's live phase status onto the swimlanes
+    var runPhase = {}, activeKey = null, activeLabel = null, runProg = null, runActive = false;
+    if (run && run.phases) {
+      run.phases.forEach(function (pp) { runPhase[pp.key] = pp.status; });
+      var apx = run.phases[run.phase_index]; activeKey = apx && apx.key; activeLabel = (apx && apx.label) || activeKey;
+      var en = run.phases.filter(function (pp) { return pp.enabled; }).length || 1;
+      var dn = run.phases.filter(function (pp) { return pp.enabled && (pp.status === 'done' || pp.status === 'skipped'); }).length;
+      runProg = dn + '/' + en; runActive = ['running', 'awaiting_approval', 'paused', 'queued'].indexOf(run.status) >= 0;
+    }
+    var LANE_BADGE = { done: '✓', running: '●', gate: '⏸', skipped: '–' };
     var sn = sel ? g.by[sel] : null;
     return h('div', { className: 'rmap-wrap' },
       h('div', { className: 'rmap-stage', ref: stageRef, onMouseDown: onDown, onWheel: onWheel },
         h('div', { className: 'rmap-world', style: { transform: 'translate(' + view.tx + 'px,' + view.ty + 'px) scale(' + view.k + ')' } },
-          RMAP_PHASES.map(function (p, i) { return h('div', { className: 'rmap-lane' + (i % 2 ? ' alt' : ''), key: p[0], style: { left: (i * g.laneW) + 'px', width: g.laneW + 'px', height: g.height + 'px' } }, h('div', { className: 'rmap-lh' }, p[2] + ' ' + p[1])); }),
+          RMAP_PHASES.map(function (p, i) { var stt = runPhase[p[0]]; return h('div', { className: 'rmap-lane' + (i % 2 ? ' alt' : '') + (activeKey === p[0] ? ' active' : ''), key: p[0], style: { left: (i * g.laneW) + 'px', width: g.laneW + 'px', height: g.height + 'px' } }, h('div', { className: 'rmap-lh' }, p[2] + ' ' + p[1], stt ? h('span', { className: 'rmap-lh-st ' + stt }, LANE_BADGE[stt] || '') : null)); }),
           h('svg', { className: 'rmap-edges', width: svgW, height: g.height }, edgeEls),
-          g.N.map(function (n) { return h('div', { key: n.id, className: 'rmap-node t-' + n.t + (sel === n.id ? ' sel' : ''), style: { left: n.x + 'px', top: n.y + 'px' }, onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); setSel(n.id); } }, body(n)); })),
+          g.N.map(function (n) { return h('div', { key: n.id, className: 'rmap-node t-' + n.t + (sel === n.id ? ' sel' : '') + (activeKey && n.ph === RMAP_PHASE_IDX[activeKey] ? ' inphase' : ''), style: { left: n.x + 'px', top: n.y + 'px' }, onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); setSel(n.id); } }, body(n)); })),
+        run && runActive ? h('div', { className: 'rmap-runbar' + (run.status === 'awaiting_approval' ? ' gate' : '') },
+          h('span', { className: 'rmap-rb-dot' }), h('b', null, '⚡ Autopilot'),
+          h('span', { className: 'rmap-rb-st' }, (AP_ST_LABEL[run.status] || run.status) + (activeLabel ? ' · ' + activeLabel : '') + (runProg ? ' · ' + runProg : '')),
+          (run.status === 'awaiting_approval' && run.gate && props.canEdit) ? h('button', { className: 'btn pri', style: { padding: '3px 10px', fontSize: 11.5, marginLeft: 4 }, onClick: approveGate }, '✓ ' + (run.gate.title || 'Jóváhagyás')) : null,
+          h('a', { className: 'btn', style: { padding: '3px 10px', fontSize: 11.5, textDecoration: 'none', marginLeft: 'auto' }, href: 'Autopilot.html?run=' + run.id, target: '_blank', rel: 'noopener' }, 'Dashboard ↗')) : null,
         h('div', { className: 'rmap-zoom' }, h('button', { onClick: function () { zoom(1.18); } }, '+'), h('button', { onClick: function () { zoom(0.85); } }, '−')),
         h('div', { className: 'rmap-hint' }, 'Húzd = pan · görgő = zoom · kattints egy node-ra')),
       sn ? h('div', { className: 'rmap-insp' },
