@@ -3720,7 +3720,9 @@
     var hgS = useState({}), hgt = hgS[0], setHgt = hgS[1];   // measured real card heights (id → px) → the no-overlap rule uses them, not an estimate
     var rnS = useState(null), run = rnS[0], setRun = rnS[1];   // P1b: the project's active Autopilot run (live)
     var mdS = useState(function () { try { return localStorage.getItem('pr-rmap-mode') === 'free' ? 'free' : 'lane'; } catch (e) { return 'lane'; } }), mode = mdS[0], setMode = mdS[1];   // 'lane' (swimlane) | 'free' (freeform)
-    var drag = useRef(null), stageRef = useRef(null), alive = useRef(true), bumpT = useRef(null), driving = useRef(false), mapDriver = useRef(null);
+    var lyS = useState({}), layout = lyS[0], setLayout = lyS[1];   // saved free-drag positions (node_id → {x,y}); overrides the auto-layout + pins the card
+    var dlS = useState(null), dlive = dlS[0], setDlive = dlS[1];   // the node currently being dragged {id,x,y} — follows the cursor 1:1
+    var drag = useRef(null), stageRef = useRef(null), alive = useRef(true), bumpT = useRef(null), driving = useRef(false), mapDriver = useRef(null), ndrag = useRef(null);
     if (!mapDriver.current) mapDriver.current = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : ('00000000-0000-4000-8000-' + String(Date.now()).slice(-12));
     useEffect(function () { return function () { alive.current = false; driving.current = false; if (bumpT.current) clearTimeout(bumpT.current); }; }, []);
     // debounced re-materialize: as the orchestrator writes rows, coalesce rapid events into one reload so nodes grow live
@@ -3755,9 +3757,18 @@
     useEffect(function () {
       var pid = props.projectId;
       sb.from('research_autopilot_runs').select('*').eq('project_id', pid).not('status', 'in', '("done","failed","cancelled")').order('updated_at', { ascending: false }).limit(1).maybeSingle().then(function (r) { if (alive.current) { setRun((r && r.data) || null); ensureDrive(r && r.data); } });
+      // load the saved free-drag layout (node_id → {x,y}); the Map overrides auto-layout with these
+      sb.from('research_map_layout').select('node_id,x,y').eq('project_id', pid).then(function (r) { if (!alive.current) return; var m = {}; ((r && r.data) || []).forEach(function (row) { m[row.node_id] = { x: row.x, y: row.y }; }); setLayout(m); });
       var ch = sb.channel('rmap-ap:' + pid)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'research_autopilot_runs', filter: 'project_id=eq.' + pid }, function (p) { if (alive.current && p.new) { setRun(p.new); ensureDrive(p.new); bumpSoon(); } })
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'research_autopilot_events', filter: 'project_id=eq.' + pid }, function () { if (alive.current) bumpSoon(); })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'research_map_layout', filter: 'project_id=eq.' + pid }, function (p) {
+          if (!alive.current) return;
+          if (p.eventType === 'DELETE') { var oid = p.old && p.old.node_id; if (oid) setLayout(function (L) { var m = Object.assign({}, L); delete m[oid]; return m; }); return; }
+          var nw = p.new; if (!nw || !nw.node_id) return;
+          if (ndrag.current && ndrag.current.id === nw.node_id) return;   // ignore the echo of my own in-flight drag
+          setLayout(function (L) { var m = Object.assign({}, L); m[nw.node_id] = { x: nw.x, y: nw.y }; return m; });
+        })
         .subscribe();
       return function () { try { sb.removeChannel(ch); } catch (e) { } };
     }, [props.projectId]);
@@ -3790,22 +3801,26 @@
       if (changed) setHgt(m);
     }, [data, bump, mode, litOpen]);   // only re-measure when the node set/content changes — not on pan/zoom/select
 
-    // BUILT-IN RULE: no two cards may overlap. Iteratively push apart any overlapping cards along the least-overlap
-    // axis, using each card's estimated height (n._h). In lane mode same-lane cards share x, so only y is nudged and
-    // the lanes stay intact; in freeform both axes move. Runs after every (re)materialize so generated cards never
-    // land on top of existing ones.
-    function separateNodes(N) {
+    // BUILT-IN RULE (new-card placement only): a freshly materialized card must never spawn on top of an existing one.
+    // Iteratively push apart overlapping cards along the least-overlap axis, using each card's measured height (n._h).
+    // `pinned` = cards the user has explicitly placed (saved layout) or is currently dragging — these are FIXED
+    // obstacles: a movable card is pushed fully clear of a pinned one, two pinned cards are left as-is (the user is
+    // allowed to overlap them on purpose), and two movable cards split the push. So the user's own arrangement is
+    // never disturbed; only never-placed cards auto-tuck into free space.
+    function separateNodes(N, pinned) {
       var W = 204, PX = 16, PY = 14;
       for (var it = 0; it < 60; it++) {
         var moved = false;
         for (var i = 0; i < N.length; i++) for (var j = i + 1; j < N.length; j++) {
-          var a = N[i], b = N[j], ha = a._h || 78, hb = b._h || 78;
+          var a = N[i], b = N[j], pa = !!(pinned && pinned[a.id]), pb = !!(pinned && pinned[b.id]);
+          if (pa && pb) continue;   // both user-placed → leave any overlap alone (deliberate)
+          var ha = a._h || 78, hb = b._h || 78;
           var dx = (b.x + W / 2) - (a.x + W / 2), dy = (b.y + hb / 2) - (a.y + ha / 2);
           var ox = (W + PX) - Math.abs(dx), oy = (ha / 2 + hb / 2 + PY) - Math.abs(dy);
           if (ox > 0.5 && oy > 0.5) {
             moved = true;
-            if (ox <= oy) { var s = (dx >= 0 ? 1 : -1) * ox / 2; a.x -= s; b.x += s; }
-            else { var t = (dy >= 0 ? 1 : -1) * oy / 2; a.y -= t; b.y += t; }
+            if (ox <= oy) { var sx = (dx >= 0 ? 1 : -1) * ox; if (pa) b.x += sx; else if (pb) a.x -= sx; else { a.x -= sx / 2; b.x += sx / 2; } }
+            else { var sy = (dy >= 0 ? 1 : -1) * oy; if (pa) b.y += sy; else if (pb) a.y -= sy; else { a.y -= sy / 2; b.y += sy / 2; } }
           }
         }
         if (!moved) break;
@@ -3850,7 +3865,12 @@
       } else {
         N.forEach(function (n) { var o = (cnt[n.ph] = (cnt[n.ph] || 0)); n.x = n.ph * LANEW + 22; n.y = 66 + o * ROWH; cnt[n.ph] = o + 1; });
       }
-      separateNodes(N);   // ← the built-in no-overlap rule
+      // free-drag: a saved position overrides the auto-layout and PINS the card; only never-placed cards separate
+      var pinned = {};
+      N.forEach(function (n) { var s = layout[n.id]; if (s) { n.x = s.x; n.y = s.y; pinned[n.id] = true; } if (ndrag.current && ndrag.current.id === n.id) pinned[n.id] = true; });
+      separateNodes(N, pinned);   // ← the no-overlap rule now only tucks in un-placed cards, never the user's own layout
+      // the card under the cursor follows the pointer 1:1 (edges recompute from this via `by`, so they track the drag)
+      if (dlive && dlive.id) { for (var q = 0; q < N.length; q++) { if (N[q].id === dlive.id) { N[q].x = dlive.x; N[q].y = dlive.y; break; } } }
       var maxY = 400; N.forEach(function (n) { maxY = Math.max(maxY, n.y + (n._h || 78) + 44); });
       var by = {}; N.forEach(function (n) { by[n.id] = n; });
       return { N: N, E: E, laneW: LANEW, height: maxY, by: by, free: mode === 'free' };
@@ -3861,6 +3881,42 @@
     function onDown(e) { if (e.target.closest && e.target.closest('.rmap-node')) return; drag.current = { sx: e.clientX, sy: e.clientY, tx: view.tx, ty: view.ty }; window.addEventListener('mousemove', onMove); window.addEventListener('mouseup', onUp); }
     function onWheel(e) { e.preventDefault(); var st = stageRef.current; if (!st) return; var r = st.getBoundingClientRect(); var mx = e.clientX - r.left, my = e.clientY - r.top; setView(function (v) { var nk = Math.min(2.2, Math.max(.3, v.k * (e.deltaY < 0 ? 1.12 : 0.89))); return { tx: mx - (mx - v.tx) * (nk / v.k), ty: my - (my - v.ty) * (nk / v.k), k: nk }; }); }
     function zoom(f) { setView(function (v) { var nk = Math.min(2.2, Math.max(.3, v.k * f)); return { tx: v.tx, ty: v.ty, k: nk }; }); }
+
+    // ---- free-drag: move a card anywhere and persist it (research_map_layout). A short press without motion = a click
+    // (select / toggle). Only left-button + editors move cards; viewers still click to select. ----
+    function persistPos(id, x, y) {
+      if (!props.canEdit) return;
+      sb.from('research_map_layout').upsert({ project_id: props.projectId, node_id: id, x: x, y: y, updated_at: new Date().toISOString() }, { onConflict: 'project_id,node_id' }).then(function (r) { if (r && r.error && alive.current) window.PRUI.toast('Pozíció mentése sikertelen: ' + r.error.message, { kind: 'error' }); });
+    }
+    function resetLayout() {
+      if (!props.canEdit) return;
+      setLayout({}); setDlive(null);
+      sb.from('research_map_layout').delete().eq('project_id', props.projectId).then(function (r) { if (r && r.error && alive.current) window.PRUI.toast('Elrendezés visszaállítása: ' + r.error.message, { kind: 'error' }); });
+    }
+    function startNodeDrag(e, n) {
+      if (e.button !== 0) return;   // left button only — right-click opens the generate menu
+      var startX = e.clientX, startY = e.clientY, k = view.k || 1, ox = n.x, oy = n.y, can = props.canEdit;
+      ndrag.current = { id: n.id, moved: false, lx: ox, ly: oy };   // lx/ly = last visible position → persisted on any terminating event
+      // finish() is the SINGLE termination path (guarded against double-call). It runs on mouseup, on a re-entry with
+      // no button held (release happened off-window → mouseup was never delivered), and on window blur (alt-tab). This
+      // prevents a leaked listener / "sticky" card that follows the cursor with no button pressed and later persists a
+      // wrong position.
+      function finish() {
+        var d = ndrag.current; if (!d) return; ndrag.current = null;
+        window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); window.removeEventListener('blur', finish);
+        setDlive(null);
+        if (d.moved) { setLayout(function (L) { var m = Object.assign({}, L); m[n.id] = { x: d.lx, y: d.ly }; return m; }); persistPos(n.id, d.lx, d.ly); }
+        else { setSel(n.id); if (n.id === 'lit') setLitOpen(function (v) { return !v; }); }
+      }
+      function mv(ev) {
+        if (!ndrag.current) return;
+        if (ev.buttons === 0) { finish(); return; }   // button already released (off-window) → recover on re-entry
+        var mdx = ev.clientX - startX, mdy = ev.clientY - startY;
+        if (can && (Math.abs(mdx) > 3 || Math.abs(mdy) > 3)) { ndrag.current.moved = true; ndrag.current.lx = Math.round(ox + mdx / k); ndrag.current.ly = Math.round(oy + mdy / k); setDlive({ id: n.id, x: ndrag.current.lx, y: ndrag.current.ly }); }
+      }
+      function up() { finish(); }
+      window.addEventListener('mousemove', mv); window.addEventListener('mouseup', up); window.addEventListener('blur', finish);
+    }
 
     // ---- P2: edit any node's real metadata via a dialog (the same columns the phase panels/modals set) ----
     function editSpec(n) {
@@ -3967,7 +4023,7 @@
         h('div', { className: 'rmap-world', style: { transform: 'translate(' + view.tx + 'px,' + view.ty + 'px) scale(' + view.k + ')' } },
           g.free ? null : RMAP_PHASES.map(function (p, i) { var stt = runPhase[p[0]]; return h('div', { className: 'rmap-lane' + (i % 2 ? ' alt' : '') + (activeKey === p[0] ? ' active' : ''), key: p[0], style: { left: (i * g.laneW) + 'px', width: g.laneW + 'px', height: g.height + 'px' } }, h('div', { className: 'rmap-lh' }, p[2] + ' ' + p[1], stt ? h('span', { className: 'rmap-lh-st ' + stt }, LANE_BADGE[stt] || '') : null)); }),
           h('svg', { className: 'rmap-edges', width: svgW, height: g.height }, edgeEls),
-          g.N.map(function (n) { return h('div', { key: n.id, 'data-nid': n.id, className: 'rmap-node t-' + n.t + (sel === n.id ? ' sel' : '') + (activeKey && n.ph === RMAP_PHASE_IDX[activeKey] ? ' inphase' : ''), style: { left: n.x + 'px', top: n.y + 'px' }, onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); setSel(n.id); if (n.id === 'lit') setLitOpen(function (v) { return !v; }); }, onContextMenu: function (e) { e.preventDefault(); e.stopPropagation(); if (props.canEdit) setMenu({ node: n, x: e.clientX, y: e.clientY }); } }, body(n)); })),
+          g.N.map(function (n) { return h('div', { key: n.id, 'data-nid': n.id, className: 'rmap-node t-' + n.t + (sel === n.id ? ' sel' : '') + (activeKey && n.ph === RMAP_PHASE_IDX[activeKey] ? ' inphase' : '') + (props.canEdit ? ' editable' : '') + (dlive && dlive.id === n.id ? ' dragging' : ''), style: { left: n.x + 'px', top: n.y + 'px' }, onMouseDown: function (e) { e.stopPropagation(); startNodeDrag(e, n); }, onContextMenu: function (e) { e.preventDefault(); e.stopPropagation(); if (props.canEdit) setMenu({ node: n, x: e.clientX, y: e.clientY }); } }, body(n)); })),
         run && runActive ? h('div', { className: 'rmap-runbar' + (run.status === 'awaiting_approval' ? ' gate' : '') },
           h('span', { className: 'rmap-rb-dot' }), h('b', null, '⚡ Autopilot'),
           h('span', { className: 'rmap-rb-st' }, (AP_ST_LABEL[run.status] || run.status) + (activeLabel ? ' · ' + activeLabel : '') + (runProg ? ' · ' + runProg : '')),
@@ -3975,8 +4031,9 @@
           h('a', { className: 'btn', style: { padding: '3px 10px', fontSize: 11.5, textDecoration: 'none', marginLeft: 'auto' }, href: 'Autopilot.html?run=' + run.id, target: '_blank', rel: 'noopener' }, 'Dashboard ↗')) : null,
         h('div', { className: 'rmap-zoom' },
           h('button', { title: mode === 'lane' ? 'Szabad elrendezés (B)' : 'Sávos elrendezés', onClick: function () { var nm = mode === 'lane' ? 'free' : 'lane'; setMode(nm); try { localStorage.setItem('pr-rmap-mode', nm); } catch (e) { } } }, mode === 'lane' ? '⊙' : '☰'),
+          (props.canEdit && Object.keys(layout).length) ? h('button', { title: 'Automatikus elrendezés (a saját pozíciók törlése)', onClick: resetLayout }, '↺') : null,
           h('button', { onClick: function () { zoom(1.18); } }, '+'), h('button', { onClick: function () { zoom(0.85); } }, '−')),
-        h('div', { className: 'rmap-hint' }, 'Húzd = pan · görgő = zoom · ' + (mode === 'lane' ? 'sávos' : 'szabad') + ' nézet · kattints egy node-ra')),
+        h('div', { className: 'rmap-hint' }, (props.canEdit ? 'Húzd a kártyát = áthelyezés · ' : '') + 'húzd a hátteret = pan · görgő = zoom · ' + (mode === 'lane' ? 'sávos' : 'szabad') + ' nézet')),
       sn ? h('div', { className: 'rmap-insp' },
         h('div', { className: 'rmap-insp-h' }, h('span', { className: 'rmap-ni' }, RMAP_TYPE[sn.t].ic), h('div', { style: { minWidth: 0 } }, h('b', null, sn.title), h('div', { className: 'rmap-insp-ty' }, RMAP_TYPE[sn.t].lab)), h('button', { className: 'rmap-insp-x', onClick: function () { setSel(null); } }, '×')),
         h('div', { className: 'rmap-insp-b' },
