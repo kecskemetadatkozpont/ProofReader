@@ -3962,6 +3962,14 @@
       if (n.t === 'venue' || n.t === 'section') return [['writing', '✍️ Draft-vázlat'], ['ideas', '✦ Ötletek']];
       return [['ideas', '✦ Ötletek generálása'], ['protocol', '🧪 Protokoll']];
     }
+    // F3: REGENERATE this exact node (in place, keeps its position). Only where an existing edge cleanly supports it:
+    // a protocol step (refine_step) and a generated review file (generate_review overwrites the same file).
+    function regenActions(n) {
+      if (!n) return [];
+      if (n.t === 'step' && n.ref && n.ref.id) return [['regen_step', '🔄 Lépés újragenerálása']];
+      if (n.t === 'review' && n.ref && /-[0-9a-f]{8}-review\./.test(String(n.ref.path || ''))) return [['regen_review', '🔄 Áttekintés újragenerálása']];
+      return [];
+    }
     function runGen(n, act) {
       if (genBusy) return;   // re-entrancy lock: nodes stay clickable during the async call, so guard against a double-fire (double study insert)
       var CORE = window.PRAutopilotCore; if (!CORE || !CORE.callEdge) { window.PRUI.toast('A generátor nem elérhető (autopilot-core).', { kind: 'error' }); return; }
@@ -3987,6 +3995,43 @@
         var md = '# ' + (o.title || proj.title) + '\n\n' + (o.abstract || '') + '\n\n## Szekciók\n' + o.sections.map(function (s) { return '- ' + (s.heading || s.key); }).join('\n');
         CORE.saveFile(pid, 'writing/outline.md', md, 'ai').then(function (sf) { if (sf && sf.error) { fail(sf.error.message || 'mentés'); return; } done('Vázlat kész (' + o.sections.length + ' szekció)'); }, function () { fail('hálózat'); });
       }, function () { fail('hálózat'); });
+      // F3 — REGENERATE this node in place (same DB row → same node id → the card keeps its position). Existing edges only.
+      else if (act === 'regen_step') {
+        var stepId = n && n.ref && n.ref.id; if (!stepId) { fail('nincs lépés-azonosító'); return; }
+        CORE.callEdge('research-protocol', { action: 'refine_step', project_id: pid, step_id: stepId }).then(function (d) {
+          if (!d || d.error) { fail((d && d.error) || 'refine'); return; }
+          var sp = d.step; if (!sp) { fail('üres válasz'); return; }
+          sb.from('research_protocol_steps').select('spec').eq('id', stepId).maybeSingle().then(function (cr) {
+            var spec = Object.assign({}, (cr && cr.data && cr.data.spec) || {});   // preserve attachments etc. the refiner doesn't return
+            // CONSERVATIVE merge: F3 applies with no user-review gate, so only overwrite a field the refiner actually
+            // POPULATED — an empty array [] (truthy!) or blank string from the model must NOT blank existing content.
+            var neStr = function (v) { return v != null && String(v).trim() !== ''; };
+            var neArr = function (v) { return Array.isArray(v) && v.length > 0; };
+            if (neStr(sp.instruction)) spec.instruction = sp.instruction;
+            if (neArr(sp.inputs)) spec.inputs = sp.inputs; if (neArr(sp.expected_outputs)) spec.expected_outputs = sp.expected_outputs;
+            if (neArr(sp.acceptance)) spec.acceptance = sp.acceptance; if (neStr(sp.command_hint)) spec.command_hint = sp.command_hint;
+            if (sp.est_minutes != null && sp.est_minutes !== '') spec.est_minutes = sp.est_minutes;
+            var patch = { spec: spec }; if (neStr(sp.title)) patch.title = sp.title; if (neStr(sp.kind)) patch.kind = sp.kind; if (sp.needs_approval != null) patch.needs_approval = !!sp.needs_approval;
+            sb.from('research_protocol_steps').update(patch).eq('id', stepId).then(function (ur) { if (ur && ur.error) { fail(ur.error.message); return; } done('Lépés újragenerálva'); }, function () { fail('mentés'); });
+          }, function () { fail('spec olvasás'); });
+        }, function () { fail('hálózat'); });
+      }
+      else if (act === 'regen_review') {
+        var rpath = (n && n.ref && n.ref.path) || '';
+        var mm = rpath.match(/-([0-9a-f]{8})-review\./);   // the review filename carries the study's 8-hex id (generate_review) → map back
+        var sid8 = mm && mm[1];
+        var study = sid8 && ((data && data.studies) || []).filter(function (s) { return String(s.id).replace(/-/g, '').slice(0, 8) === sid8; })[0];
+        if (!study) { fail('nem található a study ehhez az áttekintéshez'); return; }
+        CORE.callEdge('research-study', { action: 'generate_review', study_id: study.id }).then(function (d) {
+          if (!d || d.error) { fail((d && d.error) || 'hálózat'); return; }
+          var np = d.file_path;
+          // generate_review derives the path from the (mutable) study title → if the study was RENAMED since the last
+          // review, the edge writes a NEW path instead of overwriting. Delete the stale old file so no duplicate/orphan
+          // review card appears. Unchanged title → np === rpath → overwrite → same node id → saved position preserved.
+          if (np && rpath && np !== rpath) { sb.from('research_files').delete().eq('project_id', pid).eq('path', rpath).then(function () { done('Áttekintés újragenerálva'); }, function () { done('Áttekintés újragenerálva'); }); }
+          else done('Áttekintés újragenerálva');
+        }, function () { fail('hálózat'); });
+      }
     }
 
     if (!data) return h('div', { className: 'rmap-wrap' }, h('div', { className: 'empty' }, 'Térkép betöltése…'));
@@ -4040,6 +4085,7 @@
           h('div', { className: 'rmap-kv' }, Object.keys(sn.m).map(function (kk) { return [h('span', { className: 'k', key: 'k' + kk }, kk), h('span', { className: 'v', key: 'v' + kk }, sn.m[kk])]; })),
           h('div', { className: 'rmap-insp-acts' },
             (props.canEdit && editSpec(sn)) ? h('button', { className: 'btn pri', style: { fontSize: 12 }, onClick: function () { openEdit(sn); } }, '✎ Metaadat szerkesztése') : null,
+            (props.canEdit && regenActions(sn).length) ? h('button', { className: 'btn', style: { fontSize: 12 }, disabled: genBusy, onClick: function () { runGen(sn, regenActions(sn)[0][0]); } }, regenActions(sn)[0][1]) : null,
             h('button', { className: 'btn', style: { fontSize: 12 }, onClick: function () { if (props.onGoTab) props.onGoTab(RMAP_TYPE[sn.t].tab); } }, 'Megnyitás a ' + RMAP_TYPE[sn.t].lab + ' fülön →'),
             (sn.ref && sn.ref.url) ? h('a', { className: 'btn', style: { fontSize: 12, textDecoration: 'none' }, href: sn.ref.url, target: '_blank', rel: 'noopener' }, 'Forrás ↗') : null),
           h('p', { className: 'rmap-insp-note' }, 'A metaadat itt közvetlenül szerkeszthető — ugyanazok az adatok, mint a fázis-paneleken. A canvason maradsz, modal helyett.'))) : null,
@@ -4059,7 +4105,9 @@
       menu ? h('div', { className: 'rmap-menu-scrim', onClick: function () { setMenu(null); }, onContextMenu: function (e) { e.preventDefault(); setMenu(null); } },
         h('div', { className: 'rmap-menu', style: { left: Math.min(menu.x, (window.innerWidth || 1200) - 230) + 'px', top: Math.min(menu.y, (window.innerHeight || 800) - 140) + 'px' }, onClick: function (e) { e.stopPropagation(); } },
           h('div', { className: 'rmap-menu-h' }, '✦ Generálás innen' + (RMAP_TYPE[menu.node.t] ? ' · ' + RMAP_TYPE[menu.node.t].lab : '')),
-          genActions(menu.node).map(function (a) { return h('button', { key: a[0], className: 'rmap-menu-b', onClick: function () { runGen(menu.node, a[0]); } }, a[1]); }))) : null);
+          genActions(menu.node).map(function (a) { return h('button', { key: a[0], className: 'rmap-menu-b', onClick: function () { runGen(menu.node, a[0]); } }, a[1]); }),
+          regenActions(menu.node).length ? h('div', { className: 'rmap-menu-sep' }) : null,
+          regenActions(menu.node).map(function (a) { return h('button', { key: a[0], className: 'rmap-menu-b regen', onClick: function () { runGen(menu.node, a[0]); } }, a[1]); }))) : null);
   }
 
   function ProjectDetail(props) {
