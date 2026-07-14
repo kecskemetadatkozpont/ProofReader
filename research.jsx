@@ -3780,6 +3780,27 @@
       }, function () { if (alive.current) setData({ ideas: [], studies: [], topSrc: [], srcTotal: 0, inclTotal: 0, protocol: null, journals: [], wfiles: [], steps: [] }); });
     }, [props.projectId, bump]);
 
+    // BUILT-IN RULE: no two cards may overlap. Iteratively push apart any overlapping cards along the least-overlap
+    // axis, using each card's estimated height (n._h). In lane mode same-lane cards share x, so only y is nudged and
+    // the lanes stay intact; in freeform both axes move. Runs after every (re)materialize so generated cards never
+    // land on top of existing ones.
+    function separateNodes(N) {
+      var W = 204, PX = 16, PY = 14;
+      for (var it = 0; it < 60; it++) {
+        var moved = false;
+        for (var i = 0; i < N.length; i++) for (var j = i + 1; j < N.length; j++) {
+          var a = N[i], b = N[j], ha = a._h || 78, hb = b._h || 78;
+          var dx = (b.x + W / 2) - (a.x + W / 2), dy = (b.y + hb / 2) - (a.y + ha / 2);
+          var ox = (W + PX) - Math.abs(dx), oy = (ha / 2 + hb / 2 + PY) - Math.abs(dy);
+          if (ox > 0.5 && oy > 0.5) {
+            moved = true;
+            if (ox <= oy) { var s = (dx >= 0 ? 1 : -1) * ox / 2; a.x -= s; b.x += s; }
+            else { var t = (dy >= 0 ? 1 : -1) * oy / 2; a.y -= t; b.y += t; }
+          }
+        }
+        if (!moved) break;
+      }
+    }
     function graph() {
       var d = data, N = [], E = [];
       (d.ideas || []).forEach(function (x) { N.push({ id: 'i' + x.id, t: 'idea', ph: 0, title: x.question || 'Ötlet', m: { Novelty: (x.novelty != null ? x.novelty + ' / 100' : '—'), Hipotézis: x.hypothesis || '—' }, ref: x }); });
@@ -3810,18 +3831,19 @@
           if (lastStep) E.push([lastStep, 'w' + f.id]);
         }
       });
-      var LANEW = 252, ROWH = 104, cnt = {};
-      if (mode === 'free') {   // (B) freeform: organic per-phase clusters instead of lanes
-        var CEN = [{ x: 40, y: 60 }, { x: 470, y: 240 }, { x: 220, y: 560 }, { x: 860, y: 110 }, { x: 1140, y: 470 }, { x: 780, y: 650 }];
-        N.forEach(function (n) { var o = (cnt[n.ph] = (cnt[n.ph] || 0)); var c = CEN[n.ph] || { x: n.ph * 260, y: 80 }; n.x = c.x + (o % 2) * 172; n.y = c.y + Math.floor(o / 2) * 112 + ((o % 2) ? 26 : 0); cnt[n.ph] = o + 1; });
-        var mY = 640; N.forEach(function (n) { mY = Math.max(mY, n.y + 120); });
-        var byF = {}; N.forEach(function (n) { byF[n.id] = n; });
-        return { N: N, E: E, laneW: LANEW, height: mY, by: byF, free: true };
+      // estimate each card's rendered height (title wrap + metadata line) so the collision pass can space them
+      N.forEach(function (n) { n._h = 66 + Math.min(3, Math.floor(String(n.title || '').length / 26)) * 16; });
+      var LANEW = 252, ROWH = 108, cnt = {};
+      if (mode === 'free') {   // (B) freeform: organic per-phase clusters (columns ≥ card width so they never start overlapped)
+        var CEN = [{ x: 40, y: 60 }, { x: 520, y: 250 }, { x: 250, y: 610 }, { x: 950, y: 110 }, { x: 1260, y: 500 }, { x: 850, y: 700 }];
+        N.forEach(function (n) { var o = (cnt[n.ph] = (cnt[n.ph] || 0)); var c = CEN[n.ph] || { x: n.ph * 290, y: 80 }; n.x = c.x + (o % 2) * 234; n.y = c.y + Math.floor(o / 2) * 132; cnt[n.ph] = o + 1; });
+      } else {
+        N.forEach(function (n) { var o = (cnt[n.ph] = (cnt[n.ph] || 0)); n.x = n.ph * LANEW + 22; n.y = 66 + o * ROWH; cnt[n.ph] = o + 1; });
       }
-      N.forEach(function (n) { var o = (cnt[n.ph] = (cnt[n.ph] || 0)); n.x = n.ph * LANEW + 22; n.y = 66 + o * ROWH; cnt[n.ph] = o + 1; });
-      var maxRows = Math.max.apply(null, [1].concat(Object.keys(cnt).map(function (k) { return cnt[k]; })));
+      separateNodes(N);   // ← the built-in no-overlap rule
+      var maxY = 400; N.forEach(function (n) { maxY = Math.max(maxY, n.y + (n._h || 78) + 44); });
       var by = {}; N.forEach(function (n) { by[n.id] = n; });
-      return { N: N, E: E, laneW: LANEW, height: 66 + maxRows * ROWH + 40, by: by };
+      return { N: N, E: E, laneW: LANEW, height: maxY, by: by, free: mode === 'free' };
     }
 
     function onMove(e) { var dd = drag.current; if (!dd) return; setView(function (v) { return { tx: dd.tx + (e.clientX - dd.sx), ty: dd.ty + (e.clientY - dd.sy), k: v.k }; }); }
