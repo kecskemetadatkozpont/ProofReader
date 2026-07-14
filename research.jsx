@@ -3696,6 +3696,17 @@
   }
 
   // ---------- Project card ----------
+  // (B) Autopilot status badge on a project card — links to the run's dashboard so a closed run is always findable.
+  var AP_ST_LABEL = { running: 'fut', paused: 'szünet', awaiting_approval: 'jóváhagyásra vár', stalled: 'megszakadt', done: 'kész', failed: 'hiba', cancelled: 'leállítva', queued: 'sorban' };
+  function apRunBadge(run) {
+    if (!run) return null;
+    var eff = run.status;
+    if (eff === 'running') { var u = run.updated_at ? new Date(run.updated_at).getTime() : 0; if (u && Date.now() - u > 60000) eff = 'stalled'; }
+    var ph = run.phases || [], enabled = ph.filter(function (x) { return x.enabled; }).length || 1, done = ph.filter(function (x) { return x.enabled && (x.status === 'done' || x.status === 'skipped'); }).length;
+    var active = (eff === 'running' || eff === 'awaiting_approval' || eff === 'stalled');
+    return h('a', { className: 'chip ' + (eff === 'failed' ? 'c-warn' : active ? 'c-acc' : 'c-grey'), href: 'Autopilot.html?run=' + encodeURIComponent(run.id), onClick: function (e) { e.stopPropagation(); }, style: { textDecoration: 'none' }, title: 'Autopilot dashboard megnyitása' }, '⚡ Autopilot · ' + (AP_ST_LABEL[eff] || eff) + ' · ' + done + '/' + enabled);
+  }
+
   function ProjectCard(props) {
     var p = props.project;
     var openTasks = p._openTasks;
@@ -3707,6 +3718,7 @@
       h('div', { className: 'ch' }, h('div', null, h('b', null, p.title), h('span', null, p.field || '—')), badge),
       p.keywords && p.keywords.length ? h('div', { className: 'tags' }, p.keywords.slice(0, 4).map(function (k, i) { return h('span', { className: 'tag', key: i }, k); })) : null,
       h('div', { className: 'meter' }, h('i', { style: { width: Math.round((p.stage / (STAGES.length - 1)) * 100) + '%' } })),
+      (nd() && props.apRun) ? h('div', { style: { marginTop: 8 } }, apRunBadge(props.apRun)) : null,
       h('div', { className: 'kv' }, h('span', null, 'Stage: ' + STAGES[p.stage || 0]), h('span', { className: 'chip ' + (p.status === 'active' ? 'c-ok' : 'c-grey') }, STATUS_LABEL[p.status] || p.status))
     );
   }
@@ -4045,6 +4057,16 @@
     var supProjects = props.projects.filter(function (p) { return p.owner_id !== meId; });
     var isSup = studentList.length > 0 || supProjects.length > 0;
     var vw = useState(props.initStudent ? 'supervised' : 'mine'), view = vw[0], setView = vw[1];
+    // (B) load my Autopilot runs → project_id → most-recent run, for the ⚡ status badge on project cards (New design only).
+    // Fails soft if migration-62 isn't applied yet (query errors → empty map → no badges).
+    var arS = useState({}), apRuns = arS[0], setApRuns = arS[1];
+    useEffect(function () {
+      if (!nd()) return; var alive = true;
+      sb.from('research_autopilot_runs').select('id,project_id,status,phases,updated_at').eq('owner_id', meId).neq('status', 'cancelled').order('updated_at', { ascending: false }).then(function (r) {
+        if (!alive) return; var m = {}; ((r && r.data) || []).forEach(function (x) { if (!m[x.project_id]) m[x.project_id] = x; }); setApRuns(m);
+      }, function () { });
+      return function () { alive = false; };
+    }, [meId, props.projects.length]);
     if (!isSup && view === 'supervised') view = 'mine';
     var roleLabel = me.role === 'admin' ? 'Administrator' : (isSup ? 'Supervisor' : 'Researcher');
     var sub = sel ? STAGES[sel.stage || 0] + ' stage' : (view === 'supervised' ? (studentList.length + ' student(s)') : (mineProjects.length + ' project' + (mineProjects.length === 1 ? '' : 's')));
@@ -4064,7 +4086,7 @@
     } else if (!mineProjects.length) {
       body = h('div', null, seg, h('div', { className: 'soon' }, h('b', null, 'No research projects yet. '), 'Create one to start tracking a study from idea to submission.', h('div', { style: { marginTop: 14 } }, h('button', { className: 'btn pri', onClick: function () { setAdding(true); } }, '+ New project'))));
     } else {
-      body = h('div', null, seg, h('div', { className: 'grid' }, mineProjects.map(function (p) { return h(ProjectCard, { key: p.id, project: p, meId: meId, studentById: studentById, onOpen: props.openProject }); })));
+      body = h('div', null, seg, h('div', { className: 'grid' }, mineProjects.map(function (p) { return h(ProjectCard, { key: p.id, project: p, meId: meId, studentById: studentById, onOpen: props.openProject, apRun: apRuns[p.id] }); })));
     }
 
     return h('div', { className: 'app' + (nd() && sel ? ' rv-hasproj' : '') },
