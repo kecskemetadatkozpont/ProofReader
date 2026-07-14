@@ -623,8 +623,10 @@
     html.newdesign .idb-empty, html.newdesign .idb-bempty { font-size: 12px; color: var(--faint); padding: 6px 0; }
     html.newdesign .idb-basis { background: linear-gradient(180deg, var(--accent-tint), var(--surface)); border: 1.5px solid var(--accent); }
     html.newdesign .idb-basis .idb-h { color: var(--accent); }
-    html.newdesign .idb-bitem { display: flex; gap: 8px; align-items: flex-start; padding: 8px 0; border-top: 1px solid color-mix(in srgb, var(--accent) 18%, transparent); }
-    html.newdesign .idb-bitem:first-of-type { border-top: 0; }
+    html.newdesign .idb-bwrap { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
+    html.newdesign .idb-bitem { display: flex; gap: 9px; align-items: flex-start; padding: 9px 11px; border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line)); border-radius: 10px; background: var(--surface); box-shadow: 0 1px 2px rgba(20, 26, 40, .05); }
+    html.newdesign .idb-bnum { flex: none; width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; background: var(--accent); color: #fff; font-size: 11px; font-weight: 800; margin-top: 1px; }
+    html.newdesign.dark .idb-bnum { background: #4f46e5; }
     html.newdesign .idb-bq { font-size: 12.5px; font-weight: 700; line-height: 1.35; color: var(--ink); white-space: pre-wrap; word-break: break-word; }
     html.newdesign .idb-bh { font-size: 11.5px; color: var(--muted); margin-top: 3px; line-height: 1.4; }
     html.newdesign .idb-bitem .del { flex: none; color: var(--danger); background: none; border: 0; cursor: pointer; font-size: 12px; padding: 2px 4px; }
@@ -885,7 +887,7 @@
   <script type="text/babel" src="canvas.jsx?v=1783137934"></script>
   <script type="text/babel" src="notes.jsx?v=1783137934"></script>
   <script src="autopilot-core.js?v=1784160000"></script>
-  <script type="text/babel" src="research.jsx?v=1784170000"></script>
+  <script type="text/babel" src="research.jsx?v=1784180000"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>

@@ -662,27 +662,29 @@
         else setSelPop(null);
       }, 1);
     }
-    function load() { sb.from('research_files').select('id,path,content,storage_path,mime,size,source,updated_at').eq('project_id', props.projectId).order('updated_at', { ascending: false }).then(function (r) { setFiles((r && r.data) || []); }); }
+    function load() { sb.from('research_files').select('id,path,content,storage_path,mime,size,source,updated_at').eq('project_id', props.projectId).order('updated_at', { ascending: false }).then(function (r) { var data = (r && r.data) || []; setFiles(data); setPreview(function (p) { return p ? (data.filter(function (x) { return x.id === p.id; })[0] || null) : null; }); }); }
     useEffect(load, [props.projectId, props.version]);
     function newFile() {
       var name = (window.prompt('New file name:', 'note.md') || '').trim(); if (!name) return;
-      sb.from('research_files').upsert({ project_id: props.projectId, path: name, content: '', mime: 'text/markdown', source: 'manual', created_by: props.authorId, updated_by: props.authorId, updated_at: new Date().toISOString() }, { onConflict: 'project_id,path' }).then(function (r) { if (r && r.error) { window.PRUI.toast(r.error.message, { kind: 'error' }); return; } load(); });
+      sb.from('research_files').upsert({ project_id: props.projectId, path: name, content: '', storage_path: null, mime: 'text/markdown', source: 'manual', created_by: props.authorId, updated_by: props.authorId, updated_at: new Date().toISOString() }, { onConflict: 'project_id,path' }).then(function (r) { if (r && r.error) { window.PRUI.toast(r.error.message, { kind: 'error' }); return; } load(); });
     }
     function onUpload(e) {
       var f = e.target.files && e.target.files[0]; if (!f) return;
       if (upRef.current) upRef.current.value = '';
       if (window.PROffice && window.PROffice.isOffice(f.name)) { importOffice(f); return; }   // Word/Excel/PowerPoint → editable text/markdown
+      var taken = (files || []).map(function (x) { return x.path; }), path = f.name;
+      if (taken.indexOf(path) >= 0) { var d = path.lastIndexOf('.'), stem = d > 0 ? path.slice(0, d) : path, ext = d > 0 ? path.slice(d) : '', i = 2; while (taken.indexOf(stem + ' (' + i + ')' + ext) >= 0) i++; path = stem + ' (' + i + ')' + ext; }
       var sp = props.projectId + '/files/' + Date.now() + '_' + f.name.replace(/[^A-Za-z0-9._-]/g, '_');
       sb.storage.from('research-data').upload(sp, f).then(function (res) {
         if (res && res.error) { window.PRUI.toast(res.error.message, { kind: 'error' }); return; }
-        sb.from('research_files').upsert({ project_id: props.projectId, path: f.name, storage_path: sp, mime: f.type || 'application/octet-stream', size: f.size, source: 'upload', created_by: props.authorId, updated_by: props.authorId, updated_at: new Date().toISOString() }, { onConflict: 'project_id,path' }).then(function () { load(); if (props.onAddIdea) setIntake({ path: f.name, content: '' }); });
+        sb.from('research_files').upsert({ project_id: props.projectId, path: path, storage_path: sp, content: null, mime: f.type || 'application/octet-stream', size: f.size, source: 'upload', created_by: props.authorId, updated_by: props.authorId, updated_at: new Date().toISOString() }, { onConflict: 'project_id,path' }).then(function (rr) { if (rr && rr.error) { try { sb.storage.from('research-data').remove([sp]); } catch (e) { } window.PRUI.toast(rr.error.message, { kind: 'error' }); return; } load(); if (props.onAddIdea) setIntake({ path: path, content: '' }); });
       });
     }
     // Office (Word/Excel/PowerPoint) → editable markdown/CSV stored as a text file (shared PROffice util)
     function importOffice(f) {
       window.PROffice.extract(f).then(function (r) {
         var name = f.name.replace(/\.(docx|xlsx|xlsm|xls|pptx)$/i, '') + '.' + (r.ext || 'md');
-        sb.from('research_files').upsert({ project_id: props.projectId, path: name, content: r.text || '', mime: r.ext === 'csv' ? 'text/csv' : 'text/markdown', source: 'upload', created_by: props.authorId, updated_by: props.authorId, updated_at: new Date().toISOString() }, { onConflict: 'project_id,path' }).then(function (rr) { if (rr && rr.error) { window.PRUI.toast(rr.error.message, { kind: 'error' }); return; } load(); if (props.onAddIdea) setIntake({ path: name, content: r.text || '' }); });
+        sb.from('research_files').upsert({ project_id: props.projectId, path: name, content: r.text || '', storage_path: null, mime: r.ext === 'csv' ? 'text/csv' : 'text/markdown', size: (r.text || '').length, source: 'upload', created_by: props.authorId, updated_by: props.authorId, updated_at: new Date().toISOString() }, { onConflict: 'project_id,path' }).then(function (rr) { if (rr && rr.error) { window.PRUI.toast(rr.error.message, { kind: 'error' }); return; } load(); if (props.onAddIdea) setIntake({ path: name, content: r.text || '' }); });
       }, function (er) { window.PRUI.toast('Office processing error: ' + ((er && er.message) || er), { kind: 'error' }); });
     }
     function del(f) {
@@ -701,7 +703,7 @@
     function icon(f) { var p = (f.path || '').toLowerCase(); if (/\.md$|\.txt$/.test(p)) return '📄'; if (/\.(png|jpe?g|gif|webp|svg)$/.test(p)) return '🖼'; if (/\.pdf$/.test(p)) return '📕'; if (/\.(csv|tsv|xlsx?)$/.test(p)) return '📊'; return '📎'; }
     // ===== VS-Code-Light explorer (New design): folder tree + drag-move + rename + type-aware viewer/editor =====
     function baseName(p) { var i = String(p).lastIndexOf('/'); return i < 0 ? p : p.slice(i + 1); }
-    function toggleF(k) { setOpenF(function (o) { var n = Object.assign({}, o); n[k] = (k in o) ? !o[k] : false; return n; }); }
+    function toggleF(k, cur) { setOpenF(function (o) { var n = Object.assign({}, o); n[k] = !cur; return n; }); }
     function buildTree(fs) {
       var root = { folders: {}, files: [] };
       (fs || []).forEach(function (f) { var parts = String(f.path || '').split('/'); var node = root; for (var i = 0; i < parts.length - 1; i++) { var key = parts.slice(0, i + 1).join('/'); node.folders[key] = node.folders[key] || { name: parts[i], key: key, folders: {}, files: [] }; node = node.folders[key]; } node.files.push(f); });
@@ -738,13 +740,14 @@
       Object.keys(node.folders).sort().forEach(function (k) {
         var fo = node.folders[k], isOpen = (k in openF) ? openF[k] : (depth === 0);
         out.push(h('div', { key: 'd' + k, className: 'fbx-row fbx-folder' + (isOpen ? ' open' : ''), style: { paddingLeft: (6 + depth * 13) + 'px' },
-          onClick: function () { toggleF(k); },
+          onClick: function () { toggleF(k, isOpen); },
           onDragOver: function (e) { if (dragF.current) { e.preventDefault(); e.currentTarget.classList.add('drop'); } },
           onDragLeave: function (e) { e.currentTarget.classList.remove('drop'); },
           onDrop: function (e) { e.currentTarget.classList.remove('drop'); if (dragF.current) { e.preventDefault(); moveTo(dragF.current, k); dragF.current = null; } } },
           h('span', { className: 'fbx-chev' }, '▶'), h('span', { className: 'fbx-ic' }, isOpen ? '📂' : '📁'), h('span', { className: 'fbx-nm' }, fo.name)));
-        if (isOpen) { out = out.concat(treeNodes(fo, depth + 1)); fo.files.forEach(function (f) { out.push(fileRow(f, depth + 1)); }); }
+        if (isOpen) out = out.concat(treeNodes(fo, depth + 1));   // recursion renders this folder's subfolders AND its own files
       });
+      node.files.forEach(function (f) { out.push(fileRow(f, depth)); });   // BUGFIX: render THIS node's files (incl. root files with no '/')
       return out;
     }
     function csvTable(src) {
@@ -899,32 +902,41 @@
     function saveAiFiles(text) {
       var fs = extractFiles(text); if (!fs.length) return;
       Promise.all(fs.map(function (f) {
-        return sb.from('research_files').upsert({ project_id: props.projectId, path: f.path, content: f.content, mime: 'text/markdown', size: (f.content || '').length, source: 'ai', created_by: props.authorId, updated_by: props.authorId, updated_at: new Date().toISOString() }, { onConflict: 'project_id,path' });
+        return sb.from('research_files').upsert({ project_id: props.projectId, path: f.path, content: f.content, storage_path: null, mime: 'text/markdown', size: (f.content || '').length, source: 'ai', created_by: props.authorId, updated_by: props.authorId, updated_at: new Date().toISOString() }, { onConflict: 'project_id,path' });
       })).then(function () { setFilesVersion(function (v) { return v + 1; }); });
     }
     // P2: files dropped on the chat → upload to storage + research_files (uploads/), refresh the file manager, attach to the next message.
     function chatUpload(fileList) {
-      var arr = [].slice.call(fileList || []); if (!arr.length) return; setDropActive(false);
-      arr.forEach(function (f) {
-        if (window.PROffice && window.PROffice.isOffice(f.name)) {
-          window.PROffice.extract(f).then(function (r) {
-            var name = 'uploads/' + f.name.replace(/\.(docx|xlsx|xlsm|xls|pptx)$/i, '') + '.' + (r.ext || 'md');
-            sb.from('research_files').upsert({ project_id: props.projectId, path: name, content: r.text || '', mime: r.ext === 'csv' ? 'text/csv' : 'text/markdown', source: 'upload', created_by: props.authorId, updated_by: props.authorId, updated_at: new Date().toISOString() }, { onConflict: 'project_id,path' }).then(function () { setFilesVersion(function (v) { return v + 1; }); });
-          }, function () { window.PRUI.toast('Office-feldolgozási hiba: ' + f.name, { kind: 'error' }); });
-          return;
-        }
-        var sp = props.projectId + '/files/' + Date.now() + '_' + f.name.replace(/[^A-Za-z0-9._-]/g, '_');
-        sb.storage.from('research-data').upload(sp, f).then(function (res) {
-          if (res && res.error) { window.PRUI.toast(res.error.message, { kind: 'error' }); return; }
-          sb.from('research_files').upsert({ project_id: props.projectId, path: 'uploads/' + f.name, storage_path: sp, mime: f.type || 'application/octet-stream', size: f.size, source: 'upload', created_by: props.authorId, updated_by: props.authorId, updated_at: new Date().toISOString() }, { onConflict: 'project_id,path' }).then(function (rr) {
-            if (rr && rr.error) { window.PRUI.toast(rr.error.message, { kind: 'error' }); return; }
-            setFilesVersion(function (v) { return v + 1; });
-            setAttach(function (p) { return p.concat([{ kind: 'file', bucket: 'research-data', path: sp, name: f.name, mime: f.type, label: f.name }]); });
+      setDropActive(false);   // clear FIRST so an empty/aborted drop can't leave the overlay stuck over the chat
+      var arr = [].slice.call(fileList || []); if (!arr.length) return;
+      function freePath(base, taken) { if (taken.indexOf(base) < 0) return base; var d = base.lastIndexOf('.'); var stem = d > 0 ? base.slice(0, d) : base, ext = d > 0 ? base.slice(d) : ''; var i = 2; while (taken.indexOf(stem + ' (' + i + ')' + ext) >= 0) i++; return stem + ' (' + i + ')' + ext; }
+      // fetch existing paths once → version same-name drops instead of silently overwriting (data loss + orphaned blob)
+      sb.from('research_files').select('path').eq('project_id', props.projectId).then(function (er) {
+        var taken = ((er && er.data) || []).map(function (x) { return x.path; });
+        arr.forEach(function (f) {
+          if (window.PROffice && window.PROffice.isOffice(f.name)) {
+            window.PROffice.extract(f).then(function (r) {
+              var path = freePath('uploads/' + f.name.replace(/\.(docx|xlsx|xlsm|xls|pptx)$/i, '') + '.' + (r.ext || 'md'), taken); taken.push(path);
+              sb.from('research_files').upsert({ project_id: props.projectId, path: path, content: r.text || '', storage_path: null, mime: r.ext === 'csv' ? 'text/csv' : 'text/markdown', size: (r.text || '').length, source: 'upload', created_by: props.authorId, updated_by: props.authorId, updated_at: new Date().toISOString() }, { onConflict: 'project_id,path' }).then(function () { setFilesVersion(function (v) { return v + 1; }); });
+            }, function () { window.PRUI.toast('Office-feldolgozási hiba: ' + f.name, { kind: 'error' }); });
+            return;
+          }
+          var path = freePath('uploads/' + f.name, taken); taken.push(path);
+          var sp = props.projectId + '/files/' + Date.now() + '_' + f.name.replace(/[^A-Za-z0-9._-]/g, '_');
+          sb.storage.from('research-data').upload(sp, f).then(function (res) {
+            if (res && res.error) { window.PRUI.toast(res.error.message, { kind: 'error' }); return; }
+            sb.from('research_files').upsert({ project_id: props.projectId, path: path, storage_path: sp, content: null, mime: f.type || 'application/octet-stream', size: f.size, source: 'upload', created_by: props.authorId, updated_by: props.authorId, updated_at: new Date().toISOString() }, { onConflict: 'project_id,path' }).then(function (rr) {
+              if (rr && rr.error) { try { sb.storage.from('research-data').remove([sp]); } catch (e) { } window.PRUI.toast(rr.error.message, { kind: 'error' }); return; }
+              setFilesVersion(function (v) { return v + 1; });
+              setAttach(function (p) { return p.concat([{ kind: 'file', bucket: 'research-data', path: sp, name: f.name, mime: f.type, label: f.name }]); });
+            });
           });
         });
+        window.PRUI.toast(arr.length + ' fájl feltöltve az uploads/ mappába', { kind: 'ok' });
       });
-      window.PRUI.toast(arr.length + ' fájl feltöltve az uploads/ mappába', { kind: 'ok' });
     }
+    // safety: reset the chat dropzone overlay on any aborted drag (dragend/drop anywhere) so it can't stay stuck over the chat
+    useEffect(function () { if (!dropActive) return; function reset() { setDropActive(false); } window.addEventListener('dragend', reset); window.addEventListener('drop', reset); return function () { window.removeEventListener('dragend', reset); window.removeEventListener('drop', reset); }; }, [dropActive]);
     // Real token streaming: POST to the Edge function and append text deltas to a live bubble as they arrive.
     function streamReply(cid) {
       var CFG = window.PR_CONFIG || {};
@@ -1125,14 +1137,15 @@
           h('div', { className: 'idb-h' }, h('span', null, '📌 Study basis'), h('span', { className: 'idb-c' }, String(selected.length)),
             props.onGoStudy ? h('button', { className: 'idb-studies', onClick: function () { props.onGoStudy(); } }, '📚 Studies →') : null),
           selected.length ? h('div', null,
-            selected.map(function (idea) {
+            h('div', { className: 'idb-bwrap' }, selected.map(function (idea, i) {
               return h('div', { className: 'idb-bitem', key: idea.id },
+                h('span', { className: 'idb-bnum' }, String(i + 1)),
                 h('div', { style: { flex: 1, minWidth: 0 } },
                   h('div', { className: 'idb-bq' }, idea.question),
                   idea.hypothesis ? h('div', { className: 'idb-bh' }, idea.hypothesis) : null),
                 props.canEdit ? h('button', { className: 'del', 'aria-label': 'Remove from basis', title: 'Remove from basis', onClick: function () { setStatus(idea, 'candidate'); } }, '✕') : null
               );
-            }),
+            })),
             props.onStartStudyMulti ? h('button', { className: 'idb-cta', onClick: function () { props.onStartStudyMulti(selected); } }, '🔬 Start a study from these ideas →') : null
           ) : h('div', { className: 'idb-bempty' }, 'Press “Select” on a shortlisted idea — it becomes the study basis.')
         )
