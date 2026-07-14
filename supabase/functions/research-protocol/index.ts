@@ -49,9 +49,13 @@ Deno.serve(async (req) => {
       const goal = String(body.goal || '').slice(0, 2000);
       const ideaId = body.idea_id || null;
       // gather context (RLS scopes everything to the caller's project access)
-      const ideasQ = await sb.from('research_ideas').select('id,question,hypothesis,status').eq('project_id', projectId).limit(12);
+      const ideasQ = await sb.from('research_ideas').select('id,question,hypothesis,status').eq('project_id', projectId).order('created_at', { ascending: true }).limit(24);
       const ideas = (ideasQ.data || []);
-      const idea = ideaId ? ideas.find((x: any) => x.id === ideaId) : (ideas.find((x: any) => x.status === 'selected') || ideas[0]);
+      let idea: any = ideaId ? ideas.find((x: any) => x.id === ideaId) : (ideas.find((x: any) => x.status === 'selected') || ideas[0]);
+      // a caller-supplied lineage idea_id (Map "generate from this node") may point OUTSIDE the loaded window →
+      // fetch it directly so the protocol's provenance link (idea_id) is never silently severed. Fall back only if truly absent.
+      if (ideaId && !idea) { const iq = await sb.from('research_ideas').select('id,question,hypothesis,status').eq('project_id', projectId).eq('id', ideaId).maybeSingle(); idea = (iq.data as any) || null; }
+      if (!idea) idea = ideas.find((x: any) => x.status === 'selected') || ideas[0];
       const srcQ = await sb.from('research_sources').select('title,venue,year,screening').eq('project_id', projectId).limit(200);
       const allSrc = (srcQ.data || []);
       const inc = allSrc.filter((s: any) => s.screening === 'include');

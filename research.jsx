@@ -3777,7 +3777,7 @@
       var pid = props.projectId;
       Promise.all([
         sb.from('research_ideas').select('id,question,hypothesis,rationale,novelty,status').eq('project_id', pid).neq('status', 'rejected').order('created_at', { ascending: true }).limit(24),
-        sb.from('research_studies').select('id,idea_id,title,question,status').eq('project_id', pid),
+        sb.from('research_studies').select('id,idea_id,title,question,status').eq('project_id', pid).order('created_at', { ascending: true }),
         sb.from('research_sources').select('id,title,venue,cited_by,year,screening,url').eq('project_id', pid).order('cited_by', { ascending: false, nullsFirst: false }).limit(10),
         sb.from('research_sources').select('id', { count: 'exact', head: true }).eq('project_id', pid),
         sb.from('research_sources').select('id', { count: 'exact', head: true }).eq('project_id', pid).eq('screening', 'include'),
@@ -3970,6 +3970,37 @@
       if (n.t === 'review' && n.ref && /-[0-9a-f]{8}-review\./.test(String(n.ref.path || ''))) return [['regen_review', '🔄 Áttekintés újragenerálása']];
       return [];
     }
+    // F8 — provenance context: walk UPSTREAM from a node to its originating idea + a short lineage summary, so a
+    // generation FROM that node is grounded in its actual ancestry (idea → study → review → …), not just the project
+    // goal. Derived directly from `data` (the same relationships graph() encodes) → returns { ideaId, text }.
+    function lineageOf(n) {
+      var d = data || {}, ideas = d.ideas || [], studies = d.studies || [], parts = [], idea = null, study = null;
+      function studyFor(node) {
+        if (node.t === 'study') return node.ref || studies[0] || null;
+        if (node.t === 'review') {
+          if (node.id === 'sr') return studies[0] || null;
+          var mm = String((node.ref && node.ref.path) || '').match(/-([0-9a-f]{8})-review\./);
+          return mm ? (studies.filter(function (s) { return String(s.id).replace(/-/g, '').slice(0, 8) === mm[1]; })[0] || studies[0] || null) : (studies[0] || null);
+        }
+        return null;
+      }
+      if (n.t === 'idea') idea = n.ref;
+      else study = studyFor(n);
+      if (!study && (n.t === 'step' || n.t === 'venue' || n.t === 'section')) study = studies[0] || null;
+      if (!idea) {
+        var iid = study && study.idea_id;
+        idea = iid ? (ideas.filter(function (x) { return x.id === iid; })[0] || null) : null;
+        if (!idea && (n.t === 'step' || n.t === 'venue' || n.t === 'section' || n.t === 'review')) idea = ideas.filter(function (x) { return x.status === 'selected'; })[0] || ideas[0] || null;
+      }
+      if (idea) parts.push('KIINDULÓ ÖTLET: ' + String(idea.question || '') + (idea.hypothesis ? ' | Hipotézis: ' + idea.hypothesis : ''));
+      if (study) parts.push('IRODALOM-STUDY: ' + String(study.title || study.question || ''));
+      if (n.t === 'paper') parts.push('KAPCSOLÓDÓ CIKK: ' + String(n.title || '') + (n.ref && n.ref.venue ? ' (' + n.ref.venue + ')' : ''));
+      if (n.t === 'review') parts.push('ÁTTEKINTÉS: ' + String(n.title || ''));
+      if (n.t === 'step') parts.push('KIVÁLASZTOTT PROTOKOLL-LÉPÉS: ' + String(n.title || ''));
+      if (n.t === 'venue') parts.push('CÉL-FOLYÓIRAT: ' + String(n.title || ''));
+      if (n.t === 'section') parts.push('DRAFT-SZEKCIÓ: ' + String(n.title || ''));
+      return { ideaId: idea ? idea.id : null, text: parts.join('\n') };
+    }
     function runGen(n, act) {
       if (genBusy) return;   // re-entrancy lock: nodes stay clickable during the async call, so guard against a double-fire (double study insert)
       var CORE = window.PRAutopilotCore; if (!CORE || !CORE.callEdge) { window.PRUI.toast('A generátor nem elérhető (autopilot-core).', { kind: 'error' }); return; }
@@ -3977,7 +4008,11 @@
       var pid = props.projectId, proj = props.project;
       function done(msg) { if (!alive.current) return; setGenBusy(false); window.PRUI.toast('✓ ' + (msg || 'Kész'), { kind: 'ok' }); setBump(function (x) { return x + 1; }); }
       function fail(e) { if (!alive.current) return; setGenBusy(false); window.PRUI.toast('Hiba: ' + e, { kind: 'error' }); }
-      if (act === 'ideas') CORE.callEdge('research-ai', { action: 'gap', project_id: pid }).then(function (d) { (d && d.error) ? fail(d.error) : done(((d && d.count) || 0) + ' ötlet-jelölt'); }, function () { fail('hálózat'); });
+      if (act === 'ideas') {
+        var linI = lineageOf(n);   // F8: if this node has a lineage, ground the new ideas in it (suggest); else project-wide gap
+        if (linI.text) CORE.callEdge('research-ai', { action: 'suggest', project_id: pid, text: 'Javasolj ÚJ, kapcsolódó kutatási ötleteket a következő leszármazás alapján:\n' + linI.text }).then(function (d) { (d && d.error) ? fail(d.error) : done(((d && d.count) || 0) + ' kapcsolódó ötlet'); }, function () { fail('hálózat'); });
+        else CORE.callEdge('research-ai', { action: 'gap', project_id: pid }).then(function (d) { (d && d.error) ? fail(d.error) : done(((d && d.count) || 0) + ' ötlet-jelölt'); }, function () { fail('hálózat'); });
+      }
       else if (act === 'study') {
         var idea = (n && n.ref) || null;
         sb.from('research_studies').insert({ project_id: pid, idea_id: idea ? idea.id : null, title: String((idea && idea.question) || proj.title || 'Study').slice(0, 80), question: String((idea && idea.question) || proj.goal || proj.title || '').slice(0, 4000), created_by: props.authorId }).select('id').maybeSingle().then(function (r) {
@@ -3988,7 +4023,11 @@
         }, function () { fail('study insert'); });
       }
       else if (act === 'review') { var sid = n && n.ref && n.ref.id; if (!sid) { fail('nincs study ehhez a node-hoz'); return; } CORE.callEdge('research-study', { action: 'generate_review', study_id: sid }).then(function (d) { (d && d.error) ? fail(d.error) : done('Áttekintés kész'); }, function () { fail('hálózat'); }); }
-      else if (act === 'protocol') CORE.callEdge('research-protocol', { action: 'generate', project_id: pid, goal: proj.goal || proj.title || '' }).then(function (d) { (d && d.error) ? fail(d.error) : done(((d && d.steps) || 0) + ' protokoll-lépés'); }, function () { fail('hálózat'); });
+      else if (act === 'protocol') {
+        var linP = lineageOf(n), baseGoal = String(proj.goal || proj.title || '');   // F8: ground the protocol in the node's originating idea + lineage
+        var goalP = linP.text ? (baseGoal ? baseGoal + '\n\nA KIVÁLASZTOTT CSOMÓPONT LESZÁRMAZÁSA:\n' + linP.text : linP.text) : baseGoal;
+        CORE.callEdge('research-protocol', Object.assign({ action: 'generate', project_id: pid, goal: goalP }, linP.ideaId ? { idea_id: linP.ideaId } : {})).then(function (d) { (d && d.error) ? fail(d.error) : done(((d && d.steps) || 0) + ' protokoll-lépés'); }, function () { fail('hálózat'); });
+      }
       else if (act === 'writing') CORE.callEdge('research-writing', { action: 'outline', project_id: pid }).then(function (d) {
         if (d && d.error) { fail(d.error); return; }
         var o = d && d.outline; if (!o || !o.sections) { fail('üres vázlat'); return; }
