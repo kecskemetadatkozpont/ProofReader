@@ -4082,6 +4082,7 @@
           h('div', { style: { display: 'flex', gap: 10, alignItems: 'center' } },
             h(NotifBell, null),
             sel ? null : h('button', { className: 'btn' + (board ? ' pri' : ''), onClick: function () { setBoard(!board); }, title: 'Protocol task board — every project’s protocol steps in one Kanban' }, board ? '☷ Projects' : '🗂️ Protocol board'),
+            (nd() && !(sel || board || view === 'supervised')) ? h('a', { className: 'btn', href: 'Autopilot.html', style: { textDecoration: 'none' }, title: 'Chat-alapú belépő — állítsd össze a briefet és indítsd az Autopilotot' }, '⚡ Autopilot') : null,
             (sel || board || view === 'supervised') ? null : h('button', { className: 'btn pri', onClick: function () { setAdding(true); } }, '+ New project')
           )
         ),

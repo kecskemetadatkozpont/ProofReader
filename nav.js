@@ -12,6 +12,7 @@
   var LINKS = [
     { key: 'profile', label: 'Open Profile', href: 'Profile.html' },
     { key: 'research', label: 'Research', href: 'Research.html' },
+    { key: 'autopilot', label: 'Autopilot', href: 'Autopilot.html', newOnly: true },
     { key: 'kanban', label: 'My tasks', href: 'Kanban.html' },
     { key: 'memory', label: 'Memory', href: 'Memory.html' },
     { key: 'submissions', label: 'Érkeztető', href: 'Submissions.html' },
@@ -59,6 +60,7 @@
   function pageKey() {
     var p = (location.pathname.split('/').pop() || '').toLowerCase();
     if (p.indexOf('profile') === 0) return 'profile';
+    if (p.indexOf('autopilot') === 0) return 'autopilot';
     if (p.indexOf('research') === 0) return 'research';
     if (p.indexOf('kanban') === 0) return 'kanban';
     if (p.indexOf('memory') === 0) return 'memory';
@@ -72,7 +74,7 @@
     if (p.indexOf('proofreader') === 0) return 'editor';
     return '';
   }
-  var PAGE_NAME = { profile: 'Profile', research: 'Research', kanban: 'My tasks', memory: 'Memory', submissions: 'Érkeztető', session: 'Publify Chat', phd: 'Doctoral School', publications: 'Publications', admin: 'Admin', editor: 'Editor' };
+  var PAGE_NAME = { profile: 'Profile', research: 'Research', autopilot: 'Autopilot', kanban: 'My tasks', memory: 'Memory', submissions: 'Érkeztető', session: 'Publify Chat', phd: 'Doctoral School', publications: 'Publications', admin: 'Admin', editor: 'Editor' };
   function initials(name, email) {
     var s = (name || email || '?').trim();
     var parts = s.split(/\s+/).filter(Boolean);
@@ -200,6 +202,7 @@
     media: svg('<path d="M3 9V8.2a5 5 0 0 1 10 0V9"/><rect x="2.2" y="9" width="2.9" height="4.2" rx="1.1"/><rect x="10.9" y="9" width="2.9" height="4.2" rx="1.1"/>'),
     compare: svg('<rect x="2" y="2.8" width="4.8" height="10.4" rx="1"/><rect x="9.2" y="2.8" width="4.8" height="10.4" rx="1"/><path d="M8 1.5v13"/>'),
     research: svg('<path d="M6 2v4.5L3 12.5A1 1 0 0 0 4 14h8a1 1 0 0 0 .9-1.5L10 6.5V2"/><path d="M5 2h6"/>'),
+    autopilot: svg('<path d="M8.5 1.5 3 8.8h3.4L7 14.5 12.5 7H9z"/>'),
     kanban: svg('<rect x="2.2" y="2.8" width="3.4" height="10.4" rx="1"/><rect x="6.6" y="2.8" width="3.4" height="7" rx="1"/><rect x="11" y="2.8" width="2.8" height="4.4" rx="1"/>'),
     memory: svg('<circle cx="4" cy="4" r="1.6"/><circle cx="12" cy="5" r="1.6"/><circle cx="6.5" cy="11.5" r="1.6"/><circle cx="11.5" cy="11" r="1.6"/><path d="M5.4 4.6 10.6 4.8M5.2 5.3 6.2 10M11.7 6.5 11.6 9.6M7.9 11.3 10 11.1"/>'),
     submissions: svg('<path d="M2 8.5 4.5 8.5 6 10.5 10 10.5 11.5 8.5 14 8.5"/><path d="M2.6 8.5 4 3.4A1 1 0 0 1 5 2.7h6a1 1 0 0 1 1 .7l1.4 5.1V12a1 1 0 0 1-1 1H3.6a1 1 0 0 1-1-1z"/>'),
@@ -234,22 +237,22 @@
     function render() {
       var av = adminView();
       var du = av || curUser(), admin = isAdmin();
+      var newd = window.PRDesign ? window.PRDesign.isNew() : document.documentElement.classList.contains('newdesign');   // Autopilot (newOnly) surfaces only in New design
       ensureEnt(function () { render(); guardCurrentPage(isAdmin()); });   // load entitlements, then re-render + guard the page
       if (window.PREnt && window.PREnt.loaded()) guardCurrentPage(admin);  // already loaded → guard now (idempotent)
       document.documentElement.classList.toggle('pn-adminview', !!av);
       document.getElementById('pn-left').innerHTML = '<a class="pn-brand" href="' + withAv('Profile.html') + '" title="Open your profile"><span class="pn-mk"><i></i></span>Publify</a>'
         + (av ? '<span class="pn-as">👁 ' + esc(av.name || av.email || '') + '</span>' : '');
-      var SHORT = { profile: 'Profile', research: 'Research', kanban: 'Tasks', memory: 'Memory', session: 'Chat', media: 'Media', compare: 'Compare', phd: 'Doctoral', publications: 'Publications', admin: 'Admin' };
-      var barNav = LINKS.filter(function (l) { return linkVisible(l, admin); }).map(function (l) {
+      var SHORT = { profile: 'Profile', research: 'Research', autopilot: 'Autopilot', kanban: 'Tasks', memory: 'Memory', session: 'Chat', media: 'Media', compare: 'Compare', phd: 'Doctoral', publications: 'Publications', admin: 'Admin' };
+      var barNav = LINKS.filter(function (l) { return linkVisible(l, admin) && (!l.newOnly || newd); }).map(function (l) {
         return '<a href="' + withAv(l.href) + '"' + (l.key === here ? ' class="on" aria-current="page"' : '') + '>' + esc(SHORT[l.key] || l.label) + '</a>';
       }).join('');
       var pnNav = document.getElementById('pn-nav'); if (pnNav) pnNav.innerHTML = barNav;
       document.getElementById('pn-prof').innerHTML = avHtml(du) + '<span class="pn-nm">' + esc((du && du.name) || 'Profile') + '</span>' + (av ? '<span class="pn-cv" aria-hidden="true">👁</span>' : '');
-      var links = LINKS.filter(function (l) { return linkVisible(l, admin); }).map(function (l) {
+      var links = LINKS.filter(function (l) { return linkVisible(l, admin) && (!l.newOnly || newd); }).map(function (l) {
         return '<a href="' + withAv(l.href) + '"' + (l.key === here ? ' class="on" aria-current="page"' : '') + '>' + (ICONS[l.key] || '') + esc(l.label) + '</a>';
       }).join('');
       var dark = window.PRTheme ? window.PRTheme.isDark() : document.documentElement.classList.contains('dark');
-      var newd = window.PRDesign ? window.PRDesign.isNew() : document.documentElement.classList.contains('newdesign');
       var tt = document.getElementById('pn-theme-top'); if (tt) tt.setAttribute('aria-pressed', dark ? 'true' : 'false');
       drawer.innerHTML = '<div class="pnd-head">' + avHtml(du)
         + '<div style="min-width:0"><b>' + esc((du && du.name) || 'Not signed in') + '</b><span>' + esc((du && du.email) || '') + '</span></div>'
