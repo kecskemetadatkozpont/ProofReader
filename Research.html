@@ -858,6 +858,15 @@
     .rmap-runbar b { font-size: 13px; } .rmap-rb-st { color: var(--muted); }
     .rmap-rb-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); animation: rmap-pulse 1.4s infinite; flex: none; } .rmap-runbar.gate .rmap-rb-dot { background: var(--warn, #8f5407); }
     @media (prefers-reduced-motion: reduce) { .rmap-node, .rmap-lh-st.running, .rmap-rb-dot { animation: none; } }
+    /* F4 expand hint + F1 generate menu */
+    .rmap-exp { margin-left: 6px; font-size: 10.5px; font-weight: 700; color: var(--accent); }
+    .rmap-menu-scrim { position: fixed; inset: 0; z-index: 80; }
+    .rmap-menu { position: fixed; min-width: 210px; background: var(--surface); border: 1px solid var(--line); border-radius: 11px; box-shadow: 0 16px 44px -18px rgba(20, 26, 40, .5); padding: 6px; z-index: 81; }
+    .rmap-menu-h { font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; color: var(--faint); padding: 5px 9px 7px; }
+    .rmap-menu-b { display: block; width: 100%; text-align: left; border: 0; background: transparent; color: var(--ink); font-family: inherit; font-size: 13px; font-weight: 600; padding: 8px 10px; border-radius: 8px; cursor: pointer; }
+    .rmap-menu-b:hover { background: var(--accent-tint); color: var(--accent); }
+    .rmap-genbusy { position: fixed; top: 74px; left: 50%; transform: translateX(-50%); z-index: 40; background: var(--accent); color: #fff; font-size: 12.5px; font-weight: 700; padding: 7px 16px; border-radius: 999px; box-shadow: 0 10px 26px -8px var(--accent); }
+    html.dark .rmap-genbusy { background: #4f46e5; }
     @media (max-width: 900px) { .rmap-wrap { flex-direction: column; } .rmap-insp { width: auto; } }
   </style>
   <script src="theme.js?v=1783721200"></script>
@@ -887,7 +896,7 @@
   <script type="text/babel" src="canvas.jsx?v=1783137934"></script>
   <script type="text/babel" src="notes.jsx?v=1783137934"></script>
   <script src="autopilot-core.js?v=1784160000"></script>
-  <script type="text/babel" src="research.jsx?v=1784190000"></script>
+  <script type="text/babel" src="research.jsx?v=1784200000"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>
