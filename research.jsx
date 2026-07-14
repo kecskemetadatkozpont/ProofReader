@@ -3717,6 +3717,7 @@
     var loS = useState(false), litOpen = loS[0], setLitOpen = loS[1];   // F4: expand the study funnel's paper nodes (collapsed by default)
     var mnS = useState(null), menu = mnS[0], setMenu = mnS[1];   // F1: node "generate from here" context menu {node,x,y}
     var gbS = useState(false), genBusy = gbS[0], setGenBusy = gbS[1];
+    var hgS = useState({}), hgt = hgS[0], setHgt = hgS[1];   // measured real card heights (id → px) → the no-overlap rule uses them, not an estimate
     var rnS = useState(null), run = rnS[0], setRun = rnS[1];   // P1b: the project's active Autopilot run (live)
     var mdS = useState(function () { try { return localStorage.getItem('pr-rmap-mode') === 'free' ? 'free' : 'lane'; } catch (e) { return 'lane'; } }), mode = mdS[0], setMode = mdS[1];   // 'lane' (swimlane) | 'free' (freeform)
     var drag = useRef(null), stageRef = useRef(null), alive = useRef(true), bumpT = useRef(null), driving = useRef(false), mapDriver = useRef(null);
@@ -3779,6 +3780,15 @@
         else setData(Object.assign(base, { steps: [] }));
       }, function () { if (alive.current) setData({ ideas: [], studies: [], topSrc: [], srcTotal: 0, inclTotal: 0, protocol: null, journals: [], wfiles: [], steps: [] }); });
     }, [props.projectId, bump]);
+    // measure each card's REAL rendered height after paint → feed the no-overlap rule with true heights (estimates
+    // undershoot long-title cards, e.g. the H1/H2 hypotheses, leaving residual overlap). Converges in one extra render.
+    useEffect(function () {
+      var st = stageRef.current; if (!st || !st.querySelectorAll) return;
+      var els = st.querySelectorAll('.rmap-node[data-nid]'), m = {}, changed = false;
+      for (var i = 0; i < els.length; i++) { var id = els[i].getAttribute('data-nid'), hh = els[i].offsetHeight; if (hh) { m[id] = hh; if (Math.abs((hgt[id] || 0) - hh) > 2) changed = true; } }
+      if (Object.keys(m).length !== Object.keys(hgt).length) changed = true;
+      if (changed) setHgt(m);
+    }, [data, bump, mode, litOpen]);   // only re-measure when the node set/content changes — not on pan/zoom/select
 
     // BUILT-IN RULE: no two cards may overlap. Iteratively push apart any overlapping cards along the least-overlap
     // axis, using each card's estimated height (n._h). In lane mode same-lane cards share x, so only y is nudged and
@@ -3831,8 +3841,8 @@
           if (lastStep) E.push([lastStep, 'w' + f.id]);
         }
       });
-      // estimate each card's rendered height (title wrap + metadata line) so the collision pass can space them
-      N.forEach(function (n) { n._h = 66 + Math.min(3, Math.floor(String(n.title || '').length / 26)) * 16; });
+      // each card's height: the REAL measured value once available (hgt), else a generous estimate for the first paint
+      N.forEach(function (n) { n._h = hgt[n.id] || (72 + Math.min(4, Math.ceil(String(n.title || '').length / 22)) * 17); });
       var LANEW = 252, ROWH = 108, cnt = {};
       if (mode === 'free') {   // (B) freeform: organic per-phase clusters (columns ≥ card width so they never start overlapped)
         var CEN = [{ x: 40, y: 60 }, { x: 520, y: 250 }, { x: 250, y: 610 }, { x: 950, y: 110 }, { x: 1260, y: 500 }, { x: 850, y: 700 }];
@@ -3957,7 +3967,7 @@
         h('div', { className: 'rmap-world', style: { transform: 'translate(' + view.tx + 'px,' + view.ty + 'px) scale(' + view.k + ')' } },
           g.free ? null : RMAP_PHASES.map(function (p, i) { var stt = runPhase[p[0]]; return h('div', { className: 'rmap-lane' + (i % 2 ? ' alt' : '') + (activeKey === p[0] ? ' active' : ''), key: p[0], style: { left: (i * g.laneW) + 'px', width: g.laneW + 'px', height: g.height + 'px' } }, h('div', { className: 'rmap-lh' }, p[2] + ' ' + p[1], stt ? h('span', { className: 'rmap-lh-st ' + stt }, LANE_BADGE[stt] || '') : null)); }),
           h('svg', { className: 'rmap-edges', width: svgW, height: g.height }, edgeEls),
-          g.N.map(function (n) { return h('div', { key: n.id, className: 'rmap-node t-' + n.t + (sel === n.id ? ' sel' : '') + (activeKey && n.ph === RMAP_PHASE_IDX[activeKey] ? ' inphase' : ''), style: { left: n.x + 'px', top: n.y + 'px' }, onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); setSel(n.id); if (n.id === 'lit') setLitOpen(function (v) { return !v; }); }, onContextMenu: function (e) { e.preventDefault(); e.stopPropagation(); if (props.canEdit) setMenu({ node: n, x: e.clientX, y: e.clientY }); } }, body(n)); })),
+          g.N.map(function (n) { return h('div', { key: n.id, 'data-nid': n.id, className: 'rmap-node t-' + n.t + (sel === n.id ? ' sel' : '') + (activeKey && n.ph === RMAP_PHASE_IDX[activeKey] ? ' inphase' : ''), style: { left: n.x + 'px', top: n.y + 'px' }, onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); setSel(n.id); if (n.id === 'lit') setLitOpen(function (v) { return !v; }); }, onContextMenu: function (e) { e.preventDefault(); e.stopPropagation(); if (props.canEdit) setMenu({ node: n, x: e.clientX, y: e.clientY }); } }, body(n)); })),
         run && runActive ? h('div', { className: 'rmap-runbar' + (run.status === 'awaiting_approval' ? ' gate' : '') },
           h('span', { className: 'rmap-rb-dot' }), h('b', null, '⚡ Autopilot'),
           h('span', { className: 'rmap-rb-st' }, (AP_ST_LABEL[run.status] || run.status) + (activeLabel ? ' · ' + activeLabel : '') + (runProg ? ' · ' + runProg : '')),
