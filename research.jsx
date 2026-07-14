@@ -3771,7 +3771,7 @@
         sb.from('research_sources').select('id', { count: 'exact', head: true }).eq('project_id', pid).eq('screening', 'include'),
         sb.from('research_protocols').select('id,title,status').eq('project_id', pid).neq('status', 'archived').order('created_at', { ascending: false }).limit(1),
         sb.from('research_journal_picks').select('id,title,status,npi_level').eq('project_id', pid),
-        sb.from('research_files').select('id,path,size').eq('project_id', pid).like('path', 'writing/%')
+        sb.from('research_files').select('id,path,size').eq('project_id', pid).or('path.like.writing/%,path.like.studies/%')
       ]).then(function (r) {
         if (!alive.current) return;
         var base = { ideas: (r[0].data) || [], studies: (r[1].data) || [], topSrc: (r[2].data) || [], srcTotal: r[3].count || 0, inclTotal: r[4].count || 0, protocol: (r[5].data && r[5].data[0]) || null, journals: (r[6].data) || [], wfiles: (r[7].data) || [] };
@@ -3799,7 +3799,17 @@
       }
       d.journals.forEach(function (j) { N.push({ id: 'v' + j.id, t: 'venue', ph: 4, title: j.title || 'Folyóirat', m: { NPI: j.npi_level || '—', Státusz: j.status || '—' }, ref: j }); if (hasSR) E.push(['sr', 'v' + j.id]); });
       var lastStep = (d.protocol && d.steps.length) ? ('r' + d.steps[d.steps.length - 1].id) : (hasSR ? 'sr' : null);
-      d.wfiles.forEach(function (f) { var nm = String(f.path).replace(/^writing\//, '').replace(/\.(md|tex)$/, ''); N.push({ id: 'w' + f.id, t: 'section', ph: 5, title: nm || 'szekció', m: { Fájl: f.path, Méret: (f.size || 0) + ' B' }, ref: f }); if (lastStep) E.push([lastStep, 'w' + f.id]); });
+      d.wfiles.forEach(function (f) {
+        if (/^studies\//.test(f.path)) {   // a generated systematic-review document → a node in the SR lane
+          var rnm = String(f.path).replace(/^studies\//, '').replace(/\.(md|tex)$/, '');
+          N.push({ id: 'w' + f.id, t: 'review', ph: 2, title: rnm || 'áttekintés', m: { Fájl: f.path, Méret: (f.size || 0) + ' B' }, ref: f });
+          if (hasSR) E.push(['sr', 'w' + f.id]); else if (hasLit) E.push(['lit', 'w' + f.id]);
+        } else {
+          var nm = String(f.path).replace(/^writing\//, '').replace(/\.(md|tex)$/, '');
+          N.push({ id: 'w' + f.id, t: 'section', ph: 5, title: nm || 'szekció', m: { Fájl: f.path, Méret: (f.size || 0) + ' B' }, ref: f });
+          if (lastStep) E.push([lastStep, 'w' + f.id]);
+        }
+      });
       var LANEW = 252, ROWH = 104, cnt = {};
       if (mode === 'free') {   // (B) freeform: organic per-phase clusters instead of lanes
         var CEN = [{ x: 40, y: 60 }, { x: 470, y: 240 }, { x: 220, y: 560 }, { x: 860, y: 110 }, { x: 1140, y: 470 }, { x: 780, y: 650 }];
@@ -3858,13 +3868,14 @@
     function genActions(n) {
       if (!n) return [];
       if (n.t === 'idea') return [['study', '🔎 Study indítása ebből'], ['ideas', '✦ Kapcsolódó ötletek']];
-      if (n.t === 'study') return [['review', '📝 Áttekintés generálása'], ['protocol', '🧪 Protokoll generálása']];
+      if (n.t === 'study') return (n.ref && n.ref.id ? [['review', '📝 Áttekintés generálása']] : []).concat([['protocol', '🧪 Protokoll generálása']]);
       if (n.t === 'review') return [['protocol', '🧪 Protokoll generálása'], ['writing', '✍️ Draft-vázlat']];
       if (n.t === 'step') return [['writing', '✍️ Draft-vázlat']];
       if (n.t === 'venue' || n.t === 'section') return [['writing', '✍️ Draft-vázlat'], ['ideas', '✦ Ötletek']];
       return [['ideas', '✦ Ötletek generálása'], ['protocol', '🧪 Protokoll']];
     }
     function runGen(n, act) {
+      if (genBusy) return;   // re-entrancy lock: nodes stay clickable during the async call, so guard against a double-fire (double study insert)
       var CORE = window.PRAutopilotCore; if (!CORE || !CORE.callEdge) { window.PRUI.toast('A generátor nem elérhető (autopilot-core).', { kind: 'error' }); return; }
       setMenu(null); setGenBusy(true);
       var pid = props.projectId, proj = props.project;
@@ -3874,18 +3885,19 @@
       else if (act === 'study') {
         var idea = (n && n.ref) || null;
         sb.from('research_studies').insert({ project_id: pid, idea_id: idea ? idea.id : null, title: String((idea && idea.question) || proj.title || 'Study').slice(0, 80), question: String((idea && idea.question) || proj.goal || proj.title || '').slice(0, 4000), created_by: props.authorId }).select('id').maybeSingle().then(function (r) {
+          if (r && r.error) { fail('study: ' + r.error.message); return; }
           var sid = r && r.data && r.data.id; if (!sid) { fail('a study nem jött létre'); return; }
           var rows = LS_STEPS.map(function (s) { return { study_id: sid, step: s.step, kind: s.kind, config: lsDefaultConfig(s.step, proj, idea) }; });
-          sb.from('research_study_steps').insert(rows).then(function () { CORE.callEdge('research-study', { action: 'plan', study_id: sid }).then(function () { done('Study létrehozva'); }, function () { done('Study létrehozva'); }); });
+          sb.from('research_study_steps').insert(rows).then(function (rr) { if (rr && rr.error) { fail('study-lépések: ' + rr.error.message); return; } CORE.callEdge('research-study', { action: 'plan', study_id: sid }).then(function () { done('Study létrehozva'); }, function () { done('Study létrehozva'); }); }, function () { fail('study-lépések'); });
         }, function () { fail('study insert'); });
       }
-      else if (act === 'review') CORE.callEdge('research-study', { action: 'generate_review', study_id: n.ref && n.ref.id }).then(function (d) { (d && d.error) ? fail(d.error) : done('Áttekintés kész'); }, function () { fail('hálózat'); });
+      else if (act === 'review') { var sid = n && n.ref && n.ref.id; if (!sid) { fail('nincs study ehhez a node-hoz'); return; } CORE.callEdge('research-study', { action: 'generate_review', study_id: sid }).then(function (d) { (d && d.error) ? fail(d.error) : done('Áttekintés kész'); }, function () { fail('hálózat'); }); }
       else if (act === 'protocol') CORE.callEdge('research-protocol', { action: 'generate', project_id: pid, goal: proj.goal || proj.title || '' }).then(function (d) { (d && d.error) ? fail(d.error) : done(((d && d.steps) || 0) + ' protokoll-lépés'); }, function () { fail('hálózat'); });
       else if (act === 'writing') CORE.callEdge('research-writing', { action: 'outline', project_id: pid }).then(function (d) {
         if (d && d.error) { fail(d.error); return; }
         var o = d && d.outline; if (!o || !o.sections) { fail('üres vázlat'); return; }
         var md = '# ' + (o.title || proj.title) + '\n\n' + (o.abstract || '') + '\n\n## Szekciók\n' + o.sections.map(function (s) { return '- ' + (s.heading || s.key); }).join('\n');
-        CORE.saveFile(pid, 'writing/outline.md', md, 'ai').then(function () { done('Vázlat kész (' + o.sections.length + ' szekció)'); });
+        CORE.saveFile(pid, 'writing/outline.md', md, 'ai').then(function (sf) { if (sf && sf.error) { fail(sf.error.message || 'mentés'); return; } done('Vázlat kész (' + o.sections.length + ' szekció)'); }, function () { fail('hálózat'); });
       }, function () { fail('hálózat'); });
     }
 
@@ -3956,7 +3968,7 @@
           h('div', { className: 'modal-foot' }, h('button', { className: 'btn', onClick: function () { setEditing(null); } }, 'Mégse'), h('button', { className: 'btn pri', onClick: saveEdit }, 'Mentés')))) : null,
       genBusy ? h('div', { className: 'rmap-genbusy' }, '⏳ Generálás…') : null,
       menu ? h('div', { className: 'rmap-menu-scrim', onClick: function () { setMenu(null); }, onContextMenu: function (e) { e.preventDefault(); setMenu(null); } },
-        h('div', { className: 'rmap-menu', style: { left: Math.min(menu.x, (window.innerWidth || 1200) - 230) + 'px', top: menu.y + 'px' }, onClick: function (e) { e.stopPropagation(); } },
+        h('div', { className: 'rmap-menu', style: { left: Math.min(menu.x, (window.innerWidth || 1200) - 230) + 'px', top: Math.min(menu.y, (window.innerHeight || 800) - 140) + 'px' }, onClick: function (e) { e.stopPropagation(); } },
           h('div', { className: 'rmap-menu-h' }, '✦ Generálás innen' + (RMAP_TYPE[menu.node.t] ? ' · ' + RMAP_TYPE[menu.node.t].lab : '')),
           genActions(menu.node).map(function (a) { return h('button', { key: a[0], className: 'rmap-menu-b', onClick: function () { runGen(menu.node, a[0]); } }, a[1]); }))) : null);
   }
