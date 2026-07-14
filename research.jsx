@@ -3582,13 +3582,16 @@
     var dS = useState(null), data = dS[0], setData = dS[1];   // null = loading
     var vS = useState({ tx: 30, ty: 18, k: 1 }), view = vS[0], setView = vS[1];
     var selS = useState(null), sel = selS[0], setSel = selS[1];
+    var edS = useState(null), editing = edS[0], setEditing = edS[1];   // {spec} — the open edit dialog (P2)
+    var efS = useState({}), eform = efS[0], setEform = efS[1];
+    var bmS = useState(0), bump = bmS[0], setBump = bmS[1];   // reload after a save
     var drag = useRef(null), stageRef = useRef(null), alive = useRef(true);
     useEffect(function () { return function () { alive.current = false; }; }, []);
     useEffect(function () {
       var pid = props.projectId;
       Promise.all([
-        sb.from('research_ideas').select('id,question,hypothesis,novelty,status').eq('project_id', pid).neq('status', 'rejected').order('created_at', { ascending: true }).limit(24),
-        sb.from('research_studies').select('id,idea_id,title,status').eq('project_id', pid),
+        sb.from('research_ideas').select('id,question,hypothesis,rationale,novelty,status').eq('project_id', pid).neq('status', 'rejected').order('created_at', { ascending: true }).limit(24),
+        sb.from('research_studies').select('id,idea_id,title,question,status').eq('project_id', pid),
         sb.from('research_sources').select('id,title,venue,cited_by,year,screening,url').eq('project_id', pid).order('cited_by', { ascending: false, nullsFirst: false }).limit(10),
         sb.from('research_sources').select('id', { count: 'exact', head: true }).eq('project_id', pid),
         sb.from('research_sources').select('id', { count: 'exact', head: true }).eq('project_id', pid).eq('screening', 'include'),
@@ -3601,14 +3604,14 @@
         if (base.protocol) sb.from('research_protocol_steps').select('id,ord,title,kind,status,needs_approval').eq('protocol_id', base.protocol.id).order('ord', { ascending: true }).then(function (sr) { if (alive.current) setData(Object.assign(base, { steps: (sr.data) || [] })); });
         else setData(Object.assign(base, { steps: [] }));
       }, function () { if (alive.current) setData({ ideas: [], studies: [], topSrc: [], srcTotal: 0, inclTotal: 0, protocol: null, journals: [], wfiles: [], steps: [] }); });
-    }, [props.projectId]);
+    }, [props.projectId, bump]);
 
     function graph() {
       var d = data, N = [], E = [];
       (d.ideas || []).forEach(function (x) { N.push({ id: 'i' + x.id, t: 'idea', ph: 0, title: x.question || 'Ötlet', m: { Novelty: (x.novelty != null ? x.novelty + ' / 100' : '—'), Hipotézis: x.hypothesis || '—' }, ref: x }); });
       var hasLit = d.srcTotal > 0 || d.studies.length;
       if (hasLit) {
-        N.push({ id: 'lit', t: 'study', ph: 1, title: (d.studies[0] && d.studies[0].title) || 'Irodalom', m: { Források: String(d.srcTotal), Included: String(d.inclTotal) } });
+        N.push({ id: 'lit', t: 'study', ph: 1, title: (d.studies[0] && d.studies[0].title) || 'Irodalom', m: { Források: String(d.srcTotal), Included: String(d.inclTotal) }, ref: d.studies[0] || null });
         d.topSrc.forEach(function (s) { N.push({ id: 'p' + s.id, t: 'paper', ph: 1, title: s.title || 'Cikk', m: { Venue: s.venue || '—', Év: String(s.year || '—'), Idézettség: String(s.cited_by || 0) }, dec: s.screening, ref: s }); E.push(['lit', 'p' + s.id]); });
         var linked = false;
         d.studies.forEach(function (st) { if (st.idea_id) { E.push(['i' + st.idea_id, 'lit']); linked = true; } });
@@ -3635,6 +3638,40 @@
     function onDown(e) { if (e.target.closest && e.target.closest('.rmap-node')) return; drag.current = { sx: e.clientX, sy: e.clientY, tx: view.tx, ty: view.ty }; window.addEventListener('mousemove', onMove); window.addEventListener('mouseup', onUp); }
     function onWheel(e) { e.preventDefault(); var st = stageRef.current; if (!st) return; var r = st.getBoundingClientRect(); var mx = e.clientX - r.left, my = e.clientY - r.top; setView(function (v) { var nk = Math.min(2.2, Math.max(.3, v.k * (e.deltaY < 0 ? 1.12 : 0.89))); return { tx: mx - (mx - v.tx) * (nk / v.k), ty: my - (my - v.ty) * (nk / v.k), k: nk }; }); }
     function zoom(f) { setView(function (v) { var nk = Math.min(2.2, Math.max(.3, v.k * f)); return { tx: v.tx, ty: v.ty, k: nk }; }); }
+
+    // ---- P2: edit any node's real metadata via a dialog (the same columns the phase panels/modals set) ----
+    function editSpec(n) {
+      var r = n.ref; if (!r || !r.id) return null;
+      if (n.t === 'idea') return { table: 'research_ideas', id: r.id, title: 'Ötlet szerkesztése', fields: [{ k: 'question', l: 'Kérdés', ty: 'textarea' }, { k: 'hypothesis', l: 'Hipotézis', ty: 'textarea' }, { k: 'rationale', l: 'Indoklás', ty: 'textarea' }, { k: 'novelty', l: 'Novelty (0–100)', ty: 'number' }, { k: 'status', l: 'Státusz', ty: 'select', o: ['candidate', 'selected', 'rejected'] }] };
+      if (n.t === 'paper') return { table: 'research_sources', id: r.id, title: 'Cikk szerkesztése', fields: [{ k: 'title', l: 'Cím', ty: 'text' }, { k: 'venue', l: 'Venue', ty: 'text' }, { k: 'year', l: 'Év', ty: 'number' }, { k: 'screening', l: 'Szűrés', ty: 'select', o: ['unscreened', 'include', 'maybe', 'exclude'] }] };
+      if (n.t === 'study') return { table: 'research_studies', id: r.id, title: 'Irodalom-study szerkesztése', fields: [{ k: 'title', l: 'Cím', ty: 'text' }, { k: 'question', l: 'Kérdés', ty: 'textarea' }] };
+      if (n.t === 'step') return { table: 'research_protocol_steps', id: r.id, title: 'Protokoll-lépés szerkesztése', fields: [{ k: 'title', l: 'Cím', ty: 'text' }, { k: 'kind', l: 'Típus', ty: 'select', o: PROT_KINDS }, { k: 'status', l: 'Státusz', ty: 'select', o: ['queued', 'running', 'done', 'blocked'] }, { k: 'needs_approval', l: 'Jóváhagyás szükséges', ty: 'checkbox' }] };
+      if (n.t === 'venue') return { table: 'research_journal_picks', id: r.id, title: 'Folyóirat szerkesztése', fields: [{ k: 'title', l: 'Cím', ty: 'text' }, { k: 'npi_level', l: 'NPI szint', ty: 'text' }, { k: 'status', l: 'Státusz', ty: 'select', o: ['candidate', 'shortlisted', 'selected'] }] };
+      if (n.t === 'section') return { table: 'research_files', id: r.id, title: 'Draft-szekció szerkesztése', fields: [{ k: 'content', l: 'Tartalom (LaTeX / Markdown)', ty: 'bigtext' }] };
+      return null;   // review = generated file, no editable metadata here
+    }
+    function openEdit(n) {
+      var sp = editSpec(n); if (!sp) return;
+      // section content isn't loaded in the graph query (only path/size) → fetch it so a save can't blank the file
+      if (n.t === 'section') { sb.from('research_files').select('content').eq('id', sp.id).maybeSingle().then(function (fr) { setEform({ content: (fr && fr.data && fr.data.content) || '' }); setEditing(sp); }); return; }
+      var f = {}; sp.fields.forEach(function (fd) { var v = n.ref[fd.k]; f[fd.k] = fd.ty === 'checkbox' ? !!v : (v == null ? '' : v); });
+      setEform(f); setEditing(sp);
+    }
+    function saveEdit() {
+      var sp = editing; if (!sp) return;
+      var patch = {};
+      sp.fields.forEach(function (fd) {
+        var v = eform[fd.k];
+        if (fd.ty === 'number') patch[fd.k] = (v === '' || v == null) ? null : (parseFloat(v) || 0);
+        else if (fd.ty === 'checkbox') patch[fd.k] = !!v;
+        else patch[fd.k] = (typeof v === 'string' && !v.trim()) ? (fd.ty === 'select' ? v : null) : v;
+      });
+      if (sp.table === 'research_files') { patch.size = (patch.content || '').length; patch.updated_at = new Date().toISOString(); }
+      sb.from(sp.table).update(patch).eq('id', sp.id).then(function (r) {
+        if (r && r.error) { window.PRUI.toast(r.error.message, { kind: 'error' }); return; }
+        setEditing(null); setBump(function (x) { return x + 1; }); window.PRUI.toast('✓ Mentve', { kind: 'ok' });
+      });
+    }
 
     if (!data) return h('div', { className: 'rmap-wrap' }, h('div', { className: 'empty' }, 'Térkép betöltése…'));
     var g = graph();
@@ -3668,9 +3705,22 @@
         h('div', { className: 'rmap-insp-b' },
           h('div', { className: 'rmap-kv' }, Object.keys(sn.m).map(function (kk) { return [h('span', { className: 'k', key: 'k' + kk }, kk), h('span', { className: 'v', key: 'v' + kk }, sn.m[kk])]; })),
           h('div', { className: 'rmap-insp-acts' },
-            h('button', { className: 'btn pri', style: { fontSize: 12 }, onClick: function () { if (props.onGoTab) props.onGoTab(RMAP_TYPE[sn.t].tab); } }, 'Megnyitás a ' + RMAP_TYPE[sn.t].lab + ' fülön →'),
+            (props.canEdit && editSpec(sn)) ? h('button', { className: 'btn pri', style: { fontSize: 12 }, onClick: function () { openEdit(sn); } }, '✎ Metaadat szerkesztése') : null,
+            h('button', { className: 'btn', style: { fontSize: 12 }, onClick: function () { if (props.onGoTab) props.onGoTab(RMAP_TYPE[sn.t].tab); } }, 'Megnyitás a ' + RMAP_TYPE[sn.t].lab + ' fülön →'),
             (sn.ref && sn.ref.url) ? h('a', { className: 'btn', style: { fontSize: 12, textDecoration: 'none' }, href: sn.ref.url, target: '_blank', rel: 'noopener' }, 'Forrás ↗') : null),
-          h('p', { className: 'rmap-insp-note' }, 'A térkép a projekt valós adataiból épül (read-only nézet). Az inline szerkesztés + a fázis-akciók a következő lépés (P2).'))) : null);
+          h('p', { className: 'rmap-insp-note' }, 'A metaadat itt közvetlenül szerkeszthető — ugyanazok az adatok, mint a fázis-paneleken. A canvason maradsz, modal helyett.'))) : null,
+      editing ? h('div', { className: 'scrim', onClick: function () { setEditing(null); } },
+        h('div', { className: 'modal', style: { width: editing.fields.some(function (f) { return f.ty === 'bigtext'; }) ? 680 : 460 }, onClick: function (e) { e.stopPropagation(); } },
+          h('div', { className: 'modal-h' }, h('b', null, editing.title), h('button', { className: 'x', 'aria-label': 'Close', onClick: function () { setEditing(null); } }, '×')),
+          h('div', { className: 'modal-b' }, editing.fields.map(function (fd) {
+            return h('div', { className: 'field', key: fd.k },
+              h('label', null, fd.l),
+              fd.ty === 'select' ? h('select', { value: eform[fd.k], onChange: function (e) { var v = e.target.value; setEform(function (o) { var n = Object.assign({}, o); n[fd.k] = v; return n; }); } }, fd.o.map(function (op) { return h('option', { key: op, value: op }, op); }))
+                : fd.ty === 'checkbox' ? h('label', { style: { display: 'flex', alignItems: 'center', gap: 8, fontWeight: 400 } }, h('input', { type: 'checkbox', checked: !!eform[fd.k], onChange: function (e) { var v = e.target.checked; setEform(function (o) { var n = Object.assign({}, o); n[fd.k] = v; return n; }); } }), 'Igen')
+                  : (fd.ty === 'textarea' || fd.ty === 'bigtext') ? h('textarea', { rows: fd.ty === 'bigtext' ? 14 : 3, style: fd.ty === 'bigtext' ? { fontFamily: 'ui-monospace,Menlo,monospace', fontSize: 12.5 } : null, value: eform[fd.k], onChange: function (e) { var v = e.target.value; setEform(function (o) { var n = Object.assign({}, o); n[fd.k] = v; return n; }); } })
+                    : h('input', { type: fd.ty === 'number' ? 'number' : 'text', value: eform[fd.k], onChange: function (e) { var v = e.target.value; setEform(function (o) { var n = Object.assign({}, o); n[fd.k] = v; return n; }); } }));
+          })),
+          h('div', { className: 'modal-foot' }, h('button', { className: 'btn', onClick: function () { setEditing(null); } }, 'Mégse'), h('button', { className: 'btn pri', onClick: saveEdit }, 'Mentés')))) : null);
   }
 
   function ProjectDetail(props) {
