@@ -773,6 +773,38 @@
       html.newdesign .rv-lib-side { border-right: 0; border-bottom: 1px solid var(--line); padding-right: 0; padding-bottom: 12px; }
       html.newdesign .rv-lib-side .rv-fgrp { display: inline-block; vertical-align: top; margin-right: 18px; }
     }
+
+    /* Pipeline Canvas (Map) — P1a swimlane materializer */
+    .rmap-wrap { display: flex; gap: 14px; align-items: stretch; }
+    .rmap-stage { flex: 1; position: relative; height: calc(100vh - 240px); min-height: 460px; overflow: hidden; background: var(--surface-2); border: 1px solid var(--line); border-radius: 14px; cursor: grab; }
+    .rmap-stage:active { cursor: grabbing; }
+    .rmap-world { position: absolute; top: 0; left: 0; transform-origin: 0 0; }
+    .rmap-edges { position: absolute; top: 0; left: 0; overflow: visible; pointer-events: none; }
+    .rmap-lane { position: absolute; top: 0; border-right: 1px dashed var(--line-2); }
+    .rmap-lane.alt { background: color-mix(in srgb, var(--surface) 45%, transparent); }
+    .rmap-lh { position: absolute; top: 12px; left: 14px; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; color: var(--faint); white-space: nowrap; }
+    .rmap-node { position: absolute; width: 204px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 1px 2px rgba(20,26,40,.05), 0 10px 26px -20px rgba(20,26,40,.5); padding: 10px 12px 10px 14px; cursor: pointer; }
+    .rmap-node::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; border-radius: 12px 0 0 12px; background: var(--nc, var(--accent)); }
+    .rmap-node:hover { border-color: var(--nc, var(--accent)); }
+    .rmap-node.sel { border-color: var(--nc, var(--accent)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--nc, var(--accent)) 22%, transparent); }
+    .rmap-nh { display: flex; align-items: center; gap: 7px; } .rmap-ni { font-size: 15px; flex: none; } .rmap-nt { font-size: 12.5px; font-weight: 700; line-height: 1.25; }
+    .rmap-nm { margin-top: 5px; font-size: 11px; color: var(--muted); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; } .rmap-nm b { color: var(--ink); }
+    .rmap-chip { font-size: 10px; font-weight: 750; padding: 2px 6px; border-radius: 6px; }
+    .rmap-chip.inc, .rmap-chip.done { color: var(--ok, #0f7a4a); background: color-mix(in srgb, var(--ok, #0f7a4a) 14%, transparent); }
+    .rmap-chip.run { color: var(--accent); background: var(--accent-tint); } .rmap-chip.pend { color: var(--faint); background: var(--surface-2); }
+    .rmap-chip.gate { color: var(--warn, #8f5407); background: color-mix(in srgb, var(--warn, #8f5407) 15%, transparent); }
+    .rmap-node.t-idea { --nc: #b7791f; } .rmap-node.t-paper { --nc: var(--accent); } .rmap-node.t-study { --nc: #7c3aed; } .rmap-node.t-review { --nc: #0f766e; } .rmap-node.t-step { --nc: #0f7a4a; } .rmap-node.t-venue { --nc: #be2f5b; } .rmap-node.t-section { --nc: #3563c9; }
+    .rmap-zoom { position: absolute; right: 14px; bottom: 14px; display: flex; gap: 6px; }
+    .rmap-zoom button { width: 32px; height: 32px; border: 1px solid var(--line); background: var(--surface); color: var(--muted); border-radius: 8px; font-size: 15px; cursor: pointer; }
+    .rmap-hint { position: absolute; left: 14px; bottom: 14px; font-size: 11px; color: var(--faint); background: color-mix(in srgb, var(--surface) 80%, transparent); padding: 4px 9px; border-radius: 7px; }
+    .rmap-empty { text-align: center; padding: 60px 24px; color: var(--muted); } .rmap-empty b { display: block; color: var(--ink); font-size: 16px; margin: 10px 0 6px; } .rmap-empty p { max-width: 46ch; margin: 0 auto; font-size: 13px; }
+    .rmap-insp { width: 300px; flex: none; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; display: flex; flex-direction: column; align-self: flex-start; max-height: calc(100vh - 240px); }
+    .rmap-insp-h { display: flex; align-items: flex-start; gap: 9px; padding: 13px 14px; border-bottom: 1px solid var(--line); } .rmap-insp-h .rmap-ni { font-size: 19px; } .rmap-insp-h b { font-size: 14px; line-height: 1.3; display: block; } .rmap-insp-ty { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin-top: 2px; }
+    .rmap-insp-x { margin-left: auto; border: 1px solid var(--line); background: var(--surface); color: var(--muted); width: 28px; height: 28px; border-radius: 7px; cursor: pointer; flex: none; }
+    .rmap-insp-b { padding: 13px 14px; overflow-y: auto; }
+    .rmap-kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 11px; font-size: 12px; margin-bottom: 13px; } .rmap-kv .k { color: var(--faint); font-weight: 600; } .rmap-kv .v { color: var(--ink); word-break: break-word; }
+    .rmap-insp-acts { display: flex; flex-direction: column; gap: 8px; } .rmap-insp-note { font-size: 11px; color: var(--faint); line-height: 1.5; margin: 13px 0 0; border-top: 1px solid var(--line); padding-top: 11px; }
+    @media (max-width: 900px) { .rmap-wrap { flex-direction: column; } .rmap-insp { width: auto; } }
   </style>
   <script src="theme.js?v=1783721200"></script>
   <script src="nav.js?v=1783960000"></script>
@@ -800,7 +832,7 @@
   <script src="https://cdn.jsdelivr.net/npm/tus-js-client@4.1.0/dist/tus.min.js"></script>
   <script type="text/babel" src="canvas.jsx?v=1783137934"></script>
   <script type="text/babel" src="notes.jsx?v=1783137934"></script>
-  <script type="text/babel" src="research.jsx?v=1784050000"></script>
+  <script type="text/babel" src="research.jsx?v=1784120000"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>

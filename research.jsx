@@ -3520,6 +3520,106 @@
   }
 
   // ---------- Project detail ----------
+  // ---------- Pipeline Canvas (P1a): auto-materialize the WHOLE pipeline onto one swimlane infinite canvas ----------
+  // Reads the project's real tables → typed nodes + provenance edges → 6 swimlanes + pan/zoom + a docked inspector.
+  // Read-only view for now (P2 = inline edit + phase actions replacing modals). New-design flag only.
+  var RMAP_PHASES = [['ideas', 'Ideas', '💡'], ['literature', 'Literature', '📚'], ['sr', 'Systematic review', '🔬'], ['protocol', 'Protocol', '🧪'], ['journal', 'Journal', '🎯'], ['writing', 'Writing', '✍️']];
+  var RMAP_TYPE = { idea: { ic: '💡', lab: 'Ötlet', tab: 'ideas' }, paper: { ic: '📄', lab: 'Cikk', tab: 'literature' }, study: { ic: '🔎', lab: 'Irodalom', tab: 'literature' }, review: { ic: '📝', lab: 'Áttekintés', tab: 'study' }, step: { ic: '🧪', lab: 'Protokoll-lépés', tab: 'protocol' }, venue: { ic: '🎯', lab: 'Folyóirat', tab: 'journal' }, section: { ic: '✍️', lab: 'Draft-szekció', tab: 'writing' } };
+  function PipelineCanvas(props) {
+    var dS = useState(null), data = dS[0], setData = dS[1];   // null = loading
+    var vS = useState({ tx: 30, ty: 18, k: 1 }), view = vS[0], setView = vS[1];
+    var selS = useState(null), sel = selS[0], setSel = selS[1];
+    var drag = useRef(null), stageRef = useRef(null), alive = useRef(true);
+    useEffect(function () { return function () { alive.current = false; }; }, []);
+    useEffect(function () {
+      var pid = props.projectId;
+      Promise.all([
+        sb.from('research_ideas').select('id,question,hypothesis,novelty,status').eq('project_id', pid).neq('status', 'rejected').order('created_at', { ascending: true }).limit(24),
+        sb.from('research_studies').select('id,idea_id,title,status').eq('project_id', pid),
+        sb.from('research_sources').select('id,title,venue,cited_by,year,screening,url').eq('project_id', pid).order('cited_by', { ascending: false, nullsFirst: false }).limit(10),
+        sb.from('research_sources').select('id', { count: 'exact', head: true }).eq('project_id', pid),
+        sb.from('research_sources').select('id', { count: 'exact', head: true }).eq('project_id', pid).eq('screening', 'include'),
+        sb.from('research_protocols').select('id,title,status').eq('project_id', pid).neq('status', 'archived').order('created_at', { ascending: false }).limit(1),
+        sb.from('research_journal_picks').select('id,title,status,npi_level').eq('project_id', pid),
+        sb.from('research_files').select('id,path,size').eq('project_id', pid).like('path', 'writing/%')
+      ]).then(function (r) {
+        if (!alive.current) return;
+        var base = { ideas: (r[0].data) || [], studies: (r[1].data) || [], topSrc: (r[2].data) || [], srcTotal: r[3].count || 0, inclTotal: r[4].count || 0, protocol: (r[5].data && r[5].data[0]) || null, journals: (r[6].data) || [], wfiles: (r[7].data) || [] };
+        if (base.protocol) sb.from('research_protocol_steps').select('id,ord,title,kind,status,needs_approval').eq('protocol_id', base.protocol.id).order('ord', { ascending: true }).then(function (sr) { if (alive.current) setData(Object.assign(base, { steps: (sr.data) || [] })); });
+        else setData(Object.assign(base, { steps: [] }));
+      }, function () { if (alive.current) setData({ ideas: [], studies: [], topSrc: [], srcTotal: 0, inclTotal: 0, protocol: null, journals: [], wfiles: [], steps: [] }); });
+    }, [props.projectId]);
+
+    function graph() {
+      var d = data, N = [], E = [];
+      (d.ideas || []).forEach(function (x) { N.push({ id: 'i' + x.id, t: 'idea', ph: 0, title: x.question || 'Ötlet', m: { Novelty: (x.novelty != null ? x.novelty + ' / 100' : '—'), Hipotézis: x.hypothesis || '—' }, ref: x }); });
+      var hasLit = d.srcTotal > 0 || d.studies.length;
+      if (hasLit) {
+        N.push({ id: 'lit', t: 'study', ph: 1, title: (d.studies[0] && d.studies[0].title) || 'Irodalom', m: { Források: String(d.srcTotal), Included: String(d.inclTotal) } });
+        d.topSrc.forEach(function (s) { N.push({ id: 'p' + s.id, t: 'paper', ph: 1, title: s.title || 'Cikk', m: { Venue: s.venue || '—', Év: String(s.year || '—'), Idézettség: String(s.cited_by || 0) }, dec: s.screening, ref: s }); E.push(['lit', 'p' + s.id]); });
+        var linked = false;
+        d.studies.forEach(function (st) { if (st.idea_id) { E.push(['i' + st.idea_id, 'lit']); linked = true; } });
+        if (!linked && d.ideas.length) E.push(['i' + d.ideas[0].id, 'lit']);
+      }
+      var hasSR = d.studies.length > 0;
+      if (hasSR) { N.push({ id: 'sr', t: 'review', ph: 2, title: 'Systematic review', m: { Studies: String(d.studies.length) } }); if (hasLit) E.push(['lit', 'sr']); }
+      if (d.protocol && d.steps.length) {
+        d.steps.forEach(function (s, i) { N.push({ id: 'r' + s.id, t: 'step', ph: 3, title: s.title || ('Lépés ' + (i + 1)), m: { Kind: s.kind || '—', Státusz: s.status || '—', Jóváhagyás: s.needs_approval ? 'szükséges' : '—' }, st: s.status, gate: !!s.needs_approval, ref: s }); if (i > 0) E.push(['r' + d.steps[i - 1].id, 'r' + s.id]); });
+        if (hasSR) E.push(['sr', 'r' + d.steps[0].id]); else if (hasLit) E.push(['lit', 'r' + d.steps[0].id]);
+      }
+      d.journals.forEach(function (j) { N.push({ id: 'v' + j.id, t: 'venue', ph: 4, title: j.title || 'Folyóirat', m: { NPI: j.npi_level || '—', Státusz: j.status || '—' }, ref: j }); if (hasSR) E.push(['sr', 'v' + j.id]); });
+      var lastStep = (d.protocol && d.steps.length) ? ('r' + d.steps[d.steps.length - 1].id) : (hasSR ? 'sr' : null);
+      d.wfiles.forEach(function (f) { var nm = String(f.path).replace(/^writing\//, '').replace(/\.(md|tex)$/, ''); N.push({ id: 'w' + f.id, t: 'section', ph: 5, title: nm || 'szekció', m: { Fájl: f.path, Méret: (f.size || 0) + ' B' }, ref: f }); if (lastStep) E.push([lastStep, 'w' + f.id]); });
+      var LANEW = 252, ROWH = 104, cnt = {};
+      N.forEach(function (n) { var o = (cnt[n.ph] = (cnt[n.ph] || 0)); n.x = n.ph * LANEW + 22; n.y = 66 + o * ROWH; cnt[n.ph] = o + 1; });
+      var maxRows = Math.max.apply(null, [1].concat(Object.keys(cnt).map(function (k) { return cnt[k]; })));
+      var by = {}; N.forEach(function (n) { by[n.id] = n; });
+      return { N: N, E: E, laneW: LANEW, height: 66 + maxRows * ROWH + 40, by: by };
+    }
+
+    function onMove(e) { var dd = drag.current; if (!dd) return; setView(function (v) { return { tx: dd.tx + (e.clientX - dd.sx), ty: dd.ty + (e.clientY - dd.sy), k: v.k }; }); }
+    function onUp() { drag.current = null; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); }
+    function onDown(e) { if (e.target.closest && e.target.closest('.rmap-node')) return; drag.current = { sx: e.clientX, sy: e.clientY, tx: view.tx, ty: view.ty }; window.addEventListener('mousemove', onMove); window.addEventListener('mouseup', onUp); }
+    function onWheel(e) { e.preventDefault(); var st = stageRef.current; if (!st) return; var r = st.getBoundingClientRect(); var mx = e.clientX - r.left, my = e.clientY - r.top; setView(function (v) { var nk = Math.min(2.2, Math.max(.3, v.k * (e.deltaY < 0 ? 1.12 : 0.89))); return { tx: mx - (mx - v.tx) * (nk / v.k), ty: my - (my - v.ty) * (nk / v.k), k: nk }; }); }
+    function zoom(f) { setView(function (v) { var nk = Math.min(2.2, Math.max(.3, v.k * f)); return { tx: v.tx, ty: v.ty, k: nk }; }); }
+
+    if (!data) return h('div', { className: 'rmap-wrap' }, h('div', { className: 'empty' }, 'Térkép betöltése…'));
+    var g = graph();
+    if (!g.N.length) return h('div', { className: 'rmap-wrap' }, h('div', { className: 'rmap-empty' }, h('div', { style: { fontSize: 30 } }, '🗺️'), h('b', null, 'A térkép a projekt adataiból épül fel'), h('p', null, 'Adj hozzá ötleteket, irodalmat, protokollt — és itt egy összefüggő canvason látod majd az egészet, a provenance-élekkel.')));
+    var NW = 204, NH = 74;
+    function ctr(id) { var n = g.by[id]; return { x: n.x + NW / 2, y: n.y + NH / 2 }; }
+    var svgW = 0; g.N.forEach(function (n) { svgW = Math.max(svgW, n.x + NW + 60); });
+    var edgeEls = g.E.map(function (e, i) { var a = g.by[e[0]], b = g.by[e[1]]; if (!a || !b) return null; var ca = ctr(e[0]), cb = ctr(e[1]); var dx = (cb.x - ca.x) * 0.5; var cite = e[2] === 'cite'; return h('path', { key: i, d: 'M' + ca.x + ',' + ca.y + ' C' + (ca.x + dx) + ',' + ca.y + ' ' + (cb.x - dx) + ',' + cb.y + ' ' + cb.x + ',' + cb.y, fill: 'none', stroke: cite ? 'var(--accent-tint)' : 'var(--line-2)', strokeWidth: cite ? 1.5 : 2, strokeDasharray: cite ? '5 5' : null }); });
+    function body(n) {
+      var k = [h('div', { className: 'rmap-nh', key: 'h' }, h('span', { className: 'rmap-ni' }, RMAP_TYPE[n.t].ic), h('span', { className: 'rmap-nt' }, n.title))];
+      if (n.t === 'study') k.push(h('div', { className: 'rmap-nm', key: 'm' }, h('b', null, n.m.Források), ' forrás → ', h('b', null, n.m.Included), ' included'));
+      else if (n.t === 'paper') k.push(h('div', { className: 'rmap-nm', key: 'm' }, (n.m.Venue || '') + ' · ' + n.m.Idézettség + ' cite', n.dec === 'include' ? h('span', { className: 'rmap-chip inc' }, '✓ incl') : null));
+      else if (n.t === 'step') k.push(h('div', { className: 'rmap-nm', key: 'm' }, h('span', { className: 'rmap-chip ' + (n.st === 'done' ? 'done' : n.st === 'running' ? 'run' : 'pend') }, n.st || 'vár'), ' ' + (n.m.Kind || ''), n.gate ? h('span', { className: 'rmap-chip gate' }, 'gate') : null));
+      else if (n.t === 'venue') k.push(h('div', { className: 'rmap-nm', key: 'm' }, n.m.NPI + ' · ' + n.m.Státusz));
+      else if (n.t === 'section') k.push(h('div', { className: 'rmap-nm', key: 'm' }, n.m.Méret));
+      else if (n.t === 'idea') k.push(h('div', { className: 'rmap-nm', key: 'm' }, 'novelty ' + n.m.Novelty));
+      else if (n.t === 'review') k.push(h('div', { className: 'rmap-nm', key: 'm' }, n.m.Studies + ' study'));
+      return k;
+    }
+    var sn = sel ? g.by[sel] : null;
+    return h('div', { className: 'rmap-wrap' },
+      h('div', { className: 'rmap-stage', ref: stageRef, onMouseDown: onDown, onWheel: onWheel },
+        h('div', { className: 'rmap-world', style: { transform: 'translate(' + view.tx + 'px,' + view.ty + 'px) scale(' + view.k + ')' } },
+          RMAP_PHASES.map(function (p, i) { return h('div', { className: 'rmap-lane' + (i % 2 ? ' alt' : ''), key: p[0], style: { left: (i * g.laneW) + 'px', width: g.laneW + 'px', height: g.height + 'px' } }, h('div', { className: 'rmap-lh' }, p[2] + ' ' + p[1])); }),
+          h('svg', { className: 'rmap-edges', width: svgW, height: g.height }, edgeEls),
+          g.N.map(function (n) { return h('div', { key: n.id, className: 'rmap-node t-' + n.t + (sel === n.id ? ' sel' : ''), style: { left: n.x + 'px', top: n.y + 'px' }, onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); setSel(n.id); } }, body(n)); })),
+        h('div', { className: 'rmap-zoom' }, h('button', { onClick: function () { zoom(1.18); } }, '+'), h('button', { onClick: function () { zoom(0.85); } }, '−')),
+        h('div', { className: 'rmap-hint' }, 'Húzd = pan · görgő = zoom · kattints egy node-ra')),
+      sn ? h('div', { className: 'rmap-insp' },
+        h('div', { className: 'rmap-insp-h' }, h('span', { className: 'rmap-ni' }, RMAP_TYPE[sn.t].ic), h('div', { style: { minWidth: 0 } }, h('b', null, sn.title), h('div', { className: 'rmap-insp-ty' }, RMAP_TYPE[sn.t].lab)), h('button', { className: 'rmap-insp-x', onClick: function () { setSel(null); } }, '×')),
+        h('div', { className: 'rmap-insp-b' },
+          h('div', { className: 'rmap-kv' }, Object.keys(sn.m).map(function (kk) { return [h('span', { className: 'k', key: 'k' + kk }, kk), h('span', { className: 'v', key: 'v' + kk }, sn.m[kk])]; })),
+          h('div', { className: 'rmap-insp-acts' },
+            h('button', { className: 'btn pri', style: { fontSize: 12 }, onClick: function () { if (props.onGoTab) props.onGoTab(RMAP_TYPE[sn.t].tab); } }, 'Megnyitás a ' + RMAP_TYPE[sn.t].lab + ' fülön →'),
+            (sn.ref && sn.ref.url) ? h('a', { className: 'btn', style: { fontSize: 12, textDecoration: 'none' }, href: sn.ref.url, target: '_blank', rel: 'noopener' }, 'Forrás ↗') : null),
+          h('p', { className: 'rmap-insp-note' }, 'A térkép a projekt valós adataiból épül (read-only nézet). Az inline szerkesztés + a fázis-akciók a következő lépés (P2).'))) : null);
+  }
+
   function ProjectDetail(props) {
     var p = props.project;
     var tS = useState(props.initTab || 'overview'), tab = tS[0], setTab = tS[1];   // Memory step deep-link opens the protocol tab
@@ -3589,6 +3689,7 @@
       h('h3', { style: { marginTop: 0 } }, '📤 Submission'),
       h('p', { style: { fontSize: 13.5, color: 'var(--muted)', lineHeight: 1.55 } }, 'When the manuscript is ready, submit and track it in the Érkeztető (submission) workflow — desk-check, reviewers, decisions and camera-ready.'),
       h('a', { className: 'btn pri', href: 'Submissions.html' + (/[?&]adminView=1/.test(location.search) ? '?adminView=1' : ''), style: { textDecoration: 'none', display: 'inline-block' } }, 'Open the submission workflow →'));
+    else if (tab === 'map') content = h(PipelineCanvas, { projectId: p.id, project: p, canEdit: props.canEdit, authorId: props.authorId, onGoTab: function (t) { setTab(t); } });
     else if (tab === 'canvas') content = window.PRCanvas ? h(window.PRCanvas, { projectId: p.id, canEdit: props.canEdit, authorId: props.authorId }) : h('div', { className: 'empty' }, 'Loading Canvas…');
     else if (tab === 'notes') content = window.PRNotes ? h(window.PRNotes, { projectId: p.id, canEdit: props.canEdit, authorId: props.authorId }) : h('div', { className: 'empty' }, 'Loading Notes…');
     else if (tab === 'log') content = h(LogPanel, { projectId: p.id, authorId: props.authorId, entries: props.log, canEdit: props.canEdit, onChanged: props.onChanged });
@@ -3608,7 +3709,7 @@
       return h('div', { className: 'rv-stnav' }, kids);
     }
     function subNav() {
-      return h('div', { className: 'rv-subnav' }, [['canvas', 'Canvas', null], ['notes', 'Notes', null], ['data', 'Data', (props.datasets || []).length], ['log', 'Log', (props.log || []).length], ['tasks', 'Tasks', openTasks]].map(function (t) {
+      return h('div', { className: 'rv-subnav' }, [['map', '🗺️ Map', null], ['canvas', 'Canvas', null], ['notes', 'Notes', null], ['data', 'Data', (props.datasets || []).length], ['log', 'Log', (props.log || []).length], ['tasks', 'Tasks', openTasks]].map(function (t) {
         return h('button', { key: t[0], className: 'rv-sub' + (tab === t[0] ? ' on' : ''), onClick: function () { setTab(t[0]); } }, h('span', null, t[1]), t[2] ? h('span', { className: 'rv-sub-c' }, t[2]) : null);
       }));
     }
