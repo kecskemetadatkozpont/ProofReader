@@ -1657,6 +1657,8 @@
     var buS = useState(false), busy = buS[0], setBusy = buS[1];
     var erS = useState(''), err = erS[0], setErr = erS[1];
     var opS = useState(null), openReport = opS[0], setOpenReport = opS[1];
+    var bkS = useState(null), backup = bkS[0], setBackup = bkS[1];   // Claude-backup Study driver state (Elicit quota fallback)
+    var ofS = useState(''), offer = ofS[0], setOffer = ofS[1];       // the failed research-question, offered for the backup
     var alive = useRef(true);
     function load() { callElicit({ action: 'report.list', project_id: props.projectId }).then(function (d) { if (alive.current) setJobs((d && d.jobs) || []); }); }
     useEffect(function () { alive.current = true; if (canUse) load(); return function () { alive.current = false; }; }, [canUse]);
@@ -1676,14 +1678,54 @@
       return function () { clearInterval(iv); };
     }, [jobs && jobs.map(function (j) { return j.id + j.status; }).join(',')]);
     function create() {
-      var rq = q.trim(); if (!rq) return; setBusy(true); setErr('');
+      var rq = q.trim(); if (!rq) return; setBusy(true); setErr(''); setOffer('');
       callElicit({ action: 'report.create', researchQuestion: rq, project_id: props.projectId, title: (props.project && props.project.title) || null }).then(function (d) {
         setBusy(false);
-        if (!d || d.error) { setErr((d && d.error) || 'Could not start the report.'); return; }
+        if (!d || d.error) { var em = (d && d.error) || 'Could not start the report.'; setErr(em); if (/quota|limit|rate|napi|daily|budget/i.test(String(em))) setOffer(rq); return; }
         setQ(''); if (d.deduped) setErr('A report for this question is already in progress.'); load();
       });
     }
     function resume(j) { callElicit({ action: 'job.resume', job_id: j.id }).then(function (d) { if (d && d.error) setErr(d.error); load(); }); }
+
+    // ---- Claude backup: no Elicit quota → run the built-in Claude+OpenAlex Study funnel for the same question ----
+    var BK_STAGE = { setup: 'Study előkészítése', s1: 'Keresés + gyors triage (OpenAlex)', s2: 'Absztrakt-szűrés (Claude)', s3: 'Full-text szűrés (Claude)', review: 'Áttekintés írása (Claude)' };
+    function runBackup(rq) {
+      if (!rq || (backup && /^s|setup|review/.test(backup.stage))) return;
+      setOffer(''); setErr(''); setBackup({ stage: 'setup', msg: 'Study létrehozása…' });
+      var uid = props.authorId;
+      sb.from('research_studies').insert({ project_id: props.projectId, idea_id: null, title: rq.slice(0, 80), question: rq.slice(0, 4000), created_by: uid }).select('id').maybeSingle().then(function (sr) {
+        var sid = sr && sr.data && sr.data.id;
+        if (!sid) { setBackup({ stage: 'error', msg: 'A study nem jött létre' + (sr && sr.error ? ': ' + sr.error.message : '') }); return; }
+        var rows = LS_STEPS.map(function (s) { return { study_id: sid, step: s.step, kind: s.kind, config: lsDefaultConfig(s.step, props.project, null) }; });
+        sb.from('research_study_steps').insert(rows).then(function (rr) {
+          if (rr && rr.error) { setBackup({ stage: 'error', msg: 'study-lépések: ' + rr.error.message, sid: sid }); return; }
+          callStudy({ action: 'plan', study_id: sid }).then(function () { driveFunnel(rq, sid, 's1', 0, 0); }, function () { driveFunnel(rq, sid, 's1', 0, 0); });
+        });
+      });
+    }
+    function driveFunnel(rq, sid, stage, offset, iter) {
+      if (!alive.current) return;
+      if (stage === 'review') {
+        setBackup({ stage: 'review', msg: BK_STAGE.review + '…', sid: sid });
+        callStudy({ action: 'generate_review', study_id: sid }).then(function (d) {
+          if (!alive.current) return;
+          if (d && d.error) { if (/full-?text|passed|include/i.test(d.error)) setBackup({ stage: 'done', msg: 'A szűrés nem talált full-text included cikket — a részletek a Study fülön.', sid: sid }); else setBackup({ stage: 'error', msg: 'Review: ' + d.error, sid: sid }); return; }
+          var fp = d && d.file_path;
+          setBackup({ stage: 'done', msg: '✓ Kész' + (d && d.words ? ' — ~' + d.words + ' szó' : ''), sid: sid, filePath: fp });
+          if (fp) sb.from('research_files').select('content').eq('project_id', props.projectId).eq('path', fp).maybeSingle().then(function (fr) { var c = fr && fr.data && fr.data.content; if (c && alive.current) setOpenReport({ result_title: 'Claude backup: ' + rq.slice(0, 90), result_body: c }); });
+        }, function () { setBackup({ stage: 'error', msg: 'A review-hívás nem sikerült.', sid: sid }); });
+        return;
+      }
+      setBackup({ stage: stage, msg: (BK_STAGE[stage] || stage) + '…', sid: sid });
+      var act = stage === 's1' ? { action: 'search_step1', study_id: sid, step: 1, offset: offset } : { action: 'screen_batch', study_id: sid, step: (stage === 's2' ? 2 : 3), offset: offset };
+      callStudy(act).then(function (d) {
+        if (!alive.current) return;
+        if (d && d.error) { setBackup({ stage: 'error', msg: (BK_STAGE[stage] || stage) + ': ' + d.error, sid: sid }); return; }
+        var dflt = stage === 's1' ? 20 : (stage === 's2' ? 8 : 3), ni = iter + 1;
+        if (d.done || ni > 40) driveFunnel(rq, sid, stage === 's1' ? 's2' : stage === 's2' ? 's3' : 'review', 0, 0);
+        else driveFunnel(rq, sid, stage, (d.next_offset != null ? d.next_offset : offset + dflt), ni);
+      }, function () { setBackup({ stage: 'error', msg: 'Hálózati hiba a szűrés közben.', sid: sid }); });
+    }
     function saveToFiles(j) {
       if (!j.result_body) return;
       var path = 'reports/elicit-' + String(j.id || '').slice(0, 8) + '.md';
@@ -1713,6 +1755,17 @@
         h('button', { className: 'btn pri', disabled: !props.canEdit || busy || !q.trim(), onClick: create }, busy ? '…' : '✨ Generate report')),
       (props.project && props.project.goal) ? h('div', { style: { fontSize: 11.5, color: 'var(--faint)', marginBottom: 6 } }, h('a', { href: '#', onClick: function (e) { e.preventDefault(); setQ(props.project.goal); } }, 'Use the project goal as the question')) : null,
       err ? h('div', { style: { fontSize: 12.5, color: /^✓/.test(err) ? 'var(--ok, #15803d)' : 'var(--danger, #b42318)', margin: '4px 0' } }, err) : null,
+      (offer && props.canEdit) ? h('div', { style: { fontSize: 12.5, background: 'var(--warn-bg, #fbf1dd)', border: '1px solid color-mix(in srgb, var(--warn, #8f5407) 30%, transparent)', borderRadius: 10, padding: '10px 12px', margin: '4px 0', lineHeight: 1.5 } },
+        '⚡ Elfogyott az Elicit-kvóta. Futtassam a beépített ', h('b', null, 'Claude + OpenAlex Study-motorral'), ' ugyanerre a kérdésre? (keresés → szűrés → Claude-áttekintés)',
+        h('div', { style: { marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap' } },
+          h('button', { className: 'btn pri', style: { padding: '5px 12px', fontSize: 12.5 }, onClick: function () { runBackup(offer); } }, '⚡ Claude backup Study'),
+          h('button', { className: 'btn', style: { padding: '5px 12px', fontSize: 12.5 }, onClick: function () { setOffer(''); } }, 'Mégse'))) : null,
+      backup ? h('div', { style: { fontSize: 12.5, border: '1px solid var(--line)', borderRadius: 10, padding: '10px 12px', margin: '4px 0', display: 'flex', alignItems: 'flex-start', gap: 9 } },
+        h('span', { style: { fontSize: 15, flex: 'none' } }, backup.stage === 'error' ? '✗' : backup.stage === 'done' ? '✓' : '⏳'),
+        h('div', { style: { flex: 1, minWidth: 0 } }, h('b', null, 'Claude backup Study'),
+          h('div', { style: { color: backup.stage === 'error' ? 'var(--danger, #b42318)' : backup.stage === 'done' ? 'var(--ok, #15803d)' : 'var(--muted)', marginTop: 2 } }, backup.msg),
+          (backup.stage === 'done' && backup.sid) ? h('div', { style: { marginTop: 6 } }, h('button', { className: 'btn', style: { padding: '3px 10px', fontSize: 11.5 }, onClick: function () { if (props.onGoStudy) props.onGoStudy(); } }, 'Megnyitás a Study fülön →')) : null),
+        (backup.stage === 'done' || backup.stage === 'error') ? h('button', { className: 'btn', style: { padding: '2px 8px', fontSize: 12, flex: 'none' }, onClick: function () { setBackup(null); } }, '×') : null) : null,
       jobs === null ? h('div', { style: { fontSize: 13, color: 'var(--muted)', padding: '8px 0' } }, 'Loading…')
         : jobs.length === 0 ? h('div', { style: { fontSize: 13, color: 'var(--muted)', padding: '8px 0' } }, 'No reports yet — ask a question above. A report keeps running even if you leave.')
           : h('div', { style: { display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 } }, jobs.map(card)),
@@ -3677,7 +3730,7 @@
     if (tab === 'ideas') content = h('div', { className: nd() ? 'ideas2' : null }, h(ChatPanel, { projectId: p.id, supervised: !!p.student_id, canEdit: props.canEdit, authorId: props.authorId, fileOwnerId: props.fileOwnerId, sources: props.sources, onChanged: props.onChanged }), h(IdeasPanel, { projectId: p.id, ideas: props.ideas, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, onStartStudyMulti: function (ideas) { setAutoStudy(ideas || []); setTab('study'); }, onGoStudy: function () { setTab('study'); } }));
     else if (tab === 'literature') content = h(React.Fragment, null,
       h(LiteraturePanel, { projectId: p.id, sources: props.sources, studies: props.studies, canEdit: props.canEdit, myEmail: props.myEmail, onChanged: props.onChanged }),
-      h(ElicitReports, { projectId: p.id, project: p, canEdit: props.canEdit }),
+      h(ElicitReports, { projectId: p.id, project: p, canEdit: props.canEdit, authorId: props.authorId, onGoStudy: function () { setTab('study'); } }),
       h(ElicitTrials, { projectId: p.id, canEdit: props.canEdit }));
     else if (tab === 'study') content = h(ElicitSysReview, { projectId: p.id, project: p, canEdit: props.canEdit });   // SR Studio (primary); the keyword funnel renders persistently below
     else if (tab === 'protocol') content = h(ProtocolPanel, { projectId: p.id, ideas: props.ideas, sources: props.sources, studies: props.studies, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
