@@ -1767,6 +1767,63 @@
       return fetch(CFG.supabaseUrl + '/functions/v1/research-study', { method: 'POST', headers: { 'Content-Type': 'application/json', 'apikey': CFG.supabaseAnonKey, 'Authorization': 'Bearer ' + token }, body: JSON.stringify(body) }).then(function (r) { return r.json().catch(function () { return { error: 'The server response could not be parsed (possibly a timeout) — try again.' }; }); }, function () { return { error: 'network' }; });
     });
   }
+  // ---- Background study-funnel runner: drives the OpenAlex + Claude Study funnel at MODULE level, so a run KEEPS GOING
+  //      when the user switches tabs / views (the recursion is NOT tied to any component's mount). Run state lives here;
+  //      components subscribe to render it and can dismiss/cancel. (A full page reload still stops it — the DB keeps the
+  //      partial funnel state, so nothing is lost.) ----
+  var PRStudyRunner = (function () {
+    var runs = {}, subs = [], seq = 0;
+    var BK = { setup: 'Study előkészítése', s1: 'Keresés + gyors triage (OpenAlex)', s2: 'Absztrakt-szűrés (Claude)', s3: 'Full-text szűrés (Claude)', review: 'Áttekintés írása (Claude)' };
+    function notify() { for (var i = 0; i < subs.length; i++) { try { subs[i](); } catch (e) { } } }
+    function set(id, patch) { if (!runs[id]) return; runs[id] = Object.assign({}, runs[id], patch); notify(); }
+    function drive(id, sid, stage, offset, iter) {
+      if (!runs[id]) return;   // dismissed / cancelled → stop the recursion
+      if (stage === 'review') {
+        set(id, { stage: 'review', msg: BK.review + '…', sid: sid });
+        callStudy({ action: 'generate_review', study_id: sid }).then(function (d) {
+          if (!runs[id]) return; var oc = runs[id].onChanged; if (oc) oc();
+          if (d && d.error) { if (/full-?text|passed|include/i.test(d.error)) set(id, { stage: 'done', msg: 'A szűrés nem talált full-text included cikket, ezért nem készült áttekintés. A szűrési részletekhez: Study fül → nyisd ki a „Keyword screening funnel" panelt, és válaszd ki ezt a study-t.', sid: sid }); else set(id, { stage: 'error', msg: 'Review: ' + d.error, sid: sid }); return; }
+          var fp = d && d.file_path;
+          set(id, { stage: 'done', msg: '✓ Kész' + (d && d.words ? ' — ~' + d.words + ' szó' : '') + ' — a Study fülön a „Keyword screening funnel" panelben is elérhető.', sid: sid, filePath: fp });
+        }, function () { set(id, { stage: 'error', msg: 'A review-hívás nem sikerült.', sid: sid }); });
+        return;
+      }
+      set(id, { stage: stage, msg: (BK[stage] || stage) + '…', sid: sid });
+      var act = stage === 's1' ? { action: 'search_step1', study_id: sid, step: 1, offset: offset } : { action: 'screen_batch', study_id: sid, step: (stage === 's2' ? 2 : 3), offset: offset };
+      callStudy(act).then(function (d) {
+        if (!runs[id]) return;
+        if (d && d.error) { set(id, { stage: 'error', msg: (BK[stage] || stage) + ': ' + d.error, sid: sid }); return; }
+        var dflt = stage === 's1' ? 20 : (stage === 's2' ? 8 : 3), ni = iter + 1;
+        if (d.done || ni > 40) drive(id, sid, stage === 's1' ? 's2' : stage === 's2' ? 's3' : 'review', 0, 0);
+        else drive(id, sid, stage, (d.next_offset != null ? d.next_offset : offset + dflt), ni);
+      }, function () { set(id, { stage: 'error', msg: 'Hálózati hiba a szűrés közben.', sid: sid }); });
+    }
+    return {
+      runs: function () { return runs; },
+      subscribe: function (fn) { subs.push(fn); return function () { var i = subs.indexOf(fn); if (i >= 0) subs.splice(i, 1); }; },
+      dismiss: function (id) { if (runs[id]) { delete runs[id]; notify(); } },   // dismiss a finished card OR cancel a running funnel (the recursion stops on the next step)
+      startBackup: function (rq, ctx) {
+        if (!rq) return null;
+        var id = 'bk' + (++seq);
+        runs[id] = { id: id, projectId: ctx.projectId, onChanged: ctx.onChanged, stage: 'setup', msg: 'Study létrehozása…', title: rq.slice(0, 90) };
+        notify();
+        sb.from('research_studies').insert({ project_id: ctx.projectId, idea_id: null, title: rq.slice(0, 80), question: rq.slice(0, 4000), created_by: ctx.authorId }).select('id').maybeSingle().then(function (sr) {
+          if (!runs[id]) return;
+          var sid = sr && sr.data && sr.data.id;
+          if (!sid) { set(id, { stage: 'error', msg: 'A study nem jött létre' + (sr && sr.error ? ': ' + sr.error.message : '') }); return; }
+          var rows = LS_STEPS.map(function (s) { return { study_id: sid, step: s.step, kind: s.kind, config: lsDefaultConfig(s.step, ctx.project, null) }; });
+          sb.from('research_study_steps').insert(rows).then(function (rr) {
+            if (!runs[id]) return;
+            if (rr && rr.error) { set(id, { stage: 'error', msg: 'study-lépések: ' + rr.error.message, sid: sid }); return; }
+            if (ctx.onChanged) ctx.onChanged();
+            callStudy({ action: 'plan', study_id: sid }).then(function () { drive(id, sid, 's1', 0, 0); }, function () { drive(id, sid, 's1', 0, 0); });
+          });
+        });
+        return id;
+      }
+    };
+  })();
+
   // ---- Elicit automated reports (Phase 2) — calls the elicit-proxy edge function ----
   function callElicit(body) {
     var CFG = window.PR_CONFIG || {};
@@ -1928,8 +1985,8 @@
     var ehS = useState(null), enh = ehS[0], setEnh = ehS[1];       // AI-suggested sharper questions (item 4)
     var ebS = useState(false), enhBusy = ebS[0], setEnhBusy = ebS[1];
     var ibS = useState({}), ideaById = ibS[0], setIdeaById = ibS[1];   // idea_id → question, so each candidate shows the Study-basis idea it came from
-    var bkS = useState({}), backups = bkS[0], setBackups = bkS[1];   // Claude-backup Study drivers, keyed by run id → MULTIPLE studies can run in parallel, each with its own status card
-    var alive = useRef(true), fromCand = useRef(null), bkSeq = useRef(0);   // the candidate a review is being started from → link its launched_job_id after create; bkSeq = per-run backup id counter
+    var bkS = useState(0), setBkTick = bkS[1];   // re-render tick — the actual backup runs live in the module-level PRStudyRunner so they survive tab/view switches
+    var alive = useRef(true), fromCand = useRef(null);   // the candidate a review is being started from → link its launched_job_id after create
     function upf(k, v) { setF(function (prev) { var o = Object.assign({}, prev); o[k] = v; return o; }); }
     // Improve the manual question: accepts Hungarian, returns 2-3 sharper English SR questions to pick from.
     function enhanceQ() {
@@ -1948,6 +2005,8 @@
     function startFromCand(c) { fromCand.current = c.id; setF({ q: c.question || '', protocol: picoText(c.pico), abs: c.abstract_criteria || [], ft: [], ex: c.extraction_questions || [], gen: true, genAbs: true, genEx: true, useFig: false, runFT: true, maxResults: '1000' }); setOpenForm(true); setErr(''); }
     function dismissCand(c) { setCands(function (l) { return (l || []).filter(function (x) { return x.id !== c.id; }); }); sb.from('research_sr_candidates').update({ dismissed: true }).eq('id', c.id); }
     useEffect(function () { alive.current = true; ensureSrCss(); if (canUse) { load(); loadCands(); sb.from('research_ideas').select('id,question').eq('project_id', props.projectId).then(function (r) { if (!alive.current) return; var m = {}; ((r && r.data) || []).forEach(function (x) { m[x.id] = x.question; }); setIdeaById(m); }); } return function () { alive.current = false; }; }, [canUse]);
+    // re-render whenever a background study run changes (the runs live in PRStudyRunner, not in this component's state)
+    useEffect(function () { return PRStudyRunner.subscribe(function () { if (alive.current) setBkTick(function (x) { return x + 1; }); }); }, []);
     // one-click from the Ideas "Study basis" (Start a study from these ideas): generate SR-question drafts here in the studio
     useEffect(function () { if (props.autoGenerate && canUse && !gen) { if (props.onAutoGenerated) props.onAutoGenerated(); generate(); } }, [props.autoGenerate, canUse]);
     useEffect(function () {
@@ -2001,59 +2060,21 @@
     }
     // ---- Claude backup: Elicit SR out of quota → run the built-in Claude + OpenAlex Study funnel. MULTIPLE studies run in
     //      parallel, keyed by a per-run id, each with its own independent status card. ----
-    var BK_STAGE = { setup: 'Study előkészítése', s1: 'Keresés + gyors triage (OpenAlex)', s2: 'Absztrakt-szűrés (Claude)', s3: 'Full-text szűrés (Claude)', review: 'Áttekintés írása (Claude)' };
-    function setBk(id, patch) { if (!alive.current) return; setBackups(function (m) { var n = Object.assign({}, m); n[id] = Object.assign({ id: id }, n[id] || {}, patch); return n; }); }
-    function dismissBk(id) { setBackups(function (m) { var n = Object.assign({}, m); delete n[id]; return n; }); }
-    function runBackup(rq) {
-      if (!rq) return;
-      var id = 'bk' + (++bkSeq.current);   // no re-entrancy block → parallel backup studies are allowed, each tracked separately
-      setBk(id, { stage: 'setup', msg: 'Study létrehozása…', title: rq.slice(0, 90) });
-      sb.from('research_studies').insert({ project_id: props.projectId, idea_id: null, title: rq.slice(0, 80), question: rq.slice(0, 4000), created_by: props.authorId }).select('id').maybeSingle().then(function (sr) {
-        var sid = sr && sr.data && sr.data.id;
-        if (!sid) { setBk(id, { stage: 'error', msg: 'A study nem jött létre' + (sr && sr.error ? ': ' + sr.error.message : '') }); return; }
-        var rows = LS_STEPS.map(function (s) { return { study_id: sid, step: s.step, kind: s.kind, config: lsDefaultConfig(s.step, props.project, null) }; });
-        sb.from('research_study_steps').insert(rows).then(function (rr) {
-          if (rr && rr.error) { setBk(id, { stage: 'error', msg: 'study-lépések: ' + rr.error.message, sid: sid }); return; }
-          if (props.onChanged) props.onChanged();   // surface the new study in the Keyword-funnel list right away
-          callStudy({ action: 'plan', study_id: sid }).then(function () { driveFunnel(id, rq, sid, 's1', 0, 0); }, function () { driveFunnel(id, rq, sid, 's1', 0, 0); });
-        });
-      });
-    }
-    function driveFunnel(id, rq, sid, stage, offset, iter) {
-      if (!alive.current) return;
-      if (stage === 'review') {
-        setBk(id, { stage: 'review', msg: BK_STAGE.review + '…', sid: sid });
-        callStudy({ action: 'generate_review', study_id: sid }).then(function (d) {
-          if (!alive.current) return;
-          if (props.onChanged) props.onChanged();   // refresh so the study + its screening/review show up in the Keyword-funnel list
-          if (d && d.error) { if (/full-?text|passed|include/i.test(d.error)) setBk(id, { stage: 'done', msg: 'A szűrés nem talált full-text included cikket, ezért nem készült áttekintés. A szűrési részletekhez: Study fül → nyisd ki a „Keyword screening funnel" panelt, és válaszd ki ezt a study-t.', sid: sid }); else setBk(id, { stage: 'error', msg: 'Review: ' + d.error, sid: sid }); return; }
-          var fp = d && d.file_path;
-          setBk(id, { stage: 'done', msg: '✓ Kész' + (d && d.words ? ' — ~' + d.words + ' szó' : '') + ' — a Study fülön a „Keyword screening funnel" panelben is elérhető.', sid: sid, filePath: fp });
-          if (fp) sb.from('research_files').select('content').eq('project_id', props.projectId).eq('path', fp).maybeSingle().then(function (fr) { var c = fr && fr.data && fr.data.content; if (c && alive.current) setOpenR({ result_title: 'Claude backup: ' + rq.slice(0, 90), result_body: c }); });
-        }, function () { setBk(id, { stage: 'error', msg: 'A review-hívás nem sikerült.', sid: sid }); });
-        return;
-      }
-      setBk(id, { stage: stage, msg: (BK_STAGE[stage] || stage) + '…', sid: sid });
-      var act = stage === 's1' ? { action: 'search_step1', study_id: sid, step: 1, offset: offset } : { action: 'screen_batch', study_id: sid, step: (stage === 's2' ? 2 : 3), offset: offset };
-      callStudy(act).then(function (d) {
-        if (!alive.current) return;
-        if (d && d.error) { setBk(id, { stage: 'error', msg: (BK_STAGE[stage] || stage) + ': ' + d.error, sid: sid }); return; }
-        var dflt = stage === 's1' ? 20 : (stage === 's2' ? 8 : 3), ni = iter + 1;
-        if (d.done || ni > 40) driveFunnel(id, rq, sid, stage === 's1' ? 's2' : stage === 's2' ? 's3' : 'review', 0, 0);
-        else driveFunnel(id, rq, sid, stage, (d.next_offset != null ? d.next_offset : offset + dflt), ni);
-      }, function () { setBk(id, { stage: 'error', msg: 'Hálózati hiba a szűrés közben.', sid: sid }); });
-    }
-    function backupEl() {   // ONE status card per running/finished Claude backup study → parallel studies each show their own progress
-      var ks = Object.keys(backups); if (!ks.length) return null;
+    // The Claude backup runs in the module-level PRStudyRunner → it KEEPS GOING across tab/view switches. This component
+    // only triggers it and renders the runs; on unmount the run continues in the background.
+    function runBackup(rq) { PRStudyRunner.startBackup(rq, { projectId: props.projectId, project: props.project, authorId: props.authorId, onChanged: props.onChanged }); }
+    function backupEl() {   // one status card per Claude backup study for THIS project (state lives in PRStudyRunner)
+      var all = PRStudyRunner.runs(), ks = Object.keys(all).filter(function (k) { return all[k].projectId === props.projectId; });
+      if (!ks.length) return null;
       return h('div', { style: { display: 'flex', flexDirection: 'column', gap: 6, margin: '8px 0' } }, ks.map(function (k) {
-        var b = backups[k], term = b.stage === 'done' || b.stage === 'error';
+        var b = all[k], term = b.stage === 'done' || b.stage === 'error';
         return h('div', { key: k, style: { fontSize: 12.5, border: '1px solid var(--line)', borderRadius: 10, padding: '9px 11px', display: 'flex', alignItems: 'flex-start', gap: 9 } },
           h('span', { style: { fontSize: 15, flex: 'none' } }, b.stage === 'error' ? '✗' : b.stage === 'done' ? '✓' : '⏳'),
           h('div', { style: { flex: 1, minWidth: 0 } },
             h('b', { style: { display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, title: b.title || '' }, '⚡ ' + (b.title || 'Claude backup Study')),
-            h('div', { style: { color: b.stage === 'error' ? 'var(--danger, #b42318)' : b.stage === 'done' ? 'var(--ok, #15803d)' : 'var(--muted)', marginTop: 2 } }, b.msg),
+            h('div', { style: { color: b.stage === 'error' ? 'var(--danger, #b42318)' : b.stage === 'done' ? 'var(--ok, #15803d)' : 'var(--muted)', marginTop: 2 } }, b.msg + (term ? '' : ' · háttérben fut — nyugodtan válts fület')),
             (b.stage === 'done' && b.filePath) ? h('div', { style: { marginTop: 6 } }, h('button', { className: 'btn', style: { padding: '3px 10px', fontSize: 11.5 }, onClick: function () { sb.from('research_files').select('content').eq('project_id', props.projectId).eq('path', b.filePath).maybeSingle().then(function (fr) { var c = fr && fr.data && fr.data.content; if (c) setOpenR({ result_title: 'Claude backup', result_body: c }); }); } }, '📄 Áttekintés megnyitása')) : null),
-          term ? h('button', { className: 'btn', style: { padding: '2px 8px', fontSize: 12, flex: 'none' }, onClick: function () { dismissBk(k); } }, '×') : null);
+          h('button', { className: 'btn', style: { padding: '2px 8px', fontSize: 12, flex: 'none' }, title: term ? 'Elrejtés' : 'Leállítás', onClick: function () { PRStudyRunner.dismiss(k); } }, '×'));
       }));
     }
     function tracker(j) {
@@ -4831,6 +4852,7 @@
     var meS = useState(null), me = meS[0], setMe = meS[1];
     var pjS = useState([]), projects = pjS[0], setProjects = pjS[1];
     var selS = useState(null), sel = selS[0], setSel = selS[1];
+    var selRef = useRef(null); selRef.current = sel;   // latest selection → guards a late/cross-project loadDetail (e.g. a background study run finishing after a project switch) from clobbering the visible project
     var dS = useState({ log: [], tasks: [], ideas: [], sources: [], datasets: [], jobs: [], studies: [], loading: true }), detail = dS[0], setDetail = dS[1];
     var stuS = useState({ byId: {}, list: [] }), supStudents = stuS[0], setSupStudents = stuS[1];   // this supervisor's students (for the "Diákjaim kutatása" view + author badges)
 
@@ -4909,7 +4931,7 @@
         // e.profiles.name shape the renderer expects.
         var ids = {}; log.forEach(function (e) { if (e.profile_id) ids[e.profile_id] = 1; });
         var idList = Object.keys(ids);
-        function done(names) { log.forEach(function (e) { e.profiles = { name: (names && names[e.profile_id]) || '' }; }); setDetail(base); }
+        function done(names) { if (!(selRef.current && selRef.current.id === projectId)) return; log.forEach(function (e) { e.profiles = { name: (names && names[e.profile_id]) || '' }; }); setDetail(base); }   // never overwrite the visible project's detail with a different project's late reload
         if (idList.length) sb.from('profiles_public').select('id,name').in('id', idList).then(function (pr) { var m = {}; ((pr && pr.data) || []).forEach(function (x) { m[x.id] = x.name; }); done(m); }, function () { done({}); });
         else done({});
       });
