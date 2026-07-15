@@ -3706,7 +3706,7 @@
   // Read-only view for now (P2 = inline edit + phase actions replacing modals). New-design flag only.
   var RMAP_PHASES = [['ideas', 'Ideas', '💡'], ['literature', 'Literature', '📚'], ['sr', 'Systematic review', '🔬'], ['protocol', 'Protocol', '🧪'], ['journal', 'Journal', '🎯'], ['writing', 'Writing', '✍️']];
   var RMAP_PHASE_IDX = {}; RMAP_PHASES.forEach(function (p, i) { RMAP_PHASE_IDX[p[0]] = i; });
-  var RMAP_TYPE = { idea: { ic: '💡', lab: 'Ötlet', tab: 'ideas' }, paper: { ic: '📄', lab: 'Cikk', tab: 'literature' }, study: { ic: '🔎', lab: 'Irodalom', tab: 'literature' }, review: { ic: '📝', lab: 'Áttekintés', tab: 'study' }, step: { ic: '🧪', lab: 'Protokoll-lépés', tab: 'protocol' }, venue: { ic: '🎯', lab: 'Folyóirat', tab: 'journal' }, section: { ic: '✍️', lab: 'Draft-szekció', tab: 'writing' } };
+  var RMAP_TYPE = { idea: { ic: '💡', lab: 'Ötlet', tab: 'ideas' }, paper: { ic: '📄', lab: 'Cikk', tab: 'literature' }, study: { ic: '🔎', lab: 'Irodalom', tab: 'literature' }, review: { ic: '📝', lab: 'Áttekintés', tab: 'study' }, step: { ic: '🧪', lab: 'Protokoll-lépés', tab: 'protocol' }, venue: { ic: '🎯', lab: 'Folyóirat', tab: 'journal' }, section: { ic: '✍️', lab: 'Draft-szekció', tab: 'writing' }, dataset: { ic: '🗂️', lab: 'Adathalmaz', tab: 'data' }, file: { ic: '📎', lab: 'Fájl', tab: 'ideas' }, chat: { ic: '💬', lab: 'Beszélgetés', tab: 'ideas' }, figure: { ic: '🖼️', lab: 'Ábra', tab: 'literature' } };
   function PipelineCanvas(props) {
     var dS = useState(null), data = dS[0], setData = dS[1];   // null = loading
     var vS = useState({ tx: 30, ty: 18, k: 1 }), view = vS[0], setView = vS[1];
@@ -3786,13 +3786,18 @@
         sb.from('research_sources').select('id', { count: 'exact', head: true }).eq('project_id', pid).eq('screening', 'include'),
         sb.from('research_protocols').select('id,title,status').eq('project_id', pid).neq('status', 'archived').order('created_at', { ascending: false }).limit(1),
         sb.from('research_journal_picks').select('id,title,status,npi_level').eq('project_id', pid),
-        sb.from('research_files').select('id,path,size').eq('project_id', pid).or('path.like.writing/%,path.like.studies/%')
+        sb.from('research_files').select('id,path,size').eq('project_id', pid).or('path.like.writing/%,path.like.studies/%'),
+        // F5 — multi-modal nodes: datasets, uploaded/material files (NOT writing/studies), chat threads, paper figures
+        sb.from('research_datasets').select('id,name,source,status,size_bytes,notes').eq('project_id', pid).order('created_at', { ascending: true }).limit(16),
+        sb.from('research_files').select('id,path,size,source').eq('project_id', pid).not('path', 'like', 'writing/%').not('path', 'like', 'studies/%').order('updated_at', { ascending: false }).limit(16),
+        sb.from('research_chats').select('id,title,updated_at').eq('project_id', pid).order('updated_at', { ascending: false }).limit(8),
+        sb.from('research_figures').select('id,source_id,fig_label,caption').eq('project_id', pid).eq('hidden', false).order('created_at', { ascending: true }).limit(16)
       ]).then(function (r) {
         if (!alive.current) return;
-        var base = { ideas: (r[0].data) || [], studies: (r[1].data) || [], topSrc: (r[2].data) || [], srcTotal: r[3].count || 0, inclTotal: r[4].count || 0, protocol: (r[5].data && r[5].data[0]) || null, journals: (r[6].data) || [], wfiles: (r[7].data) || [] };
+        var base = { ideas: (r[0].data) || [], studies: (r[1].data) || [], topSrc: (r[2].data) || [], srcTotal: r[3].count || 0, inclTotal: r[4].count || 0, protocol: (r[5].data && r[5].data[0]) || null, journals: (r[6].data) || [], wfiles: (r[7].data) || [], datasets: (r[8] && r[8].data) || [], mfiles: (r[9] && r[9].data) || [], chats: (r[10] && r[10].data) || [], figures: (r[11] && r[11].data) || [] };
         if (base.protocol) sb.from('research_protocol_steps').select('id,ord,title,kind,status,needs_approval').eq('protocol_id', base.protocol.id).order('ord', { ascending: true }).then(function (sr) { if (alive.current) setData(Object.assign(base, { steps: (sr.data) || [] })); });
         else setData(Object.assign(base, { steps: [] }));
-      }, function () { if (alive.current) setData({ ideas: [], studies: [], topSrc: [], srcTotal: 0, inclTotal: 0, protocol: null, journals: [], wfiles: [], steps: [] }); });
+      }, function () { if (alive.current) setData({ ideas: [], studies: [], topSrc: [], srcTotal: 0, inclTotal: 0, protocol: null, journals: [], wfiles: [], steps: [], datasets: [], mfiles: [], chats: [], figures: [] }); });
     }, [props.projectId, bump]);
     // measure each card's REAL rendered height after paint → feed the no-overlap rule with true heights (estimates
     // undershoot long-title cards, e.g. the H1/H2 hypotheses, leaving residual overlap). Converges in one extra render.
@@ -3861,6 +3866,26 @@
           N.push({ id: 'w' + f.id, t: 'section', ph: 5, title: nm || 'szekció', m: { Fájl: f.path, Méret: (f.size || 0) + ' B' }, ref: f });
           if (lastStep) E.push([lastStep, 'w' + f.id]);
         }
+      });
+      // F5 — multi-modal content nodes (only appear when the project actually has them):
+      var protStep0 = (d.protocol && d.steps.length) ? ('r' + d.steps[0].id) : null;
+      (d.datasets || []).forEach(function (ds) {   // datasets feed the protocol (ph 3)
+        N.push({ id: 'd' + ds.id, t: 'dataset', ph: 3, title: ds.name || 'Adathalmaz', m: { Forrás: ds.source || '—', Státusz: ds.status || '—', Méret: (ds.size_bytes ? Math.round(ds.size_bytes / 1024) + ' KB' : '—'), Megjegyzés: ds.notes || '—' }, ref: ds });
+        if (protStep0) E.push(['d' + ds.id, protStep0]);
+      });
+      (d.mfiles || []).forEach(function (f) {   // uploaded / material files (ph 3) — inputs to the protocol
+        N.push({ id: 'f' + f.id, t: 'file', ph: 3, title: String(f.path).replace(/^.*\//, '') || 'fájl', m: { Útvonal: f.path, Méret: (f.size || 0) + ' B', Forrás: f.source || '—' }, ref: f });
+        if (protStep0) E.push(['f' + f.id, protStep0]);
+      });
+      (d.chats || []).forEach(function (c) {   // chat threads drive ideation (ph 0)
+        N.push({ id: 'c' + c.id, t: 'chat', ph: 0, title: c.title || 'Beszélgetés', m: { Frissítve: String(c.updated_at || '').slice(0, 10) || '—' }, ref: c });
+        if (d.ideas.length) E.push(['c' + c.id, 'i' + d.ideas[0].id]);
+      });
+      (d.figures || []).forEach(function (fg) {   // figures extracted from Library papers (ph 1)
+        N.push({ id: 'g' + fg.id, t: 'figure', ph: 1, title: fg.fig_label || String(fg.caption || 'Ábra').slice(0, 40), m: { Felirat: fg.caption || '—' }, ref: fg });
+        // link to the source paper only if that paper node is actually present (litOpen + in the top-source set); else to the funnel
+        var pShown = litOpen && fg.source_id && (d.topSrc || []).some(function (s) { return s.id === fg.source_id; });
+        if (pShown) E.push(['p' + fg.source_id, 'g' + fg.id]); else if (hasLit) E.push(['lit', 'g' + fg.id]);
       });
       // each card's height: the REAL measured value once available (hgt), else a generous estimate for the first paint
       N.forEach(function (n) { n._h = hgt[n.id] || (72 + Math.min(4, Math.ceil(String(n.title || '').length / 22)) * 17); });
@@ -3966,6 +3991,8 @@
       if (n.t === 'review') return [['protocol', '🧪 Protokoll generálása'], ['writing', '✍️ Draft-vázlat']];
       if (n.t === 'step') return [['writing', '✍️ Draft-vázlat']];
       if (n.t === 'venue' || n.t === 'section') return [['writing', '✍️ Draft-vázlat'], ['ideas', '✦ Ötletek']];
+      if (n.t === 'dataset') return [['protocol', '🧪 Protokoll ehhez az adathoz']];
+      if (n.t === 'file' || n.t === 'chat' || n.t === 'figure') return [];   // content nodes — no generation from them
       return [['ideas', '✦ Ötletek generálása'], ['protocol', '🧪 Protokoll']];
     }
     // F3: REGENERATE this exact node (in place, keeps its position). Only where an existing edge cleanly supports it:
@@ -4005,6 +4032,7 @@
       if (n.t === 'step') parts.push('KIVÁLASZTOTT PROTOKOLL-LÉPÉS: ' + String(n.title || ''));
       if (n.t === 'venue') parts.push('CÉL-FOLYÓIRAT: ' + String(n.title || ''));
       if (n.t === 'section') parts.push('DRAFT-SZEKCIÓ: ' + String(n.title || ''));
+      if (n.t === 'dataset') parts.push('ADATHALMAZ: ' + String((n.ref && n.ref.name) || n.title || '') + ((n.ref && n.ref.notes) ? ' — ' + String(n.ref.notes).slice(0, 200) : ''));
       return { ideaId: idea ? idea.id : null, text: parts.join('\n') };
     }
     // Apply a refine_step result to a step row IN PLACE, conservatively (shared by F3 regenerate + F7 refine chat).
@@ -4126,6 +4154,10 @@
       else if (n.t === 'section') k.push(h('div', { className: 'rmap-nm', key: 'm' }, n.m.Méret));
       else if (n.t === 'idea') k.push(h('div', { className: 'rmap-nm', key: 'm' }, 'novelty ' + n.m.Novelty));
       else if (n.t === 'review') k.push(h('div', { className: 'rmap-nm', key: 'm' }, n.m.Studies + ' study'));
+      else if (n.t === 'dataset') k.push(h('div', { className: 'rmap-nm', key: 'm' }, (n.m.Forrás || '') + ' · ' + (n.m.Státusz || ''), n.m.Méret && n.m.Méret !== '—' ? h('span', { className: 'rmap-chip' }, n.m.Méret) : null));
+      else if (n.t === 'file') k.push(h('div', { className: 'rmap-nm', key: 'm' }, (n.m.Forrás && n.m.Forrás !== '—' ? n.m.Forrás + ' · ' : '') + n.m.Méret));
+      else if (n.t === 'chat') k.push(h('div', { className: 'rmap-nm', key: 'm' }, 'frissítve ' + n.m.Frissítve));
+      else if (n.t === 'figure') k.push(h('div', { className: 'rmap-nm', key: 'm' }, String(n.m.Felirat || '').slice(0, 64)));
       return k;
     }
     // P1b: overlay the active run's live phase status onto the swimlanes
@@ -4144,7 +4176,7 @@
         h('div', { className: 'rmap-world', style: { transform: 'translate(' + view.tx + 'px,' + view.ty + 'px) scale(' + view.k + ')' } },
           g.free ? null : RMAP_PHASES.map(function (p, i) { var stt = runPhase[p[0]]; return h('div', { className: 'rmap-lane' + (i % 2 ? ' alt' : '') + (activeKey === p[0] ? ' active' : ''), key: p[0], style: { left: (i * g.laneW) + 'px', width: g.laneW + 'px', height: g.height + 'px' } }, h('div', { className: 'rmap-lh' }, p[2] + ' ' + p[1], stt ? h('span', { className: 'rmap-lh-st ' + stt }, LANE_BADGE[stt] || '') : null)); }),
           h('svg', { className: 'rmap-edges', width: svgW, height: g.height }, edgeEls),
-          g.N.map(function (n) { return h('div', { key: n.id, 'data-nid': n.id, className: 'rmap-node t-' + n.t + (sel === n.id ? ' sel' : '') + (activeKey && n.ph === RMAP_PHASE_IDX[activeKey] ? ' inphase' : '') + (props.canEdit ? ' editable' : '') + (dlive && dlive.id === n.id ? ' dragging' : ''), style: { left: n.x + 'px', top: n.y + 'px' }, onMouseDown: function (e) { e.stopPropagation(); startNodeDrag(e, n); }, onContextMenu: function (e) { e.preventDefault(); e.stopPropagation(); if (props.canEdit) setMenu({ node: n, x: e.clientX, y: e.clientY }); } }, body(n)); })),
+          g.N.map(function (n) { return h('div', { key: n.id, 'data-nid': n.id, className: 'rmap-node t-' + n.t + (sel === n.id ? ' sel' : '') + (activeKey && n.ph === RMAP_PHASE_IDX[activeKey] ? ' inphase' : '') + (props.canEdit ? ' editable' : '') + (dlive && dlive.id === n.id ? ' dragging' : ''), style: { left: n.x + 'px', top: n.y + 'px' }, onMouseDown: function (e) { e.stopPropagation(); startNodeDrag(e, n); }, onContextMenu: function (e) { e.preventDefault(); e.stopPropagation(); if (props.canEdit && (genActions(n).length || regenActions(n).length)) setMenu({ node: n, x: e.clientX, y: e.clientY }); } }, body(n)); })),
         run && runActive ? h('div', { className: 'rmap-runbar' + (run.status === 'awaiting_approval' ? ' gate' : '') },
           h('span', { className: 'rmap-rb-dot' }), h('b', null, '⚡ Autopilot'),
           h('span', { className: 'rmap-rb-st' }, (AP_ST_LABEL[run.status] || run.status) + (activeLabel ? ' · ' + activeLabel : '') + (runProg ? ' · ' + runProg : '')),
