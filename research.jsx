@@ -3718,11 +3718,14 @@
     var mnS = useState(null), menu = mnS[0], setMenu = mnS[1];   // F1: node "generate from here" context menu {node,x,y}
     var gbS = useState(false), genBusy = gbS[0], setGenBusy = gbS[1];
     var hgS = useState({}), hgt = hgS[0], setHgt = hgS[1];   // measured real card heights (id → px) → the no-overlap rule uses them, not an estimate
+    var rcS = useState([]), rcMsgs = rcS[0], setRcMsgs = rcS[1];   // F7: per-node refine-chat thread [{role,text}]
+    var riS = useState(''), rcInput = riS[0], setRcInput = riS[1];
+    var rbS = useState(false), rcBusy = rbS[0], setRcBusy = rbS[1];
     var rnS = useState(null), run = rnS[0], setRun = rnS[1];   // P1b: the project's active Autopilot run (live)
     var mdS = useState(function () { try { return localStorage.getItem('pr-rmap-mode') === 'free' ? 'free' : 'lane'; } catch (e) { return 'lane'; } }), mode = mdS[0], setMode = mdS[1];   // 'lane' (swimlane) | 'free' (freeform)
     var lyS = useState({}), layout = lyS[0], setLayout = lyS[1];   // saved free-drag positions (node_id → {x,y}); overrides the auto-layout + pins the card
     var dlS = useState(null), dlive = dlS[0], setDlive = dlS[1];   // the node currently being dragged {id,x,y} — follows the cursor 1:1
-    var drag = useRef(null), stageRef = useRef(null), alive = useRef(true), bumpT = useRef(null), driving = useRef(false), mapDriver = useRef(null), ndrag = useRef(null);
+    var drag = useRef(null), stageRef = useRef(null), alive = useRef(true), bumpT = useRef(null), driving = useRef(false), mapDriver = useRef(null), ndrag = useRef(null), selRef = useRef(null), refBusy = useRef({});
     if (!mapDriver.current) mapDriver.current = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : ('00000000-0000-4000-8000-' + String(Date.now()).slice(-12));
     useEffect(function () { return function () { alive.current = false; driving.current = false; if (bumpT.current) clearTimeout(bumpT.current); }; }, []);
     // debounced re-materialize: as the orchestrator writes rows, coalesce rapid events into one reload so nodes grow live
@@ -3800,6 +3803,9 @@
       if (Object.keys(m).length !== Object.keys(hgt).length) changed = true;
       if (changed) setHgt(m);
     }, [data, bump, mode, litOpen]);   // only re-measure when the node set/content changes — not on pan/zoom/select
+    // F7: the refine-chat thread is per-node → clear it whenever the selection changes; selRef tracks the live selection
+    // so an in-flight refine callback knows whether the user is still on the node it was started from.
+    useEffect(function () { setRcMsgs([]); setRcInput(''); setRcBusy(!!refBusy.current[sel]); selRef.current = sel; }, [sel]);
 
     // BUILT-IN RULE (new-card placement only): a freshly materialized card must never spawn on top of an existing one.
     // Iteratively push apart overlapping cards along the least-overlap axis, using each card's measured height (n._h).
@@ -4001,6 +4007,27 @@
       if (n.t === 'section') parts.push('DRAFT-SZEKCIÓ: ' + String(n.title || ''));
       return { ideaId: idea ? idea.id : null, text: parts.join('\n') };
     }
+    // Apply a refine_step result to a step row IN PLACE, conservatively (shared by F3 regenerate + F7 refine chat).
+    // Only a field the refiner actually POPULATED overwrites — an empty array [] (truthy!) or blank string must NOT
+    // blank existing content, since neither entry point has a user-review gate. Reports which fields changed.
+    function applyRefinedStep(stepId, sp, onDone, onFail) {
+      var neStr = function (v) { return v != null && String(v).trim() !== ''; };
+      var neArr = function (v) { return Array.isArray(v) && v.length > 0; };
+      sb.from('research_protocol_steps').select('spec').eq('id', stepId).maybeSingle().then(function (cr) {
+        var spec = Object.assign({}, (cr && cr.data && cr.data.spec) || {}), changed = [];
+        if (neStr(sp.instruction)) { spec.instruction = sp.instruction; changed.push('utasítás'); }
+        if (neArr(sp.inputs)) { spec.inputs = sp.inputs; changed.push('bemenetek'); }
+        if (neArr(sp.expected_outputs)) { spec.expected_outputs = sp.expected_outputs; changed.push('kimenetek'); }
+        if (neArr(sp.acceptance)) { spec.acceptance = sp.acceptance; changed.push('elfogadási kritériumok'); }
+        if (neStr(sp.command_hint)) { spec.command_hint = sp.command_hint; changed.push('parancs'); }
+        if (sp.est_minutes != null && sp.est_minutes !== '') spec.est_minutes = sp.est_minutes;
+        var patch = { spec: spec };
+        if (neStr(sp.title)) { patch.title = sp.title; changed.push('cím'); }
+        if (neStr(sp.kind)) { patch.kind = sp.kind; changed.push('típus'); }
+        if (sp.needs_approval != null) patch.needs_approval = !!sp.needs_approval;
+        sb.from('research_protocol_steps').update(patch).eq('id', stepId).then(function (ur) { if (ur && ur.error) { onFail(ur.error.message); return; } onDone(changed); }, function () { onFail('mentés'); });
+      }, function () { onFail('spec olvasás'); });
+    }
     function runGen(n, act) {
       if (genBusy) return;   // re-entrancy lock: nodes stay clickable during the async call, so guard against a double-fire (double study insert)
       var CORE = window.PRAutopilotCore; if (!CORE || !CORE.callEdge) { window.PRUI.toast('A generátor nem elérhető (autopilot-core).', { kind: 'error' }); return; }
@@ -4039,20 +4066,8 @@
         var stepId = n && n.ref && n.ref.id; if (!stepId) { fail('nincs lépés-azonosító'); return; }
         CORE.callEdge('research-protocol', { action: 'refine_step', project_id: pid, step_id: stepId }).then(function (d) {
           if (!d || d.error) { fail((d && d.error) || 'refine'); return; }
-          var sp = d.step; if (!sp) { fail('üres válasz'); return; }
-          sb.from('research_protocol_steps').select('spec').eq('id', stepId).maybeSingle().then(function (cr) {
-            var spec = Object.assign({}, (cr && cr.data && cr.data.spec) || {});   // preserve attachments etc. the refiner doesn't return
-            // CONSERVATIVE merge: F3 applies with no user-review gate, so only overwrite a field the refiner actually
-            // POPULATED — an empty array [] (truthy!) or blank string from the model must NOT blank existing content.
-            var neStr = function (v) { return v != null && String(v).trim() !== ''; };
-            var neArr = function (v) { return Array.isArray(v) && v.length > 0; };
-            if (neStr(sp.instruction)) spec.instruction = sp.instruction;
-            if (neArr(sp.inputs)) spec.inputs = sp.inputs; if (neArr(sp.expected_outputs)) spec.expected_outputs = sp.expected_outputs;
-            if (neArr(sp.acceptance)) spec.acceptance = sp.acceptance; if (neStr(sp.command_hint)) spec.command_hint = sp.command_hint;
-            if (sp.est_minutes != null && sp.est_minutes !== '') spec.est_minutes = sp.est_minutes;
-            var patch = { spec: spec }; if (neStr(sp.title)) patch.title = sp.title; if (neStr(sp.kind)) patch.kind = sp.kind; if (sp.needs_approval != null) patch.needs_approval = !!sp.needs_approval;
-            sb.from('research_protocol_steps').update(patch).eq('id', stepId).then(function (ur) { if (ur && ur.error) { fail(ur.error.message); return; } done('Lépés újragenerálva'); }, function () { fail('mentés'); });
-          }, function () { fail('spec olvasás'); });
+          if (!d.step) { fail('üres válasz'); return; }
+          applyRefinedStep(stepId, d.step, function () { done('Lépés újragenerálva'); }, function (err) { fail(err); });
         }, function () { fail('hálózat'); });
       }
       else if (act === 'regen_review') {
@@ -4071,6 +4086,28 @@
           else done('Áttekintés újragenerálva');
         }, function () { fail('hálózat'); });
       }
+    }
+
+    // F7: refine-chat send — each message is a hint to refine_step; the returned step is applied in place (same row → position kept).
+    // The DB update + re-materialize always run; the chat UI is only touched if the user is STILL on this node when the call returns.
+    function refineChat(node) {
+      var hint = String(rcInput || '').trim(); if (!hint || rcBusy) return;
+      if (!node || node.t !== 'step' || !node.ref || !node.ref.id) return;
+      var CORE = window.PRAutopilotCore;
+      if (!CORE || !CORE.callEdge) { setRcMsgs(function (m) { return m.concat([{ role: 'ai', text: 'A finomító nem elérhető (autopilot-core).' }]); }); return; }
+      var stepId = node.ref.id, nid = node.id;
+      if (refBusy.current[nid]) return;   // a refine for THIS step is already in flight — the lock SURVIVES a node round-trip, so returning to the node can't re-fire it (no concurrent double-write / lost update)
+      refBusy.current[nid] = true;
+      setRcMsgs(function (m) { return m.concat([{ role: 'user', text: hint }]); });
+      setRcInput(''); setRcBusy(true);
+      function onNode() { return alive.current && selRef.current === nid; }
+      // say() is the single terminal path: it ALWAYS releases the in-flight lock; it only touches the chat UI if the user is still on this node
+      function say(t) { delete refBusy.current[nid]; if (onNode()) { setRcBusy(false); setRcMsgs(function (m) { return m.concat([{ role: 'ai', text: t }]); }); } }
+      CORE.callEdge('research-protocol', { action: 'refine_step', project_id: props.projectId, step_id: stepId, hint: hint }).then(function (d) {
+        if (!alive.current) { delete refBusy.current[nid]; return; }
+        if (!d || d.error || !d.step) { say('Hiba: ' + ((d && d.error) || 'nincs válasz')); return; }
+        applyRefinedStep(stepId, d.step, function (changed) { if (!alive.current) { delete refBusy.current[nid]; return; } setBump(function (x) { return x + 1; }); say('✓ Frissítve: ' + (changed.length ? changed.join(', ') : 'nincs érdemi változás')); }, function (err) { say('Mentési hiba: ' + err); });
+      }, function () { say('Hálózati hiba'); });
     }
 
     if (!data) return h('div', { className: 'rmap-wrap' }, h('div', { className: 'empty' }, 'Térkép betöltése…'));
@@ -4127,7 +4164,13 @@
             (props.canEdit && regenActions(sn).length) ? h('button', { className: 'btn', style: { fontSize: 12 }, disabled: genBusy, onClick: function () { runGen(sn, regenActions(sn)[0][0]); } }, regenActions(sn)[0][1]) : null,
             h('button', { className: 'btn', style: { fontSize: 12 }, onClick: function () { if (props.onGoTab) props.onGoTab(RMAP_TYPE[sn.t].tab); } }, 'Megnyitás a ' + RMAP_TYPE[sn.t].lab + ' fülön →'),
             (sn.ref && sn.ref.url) ? h('a', { className: 'btn', style: { fontSize: 12, textDecoration: 'none' }, href: sn.ref.url, target: '_blank', rel: 'noopener' }, 'Forrás ↗') : null),
-          h('p', { className: 'rmap-insp-note' }, 'A metaadat itt közvetlenül szerkeszthető — ugyanazok az adatok, mint a fázis-paneleken. A canvason maradsz, modal helyett.'))) : null,
+          h('p', { className: 'rmap-insp-note' }, 'A metaadat itt közvetlenül szerkeszthető — ugyanazok az adatok, mint a fázis-paneleken. A canvason maradsz, modal helyett.'),
+          (props.canEdit && sn.t === 'step') ? h('div', { className: 'rmap-chat' },
+            h('div', { className: 'rmap-chat-h' }, '🔧 Finomítás — írd le, mit változtassak ezen a lépésen'),
+            rcMsgs.length ? h('div', { className: 'rmap-chat-msgs' }, rcMsgs.map(function (mm, i) { return h('div', { key: i, className: 'rmap-chat-msg ' + (mm.role === 'user' ? 'u' : 'a') }, mm.text); })) : null,
+            h('div', { className: 'rmap-chat-in' },
+              h('textarea', { rows: 2, value: rcInput, placeholder: 'pl. „Adj hozzá 5-fold cross-validation-t”', disabled: rcBusy, onChange: function (e) { var v = e.target.value; setRcInput(v); }, onKeyDown: function (e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); refineChat(sn); } } }),
+              h('button', { className: 'btn pri', style: { fontSize: 12, alignSelf: 'flex-end' }, disabled: rcBusy || !rcInput.trim(), onClick: function () { refineChat(sn); } }, rcBusy ? '…' : 'Küldés'))) : null)) : null,
       editing ? h('div', { className: 'scrim', onClick: function () { setEditing(null); } },
         h('div', { className: 'modal', style: { width: editing.fields.some(function (f) { return f.ty === 'bigtext'; }) ? 680 : 460 }, onClick: function (e) { e.stopPropagation(); } },
           h('div', { className: 'modal-h' }, h('b', null, editing.title), h('button', { className: 'x', 'aria-label': 'Close', onClick: function () { setEditing(null); } }, '×')),
