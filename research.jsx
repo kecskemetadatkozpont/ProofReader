@@ -1840,11 +1840,12 @@
     var buS = useState(false), busy = buS[0], setBusy = buS[1];
     var erS = useState(''), err = erS[0], setErr = erS[1];
     var opS = useState(null), openReport = opS[0], setOpenReport = opS[1];
-    var bkS = useState(null), backup = bkS[0], setBackup = bkS[1];   // Claude-backup Study driver state (Elicit quota fallback)
+    var bkS = useState(0), setBkTick = bkS[1];   // re-render tick — backup runs live in PRStudyRunner (background, survives tab switches)
     var ofS = useState(''), offer = ofS[0], setOffer = ofS[1];       // the failed research-question, offered for the backup
     var alive = useRef(true);
     function load() { callElicit({ action: 'report.list', project_id: props.projectId }).then(function (d) { if (alive.current) setJobs((d && d.jobs) || []); }); }
     useEffect(function () { alive.current = true; if (canUse) load(); return function () { alive.current = false; }; }, [canUse]);
+    useEffect(function () { return PRStudyRunner.subscribe(function () { if (alive.current) setBkTick(function (x) { return x + 1; }); }); }, []);   // re-render on background-run changes
     // poll non-terminal jobs every 12s
     useEffect(function () {
       if (!jobs || !jobs.length) return;
@@ -1870,44 +1871,22 @@
     }
     function resume(j) { callElicit({ action: 'job.resume', job_id: j.id }).then(function (d) { if (d && d.error) setErr(d.error); load(); }); }
 
-    // ---- Claude backup: no Elicit quota → run the built-in Claude+OpenAlex Study funnel for the same question ----
-    var BK_STAGE = { setup: 'Study előkészítése', s1: 'Keresés + gyors triage (OpenAlex)', s2: 'Absztrakt-szűrés (Claude)', s3: 'Full-text szűrés (Claude)', review: 'Áttekintés írása (Claude)' };
-    function runBackup(rq) {
-      if (!rq || (backup && /^s|setup|review/.test(backup.stage))) return;
-      setOffer(''); setErr(''); setBackup({ stage: 'setup', msg: 'Study létrehozása…' });
-      var uid = props.authorId;
-      sb.from('research_studies').insert({ project_id: props.projectId, idea_id: null, title: rq.slice(0, 80), question: rq.slice(0, 4000), created_by: uid }).select('id').maybeSingle().then(function (sr) {
-        var sid = sr && sr.data && sr.data.id;
-        if (!sid) { setBackup({ stage: 'error', msg: 'A study nem jött létre' + (sr && sr.error ? ': ' + sr.error.message : '') }); return; }
-        var rows = LS_STEPS.map(function (s) { return { study_id: sid, step: s.step, kind: s.kind, config: lsDefaultConfig(s.step, props.project, null) }; });
-        sb.from('research_study_steps').insert(rows).then(function (rr) {
-          if (rr && rr.error) { setBackup({ stage: 'error', msg: 'study-lépések: ' + rr.error.message, sid: sid }); return; }
-          callStudy({ action: 'plan', study_id: sid }).then(function () { driveFunnel(rq, sid, 's1', 0, 0); }, function () { driveFunnel(rq, sid, 's1', 0, 0); });
-        });
-      });
-    }
-    function driveFunnel(rq, sid, stage, offset, iter) {
-      if (!alive.current) return;
-      if (stage === 'review') {
-        setBackup({ stage: 'review', msg: BK_STAGE.review + '…', sid: sid });
-        callStudy({ action: 'generate_review', study_id: sid }).then(function (d) {
-          if (!alive.current) return;
-          if (d && d.error) { if (/full-?text|passed|include/i.test(d.error)) setBackup({ stage: 'done', msg: 'A szűrés nem talált full-text included cikket — a részletek a Study fülön.', sid: sid }); else setBackup({ stage: 'error', msg: 'Review: ' + d.error, sid: sid }); return; }
-          var fp = d && d.file_path;
-          setBackup({ stage: 'done', msg: '✓ Kész' + (d && d.words ? ' — ~' + d.words + ' szó' : ''), sid: sid, filePath: fp });
-          if (fp) sb.from('research_files').select('content').eq('project_id', props.projectId).eq('path', fp).maybeSingle().then(function (fr) { var c = fr && fr.data && fr.data.content; if (c && alive.current) setOpenReport({ result_title: 'Claude backup: ' + rq.slice(0, 90), result_body: c }); });
-        }, function () { setBackup({ stage: 'error', msg: 'A review-hívás nem sikerült.', sid: sid }); });
-        return;
-      }
-      setBackup({ stage: stage, msg: (BK_STAGE[stage] || stage) + '…', sid: sid });
-      var act = stage === 's1' ? { action: 'search_step1', study_id: sid, step: 1, offset: offset } : { action: 'screen_batch', study_id: sid, step: (stage === 's2' ? 2 : 3), offset: offset };
-      callStudy(act).then(function (d) {
-        if (!alive.current) return;
-        if (d && d.error) { setBackup({ stage: 'error', msg: (BK_STAGE[stage] || stage) + ': ' + d.error, sid: sid }); return; }
-        var dflt = stage === 's1' ? 20 : (stage === 's2' ? 8 : 3), ni = iter + 1;
-        if (d.done || ni > 40) driveFunnel(rq, sid, stage === 's1' ? 's2' : stage === 's2' ? 's3' : 'review', 0, 0);
-        else driveFunnel(rq, sid, stage, (d.next_offset != null ? d.next_offset : offset + dflt), ni);
-      }, function () { setBackup({ stage: 'error', msg: 'Hálózati hiba a szűrés közben.', sid: sid }); });
+    // ---- Claude backup: no Elicit quota → run the built-in Claude+OpenAlex Study funnel in the module-level PRStudyRunner
+    //      (background — the run survives tab/view switches). This component only triggers it and renders the cards. ----
+    function runBackup(rq) { setOffer(''); setErr(''); PRStudyRunner.startBackup(rq, { projectId: props.projectId, project: props.project, authorId: props.authorId, onChanged: props.onChanged }); }
+    function backupEl() {
+      var all = PRStudyRunner.runs(), ks = Object.keys(all).filter(function (k) { return all[k].projectId === props.projectId; });
+      if (!ks.length) return null;
+      return h('div', { style: { display: 'flex', flexDirection: 'column', gap: 6, margin: '4px 0' } }, ks.map(function (k) {
+        var b = all[k], term = b.stage === 'done' || b.stage === 'error';
+        return h('div', { key: k, style: { fontSize: 12.5, border: '1px solid var(--line)', borderRadius: 10, padding: '9px 11px', display: 'flex', alignItems: 'flex-start', gap: 9 } },
+          h('span', { style: { fontSize: 15, flex: 'none' } }, b.stage === 'error' ? '✗' : b.stage === 'done' ? '✓' : '⏳'),
+          h('div', { style: { flex: 1, minWidth: 0 } },
+            h('b', { style: { display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, title: b.title || '' }, '⚡ ' + (b.title || 'Claude backup Study')),
+            h('div', { style: { color: b.stage === 'error' ? 'var(--danger, #b42318)' : b.stage === 'done' ? 'var(--ok, #15803d)' : 'var(--muted)', marginTop: 2 } }, b.msg + (term ? '' : ' · háttérben fut — nyugodtan válts fület')),
+            (b.stage === 'done' && b.filePath) ? h('div', { style: { marginTop: 6 } }, h('button', { className: 'btn', style: { padding: '3px 10px', fontSize: 11.5 }, onClick: function () { sb.from('research_files').select('content').eq('project_id', props.projectId).eq('path', b.filePath).maybeSingle().then(function (fr) { var c = fr && fr.data && fr.data.content; if (c) setOpenReport({ result_title: 'Claude backup', result_body: c }); }); } }, '📄 Áttekintés megnyitása')) : null),
+          h('button', { className: 'btn', style: { padding: '2px 8px', fontSize: 12, flex: 'none' }, title: term ? 'Elrejtés' : 'Leállítás', onClick: function () { PRStudyRunner.dismiss(k); } }, '×'));
+      }));
     }
     function saveToFiles(j) {
       if (!j.result_body) return;
@@ -1943,12 +1922,7 @@
         h('div', { style: { marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap' } },
           h('button', { className: 'btn pri', style: { padding: '5px 12px', fontSize: 12.5 }, onClick: function () { runBackup(offer); } }, '⚡ Claude backup Study'),
           h('button', { className: 'btn', style: { padding: '5px 12px', fontSize: 12.5 }, onClick: function () { setOffer(''); } }, 'Mégse'))) : null,
-      backup ? h('div', { style: { fontSize: 12.5, border: '1px solid var(--line)', borderRadius: 10, padding: '10px 12px', margin: '4px 0', display: 'flex', alignItems: 'flex-start', gap: 9 } },
-        h('span', { style: { fontSize: 15, flex: 'none' } }, backup.stage === 'error' ? '✗' : backup.stage === 'done' ? '✓' : '⏳'),
-        h('div', { style: { flex: 1, minWidth: 0 } }, h('b', null, 'Claude backup Study'),
-          h('div', { style: { color: backup.stage === 'error' ? 'var(--danger, #b42318)' : backup.stage === 'done' ? 'var(--ok, #15803d)' : 'var(--muted)', marginTop: 2 } }, backup.msg),
-          (backup.stage === 'done' && backup.sid) ? h('div', { style: { marginTop: 6 } }, h('button', { className: 'btn', style: { padding: '3px 10px', fontSize: 11.5 }, onClick: function () { if (props.onGoStudy) props.onGoStudy(); } }, 'Megnyitás a Study fülön →')) : null),
-        (backup.stage === 'done' || backup.stage === 'error') ? h('button', { className: 'btn', style: { padding: '2px 8px', fontSize: 12, flex: 'none' }, onClick: function () { setBackup(null); } }, '×') : null) : null,
+      backupEl(),
       jobs === null ? h('div', { style: { fontSize: 13, color: 'var(--muted)', padding: '8px 0' } }, 'Loading…')
         : jobs.length === 0 ? h('div', { style: { fontSize: 13, color: 'var(--muted)', padding: '8px 0' } }, 'No reports yet — ask a question above. A report keeps running even if you leave.')
           : h('div', { style: { display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 } }, jobs.map(card)),
