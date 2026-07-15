@@ -3801,7 +3801,7 @@
         sb.from('research_sources').select('id,title,venue,cited_by,year,screening,url').eq('project_id', pid).order('cited_by', { ascending: false, nullsFirst: false }).limit(10),
         sb.from('research_sources').select('id', { count: 'exact', head: true }).eq('project_id', pid),
         sb.from('research_sources').select('id', { count: 'exact', head: true }).eq('project_id', pid).eq('screening', 'include'),
-        sb.from('research_protocols').select('id,title,status').eq('project_id', pid).neq('status', 'archived').order('created_at', { ascending: false }).limit(1),
+        sb.from('research_protocols').select('id,title,status,idea_id').eq('project_id', pid).neq('status', 'archived').order('created_at', { ascending: false }).limit(1),
         sb.from('research_journal_picks').select('id,title,status,npi_level').eq('project_id', pid),
         sb.from('research_files').select('id,path,size').eq('project_id', pid).or('path.like.writing/%,path.like.studies/%'),
         // F5 — multi-modal nodes: datasets, uploaded/material files (NOT writing/studies), chat threads, paper figures
@@ -3866,26 +3866,33 @@
         N.push({ id: 'lit', t: 'study', ph: 1, title: (d.studies[0] && d.studies[0].title) || 'Irodalom', m: { Források: String(d.srcTotal), Included: String(d.inclTotal) }, ref: d.studies[0] || null, pcount: d.topSrc.length });
         if (litOpen) d.topSrc.forEach(function (s) { N.push({ id: 'p' + s.id, t: 'paper', ph: 1, title: s.title || 'Cikk', m: { Venue: s.venue || '—', Év: String(s.year || '—'), Idézettség: String(s.cited_by || 0) }, dec: s.screening, ref: s }); E.push(['lit', 'p' + s.id]); });
         var linked = false;
-        d.studies.forEach(function (st) { if (st.idea_id) { E.push(['i' + st.idea_id, 'lit']); linked = true; } });
+        d.studies.forEach(function (st) { if (st.idea_id && (d.ideas || []).some(function (x) { return x.id === st.idea_id; })) { E.push(['i' + st.idea_id, 'lit']); linked = true; } });   // only when the idea node actually exists, else `linked` would suppress the ideas[0] fallback and orphan lit
         if (!linked && d.ideas.length) E.push(['i' + d.ideas[0].id, 'lit']);
       }
       var hasSR = d.studies.length > 0;
       if (hasSR) { N.push({ id: 'sr', t: 'review', ph: 2, title: 'Systematic review', m: { Studies: String(d.studies.length) } }); if (hasLit) E.push(['lit', 'sr']); }
+      // upstream anchors so every downstream card connects into ONE traceable chain (no orphans), even when a phase is skipped
+      var firstIdea = d.ideas.length ? ('i' + d.ideas[0].id) : null;
+      var litId = hasLit ? 'lit' : null, srId = hasSR ? 'sr' : null;
+      function ideaHas(id) { return (d.ideas || []).some(function (x) { return x.id === id; }); }
+      var protoIdea = (d.protocol && d.protocol.idea_id && ideaHas(d.protocol.idea_id)) ? ('i' + d.protocol.idea_id) : null;
+      var lastStep = (d.protocol && d.steps.length) ? ('r' + d.steps[d.steps.length - 1].id) : null;
       if (d.protocol && d.steps.length) {
         d.steps.forEach(function (s, i) { N.push({ id: 'r' + s.id, t: 'step', ph: 3, title: s.title || ('Lépés ' + (i + 1)), m: { Kind: s.kind || '—', Státusz: s.status || '—', Jóváhagyás: s.needs_approval ? 'szükséges' : '—' }, st: s.status, gate: !!s.needs_approval, ref: s }); if (i > 0) E.push(['r' + d.steps[i - 1].id, 'r' + s.id]); });
-        if (hasSR) E.push(['sr', 'r' + d.steps[0].id]); else if (hasLit) E.push(['lit', 'r' + d.steps[0].id]);
+        var protUp = srId || litId || protoIdea || firstIdea; if (protUp) E.push([protUp, 'r' + d.steps[0].id]);
       }
-      d.journals.forEach(function (j) { N.push({ id: 'v' + j.id, t: 'venue', ph: 4, title: j.title || 'Folyóirat', m: { NPI: j.npi_level || '—', Státusz: j.status || '—' }, ref: j }); if (hasSR) E.push(['sr', 'v' + j.id]); });
-      var lastStep = (d.protocol && d.steps.length) ? ('r' + d.steps[d.steps.length - 1].id) : (hasSR ? 'sr' : null);
+      var venueUp = srId || lastStep || litId || firstIdea;
+      d.journals.forEach(function (j) { N.push({ id: 'v' + j.id, t: 'venue', ph: 4, title: j.title || 'Folyóirat', m: { NPI: j.npi_level || '—', Státusz: j.status || '—' }, ref: j }); if (venueUp) E.push([venueUp, 'v' + j.id]); });
+      var writeUp = lastStep || srId || litId || firstIdea;
       d.wfiles.forEach(function (f) {
         if (/^studies\//.test(f.path)) {   // a generated systematic-review document → a node in the SR lane
           var rnm = String(f.path).replace(/^studies\//, '').replace(/\.(md|tex)$/, '');
           N.push({ id: 'w' + f.id, t: 'review', ph: 2, title: rnm || 'áttekintés', m: { Fájl: f.path, Méret: (f.size || 0) + ' B' }, ref: f });
-          if (hasSR) E.push(['sr', 'w' + f.id]); else if (hasLit) E.push(['lit', 'w' + f.id]);
+          var rUp = srId || litId || firstIdea; if (rUp) E.push([rUp, 'w' + f.id]);
         } else {
           var nm = String(f.path).replace(/^writing\//, '').replace(/\.(md|tex)$/, '');
           N.push({ id: 'w' + f.id, t: 'section', ph: 5, title: nm || 'szekció', m: { Fájl: f.path, Méret: (f.size || 0) + ' B' }, ref: f });
-          if (lastStep) E.push([lastStep, 'w' + f.id]);
+          if (writeUp) E.push([writeUp, 'w' + f.id]);
         }
       });
       // F5 — multi-modal content nodes (only appear when the project actually has them):
@@ -4240,8 +4247,11 @@
     if (!g.N.length) return h('div', { className: 'rmap-wrap' }, h('div', { className: 'rmap-empty' }, h('div', { style: { fontSize: 30 } }, '🗺️'), h('b', null, 'A térkép a projekt adataiból épül fel'), h('p', null, 'Adj hozzá ötleteket, irodalmat, protokollt — és itt egy összefüggő canvason látod majd az egészet, a provenance-élekkel.')));
     var NW = 204, NH = 74;
     function ctr(id) { var n = g.by[id]; return { x: n.x + NW / 2, y: n.y + NH / 2 }; }
+    function ndCtr(n) { return { x: n.x + NW / 2, y: n.y + (n._h || NH) / 2 }; }
+    // the point on a node's boundary along the ray toward another node → edges start/end AT the card edge (clean, and the arrowhead shows)
+    function bpt(node, other) { var c = ndCtr(node), o = ndCtr(other), hw = NW / 2, hh = (node._h || NH) / 2, dx = o.x - c.x, dy = o.y - c.y; if (!dx && !dy) return c; var t = Math.min(hw / (Math.abs(dx) || 1e-6), hh / (Math.abs(dy) || 1e-6)); return { x: c.x + dx * t, y: c.y + dy * t }; }
     var svgW = 0; g.N.forEach(function (n) { svgW = Math.max(svgW, n.x + NW + 60); });
-    var edgeEls = g.E.map(function (e, i) { var a = g.by[e[0]], b = g.by[e[1]]; if (!a || !b) return null; var ca = ctr(e[0]), cb = ctr(e[1]); var dx = (cb.x - ca.x) * 0.5; var cite = e[2] === 'cite'; return h('path', { key: i, d: 'M' + ca.x + ',' + ca.y + ' C' + (ca.x + dx) + ',' + ca.y + ' ' + (cb.x - dx) + ',' + cb.y + ' ' + cb.x + ',' + cb.y, fill: 'none', stroke: cite ? 'var(--accent-tint)' : 'var(--line-2)', strokeWidth: cite ? 1.5 : 2, strokeDasharray: cite ? '5 5' : null }); });
+    var edgeEls = g.E.map(function (e, i) { var a = g.by[e[0]], b = g.by[e[1]]; if (!a || !b) return null; var pa = bpt(a, b), pb = bpt(b, a); var dx = (pb.x - pa.x) * 0.5; var cite = e[2] === 'cite'; return h('path', { key: i, d: 'M' + pa.x + ',' + pa.y + ' C' + (pa.x + dx) + ',' + pa.y + ' ' + (pb.x - dx) + ',' + pb.y + ' ' + pb.x + ',' + pb.y, fill: 'none', stroke: cite ? 'var(--accent-tint)' : 'var(--line-2, var(--muted))', strokeWidth: cite ? 1.5 : 2, strokeDasharray: cite ? '5 5' : null, markerEnd: cite ? null : 'url(#rmap-arrow)' }); });
     function body(n) {
       var k = [h('div', { className: 'rmap-nh', key: 'h' }, h('span', { className: 'rmap-ni' }, RMAP_TYPE[n.t].ic), h('span', { className: 'rmap-nt' }, n.title))];
       if (n.t === 'study') k.push(h('div', { className: 'rmap-nm', key: 'm' }, h('b', null, n.m.Források), ' forrás → ', h('b', null, n.m.Included), ' incl', n.pcount ? h('span', { className: 'rmap-exp' }, (litOpen ? '▾ ' : '▸ ') + n.pcount + ' cikk') : null));
@@ -4271,7 +4281,9 @@
     return h('div', { className: 'rmap-wrap' },
       h('div', { className: 'rmap-stage', ref: stageRef, onMouseDown: onDown, onWheel: onWheel },
         h('div', { className: 'rmap-world', style: { transform: 'translate(' + view.tx + 'px,' + view.ty + 'px) scale(' + view.k + ')' } },
-          h('svg', { className: 'rmap-edges', width: svgW, height: g.height }, edgeEls),
+          h('svg', { className: 'rmap-edges', width: svgW, height: g.height },
+            h('defs', null, h('marker', { id: 'rmap-arrow', viewBox: '0 0 8 8', refX: 6.5, refY: 4, markerWidth: 6.5, markerHeight: 6.5, orient: 'auto-start-reverse' }, h('path', { d: 'M0.5,0.5 L7.5,4 L0.5,7.5 Z', fill: 'var(--line-2, var(--muted))' }))),
+            edgeEls),
           g.N.map(function (n) { return h('div', { key: n.id, 'data-nid': n.id, className: 'rmap-node t-' + n.t + (sel === n.id ? ' sel' : '') + (activeKey && n.ph === RMAP_PHASE_IDX[activeKey] ? ' inphase' : '') + (props.canEdit ? ' editable' : '') + (dlive && dlive.id === n.id ? ' dragging' : ''), style: { left: n.x + 'px', top: n.y + 'px' }, onMouseDown: function (e) { e.stopPropagation(); startNodeDrag(e, n); }, onContextMenu: function (e) { e.preventDefault(); e.stopPropagation(); if (props.canEdit && (genActions(n).length || regenActions(n).length)) setMenu({ node: n, x: e.clientX, y: e.clientY }); } }, body(n)); })),
         run && runActive ? h('div', { className: 'rmap-runbar' + (run.status === 'awaiting_approval' ? ' gate' : '') },
           h('span', { className: 'rmap-rb-dot' }), h('b', null, '⚡ Autopilot'),
