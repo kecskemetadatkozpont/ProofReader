@@ -3796,7 +3796,7 @@
     useEffect(function () {
       var pid = props.projectId;
       Promise.all([
-        sb.from('research_ideas').select('id,question,hypothesis,rationale,novelty,status').eq('project_id', pid).neq('status', 'rejected').order('created_at', { ascending: true }).limit(24),
+        sb.from('research_ideas').select('id,question,hypothesis,rationale,novelty,status,source').eq('project_id', pid).neq('status', 'rejected').order('created_at', { ascending: true }).limit(24),
         sb.from('research_studies').select('id,idea_id,title,question,status').eq('project_id', pid).order('created_at', { ascending: true }),
         sb.from('research_sources').select('id,title,venue,cited_by,year,screening,url').eq('project_id', pid).order('cited_by', { ascending: false, nullsFirst: false }).limit(10),
         sb.from('research_sources').select('id', { count: 'exact', head: true }).eq('project_id', pid),
@@ -3907,7 +3907,9 @@
       });
       (d.chats || []).forEach(function (c) {   // chat threads drive ideation (ph 0)
         N.push({ id: 'c' + c.id, t: 'chat', ph: 0, title: c.title || 'Beszélgetés', m: { Frissítve: String(c.updated_at || '').slice(0, 10) || '—' }, ref: c });
-        if (d.ideas.length) E.push(['c' + c.id, 'i' + d.ideas[0].id]);
+        var kids = (d.ideas || []).filter(function (x) { return x.source === 'chat'; });   // connect the chat to EVERY idea that came from chat ideation, not just the first
+        if (kids.length) kids.forEach(function (x) { E.push(['c' + c.id, 'i' + x.id]); });
+        else if (d.ideas.length) E.push(['c' + c.id, 'i' + d.ideas[0].id]);   // no chat-sourced idea yet → keep one representative edge so the chat isn't orphaned
       });
       (d.figures || []).forEach(function (fg) {   // figures extracted from Library papers (ph 1)
         N.push({ id: 'g' + fg.id, t: 'figure', ph: 1, title: fg.fig_label || String(fg.caption || 'Ábra').slice(0, 40), m: { Felirat: fg.caption || '—' }, ref: fg });
