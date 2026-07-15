@@ -3721,11 +3721,15 @@
     var rcS = useState([]), rcMsgs = rcS[0], setRcMsgs = rcS[1];   // F7: per-node refine-chat thread [{role,text}]
     var riS = useState(''), rcInput = riS[0], setRcInput = riS[1];
     var rbS = useState(false), rcBusy = rbS[0], setRcBusy = rbS[1];
+    // Luma-style canvas assistant dock (bottom-right): quick pipeline commands + a free-text chat (research-chat)
+    var dkS = useState(function () { try { return localStorage.getItem('pr-rmap-dock') !== '0'; } catch (e) { return true; } }), dkOpen = dkS[0], setDkOpen = dkS[1];
+    var dmS = useState([{ role: 'ai', text: '👋 Canvas-asszisztens. Adj utasítást vagy kérdést, vagy használd a gyors-parancsokat lent — az eredmény megjelenik a térképen.' }]), dMsgs = dmS[0], setDMsgs = dmS[1];
+    var diS = useState(''), dInput = diS[0], setDInput = diS[1];
+    var dbS = useState(false), dBusy = dbS[0], setDBusy = dbS[1];
     var rnS = useState(null), run = rnS[0], setRun = rnS[1];   // P1b: the project's active Autopilot run (live)
-    var mdS = useState(function () { try { return localStorage.getItem('pr-rmap-mode') === 'free' ? 'free' : 'lane'; } catch (e) { return 'lane'; } }), mode = mdS[0], setMode = mdS[1];   // 'lane' (swimlane) | 'free' (freeform)
     var lyS = useState({}), layout = lyS[0], setLayout = lyS[1];   // saved free-drag positions (node_id → {x,y}); overrides the auto-layout + pins the card
     var dlS = useState(null), dlive = dlS[0], setDlive = dlS[1];   // the node currently being dragged {id,x,y} — follows the cursor 1:1
-    var drag = useRef(null), stageRef = useRef(null), alive = useRef(true), bumpT = useRef(null), driving = useRef(false), mapDriver = useRef(null), ndrag = useRef(null), selRef = useRef(null), refBusy = useRef({});
+    var drag = useRef(null), stageRef = useRef(null), alive = useRef(true), bumpT = useRef(null), driving = useRef(false), mapDriver = useRef(null), ndrag = useRef(null), selRef = useRef(null), refBusy = useRef({}), dcRef = useRef(null), dScroll = useRef(null);
     if (!mapDriver.current) mapDriver.current = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : ('00000000-0000-4000-8000-' + String(Date.now()).slice(-12));
     useEffect(function () { return function () { alive.current = false; driving.current = false; if (bumpT.current) clearTimeout(bumpT.current); }; }, []);
     // debounced re-materialize: as the orchestrator writes rows, coalesce rapid events into one reload so nodes grow live
@@ -3807,10 +3811,11 @@
       for (var i = 0; i < els.length; i++) { var id = els[i].getAttribute('data-nid'), hh = els[i].offsetHeight; if (hh) { m[id] = hh; if (Math.abs((hgt[id] || 0) - hh) > 2) changed = true; } }
       if (Object.keys(m).length !== Object.keys(hgt).length) changed = true;
       if (changed) setHgt(m);
-    }, [data, bump, mode, litOpen]);   // only re-measure when the node set/content changes — not on pan/zoom/select
+    }, [data, bump, litOpen]);   // only re-measure when the node set/content changes — not on pan/zoom/select
     // F7: the refine-chat thread is per-node → clear it whenever the selection changes; selRef tracks the live selection
     // so an in-flight refine callback knows whether the user is still on the node it was started from.
     useEffect(function () { setRcMsgs([]); setRcInput(''); setRcBusy(!!refBusy.current[sel]); selRef.current = sel; }, [sel]);
+    useEffect(function () { var el = dScroll.current; if (el) el.scrollTop = el.scrollHeight; }, [dMsgs.length, dBusy, dkOpen]);   // keep the dock scrolled to the latest message
 
     // BUILT-IN RULE (new-card placement only): a freshly materialized card must never spawn on top of an existing one.
     // Iteratively push apart overlapping cards along the least-overlap axis, using each card's measured height (n._h).
@@ -3889,13 +3894,9 @@
       });
       // each card's height: the REAL measured value once available (hgt), else a generous estimate for the first paint
       N.forEach(function (n) { n._h = hgt[n.id] || (72 + Math.min(4, Math.ceil(String(n.title || '').length / 22)) * 17); });
-      var LANEW = 252, ROWH = 108, cnt = {};
-      if (mode === 'free') {   // (B) freeform: organic per-phase clusters (columns ≥ card width so they never start overlapped)
-        var CEN = [{ x: 40, y: 60 }, { x: 520, y: 250 }, { x: 250, y: 610 }, { x: 950, y: 110 }, { x: 1260, y: 500 }, { x: 850, y: 700 }];
-        N.forEach(function (n) { var o = (cnt[n.ph] = (cnt[n.ph] || 0)); var c = CEN[n.ph] || { x: n.ph * 290, y: 80 }; n.x = c.x + (o % 2) * 234; n.y = c.y + Math.floor(o / 2) * 132; cnt[n.ph] = o + 1; });
-      } else {
-        N.forEach(function (n) { var o = (cnt[n.ph] = (cnt[n.ph] || 0)); n.x = n.ph * LANEW + 22; n.y = 66 + o * ROWH; cnt[n.ph] = o + 1; });
-      }
+      // column-less layout: organic per-phase clusters as the DEFAULT seed positions (no swimlanes) — free-drag takes over from here
+      var cnt = {}, CEN = [{ x: 40, y: 60 }, { x: 520, y: 250 }, { x: 250, y: 610 }, { x: 950, y: 110 }, { x: 1260, y: 500 }, { x: 850, y: 700 }];
+      N.forEach(function (n) { var o = (cnt[n.ph] = (cnt[n.ph] || 0)); var c = CEN[n.ph] || { x: n.ph * 290, y: 80 }; n.x = c.x + (o % 2) * 234; n.y = c.y + Math.floor(o / 2) * 132; cnt[n.ph] = o + 1; });
       // free-drag: a saved position overrides the auto-layout and PINS the card; only never-placed cards separate
       var pinned = {};
       N.forEach(function (n) { var s = layout[n.id]; if (s) { n.x = s.x; n.y = s.y; pinned[n.id] = true; } if (ndrag.current && ndrag.current.id === n.id) pinned[n.id] = true; });
@@ -3904,7 +3905,7 @@
       if (dlive && dlive.id) { for (var q = 0; q < N.length; q++) { if (N[q].id === dlive.id) { N[q].x = dlive.x; N[q].y = dlive.y; break; } } }
       var maxY = 400; N.forEach(function (n) { maxY = Math.max(maxY, n.y + (n._h || 78) + 44); });
       var by = {}; N.forEach(function (n) { by[n.id] = n; });
-      return { N: N, E: E, laneW: LANEW, height: maxY, by: by, free: mode === 'free' };
+      return { N: N, E: E, height: maxY, by: by };
     }
 
     function onMove(e) { var dd = drag.current; if (!dd) return; setView(function (v) { return { tx: dd.tx + (e.clientX - dd.sx), ty: dd.ty + (e.clientY - dd.sy), k: v.k }; }); }
@@ -4138,6 +4139,71 @@
       }, function () { say('Hálózati hiba'); });
     }
 
+    // ---- Canvas assistant dock: quick pipeline commands + a free-text chat (research-chat) ----
+    function dkSay(role, text) { if (alive.current) setDMsgs(function (m) { return m.concat([{ role: role, text: text }]); }); }
+    function dkEnsureChat() {   // a dedicated "Canvas asszisztens" chat thread (separate from the Ideas-tab chat) → research-chat has multi-turn context
+      if (dcRef.current) return Promise.resolve(dcRef.current);
+      return sb.from('research_chats').select('id').eq('project_id', props.projectId).eq('title', 'Canvas asszisztens').order('created_at', { ascending: true }).limit(1).maybeSingle().then(function (r) {
+        var c = r && r.data; if (c && c.id) { dcRef.current = c.id; return c.id; }
+        return sb.from('research_chats').insert({ project_id: props.projectId, title: 'Canvas asszisztens' }).select('id').maybeSingle().then(function (ir) { var nc = ir && ir.data; if (nc && nc.id) dcRef.current = nc.id; return nc && nc.id; });
+      });
+    }
+    function dkCmd(act) {   // one-click pipeline command → runs the project-level generation and re-materializes the map
+      if (dBusy) return;
+      var CORE = window.PRAutopilotCore; if (!CORE || !CORE.callEdge) { dkSay('ai', 'A generátor nem elérhető (autopilot-core).'); return; }
+      var pid = props.projectId, proj = props.project, LAB = { ideas: '✦ Ötletek generálása', study: '📚 Irodalom-study indítása', protocol: '🧪 Protokoll generálása', writing: '✍️ Draft-vázlat készítése' };
+      dkSay('user', LAB[act] || act); setDBusy(true);
+      function ok(msg) { if (!alive.current) return; setDBusy(false); dkSay('ai', '✓ ' + msg); setBump(function (x) { return x + 1; }); }
+      function bad(e) { if (!alive.current) return; setDBusy(false); dkSay('ai', '⚠️ ' + e); }
+      if (act === 'ideas') CORE.callEdge('research-ai', { action: 'gap', project_id: pid }).then(function (d) { (d && d.error) ? bad(d.error) : ok(((d && d.count) || 0) + ' ötlet-jelölt a térképen'); }, function () { bad('hálózat'); });
+      else if (act === 'protocol') CORE.callEdge('research-protocol', { action: 'generate', project_id: pid, goal: String(proj.goal || proj.title || '') }).then(function (d) { (d && d.error) ? bad(d.error) : ok(((d && d.steps) || 0) + ' protokoll-lépés'); }, function () { bad('hálózat'); });
+      else if (act === 'writing') CORE.callEdge('research-writing', { action: 'outline', project_id: pid }).then(function (d) {
+        if (d && d.error) { bad(d.error); return; }
+        var o = d && d.outline; if (!o || !o.sections) { bad('üres vázlat'); return; }
+        var md = '# ' + (o.title || proj.title) + '\n\n' + (o.abstract || '') + '\n\n## Szekciók\n' + o.sections.map(function (s) { return '- ' + (s.heading || s.key); }).join('\n');
+        CORE.saveFile(pid, 'writing/outline.md', md, 'ai').then(function (sf) { (sf && sf.error) ? bad(sf.error.message || 'mentés') : ok('Vázlat kész (' + o.sections.length + ' szekció)'); }, function () { bad('hálózat'); });
+      }, function () { bad('hálózat'); });
+      else if (act === 'study') {
+        var idea = (data && data.ideas && data.ideas[0]) || null;
+        if (!idea) { setDBusy(false); dkSay('ai', '⚠️ Előbb generálj egy ötletet (✦ Ötletek), abból indul az irodalom-study.'); return; }
+        sb.from('research_studies').insert({ project_id: pid, idea_id: idea.id, title: String(idea.question || proj.title || 'Study').slice(0, 80), question: String(idea.question || proj.goal || '').slice(0, 4000), created_by: props.authorId }).select('id').maybeSingle().then(function (r) {
+          if (r && r.error) { bad('study: ' + r.error.message); return; }
+          var sid = r && r.data && r.data.id; if (!sid) { bad('a study nem jött létre'); return; }
+          var rows = LS_STEPS.map(function (s) { return { study_id: sid, step: s.step, kind: s.kind, config: lsDefaultConfig(s.step, proj, idea) }; });
+          sb.from('research_study_steps').insert(rows).then(function (rr) { if (rr && rr.error) { bad('study-lépések: ' + rr.error.message); return; } CORE.callEdge('research-study', { action: 'plan', study_id: sid }).then(function () { ok('Irodalom-study létrehozva'); }, function () { ok('Irodalom-study létrehozva'); }); }, function () { bad('study-lépések'); });
+        }, function () { bad('study insert'); });
+      }
+    }
+    function dkSend() {   // free-text turn → research-chat (non-streaming); the reply may save files (→ file nodes)
+      var txt = String(dInput || '').trim(); if (!txt || dBusy) return;
+      dkSay('user', txt); setDInput(''); setDBusy(true);
+      var CFG = window.PR_CONFIG || {}, CORE = window.PRAutopilotCore, pid = props.projectId;
+      function fail(msg) { if (alive.current) { setDBusy(false); dkSay('ai', msg || 'Hiba történt.'); } }   // single failure path → dBusy never strands
+      dkEnsureChat().then(function (cid) {
+        if (!cid) { fail('Nem sikerült elindítani a beszélgetést.'); return; }
+        sb.from('research_messages').insert({ chat_id: cid, role: 'user', content: txt }).then(function (ins) {
+          if (ins && ins.error) { fail('Hiba: ' + ins.error.message); return; }
+          sb.auth.getSession().then(function (s) {
+            var token = (s && s.data && s.data.session && s.data.session.access_token) || CFG.supabaseAnonKey;
+            fetch(CFG.supabaseUrl + '/functions/v1/research-chat', { method: 'POST', headers: { 'Content-Type': 'application/json', 'apikey': CFG.supabaseAnonKey, 'Authorization': 'Bearer ' + token }, body: JSON.stringify({ chat_id: cid, stream: false }) })
+              .then(function (resp) { return resp.json(); })
+              .then(function (d) {
+                if (!alive.current) return;
+                if (!d || d.error || !d.message_id) { fail('Hiba: ' + ((d && d.error) || 'nincs válasz — telepítve van a research-chat?')); return; }
+                sb.from('research_messages').select('content').eq('id', d.message_id).maybeSingle().then(function (mr) {
+                  if (!alive.current) return;
+                  setDBusy(false);
+                  var reply = (mr && mr.data && mr.data.content) || '(üres válasz)';
+                  dkSay('ai', reply);
+                  var files = (typeof extractFiles === 'function') ? extractFiles(reply) : [];   // persist any ```file:…``` blocks → they appear as file nodes
+                  if (files.length && CORE && CORE.saveFile) Promise.all(files.map(function (f) { return CORE.saveFile(pid, f.path, f.content, 'ai'); })).then(function () { if (alive.current) setBump(function (x) { return x + 1; }); });
+                }, function () { fail('A válasz beolvasása nem sikerült.'); });
+              }, function () { fail('Hálózati hiba.'); });
+          }, function () { fail('Munkamenet-hiba.'); });
+        }, function () { fail('Az üzenet mentése nem sikerült.'); });
+      }, function () { fail('A beszélgetés indítása nem sikerült.'); });
+    }
+
     if (!data) return h('div', { className: 'rmap-wrap' }, h('div', { className: 'empty' }, 'Térkép betöltése…'));
     var g = graph();
     if (!g.N.length) return h('div', { className: 'rmap-wrap' }, h('div', { className: 'rmap-empty' }, h('div', { style: { fontSize: 30 } }, '🗺️'), h('b', null, 'A térkép a projekt adataiból épül fel'), h('p', null, 'Adj hozzá ötleteket, irodalmat, protokollt — és itt egy összefüggő canvason látod majd az egészet, a provenance-élekkel.')));
@@ -4160,21 +4226,18 @@
       else if (n.t === 'figure') k.push(h('div', { className: 'rmap-nm', key: 'm' }, String(n.m.Felirat || '').slice(0, 64)));
       return k;
     }
-    // P1b: overlay the active run's live phase status onto the swimlanes
-    var runPhase = {}, activeKey = null, activeLabel = null, runProg = null, runActive = false;
+    // P1b: the active run's phase drives the node .inphase highlight (activeKey) + the run bar
+    var activeKey = null, activeLabel = null, runProg = null, runActive = false;
     if (run && run.phases) {
-      run.phases.forEach(function (pp) { runPhase[pp.key] = pp.status; });
       var apx = run.phases[run.phase_index]; activeKey = apx && apx.key; activeLabel = (apx && apx.label) || activeKey;
       var en = run.phases.filter(function (pp) { return pp.enabled; }).length || 1;
       var dn = run.phases.filter(function (pp) { return pp.enabled && (pp.status === 'done' || pp.status === 'skipped'); }).length;
       runProg = dn + '/' + en; runActive = ['running', 'awaiting_approval', 'paused', 'queued'].indexOf(run.status) >= 0;
     }
-    var LANE_BADGE = { done: '✓', running: '●', gate: '⏸', skipped: '–' };
     var sn = sel ? g.by[sel] : null;
     return h('div', { className: 'rmap-wrap' },
       h('div', { className: 'rmap-stage', ref: stageRef, onMouseDown: onDown, onWheel: onWheel },
         h('div', { className: 'rmap-world', style: { transform: 'translate(' + view.tx + 'px,' + view.ty + 'px) scale(' + view.k + ')' } },
-          g.free ? null : RMAP_PHASES.map(function (p, i) { var stt = runPhase[p[0]]; return h('div', { className: 'rmap-lane' + (i % 2 ? ' alt' : '') + (activeKey === p[0] ? ' active' : ''), key: p[0], style: { left: (i * g.laneW) + 'px', width: g.laneW + 'px', height: g.height + 'px' } }, h('div', { className: 'rmap-lh' }, p[2] + ' ' + p[1], stt ? h('span', { className: 'rmap-lh-st ' + stt }, LANE_BADGE[stt] || '') : null)); }),
           h('svg', { className: 'rmap-edges', width: svgW, height: g.height }, edgeEls),
           g.N.map(function (n) { return h('div', { key: n.id, 'data-nid': n.id, className: 'rmap-node t-' + n.t + (sel === n.id ? ' sel' : '') + (activeKey && n.ph === RMAP_PHASE_IDX[activeKey] ? ' inphase' : '') + (props.canEdit ? ' editable' : '') + (dlive && dlive.id === n.id ? ' dragging' : ''), style: { left: n.x + 'px', top: n.y + 'px' }, onMouseDown: function (e) { e.stopPropagation(); startNodeDrag(e, n); }, onContextMenu: function (e) { e.preventDefault(); e.stopPropagation(); if (props.canEdit && (genActions(n).length || regenActions(n).length)) setMenu({ node: n, x: e.clientX, y: e.clientY }); } }, body(n)); })),
         run && runActive ? h('div', { className: 'rmap-runbar' + (run.status === 'awaiting_approval' ? ' gate' : '') },
@@ -4183,10 +4246,17 @@
           (run.status === 'awaiting_approval' && run.gate && props.canEdit) ? h('button', { className: 'btn pri', style: { padding: '3px 10px', fontSize: 11.5, marginLeft: 4 }, onClick: approveGate }, '✓ ' + (run.gate.title || 'Jóváhagyás')) : null,
           h('a', { className: 'btn', style: { padding: '3px 10px', fontSize: 11.5, textDecoration: 'none', marginLeft: 'auto' }, href: 'Autopilot.html?run=' + run.id, target: '_blank', rel: 'noopener' }, 'Dashboard ↗')) : null,
         h('div', { className: 'rmap-zoom' },
-          h('button', { title: mode === 'lane' ? 'Szabad elrendezés (B)' : 'Sávos elrendezés', onClick: function () { var nm = mode === 'lane' ? 'free' : 'lane'; setMode(nm); try { localStorage.setItem('pr-rmap-mode', nm); } catch (e) { } } }, mode === 'lane' ? '⊙' : '☰'),
           (props.canEdit && Object.keys(layout).length) ? h('button', { title: 'Automatikus elrendezés (a saját pozíciók törlése)', onClick: resetLayout }, '↺') : null,
           h('button', { onClick: function () { zoom(1.18); } }, '+'), h('button', { onClick: function () { zoom(0.85); } }, '−')),
-        h('div', { className: 'rmap-hint' }, (props.canEdit ? 'Húzd a kártyát = áthelyezés · ' : '') + 'húzd a hátteret = pan · görgő = zoom · ' + (mode === 'lane' ? 'sávos' : 'szabad') + ' nézet')),
+        h('div', { className: 'rmap-hint' }, (props.canEdit ? 'Húzd a kártyát = áthelyezés · ' : '') + 'húzd a hátteret = pan · görgő = zoom'),
+        props.canEdit ? (dkOpen ? h('div', { className: 'rmap-dock open', onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
+          h('div', { className: 'rmap-dock-h' }, h('span', null, '🤖 Asszisztens'), h('button', { className: 'rmap-dock-x', title: 'Összecsukás', onClick: function () { setDkOpen(false); try { localStorage.setItem('pr-rmap-dock', '0'); } catch (e) { } } }, '▾')),
+          h('div', { className: 'rmap-dock-msgs', ref: dScroll }, dMsgs.map(function (mm, i) { return h('div', { key: i, className: 'rmap-dock-msg ' + (mm.role === 'user' ? 'u' : 'a') }, mm.text); }), dBusy ? h('div', { className: 'rmap-dock-msg a busy' }, '⏳ dolgozom…') : null),
+          h('div', { className: 'rmap-dock-cmds' }, [['ideas', '✦ Ötletek'], ['study', '📚 Irodalom'], ['protocol', '🧪 Protokoll'], ['writing', '✍️ Draft']].map(function (c) { return h('button', { key: c[0], className: 'rmap-dock-chip', disabled: dBusy, onClick: function () { dkCmd(c[0]); } }, c[1]); })),
+          h('div', { className: 'rmap-dock-in' },
+            h('textarea', { rows: 1, value: dInput, placeholder: 'Írj utasítást vagy kérdést…', disabled: dBusy, onChange: function (e) { setDInput(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); dkSend(); } } }),
+            h('button', { className: 'btn pri', style: { fontSize: 14, padding: '0 12px', flex: 'none' }, disabled: dBusy || !dInput.trim(), onClick: dkSend }, '➤')))
+          : h('button', { className: 'rmap-dock-fab', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function () { setDkOpen(true); try { localStorage.setItem('pr-rmap-dock', '1'); } catch (e) { } } }, '🤖 Asszisztens')) : null),
       sn ? h('div', { className: 'rmap-insp' },
         h('div', { className: 'rmap-insp-h' }, h('span', { className: 'rmap-ni' }, RMAP_TYPE[sn.t].ic), h('div', { style: { minWidth: 0 } }, h('b', null, sn.title), h('div', { className: 'rmap-insp-ty' }, RMAP_TYPE[sn.t].lab)), h('button', { className: 'rmap-insp-x', onClick: function () { setSel(null); } }, '×')),
         h('div', { className: 'rmap-insp-b' },
