@@ -2072,23 +2072,19 @@
     // the literature studies started FROM each idea (idea_id-linked) → shown on the review-question modal so you can
     // see / open the studies that already belong to this idea and their status
     function loadStudies() {
-      sb.from('research_studies').select('id,idea_id,title,status,created_at').eq('project_id', props.projectId).not('idea_id', 'is', null).order('created_at', { ascending: false }).then(function (r) {
+      sb.from('research_studies').select('id,idea_id,title,status,cur_step,created_at').eq('project_id', props.projectId).not('idea_id', 'is', null).order('created_at', { ascending: false }).then(function (r) {
         if (!alive.current) return;
         var m = {}; ((r && r.data) || []).forEach(function (s) { if (s.idea_id) (m[s.idea_id] = m[s.idea_id] || []).push(s); });
         setStudiesByIdea(m);
       }, function () { });
     }
     // open a literature study's review markdown in the same viewer modal (openR) the SR reports use
-    function openStudyReview(study) {
-      var title = study.title || 'Irodalom-study';
-      setOpenR({ result_title: title, result_body: '⏳ Betöltés…' });
-      var sid8 = String(study.id).replace(/-/g, '').slice(0, 8);
-      sb.from('research_files').select('content').eq('project_id', props.projectId).like('path', 'studies/%-' + sid8 + '-review.md').order('updated_at', { ascending: false }).limit(1).then(function (r) {
-        if (!alive.current) return;
-        var f = r && r.data && r.data[0];
-        setOpenR({ result_title: title, result_body: (f && f.content) || '_Ehhez a study-hoz még nincs áttekintés (pl. nem volt full-text included cikk, vagy még fut). A szűrési részletek a Study fülön: „Keyword screening funnel"._' });
-      }, function () { if (alive.current) setOpenR({ result_title: title, result_body: '_Nem sikerült betölteni az eredményt._' }); });
-    }
+    // step 1..4 → a short Hungarian stage name, so the "Study" chip says WHICH stage the study is at
+    function studyStepName(n) { return n === 4 ? 'Áttekintés' : n === 3 ? 'Full-text' : n === 2 ? 'Absztrakt-szűrés' : 'Keresés'; }
+    // open the keyword screening funnel below AT this study, at its furthest step — the parent reveals + scrolls the
+    // funnel and LiteratureStudy selects the study (so the user sees the real funnel state: papers, screening, review),
+    // instead of a review-markdown modal that is empty while the study is still running.
+    function goStudyFunnel(study) { if (props.onOpenStudy) props.onOpenStudy(study.id); }
     function generate() { setGen(true); setErr(''); callStudy({ action: 'sr_suggest', project_id: props.projectId }).then(function (d) { if (!alive.current) return; setGen(false); if (d && d.error) { setErr('Generate: ' + d.error); return; } loadCands(); if (d && d.created === 0) setErr('No Ideas yet — add Ideas in the Idea stage first, then generate.'); }); }
     function picoText(p) { if (!p) return ''; return [['P', p.population], ['I', p.intervention], ['C', p.comparison], ['O', p.outcome]].filter(function (x) { return x[1]; }).map(function (x) { return x[0] + ': ' + x[1]; }).join('\n'); }
     function startFromCand(c) { fromCand.current = c.id; setF({ q: c.question || '', protocol: picoText(c.pico), abs: c.abstract_criteria || [], ft: [], ex: c.extraction_questions || [], exclude: c.exclusion_criteria || [], gen: true, genAbs: true, genEx: true, useFig: false, runFT: true, maxResults: '1000' }); setOpenForm(true); setErr(''); }
@@ -2281,9 +2277,13 @@
       return h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 6 } }, list.map(function (s) {
         var running = PRStudyRunner.isStudyRunning(s.id);
         var done = s.status === 'done' || s.status === 'completed';
-        return h('button', { key: s.id, className: running ? 'pulse-run' : null, title: (s.title || 'Irodalom-study') + ' — megnyitás', onClick: function (e) { e.stopPropagation(); openStudyReview(s); },
+        var stepN = s.cur_step || 1;
+        var label = running ? ('⏳ Study · ' + studyStepName(stepN) + ' — funnel megnyitása')
+          : done ? '✓ Study · Áttekintés kész — funnel megnyitása'
+            : '📄 Study · ' + studyStepName(stepN) + ' (' + stepN + '/4) — funnel megnyitása';
+        return h('button', { key: s.id, className: running ? 'pulse-run' : null, title: 'Megnyitás a Keyword screening funnelben, ott ahol a study tart', onClick: function (e) { e.stopPropagation(); goStudyFunnel(s); },
           style: { display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 9px', fontSize: 10.5, fontWeight: 600, borderRadius: 999, cursor: 'pointer', border: '1px solid ' + (running ? 'rgba(234,179,8,.55)' : 'var(--line)'), background: done ? 'var(--ok-bg, #e7f6ee)' : 'var(--surface-2)', color: running ? '#a16207' : done ? 'var(--ok, #15803d)' : 'var(--muted)' } },
-          (running ? '⏳ Study — kidolgozás alatt' : done ? '✓ Study — megnyitás' : '📄 Study — ' + (s.status || 'aktív')));
+          label);
       }));
     }
     function candCard(c) {
@@ -2394,11 +2394,12 @@
         list.map(function (s) {
           var running = PRStudyRunner.isStudyRunning(s.id);
           var done = s.status === 'done' || s.status === 'completed';
+          var stepN = s.cur_step || 1;
           return h('div', { key: s.id, className: running ? 'pulse-run' : null, style: { display: 'flex', alignItems: 'center', gap: 8, padding: '5px 8px', background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 7 } },
             h('div', { style: { minWidth: 0, flex: 1 } },
               h('div', { style: { fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } }, s.title || 'Irodalom-study'),
-              h('div', { style: { fontSize: 11, color: running ? '#a16207' : done ? 'var(--ok, #15803d)' : 'var(--faint)' } }, running ? '⏳ Kidolgozás alatt…' : done ? '✓ Kész áttekintés' : '• ' + (s.status || 'aktív'))),
-            h('button', { className: 'btn', style: { padding: '3px 10px', fontSize: 11.5, flex: 'none' }, onClick: function () { openStudyReview(s); } }, 'Megnyitás'));
+              h('div', { style: { fontSize: 11, color: running ? '#a16207' : done ? 'var(--ok, #15803d)' : 'var(--faint)' } }, running ? ('⏳ ' + studyStepName(stepN) + ' — kidolgozás alatt') : done ? '✓ Áttekintés kész' : '• ' + studyStepName(stepN) + ' (' + stepN + '/4)')),
+            h('button', { className: 'btn', style: { padding: '3px 10px', fontSize: 11.5, flex: 'none' }, title: 'Megnyitás a Keyword screening funnelben', onClick: function () { setOpenForm(false); goStudyFunnel(s); } }, 'Funnel ▾'));
         }));
     }
     // the create-review form body — shared by the classic full-width layout (flag OFF) AND the New-design modal (flag ON)
@@ -2599,6 +2600,15 @@
     useEffect(function () {
       if (props.autoCreateFrom && props.autoCreateFrom.length) { var ids = props.autoCreateFrom; if (props.onAutoConsumed) props.onAutoConsumed(); newStudy(ids); }
     }, [props.autoCreateFrom]);
+    // reveal a specific study (a "Study" chip was clicked in the SR studio): select it + jump to its FURTHEST step
+    // (cur_step — 4/Review when done, else the last completed stage), so the funnel opens where the study left off.
+    useEffect(function () {
+      var sid = props.openStudyId; if (!sid) return;
+      setSelId(sid);
+      var st = (props.studies || []).filter(function (x) { return x.id === sid; })[0];
+      setCurStep((st && st.cur_step) || 1);
+      if (props.onStudyOpened) props.onStudyOpened();
+    }, [props.openStudyId]);
     function newStudy(ideas) {
       var arr = Array.isArray(ideas) ? ideas : (ideas ? [ideas] : []);
       var q = arr.length ? arr.map(function (i) { return i.question + (i.hypothesis ? ' — hypothesis: ' + i.hypothesis : ''); }).join('\n\n') : props.project.title;
@@ -4619,6 +4629,14 @@
     var tS = useState(props.initTab || 'overview'), tab = tS[0], setTab = tS[1];   // Memory step deep-link opens the protocol tab
     var asS = useState(null), autoStudy = asS[0], setAutoStudy = asS[1];   // ideas to auto-create a study from (set by the Ideas "study basis" window → one-click create + Publify pre-fill)
     var agS = useState(0), autoSR = agS[0], setAutoSR = agS[1];   // signal from the Ideas "Study basis" → generate SR-question drafts in the SR studio
+    var fsS = useState(null), focusStudy = fsS[0], setFocusStudy = fsS[1];   // a study id to REVEAL in the keyword funnel (clicked a "Study" chip in the SR studio)
+    // reveal a specific study in the keyword screening funnel at its furthest step: LiteratureStudy selects it (openStudyId),
+    // and we open the collapsed <details> + scroll it into view (both live on the study tab, so the DOM is already there).
+    function openFunnelStudy(sid) {
+      if (!sid) return;
+      setFocusStudy(sid);
+      var d = document.getElementById('pr-funnel-details'); if (d) { d.open = true; d.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+    }
     var edS = useState(false), editOpen = edS[0], setEditOpen = edS[1];   // #2: project settings editor
     function setStage(i) {
       sb.from('research_projects').update({ stage: i }).eq('id', p.id).then(function () {
@@ -4674,7 +4692,7 @@
       h(LiteraturePanel, { projectId: p.id, sources: props.sources, studies: props.studies, canEdit: props.canEdit, myEmail: props.myEmail, onChanged: props.onChanged }),
       h(ElicitReports, { projectId: p.id, project: p, canEdit: props.canEdit, authorId: props.authorId, onGoStudy: function () { setTab('study'); } }),
       h(ElicitTrials, { projectId: p.id, canEdit: props.canEdit }));
-    else if (tab === 'study') content = h(ElicitSysReview, { projectId: p.id, project: p, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, autoGenerate: autoSR, onAutoGenerated: function () { setAutoSR(0); } });   // SR Studio (primary); the keyword funnel renders persistently below
+    else if (tab === 'study') content = h(ElicitSysReview, { projectId: p.id, project: p, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, autoGenerate: autoSR, onAutoGenerated: function () { setAutoSR(0); }, onOpenStudy: openFunnelStudy });   // SR Studio (primary); the keyword funnel renders persistently below
     else if (tab === 'protocol') content = h(ProtocolPanel, { projectId: p.id, ideas: props.ideas, sources: props.sources, studies: props.studies, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
     else if (tab === 'data') content = h(DataPanel, { projectId: p.id, datasets: props.datasets, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
     else if (tab === 'compute') content = h(ComputePanel, { projectId: p.id, jobs: props.jobs, datasets: props.datasets, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
@@ -4719,9 +4737,9 @@
         ['Open tasks', openTasks]
       ].map(function (k) { return h('div', { className: 'rv-kpi-c', key: k[0] }, h('div', { className: 'k' }, k[0]), h('div', { className: 'v' }, String(k[1]))); }));
       var funnelN = h('div', { style: { display: tab === 'study' ? 'block' : 'none' } },
-        h('details', { className: 'panel', style: { marginTop: 14, padding: '12px 16px' } },
+        h('details', { id: 'pr-funnel-details', className: 'panel', style: { marginTop: 14, padding: '12px 16px' } },
           h('summary', { style: { cursor: 'pointer', fontSize: 13, fontWeight: 600, color: 'var(--muted)' } }, '⏸ Keyword screening funnel (OpenAlex search → screen) — paused · click to open'),
-          h('div', { style: { marginTop: 12 } }, h(LiteratureStudy, { projectId: p.id, project: p, studies: props.studies, sources: props.sources, ideas: props.ideas, loading: props.loading, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, autoCreateFrom: autoStudy, onAutoConsumed: function () { setAutoStudy(null); } }))));
+          h('div', { style: { marginTop: 12 } }, h(LiteratureStudy, { projectId: p.id, project: p, studies: props.studies, sources: props.sources, ideas: props.ideas, loading: props.loading, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, autoCreateFrom: autoStudy, onAutoConsumed: function () { setAutoStudy(null); }, openStudyId: focusStudy, onStudyOpened: function () { setFocusStudy(null); } }))));
       return h('div', { className: 'rv-2t' },
         h('aside', { className: 'rv-ctx' },
           h('div', { className: 'rv-ctx-top' },
@@ -4784,9 +4802,9 @@
       // #9 — persistent Lit. study: stays mounted (just hidden) on other tabs, so a running study keeps going
       // in the background while you use the Chat / other tabs.
       h('div', { style: { display: tab === 'study' ? 'block' : 'none' } },
-        h('details', { className: 'panel', style: { marginTop: 14, padding: '12px 16px' } },
+        h('details', { id: 'pr-funnel-details', className: 'panel', style: { marginTop: 14, padding: '12px 16px' } },
           h('summary', { style: { cursor: 'pointer', fontSize: 13, fontWeight: 600, color: 'var(--muted)' } }, '⏸ Keyword screening funnel (OpenAlex search → screen) — paused · click to open'),
-          h('div', { style: { marginTop: 12 } }, h(LiteratureStudy, { projectId: p.id, project: p, studies: props.studies, sources: props.sources, ideas: props.ideas, loading: props.loading, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, autoCreateFrom: autoStudy, onAutoConsumed: function () { setAutoStudy(null); } })))),
+          h('div', { style: { marginTop: 12 } }, h(LiteratureStudy, { projectId: p.id, project: p, studies: props.studies, sources: props.sources, ideas: props.ideas, loading: props.loading, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, autoCreateFrom: autoStudy, onAutoConsumed: function () { setAutoStudy(null); }, openStudyId: focusStudy, onStudyOpened: function () { setFocusStudy(null); } })))),
       editOpen ? h(ProjectSettingsModal, { project: p, onClose: function () { setEditOpen(false); }, onSaved: function () { setEditOpen(false); props.onChanged(); } }) : null
     );
   }
