@@ -1083,6 +1083,20 @@
     var rlS = useState(null), runList = rlS[0], setRunList = rlS[1];       // {ideaQ, runs} — a picker when an idea has several runs
     var aliveR = useRef(true);
     useEffect(function () { aliveR.current = true; return function () { aliveR.current = false; }; }, []);
+    var rtS = useState(0), setRunTick = rtS[1];   // cheap re-render on every runner progress so the pulse reflects running↔done
+    var rkS = useState(''), reloadKey = rkS[0], setReloadKey = rkS[1];   // reload the idea→runs map ONLY when the running-set changes
+    var pidRef = useRef(props.projectId); pidRef.current = props.projectId;
+    useEffect(function () {
+      return PRStudyRunner.subscribe(function () {
+        if (!aliveR.current) return;
+        setRunTick(function (x) { return x + 1; });
+        // Only the runs' SET/terminal-state (not their per-step progress) changes what runsByIdea shows, so build a
+        // signature of this project's studies + whether each is terminal and reload the 3-query map only when it changes.
+        var pid = pidRef.current, all = PRStudyRunner.runs(), sig = [];
+        for (var k in all) { var r = all[k]; if (r.projectId === pid && r.sid) sig.push(r.sid + ':' + ((r.stage === 'done' || r.stage === 'error') ? '1' : '0')); }
+        sig.sort(); setReloadKey(sig.join('|'));
+      });
+    }, []);
     // load which ideas already have a run (a Study created from the idea, or an SR review launched from a candidate of the idea)
     useEffect(function () {
       var pid = props.projectId;
@@ -1099,7 +1113,7 @@
         cands.forEach(function (c) { var j = c.launched_job_id && jobById[c.launched_job_id]; if (c.idea_id && j) (map[c.idea_id] = map[c.idea_id] || []).push({ kind: 'review', id: j.id, title: j.result_title || c.question || 'Szisztematikus áttekintés', status: j.status }); });
         setRunsByIdea(map);
       }, function () { if (aliveR.current) setRunsByIdea({}); });   // network reject → no badges (never throw)
-    }, [props.projectId, (props.ideas || []).length]);
+    }, [props.projectId, (props.ideas || []).length, reloadKey]);
     function toggle(id) { setExpanded(function (e) { var n = Object.assign({}, e); n[id] = e[id] === false ? true : false; return n; }); }
     // open a run's result (the review markdown) in the viewer modal
     function openRun(run, ideaId) {
@@ -1130,10 +1144,11 @@
         }, function () { if (aliveR.current) window.PRUI.toast('Törlés sikertelen (hálózat)', { kind: 'error' }); });
       });
     }
-    function runBadge(idea) {   // green chip on an idea card when a run exists → click to open its result
+    function runBadge(idea) {   // chip on an idea card when a run exists → click to open its result; pulses while a study is being worked on
       var runs = runsByIdea[idea.id] || []; if (!runs.length) return null;
+      var running = runs.some(function (r) { return r.kind === 'study' && PRStudyRunner.isStudyRunning(r.id); });
       var done = runs.some(function (r) { return r.status === 'done' || r.status === 'completed'; });
-      return h('button', { className: 'idb-run' + (done ? ' done' : ''), title: 'Futtatás eredményének megnyitása', onClick: function (e) { e.stopPropagation(); openIdeaRuns(idea); } }, (done ? '✓ ' : '▶ ') + runs.length + ' futtatás');
+      return h('button', { className: 'idb-run' + (done && !running ? ' done' : '') + (running ? ' pulse-run' : ''), title: running ? 'Kidolgozás alatt — kattints a részletekért' : 'Futtatás eredményének megnyitása', onClick: function (e) { e.stopPropagation(); openIdeaRuns(idea); } }, (running ? '⏳ Kidolgozás alatt · ' : done ? '✓ ' : '▶ ') + runs.length + ' futtatás');
     }
     function add() {
       var q = form.question.trim();
@@ -1877,15 +1892,19 @@
       runs: function () { return runs; },
       subscribe: function (fn) { subs.push(fn); return function () { var i = subs.indexOf(fn); if (i >= 0) subs.splice(i, 1); }; },
       dismiss: function (id) { if (runs[id]) { delete runs[id]; notify(); } },   // dismiss a finished card OR cancel a running funnel (the recursion stops on the next step)
+      // is a given study (by id) or question currently being worked on (non-terminal stage)? → drives the pulsing indicators
+      isStudyRunning: function (sid) { if (!sid) return false; for (var k in runs) { var r = runs[k]; if (r.sid === sid && r.stage !== 'done' && r.stage !== 'error') return true; } return false; },
+      isQuestionRunning: function (q) { if (!q) return false; for (var k in runs) { var r = runs[k]; if (r.rq === q && r.stage !== 'done' && r.stage !== 'error') return true; } return false; },
       startBackup: function (rq, ctx) {
         if (!rq) return null;
         var id = 'bk' + (++seq);
-        runs[id] = { id: id, projectId: ctx.projectId, onChanged: ctx.onChanged, stage: 'setup', msg: 'Study létrehozása…', title: rq.slice(0, 90) };
+        runs[id] = { id: id, projectId: ctx.projectId, ideaId: ctx.ideaId || null, onChanged: ctx.onChanged, rq: rq, sid: null, stage: 'setup', msg: 'Study létrehozása…', title: rq.slice(0, 90) };
         notify();
-        sb.from('research_studies').insert({ project_id: ctx.projectId, idea_id: null, title: rq.slice(0, 80), question: rq.slice(0, 4000), created_by: ctx.authorId }).select('id').maybeSingle().then(function (sr) {
+        sb.from('research_studies').insert({ project_id: ctx.projectId, idea_id: ctx.ideaId || null, title: rq.slice(0, 80), question: rq.slice(0, 4000), created_by: ctx.authorId }).select('id').maybeSingle().then(function (sr) {
           if (!runs[id]) return;
           var sid = sr && sr.data && sr.data.id;
           if (!sid) { set(id, { stage: 'error', msg: 'A study nem jött létre' + (sr && sr.error ? ': ' + sr.error.message : '') }); return; }
+          set(id, { sid: sid });   // now the study card / candidate / idea badge can match this run + pulse
           var rows = LS_STEPS.map(function (s) { return { study_id: sid, step: s.step, kind: s.kind, config: lsDefaultConfig(s.step, ctx.project, null) }; });
           sb.from('research_study_steps').insert(rows).then(function (rr) {
             if (!runs[id]) return;
@@ -2100,7 +2119,7 @@
           var em = (d && d.error) || 'Could not start the review.';
           // Elicit truly EXHAUSTED (out of quota / daily cap) → auto-fall-back to the built-in Claude + OpenAlex Study funnel.
           // Transient conditions (429 "Rate limit hit", 403 "plan limit or max concurrent") must NOT auto-spend tokens — they surface as a retryable error.
-          if (/out of quota|over quota|kvóta|napi|budget|daily .*limit reached/i.test(String(em))) { setErr('⚡ Elicit nem elérhető (kvóta/napi limit) — automatikus Claude backup Study indul ugyanerre a kérdésre…'); setOpenForm(false); fromCand.current = null; runBackup(rq); }
+          if (/out of quota|over quota|kvóta|napi|budget|daily .*limit reached/i.test(String(em))) { var qCand = (cands || []).filter(function (x) { return x.id === fromCand.current; })[0]; setErr('⚡ Elicit nem elérhető (kvóta/napi limit) — automatikus Claude backup Study indul ugyanerre a kérdésre…'); setOpenForm(false); runBackup(rq, qCand && qCand.idea_id); fromCand.current = null; }
           else setErr(em);
           return;
         }
@@ -2114,7 +2133,7 @@
     //      parallel, keyed by a per-run id, each with its own independent status card. ----
     // The Claude backup runs in the module-level PRStudyRunner → it KEEPS GOING across tab/view switches. This component
     // only triggers it and renders the runs; on unmount the run continues in the background.
-    function runBackup(rq) { PRStudyRunner.startBackup(rq, { projectId: props.projectId, project: props.project, authorId: props.authorId, onChanged: props.onChanged }); }
+    function runBackup(rq, ideaId) { PRStudyRunner.startBackup(rq, { projectId: props.projectId, project: props.project, authorId: props.authorId, onChanged: props.onChanged, ideaId: ideaId || null }); }
     function backupEl() {   // one status card per Claude backup study for THIS project (state lives in PRStudyRunner)
       var all = PRStudyRunner.runs(), ks = Object.keys(all).filter(function (k) { return all[k].projectId === props.projectId; });
       if (!ks.length) return null;
@@ -2215,6 +2234,7 @@
     }
     function openCandRun(c) { var j = candJob(c); if (!j) return; if (j.status === 'completed' && j.result_body) setOpenR(j); else setSelJob(j.id); }   // done → open the report; else select it in the rail (shows the tracker)
     function candRunBadge(c) {
+      if (PRStudyRunner.isQuestionRunning(c.question)) return h('span', { className: 'pulse-run-tag', style: { alignSelf: 'flex-start', marginTop: 2 } }, '⏳ Kidolgozás alatt…');   // a Claude backup study is actively running for this question
       var j = candJob(c); if (!j) return null;
       var done = j.status === 'completed', failed = j.status === 'failed';
       return h('button', { className: 'sr-cand-run' + (done ? ' done' : failed ? ' fail' : ''), title: 'A lefuttatott áttekintés megnyitása', onClick: function (e) { e.stopPropagation(); openCandRun(c); } }, done ? '✓ Áttekintés kész — megnyitás' : failed ? '✗ Sikertelen futtatás' : '⏳ Futtatás folyamatban — megnyitás');
@@ -2222,7 +2242,7 @@
     function candCard(c) {
       var pico = c.pico || {};
       var hasPico = pico.population || pico.intervention || pico.comparison || pico.outcome;
-      return h('div', { key: c.id, style: { border: '1px solid var(--line)', borderLeft: '3px solid var(--accent, #4f46e5)', borderRadius: 11, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 9 } },
+      return h('div', { key: c.id, className: PRStudyRunner.isQuestionRunning(c.question) ? 'pulse-run' : null, style: { border: '1px solid var(--line)', borderLeft: '3px solid var(--accent, #4f46e5)', borderRadius: 11, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 9 } },
         (c.idea_id && ideaById[c.idea_id]) ? h('div', { style: { fontSize: 11, color: 'var(--muted)', display: 'flex', gap: 5, alignItems: 'baseline' } }, h('span', { style: { flex: 'none', fontWeight: 700, color: 'var(--accent)' } }, '💡 Alap'), h('span', { style: { minWidth: 0 } }, ideaById[c.idea_id])) : null,
         h('div', { style: { fontSize: 14, fontWeight: 650, lineHeight: 1.35 } }, c.question),
         candRunBadge(c),
@@ -2264,7 +2284,7 @@
       if (c.study_type) meta.push(c.study_type);
       if (c.abstract_criteria && c.abstract_criteria.length) meta.push('✓ ' + c.abstract_criteria.length + ' criteria');
       if (c.extraction_questions && c.extraction_questions.length) meta.push('📋 ' + c.extraction_questions.length + ' extraction');
-      return h('div', { key: c.id, className: 'sr-rcand' },
+      return h('div', { key: c.id, className: 'sr-rcand' + (PRStudyRunner.isQuestionRunning(c.question) ? ' pulse-run' : '') },
         (c.idea_id && ideaById[c.idea_id]) ? h('div', { className: 'sr-rcand-basis' }, '💡 ' + ideaById[c.idea_id]) : null,
         h('div', { className: 'sr-rcand-q' }, c.question),
         picoBits ? h('div', { className: 'sr-rcand-pico' }, picoBits) : null,
@@ -2445,6 +2465,20 @@
     useEffect(function () { if (!studiesOpen) return; function onEsc(e) { if (e.key === 'Escape') setStudiesOpen(false); } window.addEventListener('keydown', onEsc); return function () { window.removeEventListener('keydown', onEsc); }; }, [studiesOpen]);
     var alive = useRef(true), stop = useRef(false);
     useEffect(function () { return function () { alive.current = false; }; }, []);
+    // LIVE: while a background Claude-backup study (PRStudyRunner) advances, re-render (pulse) and, if the SELECTED study is
+    // the one running, reload its steps/papers so results stream in without a page reload.
+    var lrS = useState(0), setLrTick = lrS[1];
+    var loadRef = useRef(null), selRef2 = useRef(null); loadRef.current = loadStudy; selRef2.current = selId;
+    useEffect(function () {
+      return PRStudyRunner.subscribe(function () {
+        if (!alive.current) return;
+        setLrTick(function (x) { return x + 1; });
+        var sid = selRef2.current;
+        // keepCfg=true: this is a live progress reload of a RUNNING study — stream in steps/papers/review but do
+        // NOT overwrite the local cfg (the user may be editing step-1 keywords/criteria while it runs).
+        if (sid && PRStudyRunner.isStudyRunning(sid) && loadRef.current) loadRef.current(sid, true);
+      });
+    }, []);
     // #12 — selId is seeded from studies[0] at mount; if the studies list loads AFTER mount it stays null
     // and a step run would POST an empty study_id ("study_id required"). Sync selId once studies arrive.
     // On (re)load restore the LAST-VIEWED study (localStorage) + its furthest step, so a completed run's
@@ -2464,7 +2498,7 @@
       if (!id) { setReview(''); return; }
       sb.from('research_files').select('content').eq('project_id', props.projectId).like('path', 'studies/%-' + String(id).slice(0, 8) + '-review.md').order('updated_at', { ascending: false }).limit(1).then(function (rr) { setReview((rr && rr.data && rr.data[0] && rr.data[0].content) || ''); }, function () { });
     }
-    function loadStudy(id) {
+    function loadStudy(id, keepCfg) {
       if (!id) { setSteps([]); setPapers([]); setPapersLoading(false); setReview(''); return; }
       loadReview(id);
       Promise.all([
@@ -2472,7 +2506,8 @@
         sb.from('research_study_papers').select('source_id,step,decision,reason,score,signals,overridden').eq('study_id', id)
       ]).then(function (r) {
         var st = (r[0] && r[0].data) || []; var pps = (r[1] && r[1].data) || []; setSteps(st); setPapers(pps); setPapersLoading(false);
-        var cs = st.filter(function (x) { return x.step === curStep; })[0]; if (cs && cs.config) setCfg(cs.config);
+        // keepCfg (live progress reload): don't clobber the user's in-progress cfg edits with the DB copy.
+        if (!keepCfg) { var cs = st.filter(function (x) { return x.step === curStep; })[0]; if (cs && cs.config) setCfg(cs.config); }
         // load titles for this study's papers directly, so reloaded results always show a title (even if the
         // source isn't in the project-wide props.sources slice) — the transient run-time `titles` is gone on reload
         var ids = []; var seen = {}; pps.forEach(function (p) { if (p.source_id && !seen[p.source_id]) { seen[p.source_id] = 1; ids.push(p.source_id); } });
@@ -2630,7 +2665,7 @@
             var on = s.id === selId;
             var st = s.status === 'done' ? '✓ done' : ('step ' + (s.cur_step || 1) + '/4');
             var editing = renameId === s.id;
-            return h('div', { key: s.id, onClick: editing ? null : function () { setSelId(s.id); setCurStep(s.cur_step || 1); }, style: { textAlign: 'left', maxWidth: 260, minWidth: 150, border: '1.5px solid ' + (on ? 'var(--accent)' : 'var(--line)'), background: on ? 'var(--surface-2)' : 'var(--surface)', borderRadius: 8, padding: '6px 10px', cursor: editing ? 'default' : 'pointer' } },
+            return h('div', { key: s.id, className: PRStudyRunner.isStudyRunning(s.id) ? 'pulse-run' : null, onClick: editing ? null : function () { setSelId(s.id); setCurStep(s.cur_step || 1); }, style: { textAlign: 'left', maxWidth: 260, minWidth: 150, border: '1.5px solid ' + (on ? 'var(--accent)' : 'var(--line)'), background: on ? 'var(--surface-2)' : 'var(--surface)', borderRadius: 8, padding: '6px 10px', cursor: editing ? 'default' : 'pointer' } },
               editing
                 ? h('div', { onClick: function (e) { e.stopPropagation(); }, style: { display: 'flex', flexDirection: 'column', gap: 4 } },
                     h('input', { className: 'field', autoFocus: true, style: { fontSize: 12.5, width: '100%', boxSizing: 'border-box' }, value: renameVal, placeholder: 'Study name…', onChange: function (e) { setRenameVal(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter') { e.preventDefault(); renameStudy(s); } else if (e.key === 'Escape') { setRenameId(null); } } }),
