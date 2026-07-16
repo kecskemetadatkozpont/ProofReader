@@ -398,9 +398,10 @@
   }
 
   var extracting = false;
+  function figTerminal(st) { return st === 'ok' || st === 'no_oa' || st === 'no_figs'; }   // attempted with a terminal result → skip (migration-64)
   function extractAll() {
     if (extracting) return; extracting = true;
-    var todo = scopedPapers().filter(function (p) { return p.doi && !(S.byPaper[p.id] || []).length; });
+    var todo = scopedPapers().filter(function (p) { return p.doi && !(S.byPaper[p.id] || []).length && !figTerminal(p.fig_status); });
     if (!todo.length) { progEl.innerHTML = 'All papers with a DOI in this scope are already extracted.'; extracting = false; return; }
     var i = 0, added = 0;
     function next() {
@@ -413,6 +414,8 @@
       var p = todo[i];
       progEl.innerHTML = '<div class="pbar"><i style="width:' + Math.round(i / todo.length * 100) + '%"></i></div><div class="prow"><span>' + esc((p.title || '').slice(0, 34)) + '…</span><span>' + (i + 1) + '/' + todo.length + '</span></div>';
       extractPaper(p, function (msg) { var pr = progEl.querySelector('.prow span'); if (pr) pr.textContent = msg; }).then(function (r) {
+        // mark "attempted, produced nothing" so future runs skip it (migration-64; no-ops silently if the column is absent)
+        if (r && (r.status === 'no_oa' || r.status === 'no_figs')) { try { sb.from('research_sources').update({ fig_status: r.status }).eq('id', p.id).then(function () { }, function () { }); } catch (e) { } }
         added += (r.figs || 0); i++; next();
       });
     }

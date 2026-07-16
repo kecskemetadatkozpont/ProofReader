@@ -1449,7 +1449,13 @@
       sb.from('research_figures').select('source_id').eq('project_id', props.projectId).then(function (r) {
         if (!frAlive.current) return;
         var m = {}; ((r && r.data) || []).forEach(function (x) { if (x.source_id) m[x.source_id] = true; });
-        setFigExtracted(m);
+        // also skip papers already ATTEMPTED with no result (migration-64 fig_status). Degrades gracefully if the
+        // column is absent (the query errors → we just fall back to the has-figures set).
+        sb.from('research_sources').select('id,fig_status').eq('project_id', props.projectId).not('fig_status', 'is', null).then(function (r2) {
+          if (!frAlive.current) return;
+          if (r2 && !r2.error) (r2.data || []).forEach(function (x) { if (x.id && (x.fig_status === 'ok' || x.fig_status === 'no_oa' || x.fig_status === 'no_figs')) m[x.id] = true; });
+          setFigExtracted(m);
+        }, function () { if (frAlive.current) setFigExtracted(m); });
       }, function () { });
     }
     useEffect(function () { loadFigExtracted(); }, [props.projectId, (props.sources || []).length]);
@@ -1985,6 +1991,10 @@
           .then(function (r) { return binary ? (r.ok ? r.arrayBuffer() : r.json().then(function (e) { throw new Error((e && e.error) || 'fetch failed'); })) : r.json(); });
       });
     }
+    // Yield to the event loop between heavy page renders so the SPA UI stays responsive while extraction runs in the
+    // background. Uses MessageChannel, NOT setTimeout: background-tab timer throttling would clamp a setTimeout yield to
+    // ~1s each (≈30s/paper of pure waiting); MessageChannel macrotasks are not throttled.
+    function yieldUI() { return new Promise(function (resolve) { var ch = new MessageChannel(); ch.port1.onmessage = function () { resolve(); }; ch.port2.postMessage(0); }); }
     var pdfjsPromise = null;
     function ensurePdfjs() {
       if (window.pdfjsLib) { window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js'; return Promise.resolve(window.pdfjsLib); }
@@ -2027,7 +2037,7 @@
             var out = [], ord = 0, chain = Promise.resolve();
             var maxPages = Math.min(pdf.numPages, 30);
             for (var pn = 1; pn <= maxPages; pn++) (function (pnum) {
-              chain = chain.then(function () {
+              chain = chain.then(yieldUI).then(function () {   // let the UI breathe before each page's render
                 onProg && onProg('Oldal ' + pnum + '/' + maxPages + '…');
                 return pdf.getPage(pnum).then(function (page) {
                   var vp = page.getViewport({ scale: 2 });
@@ -2081,6 +2091,9 @@
       extractPaper(pid, p, function (m) { if (runs[pid]) set(pid, { msg: m }); }).then(function (r) {
         if (!runs[pid]) return;
         var oc2 = runs[pid].onChanged;
+        // mark "attempted, produced nothing" (no OA PDF / no captioned figures) so a resume skips it instead of
+        // re-processing every time. Needs migration-64 research_sources.fig_status; the update silently no-ops if absent.
+        if (r && (r.status === 'no_oa' || r.status === 'no_figs')) { try { sb.from('research_sources').update({ fig_status: r.status }).eq('id', p.id).then(function () { }, function () { }); } catch (e) { } }
         set(pid, { added: runs[pid].added + ((r && r.figs) || 0), done: i + 1 });
         if (oc2 && r && r.figs) try { oc2(); } catch (e) { }   // stream: refresh the app as each paper's figures land
         drive(pid, todo, i + 1);
