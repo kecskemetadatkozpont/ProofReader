@@ -2206,12 +2206,26 @@
         exps.length ? h('div', { style: { display: 'flex', gap: 7, marginTop: 6, flexWrap: 'wrap' } }, exps) : null
       );
     }
+    // has a review already been launched from THIS candidate? match by launched_job_id (set on create) or the question text
+    function candJob(c) {
+      if (!c || !jobs || !jobs.length) return null;
+      var j = c.launched_job_id ? jobs.filter(function (x) { return x.id === c.launched_job_id; })[0] : null;
+      if (!j && c.question) j = jobs.filter(function (x) { return x.research_question === c.question; })[0];
+      return j || null;
+    }
+    function openCandRun(c) { var j = candJob(c); if (!j) return; if (j.status === 'completed' && j.result_body) setOpenR(j); else setSelJob(j.id); }   // done → open the report; else select it in the rail (shows the tracker)
+    function candRunBadge(c) {
+      var j = candJob(c); if (!j) return null;
+      var done = j.status === 'completed', failed = j.status === 'failed';
+      return h('button', { className: 'sr-cand-run' + (done ? ' done' : failed ? ' fail' : ''), title: 'A lefuttatott áttekintés megnyitása', onClick: function (e) { e.stopPropagation(); openCandRun(c); } }, done ? '✓ Áttekintés kész — megnyitás' : failed ? '✗ Sikertelen futtatás' : '⏳ Futtatás folyamatban — megnyitás');
+    }
     function candCard(c) {
       var pico = c.pico || {};
       var hasPico = pico.population || pico.intervention || pico.comparison || pico.outcome;
       return h('div', { key: c.id, style: { border: '1px solid var(--line)', borderLeft: '3px solid var(--accent, #4f46e5)', borderRadius: 11, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 9 } },
         (c.idea_id && ideaById[c.idea_id]) ? h('div', { style: { fontSize: 11, color: 'var(--muted)', display: 'flex', gap: 5, alignItems: 'baseline' } }, h('span', { style: { flex: 'none', fontWeight: 700, color: 'var(--accent)' } }, '💡 Alap'), h('span', { style: { minWidth: 0 } }, ideaById[c.idea_id])) : null,
         h('div', { style: { fontSize: 14, fontWeight: 650, lineHeight: 1.35 } }, c.question),
+        candRunBadge(c),
         hasPico ? h('div', { style: { display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '2px 8px', fontSize: 11.5, background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 8, padding: '7px 9px' } },
           h('b', { style: { color: 'var(--accent)' } }, 'P'), h('span', null, pico.population || '—'),
           h('b', { style: { color: 'var(--accent)' } }, 'I'), h('span', null, pico.intervention || '—'),
@@ -2255,6 +2269,7 @@
         h('div', { className: 'sr-rcand-q' }, c.question),
         picoBits ? h('div', { className: 'sr-rcand-pico' }, picoBits) : null,
         meta.length ? h('div', { className: 'sr-rcand-meta' }, meta.join(' · ')) : null,
+        candRunBadge(c),
         h('div', { className: 'sr-rcand-a' },
           h('button', { className: 'sr-rcstart', disabled: !props.canEdit, onClick: function () { startFromCand(c); } }, '🔬 Start review'),
           h('button', { className: 'sr-rcx', disabled: !props.canEdit, title: 'Dismiss', onClick: function () { dismissCand(c); } }, '×'))
