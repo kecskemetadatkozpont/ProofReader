@@ -4726,12 +4726,21 @@
     }
     function dkSend() {   // free-text turn → research-chat (non-streaming); the reply may save files (→ file nodes)
       var txt = String(dInput || '').trim(); if (!txt || dBusy) return;
-      dkSay('user', txt); setDInput(''); setDBusy(true);
+      // the currently SELECTED map card is "attached" as context — the assistant sees exactly which node you mean.
+      var an = (sel && g && g.by) ? g.by[sel] : null;
+      var full = txt;
+      if (an) {
+        var lab = (RMAP_TYPE[an.t] && RMAP_TYPE[an.t].lab) || an.t;
+        var mbits = []; if (an.m) { for (var kk in an.m) { if (an.m[kk] && an.m[kk] !== '—') mbits.push(kk + ': ' + an.m[kk]); } }
+        var idp = (an.ref && an.ref.id) ? (' [id: ' + an.ref.id + ']') : '';
+        full = '[BECSATOLT KÁRTYA a térképről — erre a kártyára fókuszálj: ' + lab + ' — "' + String(an.title || '').slice(0, 160) + '"' + idp + (mbits.length ? ' — ' + mbits.slice(0, 6).join(', ') : '') + ']\n\n' + txt;
+      }
+      dkSay('user', (an ? '📎 ' + String(an.title || 'kártya').slice(0, 44) + '\n' : '') + txt); setDInput(''); setDBusy(true);
       var CFG = window.PR_CONFIG || {}, CORE = window.PRAutopilotCore, pid = props.projectId;
       function fail(msg) { if (alive.current) { setDBusy(false); dkSay('ai', msg || 'Hiba történt.'); } }   // single failure path → dBusy never strands
       dkEnsureChat().then(function (cid) {
         if (!cid) { fail('Nem sikerült elindítani a beszélgetést.'); return; }
-        sb.from('research_messages').insert({ chat_id: cid, role: 'user', content: txt }).then(function (ins) {
+        sb.from('research_messages').insert({ chat_id: cid, role: 'user', content: full }).then(function (ins) {
           if (ins && ins.error) { fail('Hiba: ' + ins.error.message); return; }
           sb.auth.getSession().then(function (s) {
             var token = (s && s.data && s.data.session && s.data.session.access_token) || CFG.supabaseAnonKey;
@@ -4810,8 +4819,13 @@
           h('div', { className: 'rmap-dock-h' }, h('span', null, '🤖 Asszisztens'), h('button', { className: 'rmap-dock-x', title: 'Összecsukás', onClick: function () { setDkOpen(false); try { localStorage.setItem('pr-rmap-dock', '0'); } catch (e) { } } }, '▾')),
           h('div', { className: 'rmap-dock-msgs', ref: dScroll }, dMsgs.map(function (mm, i) { return h('div', { key: i, className: 'rmap-dock-msg ' + (mm.role === 'user' ? 'u' : 'a') }, mm.text); }), dBusy ? h('div', { className: 'rmap-dock-msg a busy' }, '⏳ dolgozom…') : null),
           h('div', { className: 'rmap-dock-cmds' }, [['ideas', '✦ Ötletek'], ['study', '📚 Irodalom'], ['protocol', '🧪 Protokoll'], ['writing', '✍️ Draft']].map(function (c) { return h('button', { key: c[0], className: 'rmap-dock-chip', disabled: dBusy, onClick: function () { dkCmd(c[0]); } }, c[1]); })),
+          // the selected card is "attached" to the next prompt — shown here like an attachment chip (× to detach)
+          sn ? h('div', { style: { display: 'flex', alignItems: 'center', gap: 6, margin: '2px 12px 6px', padding: '4px 8px', borderRadius: 8, background: 'var(--accent-tint)', border: '1px solid var(--accent)' } },
+            h('span', { style: { flex: 'none', fontSize: 13 } }, (RMAP_TYPE[sn.t] && RMAP_TYPE[sn.t].ic) || '📎'),
+            h('span', { style: { minWidth: 0, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 11.5, fontWeight: 600, color: 'var(--accent-d, var(--accent))' } }, '📎 Becsatolva: ' + String(sn.title || 'kártya').slice(0, 46)),
+            h('button', { style: { flex: 'none', border: 'none', background: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: 15, lineHeight: 1, padding: 0 }, title: 'Leválasztás a promptról', onClick: function () { setSel(null); } }, '×')) : null,
           h('div', { className: 'rmap-dock-in' },
-            h('textarea', { rows: 1, value: dInput, placeholder: 'Írj utasítást vagy kérdést…', disabled: dBusy, onChange: function (e) { setDInput(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); dkSend(); } } }),
+            h('textarea', { rows: 1, value: dInput, placeholder: sn ? 'Kérdezz vagy adj utasítást a becsatolt kártyáról…' : 'Írj utasítást vagy kérdést… (jelölj ki egy kártyát a becsatoláshoz)', disabled: dBusy, onChange: function (e) { setDInput(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); dkSend(); } } }),
             h('button', { className: 'btn pri', style: { fontSize: 14, padding: '0 12px', flex: 'none' }, disabled: dBusy || !dInput.trim(), onClick: dkSend }, '➤')))
           : h('button', { className: 'rmap-dock-fab', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function () { setDkOpen(true); try { localStorage.setItem('pr-rmap-dock', '1'); } catch (e) { } } }, '🤖 Asszisztens')) : null),
       sn ? h('div', { className: 'rmap-insp' },
