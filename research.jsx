@@ -2271,22 +2271,22 @@
           props.canEdit ? h('button', { className: 'btn', style: { padding: '5px 11px', fontSize: 12.5 }, onClick: function () { fromCand.current = null; setF({ q: '', protocol: '', abs: [], ft: [], ex: [], exclude: [], gen: true, genAbs: true, genEx: true, useFig: false, runFT: true, maxResults: '1000' }); setOpenForm(true); } }, '+ Manual review') : null),
         err ? h('div', { style: { fontSize: 12.5, color: /^✓/.test(err) ? 'var(--ok, #15803d)' : 'var(--danger, #b42318)', margin: '6px 0' } }, err) : null,
         backupEl(),
-        h('div', { className: 'sr2' },
+        // Reviews exist → master-detail (rail + the selected review). No reviews yet → the review-question cards fill the
+        // FULL width in a responsive grid (side by side) instead of a narrow rail + a big empty detail pane.
+        (jobs && jobs.length) ? h('div', { className: 'sr2' },
           h('div', { className: 'sr-rail' },
-            (jobs && jobs.length) ? h('div', null,
+            h('div', null,
               h('div', { className: 'sr-rail-hd' }, 'Reviews ', h('span', { className: 'sr-rail-c' }, jobs.length)),
-              h('div', { className: 'sr-rlist' }, jobs.map(function (j) { return railRow(j, selId); }))) : (jobs ? h('div', { className: 'sr-rail-empty' }, 'No reviews yet.') : h('div', { className: 'sr-rail-empty' }, 'Loading…')),
+              h('div', { className: 'sr-rlist' }, jobs.map(function (j) { return railRow(j, selId); }))),
             (cands && cands.length) ? h('div', { className: 'sr-rail-sec' },
               h('div', { className: 'sr-rail-hd' }, 'From your Ideas ', h('span', { className: 'sr-rail-c' }, cands.length)),
-              cands.map(railCand)) : null
-          ),
-          h('div', { className: 'sr-detail' },
-            sel ? card(sel) :
-              (jobs === null) ? h('div', { className: 'sr-detail-empty' }, 'Loading reviews…') :
-                (cands && cands.length) ? h('div', { className: 'sr-detail-empty' }, 'Pick a review question on the left and press “🔬 Start review”, or “+ Manual review”.') :
-                  h('div', { className: 'sr-detail-empty' }, 'No reviews yet. Click “✨ Generate from Ideas” to draft review questions from your project Ideas, then start one.')
-          )
-        ),
+              cands.map(railCand)) : null),
+          h('div', { className: 'sr-detail' }, sel ? card(sel) : h('div', { className: 'sr-detail-empty' }, 'Válassz egy review-t a bal oldali listából.')))
+          : (jobs === null) ? h('div', { className: 'sr-detail-empty', style: { padding: '28px 16px', textAlign: 'center' } }, 'Loading reviews…')
+            : (cands && cands.length) ? h('div', { style: { marginTop: 6 } },
+                h('div', { className: 'field-label' }, '📋 Review-kérdések a projekt ötleteiből — válassz egyet („🔬 Start review"), vagy „+ Manual review"'),
+                h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 12, marginTop: 8, alignItems: 'start' } }, cands.map(candCard)))
+              : h('div', { className: 'sr-detail-empty', style: { padding: '36px 16px', textAlign: 'center', lineHeight: 1.6 } }, 'Még nincs review. Kattints a „✨ Generate from Ideas"-ra, hogy a projekt ötleteiből review-kérdéseket készíts, majd indíts egyet.'),
         openR ? h('div', { className: 'scrim', onClick: function () { setOpenR(null); } }, h('div', { className: 'modal', style: { width: 780 }, onClick: function (e) { e.stopPropagation(); } },
           h('div', { className: 'modal-h' }, h('h3', { style: { margin: 0, flex: 1 } }, openR.result_title || 'Systematic review'), h('button', { className: 'icon-x', 'aria-label': 'Close', onClick: function () { setOpenR(null); } }, '✕')),
           (window.marked && window.DOMPurify)
