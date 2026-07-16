@@ -615,6 +615,10 @@
     html.newdesign .idb-q.clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
     html.newdesign .idb-h2.clamp, html.newdesign .idb-r2.clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
     html.newdesign .idb-meta { font-size: 10.5px; color: var(--faint); margin-top: 4px; }
+    html.newdesign .idb-run { display: inline-flex; align-items: center; margin-left: 6px; border: 1px solid var(--line); background: var(--surface-2, transparent); color: var(--muted); font-family: inherit; font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 999px; cursor: pointer; vertical-align: middle; white-space: nowrap; }
+    html.newdesign .idb-run:hover { border-color: var(--accent); color: var(--accent); }
+    html.newdesign .idb-run.done { border-color: color-mix(in srgb, var(--ok, #15803d) 45%, var(--line)); background: color-mix(in srgb, var(--ok, #15803d) 10%, transparent); color: var(--ok, #15803d); }
+    html.newdesign .idb-run.done:hover { border-color: var(--ok, #15803d); color: var(--ok, #15803d); background: color-mix(in srgb, var(--ok, #15803d) 18%, transparent); }
     html.newdesign .idb-rejtag { color: var(--danger); }
     html.newdesign .idb-acts { display: flex; gap: 6px; margin-top: 7px; align-items: center; }
     html.newdesign .idb-acts button { font-family: inherit; font-size: 11px; font-weight: 700; padding: 4px 9px; border-radius: 7px; cursor: pointer; border: 1px solid var(--line); background: var(--surface); color: var(--muted); }
@@ -934,7 +938,7 @@
   <script type="text/babel" src="canvas.jsx?v=1783137934"></script>
   <script type="text/babel" src="notes.jsx?v=1783137934"></script>
   <script src="autopilot-core.js?v=1784160000"></script>
-  <script type="text/babel" src="research.jsx?v=1784530000"></script>
+  <script type="text/babel" src="research.jsx?v=1784540000"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>

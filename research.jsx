@@ -1078,7 +1078,45 @@
     var b = useState(false), busy = b[0], setBusy = b[1];
     var m = useState(''), msg = m[0], setMsg = m[1];
     var exS = useState({}), expanded = exS[0], setExpanded = exS[1];   // #10: per-idea open/closed
+    var rbS = useState({}), runsByIdea = rbS[0], setRunsByIdea = rbS[1];   // idea_id → [{kind:'study'|'review', id, title, status}] : has a run been started FROM this idea?
+    var vwS = useState(null), viewer = vwS[0], setViewer = vwS[1];         // {title, body} — an opened run result (markdown), or {title, body:'⏳…'} while loading
+    var rlS = useState(null), runList = rlS[0], setRunList = rlS[1];       // {ideaQ, runs} — a picker when an idea has several runs
+    var aliveR = useRef(true);
+    useEffect(function () { aliveR.current = true; return function () { aliveR.current = false; }; }, []);
+    // load which ideas already have a run (a Study created from the idea, or an SR review launched from a candidate of the idea)
+    useEffect(function () {
+      var pid = props.projectId;
+      Promise.all([
+        sb.from('research_studies').select('id,idea_id,title,status').eq('project_id', pid).not('idea_id', 'is', null),
+        sb.from('research_sr_candidates').select('idea_id,question,launched_job_id').eq('project_id', pid).not('launched_job_id', 'is', null),
+        sb.from('elicit_jobs').select('id,status,result_title,research_question').eq('project_id', pid).eq('kind', 'sysreview')
+      ]).then(function (r) {
+        if (!aliveR.current) return;
+        var studies = (r[0] && r[0].data) || [], cands = (r[1] && r[1].data) || [], jobs = (r[2] && r[2].data) || [];
+        var jobById = {}; jobs.forEach(function (j) { jobById[j.id] = j; });
+        var map = {};
+        studies.forEach(function (s) { if (s.idea_id) (map[s.idea_id] = map[s.idea_id] || []).push({ kind: 'study', id: s.id, title: s.title || 'Irodalom-study', status: s.status }); });
+        cands.forEach(function (c) { var j = c.launched_job_id && jobById[c.launched_job_id]; if (c.idea_id && j) (map[c.idea_id] = map[c.idea_id] || []).push({ kind: 'review', id: j.id, title: j.result_title || c.question || 'Szisztematikus áttekintés', status: j.status }); });
+        setRunsByIdea(map);
+      }, function () { if (aliveR.current) setRunsByIdea({}); });   // network reject → no badges (never throw)
+    }, [props.projectId, (props.ideas || []).length]);
     function toggle(id) { setExpanded(function (e) { var n = Object.assign({}, e); n[id] = e[id] === false ? true : false; return n; }); }
+    // open a run's result (the review markdown) in the viewer modal
+    function openRun(run) {
+      setViewer({ title: run.title, body: '⏳ Betöltés…' });
+      if (run.kind === 'review') {
+        sb.from('elicit_jobs').select('result_title,result_body').eq('id', run.id).maybeSingle().then(function (r) { if (!aliveR.current) return; var j = r && r.data; setViewer({ title: (j && j.result_title) || run.title, body: (j && j.result_body) || '_A szisztematikus áttekintés még fut, vagy nincs kész riport — a részletek a Study fülön._' }); }, function () { if (aliveR.current) setViewer({ title: run.title, body: '_Nem sikerült betölteni az eredményt._' }); });
+      } else {
+        var sid8 = String(run.id).replace(/-/g, '').slice(0, 8);
+        sb.from('research_files').select('content').eq('project_id', props.projectId).like('path', 'studies/%-' + sid8 + '-review.md').order('updated_at', { ascending: false }).limit(1).then(function (r) { if (!aliveR.current) return; var f = r && r.data && r.data[0]; setViewer({ title: run.title, body: (f && f.content) || '_Ehhez a study-hoz még nincs áttekintés (pl. nem volt full-text included cikk). A szűrési részletek a Study fülön: „Keyword screening funnel"._' }); }, function () { if (aliveR.current) setViewer({ title: run.title, body: '_Nem sikerült betölteni az eredményt._' }); });
+      }
+    }
+    function openIdeaRuns(idea) { var runs = runsByIdea[idea.id] || []; if (!runs.length) return; if (runs.length === 1) openRun(runs[0]); else setRunList({ ideaQ: idea.question, runs: runs }); }
+    function runBadge(idea) {   // green chip on an idea card when a run exists → click to open its result
+      var runs = runsByIdea[idea.id] || []; if (!runs.length) return null;
+      var done = runs.some(function (r) { return r.status === 'done' || r.status === 'completed'; });
+      return h('button', { className: 'idb-run' + (done ? ' done' : ''), title: 'Futtatás eredményének megnyitása', onClick: function (e) { e.stopPropagation(); openIdeaRuns(idea); } }, (done ? '✓ ' : '▶ ') + runs.length + ' futtatás');
+    }
     function add() {
       var q = form.question.trim();
       if (!q) { setMsg('Type a research question first.'); return; }
@@ -1123,7 +1161,7 @@
                 h('div', { className: 'idb-q' + (xp ? '' : ' clamp'), title: xp ? '' : idea.question, onClick: function () { toggle(idea.id); } }, idea.question),
                 idea.hypothesis ? h('div', { className: 'idb-h2' + (xp ? '' : ' clamp') }, idea.hypothesis) : null,
                 idea.rationale ? h('div', { className: 'idb-r2' + (xp ? '' : ' clamp') }, idea.rationale) : null,
-                h('div', { className: 'idb-meta' }, srcLabel(idea.source), idea.novelty != null ? ' · novelty ' + idea.novelty : '', rej ? h('span', { className: 'idb-rejtag' }, ' · rejected') : ''),
+                h('div', { className: 'idb-meta' }, srcLabel(idea.source), idea.novelty != null ? ' · novelty ' + idea.novelty : '', rej ? h('span', { className: 'idb-rejtag' }, ' · rejected') : '', runBadge(idea)),
                 props.canEdit ? h('div', { className: 'idb-acts' },
                   h('button', { className: 'sel', onClick: function () { setStatus(idea, 'selected'); } }, 'Select'),
                   rej ? h('button', { onClick: function () { setStatus(idea, 'candidate'); } }, 'Reset') : h('button', { onClick: function () { setStatus(idea, 'rejected'); } }, 'Reject'),
@@ -1142,13 +1180,31 @@
                 h('span', { className: 'idb-bnum' }, String(i + 1)),
                 h('div', { style: { flex: 1, minWidth: 0 } },
                   h('div', { className: 'idb-bq' }, idea.question),
-                  idea.hypothesis ? h('div', { className: 'idb-bh' }, idea.hypothesis) : null),
+                  idea.hypothesis ? h('div', { className: 'idb-bh' }, idea.hypothesis) : null,
+                  (runsByIdea[idea.id] || []).length ? h('div', { style: { marginTop: 4 } }, runBadge(idea)) : null),
                 props.canEdit ? h('button', { className: 'del', 'aria-label': 'Remove from basis', title: 'Remove from basis', onClick: function () { setStatus(idea, 'candidate'); } }, '✕') : null
               );
             })),
             props.onStartStudyMulti ? h('button', { className: 'idb-cta', onClick: function () { props.onStartStudyMulti(selected); } }, '🔬 Start a study from these ideas →') : null
           ) : h('div', { className: 'idb-bempty' }, 'Press “Select” on a shortlisted idea — it becomes the study basis.')
-        )
+        ),
+        runList ? h('div', { className: 'scrim', onClick: function () { setRunList(null); } }, h('div', { className: 'modal', style: { width: 460 }, onClick: function (e) { e.stopPropagation(); } },
+          h('div', { className: 'modal-h' }, h('b', null, 'Futtatások ehhez az ötlethez'), h('button', { className: 'x', 'aria-label': 'Close', onClick: function () { setRunList(null); } }, '×')),
+          h('div', { className: 'modal-b' },
+            h('div', { style: { fontSize: 12, color: 'var(--muted)', marginBottom: 8, lineHeight: 1.4 } }, runList.ideaQ),
+            runList.runs.map(function (run, i) {
+              return h('div', { key: i, style: { display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0', borderTop: i ? '1px solid var(--line)' : 'none' } },
+                h('span', { style: { fontSize: 15, flex: 'none' } }, run.kind === 'review' ? '🔬' : '🔎'),
+                h('div', { style: { flex: 1, minWidth: 0 } },
+                  h('div', { style: { fontSize: 12.5, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, run.title),
+                  h('div', { style: { fontSize: 11, color: 'var(--muted)' } }, (run.kind === 'review' ? 'Szisztematikus áttekintés' : 'Irodalom-study') + ' · ' + (run.status || '—'))),
+                h('button', { className: 'btn pri', style: { fontSize: 12, padding: '4px 10px', flex: 'none' }, onClick: function () { setRunList(null); openRun(run); } }, 'Megnyitás'));
+            })))) : null,
+        viewer ? h('div', { className: 'scrim', onClick: function () { setViewer(null); } }, h('div', { className: 'modal', style: { width: 780 }, onClick: function (e) { e.stopPropagation(); } },
+          h('div', { className: 'modal-h' }, h('b', { style: { flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, viewer.title || 'Eredmény'), h('button', { className: 'x', 'aria-label': 'Close', onClick: function () { setViewer(null); } }, '×')),
+          (window.marked && window.DOMPurify)
+            ? h('div', { className: 'md-report', style: { padding: 18, maxHeight: '72vh', overflow: 'auto', lineHeight: 1.6, fontSize: 13.5 }, dangerouslySetInnerHTML: { __html: enhanceReport(viewer.body || '') } })
+            : h('div', { style: { padding: 18, maxHeight: '72vh', overflow: 'auto', whiteSpace: 'pre-wrap', fontSize: 13 } }, viewer.body || ''))) : null
       );
     }
     if (nd()) return railRender();
