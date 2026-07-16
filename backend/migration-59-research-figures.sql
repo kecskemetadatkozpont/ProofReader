@@ -39,7 +39,8 @@ create policy rfig_write on public.research_figures for all to authenticated
   using (public.research_can_write_project(project_id)) with check (public.research_can_write_project(project_id));
 grant select, insert, update, delete on table public.research_figures to authenticated;
 
--- Figure images live under the existing research-data bucket at:  figures/<project_id>/<source_id>/<ord>.png
+-- Figure images live under the existing research-data bucket at:  <project_id>/figures/<source_id>/<ord>.png
+-- (project_id MUST be the FIRST path segment — the research-data bucket RLS in migration-15 scopes writes on foldername[1])
 -- (that bucket's RLS already scopes objects to project members — no new bucket needed).
 
 -- Verify after apply:  select count(*) from research_figures;   -- 0

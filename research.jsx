@@ -1438,6 +1438,27 @@
         setStudyInc(m); setStudyOrigin(orig);
       }, function () { });
     }, [(props.studies || []).map(function (s) { return s.id + ':' + (s.title || ''); }).join('|'), (props.sources || []).length]);
+    // ---- Background figure extraction (PRFigureRunner): keeps running across SPA tab/view switches; the Figure Board
+    //      button pulses yellow while it runs and turns green when done; realtime progress shows the current paper. ----
+    var frS = useState(0), setFigTick = frS[1];
+    var fexS = useState({}), figExtracted = fexS[0], setFigExtracted = fexS[1];   // source_id -> true (already has figures → skip)
+    var frAlive = useRef(true);
+    useEffect(function () { frAlive.current = true; return function () { frAlive.current = false; }; }, []);
+    useEffect(function () { return PRFigureRunner.subscribe(function () { if (frAlive.current) setFigTick(function (x) { return x + 1; }); }); }, []);
+    function loadFigExtracted() {
+      sb.from('research_figures').select('source_id').eq('project_id', props.projectId).then(function (r) {
+        if (!frAlive.current) return;
+        var m = {}; ((r && r.data) || []).forEach(function (x) { if (x.source_id) m[x.source_id] = true; });
+        setFigExtracted(m);
+      }, function () { });
+    }
+    useEffect(function () { loadFigExtracted(); }, [props.projectId, (props.sources || []).length]);
+    function startFigExtract() {
+      var todo = (props.sources || []).filter(function (s) { return s.doi && !figExtracted[s.id]; });
+      if (!todo.length) { if (window.PRUI && window.PRUI.toast) window.PRUI.toast('Minden DOI-val rendelkező cikkből már kinyertük az ábrákat.', {}); return; }
+      // callback fires per finished paper + at the end → refresh which sources are extracted (updates the button/count live)
+      PRFigureRunner.start(props.projectId, todo, function () { loadFigExtracted(); });
+    }
     var saved = {}; (props.sources || []).forEach(function (s) { if (s.ext_id) saved[s.ext_id] = true; });
     function setF(k, v) { var o = {}; o[k] = v; setFlt(Object.assign({}, flt, o)); }
     function buildFilter(f) {
@@ -1580,10 +1601,24 @@
       h('div', { className: 'panel' },
         h('h3', null, 'Library', h('div', { style: { display: 'flex', gap: 10, alignItems: 'center' } },
           h('span', { style: { fontWeight: 600, color: 'var(--faint)' } }, lib.length + ' source' + (lib.length === 1 ? '' : 's')),
-          lib.length ? h('a', { className: 'btn', style: { padding: '4px 10px', fontSize: 12, textDecoration: 'none' }, href: 'FigureBoard.html?project=' + encodeURIComponent(props.projectId), title: 'Extract figures from these papers onto an infinite canvas' }, '🖼 Figure Board') : null,
+          lib.length ? (function () {
+            var fr = PRFigureRunner.status(props.projectId), running = PRFigureRunner.isRunning(props.projectId), doneRun = !!(fr && fr.stage === 'done');
+            return h('a', { className: 'btn' + (running ? ' pulse-run' : (doneRun ? ' fig-done' : '')), style: { padding: '4px 10px', fontSize: 12, textDecoration: 'none' }, href: 'FigureBoard.html?project=' + encodeURIComponent(props.projectId), title: running ? ('Ábra-kinyerés fut a háttérben — ' + (fr.done || 0) + '/' + (fr.total || 0)) : 'Extract figures from these papers onto an infinite canvas' },
+              running ? ('⏳ Figure Board · ' + (fr.done || 0) + '/' + (fr.total || 0)) : (doneRun ? '✓ Figure Board' : '🖼 Figure Board'));
+          })() : null,
+          (lib.length && props.canEdit) ? h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12 }, disabled: PRFigureRunner.isRunning(props.projectId), title: 'Ábrák kinyerése a háttérben — fut tovább, amíg az appot használod (teljes újratöltés állítja csak le, onnan folytatható)', onClick: startFigExtract }, PRFigureRunner.isRunning(props.projectId) ? '⏳ Kinyerés…' : '✨ Ábrák kinyerése (háttér)') : null,
           lib.length ? h('a', { className: 'btn', style: { padding: '4px 10px', fontSize: 12, textDecoration: 'none' }, href: 'CitationOptimizer.html?project=' + encodeURIComponent(props.projectId), title: 'Analyze what your top-cited included papers are cited FOR' }, '🔗 Citation Optimizer') : null,
           lib.length ? h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12 }, title: 'Export included (or all) as BibTeX', onClick: function () { var inc = lib.filter(function (x) { return x.screening === 'include'; }); downloadText('library.bib', genBibtex(inc.length ? inc : lib)); } }, '⬇ BibTeX') : null
         )),
+        (function () {   // realtime figure-extraction progress (background runner) — survives tab/view switches
+          var fr = PRFigureRunner.status(props.projectId); if (!fr) return null;
+          var running = fr.stage === 'running', err = fr.stage === 'error';
+          return h('div', { style: { display: 'flex', alignItems: 'center', gap: 10, margin: '2px 0 10px', padding: '7px 11px', borderRadius: 8, background: 'var(--surface-2)', border: '1px solid ' + (running ? 'rgba(234,179,8,.5)' : err ? 'var(--danger,#b42318)' : 'rgba(22,163,74,.4)') } },
+            h('span', { style: { minWidth: 0, flex: 1, fontSize: 12, color: running ? '#a16207' : err ? 'var(--danger,#b42318)' : 'var(--ok,#15803d)' } },
+              running ? ('🖼 Ábra-kinyerés a háttérben — ' + (fr.done || 0) + '/' + (fr.total || 0) + (fr.curTitle ? ' · ' + String(fr.curTitle).slice(0, 46) : '') + (fr.msg ? ' — ' + fr.msg : '')) : (err ? ('✗ ' + (fr.msg || 'Hiba')) : ('✓ ' + (fr.msg || 'Kész')))),
+            running ? h('button', { className: 'btn', style: { padding: '2px 9px', fontSize: 11, flex: 'none' }, onClick: function () { PRFigureRunner.cancel(props.projectId); }, title: 'Kinyerés leállítása' }, 'Leállítás')
+              : h('button', { className: 'btn', style: { padding: '2px 9px', fontSize: 11, flex: 'none' }, onClick: function () { PRFigureRunner.dismiss(props.projectId); setFigTick(function (x) { return x + 1; }); } }, '✕'));
+        })(),
         nd() ? libNewBody() : (lib.length ? lib.map(function (s) {
           return h('div', { className: 'src' + (studyInc[s.id] ? ' src-study' : ''), style: { alignItems: 'flex-start' }, key: s.id },
             h('div', { style: { flex: 1, minWidth: 0 } },
@@ -1928,6 +1963,144 @@
           });
         });
         return id;
+      }
+    };
+  })();
+
+  // ---- Background figure-extraction runner: runs the pdf.js figure extraction at MODULE level so it KEEPS GOING
+  //      across SPA tab/view switches (like PRStudyRunner). One run per project. A full page reload stops it, but each
+  //      paper's figures persist to research_figures as it finishes, so re-starting resumes (done papers are skipped).
+  //      Same extraction as figure-board.js (resolve OA PDF via pdf-proxy → pdf.js render → caption-crop → upload). ----
+  var PRFigureRunner = (function () {
+    var runs = {}, subs = [];   // projectId -> { projectId, stage:'running'|'done'|'error', done, total, added, msg, curTitle, onChanged }
+    function notify() { for (var i = 0; i < subs.length; i++) { try { subs[i](); } catch (e) { } } }
+    function set(pid, patch) { if (!runs[pid]) return; runs[pid] = Object.assign({}, runs[pid], patch); notify(); }
+    function CFG() { return window.PR_CONFIG || {}; }
+    function fbBareDoi(d) { return String(d || '').trim().replace(/^https?:\/\/(dx\.)?doi\.org\//i, '').replace(/^doi:/i, ''); }
+    function fbProxy(body, binary) {
+      var C = CFG();
+      return sb.auth.getSession().then(function (s) {
+        var token = (s && s.data && s.data.session && s.data.session.access_token) || C.supabaseAnonKey;
+        return fetch(C.supabaseUrl + '/functions/v1/pdf-proxy', { method: 'POST', headers: { 'Content-Type': 'application/json', 'apikey': C.supabaseAnonKey, 'Authorization': 'Bearer ' + token }, body: JSON.stringify(body) })
+          .then(function (r) { return binary ? (r.ok ? r.arrayBuffer() : r.json().then(function (e) { throw new Error((e && e.error) || 'fetch failed'); })) : r.json(); });
+      });
+    }
+    var pdfjsPromise = null;
+    function ensurePdfjs() {
+      if (window.pdfjsLib) { window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js'; return Promise.resolve(window.pdfjsLib); }
+      if (pdfjsPromise) return pdfjsPromise;
+      pdfjsPromise = new Promise(function (resolve, reject) {
+        var sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js';
+        sc.onload = function () { if (window.pdfjsLib) { window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js'; resolve(window.pdfjsLib); } else { pdfjsPromise = null; reject(new Error('pdf.js unavailable')); } };
+        sc.onerror = function () { pdfjsPromise = null; reject(new Error('pdf.js failed to load')); };
+        document.head.appendChild(sc);
+      });
+      return pdfjsPromise;
+    }
+    // find "Figure N" captions on a page → rendered-px position (top-origin) + first-line text (ported from figure-board.js)
+    function findCaptions(items, viewport) {
+      var U = window.pdfjsLib.Util, lines = {};
+      items.forEach(function (it) {
+        if (!it.str || !it.str.trim()) return;
+        var t = U.transform(viewport.transform, it.transform), y = t[5], x = t[4];
+        var key = Math.round(y / 4) * 4;
+        (lines[key] = lines[key] || []).push({ x: x, y: y, s: it.str, h: Math.hypot(t[2], t[3]) || 12 });
+      });
+      var caps = [];
+      Object.keys(lines).forEach(function (k) {
+        var line = lines[k].sort(function (a, b) { return a.x - b.x; });
+        var text = line.map(function (w) { return w.s; }).join('').replace(/\s+/g, ' ').trim();
+        var m = text.match(/^(Fig(?:ure|\.)?)\s*(\d+)[\.:\s]/i);
+        if (!m) return;
+        var y = line[0].y, hh = line[0].h;
+        caps.push({ y: y, top: y - hh, bottom: y + hh * 0.6, label: 'Figure ' + m[2], text: text.slice(0, 320) });
+      });
+      caps.sort(function (a, b) { return a.y - b.y; });
+      return caps;
+    }
+    function extractPaper(pid, p, onProg) {   // pid threaded in: SPA props.sources rows omit project_id, so never read p.project_id
+      return fbProxy({ action: 'resolve', doi: fbBareDoi(p.doi) }, false).then(function (res) {
+        if (!res || !res.pdf_url) return { status: 'no_oa', figs: 0 };
+        onProg && onProg('PDF letöltése…');
+        return fbProxy({ action: 'fetch', url: res.pdf_url }, true).then(function (buf) {
+          return ensurePdfjs().then(function (pdfjs) { return pdfjs.getDocument({ data: buf }).promise; }).then(function (pdf) {
+            var out = [], ord = 0, chain = Promise.resolve();
+            var maxPages = Math.min(pdf.numPages, 30);
+            for (var pn = 1; pn <= maxPages; pn++) (function (pnum) {
+              chain = chain.then(function () {
+                onProg && onProg('Oldal ' + pnum + '/' + maxPages + '…');
+                return pdf.getPage(pnum).then(function (page) {
+                  var vp = page.getViewport({ scale: 2 });
+                  var cv = document.createElement('canvas'); cv.width = Math.ceil(vp.width); cv.height = Math.ceil(vp.height);
+                  var ctx = cv.getContext('2d');
+                  return page.render({ canvasContext: ctx, viewport: vp }).promise.then(function () { return page.getTextContent(); }).then(function (tc) {
+                    var caps = findCaptions(tc.items, vp);
+                    var pchain = Promise.resolve();
+                    caps.forEach(function (cap, ci) {
+                      pchain = pchain.then(function () {
+                        var topBound = (ci > 0) ? caps[ci - 1].bottom + 8 : Math.max(0, cap.top - vp.height * 0.55);
+                        var cropTop = Math.max(0, Math.min(topBound, cap.top - 16));
+                        var cropBottom = Math.min(cv.height, cap.bottom + 6);
+                        var cropH = Math.round(cropBottom - cropTop);
+                        if (cropH < 90) return;
+                        var fc = document.createElement('canvas'); fc.width = cv.width; fc.height = cropH;
+                        fc.getContext('2d').drawImage(cv, 0, cropTop, cv.width, cropH, 0, 0, cv.width, cropH);
+                        var myOrd = ord++;
+                        var path = pid + '/figures/' + p.id + '/' + myOrd + '.png';   // RLS bucket keys on the first path segment = project id
+                        return new Promise(function (r) { fc.toBlob(r, 'image/png', 0.92); }).then(function (blob) {
+                          if (!blob) return;
+                          return sb.storage.from('research-data').upload(path, blob, { upsert: true, contentType: 'image/png' }).then(function () {
+                            out.push({ project_id: pid, source_id: p.id, page: pnum, ord: myOrd, fig_label: cap.label, caption: cap.text, storage_path: path, width: fc.width, height: fc.height });
+                          });
+                        });
+                      });
+                    });
+                    return pchain;
+                  });
+                });
+              });
+            })(pn);
+            return chain.then(function () {
+              if (!out.length) return { status: 'no_figs', figs: 0 };
+              return sb.from('research_figures').upsert(out, { onConflict: 'source_id,ord' }).then(function () { return { status: 'ok', figs: out.length }; });
+            });
+          });
+        });
+      }).catch(function (e) { return { status: 'error', figs: 0, msg: (e && e.message) || 'failed' }; });
+    }
+    function drive(pid, todo, i) {
+      if (!runs[pid]) return;   // cancelled → stop
+      if (i >= todo.length) {
+        var oc = runs[pid].onChanged;
+        set(pid, { stage: 'done', done: todo.length, curTitle: '', msg: '✓ Kész — ' + runs[pid].added + ' ábra ' + todo.length + ' cikkből' });
+        if (oc) try { oc(); } catch (e) { }
+        return;
+      }
+      var p = todo[i];
+      set(pid, { stage: 'running', done: i, curTitle: p.title || '', msg: 'Feldolgozás…' });
+      extractPaper(pid, p, function (m) { if (runs[pid]) set(pid, { msg: m }); }).then(function (r) {
+        if (!runs[pid]) return;
+        var oc2 = runs[pid].onChanged;
+        set(pid, { added: runs[pid].added + ((r && r.figs) || 0), done: i + 1 });
+        if (oc2 && r && r.figs) try { oc2(); } catch (e) { }   // stream: refresh the app as each paper's figures land
+        drive(pid, todo, i + 1);
+      }, function () { if (runs[pid]) drive(pid, todo, i + 1); });   // a single paper failing must not stop the run
+    }
+    return {
+      runs: function () { return runs; },
+      subscribe: function (fn) { subs.push(fn); return function () { var k = subs.indexOf(fn); if (k >= 0) subs.splice(k, 1); }; },
+      isRunning: function (pid) { var r = runs[pid]; return !!(r && r.stage === 'running'); },
+      status: function (pid) { return runs[pid] || null; },
+      dismiss: function (pid) { var r = runs[pid]; if (r && (r.stage === 'done' || r.stage === 'error')) { delete runs[pid]; notify(); } },
+      cancel: function (pid) { if (runs[pid]) { delete runs[pid]; notify(); } },
+      // start extraction for a project over `papers` (research_sources rows already filtered to DOI + not-yet-extracted)
+      start: function (pid, papers, onChanged) {
+        if (!pid || !papers || !papers.length) return null;
+        if (runs[pid] && runs[pid].stage === 'running') return runs[pid];   // already running → no double-start
+        runs[pid] = { projectId: pid, stage: 'running', done: 0, total: papers.length, added: 0, msg: 'Indítás…', curTitle: '', onChanged: onChanged };
+        notify();
+        ensurePdfjs().then(function () { if (runs[pid]) drive(pid, papers, 0); }, function () { set(pid, { stage: 'error', msg: 'pdf.js betöltése sikertelen' }); });
+        return runs[pid];
       }
     };
   })();
