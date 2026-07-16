@@ -9,6 +9,7 @@
 // (Model override optional:  supabase secrets set RESEARCH_AI_MODEL=claude-sonnet-4-6)
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { assertEntitled, resolveModel } from '../_shared/entitlement.ts';
+import { langDirective, loadProjectLang } from '../_shared/lang.ts';
 
 const ANTHROPIC_KEY = Deno.env.get('ANTHROPIC_API_KEY');
 const MODEL = Deno.env.get('RESEARCH_AI_MODEL') || 'claude-sonnet-4-6';
@@ -46,10 +47,12 @@ Deno.serve(async (req) => {
     const gate = await assertEntitled(sb, 'research_chat_ideas'); if (gate) return gate;
     const { data: profRow } = await sb.from('profiles').select('ai_model').eq('id', ures?.user?.id ?? '').maybeSingle();
     const userModel = await resolveModel(sb);
+    // per-project output language for USER-FACING generation (search keywords stay English elsewhere)
+    const _lang = await loadProjectLang(sb, project_id);
 
     // Research Canvas: free-text summary of the edgeless whiteboard (no DB writes).
     if (action === 'canvas-summary') {
-      const summary = await summarizeCanvas(proj, String(canvas || '').slice(0, 12000), userModel);
+      const summary = await summarizeCanvas(proj, String(canvas || '').slice(0, 12000), userModel, _lang);
       return json({ ok: true, summary });
     }
     // #6 — automatic prompt enhancement: rewrite the user's chat prompt to be clearer/more specific (no DB writes)
@@ -62,7 +65,7 @@ Deno.serve(async (req) => {
     if (action === 'suggest') {
       const { data: existing } = await sb.from('research_ideas').select('question').eq('project_id', project_id).limit(60);
       const existingQs = (existing || []).map((e: any) => String(e.question || ''));
-      const ideas = await suggestFromChat(proj, String(text || '').slice(0, 9000), existingQs, userModel);
+      const ideas = await suggestFromChat(proj, String(text || '').slice(0, 9000), existingQs, userModel, _lang);
       const rows = ideas.slice(0, 3).map((i: any) => ({
         project_id, source: 'chat', question: String(i.question || '').slice(0, 600),
         hypothesis: i.hypothesis ? String(i.hypothesis).slice(0, 800) : null,
@@ -78,7 +81,7 @@ Deno.serve(async (req) => {
     const { data: sources } = await sb.from('research_sources')
       .select('title,year,venue,abstract').eq('project_id', project_id).limit(40);
 
-    const ideas = await askClaude(action, proj, sources || [], userModel);
+    const ideas = await askClaude(action, proj, sources || [], userModel, _lang);
     if (ideas.length) {
       const rows = ideas.slice(0, 8).map((i: any) => ({
         project_id, source: 'gap', question: String(i.question || '').slice(0, 600),
@@ -96,13 +99,13 @@ Deno.serve(async (req) => {
   }
 });
 
-async function summarizeCanvas(proj: any, canvas: string, model: string): Promise<string> {
+async function summarizeCanvas(proj: any, canvas: string, model: string, lang: 'en' | 'hu'): Promise<string> {
   const prompt = `Egy kutató edgeless vásznát (Research Canvas) kapod: tipizált csomópontok (jegyzet/ötlet/publikáció/forrás/adat) és tipizált kapcsolatok (kapcsolódik/alátámaszt/cáfol/vezet-hozzá). Projekt: "${proj.title}"${proj.field ? ' (' + proj.field + ')' : ''}.
 
 VÁSZON TARTALMA:
 ${canvas || '(üres)'}
 
-Készíts TÖMÖR, magyar nyelvű összefoglalót a témavezető/kutató számára: (1) mi a vászon fő gondolatmenete, (2) az érvstruktúra (mi mit támaszt alá vagy cáfol), (3) 2-3 konkrét következő lépés vagy nyitott kérdés. Csak a megadott tartalomra támaszkodj. Markdown, max ~180 szó.`;
+Készíts TÖMÖR összefoglalót a témavezető/kutató számára: (1) mi a vászon fő gondolatmenete, (2) az érvstruktúra (mi mit támaszt alá vagy cáfol), (3) 2-3 konkrét következő lépés vagy nyitott kérdés. Csak a megadott tartalomra támaszkodj. Markdown, max ~180 szó.` + langDirective(lang);
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'x-api-key': ANTHROPIC_KEY!, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
@@ -133,7 +136,7 @@ ${text}`;
   return t || text;
 }
 
-async function suggestFromChat(proj: any, transcript: string, existingQs: string[], model: string): Promise<any[]> {
+async function suggestFromChat(proj: any, transcript: string, existingQs: string[], model: string, lang: 'en' | 'hu'): Promise<any[]> {
   if (!transcript.trim()) return [];
   const avoid = existingQs.slice(0, 40).map((q) => '- ' + q).join('\n');
   const prompt = `You watch a researcher's chat and surface NEW research ideas as they emerge. Project: "${proj.title || ''}"${proj.field ? ' (' + proj.field + ')' : ''}.${proj.goal ? ' Goal: ' + proj.goal + '.' : ''}
@@ -144,7 +147,7 @@ ${avoid || '(none yet)'}
 Conversation (most recent last):
 ${transcript}
 
-Return ONLY a JSON array, no prose. Each item: {"question": "...", "hypothesis": "... or null", "rationale": "one sentence on why this follows from the conversation"}. If nothing genuinely new is worth proposing, return [].`;
+Return ONLY a JSON array, no prose. Each item: {"question": "...", "hypothesis": "... or null", "rationale": "one sentence on why this follows from the conversation"}. If nothing genuinely new is worth proposing, return [].` + langDirective(lang);
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'x-api-key': ANTHROPIC_KEY!, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
@@ -158,7 +161,7 @@ Return ONLY a JSON array, no prose. Each item: {"question": "...", "hypothesis":
   try { const arr = JSON.parse(m[0]); return Array.isArray(arr) ? arr : []; } catch { return []; }
 }
 
-async function askClaude(action: string, proj: any, sources: any[], model: string): Promise<any[]> {
+async function askClaude(action: string, proj: any, sources: any[], model: string, lang: 'en' | 'hu'): Promise<any[]> {
   const lib = sources.map((s, i) =>
     `[${i + 1}] ${s.title} (${s.year ?? 'n.d.'}, ${s.venue ?? ''})\n${(s.abstract ?? '').slice(0, 600)}`).join('\n\n');
   const verb = action === 'ideas' ? 'Propose novel research directions' : 'Perform a research-gap analysis';
@@ -179,7 +182,7 @@ would advance the field given the goal and the literature above. Ground each in 
 does not cover.
 
 Return ONLY a JSON array, no prose, each item:
-{"question": "...", "hypothesis": "...", "rationale": "why this is a gap / novel", "novelty": 0-100}`;
+{"question": "...", "hypothesis": "...", "rationale": "why this is a gap / novel", "novelty": 0-100}` + langDirective(lang);
 
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',

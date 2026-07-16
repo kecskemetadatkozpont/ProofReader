@@ -26,6 +26,25 @@
   var LOG_TYPES = ['NOTE', 'DECISION', 'RESULT', 'ARTIFACT', 'MILESTONE', 'TASK'];
   var STATUS_LABEL = { active: 'Active', paused: 'Paused', done: 'Done', archived: 'Archived' };
 
+  // ---------- i18n: core UI chrome (per-project language, migration-65). tr(lang, en) → the Hungarian label when the
+  //            project language is 'hu', else the original English. Curated to the main nav / tabs / primary controls;
+  //            deeper strings + AI-generated content are localized elsewhere (edge functions carry the project language). ----
+  var I18N_HU = {
+    // workflow stages
+    'Setup': 'Beállítás', 'Idea': 'Ötlet', 'Literature': 'Irodalom', 'Protocol': 'Protokoll', 'Journal': 'Folyóirat', 'Writing': 'Írás', 'Submission': 'Beküldés',
+    // tabs / sub-nav
+    'Overview': 'Áttekintés', 'Ideas': 'Ötletek', 'Studies': 'Study-k', 'Canvas': 'Vászon', 'Notes': 'Jegyzetek', 'Log': 'Napló', 'Tasks': 'Feladatok', 'Data': 'Adatok', 'Map': 'Térkép', '🗺️ Map': '🗺️ Térkép', 'Compute': 'Számítás', 'Views': 'Nézetek', 'Workflow': 'Munkafolyamat',
+    // status
+    'Active': 'Aktív', 'Paused': 'Szüneteltetve', 'Done': 'Kész', 'Archived': 'Archivált',
+    // primary controls / project chrome
+    '+ New project': '+ Új projekt', 'Settings': 'Beállítások', '✎ Settings': '✎ Beállítások', 'Save': 'Mentés', 'Cancel': 'Mégse', 'Saving…': 'Mentés…', 'Creating…': 'Létrehozás…', 'Create project': 'Projekt létrehozása', 'Project settings': 'Projekt beállítások', 'New research project': 'Új kutatási projekt', 'Language': 'Nyelv', 'English': 'Angol', 'Magyar': 'Magyar', '‹ Projects': '‹ Projektek', '← All projects': '← Összes projekt',
+    // common fields
+    'Title': 'Cím', 'Title *': 'Cím *', 'Field': 'Terület', 'Keywords (comma-separated)': 'Kulcsszavak (vesszővel)', 'Goal / expected output': 'Cél / várt eredmény', 'Stage': 'Fázis', 'Status': 'Állapot',
+    // main panel headers
+    'Library': 'Könyvtár', 'Literature search': 'Irodalomkeresés'
+  };
+  function tr(lang, en) { return (lang === 'hu' && I18N_HU[en]) ? I18N_HU[en] : en; }
+
   // ---- Task board (Kanban) — shared by the per-protocol board AND the cross-project global board.
   // A step's column is derived from (assignee, status); moving a card writes back the encoded patch. ----
   var BOARD_COLS = [
@@ -144,7 +163,7 @@
 
   // ---------- New project ----------
   function NewProjectModal(props) {
-    var f = useState({ title: '', field: '', keywords: '', goal: '' }), form = f[0], setForm = f[1];
+    var f = useState({ title: '', field: '', keywords: '', goal: '', language: 'hu' }), form = f[0], setForm = f[1];
     var s = useState(false), saving = s[0], setSaving = s[1];
     function up(k, v) { setForm(Object.assign({}, form, (function () { var o = {}; o[k] = v; return o; })())); }
     function save() {
@@ -157,7 +176,7 @@
         var payload = {
           owner_id: props.ownerId, title: form.title.trim(), field: form.field.trim() || null,
           keywords: form.keywords ? form.keywords.split(',').map(function (x) { return x.trim(); }).filter(Boolean) : null,
-          goal: form.goal.trim() || null, stage: 0, status: 'active'
+          goal: form.goal.trim() || null, stage: 0, status: 'active', language: (form.language === 'hu' ? 'hu' : 'en')
         };
         if (sid) payload.student_id = sid;
         sb.from('research_projects').insert(payload).select().maybeSingle().then(function (r) {
@@ -179,6 +198,10 @@
         h('div', { className: 'modal-h' }, h('b', null, 'New research project'), h('button', { className: 'x', 'aria-label': 'Close', onClick: tryClose }, '×')),
         h('div', { className: 'modal-b' },
           h('div', { className: 'field' }, h('label', null, 'Title *'), h('input', { value: form.title, onChange: function (e) { up('title', e.target.value); }, placeholder: 'e.g. Fisher fusion for LiDAR OOD detection' })),
+          h('div', { className: 'field' }, h('label', null, 'Language / Nyelv'),
+            h('select', { value: form.language, onChange: function (e) { up('language', e.target.value); }, title: 'The project language: AI-generated content (ideas, reviews, protocol, drafts…) and the core UI are produced in this language. You can still ask for the other language ad hoc.' },
+              h('option', { value: 'hu' }, 'Magyar'), h('option', { value: 'en' }, 'English')),
+            h('div', { style: { fontSize: 11.5, color: 'var(--faint)', marginTop: 4 } }, 'Az AI-eredmények és a fő felület ezen a nyelven készülnek. / AI results and the core UI use this language.')),
           h('div', { className: 'field' }, h('label', null, 'Field'), h('input', { value: form.field, onChange: function (e) { up('field', e.target.value); }, placeholder: 'e.g. Computer vision, Robotics' })),
           h('div', { className: 'field' }, h('label', null, 'Keywords (comma-separated)'), h('input', { value: form.keywords, onChange: function (e) { up('keywords', e.target.value); }, placeholder: 'OOD, LiDAR, uncertainty' })),
           h('div', { className: 'field' }, h('label', null, 'Goal / expected output'), h('textarea', { rows: 3, value: form.goal, onChange: function (e) { up('goal', e.target.value); }, placeholder: 'What does success look like? (paper, thesis chapter, …)' }))
@@ -191,7 +214,8 @@
   // ---------- Edit project base settings (#2) ----------
   function ProjectSettingsModal(props) {
     var p = props.project;
-    var f = useState({ title: p.title || '', field: p.field || '', keywords: (p.keywords || []).join(', '), goal: p.goal || '' }), form = f[0], setForm = f[1];
+    var f = useState({ title: p.title || '', field: p.field || '', keywords: (p.keywords || []).join(', '), goal: p.goal || '', language: (p.language === 'hu' ? 'hu' : 'en') }), form = f[0], setForm = f[1];
+    var lang = form.language;
     var s = useState(false), saving = s[0], setSaving = s[1];
     function up(k, v) { setForm(Object.assign({}, form, (function () { var o = {}; o[k] = v; return o; })())); }
     function save() {
@@ -200,7 +224,7 @@
       sb.from('research_projects').update({
         title: form.title.trim(), field: form.field.trim() || null,
         keywords: form.keywords ? form.keywords.split(',').map(function (x) { return x.trim(); }).filter(Boolean) : null,
-        goal: form.goal.trim() || null
+        goal: form.goal.trim() || null, language: (form.language === 'hu' ? 'hu' : 'en')
       }).eq('id', p.id).then(function (r) {
         setSaving(false);
         if (r && r.error) { window.PRUI.toast('Could not save: ' + r.error.message, { kind: 'error' }); return; }
@@ -210,14 +234,17 @@
     useEffect(function () { function onEsc(e) { if (e.key === 'Escape') props.onClose(); } window.addEventListener('keydown', onEsc); return function () { window.removeEventListener('keydown', onEsc); }; });
     return h('div', { className: 'scrim', onClick: props.onClose },
       h('div', { className: 'modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Project settings', onClick: function (e) { e.stopPropagation(); } },
-        h('div', { className: 'modal-h' }, h('b', null, 'Project settings'), h('button', { className: 'x', 'aria-label': 'Close', onClick: props.onClose }, '×')),
+        h('div', { className: 'modal-h' }, h('b', null, tr(lang, 'Project settings')), h('button', { className: 'x', 'aria-label': 'Close', onClick: props.onClose }, '×')),
         h('div', { className: 'modal-b' },
-          h('div', { className: 'field' }, h('label', null, 'Title *'), h('input', { value: form.title, onChange: function (e) { up('title', e.target.value); } })),
-          h('div', { className: 'field' }, h('label', null, 'Field'), h('input', { value: form.field, onChange: function (e) { up('field', e.target.value); }, placeholder: 'e.g. Computer vision, Robotics' })),
-          h('div', { className: 'field' }, h('label', null, 'Keywords (comma-separated)'), h('input', { value: form.keywords, onChange: function (e) { up('keywords', e.target.value); }, placeholder: 'OOD, LiDAR, uncertainty' })),
-          h('div', { className: 'field' }, h('label', null, 'Goal / expected output'), h('textarea', { rows: 3, value: form.goal, onChange: function (e) { up('goal', e.target.value); } }))
+          h('div', { className: 'field' }, h('label', null, tr(lang, 'Title *')), h('input', { value: form.title, onChange: function (e) { up('title', e.target.value); } })),
+          h('div', { className: 'field' }, h('label', null, tr(lang, 'Language')),
+            h('select', { value: form.language, onChange: function (e) { up('language', e.target.value); }, title: 'AI-generated content + core UI language' },
+              h('option', { value: 'hu' }, 'Magyar'), h('option', { value: 'en' }, 'English'))),
+          h('div', { className: 'field' }, h('label', null, tr(lang, 'Field')), h('input', { value: form.field, onChange: function (e) { up('field', e.target.value); }, placeholder: 'e.g. Computer vision, Robotics' })),
+          h('div', { className: 'field' }, h('label', null, tr(lang, 'Keywords (comma-separated)')), h('input', { value: form.keywords, onChange: function (e) { up('keywords', e.target.value); }, placeholder: 'OOD, LiDAR, uncertainty' })),
+          h('div', { className: 'field' }, h('label', null, tr(lang, 'Goal / expected output')), h('textarea', { rows: 3, value: form.goal, onChange: function (e) { up('goal', e.target.value); } }))
         ),
-        h('div', { className: 'modal-foot' }, h('button', { className: 'btn', onClick: props.onClose }, 'Cancel'), h('button', { className: 'btn pri', disabled: saving, onClick: save }, saving ? 'Saving…' : 'Save'))
+        h('div', { className: 'modal-foot' }, h('button', { className: 'btn', onClick: props.onClose }, tr(lang, 'Cancel')), h('button', { className: 'btn pri', disabled: saving, onClick: save }, saving ? tr(lang, 'Saving…') : tr(lang, 'Save')))
       )
     );
   }
@@ -235,7 +262,7 @@
         // navigation ONLY — clicking to view never advances the recorded stage (that would silently
         // progress the project + spam the supervisor digest). Setting the stage is the explicit Stage control.
         onClick: function () { if (props.onNav) props.onNav(i); }
-      }, h('span', { className: 'dot', 'aria-hidden': 'true' }, STAGE_ICONS[i] || (i + 1)), name));
+      }, h('span', { className: 'dot', 'aria-hidden': 'true' }, STAGE_ICONS[i] || (i + 1)), tr(props.lang, name)));
       // intermediate "Studies" funnel between Idea and Literature — opens the study tab (NOT a lifecycle stage,
       // so it never changes the stored project.stage / shifts indices)
       if (i === 1) {
@@ -244,7 +271,7 @@
           key: 'study', className: 'step step-study' + (props.tab === 'study' ? ' cur' : ''),
           title: 'Studies — the literature-screening funnel between an idea and your literature',
           onClick: function () { if (props.onStudy) props.onStudy(); }
-        }, h('span', { className: 'dot', 'aria-hidden': 'true' }, svg('M3 4 13 4 9.2 8.8 9.2 12 6.8 13 6.8 8.8Z')), 'Studies'));
+        }, h('span', { className: 'dot', 'aria-hidden': 'true' }, svg('M3 4 13 4 9.2 8.8 9.2 12 6.8 13 6.8 8.8Z')), tr(props.lang, 'Studies')));
       }
     });
     return h('div', { className: 'stepper' }, kids);
@@ -4826,6 +4853,7 @@
 
   function ProjectDetail(props) {
     var p = props.project;
+    var plang = (p.language === 'hu' ? 'hu' : 'en');   // per-project UI language (migration-65) → core chrome via tr(plang, …)
     var tS = useState(props.initTab || 'overview'), tab = tS[0], setTab = tS[1];   // Memory step deep-link opens the protocol tab
     var asS = useState(null), autoStudy = asS[0], setAutoStudy = asS[1];   // ideas to auto-create a study from (set by the Ideas "study basis" window → one-click create + Publify pre-fill)
     var agS = useState(0), autoSR = agS[0], setAutoSR = agS[1];   // signal from the Ideas "Study basis" → generate SR-question drafts in the SR studio
@@ -4915,15 +4943,15 @@
         var isDone = i < (p.stage || 0);
         var active = STAGE_TAB[i] === tab;
         kids.push(h('button', { key: i, className: 'rv-st' + (active ? ' cur' : '') + (isDone ? ' done' : '') + (i === (p.stage || 0) ? ' atstage' : ''), 'aria-current': active ? 'page' : null, onClick: function () { setTab(STAGE_TAB[i] || 'overview'); } },
-          h('span', { className: 'rv-st-dot' }, isDone ? '✓' : (i + 1)), h('span', { className: 'rv-st-lbl' }, name)));
+          h('span', { className: 'rv-st-dot' }, isDone ? '✓' : (i + 1)), h('span', { className: 'rv-st-lbl' }, tr(plang, name))));
         if (i === 1) kids.push(h('button', { key: 'study', className: 'rv-st sub' + (tab === 'study' ? ' cur' : ''), onClick: function () { setTab('study'); } },
-          h('span', { className: 'rv-st-dot' }, '›'), h('span', { className: 'rv-st-lbl' }, 'Studies')));
+          h('span', { className: 'rv-st-dot' }, '›'), h('span', { className: 'rv-st-lbl' }, tr(plang, 'Studies'))));
       });
       return h('div', { className: 'rv-stnav' }, kids);
     }
     function subNav() {
-      return h('div', { className: 'rv-subnav' }, [['map', '🗺️ Map', null], ['canvas', 'Canvas', null], ['notes', 'Notes', null], ['data', 'Data', (props.datasets || []).length], ['log', 'Log', (props.log || []).length], ['tasks', 'Tasks', openTasks]].map(function (t) {
-        return h('button', { key: t[0], className: 'rv-sub' + (tab === t[0] ? ' on' : ''), onClick: function () { setTab(t[0]); } }, h('span', null, t[1]), t[2] ? h('span', { className: 'rv-sub-c' }, t[2]) : null);
+      return h('div', { className: 'rv-subnav' }, [['map', '🗺️ Map', null], ['canvas', 'Canvas', null], ['notes', 'Notes', null], ['data', 'Data', (props.datasets || []).length], ['log', 'Log', (props.log || []).length], ['tasks', 'Tasks', openTasks]].map(function (nt) {
+        return h('button', { key: nt[0], className: 'rv-sub' + (tab === nt[0] ? ' on' : ''), onClick: function () { setTab(nt[0]); } }, h('span', null, tr(plang, nt[1])), nt[2] ? h('span', { className: 'rv-sub-c' }, nt[2]) : null);
       }));
     }
     if (nd()) {
@@ -4944,19 +4972,19 @@
         h('aside', { className: 'rv-ctx' },
           h('div', { className: 'rv-ctx-top' },
             h('div', { className: 'rv-ctx-brand' }, h('div', { className: 'mk' }, h('span')), h('b', null, 'Publify')),
-            h('button', { className: 'rv-ctx-back', onClick: props.onBack, title: 'Back to all projects' }, '‹ Projects')),
+            h('button', { className: 'rv-ctx-back', onClick: props.onBack, title: 'Back to all projects' }, tr(plang, '‹ Projects'))),
           h('div', { className: 'rv-ctx-proj' },
             h('div', { className: 'rv-ctx-title' }, p.title),
             h('div', { className: 'rv-ctx-field' }, (p.field || 'No field set') + (p.keywords && p.keywords.length ? ' · ' + p.keywords.join(', ') : '')),
             h('div', { className: 'rv-ctx-pills' },
-              props.canEdit ? h('select', { className: 'field rv-ctx-sel', title: 'Set the current stage (logs a milestone)', value: p.stage || 0, onChange: function (e) { setStage(parseInt(e.target.value, 10)); } }, STAGES.map(function (s, i) { return h('option', { key: i, value: i }, 'Stage: ' + s); })) : h('span', { className: 'chip c-grey' }, 'Stage: ' + STAGES[p.stage || 0]),
-              props.canEdit ? h('select', { className: 'field rv-ctx-sel', value: p.status, onChange: setStatus }, Object.keys(STATUS_LABEL).map(function (k) { return h('option', { key: k, value: k }, STATUS_LABEL[k]); })) : h('span', { className: 'chip c-grey' }, STATUS_LABEL[p.status] || p.status),
-              props.canEdit ? h('button', { className: 'btn rv-ctx-set', title: 'Project base settings (title, field, keywords, goal)', onClick: function () { setEditOpen(true); } }, '✎ Settings') : null
+              props.canEdit ? h('select', { className: 'field rv-ctx-sel', title: 'Set the current stage (logs a milestone)', value: p.stage || 0, onChange: function (e) { setStage(parseInt(e.target.value, 10)); } }, STAGES.map(function (s, i) { return h('option', { key: i, value: i }, tr(plang, 'Stage') + ': ' + tr(plang, s)); })) : h('span', { className: 'chip c-grey' }, tr(plang, 'Stage') + ': ' + tr(plang, STAGES[p.stage || 0])),
+              props.canEdit ? h('select', { className: 'field rv-ctx-sel', value: p.status, onChange: setStatus }, Object.keys(STATUS_LABEL).map(function (k) { return h('option', { key: k, value: k }, tr(plang, STATUS_LABEL[k])); })) : h('span', { className: 'chip c-grey' }, tr(plang, STATUS_LABEL[p.status] || p.status)),
+              props.canEdit ? h('button', { className: 'btn rv-ctx-set', title: 'Project base settings (title, field, keywords, goal)', onClick: function () { setEditOpen(true); } }, tr(plang, '✎ Settings')) : null
             )
           ),
-          h('div', { className: 'rv-ctx-lbl' }, 'Workflow'),
+          h('div', { className: 'rv-ctx-lbl' }, tr(plang, 'Workflow')),
           stageNav(),
-          h('div', { className: 'rv-ctx-lbl' }, 'Views'),
+          h('div', { className: 'rv-ctx-lbl' }, tr(plang, 'Views')),
           subNav(),
           props.me ? h('div', { className: 'rv-ctx-foot' }, h(Avatar, { u: props.me, size: 28 }), h('div', { className: 'rv-ctx-acct' }, h('b', null, props.me.name), h('span', null, props.me.email)), h('a', { className: 'rv-ctx-exit', href: 'Projects.html', title: 'Back to Publify' }, '←')) : null
         ),
@@ -4965,24 +4993,24 @@
       );
     }
     return h('div', null,
-      h('button', { className: 'back-btn', onClick: props.onBack }, '← All projects'),
+      h('button', { className: 'back-btn', onClick: props.onBack }, tr(plang, '← All projects')),
       (!props.canEdit && props.viewerId && p.owner_id !== props.viewerId) ? h('div', { className: 'ro-banner' }, '👁 Supervisor view — ' + (props.studentName ? props.studentName + '’s project' : 'student’s project') + '. Read-only.') : null,
       h('div', { className: 'dhead' },
         h('div', { className: 'dt' }, h('h1', null, p.title), h('p', null, (p.field || 'No field set') + (p.keywords && p.keywords.length ? ' · ' + p.keywords.join(', ') : ''))),
         h('div', { style: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' } },
           // explicit Stage control — recording the stage is deliberate here, not a side-effect of browsing the stepper
           props.canEdit
-            ? h('select', { className: 'field', style: { width: 'auto', height: 32 }, title: 'Set the current stage (logs a milestone)', value: p.stage || 0, onChange: function (e) { setStage(parseInt(e.target.value, 10)); } }, STAGES.map(function (s, i) { return h('option', { key: i, value: i }, 'Stage: ' + s); }))
-            : h('span', { className: 'chip c-grey' }, 'Stage: ' + STAGES[p.stage || 0]),
+            ? h('select', { className: 'field', style: { width: 'auto', height: 32 }, title: 'Set the current stage (logs a milestone)', value: p.stage || 0, onChange: function (e) { setStage(parseInt(e.target.value, 10)); } }, STAGES.map(function (s, i) { return h('option', { key: i, value: i }, tr(plang, 'Stage') + ': ' + tr(plang, s)); }))
+            : h('span', { className: 'chip c-grey' }, tr(plang, 'Stage') + ': ' + tr(plang, STAGES[p.stage || 0])),
           props.canEdit
-            ? h('select', { className: 'field', style: { width: 'auto', height: 32 }, value: p.status, onChange: setStatus }, Object.keys(STATUS_LABEL).map(function (k) { return h('option', { key: k, value: k }, STATUS_LABEL[k]); }))
-            : h('span', { className: 'chip c-grey' }, STATUS_LABEL[p.status] || p.status),
-          props.canEdit ? h('button', { className: 'btn', style: { height: 32, flex: 'none' }, title: 'Project base settings (title, field, keywords, goal)', onClick: function () { setEditOpen(true); } }, '✎ Settings') : null
+            ? h('select', { className: 'field', style: { width: 'auto', height: 32 }, value: p.status, onChange: setStatus }, Object.keys(STATUS_LABEL).map(function (k) { return h('option', { key: k, value: k }, tr(plang, STATUS_LABEL[k])); }))
+            : h('span', { className: 'chip c-grey' }, tr(plang, STATUS_LABEL[p.status] || p.status)),
+          props.canEdit ? h('button', { className: 'btn', style: { height: 32, flex: 'none' }, title: 'Project base settings (title, field, keywords, goal)', onClick: function () { setEditOpen(true); } }, tr(plang, '✎ Settings')) : null
         )
       ),
-      h(Stepper, { stage: p.stage, tab: tab, canEdit: props.canEdit, onSet: setStage, onStudy: function () { setTab('study'); }, onNav: function (i) { setTab(STAGE_TAB[i] || 'overview'); } }),
-      h('div', { className: 'subtabs' }, [['overview', 'Overview', null], ['canvas', 'Canvas', null], ['notes', 'Notes', null], ['log', 'Log', (props.log || []).length], ['tasks', 'Tasks', openTasks]].map(function (t) {
-        return h('button', { key: t[0], className: tab === t[0] ? 'on' : '', onClick: function () { setTab(t[0]); } }, t[1], t[2] ? h('span', { className: 'c' }, t[2]) : null);
+      h(Stepper, { stage: p.stage, tab: tab, lang: plang, canEdit: props.canEdit, onSet: setStage, onStudy: function () { setTab('study'); }, onNav: function (i) { setTab(STAGE_TAB[i] || 'overview'); } }),
+      h('div', { className: 'subtabs' }, [['overview', 'Overview', null], ['canvas', 'Canvas', null], ['notes', 'Notes', null], ['log', 'Log', (props.log || []).length], ['tasks', 'Tasks', openTasks]].map(function (nt) {
+        return h('button', { key: nt[0], className: tab === nt[0] ? 'on' : '', onClick: function () { setTab(nt[0]); } }, tr(plang, nt[1]), nt[2] ? h('span', { className: 'c' }, nt[2]) : null);
       })),
       nd() ? (function () {
         var srcs = props.sources || [];

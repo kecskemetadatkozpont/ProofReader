@@ -16,6 +16,7 @@
 //          fall back to the shared unauthenticated pool + 429 backoff).
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { assertActive, resolveModel } from '../_shared/entitlement.ts';
+import { langDirective, loadProjectLang } from '../_shared/lang.ts';
 
 const ANTHROPIC_KEY = Deno.env.get('ANTHROPIC_API_KEY');
 const S2_KEY = Deno.env.get('S2_API_KEY') || '';
@@ -148,6 +149,7 @@ Deno.serve(async (req) => {
       const intentByIdx: Record<number, string> = {};
       if (picked.length) {
         const lines = picked.map((c, i) => '[' + i + '] "' + String(c.contexts[0] || '').replace(/\s+/g, ' ').slice(0, 300) + '" — citing: ' + String((c.citingPaper && c.citingPaper.title) || 'unknown').slice(0, 90) + ' (' + ((c.citingPaper && c.citingPaper.year) || '?') + ')').join('\n');
+        const _lang = await loadProjectLang(sb, ins.project_id);
         const prompt = `You analyze how ONE paper is cited by others. Below is the cited paper and numbered sentences from papers that cite it (the citation contexts).
 CITED PAPER: "${String(ins.title || '').slice(0, 200)}"${ins.venue ? ' (' + String(ins.venue).slice(0, 80) + (ins.year ? ', ' + ins.year : '') + ')' : ''}.
 For EACH numbered sentence, classify why the citing author invoked this paper:
@@ -159,7 +161,7 @@ For EACH numbered sentence, classify why the citing author invoked this paper:
 Then list the specific contributions this paper is most cited FOR (short noun phrases, with how many sentences support each), and write a <=2 sentence plain summary of what it is cited for overall.
 Sentences:
 ${lines}
-Return ONLY JSON: {"classifications":[{"i":0,"intent":"method"}],"contributions":[{"label":"reconstruction anomaly score","count":12}],"summary":"..."}`;
+Return ONLY JSON: {"classifications":[{"i":0,"intent":"method"}],"contributions":[{"label":"reconstruction anomaly score","count":12}],"summary":"..."}` + langDirective(_lang);
         try {
           const model = await resolveModel(sb);
           const out = await callClaude(model, prompt, 1600);
@@ -196,6 +198,7 @@ Return ONLY JSON: {"classifications":[{"i":0,"intent":"method"}],"contributions"
       let strategy = '';
       if (summaries) {
         const kw = ((proj && proj.keywords) || []).join(', ');
+        const _lang = await loadProjectLang(sb, rep.project_id);
         const prompt = `You advise a researcher on citation strategy for their paper, based on how their field cites the most important prior works.
 Project: "${(proj && proj.title) || ''}"${(proj && proj.field) ? ' — field: ' + proj.field : ''}.${(proj && proj.goal) ? ' Goal: ' + proj.goal + '.' : ''}${kw ? ' Keywords: ' + kw + '.' : ''}
 What the top-cited included papers are cited FOR:
@@ -205,7 +208,7 @@ Write a concise citation strategy in markdown (<=180 words) to optimize the rese
 - one bold headline insight,
 - 2-3 concrete, actionable recommendations ("When you introduce X, cite <paper> for its <contribution>, because that is how the field cites it"),
 - name any uncrowded angle they could claim (e.g. if contrast is rare).
-Return ONLY the markdown, no preamble.`;
+Return ONLY the markdown, no preamble.` + langDirective(_lang);
         try { const model = await resolveModel(sb); strategy = await callClaude(model, prompt, 1200); } catch (_e) { strategy = ''; }
       }
       await sb.from('citation_reports').update({ status: 'done', strategy, intent_totals: totals, stats: { papers: (insights || []).length, resolved, contexts: ctxCount, influential: infl }, updated_at: new Date().toISOString() }).eq('id', report_id);

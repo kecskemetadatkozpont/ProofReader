@@ -1,5 +1,6 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 import { assertEntitled, clampModel } from '../_shared/entitlement.ts';
+import { langDirective, loadProjectLang } from '../_shared/lang.ts';
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type', 'Access-Control-Allow-Methods': 'POST, OPTIONS' };
 const ANTHROPIC_KEY = Deno.env.get('ANTHROPIC_API_KEY');
 const MODEL = 'claude-sonnet-4-6';   // planning quality matters for the protocol
@@ -44,6 +45,7 @@ Deno.serve(async (req) => {
     const action = String(body.action || 'generate');
     const projectId = String(body.project_id || '');
     if (!projectId) return json({ error: 'project_id required' }, 400);
+    const _lang = await loadProjectLang(sb, projectId);
 
     if (action === 'generate') {
       const goal = String(body.goal || '').slice(0, 2000);
@@ -71,7 +73,7 @@ Deno.serve(async (req) => {
         + `DATASETS ALREADY REGISTERED:\n${dsTxt}\n\n`
         + `Plan the executable protocol now.`;
 
-      const raw = await callClaude(SYS, user, model);
+      const raw = await callClaude(SYS + langDirective(_lang), user, model);
       const m = raw.match(/\{[\s\S]*\}/);
       if (!m) return json({ error: 'model did not return JSON' }, 502);
       let parsed: any; try { parsed = JSON.parse(m[0]); } catch (e) { return json({ error: 'bad JSON from model: ' + e }, 502); }
@@ -106,7 +108,7 @@ Deno.serve(async (req) => {
       const ctx = (pq.data && pq.data.context_snapshot) || {};
       const sys = 'You are improving ONE step of an executable research protocol. Keep its intent; make it more precise and runnable. Return ONLY a JSON object: {"title","kind","instruction","inputs":[],"expected_outputs":[],"acceptance":[],"command_hint":"","est_minutes":N,"needs_approval":bool}. Be concise.';
       const u = `PROTOCOL GOAL: ${(pq.data && pq.data.goal) || ''}\nIDEA: ${(ctx.idea && ctx.idea.question) || ''}\n\nCURRENT STEP:\n${JSON.stringify({ title: s.title, kind: s.kind, ...sx }, null, 1)}\n\n${hint ? 'FOCUS: ' + hint + '\n\n' : ''}Return the improved step.`;
-      const raw = await callClaude(sys, u, model); const m = raw.match(/\{[\s\S]*\}/);
+      const raw = await callClaude(sys + langDirective(_lang), u, model); const m = raw.match(/\{[\s\S]*\}/);
       if (!m) return json({ error: 'model returned no JSON' }, 502);
       let p: any; try { p = JSON.parse(m[0]); } catch (e) { return json({ error: 'bad JSON: ' + e }, 502); }
       return json({ ok: true, step: p });
@@ -123,7 +125,7 @@ Deno.serve(async (req) => {
       const filesTxt = files.length ? `\n\nThe researcher provided these data sources for these tasks. Generate a small pipeline that LOADS and PROCESSES this specific data — a "data" step first (uploaded files are attached to it; for a URL, the data step must DOWNLOAD/stream it from that URL), then the preprocessing/analysis/eval steps that consume it. Reference the names/URLs in the instructions.\n${files.map((f: any) => f.url ? `- ${String(f.name || 'dataset')} — available at URL: ${String(f.url).slice(0, 400)} (download/stream it in the data step)${f.note ? ' — ' + String(f.note).slice(0, 200) : ''}` : `- ${String(f.name || 'file')} (uploaded${f.mime ? ', ' + f.mime : ''}${f.size ? ', ' + Math.round(f.size / 1024) + ' KB' : ''})${f.note ? ' — ' + String(f.note).slice(0, 200) : ''}`).join('\n')}` : '';
       const sys = `Propose NEW steps to add to an existing executable research protocol. Return ONLY a JSON object {"steps":[{"title","kind","instruction","inputs":[],"expected_outputs":[],"acceptance":[],"command_hint":"","est_minutes":N,"depends_on":[],"needs_approval":bool}]}. Use depends_on with the 1-based positions of EXISTING steps if relevant. At most ${count} steps, concise. When data files are provided, the FIRST step must be kind:"data" (data ingestion/validation of those files).`;
       const u = `PROTOCOL GOAL: ${(pq.data && pq.data.goal) || ''}\nIDEA: ${(ctx.idea && ctx.idea.question) || ''}\n\nEXISTING STEPS:\n${ex.map((e: any) => `${e.ord}. [${e.kind}] ${e.title}`).join('\n') || '(none)'}\n\nADD STEPS FOR: ${prompt || '(process the uploaded data below)'}${filesTxt}`;
-      const raw = await callClaude(sys, u, model); const m = raw.match(/\{[\s\S]*\}/);
+      const raw = await callClaude(sys + langDirective(_lang), u, model); const m = raw.match(/\{[\s\S]*\}/);
       if (!m) return json({ error: 'model returned no JSON' }, 502);
       let p: any; try { p = JSON.parse(m[0]); } catch (e) { return json({ error: 'bad JSON: ' + e }, 502); }
       return json({ ok: true, steps: (Array.isArray(p.steps) ? p.steps : []).slice(0, count) });
@@ -137,7 +139,7 @@ Deno.serve(async (req) => {
       const s = stq.data; const sx = s.spec || {};
       const sys = 'Split ONE protocol step into 2–4 smaller, ordered sub-steps that together accomplish it. Return ONLY {"steps":[{"title","kind","instruction","inputs":[],"expected_outputs":[],"acceptance":[],"command_hint":"","est_minutes":N,"needs_approval":bool}]}. Concise; each sub-step runnable on its own.';
       const u = `STEP TO SPLIT:\n${JSON.stringify({ title: s.title, kind: s.kind, ...sx }, null, 1)}`;
-      const raw = await callClaude(sys, u, model); const m = raw.match(/\{[\s\S]*\}/);
+      const raw = await callClaude(sys + langDirective(_lang), u, model); const m = raw.match(/\{[\s\S]*\}/);
       if (!m) return json({ error: 'model returned no JSON' }, 502);
       let p: any; try { p = JSON.parse(m[0]); } catch (e) { return json({ error: 'bad JSON: ' + e }, 502); }
       return json({ ok: true, steps: (Array.isArray(p.steps) ? p.steps : []).slice(0, 4) });
@@ -159,7 +161,7 @@ For EVERY clarifying question you MUST also offer 2–4 concrete suggested ANSWE
 As soon as the researcher's answers give you enough to sharpen the task, POPULATE "suggestion" with the concrete field values (only the fields you would actually change; kind must be one of: ${KINDS}) — do this proactively; the app auto-fills the form from it. Never invent file contents you were not told about.`;
       const user = `Current task draft:\n${taskTxt}\n\n${filesTxt ? `Files attached to this task:\n${filesTxt}\n\n` : ''}${history.length ? `Conversation so far:\n${history.map((m: any) => `${m.role === 'user' ? 'Researcher' : 'Assistant'}: ${String(m.content || '').slice(0, 1500)}`).join('\n')}\n\n` : ''}Researcher: ${msg || '(They just opened the assistant or attached a file and have not typed anything. Greet in one short sentence, then — if a file is attached or the task is vague — ask your clarifying questions with suggested-answer options.)'}\n\nReturn ONLY JSON: {"reply":"<your conversational reply>","questions":[{"q":"<clarifying question>","options":["<2-4 short suggested answers to pick from>"]}],"suggestion":{<the task fields to fill: "title"?, "kind"?, "instruction"?, "inputs"?:[], "expected_outputs"?:[], "acceptance"?:[], "command_hint"? — or {} if not enough info yet>}}`;
       let out = '';
-      try { out = await callClaude(system, user, model); } catch (_e) { return json({ error: 'AI is unavailable — try again.' }, 502); }
+      try { out = await callClaude(system + langDirective(_lang), user, model); } catch (_e) { return json({ error: 'AI is unavailable — try again.' }, 502); }
       const mm = out.match(/\{[\s\S]*\}/); let p: any = {};
       if (mm) { try { p = JSON.parse(mm[0]); } catch { p = {}; } }
       const sug = (p.suggestion && typeof p.suggestion === 'object' && Object.keys(p.suggestion).length) ? p.suggestion : null;
@@ -191,7 +193,7 @@ As soon as the researcher's answers give you enough to sharpen the task, POPULAT
       const system = `You are Publify's Protocol assistant. You can see the ENTIRE executable research protocol — every task with its kind, status, instruction, result, error, and notes. Answer the researcher's question about ANY or ALL of the tasks: current status, what the runner did and why, why a task failed, what is waiting for approval, and what to do next. Be concise and specific; reference tasks by their number (e.g. "Task 3"). Never invent results you cannot see in the snapshot.`;
       const user = `PROTOCOL: ${(pq.data && pq.data.title) || ''}${(pq.data && pq.data.goal) ? '\nGOAL: ' + pq.data.goal : ''}\n\nALL TASKS (${steps.length}):\n${snap || '(no tasks yet)'}\n\n${history.length ? 'Conversation so far:\n' + history.map((m: any) => `${m.role === 'user' ? 'Researcher' : 'Assistant'}: ${String(m.content || '').slice(0, 1500)}`).join('\n') + '\n\n' : ''}Researcher: ${msg || 'Give me a brief status of the protocol — what is done, running, blocked, or waiting for approval, and what I should look at next.'}`;
       let out = '';
-      try { out = await callClaude(system, user, model); } catch (_e) { return json({ error: 'AI is unavailable — try again.' }, 502); }
+      try { out = await callClaude(system + langDirective(_lang), user, model); } catch (_e) { return json({ error: 'AI is unavailable — try again.' }, 502); }
       return json({ ok: true, reply: out });
     }
 

@@ -14,6 +14,7 @@
 // Secrets: ANTHROPIC_API_KEY (reused); CONSENSUS_MCP_TOKEN (optional, grounds the review).
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { assertEntitled, assertActive, resolveModel } from '../_shared/entitlement.ts';
+import { langDirective, loadProjectLang } from '../_shared/lang.ts';
 
 const ANTHROPIC_KEY = Deno.env.get('ANTHROPIC_API_KEY');
 const CONSENSUS_TOKEN = Deno.env.get('CONSENSUS_MCP_TOKEN');
@@ -321,7 +322,7 @@ Return ONLY a JSON array of strings, e.g. ["learning agility","leadership effect
 }
 
 // Turn each project Idea into ONE systematic-review-ready question (+ PICO, criteria, extraction). One Claude call.
-async function planSR(ideas: any[], proj: any, model: string): Promise<any[]> {
+async function planSR(ideas: any[], proj: any, model: string, lang: string): Promise<any[]> {
   if (!ideas.length) return [];
   const list = ideas.map((i, k) => `[${k}] ${String(i.question || '').slice(0, 600)}${i.hypothesis ? ' | hypothesis: ' + String(i.hypothesis).slice(0, 300) : ''}`).join('\n');
   const prompt = `You are preparing systematic reviews. For EACH research idea below, produce ONE systematic-review-ready research question with a PICO frame, abstract-screening inclusion criteria, and data-extraction questions. Tailor to the project field.
@@ -333,7 +334,7 @@ ${list}
 Return ONLY a JSON array — one object per idea, and include the bracket index as "idx":
 [{ "idx": <the [index]>, "question": "a well-formed systematic-review question (<=250 chars)", "pico": {"population":"...","intervention":"...","comparison":"...","outcome":"..."}, "abstract_criteria": ["3-5 short inclusion criteria"], "extraction_questions": ["3-5 short data-extraction questions"], "study_type": "interventional|observational|qualitative|mixed" }]`;
   let out = '';
-  try { out = await callClaude(model, '', prompt, false, 3500); } catch { return []; }
+  try { out = await callClaude(model, langDirective(lang), prompt, false, 3500); } catch { return []; }
   const m = out.match(/\[[\s\S]*\]/); if (!m) return [];
   try { const arr = JSON.parse(m[0]); return Array.isArray(arr) ? arr : []; } catch { return []; }
 }
@@ -359,7 +360,8 @@ Deno.serve(async (req) => {
       const model0 = await resolveModel(sb);
       const { data: ideas } = await sb.from('research_ideas').select('id,question,hypothesis').eq('project_id', project_id).neq('status', 'rejected').order('created_at', { ascending: true }).limit(12);
       if (!ideas || !ideas.length) return json({ ok: true, created: 0, note: 'no ideas' });
-      const cands = await planSR(ideas, proj, model0);
+      const _lang = await loadProjectLang(sb, project_id);
+      const cands = await planSR(ideas, proj, model0, _lang);
       let created = 0;
       for (const c of cands) {
         const idx = (typeof c.idx === 'number') ? c.idx : -1;
@@ -381,10 +383,12 @@ Deno.serve(async (req) => {
     if (action === 'sr_enhance') {
       const q = String(body.question || '').trim();
       if (!q) return json({ error: 'question required' }, 400);
+      const project_id = String(body.project_id || '');
       const gate = await assertEntitled(sb, 'literature_study'); if (gate) return gate;
       const model = await resolveModel(sb);
+      const _lang = await loadProjectLang(sb, project_id);
       const prompt = `A researcher proposes a question for a systematic literature review. It may be written in Hungarian (or another language) and may be broad or vague.
-Rewrite it into 2-3 IMPROVED, self-contained systematic-review research questions, each IN ENGLISH, that:
+Rewrite it into 2-3 IMPROVED, self-contained systematic-review research questions that:
 - sharpen the scope and make Population / Intervention / Comparison / Outcome explicit where it makes sense,
 - are answerable by screening the published literature,
 - stay faithful to the researcher's original intent (do not invent a new topic).
@@ -392,7 +396,7 @@ Order them from the closest faithful rewrite to the most specific/scoped.
 Original question: "${q.slice(0, 800)}"
 Return ONLY JSON, no prose: {"detected_language":"<language name>","suggestions":["question 1","question 2","question 3"]}`;
       let out = '';
-      try { out = await callClaude(model, '', prompt, false, 900); } catch { return json({ error: 'AI is unavailable — try again.' }, 502); }
+      try { out = await callClaude(model, langDirective(_lang), prompt, false, 900); } catch { return json({ error: 'AI is unavailable — try again.' }, 502); }
       const m = out.match(/\{[\s\S]*\}/);
       let parsed: any = {};
       if (m) { try { parsed = JSON.parse(m[0]); } catch { parsed = {}; } }
@@ -411,6 +415,7 @@ Return ONLY JSON, no prose: {"detected_language":"<language name>","suggestions"
       const { data: srcs } = await sb.from('research_sources').select('id,title,venue,year,abstract').eq('project_id', project_id).is('relevance', null).order('cited_by', { ascending: false, nullsFirst: false }).limit(cap);
       if (!srcs || !srcs.length) return json({ ok: true, generated: 0, relevance: {} });
       const model = await resolveModel(sb);
+      const _lang = await loadProjectLang(sb, project_id);
       const kw = ((proj.keywords) || []).join(', ');
       const ctx = `Project: "${proj.title || ''}"${proj.field ? ' — field: ' + proj.field : ''}.${proj.goal ? ' Goal: ' + proj.goal + '.' : ''}${kw ? ' Keywords: ' + kw + '.' : ''}`;
       const out: Record<string, string> = {};
@@ -424,7 +429,7 @@ Papers (index in brackets):
 ${list}
 For EACH paper write AT MOST TWO sentences. Return ONLY a JSON array: [{"i":0,"relevance":"<=2 sentences on why it is relevant to THIS project>"}]`;
         let txt = '';
-        try { txt = await callClaude(model, '', prompt, false, 2400); } catch { continue; }
+        try { txt = await callClaude(model, langDirective(_lang), prompt, false, 2400); } catch { continue; }
         const arr = parseDecisions(txt) as any[];
         for (const it of arr) {
           const idx = typeof it.i === 'number' ? it.i : -1;
@@ -446,6 +451,7 @@ For EACH paper write AT MOST TWO sentences. Return ONLY a JSON array: [{"i":0,"r
       const context = String(body.context || '').slice(0, 800);      // where it's used: a task title/instruction, or "a research idea"
       const intent = String(body.intent || '').slice(0, 800);        // what the user already said to do with it (may be empty)
       const model = await resolveModel(sb);
+      const _lang = await loadProjectLang(sb, String(body.project_id || ''));
       const prompt = `A researcher just uploaded a file into their research workspace. Read it and help clarify what to do with it.
 File name: ${filename}
 Where it is being used: ${context || '(not specified)'}
@@ -457,7 +463,7 @@ ALWAYS return 1-2 clarifying questions, even when the user gave an instruction (
 Return ONLY JSON, no prose:
 {"summary":"one concise sentence: what this file is and its apparent role","questions":["short specific clarifying question 1","optional question 2"]}`;
       let out = '';
-      try { out = await callClaude(model, '', prompt, false, 700); } catch { return json({ error: 'AI is unavailable — try again.' }, 502); }
+      try { out = await callClaude(model, langDirective(_lang), prompt, false, 700); } catch { return json({ error: 'AI is unavailable — try again.' }, 502); }
       const m = out.match(/\{[\s\S]*\}/);
       let parsed: any = {};
       if (m) { try { parsed = JSON.parse(m[0]); } catch { parsed = {}; } }
@@ -484,7 +490,12 @@ Return ONLY JSON, no prose:
       const { data: srcs } = await sb.from('research_sources').select('title,authors,year,venue,abstract,doi,url').in('id', ids);
       const list = (srcs || []).map((s: any, i: number) => `[${i + 1}] ${s.title} (${s.year || 'n.d.'}, ${s.venue || ''}). ${(s.authors || []).slice(0, 3).join(', ')}. ${s.doi || s.url || ''}\nAbstract: ${(s.abstract || '').slice(0, 800)}`).join('\n\n');
       const useMcp = !!CONSENSUS_TOKEN;
-      const sys = `You are writing a concise structured literature REVIEW (Markdown) for the research question: ${study.question || study.title}. Use ONLY the ${ids.length} included papers below; cite them as [n]. Sections: ## Áttekintés, ## Fő témák és eredmények, ## Módszerek és adathalmazok, ## Hiányosságok (research gaps), ## Következtetés. ${useMcp ? 'Ground non-trivial claims with the Consensus tools and cite the papers.' : ''} Be specific and synthesize across papers — do not just list them. End with a ## Hivatkozások list.`;
+      const _lang = await loadProjectLang(sb, study.project_id);
+      const sections = _lang === 'hu'
+        ? '## Áttekintés, ## Fő témák és eredmények, ## Módszerek és adathalmazok, ## Hiányosságok (research gaps), ## Következtetés'
+        : '## Overview, ## Key themes and findings, ## Methods and datasets, ## Gaps (research gaps), ## Conclusion';
+      const refsHeading = _lang === 'hu' ? 'Hivatkozások' : 'References';
+      const sys = `You are writing a concise structured literature REVIEW (Markdown) for the research question: ${study.question || study.title}. Use ONLY the ${ids.length} included papers below; cite them as [n]. Sections: ${sections}. ${useMcp ? 'Ground non-trivial claims with the Consensus tools and cite the papers.' : ''} Be specific and synthesize across papers — do not just list them. End with a ## ${refsHeading} list.` + langDirective(_lang);
       const md = await callClaude(REVIEW_MODEL, sys, `Included papers:\n\n${list}\n\nWrite the review now.`, useMcp, 8192);
       const slug = String(study.title || 'study').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'study';
       const sid8 = String(study_id).replace(/-/g, '').slice(0, 8);   // #9b: stable per-study id in the filename (unique + traceable, idempotent on re-run)
@@ -661,7 +672,8 @@ Return ONLY JSON, no prose:
 // Screen a batch of papers with one Claude call, write research_study_papers(step), return UI rows.
 async function screenAndWrite(sb: any, study: any, study_id: string, step: number, config: any, model: string, inputs: any[], fullText: boolean) {
   if (!inputs.length) return [];
-  const sys = screenSystem(study.question || study.title, config, step);
+  const _lang = await loadProjectLang(sb, study.project_id);
+  const sys = screenSystem(study.question || study.title, config, step) + langDirective(_lang);
   const content: any[] = [];
   const signalsBase: Record<string, any> = {};
   for (let i = 0; i < inputs.length; i++) {

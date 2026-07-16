@@ -13,6 +13,7 @@
 //          supabase secrets set RESEARCH_HISTORY=12                    (last N messages sent; default 12)
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { assertEntitled, resolveModel } from '../_shared/entitlement.ts';
+import { langDirective, loadProjectLang } from '../_shared/lang.ts';
 
 const ANTHROPIC_KEY = Deno.env.get('ANTHROPIC_API_KEY');
 const CONSENSUS_TOKEN = Deno.env.get('CONSENSUS_MCP_TOKEN');
@@ -80,10 +81,11 @@ Deno.serve(async (req) => {
     const mcpNote = useMcp ? ` Use the Consensus tools to ground every non-trivial claim in peer-reviewed evidence, and cite the papers.` : '';
     const FILE_NOTE = ` You can save a file into the project's file browser by emitting a fenced block in EXACTLY this form (the opening line is \`\`\`file: followed by a short descriptive relative path, nothing else on that line):\n\`\`\`file:lit-review.md\n<the full file content>\n\`\`\`\nDo this whenever the user asks you to write something to a file, create/save a document, or produce an artifact (a literature summary, a research plan, a draft section, notes). Prefer .md. Keep a short normal reply too, but put the document itself inside the file block — only emit a file block when a saved file is actually wanted.`;
     const SYSTEM = persona + mcpNote + ATTACH_NOTE + FILE_NOTE;
+    const _lang = await loadProjectLang(sb, chat.project_id);
 
     const headers: Record<string, string> = { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' };
     if (useMcp) headers['anthropic-beta'] = 'mcp-client-2025-04-04';
-    const body: Record<string, unknown> = { model: userModel, max_tokens: MAX_TOKENS, system: SYSTEM + ctx, messages };
+    const body: Record<string, unknown> = { model: userModel, max_tokens: MAX_TOKENS, system: SYSTEM + ctx + langDirective(_lang), messages };
     if (useMcp) body.mcp_servers = [{ type: 'url', url: CONSENSUS_MCP_URL, name: 'consensus', authorization_token: CONSENSUS_TOKEN }];
 
     // ---- Streaming path: forward Claude's text deltas to the browser live, rebuild the full block list
