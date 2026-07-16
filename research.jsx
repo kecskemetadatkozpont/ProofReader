@@ -1102,16 +1102,34 @@
     }, [props.projectId, (props.ideas || []).length]);
     function toggle(id) { setExpanded(function (e) { var n = Object.assign({}, e); n[id] = e[id] === false ? true : false; return n; }); }
     // open a run's result (the review markdown) in the viewer modal
-    function openRun(run) {
-      setViewer({ title: run.title, body: '⏳ Betöltés…' });
+    function openRun(run, ideaId) {
+      var setBody = function (body, title) { if (aliveR.current) setViewer({ title: title || run.title, body: body, run: run, ideaId: ideaId }); };
+      setBody('⏳ Betöltés…');
       if (run.kind === 'review') {
-        sb.from('elicit_jobs').select('result_title,result_body').eq('id', run.id).maybeSingle().then(function (r) { if (!aliveR.current) return; var j = r && r.data; setViewer({ title: (j && j.result_title) || run.title, body: (j && j.result_body) || '_A szisztematikus áttekintés még fut, vagy nincs kész riport — a részletek a Study fülön._' }); }, function () { if (aliveR.current) setViewer({ title: run.title, body: '_Nem sikerült betölteni az eredményt._' }); });
+        sb.from('elicit_jobs').select('result_title,result_body').eq('id', run.id).maybeSingle().then(function (r) { var j = r && r.data; setBody((j && j.result_body) || '_A szisztematikus áttekintés még fut, vagy nincs kész riport — a részletek a Study fülön._', (j && j.result_title) || run.title); }, function () { setBody('_Nem sikerült betölteni az eredményt._'); });
       } else {
         var sid8 = String(run.id).replace(/-/g, '').slice(0, 8);
-        sb.from('research_files').select('content').eq('project_id', props.projectId).like('path', 'studies/%-' + sid8 + '-review.md').order('updated_at', { ascending: false }).limit(1).then(function (r) { if (!aliveR.current) return; var f = r && r.data && r.data[0]; setViewer({ title: run.title, body: (f && f.content) || '_Ehhez a study-hoz még nincs áttekintés (pl. nem volt full-text included cikk). A szűrési részletek a Study fülön: „Keyword screening funnel"._' }); }, function () { if (aliveR.current) setViewer({ title: run.title, body: '_Nem sikerült betölteni az eredményt._' }); });
+        sb.from('research_files').select('content').eq('project_id', props.projectId).like('path', 'studies/%-' + sid8 + '-review.md').order('updated_at', { ascending: false }).limit(1).then(function (r) { var f = r && r.data && r.data[0]; setBody((f && f.content) || '_Ehhez a study-hoz még nincs áttekintés (pl. nem volt full-text included cikk). A szűrési részletek a Study fülön: „Keyword screening funnel"._'); }, function () { setBody('_Nem sikerült betölteni az eredményt._'); });
       }
     }
-    function openIdeaRuns(idea) { var runs = runsByIdea[idea.id] || []; if (!runs.length) return; if (runs.length === 1) openRun(runs[0]); else setRunList({ ideaQ: idea.question, runs: runs }); }
+    function openIdeaRuns(idea) { var runs = runsByIdea[idea.id] || []; if (!runs.length) return; if (runs.length === 1) openRun(runs[0], idea.id); else setRunList({ ideaId: idea.id, ideaQ: idea.question, runs: runs }); }
+    // delete a run FROM an idea — a Study (research_studies, cascades steps/papers) or an SR review (elicit_jobs, owner-only by RLS)
+    function delRun(run, ideaId) {
+      window.PRUI.confirm({ title: (run.kind === 'review' ? 'Áttekintés' : 'Study') + ' törlése?', body: (run.title || '') + ' — véglegesen törlődik.', confirmLabel: 'Törlés', danger: true }).then(function (ok) {
+        if (!ok) return;
+        (run.kind === 'review'
+          ? sb.from('research_sr_candidates').update({ launched_job_id: null }).eq('launched_job_id', run.id).then(function () { return sb.from('elicit_jobs').delete().eq('id', run.id); })
+          : sb.from('research_studies').delete().eq('id', run.id)
+        ).then(function (r) {
+          if (!aliveR.current) return;
+          if (r && r.error) { window.PRUI.toast('Törlés sikertelen: ' + r.error.message, { kind: 'error' }); return; }
+          setRunsByIdea(function (m) { var n = Object.assign({}, m); if (ideaId && n[ideaId]) { n[ideaId] = n[ideaId].filter(function (x) { return !(x.kind === run.kind && x.id === run.id); }); if (!n[ideaId].length) delete n[ideaId]; } return n; });
+          setRunList(function (rl) { if (!rl) return rl; var rs = rl.runs.filter(function (x) { return !(x.kind === run.kind && x.id === run.id); }); return rs.length ? Object.assign({}, rl, { runs: rs }) : null; });
+          setViewer(function (v) { return (v && v.run && v.run.kind === run.kind && v.run.id === run.id) ? null : v; });
+          if (props.onChanged) props.onChanged();
+        }, function () { if (aliveR.current) window.PRUI.toast('Törlés sikertelen (hálózat)', { kind: 'error' }); });
+      });
+    }
     function runBadge(idea) {   // green chip on an idea card when a run exists → click to open its result
       var runs = runsByIdea[idea.id] || []; if (!runs.length) return null;
       var done = runs.some(function (r) { return r.status === 'done' || r.status === 'completed'; });
@@ -1198,10 +1216,11 @@
                 h('div', { style: { flex: 1, minWidth: 0 } },
                   h('div', { style: { fontSize: 12.5, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, run.title),
                   h('div', { style: { fontSize: 11, color: 'var(--muted)' } }, (run.kind === 'review' ? 'Szisztematikus áttekintés' : 'Irodalom-study') + ' · ' + (run.status || '—'))),
-                h('button', { className: 'btn pri', style: { fontSize: 12, padding: '4px 10px', flex: 'none' }, onClick: function () { setRunList(null); openRun(run); } }, 'Megnyitás'));
+                h('button', { className: 'btn pri', style: { fontSize: 12, padding: '4px 10px', flex: 'none' }, onClick: function () { setRunList(null); openRun(run, runList.ideaId); } }, 'Megnyitás'),
+                props.canEdit ? h('button', { className: 'btn', style: { fontSize: 12, padding: '4px 8px', flex: 'none', color: 'var(--danger, #b42318)' }, title: 'Törlés', onClick: function () { delRun(run, runList.ideaId); } }, '🗑') : null);
             })))) : null,
         viewer ? h('div', { className: 'scrim', onClick: function () { setViewer(null); } }, h('div', { className: 'modal', style: { width: 780 }, onClick: function (e) { e.stopPropagation(); } },
-          h('div', { className: 'modal-h' }, h('b', { style: { flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, viewer.title || 'Eredmény'), h('button', { className: 'x', 'aria-label': 'Close', onClick: function () { setViewer(null); } }, '×')),
+          h('div', { className: 'modal-h' }, h('b', { style: { flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, viewer.title || 'Eredmény'), (viewer.run && props.canEdit) ? h('button', { className: 'btn', style: { padding: '2px 9px', fontSize: 12, flex: 'none', color: 'var(--danger, #b42318)', marginRight: 6 }, title: 'A futtatás törlése', onClick: function () { delRun(viewer.run, viewer.ideaId); } }, '🗑 Törlés') : null, h('button', { className: 'x', 'aria-label': 'Close', onClick: function () { setViewer(null); } }, '×')),
           (window.marked && window.DOMPurify)
             ? h('div', { className: 'md-report', style: { padding: 18, maxHeight: '72vh', overflow: 'auto', lineHeight: 1.6, fontSize: 13.5 }, dangerouslySetInnerHTML: { __html: enhanceReport(viewer.body || '') } })
             : h('div', { style: { padding: 18, maxHeight: '72vh', overflow: 'auto', whiteSpace: 'pre-wrap', fontSize: 13 } }, viewer.body || ''))) : null
@@ -2151,6 +2170,18 @@
         h('div', { style: { fontSize: 12, color: 'var(--accent, #4f46e5)', fontWeight: 600 } }, '⏳ ' + stepTxt + desc),
         metaEl);
     }
+    function delEl(j) {   // delete a systematic review (elicit_jobs) — owner-only by RLS; also unlink its Study-basis candidate
+      window.PRUI.confirm({ title: 'Áttekintés törlése?', body: (j.result_title || j.research_question || 'Systematic review') + ' — véglegesen törlődik.', confirmLabel: 'Törlés', danger: true }).then(function (ok) {
+        if (!ok) return;
+        sb.from('research_sr_candidates').update({ launched_job_id: null }).eq('launched_job_id', j.id).then(function () { });
+        sb.from('elicit_jobs').delete().eq('id', j.id).then(function (r) {
+          if (!alive.current) return;
+          if (r && r.error) { setErr('Törlés sikertelen: ' + r.error.message); return; }
+          if (selJob === j.id) setSelJob(null);
+          load();
+        });
+      });
+    }
     function card(j) {
       var done = j.status === 'completed', failed = j.status === 'failed', paused = j.status === 'pausedForInsufficientQuota';
       var acts = [];
@@ -2159,6 +2190,7 @@
       if (done && j.result_body) acts.push(h('button', { key: 'v', className: 'btn', style: { padding: '4px 10px', fontSize: 12 }, onClick: function () { setOpenR(j); } }, 'View full report'));
       if (done) acts.push(h('button', { key: 'rf', className: 'btn', style: { padding: '4px 10px', fontSize: 12 }, title: 'Re-fetch the download links (they expire after 7 days)', onClick: function () { refreshJob(j); } }, '↻ Refresh downloads'));
       if (paused) acts.push(h('button', { key: 'r', className: 'btn pri', style: { padding: '4px 10px', fontSize: 12 }, onClick: function () { resume(j); } }, 'Resume'));
+      if (props.canEdit) acts.push(h('button', { key: 'del', className: 'btn', style: { padding: '4px 10px', fontSize: 12, color: 'var(--danger, #b42318)' }, onClick: function () { delEl(j); } }, '🗑 Törlés'));
       var e = j.exports || {};
       var exps = [['pdf', 'PDF'], ['docx', 'DOCX'], ['bib', 'BibTeX'], ['ris', 'RIS']].map(function (x) { return e[x[0]] ? h('a', { key: x[0], className: 'btn', style: { padding: '4px 9px', fontSize: 12 }, href: e[x[0]], target: '_blank' }, x[1]) : null; }).filter(Boolean);
       return h('div', { key: j.id, style: { border: '1px solid var(--line)', borderRadius: 10, padding: '10px 12px' } },
