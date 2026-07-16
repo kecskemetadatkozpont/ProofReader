@@ -106,7 +106,7 @@
   }
 
   // ---------- data ----------
-  var S = { papers: [], figs: [], byPaper: {}, urls: {}, view: { x: 40, y: 24, k: 0.9 }, group: 'paper', showHidden: false, curFig: null, curPaper: null, hiddenCount: 0, moved: false, sort: 'cites', pro: false };
+  var S = { papers: [], figs: [], byPaper: {}, urls: {}, view: { x: 40, y: 24, k: 0.9 }, group: 'paper', showHidden: false, curFig: null, curPaper: null, hiddenCount: 0, moved: false, sort: 'cites', pro: false, scope: 'all', studies: [], studyOfSource: {} };
   function nd() { return !!(window.PRDesign && window.PRDesign.isNew()); }   // "New design" flag
   function uid() { return 'n' + Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-4); }
   function toast(msg, ok) { var t = el('div', 'fb-toast' + (ok === false ? ' err' : '')); t.textContent = msg; document.body.appendChild(t); requestAnimationFrame(function () { t.classList.add('show'); }); setTimeout(function () { t.classList.remove('show'); setTimeout(function () { if (t.parentNode) t.parentNode.removeChild(t); }, 260); }, 2400); }
@@ -117,13 +117,26 @@
     return Promise.all([
       sb.from('research_sources').select('*').eq('project_id', pid).order('year', { ascending: false, nullsFirst: false }),
       figQ,
-      sb.from('research_figures').select('id', { count: 'exact', head: true }).eq('project_id', pid).eq('hidden', true)
+      sb.from('research_figures').select('id', { count: 'exact', head: true }).eq('project_id', pid).eq('hidden', true),
+      sb.from('research_studies').select('id,title').eq('project_id', pid).order('created_at', { ascending: false })
     ]).then(function (r) {
       S.papers = (r[0] && r[0].data) || [];
       S.figs = (r[1] && r[1].data) || [];
       S.hiddenCount = (r[2] && r[2].count) || 0;
+      S.studies = (r[3] && r[3].data) || [];
+      // a scope pointing at a study that no longer exists (deleted elsewhere) → fall back to All, so the select value
+      // and S.scope agree and the list/stats/extract aren't silently stuck on an empty scope.
+      if (S.scope && S.scope.indexOf('study:') === 0 && !S.studies.some(function (s) { return 'study:' + s.id === S.scope; })) S.scope = 'all';
       S.byPaper = {}; S.figs.forEach(function (f) { (S.byPaper[f.source_id] = S.byPaper[f.source_id] || []).push(f); });
-      return signUrls();
+      // map each source → the study run(s) it belongs to (research_study_papers has no project_id → query by study ids),
+      // so the extraction-scope selector can restrict to one study, all included, or the whole Library.
+      var sids = S.studies.map(function (s) { return s.id; });
+      if (!sids.length) { S.studyOfSource = {}; return signUrls(); }
+      return sb.from('research_study_papers').select('source_id,study_id').in('study_id', sids).then(function (rr) {
+        S.studyOfSource = {};
+        ((rr && rr.data) || []).forEach(function (x) { if (!x.source_id) return; var a = (S.studyOfSource[x.source_id] = S.studyOfSource[x.source_id] || []); if (a.indexOf(x.study_id) < 0) a.push(x.study_id); });
+        return signUrls();
+      }, function () { S.studyOfSource = {}; return signUrls(); });
     });
   }
   function signUrls() {
@@ -192,6 +205,18 @@
     if (p.cited_by != null) t.push('<span class="mtag cite" title="Citation count">' + (+p.cited_by) + ' cites</span>');
     return t.length ? '<div class="mrow">' + t.join('') + '</div>' : '';
   }
+  // the papers currently IN SCOPE (extraction source): whole Library, only included, or one study run
+  function scopedPapers() {
+    if (!S.scope || S.scope === 'all') return S.papers;
+    if (S.scope === 'included') return S.papers.filter(function (p) { return p.screening === 'include'; });
+    if (S.scope.indexOf('study:') === 0) { var sid = S.scope.slice(6); return S.papers.filter(function (p) { return (S.studyOfSource[p.id] || []).indexOf(sid) >= 0; }); }
+    return S.papers;
+  }
+  function scopeCount(scope) {
+    if (scope === 'all') return S.papers.length;
+    if (scope === 'included') return S.papers.filter(function (p) { return p.screening === 'include'; }).length;
+    var sid = scope.slice(6); return S.papers.filter(function (p) { return (S.studyOfSource[p.id] || []).indexOf(sid) >= 0; }).length;
+  }
   // order the papers by the current sort key (applied to both the sidebar list and the canvas layout)
   function ordered(list) {
     var arr = (list || S.papers).slice(), by = S.sort;
@@ -223,7 +248,9 @@
   var EMPTY = '<div class="cluster" style="left:40px;top:40px;width:440px;padding:26px 24px"><b style="font-size:14px">No figures yet</b><div style="font-size:12.5px;color:var(--muted);margin-top:8px;line-height:1.5">Hit <b>Extract figures from Library</b> on the left. Publify finds each paper’s open-access PDF and pulls its figures onto this board.</div></div>';
   // New-design onboarding: a guided first-run panel instead of the terse empty state
   function onboardHTML() {
-    var withDoi = S.papers.filter(function (p) { return !!p.doi; }).length;
+    var scoped = scopedPapers();   // honor the active extraction scope, so the CTA copy/counts match what the button does
+    var withDoi = scoped.filter(function (p) { return !!p.doi; }).length;
+    var scopeActive = !!(S.scope && S.scope !== 'all');
     return '<div class="fb-onboard"><div class="ob-badge">Figure Board</div>'
       + '<h1>Every figure from your papers, on one canvas</h1>'
       + '<p>Publify opens each open-access PDF in your Library and pulls out its figures — grouped by paper, with citations, a relevance note and the abstract, ready to pin into your writing.</p>'
@@ -231,8 +258,8 @@
       + '<div class="ob-step"><span class="obn">1</span><div><b>Extract</b><i>from your ' + withDoi + ' paper' + (withDoi === 1 ? '' : 's') + ' with a DOI</i></div></div>'
       + '<div class="ob-step"><span class="obn">2</span><div><b>Browse</b><i>by paper — see why each figure is relevant</i></div></div>'
       + '<div class="ob-step"><span class="obn">3</span><div><b>Pin</b><i>the best ones into your research Canvas</i></div></div></div>'
-      + '<button class="btn pri ob-cta" id="ob-extract">✨ Extract figures from Library</button>'
-      + '<div class="ob-hint">' + S.papers.length + ' paper' + (S.papers.length === 1 ? '' : 's') + ' in your Library · ' + withDoi + ' can be extracted right now</div></div>';
+      + '<button class="btn pri ob-cta" id="ob-extract">✨ Extract figures' + (scopeActive ? '' : ' from Library') + '</button>'
+      + '<div class="ob-hint">' + scoped.length + ' paper' + (scoped.length === 1 ? '' : 's') + ' in ' + (scopeActive ? 'this scope' : 'your Library') + ' · ' + withDoi + ' can be extracted right now</div></div>';
   }
   function renderEmpty() {
     world.innerHTML = '';
@@ -263,7 +290,7 @@
   // By-paper view: one card per paper, its figures in a row.
   function layout() {
     activeReflow = reflow;
-    var withFigs = ordered(S.papers).filter(function (p) { return (S.byPaper[p.id] || []).length; });
+    var withFigs = ordered(scopedPapers()).filter(function (p) { return (S.byPaper[p.id] || []).length; });
     world.innerHTML = '';
     if (!withFigs.length) { renderEmpty(); return; }
     withFigs.forEach(function (p) {
@@ -289,7 +316,7 @@
   function layoutGallery() {
     activeReflow = reflowGallery;
     world.innerHTML = '';
-    var all = []; ordered(S.papers).forEach(function (p) { (S.byPaper[p.id] || []).forEach(function (f, i) { all.push({ p: p, f: f, i: i }); }); });
+    var all = []; ordered(scopedPapers()).forEach(function (p) { (S.byPaper[p.id] || []).forEach(function (f, i) { all.push({ p: p, f: f, i: i }); }); });
     if (!all.length) { renderEmpty(); return; }
     all.forEach(function (o) {
       var f = o.f, p = o.p;
@@ -340,23 +367,32 @@
   var SORTS = [['cites', 'Most cited'], ['year', 'Newest'], ['figs', 'Most figures'], ['q', 'Best quartile'], ['title', 'Title A–Z']];
   function sidebar() {
     var pid = projId();
-    var rows = ordered(S.papers).map(function (p) {
+    var scoped = scopedPapers();
+    var rows = ordered(scoped).map(function (p) {
       var figs = S.byPaper[p.id] || [], n = figs.length, hasDoi = !!p.doi;
       var st = n ? 'ok' : (hasDoi ? 'idle' : 'nodoi'), ico = n ? '✓' : (hasDoi ? '↧' : '–');
       return '<div class="paper" data-pid="' + p.id + '"><span class="st ' + st + '">' + ico + '</span>'
         + '<span class="pt"><b>' + esc(p.title || 'Untitled') + '</b><span>' + esc(fmtAuthors(p.authors)) + (n ? ' · ' + n + ' figures' : hasDoi ? ' · not extracted' : ' · no DOI') + '</span>' + metricRow(p, true) + '</span></div>';
     }).join('');
     var sortOpts = SORTS.map(function (o) { return '<option value="' + o[0] + '"' + (S.sort === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('');
+    // extraction SCOPE: whole Library, only the included sources, or one specific study run
+    var scopeOpts = '<option value="all"' + (S.scope === 'all' ? ' selected' : '') + '>📚 All Library (' + S.papers.length + ')</option>'
+      + '<option value="included"' + (S.scope === 'included' ? ' selected' : '') + '>✓ Included only (' + scopeCount('included') + ')</option>'
+      + S.studies.map(function (st) { var v = 'study:' + st.id; return '<option value="' + v + '"' + (S.scope === v ? ' selected' : '') + '>🔎 ' + esc((st.title || 'Study').slice(0, 46)) + ' (' + scopeCount(v) + ')</option>'; }).join('');
+    var scopedDoi = scoped.filter(function (p) { return !!p.doi; }).length;
     sideEl.innerHTML = '<div class="extract-card"><div class="lead">Pull the figures out of your <b>Library</b> papers. Publify finds each open-access PDF and extracts its figures onto this board.</div>'
-      + '<button class="btn pri" id="extract">✨ Extract figures from Library</button><div class="prog" id="prog"></div></div>'
-      + '<div class="side-head"><h2>Library papers (' + S.papers.length + ')</h2><select class="sortsel adv" id="sortsel" title="Sort the list">' + sortOpts + '</select></div>' + rows;
+      + '<label class="fb-scope"><span class="fb-scope-k">Extract from</span><select class="sortsel" id="scopesel" title="Which publications to extract figures from">' + scopeOpts + '</select></label>'
+      + '<button class="btn pri" id="extract">✨ Extract figures (' + scopedDoi + ' paper' + (scopedDoi === 1 ? '' : 's') + ')</button><div class="prog" id="prog"></div></div>'
+      + '<div class="side-head"><h2>' + (S.scope === 'all' ? 'Library papers' : 'Papers in scope') + ' (' + scoped.length + ')</h2><select class="sortsel adv" id="sortsel" title="Sort the list">' + sortOpts + '</select></div>' + rows;
     document.getElementById('extract').onclick = extractAll;
     document.getElementById('sortsel').onchange = function (e) { S.sort = e.target.value; sidebar(); render(); };
+    var scEl = document.getElementById('scopesel'); if (scEl) scEl.onchange = function (e) { S.scope = e.target.value; sidebar(); render(); };
     progEl = document.getElementById('prog');
     sideEl.querySelectorAll('.paper').forEach(function (el2) { el2.onclick = function () { flyTo(el2.dataset.pid); }; });
-    var withFigs = S.papers.filter(function (p) { return (S.byPaper[p.id] || []).length; }).length;
-    var withDoi = S.papers.filter(function (p) { return !!p.doi; }).length;
-    statEl.innerHTML = '<span class="dot" style="background:var(--ok)"></span><b>' + withFigs + '</b> papers extracted · <b>' + S.figs.length + '</b> figures · ' + withDoi + ' have a DOI';
+    var withFigs = scoped.filter(function (p) { return (S.byPaper[p.id] || []).length; }).length;
+    var withDoi = scoped.filter(function (p) { return !!p.doi; }).length;
+    var scopedFigs = scoped.reduce(function (a, p) { return a + (S.byPaper[p.id] || []).length; }, 0);
+    statEl.innerHTML = '<span class="dot" style="background:var(--ok)"></span><b>' + withFigs + '</b> papers extracted · <b>' + scopedFigs + '</b> figures · ' + withDoi + ' have a DOI';
     var th = document.getElementById('toghide');
     if (th) { th.classList.toggle('on', S.showHidden); th.textContent = S.showHidden ? 'Hide hidden' : ('Show hidden' + (S.hiddenCount ? ' (' + S.hiddenCount + ')' : '')); th.style.display = (S.showHidden || S.hiddenCount) ? '' : 'none'; }
   }
@@ -364,8 +400,8 @@
   var extracting = false;
   function extractAll() {
     if (extracting) return; extracting = true;
-    var todo = S.papers.filter(function (p) { return p.doi && !(S.byPaper[p.id] || []).length; });
-    if (!todo.length) { progEl.innerHTML = 'All papers with a DOI are already extracted.'; extracting = false; return; }
+    var todo = scopedPapers().filter(function (p) { return p.doi && !(S.byPaper[p.id] || []).length; });
+    if (!todo.length) { progEl.innerHTML = 'All papers with a DOI in this scope are already extracted.'; extracting = false; return; }
     var i = 0, added = 0;
     function next() {
       if (i >= todo.length) {
