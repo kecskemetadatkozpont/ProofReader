@@ -1417,19 +1417,25 @@
     // source_ids that were selected in a Study (AI-included in any step, or the user's "Your decision" override) —
     // these float to the top of the Library and are highlighted.
     var siS = useState({}), studyInc = siS[0], setStudyInc = siS[1];   // source_id -> [study titles it was selected in]
+    var soS = useState({}), studyOrigin = soS[0], setStudyOrigin = soS[1];   // source_id -> [{id,title}] : which study RUN(s) the source came from (any step/decision)
     useEffect(function () {
       var ids = (props.studies || []).map(function (s) { return s.id; });
-      if (!ids.length) { setStudyInc({}); return; }
+      if (!ids.length) { setStudyInc({}); setStudyOrigin({}); return; }
       var titleById = {}; (props.studies || []).forEach(function (s) { titleById[s.id] = s.title || 'Untitled study'; });
       sb.from('research_study_papers').select('source_id,study_id,decision,overridden').in('study_id', ids).then(function (r2) {
-        var m = {};
+        var m = {}, orig = {};
         ((r2 && r2.data) || []).forEach(function (p) {
-          if (!p.source_id || !(p.decision === 'include' || (p.overridden && p.decision !== 'exclude'))) return;
+          if (!p.source_id) return;
           var t = titleById[p.study_id] || 'Study';
+          // origin: the source was fetched / screened by this study run (ANY step/decision), so it "came from" it
+          if (!orig[p.source_id]) orig[p.source_id] = [];
+          if (!orig[p.source_id].some(function (x) { return x.id === p.study_id; })) orig[p.source_id].push({ id: p.study_id, title: t });
+          // included highlight (only AI-included or a human keep-override) — unchanged, drives the ★ + top-sort
+          if (!(p.decision === 'include' || (p.overridden && p.decision !== 'exclude'))) return;
           if (!m[p.source_id]) m[p.source_id] = [];
           if (m[p.source_id].indexOf(t) < 0) m[p.source_id].push(t);
         });
-        setStudyInc(m);
+        setStudyInc(m); setStudyOrigin(orig);
       }, function () { });
     }, [(props.studies || []).map(function (s) { return s.id + ':' + (s.title || ''); }).join('|'), (props.sources || []).length]);
     var saved = {}; (props.sources || []).forEach(function (s) { if (s.ext_id) saved[s.ext_id] = true; });
@@ -1509,6 +1515,7 @@
               h('th', { className: 'rv-th' }, 'Authors'),
               sortTh('Year', 'year', 'r'),
               h('th', { className: 'rv-th' }, 'Venue'),
+              h('th', { className: 'rv-th' }, 'Study'),
               sortTh('Cites', 'cites', 'r'),
               hasSci ? sortTh('Q', 'q', 'c') : null,
               sortTh('Decision', 'screen', 'l'),
@@ -1522,6 +1529,13 @@
                 h('td', { className: 'rv-au' }, (s.authors && s.authors.length) ? s.authors.slice(0, 3).join(', ') : '—'),
                 h('td', { className: 'rv-n' }, s.year || '—'),
                 h('td', { className: 'rv-ve' }, s.venue || '—'),
+                (function () {
+                  var o = studyOrigin[s.id] || [];
+                  if (!o.length) return h('td', { className: 'rv-ve', style: { color: 'var(--faint)' } }, '—');   // manually added / not from a study run
+                  var first = o[0].title || 'Study';
+                  return h('td', { className: 'rv-ve', title: 'Ebből a study-futtatásból származik: ' + o.map(function (x) { return x.title; }).join(' · ') },
+                    h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 11.5 } }, '🔎 ' + (first.length > 26 ? first.slice(0, 26) + '…' : first) + (o.length > 1 ? ' +' + (o.length - 1) : '')));
+                })(),
                 h('td', { className: 'rv-n' }, s.cited_by != null ? s.cited_by : '–'),
                 hasSci ? h('td', { className: 'rv-qc' }, q ? h('span', { className: 'rv-qb q' + q }, 'Q' + q) : h('span', { className: 'rv-qb q0' }, '–')) : null,
                 h('td', null, props.canEdit
