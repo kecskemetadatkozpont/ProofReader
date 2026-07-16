@@ -287,15 +287,37 @@ ${study.question || study.title || ''}
 
 Return ONLY JSON, no prose. EVERY step must have non-empty include AND exclude arrays (short, concrete, one line each):
 {
-  "semantic_query": "ONE well-formed natural-language research question (<=300 chars) capturing the study intent — a full sentence a semantic search engine can embed, NOT a keyword list",
-  "step1": { "keywords": ["6-10 precise OpenAlex search terms/phrases"], "filters": { "fromYear": <int or null>, "oa": <bool>, "journals": <bool> }, "include": ["2-4 quick title/metadata-level inclusion criteria for fast screening"], "exclude": ["2-4 quick exclusion criteria (off-topic, wrong venue/type, etc.)"] },
+  "semantic_query": "ONE well-formed ENGLISH natural-language research question (<=300 chars) capturing the study intent — a full sentence a semantic search engine can embed, NOT a keyword list (translate to English if the question is in another language)",
+  "step1": { "keywords": ["6-10 precise ENGLISH OpenAlex search terms/phrases — MUST be English even if the question is not, since OpenAlex indexes mostly English"], "filters": { "fromYear": <int or null>, "oa": <bool>, "journals": <bool> }, "include": ["2-4 quick title/metadata-level inclusion criteria for fast screening"], "exclude": ["2-4 quick exclusion criteria (off-topic, wrong venue/type, etc.)"] },
   "step2": { "include": ["3-5 abstract-level inclusion criteria, one short line each"], "exclude": ["2-4 exclusion criteria"] },
   "step3": { "include": ["3-5 full-text inclusion criteria"], "exclude": ["2-4 exclusion criteria"], "signals": ["has_github","has_dataset"] }
 }`;
   let out = '';
-  try { out = await callClaude(model, '', prompt, false, 1800); } catch { return {}; }
+  // 2600 tokens (was 1800): the full 4-step JSON with verbose criteria could TRUNCATE at 1800 → the regex then
+  // grabbed an incomplete object → JSON.parse threw → planStudy returned {} → step-1 keywords stayed EMPTY.
+  try { out = await callClaude(model, '', prompt, false, 2600); } catch { return {}; }
   const m = out.match(/\{[\s\S]*\}/); if (!m) return {};
   try { return JSON.parse(m[0]); } catch { return {}; }
+}
+
+// Fallback: derive 6-10 ENGLISH OpenAlex keywords from a (possibly non-English) research question. Used when
+// planStudy did not populate step-1 keywords — an empty keyword set makes openalexUnion/Elicit fall back to a
+// single raw-question query, which returns almost nothing for a long or non-English question (→ the funnel
+// finished with 3-4 papers in seconds). One small, strict-contract Claude call, so it's cheap and reliable.
+async function deriveKeywords(question: string, model: string): Promise<string[]> {
+  const q = String(question || '').slice(0, 1200);
+  if (!q.trim()) return [];
+  const prompt = `From the research question below, produce 8 precise ENGLISH search keywords/phrases for the OpenAlex academic search API (translate to English if the question is in another language). Each 1-4 words, concrete, no punctuation. Cover the core concepts: population, intervention/variable, and outcome.
+Question: "${q}"
+Return ONLY a JSON array of strings, e.g. ["learning agility","leadership effectiveness","longitudinal study"]. No prose.`;
+  let out = '';
+  try { out = await callClaude(model, '', prompt, false, 500); } catch { return []; }
+  const m = out.match(/\[[\s\S]*\]/); if (!m) return [];
+  try {
+    const arr = JSON.parse(m[0]);
+    if (!Array.isArray(arr)) return [];
+    return arr.map((x: any) => String(x || '').replace(/["\[\]{}]/g, ' ').replace(/\s+/g, ' ').trim()).filter(Boolean).slice(0, 10);
+  } catch { return []; }
 }
 
 // Turn each project Idea into ONE systematic-review-ready question (+ PICO, criteria, extraction). One Claude call.
@@ -497,6 +519,17 @@ Return ONLY JSON, no prose:
         c1.semantic_query = plan.semantic_query.trim().slice(0, 350);
         await sb.from('research_study_steps').update({ config: c1 }).eq('study_id', study_id).eq('step', 1);
       }
+      // If planStudy failed to yield usable keywords (truncated/malformed JSON), derive them now so the search is
+      // never left with an empty keyword set (which would collapse the funnel to a single raw-question query).
+      {
+        const { data: s1k } = await sb.from('research_study_steps').select('config').eq('study_id', study_id).eq('step', 1).maybeSingle();
+        const c1: any = (s1k && s1k.config) || {};
+        const kws = (c1.keywords || []).map((k: any) => String(k || '').trim()).filter(Boolean);
+        if (!kws.length) {
+          const derived = await deriveKeywords(study.question || study.title || '', model);
+          if (derived.length) { c1.keywords = derived; await sb.from('research_study_steps').update({ config: c1 }).eq('study_id', study_id).eq('step', 1); }
+        }
+      }
       return json({ ok: true });
     }
 
@@ -523,6 +556,18 @@ Return ONLY JSON, no prose:
         const q = study.question || study.title;
         // natural-language query for SEMANTIC Elicit search: authored/planned semantic_query, else the study question
         const semanticQ = (config.semantic_query && String(config.semantic_query).trim()) || study.question || study.title || '';
+        // SAFETY NET (path-independent): an EMPTY keyword set makes openalexUnion (and Elicit keyword mode) fall back
+        // to a single raw-question query, which returns ~nothing for a long/non-English question — the funnel then
+        // finished with 3-4 papers in seconds. If plan never ran or failed to populate keywords, derive English ones
+        // NOW and persist them, so the sweep is broad, reruns reuse them, and the UI shows what was searched.
+        const kwNow = (config.keywords || []).map((k: any) => String(k || '').trim()).filter(Boolean);
+        if (!kwNow.length) {
+          const derived = await deriveKeywords(q, model);
+          if (derived.length) {
+            config.keywords = derived;
+            await sb.from('research_study_steps').update({ config: Object.assign({}, config, { keywords: derived }) }).eq('study_id', study_id).eq('step', 1);
+          }
+        }
         let u: any = null;
         // Elicit adapter (config.source_adapter = 'elicit' | 'elicit_keyword') — gated + budgeted + cached,
         // with a graceful OpenAlex fallback on any denial / rate-limit / quota / outage.

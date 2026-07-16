@@ -2053,6 +2053,7 @@
     var ehS = useState(null), enh = ehS[0], setEnh = ehS[1];       // AI-suggested sharper questions (item 4)
     var ebS = useState(false), enhBusy = ebS[0], setEnhBusy = ebS[1];
     var ibS = useState({}), ideaById = ibS[0], setIdeaById = ibS[1];   // idea_id → question, so each candidate shows the Study-basis idea it came from
+    var stByS = useState({}), studiesByIdea = stByS[0], setStudiesByIdea = stByS[1];   // idea_id → [research_studies] : the literature studies belonging to each idea (shown on the review-question modal)
     var bkS = useState(0), setBkTick = bkS[1];   // re-render tick — the actual backup runs live in the module-level PRStudyRunner so they survive tab/view switches
     var alive = useRef(true), fromCand = useRef(null);   // the candidate a review is being started from → link its launched_job_id after create
     function upf(k, v) { setF(function (prev) { var o = Object.assign({}, prev); o[k] = v; return o; }); }
@@ -2068,13 +2069,45 @@
     }
     function load() { callElicit({ action: 'sr.list', project_id: props.projectId }).then(function (d) { if (alive.current) setJobs((d && d.jobs) || []); }); }
     function loadCands() { sb.from('research_sr_candidates').select('*').eq('project_id', props.projectId).eq('dismissed', false).order('created_at', { ascending: true }).then(function (r) { if (alive.current) setCands((r && r.data) || []); }); }
+    // the literature studies started FROM each idea (idea_id-linked) → shown on the review-question modal so you can
+    // see / open the studies that already belong to this idea and their status
+    function loadStudies() {
+      sb.from('research_studies').select('id,idea_id,title,status,created_at').eq('project_id', props.projectId).not('idea_id', 'is', null).order('created_at', { ascending: false }).then(function (r) {
+        if (!alive.current) return;
+        var m = {}; ((r && r.data) || []).forEach(function (s) { if (s.idea_id) (m[s.idea_id] = m[s.idea_id] || []).push(s); });
+        setStudiesByIdea(m);
+      }, function () { });
+    }
+    // open a literature study's review markdown in the same viewer modal (openR) the SR reports use
+    function openStudyReview(study) {
+      var title = study.title || 'Irodalom-study';
+      setOpenR({ result_title: title, result_body: '⏳ Betöltés…' });
+      var sid8 = String(study.id).replace(/-/g, '').slice(0, 8);
+      sb.from('research_files').select('content').eq('project_id', props.projectId).like('path', 'studies/%-' + sid8 + '-review.md').order('updated_at', { ascending: false }).limit(1).then(function (r) {
+        if (!alive.current) return;
+        var f = r && r.data && r.data[0];
+        setOpenR({ result_title: title, result_body: (f && f.content) || '_Ehhez a study-hoz még nincs áttekintés (pl. nem volt full-text included cikk, vagy még fut). A szűrési részletek a Study fülön: „Keyword screening funnel"._' });
+      }, function () { if (alive.current) setOpenR({ result_title: title, result_body: '_Nem sikerült betölteni az eredményt._' }); });
+    }
     function generate() { setGen(true); setErr(''); callStudy({ action: 'sr_suggest', project_id: props.projectId }).then(function (d) { if (!alive.current) return; setGen(false); if (d && d.error) { setErr('Generate: ' + d.error); return; } loadCands(); if (d && d.created === 0) setErr('No Ideas yet — add Ideas in the Idea stage first, then generate.'); }); }
     function picoText(p) { if (!p) return ''; return [['P', p.population], ['I', p.intervention], ['C', p.comparison], ['O', p.outcome]].filter(function (x) { return x[1]; }).map(function (x) { return x[0] + ': ' + x[1]; }).join('\n'); }
     function startFromCand(c) { fromCand.current = c.id; setF({ q: c.question || '', protocol: picoText(c.pico), abs: c.abstract_criteria || [], ft: [], ex: c.extraction_questions || [], exclude: c.exclusion_criteria || [], gen: true, genAbs: true, genEx: true, useFig: false, runFT: true, maxResults: '1000' }); setOpenForm(true); setErr(''); }
     function dismissCand(c) { setCands(function (l) { return (l || []).filter(function (x) { return x.id !== c.id; }); }); sb.from('research_sr_candidates').update({ dismissed: true }).eq('id', c.id); }
-    useEffect(function () { alive.current = true; ensureSrCss(); if (canUse) { load(); loadCands(); sb.from('research_ideas').select('id,question').eq('project_id', props.projectId).then(function (r) { if (!alive.current) return; var m = {}; ((r && r.data) || []).forEach(function (x) { m[x.id] = x.question; }); setIdeaById(m); }); } return function () { alive.current = false; }; }, [canUse]);
+    useEffect(function () { alive.current = true; ensureSrCss(); if (canUse) { load(); loadCands(); loadStudies(); sb.from('research_ideas').select('id,question').eq('project_id', props.projectId).then(function (r) { if (!alive.current) return; var m = {}; ((r && r.data) || []).forEach(function (x) { m[x.id] = x.question; }); setIdeaById(m); }); } return function () { alive.current = false; }; }, [canUse]);
     // re-render whenever a background study run changes (the runs live in PRStudyRunner, not in this component's state)
-    useEffect(function () { return PRStudyRunner.subscribe(function () { if (alive.current) setBkTick(function (x) { return x + 1; }); }); }, []);
+    var loadStudiesRef = useRef(null), pidRefSr = useRef(props.projectId), stSigRef = useRef('');
+    loadStudiesRef.current = loadStudies; pidRefSr.current = props.projectId;
+    useEffect(function () {
+      return PRStudyRunner.subscribe(function () {
+        if (!alive.current) return;
+        setBkTick(function (x) { return x + 1; });   // cheap re-render → related-study pulse reflects running↔done
+        // reload the idea→studies map only when a study appears / goes terminal (not on every progress tick)
+        var pid = pidRefSr.current, all = PRStudyRunner.runs(), sig = [];
+        for (var k in all) { var r = all[k]; if (r.projectId === pid && r.sid) sig.push(r.sid + ':' + ((r.stage === 'done' || r.stage === 'error') ? '1' : '0')); }
+        sig.sort(); var s = sig.join('|');
+        if (s !== stSigRef.current) { stSigRef.current = s; if (loadStudiesRef.current) loadStudiesRef.current(); }
+      });
+    }, []);
     // one-click from the Ideas "Study basis" (Start a study from these ideas): generate SR-question drafts here in the studio
     useEffect(function () { if (props.autoGenerate && canUse && !gen) { if (props.onAutoGenerated) props.onAutoGenerated(); generate(); } }, [props.autoGenerate, canUse]);
     useEffect(function () {
@@ -2239,6 +2272,20 @@
       var done = j.status === 'completed', failed = j.status === 'failed';
       return h('button', { className: 'sr-cand-run' + (done ? ' done' : failed ? ' fail' : ''), title: 'A lefuttatott áttekintés megnyitása', onClick: function (e) { e.stopPropagation(); openCandRun(c); } }, done ? '✓ Áttekintés kész — megnyitás' : failed ? '✗ Sikertelen futtatás' : '⏳ Futtatás folyamatban — megnyitás');
     }
+    // Linked literature studies for this candidate's idea (running AND finished, incl. the Claude/OpenAlex backup),
+    // openable directly from the card. The isQuestionRunning pulse + the transient backupEl card only cover a LIVE
+    // run in this session; this is DB-backed, so a finished or past-session backup study stays visible + openable.
+    function candStudiesEls(c) {
+      if (!nd() || !c.idea_id) return null;
+      var list = studiesByIdea[c.idea_id] || []; if (!list.length) return null;
+      return h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 6 } }, list.map(function (s) {
+        var running = PRStudyRunner.isStudyRunning(s.id);
+        var done = s.status === 'done' || s.status === 'completed';
+        return h('button', { key: s.id, className: running ? 'pulse-run' : null, title: (s.title || 'Irodalom-study') + ' — megnyitás', onClick: function (e) { e.stopPropagation(); openStudyReview(s); },
+          style: { display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 9px', fontSize: 10.5, fontWeight: 600, borderRadius: 999, cursor: 'pointer', border: '1px solid ' + (running ? 'rgba(234,179,8,.55)' : 'var(--line)'), background: done ? 'var(--ok-bg, #e7f6ee)' : 'var(--surface-2)', color: running ? '#a16207' : done ? 'var(--ok, #15803d)' : 'var(--muted)' } },
+          (running ? '⏳ Study — kidolgozás alatt' : done ? '✓ Study — megnyitás' : '📄 Study — ' + (s.status || 'aktív')));
+      }));
+    }
     function candCard(c) {
       var pico = c.pico || {};
       var hasPico = pico.population || pico.intervention || pico.comparison || pico.outcome;
@@ -2252,6 +2299,7 @@
           h('b', { style: { color: 'var(--accent)' } }, 'C'), h('span', null, pico.comparison || '—'),
           h('b', { style: { color: 'var(--accent)' } }, 'O'), h('span', null, pico.outcome || '—')) : null,
         (c.abstract_criteria && c.abstract_criteria.length) ? h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 5 } }, c.abstract_criteria.slice(0, 3).map(function (x, i) { return h('span', { key: i, style: { fontSize: 10.5, fontWeight: 600, padding: '2px 8px', borderRadius: 999, background: 'var(--ok-bg, #e7f6ee)', color: 'var(--ok, #15803d)' } }, '✓ ' + String(x).slice(0, 44)); })) : null,
+        candStudiesEls(c),
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 12, fontSize: 11, color: 'var(--muted)' } },
           (c.extraction_questions && c.extraction_questions.length) ? h('span', null, '📋 ' + c.extraction_questions.length + ' extraction') : null,
           c.study_type ? h('span', { style: { fontFamily: 'monospace' } }, c.study_type) : null),
@@ -2290,6 +2338,7 @@
         picoBits ? h('div', { className: 'sr-rcand-pico' }, picoBits) : null,
         meta.length ? h('div', { className: 'sr-rcand-meta' }, meta.join(' · ')) : null,
         candRunBadge(c),
+        candStudiesEls(c),
         h('div', { className: 'sr-rcand-a' },
           h('button', { className: 'sr-rcstart', disabled: !props.canEdit, onClick: function () { startFromCand(c); } }, '🔬 Start review'),
           h('button', { className: 'sr-rcx', disabled: !props.canEdit, title: 'Dismiss', onClick: function () { dismissCand(c); } }, '×'))
@@ -2332,9 +2381,30 @@
           h('div', { className: 'modal-b', style: { display: 'flex', flexDirection: 'column', gap: 10, maxHeight: '74vh', overflow: 'auto' } }, reviewFormEls()))) : null
       );
     }
+    // Related literature studies for the candidate this review is being started from — so the modal shows which
+    // studies already belong to this idea + their status, with a one-click open of the finished review.
+    function relatedStudiesEl() {
+      if (!nd()) return null;   // additive; keep the classic (flag-OFF) form byte-identical
+      var cid = fromCand.current; if (!cid) return null;
+      var cand = (cands || []).filter(function (x) { return x.id === cid; })[0];
+      var iid = cand && cand.idea_id; if (!iid) return null;
+      var list = studiesByIdea[iid] || []; if (!list.length) return null;
+      return h('div', { key: 'relstudies', style: { padding: '9px 11px', background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 8, display: 'flex', flexDirection: 'column', gap: 6 } },
+        h('div', { style: { fontSize: 11.5, fontWeight: 700, color: 'var(--muted)' } }, '📚 Ehhez az ötlethez tartozó study-k (' + list.length + ')'),
+        list.map(function (s) {
+          var running = PRStudyRunner.isStudyRunning(s.id);
+          var done = s.status === 'done' || s.status === 'completed';
+          return h('div', { key: s.id, className: running ? 'pulse-run' : null, style: { display: 'flex', alignItems: 'center', gap: 8, padding: '5px 8px', background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 7 } },
+            h('div', { style: { minWidth: 0, flex: 1 } },
+              h('div', { style: { fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } }, s.title || 'Irodalom-study'),
+              h('div', { style: { fontSize: 11, color: running ? '#a16207' : done ? 'var(--ok, #15803d)' : 'var(--faint)' } }, running ? '⏳ Kidolgozás alatt…' : done ? '✓ Kész áttekintés' : '• ' + (s.status || 'aktív'))),
+            h('button', { className: 'btn', style: { padding: '3px 10px', fontSize: 11.5, flex: 'none' }, onClick: function () { openStudyReview(s); } }, 'Megnyitás'));
+        }));
+    }
     // the create-review form body — shared by the classic full-width layout (flag OFF) AND the New-design modal (flag ON)
     function reviewFormEls() {
       return [
+        relatedStudiesEl(),
         h('div', { key: 'q' },
           h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
             h('div', { className: 'field-label', style: { flex: 1, margin: 0 } }, 'Research question *'),
