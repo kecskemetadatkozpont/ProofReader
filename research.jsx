@@ -4447,6 +4447,7 @@
     var tourT = useRef(null);   // tour autoplay timer
     var viewRef = useRef(view); viewRef.current = view;   // live mirror of `view` so a tween always starts from the true current camera
     var armedRef = useRef(null);   // the card "armed to enter" at deep zoom (Fázis 3) — Enter dives into it
+    var stagesBusy = useRef(false);   // re-entry guard for autoLayoutStages (prevents duplicate phase frames on rapid double-invoke)
     var memS = useState(null), members = memS[0], setMembers = memS[1];   // project collaborators (migration-74) — null until loaded/capable
     var shareS = useState(false), shareOpen = shareS[0], setShareOpen = shareS[1];   // the Share/Collaborators modal
     var invqS = useState(''), invQ = invqS[0], setInvQ = invqS[1];   // invite: user search query
@@ -4603,7 +4604,7 @@
       function onKey(e) {
         if (e.key === 'Escape') { if (tour) tourStop(); else if (focus) exitFocus(); }
         else if (tour && tour.beats && !typing(e.target)) { if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); tourNext(); } else if (e.key === 'ArrowLeft') { e.preventDefault(); tourPrev(); } }
-        else if (e.key === 'Enter' && !focus && !tour && armedRef.current && !typing(e.target)) { e.preventDefault(); enterNode(armedRef.current); }
+        else if (e.key === 'Enter' && !focus && !tour && armedRef.current && !typing(e.target)) { e.preventDefault(); enterNode(armedRef.current); }   // armedRef is null while a modal is open (guarded at compute)
       }
       window.addEventListener('keydown', onKey);
       return function () { window.removeEventListener('keydown', onKey); };
@@ -4872,7 +4873,7 @@
       if (!tab) return;
       if (!canEnter(n)) { if (props.onGoTab) props.onGoTab(tab); return; }   // non-embeddable → hand off to the classic tab
       stopFollow(); tourStop();
-      returnView.current = { tx: view.tx, ty: view.ty, k: view.k };
+      returnView.current = { tx: viewRef.current.tx, ty: viewRef.current.ty, k: viewRef.current.k };
       // mount the (possibly heavy) panel only AFTER the camera tween settles — a light placeholder shows during 'entering'
       setFocus(Object.assign({ nodeId: n.id, tab: tab, t: n.t, title: n.title, ref: n.ref, phase: 'entering' }, focusPropsFor(n)));
       flyTo(nodeTarget(n, 2.0), { ms: 420, done: function () { if (alive.current) setFocus(function (f) { return f ? Object.assign({}, f, { phase: 'open' }) : f; }); } });
@@ -4911,12 +4912,12 @@
     function tourStart() {   // Fázis-1 quick Lap-based tour
       if (!pagesCap || !pages.length) { window.PRUI.toast('Ments előbb legalább egy „Lapot" (nézetet) a túrához.', { kind: 'info' }); return; }
       var beats = pages.slice().sort(function (a, b) { return (a.ord || 0) - (b.ord || 0); }).map(function (pg) { return { tx: pg.tx, ty: pg.ty, k: pg.k, caption: pg.name, notes: '', enter_panel: false }; });
-      setFocus(null); returnView.current = { tx: view.tx, ty: view.ty, k: view.k };
+      setFocus(null); returnView.current = { tx: viewRef.current.tx, ty: viewRef.current.ty, k: viewRef.current.k };
       tourRun(beats, 0, true, { name: 'Lap-túra' });
     }
     function presentPath(path, presenter) {   // Fázis-2 authored presentation
       var beats = (path.steps || []).map(resolveBeat); if (!beats.length) { window.PRUI.toast('Ehhez a bemutatóhoz még nincs jelenet.', { kind: 'info' }); return; }
-      setPresMgrOpen(false); setEditPath(null); setFocus(null); returnView.current = { tx: view.tx, ty: view.ty, k: view.k };
+      setPresMgrOpen(false); setEditPath(null); setFocus(null); returnView.current = { tx: viewRef.current.tx, ty: viewRef.current.ty, k: viewRef.current.k };
       tourRun(beats, 0, true, { name: path.name, pathId: path.id, presenter: !!presenter });
     }
     function tourPrev() { if (tour && tour.beats) { if (tourT.current) { clearTimeout(tourT.current); tourT.current = null; } tourRun(tour.beats, Math.max(0, tour.i - 1), false, tour); } }
@@ -5196,9 +5197,10 @@
     var PHASE_HU = ['💡 Ötlet', '📚 Irodalom', '🔬 Áttekintés', '🧪 Protokoll', '🎯 Folyóirat', '✍️ Írás'];
     var PHASE_COL = ['violet', 'cyan', 'slate', 'amber', 'rose', 'green'];
     function autoLayoutStages() {
-      if (!props.canEdit || !framesCap) return;
+      if (!props.canEdit || !framesCap || stagesBusy.current) return;
+      stagesBusy.current = true;   // guard from the moment ⌗ is clicked until the arrange settles (no duplicate frames on double-click)
       window.PRUI.confirm({ title: 'Rendezés fázisokba?', body: 'A kártyák a munkafolyamat-fázisok (Ötlet → Irodalom → Áttekintés → Protokoll → Folyóirat → Írás) szerint sávokba rendeződnek, és minden fázishoz keret készül. Ez FELÜLÍRJA a kézi elrendezést (a ↺ gombbal visszaállítható).', confirmLabel: 'Rendezés' }).then(function (ok) {
-        if (!ok || !alive.current) return;
+        if (!ok || !alive.current) { stagesBusy.current = false; return; }
         var LANE_W = 300, CW = 204, CH = 74, gapY = 22, padX = (LANE_W - CW) / 2, topY = 56, laneGap = 40;
         var byPhase = {}; g.N.forEach(function (n) { if (n.mapHidden) return; var ph = (n.ph != null ? n.ph : 0); (byPhase[ph] = byPhase[ph] || []).push(n); });
         var phases = Object.keys(byPhase).map(Number).sort(function (a, b) { return a - b; });
@@ -5216,8 +5218,8 @@
           if (existing) framePatch(existing.id, { x: fo.x, y: fo.y, w: fo.w, h: fo.h });
           else sb.from('research_map_frames').insert({ project_id: props.projectId, title: title, x: fo.x, y: fo.y, w: fo.w, h: fo.h, color: PHASE_COL[fo.ph] || 'slate' }).select('id,title,x,y,w,h,color').single().then(function (r) { if (alive.current && r && r.data) setFrames(function (F) { return F.some(function (f) { return f.id === r.data.id; }) ? F : F.concat([r.data]); }); });
         });
-        setTimeout(function () { if (alive.current) fitView(); }, 520);
-      });
+        setTimeout(function () { if (alive.current) fitView(); stagesBusy.current = false; }, 620);
+      }, function () { stagesBusy.current = false; });
     }
     function toggleMsel(id) { setMsel(function (M) { var m = Object.assign({}, M); if (m[id]) delete m[id]; else m[id] = true; return m; }); }
     function startNodeDrag(e, n) {
@@ -5659,7 +5661,7 @@
     // Fázis 3 (semantic zoom / ZUI): a level-of-detail from view.k + an "arm-to-enter" card near the viewport center at deep zoom
     var K_ARM = 1.9, lod = view.k < 0.55 ? 0 : (view.k < 1.3 ? 1 : 2);
     var armedNode = null;
-    if (view.k >= K_ARM && !focus && !tour && props.renderPanel) {
+    if (view.k >= K_ARM && !focus && !tour && !shareOpen && !presMgrOpen && props.renderPanel) {
       var _st = stageRef.current, _cw = (_st && _st.clientWidth) || 900, _ch = (_st && _st.clientHeight) || 560, _best = Infinity;
       g.N.forEach(function (n) { if (!nodeVisible(n) || !canEnter(n)) return; var sx = view.tx + (n.x + 102) * view.k, sy = view.ty + (n.y + 37) * view.k; var d = Math.abs(sx - _cw / 2) + Math.abs(sy - _ch / 2); if (d < _best && d < 240) { _best = d; armedNode = n; } });
     }

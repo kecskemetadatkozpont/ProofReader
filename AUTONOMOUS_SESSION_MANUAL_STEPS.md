@@ -89,6 +89,18 @@ sorrendben. A service-key nem tud DDL-t futtatni, ezért ezek manuálisak.
    CRDT/Yjs** (egyidejű azonos-szekció gépelés valós idejű merge-dzsel) továbbra is szándékosan kimaradt
    (Phase 6 — nagy külső függőség, külön dependency-döntés).
 
+10. **`backend/migration-79-map-paths.sql`** — Prezi-mód **bemutatók** (story paths): `research_map_paths` tábla.
+    RLS/realtime a `research_map_pages`-ből klónozva (olvasás=olvasók, írás=szerkesztők). Amíg nincs lefuttatva:
+    a `🎬` bemutató-kezelő NEM jelenik meg, DE a `▶` Lap-alapú gyors-túra migráció nélkül is működik.
+
+    **PREZI-MÓD MEGÉPÜLT (2026-07-17) — zoomolható munkafolyamat + storytelling a Map-en:**
+    - **Fázis 1 (D):** kártyába zoomolás → a valódi munkafolyamat-panel a helyén nyílik (`◇ Belépés` / dupla-katt);
+      `flyTo` kamera-tween; `▶` Lap-alapú túra. **Nincs migráció.**
+    - **Fázis 2 (C):** `🎬` bemutató-mód — jelenetekből álló vezetett túra (felirat, előadói jegyzet, panel-megnyitás),
+      lejátszó, `🔴 Élő` megosztott bemutató. **`migration-79` kell** (a UI addig graceful-rejtett).
+    - **Fázis 2.5 (B):** `⌗` „Rendezés fázisokba" (opcionális, megerősítéssel). **Nincs migráció.**
+    - **Fázis 3 (A):** szemantikus zoom (LOD) + „arm-to-enter" (Enter a mélyre-zoomolt kártyába). **Nincs migráció.**
+
 ## Edge-function deploy-ok (explicit jóváhagyás + megnevezés kell)
 
 **NINCS** — ebben a munkamenetben egyetlen edge-function sem változott, deploy nem szükséges.
@@ -125,6 +137,11 @@ Minden be van commitolva a `main`-re és deploy-olva (GitHub Pages).
 | `05f7957` | Phase 4: konzulensi sign-off (RPC) | **77** |
 | `d94be8f` | Phase 5: élő közös draft-szekció-szerkesztés (soft-lock) | — |
 | `7b9aa27` | Fix: atomikus szekció-írás RPC (cross-section lost-update) | **78** |
+| `c4a20f9` | Típus-szűrő (👁): objektum-típusok ki/be a térképen | — |
+| `b644950`.. | **Prezi-mód** F1 (D): zoom-a-panelbe + flyTo + Lap-túra | — |
+| `20097a5` | Prezi-mód F2 (C): bemutató-mód (jelenetek, előadói, élő) | **79** |
+| `196393a` | Prezi-mód F2.5 (B): „Rendezés fázisokba" | — |
+| `2105a14` | Prezi-mód F3 (A): szemantikus zoom + arm-to-enter | — |
 
 **Teendőd:** a `migration-70 … 74` már lefutott (2026-07-17, smoke-tesztelve). Már csak a
 **`migration-75` és `migration-76`** van hátra — futtasd le a Supabase SQL editorban (ref
