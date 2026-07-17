@@ -5135,18 +5135,48 @@
     return h('a', { className: 'chip ' + (eff === 'failed' ? 'c-warn' : active ? 'c-acc' : 'c-grey'), href: 'Autopilot.html?run=' + encodeURIComponent(run.id), onClick: function (e) { e.stopPropagation(); }, style: { textDecoration: 'none' }, title: 'Autopilot dashboard megnyitása' }, '⚡ Autopilot · ' + (AP_ST_LABEL[eff] || eff) + ' · ' + done + '/' + enabled);
   }
 
+  function pcAgo(ts, hu) {
+    if (!ts) return '';
+    var pre = hu ? 'frissítve ' : 'updated ';
+    var d = (Date.now() - new Date(ts).getTime()) / 1000;
+    if (d < 3600) { var mnt = Math.max(1, Math.round(d / 60)); return pre + mnt + (hu ? ' perce' : 'm ago'); }
+    if (d < 86400) { var hr = Math.round(d / 3600); return pre + hr + (hu ? ' órája' : 'h ago'); }
+    if (d < 2592000) { var dy = Math.round(d / 86400); return pre + dy + (hu ? ' napja' : 'd ago'); }
+    return pre + new Date(ts).toLocaleDateString(hu ? 'hu-HU' : 'en-US');
+  }
   function ProjectCard(props) {
     var p = props.project;
-    var openTasks = p._openTasks;
     // explicit author attribution so a student's (or a test's) project can never read as the viewer's own
     var badge;
     if (props.meId && p.owner_id === props.meId) badge = h('span', { className: 'chip c-grey author-badge' }, 'Mine');
     else { var st = props.studentById && props.studentById[p.student_id]; badge = h('span', { className: 'chip ' + (st ? 'c-acc' : 'c-warn') + ' author-badge' }, st ? 'Student: ' + st.name : 'Student’s work'); }
+    if (nd()) {
+      // ---- Option A: pipeline-rail card (New design) ----
+      var clang = (p.language === 'hu' ? 'hu' : 'en'), hu = clang === 'hu';
+      var stage = p.stage || 0, nS = STAGES.length;
+      var scls = p.status === 'active' ? 'act' : p.status === 'paused' ? 'pau' : p.status === 'done' ? 'don' : 'arc';
+      var c = props.counts || {};
+      var ML = hu ? ['Ötlet', 'Forrás', 'Incl', 'Study', 'Feladat'] : ['Ideas', 'Sources', 'Incl', 'Studies', 'Tasks'];
+      var MV = [c.ideas, c.sources, c.incl, c.studies, c.tasks];
+      var segs = [];
+      for (var i = 0; i < nS; i++) segs.push(h('div', { key: i, className: 'pc-seg' + (i < stage ? ' done' : i === stage ? ' cur' : '') }, h('span', { className: 'pc-dot' })));
+      var kws = (p.keywords || []).slice(0, 3), extraKw = Math.max(0, (p.keywords || []).length - 3);
+      return h('div', { className: 'pc-a', onClick: function () { props.onOpen(p); } },
+        h('div', { className: 'pc-top' },
+          h('div', { style: { minWidth: 0 } }, h('div', { className: 'pc-t' }, p.title), h('div', { className: 'pc-f' }, p.field || '—')),
+          h('span', { className: 'pc-st ' + scls }, tr(clang, STATUS_LABEL[p.status] || p.status))),
+        h('div', { className: 'pc-rail' }, segs),
+        h('div', { className: 'pc-rlab' }, h('span', null, tr(clang, STAGES[0])), h('span', { className: 'now' }, tr(clang, STAGES[stage]) + ' · ' + (stage + 1) + '/' + nS), h('span', null, tr(clang, STAGES[nS - 1]))),
+        h('div', { className: 'pc-metrics tabnum' }, ML.map(function (lab, k) { return h('div', { className: 'pc-m', key: k }, h('span', { className: 'pc-mv' }, MV[k] != null ? MV[k] : '–'), h('span', { className: 'pc-ml' }, lab)); })),
+        h('div', { className: 'pc-foot' },
+          h('div', { className: 'pc-kw' }, kws.map(function (k, i) { return h('span', { className: 'pc-kwc', key: i }, k); }), extraKw ? h('span', { className: 'pc-kwc' }, '+' + extraKw) : null, badge),
+          props.apRun ? apRunBadge(props.apRun) : h('span', { className: 'pc-upd' }, pcAgo(p.updated_at, hu))));
+    }
+    // ---- classic card (flag OFF) — unchanged ----
     return h('div', { className: 'card', onClick: function () { props.onOpen(p); } },
       h('div', { className: 'ch' }, h('div', null, h('b', null, p.title), h('span', null, p.field || '—')), badge),
       p.keywords && p.keywords.length ? h('div', { className: 'tags' }, p.keywords.slice(0, 4).map(function (k, i) { return h('span', { className: 'tag', key: i }, k); })) : null,
       h('div', { className: 'meter' }, h('i', { style: { width: Math.round((p.stage / (STAGES.length - 1)) * 100) + '%' } })),
-      (nd() && props.apRun) ? h('div', { style: { marginTop: 8 } }, apRunBadge(props.apRun)) : null,
       h('div', { className: 'kv' }, h('span', null, 'Stage: ' + STAGES[p.stage || 0]), h('span', { className: 'chip ' + (p.status === 'active' ? 'c-ok' : 'c-grey') }, STATUS_LABEL[p.status] || p.status))
     );
   }
@@ -5424,7 +5454,7 @@
       }, function () { setSupStudents({ byId: {}, list: [] }); });
     }
     function loadProjects(pid, preview, done) {
-      sb.from('research_projects').select('id,owner_id,student_id,title,field,keywords,stage,status,goal,updated_at').order('updated_at', { ascending: false }).then(function (r) {
+      sb.from('research_projects').select('id,owner_id,student_id,title,field,keywords,stage,status,goal,language,updated_at').order('updated_at', { ascending: false }).then(function (r) {
         var list = (r && r.data) || [];
         if (preview) list = list.filter(function (x) { return x.owner_id === pid; });
         setProjects(list);
@@ -5496,6 +5526,28 @@
       }, function () { });
       return function () { alive = false; };
     }, [meId, props.projects.length]);
+    // per-project metric counts for the redesigned (New-design) project cards — one minimal batch query per table,
+    // tallied client-side. nd-only + fails soft (an error → empty map → the card just shows 0/—).
+    var cntS = useState({}), pCounts = cntS[0], setPCounts = cntS[1];
+    useEffect(function () {
+      if (!nd()) return; var alive = true;
+      var pids = (props.projects || []).map(function (x) { return x.id; }); if (!pids.length) { setPCounts({}); return function () { alive = false; }; }
+      Promise.all([
+        sb.from('research_ideas').select('project_id').in('project_id', pids).neq('status', 'rejected'),
+        sb.from('research_sources').select('project_id,screening').in('project_id', pids),
+        sb.from('research_studies').select('project_id').in('project_id', pids),
+        sb.from('research_todos').select('project_id,status').in('project_id', pids)
+      ]).then(function (r) {
+        if (!alive) return; var m = {};
+        function slot(pid) { return m[pid] || (m[pid] = { ideas: 0, sources: 0, incl: 0, studies: 0, tasks: 0 }); }
+        ((r[0] && r[0].data) || []).forEach(function (x) { slot(x.project_id).ideas++; });
+        ((r[1] && r[1].data) || []).forEach(function (x) { var s = slot(x.project_id); s.sources++; if (x.screening === 'include') s.incl++; });
+        ((r[2] && r[2].data) || []).forEach(function (x) { slot(x.project_id).studies++; });
+        ((r[3] && r[3].data) || []).forEach(function (x) { if (x.status !== 'done' && x.status !== 'cancelled') slot(x.project_id).tasks++; });
+        setPCounts(m);
+      }, function () { });
+      return function () { alive = false; };
+    }, [meId, props.projects.length]);
     if (!isSup && view === 'supervised') view = 'mine';
     var roleLabel = me.role === 'admin' ? 'Administrator' : (isSup ? 'Supervisor' : 'Researcher');
     var sub = sel ? STAGES[sel.stage || 0] + ' stage' : (view === 'supervised' ? (studentList.length + ' student(s)') : (mineProjects.length + ' project' + (mineProjects.length === 1 ? '' : 's')));
@@ -5515,7 +5567,7 @@
     } else if (!mineProjects.length) {
       body = h('div', null, seg, h('div', { className: 'soon' }, h('b', null, 'No research projects yet. '), 'Create one to start tracking a study from idea to submission.', h('div', { style: { marginTop: 14 } }, h('button', { className: 'btn pri', onClick: function () { setAdding(true); } }, '+ New project'))));
     } else {
-      body = h('div', null, seg, h('div', { className: 'grid' }, mineProjects.map(function (p) { return h(ProjectCard, { key: p.id, project: p, meId: meId, studentById: studentById, onOpen: props.openProject, apRun: apRuns[p.id] }); })));
+      body = h('div', null, seg, h('div', { className: 'grid' }, mineProjects.map(function (p) { return h(ProjectCard, { key: p.id, project: p, meId: meId, studentById: studentById, onOpen: props.openProject, apRun: apRuns[p.id], counts: pCounts[p.id] }); })));
     }
 
     return h('div', { className: 'app' + (nd() && sel ? ' rv-hasproj' : '') },
