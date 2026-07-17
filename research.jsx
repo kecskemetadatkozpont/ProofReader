@@ -5180,6 +5180,34 @@
       setLayout({}); setDlive(null);
       sb.from('research_map_layout').delete().eq('project_id', props.projectId).then(function (r) { if (r && r.error && alive.current) window.PRUI.toast('Elrendezés visszaállítása: ' + r.error.message, { kind: 'error' }); });
     }
+    // Fázis 2.5 (opt-in, Prezi-B): arrange the cards into per-phase lanes + a named frame each. Overwrites manual
+    // positions → behind a confirm; matches frames by title so re-running updates instead of duplicating.
+    var PHASE_HU = ['💡 Ötlet', '📚 Irodalom', '🔬 Áttekintés', '🧪 Protokoll', '🎯 Folyóirat', '✍️ Írás'];
+    var PHASE_COL = ['violet', 'cyan', 'slate', 'amber', 'rose', 'green'];
+    function autoLayoutStages() {
+      if (!props.canEdit || !framesCap) return;
+      window.PRUI.confirm({ title: 'Rendezés fázisokba?', body: 'A kártyák a munkafolyamat-fázisok (Ötlet → Irodalom → Áttekintés → Protokoll → Folyóirat → Írás) szerint sávokba rendeződnek, és minden fázishoz keret készül. Ez FELÜLÍRJA a kézi elrendezést (a ↺ gombbal visszaállítható).', confirmLabel: 'Rendezés' }).then(function (ok) {
+        if (!ok || !alive.current) return;
+        var LANE_W = 300, CW = 204, CH = 74, gapY = 22, padX = (LANE_W - CW) / 2, topY = 56, laneGap = 40;
+        var byPhase = {}; g.N.forEach(function (n) { if (n.mapHidden) return; var ph = (n.ph != null ? n.ph : 0); (byPhase[ph] = byPhase[ph] || []).push(n); });
+        var phases = Object.keys(byPhase).map(Number).sort(function (a, b) { return a - b; });
+        var laneX = 0, updates = [], frameOps = [];
+        phases.forEach(function (ph) {
+          var list = byPhase[ph], y = topY;
+          list.forEach(function (n) { updates.push({ id: n.id, x: Math.round(laneX + padX), y: Math.round(y) }); y += CH + gapY; });
+          frameOps.push({ ph: ph, x: laneX, y: 0, w: LANE_W, h: topY + list.length * (CH + gapY) + 14 });
+          laneX += LANE_W + laneGap;
+        });
+        setLayout(function (L) { var m = Object.assign({}, L); updates.forEach(function (u) { m[u.id] = Object.assign({}, m[u.id], { x: u.x, y: u.y }); }); return m; });
+        updates.forEach(function (u) { persistPos(u.id, u.x, u.y); });
+        frameOps.forEach(function (fo) {
+          var title = PHASE_HU[fo.ph] || ('Fázis ' + (fo.ph + 1)), existing = frames.filter(function (f) { return f.title === title; })[0];
+          if (existing) framePatch(existing.id, { x: fo.x, y: fo.y, w: fo.w, h: fo.h });
+          else sb.from('research_map_frames').insert({ project_id: props.projectId, title: title, x: fo.x, y: fo.y, w: fo.w, h: fo.h, color: PHASE_COL[fo.ph] || 'slate' }).select('id,title,x,y,w,h,color').single().then(function (r) { if (alive.current && r && r.data) setFrames(function (F) { return F.some(function (f) { return f.id === r.data.id; }) ? F : F.concat([r.data]); }); });
+        });
+        setTimeout(function () { if (alive.current) fitView(); }, 520);
+      });
+    }
     function toggleMsel(id) { setMsel(function (M) { var m = Object.assign({}, M); if (m[id]) delete m[id]; else m[id] = true; return m; }); }
     function startNodeDrag(e, n) {
       if (e.button !== 0) return;   // left button only — right-click opens the generate menu
@@ -5709,6 +5737,7 @@
           (pagesCap && pages.length > 1) ? h('button', { title: 'Gyors túra: végigzoomol a mentett Lapokon', onClick: tourStart }, '▶') : null,
           pathsCap ? h('button', { className: presMgrOpen ? 'on' : '', title: 'Bemutatók (Prezi-story): jelenetekből álló, vezetett túra', onClick: function () { setPresMgrOpen(function (v) { return !v; }); } }, '🎬') : null,
           (props.canEdit && framesCap) ? h('button', { title: 'Új keret (nevesített régió) hozzáadása', onClick: frameCreate }, '▦') : null,
+          (props.canEdit && framesCap) ? h('button', { title: 'Rendezés fázisokba (sávok + keretek) — felülírja a kézi elrendezést', onClick: autoLayoutStages }, '⌗') : null,
           commentsCap ? h('button', { className: commentMode ? 'on' : '', title: commentMode ? 'Komment-mód kikapcsolása' : 'Komment-mód: kattints a vászonra vagy egy kártyára', onClick: function () { setCommentMode(function (v) { return !v; }); setComposer(null); } }, '💬') : null,
           (commentsCap && comments.length) ? h('button', { title: 'Összes komment', onClick: function () { setCmPanelOpen(function (v) { return !v; }); } }, '📋' + (cmUnresolved || '')) : null,
           (data && data.hiddenFigs && data.hiddenFigs.length) ? h('button', { title: 'Térképről levett ábrák visszahozása', onClick: function () { setRestoreOpen(true); } }, '🖼' + data.hiddenFigs.length) : null,
