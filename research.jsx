@@ -4421,6 +4421,10 @@
     var pgS = useState([]), pages = pgS[0], setPages = pgS[1];   // Map pages (saved views) — migration-73
     var pgcS = useState(false), pagesCap = pgcS[0], setPagesCap = pgcS[1];   // migration-73 capability
     var apgS = useState(null), activePage = apgS[0], setActivePage = apgS[1];   // active page id or null (= full graph)
+    var pthS = useState([]), paths = pthS[0], setPaths = pthS[1];   // Map story paths (presentations) — migration-79
+    var pthcS = useState(false), pathsCap = pthcS[0], setPathsCap = pthcS[1];   // migration-79 capability
+    var presMgrS = useState(false), presMgrOpen = presMgrS[0], setPresMgrOpen = presMgrS[1];   // the presentations manager panel
+    var editPathS = useState(null), editPath = editPathS[0], setEditPath = editPathS[1];   // the path id whose beat-editor is open
     var sfcS = useState(false), stepFlagsCap = sfcS[0], setStepFlagsCap = sfcS[1];   // migration-75 capability: step assignee/sign-off columns present
     var htS = useState({}), hiddenTypes = htS[0], setHiddenTypes = htS[1];   // temporary per-type visibility filter {node_type: true = hidden} (client-only, localStorage)
     var tfoS = useState(false), typeFilterOpen = tfoS[0], setTypeFilterOpen = tfoS[1];   // the type-filter popover
@@ -4501,6 +4505,10 @@
       sb.from('research_map_pages').select('id,name,tx,ty,k,only_pinned,ord').eq('project_id', pid).order('ord', { ascending: true }).order('created_at', { ascending: true }).then(function (r) {
         if (!alive.current) return; if (r && r.error) return; setPagesCap(true); setPages((r && r.data) || []);
       });
+      // load Map story paths (presentations) — graceful: pre-migration-79 → pathsCap stays false, no presentation UI
+      sb.from('research_map_paths').select('id,name,ord,steps').eq('project_id', pid).order('ord', { ascending: true }).order('created_at', { ascending: true }).then(function (r) {
+        if (!alive.current) return; if (r && r.error) return; setPathsCap(true); setPaths((r && r.data) || []);
+      });
       var me = props.viewer || {}, myKey = props.viewerId || ('anon-' + pid);
       var ch = sb.channel('rmap-ap:' + pid, { config: { presence: { key: myKey } } })
         .on('broadcast', { event: 'cursor' }, function (m) {
@@ -4549,6 +4557,18 @@
           var np = p.new; if (!np || !np.id) return;
           setPages(function (P) { var found = false, out = P.map(function (x) { if (x.id === np.id) { found = true; return { id: np.id, name: np.name, tx: np.tx, ty: np.ty, k: np.k, only_pinned: np.only_pinned, ord: np.ord }; } return x; }); if (!found) out.push({ id: np.id, name: np.name, tx: np.tx, ty: np.ty, k: np.k, only_pinned: np.only_pinned, ord: np.ord }); return out; });
         })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'research_map_paths', filter: 'project_id=eq.' + pid }, function (p) {
+          if (!alive.current) return;
+          if (p.eventType === 'DELETE') { var oid = p.old && p.old.id; if (oid) setPaths(function (P) { return P.filter(function (x) { return x.id !== oid; }); }); return; }
+          var np = p.new; if (!np || !np.id) return;
+          setPaths(function (P) { var found = false, out = P.map(function (x) { if (x.id === np.id) { found = true; return { id: np.id, name: np.name, ord: np.ord, steps: np.steps }; } return x; }); if (!found) out.push({ id: np.id, name: np.name, ord: np.ord, steps: np.steps }); return out; });
+        })
+        .on('broadcast', { event: 'story_beat' }, function (m) {
+          if (!alive.current) return; var pl = m && m.payload; if (!pl || pl.id === props.viewerId) return;
+          // a presenter broadcasts the target of the current beat; audience flies there locally (bandwidth-cheap)
+          if (pl.tx != null) flyTo({ tx: pl.tx, ty: pl.ty, k: pl.k }, { ms: 620 });
+          setTour(function (t) { return { follow: true, name: pl.name || 'Bemutató', caption: pl.caption || '', i: pl.i, total: pl.total, playing: false, beats: [] }; });
+        })
         .subscribe(function (status) { if (status === 'SUBSCRIBED' && props.viewerId) { try { ch.track({ id: props.viewerId, name: me.name || 'Kolléga', avatar: me.avatar || null }); } catch (e) { } } });
       chRef.current = ch;
       // prune stale remote cursors (a user who left / went idle)
@@ -4577,7 +4597,8 @@
     // Esc closes the focus overlay (or stops a tour); rebinds when focus/tour changes so it sees the current one
     useEffect(function () {
       if (!focus && !tour) return;
-      function onKey(e) { if (e.key === 'Escape') { if (focus) exitFocus(); else if (tour) tourStop(); } }
+      function typing(el) { if (!el) return false; var tg = el.tagName || ''; return tg === 'INPUT' || tg === 'TEXTAREA' || tg === 'SELECT' || el.isContentEditable; }
+      function onKey(e) { if (e.key === 'Escape') { if (tour) tourStop(); else if (focus) exitFocus(); } else if (tour && tour.beats && !typing(e.target)) { if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); tourNext(); } else if (e.key === 'ArrowLeft') { e.preventDefault(); tourPrev(); } } }
       window.addEventListener('keydown', onKey);
       return function () { window.removeEventListener('keydown', onKey); };
     }, [focus, tour]);
@@ -4852,27 +4873,69 @@
     }
     function exitFocus() { var rv = returnView.current; setFocus(null); if (rv) flyTo(rv, { ms: 360 }); }
     // ---- guided tour over the saved Lapok (pages) — Fázis 1; Fázis 2 upgrades this to authored story beats ----
-    function tourStop() { if (tourT.current) { clearTimeout(tourT.current); tourT.current = null; } setTour(null); }
-    function tourGoto(list, i) {
-      if (!list.length) return; var idx = (i + list.length) % list.length, pg = list[idx];
-      flyTo({ tx: pg.tx, ty: pg.ty, k: pg.k }, { ms: 620 });
-      setTour(function (t) { return Object.assign({}, t || {}, { list: list, i: idx }); });
+    function tourStop() { if (tourT.current) { clearTimeout(tourT.current); tourT.current = null; } setFocus(null); setTour(null); }
+    function fitFrameTarget(f) {
+      var st = stageRef.current, cw = (st && st.clientWidth) || 900, ch = (st && st.clientHeight) || 560, pad = 48;
+      var k = Math.min(1.8, Math.max(.3, Math.min((cw - pad * 2) / Math.max(1, f.w), (ch - pad * 2) / Math.max(1, f.h))));
+      return { tx: cw / 2 - (f.x + f.w / 2) * k, ty: ch / 2 - (f.y + f.h / 2) * k, k: k };
     }
-    function tourStart() {
-      if (!pagesCap || !pages.length) { window.PRUI.toast('Ments előbb legalább egy „Lapot" (nézetet) a túrához.', { kind: 'info' }); return; }
-      var list = pages.slice().sort(function (a, b) { return (a.ord || 0) - (b.ord || 0); });
-      setFocus(null); returnView.current = { tx: view.tx, ty: view.ty, k: view.k };
-      setTour({ list: list, i: -1, playing: true }); tourAdvance(list, 0, true);
+    // resolve an authored beat (step) to a live camera target + panel/caption metadata; falls back to the stored snapshot
+    function resolveBeat(step) {
+      step = step || {}; var b = { caption: step.caption || '', notes: step.notes || '', enter_panel: !!step.enter_panel, tab: step.panel_tab || null, kind: step.kind, ref_id: step.ref_id, nodeId: null, dwell_ms: step.dwell_ms || 0 }, t = null;
+      if (step.kind === 'node' && step.ref_id && g.by[step.ref_id]) { var n = g.by[step.ref_id]; t = nodeTarget(n, 1.9); b.nodeId = n.id; b.t = n.t; b.title = n.title; b.ref = n.ref; if (!b.tab) b.tab = RMAP_TYPE[n.t] && RMAP_TYPE[n.t].tab; if (b.enter_panel) Object.assign(b, focusPropsFor(n)); }
+      else if (step.kind === 'page' && step.ref_id) { var pg = pages.filter(function (x) { return x.id === step.ref_id; })[0]; if (pg) t = { tx: pg.tx, ty: pg.ty, k: pg.k }; }
+      else if (step.kind === 'frame' && step.ref_id) { var fr = frames.filter(function (x) { return x.id === step.ref_id; })[0]; if (fr) t = fitFrameTarget(fr); }
+      if (!t) t = { tx: step.tx != null ? step.tx : view.tx, ty: step.ty != null ? step.ty : view.ty, k: step.k != null ? step.k : view.k };
+      b.tx = t.tx; b.ty = t.ty; b.k = t.k; return b;
     }
-    function tourAdvance(list, i, playing) {
-      tourGoto(list, i);
+    function tourGo(beats, i, meta) {
+      if (!beats.length) return; var idx = Math.max(0, Math.min(i, beats.length - 1)), b = beats[idx];
+      setFocus(null);   // clear any panel from the previous beat (no fly-back; this beat's flyTo takes over)
+      flyTo({ tx: b.tx, ty: b.ty, k: b.k }, { ms: 640, done: function () { if (alive.current && b.enter_panel && b.nodeId && b.tab && props.renderPanel) setFocus(Object.assign({}, b, { phase: 'open' })); } });
+      if (meta && meta.presenter) { var ch2 = chRef.current; if (ch2 && props.viewerId) { try { ch2.send({ type: 'broadcast', event: 'story_beat', payload: { id: props.viewerId, tx: b.tx, ty: b.ty, k: b.k, caption: b.caption, name: meta.name, i: idx, total: beats.length } }); } catch (e) { } } }
+      setTour(function (t) { return Object.assign({}, t || {}, { beats: beats, i: idx, name: (meta && meta.name) || (t && t.name), presenter: !!(meta && meta.presenter), pathId: (meta && meta.pathId) || (t && t.pathId), caption: b.caption, notes: b.notes, follow: false }); });
+    }
+    function tourRun(beats, i, playing, meta) {
+      tourGo(beats, i, meta);
       if (tourT.current) { clearTimeout(tourT.current); tourT.current = null; }
-      if (playing && i < list.length - 1) tourT.current = setTimeout(function () { if (alive.current) tourAdvance(list, i + 1, true); }, 3200);
-      else setTour(function (t) { return Object.assign({}, t || { list: list }, { i: (i + list.length) % list.length, playing: playing && i < list.length - 1 }); });
+      var b = beats[Math.max(0, Math.min(i, beats.length - 1))], dwell = (b && b.dwell_ms) || 3600;
+      if (playing && !(b && b.enter_panel) && i < beats.length - 1) tourT.current = setTimeout(function () { if (alive.current) tourRun(beats, i + 1, true, meta); }, dwell);   // panel beats pause for the presenter
+      setTour(function (t) { return Object.assign({}, t || {}, { playing: playing && i < beats.length - 1 && !(b && b.enter_panel) }); });
     }
-    function tourPrev() { if (tour) { if (tourT.current) { clearTimeout(tourT.current); tourT.current = null; } tourAdvance(tour.list, tour.i - 1, false); } }
-    function tourNext() { if (tour) { if (tourT.current) { clearTimeout(tourT.current); tourT.current = null; } tourAdvance(tour.list, tour.i + 1, false); } }
-    function tourToggle() { if (!tour) return; if (tour.playing) { if (tourT.current) { clearTimeout(tourT.current); tourT.current = null; } setTour(function (t) { return Object.assign({}, t, { playing: false }); }); } else tourAdvance(tour.list, tour.i, true); }
+    function tourStart() {   // Fázis-1 quick Lap-based tour
+      if (!pagesCap || !pages.length) { window.PRUI.toast('Ments előbb legalább egy „Lapot" (nézetet) a túrához.', { kind: 'info' }); return; }
+      var beats = pages.slice().sort(function (a, b) { return (a.ord || 0) - (b.ord || 0); }).map(function (pg) { return { tx: pg.tx, ty: pg.ty, k: pg.k, caption: pg.name, notes: '', enter_panel: false }; });
+      setFocus(null); returnView.current = { tx: view.tx, ty: view.ty, k: view.k };
+      tourRun(beats, 0, true, { name: 'Lap-túra' });
+    }
+    function presentPath(path, presenter) {   // Fázis-2 authored presentation
+      var beats = (path.steps || []).map(resolveBeat); if (!beats.length) { window.PRUI.toast('Ehhez a bemutatóhoz még nincs jelenet.', { kind: 'info' }); return; }
+      setPresMgrOpen(false); setEditPath(null); setFocus(null); returnView.current = { tx: view.tx, ty: view.ty, k: view.k };
+      tourRun(beats, 0, true, { name: path.name, pathId: path.id, presenter: !!presenter });
+    }
+    function tourPrev() { if (tour && tour.beats) { if (tourT.current) { clearTimeout(tourT.current); tourT.current = null; } tourRun(tour.beats, Math.max(0, tour.i - 1), false, tour); } }
+    function tourNext() { if (tour && tour.beats) { if (tourT.current) { clearTimeout(tourT.current); tourT.current = null; } tourRun(tour.beats, Math.min(tour.beats.length - 1, tour.i + 1), false, tour); } }
+    function tourToggle() { if (!tour || !tour.beats) return; if (tour.playing) { if (tourT.current) { clearTimeout(tourT.current); tourT.current = null; } setTour(function (t) { return Object.assign({}, t, { playing: false }); }); } else tourRun(tour.beats, tour.i, true, tour); }
+    // ---- presentation (path) CRUD — migration-79 ----
+    function pathCreate() {
+      if (!props.canEdit || !pathsCap) return; var nm = window.prompt('Bemutató neve:', 'Bemutató ' + (paths.length + 1)); if (nm == null) return;
+      sb.from('research_map_paths').insert({ project_id: props.projectId, name: String(nm).trim() || 'Bemutató', ord: paths.length, steps: [] }).select('id,name,ord,steps').single().then(function (r) {
+        if (!alive.current) return; if (r && r.error) { window.PRUI.toast('Nem sikerült: ' + r.error.message, { kind: 'error' }); return; }
+        if (r && r.data) { setPaths(function (P) { return P.some(function (x) { return x.id === r.data.id; }) ? P : P.concat([r.data]); }); setEditPath(r.data.id); }
+      });
+    }
+    function pathPatch(id, patch) {
+      setPaths(function (P) { return P.map(function (x) { return x.id === id ? Object.assign({}, x, patch) : x; }); });
+      sb.from('research_map_paths').update(Object.assign({}, patch, { updated_at: new Date().toISOString() })).eq('id', id).then(function (r) { if (r && r.error && alive.current) window.PRUI.toast('Mentés sikertelen: ' + r.error.message, { kind: 'error' }); });
+    }
+    function pathRename(pt) { if (!props.canEdit) return; var v = window.prompt('Bemutató neve:', pt.name); if (v == null || !String(v).trim()) return; pathPatch(pt.id, { name: String(v).trim() }); }
+    function pathDelete(pt) { if (!props.canEdit) return; setPaths(function (P) { return P.filter(function (x) { return x.id !== pt.id; }); }); if (editPath === pt.id) setEditPath(null); sb.from('research_map_paths').delete().eq('id', pt.id).then(function (r) { if (r && r.error && alive.current) window.PRUI.toast('Törlés sikertelen: ' + r.error.message, { kind: 'error' }); }); }
+    function pathSetSteps(pt, steps) { pathPatch(pt.id, { steps: steps }); }
+    function beatAddCurrentView(pt) { pathSetSteps(pt, (pt.steps || []).concat([{ kind: 'view', tx: view.tx, ty: view.ty, k: view.k, caption: 'Nézet ' + ((pt.steps || []).length + 1), notes: '', enter_panel: false, dwell_ms: 3600 }])); }
+    function beatAddNode(pt, n, enter) { var tab = RMAP_TYPE[n.t] && RMAP_TYPE[n.t].tab; pathSetSteps(pt, (pt.steps || []).concat([{ kind: 'node', ref_id: n.id, tx: view.tx, ty: view.ty, k: view.k, caption: n.title || (RMAP_TYPE[n.t] && RMAP_TYPE[n.t].lab) || '', notes: '', enter_panel: !!(enter && EMBEDDABLE[tab] && props.renderPanel), panel_tab: tab, dwell_ms: 3600 }])); }
+    function beatUpdate(pt, i, patch) { pathSetSteps(pt, (pt.steps || []).map(function (s, j) { return j === i ? Object.assign({}, s, patch) : s; })); }
+    function beatRemove(pt, i) { pathSetSteps(pt, (pt.steps || []).filter(function (s, j) { return j !== i; })); }
+    function beatMove(pt, i, dir) { var steps = (pt.steps || []).slice(), j = i + dir; if (j < 0 || j >= steps.length) return; var tmp = steps[i]; steps[i] = steps[j]; steps[j] = tmp; pathSetSteps(pt, steps); }
 
     // ---- free-drag: move a card anywhere and persist it (research_map_layout). A short press without motion = a click
     // (select / toggle). Only left-button + editors move cards; viewers still click to select. ----
@@ -5643,7 +5706,8 @@
           h('button', { className: (Object.keys(hiddenTypes).length ? 'on' : ''), title: 'Típusok ki/be kapcsolása a térképen (pl. Ábrák)', onClick: function () { setTypeFilterOpen(function (v) { return !v; }); } }, '👁' + (Object.keys(hiddenTypes).length ? Object.keys(hiddenTypes).length : '')),
           h('button', { title: 'Térkép újratöltése a legfrissebb adatokkal (a módosítások érvényesítése)', disabled: refreshing, onClick: refreshMap }, refreshing ? '⏳' : '🔄'),
           h('button', { title: 'Térkép exportálása PNG-be', onClick: exportMap }, '⤓'),
-          (pagesCap && pages.length > 1) ? h('button', { title: 'Bemutató (Prezi-túra): végigzoomol a mentett Lapokon', onClick: tourStart }, '▶') : null,
+          (pagesCap && pages.length > 1) ? h('button', { title: 'Gyors túra: végigzoomol a mentett Lapokon', onClick: tourStart }, '▶') : null,
+          pathsCap ? h('button', { className: presMgrOpen ? 'on' : '', title: 'Bemutatók (Prezi-story): jelenetekből álló, vezetett túra', onClick: function () { setPresMgrOpen(function (v) { return !v; }); } }, '🎬') : null,
           (props.canEdit && framesCap) ? h('button', { title: 'Új keret (nevesített régió) hozzáadása', onClick: frameCreate }, '▦') : null,
           commentsCap ? h('button', { className: commentMode ? 'on' : '', title: commentMode ? 'Komment-mód kikapcsolása' : 'Komment-mód: kattints a vászonra vagy egy kártyára', onClick: function () { setCommentMode(function (v) { return !v; }); setComposer(null); } }, '💬') : null,
           (commentsCap && comments.length) ? h('button', { title: 'Összes komment', onClick: function () { setCmPanelOpen(function (v) { return !v; }); } }, '📋' + (cmUnresolved || '')) : null,
@@ -5682,6 +5746,37 @@
                 h('span', { className: 'rmap-tf-eye' }, hidden ? '🚫' : '👁'));
             })) : h('div', { className: 'rmap-cm-empty' }, 'Nincs elem a térképen.'));
         })() : null,
+        // presentations manager + beat editor (Prezi-story) — migration-79
+        (presMgrOpen && pathsCap) ? h('div', { className: 'rmap-pres', onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
+          h('div', { className: 'rmap-cm-t-h' }, h('b', { style: { flex: 1 } }, '🎬 Bemutatók'), props.canEdit ? h('button', { className: 'rmap-tf-all', onClick: pathCreate }, '＋ Új') : null, h('button', { className: 'rmap-cm-x', onClick: function () { setPresMgrOpen(false); setEditPath(null); } }, '×')),
+          h('div', { className: 'rmap-cm-t-b' }, paths.length ? paths.map(function (pt) {
+            var isEd = editPath === pt.id, nb = (pt.steps || []).length, snode = (sel && g.by[sel]) ? g.by[sel] : null;
+            return h('div', { key: pt.id, className: 'rmap-pres-item' },
+              h('div', { className: 'rmap-pres-row' }, h('span', { style: { flex: 1, fontSize: 12.5, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, pt.name), h('span', { style: { fontSize: 11, color: 'var(--muted)' } }, nb + ' jelenet')),
+              h('div', { className: 'rmap-pres-acts' },
+                h('button', { className: 'btn pri', style: { fontSize: 11, padding: '3px 9px' }, disabled: !nb, onClick: function () { presentPath(pt, false); } }, '▶ Lejátszás'),
+                (online.length > 1) ? h('button', { className: 'btn', style: { fontSize: 11, padding: '3px 9px' }, disabled: !nb, title: 'Élő megosztott bemutató a jelenlévőknek', onClick: function () { presentPath(pt, true); } }, '🔴 Élő') : null,
+                props.canEdit ? h('button', { className: 'btn', style: { fontSize: 11, padding: '3px 9px' }, onClick: function () { setEditPath(isEd ? null : pt.id); } }, isEd ? 'Kész' : '✎ Jelenetek') : null,
+                props.canEdit ? h('button', { className: 'btn', style: { fontSize: 11, padding: '3px 7px' }, title: 'Átnevezés', onClick: function () { pathRename(pt); } }, '✏') : null,
+                props.canEdit ? h('button', { className: 'btn', style: { fontSize: 11, padding: '3px 7px' }, title: 'Törlés', onClick: function () { pathDelete(pt); } }, '🗑') : null),
+              isEd ? h('div', { className: 'rmap-beat-ed' },
+                (pt.steps || []).length ? (pt.steps || []).map(function (s, i) {
+                  return h('div', { key: i, className: 'rmap-beat' },
+                    h('div', { className: 'rmap-beat-top' },
+                      h('span', { className: 'rmap-beat-n' }, i + 1),
+                      (s.kind === 'node') ? h('button', { className: 'rmap-beat-eye' + (s.enter_panel ? ' on' : ''), title: s.enter_panel ? 'Panel megnyílik itt' : 'Csak ráközelít', onClick: function () { beatUpdate(pt, i, { enter_panel: !s.enter_panel }); } }, s.enter_panel ? '◇ panel' : '○ nézet') : h('span', { className: 'rmap-beat-kind' }, s.kind === 'page' ? '🗂️ lap' : s.kind === 'frame' ? '▦ keret' : '👁 nézet'),
+                      h('div', { style: { flex: 1 } }),
+                      h('button', { className: 'rmap-beat-b', disabled: i === 0, onClick: function () { beatMove(pt, i, -1); } }, '↑'),
+                      h('button', { className: 'rmap-beat-b', disabled: i === (pt.steps.length - 1), onClick: function () { beatMove(pt, i, 1); } }, '↓'),
+                      h('button', { className: 'rmap-beat-b', onClick: function () { beatRemove(pt, i); } }, '✕')),
+                    h('input', { className: 'rmap-beat-cap', value: s.caption || '', placeholder: 'Felirat…', onChange: function (e) { beatUpdate(pt, i, { caption: e.target.value }); } }),
+                    h('input', { className: 'rmap-beat-notes', value: s.notes || '', placeholder: 'Előadói jegyzet (csak neked)…', onChange: function (e) { beatUpdate(pt, i, { notes: e.target.value }); } }));
+                }) : h('div', { className: 'rmap-cm-empty' }, 'Állj rá egy nézetre/kártyára, majd add hozzá lentről.'),
+                h('div', { className: 'rmap-beat-add' },
+                  h('button', { className: 'btn', style: { fontSize: 11, padding: '4px 8px' }, title: 'Az aktuális nézet mentése jelenetként', onClick: function () { beatAddCurrentView(pt); } }, '＋ Nézet'),
+                  snode ? h('button', { className: 'btn', style: { fontSize: 11, padding: '4px 8px' }, title: 'A kijelölt kártya + ráközelítés', onClick: function () { beatAddNode(pt, snode, false); } }, '＋ Kártya') : null,
+                  (snode && canEnter(snode)) ? h('button', { className: 'btn pri', style: { fontSize: 11, padding: '4px 8px' }, title: 'A kijelölt kártya + a panel megnyílik a jelenetnél', onClick: function () { beatAddNode(pt, snode, true); } }, '＋ Kártya + panel') : null)) : null);
+          }) : h('div', { className: 'rmap-cm-empty' }, props.canEdit ? 'Készíts egy bemutatót a ＋ Új gombbal. Egy bemutató jelenetekből áll: mentett nézet, keret vagy kártya (opcionális panel-megnyitással). A ▶ végigzoomol rajtuk; az „🔴 Élő" a jelenlévőket is viszi.' : 'Még nincs bemutató.'))) : null,
         (nodeRestoreOpen && mapFlags) ? (function () {
           var hn = g.N.filter(function (n) { return n.mapHidden; });
           return h('div', { style: { position: 'absolute', left: 14, bottom: 96, zIndex: 15, width: 264, maxHeight: '58%', overflowY: 'auto', background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 12, boxShadow: '0 18px 50px -20px rgba(20,26,40,.55)', padding: 12 }, onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
@@ -5862,26 +5957,31 @@
       })() : null,
       // Prezi-mód focus overlay — the card's real workflow panel mounted in-place (screen-space, over the dimmed map)
       focus ? h('div', { className: 'rmap-focus', onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
-        h('div', { className: 'rmap-focus-scrim', onClick: exitFocus }),
+        h('div', { className: 'rmap-focus-scrim', onClick: function () { (tour ? tourStop : exitFocus)(); } }),
         h('div', { className: 'rmap-focus-card' },
           h('div', { className: 'rmap-focus-top' },
             h('div', { className: 'rmap-focus-crumb' },
-              h('button', { onClick: exitFocus }, '🗺️ Térkép'),
+              h('button', { onClick: function () { (tour ? tourStop : exitFocus)(); } }, '🗺️ Térkép'),
               h('span', { className: 'sep' }, '›'),
               h('span', { className: 'cur' }, ((RMAP_TYPE[focus.t] && RMAP_TYPE[focus.t].ic) || '•') + ' ' + String(focus.title || (RMAP_TYPE[focus.t] && RMAP_TYPE[focus.t].lab) || '').slice(0, 44))),
             h('div', { style: { flex: 1 } }),
-            h('button', { className: 'rmap-focus-hand', title: 'Megnyitás teljes fülként', onClick: function () { var tb = focus.tab; setFocus(null); cancelFly(); if (props.onGoTab) props.onGoTab(tb); } }, 'Fülként ↗'),
-            h('button', { className: 'rmap-focus-x', title: 'Vissza a térképre (Esc)', onClick: exitFocus }, '×')),
+            h('button', { className: 'rmap-focus-hand', title: 'Megnyitás teljes fülként', onClick: function () { var tb = focus.tab; setFocus(null); cancelFly(); tourStop(); if (props.onGoTab) props.onGoTab(tb); } }, 'Fülként ↗'),
+            h('button', { className: 'rmap-focus-x', title: 'Vissza a térképre (Esc)', onClick: function () { (tour ? tourStop : exitFocus)(); } }, '×')),
           h('div', { className: 'rmap-focus-body' }, (focus.phase === 'open' && props.renderPanel) ? props.renderPanel(focus.tab, focus) : h('div', { className: 'rmap-focus-loading' }, h('div', { className: 'rmap-focus-ic' }, (RMAP_TYPE[focus.t] && RMAP_TYPE[focus.t].ic) || '◇'), h('div', null, 'Belépés…')))) ) : null,
-      // guided-tour player (Fázis 1: over saved Lapok)
+      // guided-tour / presentation player (beats; presenter notes + audience follow-mode)
       tour ? h('div', { className: 'rmap-tour', onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
-        (tour.i >= 0 && tour.list[tour.i]) ? h('div', { className: 'rmap-tour-cap' }, h('b', null, (tour.i + 1) + '/' + tour.list.length), ' · ' + ((tour.list[tour.i].only_pinned ? '📌 ' : '') + (tour.list[tour.i].name || 'Nézet'))) : null,
-        h('div', { className: 'rmap-tour-bar' },
-          h('button', { title: 'Előző', disabled: tour.i <= 0, onClick: tourPrev }, '⏮'),
-          h('button', { className: 'play', title: tour.playing ? 'Szünet' : 'Lejátszás', onClick: tourToggle }, tour.playing ? '⏸' : '▶'),
-          h('button', { title: 'Következő', disabled: tour.i >= tour.list.length - 1, onClick: tourNext }, '⏭'),
-          h('span', { className: 'rmap-tour-dots' }, tour.list.map(function (pg, i) { return h('i', { key: i, className: i === tour.i ? 'on' : '' }); })),
-          h('button', { className: 'stop', title: 'Bemutató bezárása', onClick: tourStop }, '✕'))) : null,
+        (tour.caption || tour.follow) ? h('div', { className: 'rmap-tour-cap' },
+          h('b', null, tour.follow ? ('▶ ' + (tour.name || 'Bemutató')) : ((tour.i + 1) + '/' + (tour.beats ? tour.beats.length : tour.total || '?'))),
+          tour.caption ? (' · ' + tour.caption) : (tour.follow ? ' · követed az előadót' : '')) : null,
+        (tour.presenter && tour.notes) ? h('div', { className: 'rmap-tour-notes' }, h('b', null, '🗒 Jegyzet: '), tour.notes) : null,
+        tour.follow ? h('div', { className: 'rmap-tour-bar' }, h('button', { className: 'stop', title: 'Kilépés a követésből', onClick: tourStop }, '✕ Kilépés'))
+          : h('div', { className: 'rmap-tour-bar' },
+            h('button', { title: 'Előző (←)', disabled: tour.i <= 0, onClick: tourPrev }, '⏮'),
+            h('button', { className: 'play', title: tour.playing ? 'Szünet' : 'Lejátszás', onClick: tourToggle }, tour.playing ? '⏸' : '▶'),
+            h('button', { title: 'Következő (→/Space)', disabled: !tour.beats || tour.i >= tour.beats.length - 1, onClick: tourNext }, '⏭'),
+            h('span', { className: 'rmap-tour-dots' }, (tour.beats || []).map(function (b, i) { return h('i', { key: i, className: i === tour.i ? 'on' : '' }); })),
+            tour.presenter ? h('span', { className: 'rmap-tour-live', title: 'Élő megosztott bemutató' }, '🔴 élő') : null,
+            h('button', { className: 'stop', title: 'Bemutató bezárása (Esc)', onClick: tourStop }, '✕'))) : null,
       menu ? h('div', { className: 'rmap-menu-scrim', onClick: function () { setMenu(null); }, onContextMenu: function (e) { e.preventDefault(); setMenu(null); } },
         h('div', { className: 'rmap-menu', style: { left: Math.min(menu.x, (window.innerWidth || 1200) - 230) + 'px', top: Math.min(menu.y, (window.innerHeight || 800) - 140) + 'px' }, onClick: function (e) { e.stopPropagation(); } },
           h('div', { className: 'rmap-menu-h' }, '✦ Generálás innen' + (RMAP_TYPE[menu.node.t] ? ' · ' + RMAP_TYPE[menu.node.t].lab : '')),

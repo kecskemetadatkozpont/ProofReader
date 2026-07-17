@@ -989,9 +989,31 @@
     @keyframes rmap-focus-breathe { 0%, 100% { transform: scale(1); opacity: .8; } 50% { transform: scale(1.12); opacity: 1; } }
     @media (prefers-reduced-motion: reduce) { .rmap-focus-ic { animation: none; } }
     /* guided tour player */
-    .rmap-tour { position: absolute; left: 0; right: 0; bottom: 0; z-index: 24; display: flex; flex-direction: column; align-items: center; gap: 8px; padding-bottom: 14px; pointer-events: none; }
+    .rmap-tour { position: absolute; left: 0; right: 0; bottom: 0; z-index: 34; display: flex; flex-direction: column; align-items: center; gap: 8px; padding-bottom: 14px; pointer-events: none; }
     .rmap-tour > * { pointer-events: auto; }
-    .rmap-tour-cap { background: color-mix(in srgb, #14121f 84%, transparent); color: #fff; border-radius: 12px; padding: 7px 15px; font-size: 12px; box-shadow: 0 12px 30px -12px rgba(0,0,0,.6); }
+    .rmap-tour-cap { background: color-mix(in srgb, #14121f 84%, transparent); color: #fff; border-radius: 12px; padding: 7px 15px; font-size: 12px; box-shadow: 0 12px 30px -12px rgba(0,0,0,.6); max-width: 70%; text-align: center; }
+    .rmap-tour-notes { background: var(--surface); border: 1px solid var(--accent); border-radius: 10px; padding: 6px 12px; font-size: 11.5px; color: var(--ink); max-width: 60%; box-shadow: 0 8px 22px -12px rgba(20,26,40,.5); }
+    .rmap-tour-notes b { color: var(--accent); }
+    .rmap-tour-live { font-size: 10.5px; font-weight: 800; color: var(--danger, #b42318); padding: 0 6px; }
+    /* presentations manager + beat editor */
+    .rmap-pres { position: absolute; left: 14px; bottom: 96px; z-index: 17; width: 306px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 18px 50px -20px rgba(20,26,40,.55); max-height: 66%; display: flex; flex-direction: column; }
+    .rmap-pres .rmap-cm-t-b { max-height: none; }
+    .rmap-pres-item { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; background: var(--surface-2); }
+    .rmap-pres-row { display: flex; align-items: center; gap: 8px; }
+    .rmap-pres-acts { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 7px; }
+    .rmap-beat-ed { margin-top: 9px; border-top: 1px solid var(--line); padding-top: 8px; display: flex; flex-direction: column; gap: 7px; }
+    .rmap-beat { border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; background: var(--surface); display: flex; flex-direction: column; gap: 5px; }
+    .rmap-beat-top { display: flex; align-items: center; gap: 6px; }
+    .rmap-beat-n { width: 18px; height: 18px; border-radius: 50%; background: var(--accent-soft, var(--surface-2)); color: var(--accent); font-size: 10px; font-weight: 800; display: flex; align-items: center; justify-content: center; flex: none; }
+    .rmap-beat-eye { border: 1px solid var(--line); background: var(--surface); cursor: pointer; font-family: inherit; font-size: 10px; font-weight: 700; color: var(--muted); padding: 2px 7px; border-radius: 999px; }
+    .rmap-beat-eye.on { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+    .rmap-beat-kind { font-size: 10px; font-weight: 700; color: var(--muted); }
+    .rmap-beat-b { border: none; background: none; cursor: pointer; color: var(--muted); font-size: 12px; width: 22px; height: 20px; border-radius: 6px; }
+    .rmap-beat-b:hover:not(:disabled) { background: var(--surface-2); color: var(--accent); } .rmap-beat-b:disabled { opacity: .35; cursor: default; }
+    .rmap-beat-cap, .rmap-beat-notes { width: 100%; box-sizing: border-box; font-family: inherit; font-size: 11.5px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-2); color: var(--ink); }
+    .rmap-beat-notes { font-size: 11px; color: var(--muted); }
+    .rmap-beat-cap:focus, .rmap-beat-notes:focus { outline: none; border-color: var(--accent); }
+    .rmap-beat-add { display: flex; flex-wrap: wrap; gap: 5px; }
     .rmap-tour-cap b { color: #fff; font-variant-numeric: tabular-nums; }
     .rmap-tour-bar { display: flex; align-items: center; gap: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 6px 9px; box-shadow: 0 12px 30px -14px rgba(20,26,40,.5); }
     .rmap-tour-bar button { border: none; background: none; cursor: pointer; font-size: 14px; color: var(--ink); width: 30px; height: 28px; border-radius: 8px; display: flex; align-items: center; justify-content: center; }
@@ -1176,7 +1198,7 @@
   <script type="text/babel" src="canvas.jsx?v=1783137934"></script>
   <script type="text/babel" src="notes.jsx?v=1783137934"></script>
   <script src="autopilot-core.js?v=1784160000"></script>
-  <script type="text/babel" src="research.jsx?v=1785210000"></script>
+  <script type="text/babel" src="research.jsx?v=1785220000"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>
