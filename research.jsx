@@ -4298,6 +4298,7 @@
     var pgS = useState([]), pages = pgS[0], setPages = pgS[1];   // Map pages (saved views) — migration-73
     var pgcS = useState(false), pagesCap = pgcS[0], setPagesCap = pgcS[1];   // migration-73 capability
     var apgS = useState(null), activePage = apgS[0], setActivePage = apgS[1];   // active page id or null (= full graph)
+    var sfcS = useState(false), stepFlagsCap = sfcS[0], setStepFlagsCap = sfcS[1];   // migration-75 capability: step assignee/sign-off columns present
     var onlS = useState([]), online = onlS[0], setOnline = onlS[1];   // realtime presence: who else is viewing this Map
     var curS = useState({}), cursors = curS[0], setCursors = curS[1];   // live cursors from other users {id:{name,wx,wy,sel,ts,color}}
     var chRef = useRef(null);   // the Map realtime channel (for broadcasting my cursor)
@@ -4443,7 +4444,14 @@
         // remove Map-hidden figures (on_map=false) client-side + keep them for the restore panel
         var hiddenFigs = (r[14] && !r[14].error && r[14].data) ? r[14].data : []; var hidSet = {}; hiddenFigs.forEach(function (x) { hidSet[x.id] = 1; });
         base.figures = base.figures.filter(function (f) { return !hidSet[f.id]; }); base.hiddenFigs = hiddenFigs;
-        if (base.protocol) sb.from('research_protocol_steps').select('id,ord,title,kind,status,needs_approval').eq('protocol_id', base.protocol.id).order('ord', { ascending: true }).then(function (sr) { if (alive.current) setData(Object.assign(base, { steps: (sr.data) || [] })); });
+        if (base.protocol) {
+          // probe the migration-75 columns (assignee/sign-off); on error fall back to the basic select
+          sb.from('research_protocol_steps').select('id,ord,title,kind,status,needs_approval,assignee_id,signed_off_by,signed_off_at').eq('protocol_id', base.protocol.id).order('ord', { ascending: true }).then(function (sr) {
+            if (!alive.current) return;
+            if (sr && sr.error) { sb.from('research_protocol_steps').select('id,ord,title,kind,status,needs_approval').eq('protocol_id', base.protocol.id).order('ord', { ascending: true }).then(function (sr2) { if (alive.current) setData(Object.assign(base, { steps: (sr2.data) || [] })); }); return; }
+            setStepFlagsCap(true); setData(Object.assign(base, { steps: (sr.data) || [] }));
+          });
+        }
         else setData(Object.assign(base, { steps: [] }));
       }, function () { if (alive.current) setData({ ideas: [], studies: [], topSrc: [], srcTotal: 0, inclTotal: 0, protocol: null, journals: [], wfiles: [], steps: [], datasets: [], mfiles: [], chats: [], figures: [], srcands: [], sreviews: [], hiddenFigs: [] }); });
     }, [props.projectId, bump]);
@@ -4506,7 +4514,7 @@
       var protoIdea = (d.protocol && d.protocol.idea_id && ideaHas(d.protocol.idea_id)) ? ('i' + d.protocol.idea_id) : null;
       var lastStep = (d.protocol && d.steps.length) ? ('r' + d.steps[d.steps.length - 1].id) : null;
       if (d.protocol && d.steps.length) {
-        d.steps.forEach(function (s, i) { N.push({ id: 'r' + s.id, t: 'step', ph: 3, title: s.title || ('Lépés ' + (i + 1)), m: { Kind: s.kind || '—', Státusz: s.status || '—', Jóváhagyás: s.needs_approval ? 'szükséges' : '—' }, st: s.status, gate: !!s.needs_approval, ref: s }); if (i > 0) E.push(['r' + d.steps[i - 1].id, 'r' + s.id]); });
+        d.steps.forEach(function (s, i) { var sm = { Kind: s.kind || '—', Státusz: s.status || '—', Jóváhagyás: s.needs_approval ? 'szükséges' : '—' }; if (stepFlagsCap) { sm['Felelős'] = s.assignee_id ? nameOf(s.assignee_id) : '—'; sm['Sign-off'] = s.signed_off_by ? (nameOf(s.signed_off_by) + (s.signed_off_at ? ' · ' + String(s.signed_off_at).slice(0, 10) : '')) : '—'; } N.push({ id: 'r' + s.id, t: 'step', ph: 3, title: s.title || ('Lépés ' + (i + 1)), m: sm, st: s.status, gate: !!s.needs_approval, ref: s }); if (i > 0) E.push(['r' + d.steps[i - 1].id, 'r' + s.id]); });
         var protUp = srId || litId || protoIdea || firstIdea; if (protUp) E.push([protUp, 'r' + d.steps[0].id]);
       }
       var venueUp = srId || lastStep || litId || firstIdea;
@@ -4681,6 +4689,21 @@
       return list;
     }
     function insertMention(name) { setCmText(function (v) { return (v && !/\s$/.test(v) ? v + ' ' : v) + '@' + name + ' '; }); }
+    // resolve a user id → display name via members + presence + self
+    function nameOf(uid) {
+      if (!uid) return ''; if (uid === props.viewerId) return (props.viewer && props.viewer.name) || 'Te';
+      var m = (members || []).filter(function (x) { return x.user_id === uid; })[0]; if (m && m.pname) return m.pname;
+      var o = online.filter(function (x) { return x.id === uid; })[0]; if (o && o.name) return o.name;
+      return 'Kolléga';
+    }
+    // protocol-step assignee + sign-off (migration-75). `step` is the node.ref (a research_protocol_steps row).
+    function stepPatch(step, patch) {
+      if (!step || !step.id || !props.canEdit) return;
+      sb.from('research_protocol_steps').update(patch).eq('id', step.id).then(function (r) { if (!alive.current) return; if (r && r.error) { window.PRUI.toast('Nem sikerült: ' + r.error.message, { kind: 'error' }); return; } setBump(function (x) { return x + 1; }); });
+    }
+    function stepSetAssignee(step, uid) { stepPatch(step, { assignee_id: uid || null }); }
+    function stepSignOff(step) { stepPatch(step, { signed_off_by: props.viewerId, signed_off_at: new Date().toISOString() }); }
+    function stepUnsignOff(step) { stepPatch(step, { signed_off_by: null, signed_off_at: null }); }
     function notifyMentions(body, target) {
       var cands = mentionCandidates(); if (!cands.length) return;
       var hit = cands.filter(function (u) { return body.indexOf('@' + u.name) >= 0; });
@@ -5291,7 +5314,7 @@
           h('svg', { className: 'rmap-edges', width: svgW, height: g.height },
             h('defs', null, h('marker', { id: 'rmap-arrow', viewBox: '0 0 8 8', refX: 6.5, refY: 4, markerWidth: 6.5, markerHeight: 6.5, orient: 'auto-start-reverse' }, h('path', { d: 'M0.5,0.5 L7.5,4 L0.5,7.5 Z', fill: 'var(--line-2, var(--muted))' }))),
             edgeEls),
-          g.N.map(function (n) { if (!nodeVisible(n)) return null; return h('div', { key: n.id, 'data-nid': n.id, className: 'rmap-node t-' + n.t + (sel === n.id ? ' sel' : '') + (msel[n.id] ? ' rmap-mselected' : '') + (n.mapPinned ? ' rmap-pinned' : '') + (activeKey && n.ph === RMAP_PHASE_IDX[activeKey] ? ' inphase' : '') + (props.canEdit ? ' editable' : '') + (dlive && dlive.id === n.id ? ' dragging' : ''), style: { left: n.x + 'px', top: n.y + 'px' }, onMouseDown: function (e) { e.stopPropagation(); startNodeDrag(e, n); }, onContextMenu: function (e) { e.preventDefault(); e.stopPropagation(); if (props.canEdit && (genActions(n).length || regenActions(n).length)) setMenu({ node: n, x: e.clientX, y: e.clientY }); } }, n.mapPinned ? h('span', { className: 'rmap-pin-badge', title: 'Kitűzött' }, '📌') : null, nodeCmCount(n.id) ? h('span', { className: 'rmap-cm-badge', title: nodeCmCount(n.id) + ' nyitott komment', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); setOpenThread(n.id); } }, '💬' + nodeCmCount(n.id)) : null, body(n)); })),
+          g.N.map(function (n) { if (!nodeVisible(n)) return null; return h('div', { key: n.id, 'data-nid': n.id, className: 'rmap-node t-' + n.t + (sel === n.id ? ' sel' : '') + (msel[n.id] ? ' rmap-mselected' : '') + (n.mapPinned ? ' rmap-pinned' : '') + (activeKey && n.ph === RMAP_PHASE_IDX[activeKey] ? ' inphase' : '') + (props.canEdit ? ' editable' : '') + (dlive && dlive.id === n.id ? ' dragging' : ''), style: { left: n.x + 'px', top: n.y + 'px' }, onMouseDown: function (e) { e.stopPropagation(); startNodeDrag(e, n); }, onContextMenu: function (e) { e.preventDefault(); e.stopPropagation(); if (props.canEdit && (genActions(n).length || regenActions(n).length)) setMenu({ node: n, x: e.clientX, y: e.clientY }); } }, n.mapPinned ? h('span', { className: 'rmap-pin-badge', title: 'Kitűzött' }, '📌') : null, nodeCmCount(n.id) ? h('span', { className: 'rmap-cm-badge', title: nodeCmCount(n.id) + ' nyitott komment', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); setOpenThread(n.id); } }, '💬' + nodeCmCount(n.id)) : null, (n.t === 'step' && n.ref && (n.ref.assignee_id || n.ref.signed_off_by)) ? h('span', { className: 'rmap-step-badges' }, n.ref.assignee_id ? h('span', { className: 'rmap-assignee', title: 'Felelős: ' + nameOf(n.ref.assignee_id), style: { background: userColor(n.ref.assignee_id) } }, String(nameOf(n.ref.assignee_id) || '?').trim().charAt(0).toUpperCase()) : null, n.ref.signed_off_by ? h('span', { className: 'rmap-signoff', title: 'Jóváhagyta: ' + nameOf(n.ref.signed_off_by) }, '✅') : null) : null, body(n)); })),
         // page bar (saved views) — top-left tabs; the active page can be curated (only pinned) / re-captured / renamed / deleted
         pagesCap ? h('div', { className: 'rmap-pagebar', onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
           h('div', { className: 'rmap-pagetabs' },
@@ -5470,6 +5493,17 @@
               furl ? h('img', { src: furl, alt: sn.ref.fig_label || 'ábra', loading: 'lazy', style: { width: '100%', maxHeight: 220, objectFit: 'contain', borderRadius: 8, border: '1px solid var(--line)', background: 'var(--surface-2)', display: 'block' } })
                 : h('div', { style: { fontSize: 12, color: 'var(--faint)', padding: '20px 0', textAlign: 'center', border: '1px dashed var(--line)', borderRadius: 8 } }, '⏳ Ábra betöltése…'),
               props.canEdit ? h('button', { className: 'btn', style: { fontSize: 12, marginTop: 8 }, title: 'A figyelmet elvéve a térképről (a Figure Boardon marad); a bal alsó „Rejtett ábrák" panelből visszahozható', onClick: function () { figSetOnMap(sn.ref.id, false); setSel(null); } }, '🙈 Levétel a térképről') : null);
+          })() : null,
+          // protocol step: assignee + sign-off (migration-75) — collaboration controls (editors only)
+          (sn.t === 'step' && sn.ref && stepFlagsCap && props.canEdit) ? (function () {
+            var seen = {}, cands = [{ id: props.viewerId, name: (props.viewer && props.viewer.name) || 'Te' }].concat(mentionCandidates()).filter(function (u) { if (!u.id || seen[u.id]) return false; seen[u.id] = 1; return true; });
+            var st = sn.ref, signed = !!st.signed_off_by;
+            return h('div', { className: 'rmap-step-collab' },
+              h('div', { className: 'rmap-step-row' }, h('span', { className: 'rmap-step-l' }, '👤 Felelős'),
+                h('select', { className: 'rmap-mem-role', style: { flex: 1 }, value: st.assignee_id || '', onChange: function (e) { stepSetAssignee(st, e.target.value || null); } }, [h('option', { key: '_none', value: '' }, '— nincs —')].concat(cands.map(function (u) { return h('option', { key: u.id, value: u.id }, u.name); })))),
+              h('div', { className: 'rmap-step-row' }, h('span', { className: 'rmap-step-l' }, '✅ Sign-off'),
+                signed ? h('span', { style: { fontSize: 11.5, flex: 1, minWidth: 0 } }, nameOf(st.signed_off_by) + (st.signed_off_at ? ' · ' + String(st.signed_off_at).slice(0, 10) : '')) : h('span', { style: { fontSize: 11.5, color: 'var(--muted)', flex: 1 } }, 'nincs'),
+                signed ? h('button', { className: 'btn', style: { fontSize: 11, padding: '3px 8px', flex: 'none' }, onClick: function () { stepUnsignOff(st); } }, 'Visszavonás') : h('button', { className: 'btn pri', style: { fontSize: 11, padding: '3px 8px', flex: 'none' }, onClick: function () { stepSignOff(st); } }, 'Jóváhagyom')));
           })() : null,
           h('div', { className: 'rmap-insp-acts' },
             (props.canEdit && editSpec(sn)) ? h('button', { className: 'btn pri', style: { fontSize: 12 }, onClick: function () { openEdit(sn); } }, '✎ Metaadat szerkesztése') : null,

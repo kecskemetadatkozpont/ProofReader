@@ -930,6 +930,13 @@
     .rmap-cm-mlbl { font-size: 12px; font-weight: 800; color: var(--muted); }
     .rmap-cm-mchip { border: 1px solid var(--line); background: var(--surface); cursor: pointer; font-family: inherit; font-size: 10.5px; font-weight: 600; color: var(--ink); padding: 2px 8px; border-radius: 999px; }
     .rmap-cm-mchip:hover { border-color: var(--accent); color: var(--accent); }
+    /* protocol-step assignee + sign-off */
+    .rmap-step-badges { position: absolute; bottom: -8px; right: -6px; z-index: 2; display: flex; gap: 3px; align-items: center; }
+    .rmap-assignee { width: 20px; height: 20px; border-radius: 50%; color: #fff; font-size: 10px; font-weight: 800; display: flex; align-items: center; justify-content: center; border: 2px solid var(--surface); text-transform: uppercase; }
+    .rmap-signoff { font-size: 14px; filter: drop-shadow(0 1px 1px rgba(0,0,0,.25)); }
+    .rmap-step-collab { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 10px; padding: 9px 10px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 9px; }
+    .rmap-step-row { display: flex; align-items: center; gap: 8px; }
+    .rmap-step-l { font-size: 11px; font-weight: 700; color: var(--muted); min-width: 66px; flex: none; }
     .rmap-cm-panel { position: absolute; left: 14px; bottom: 96px; z-index: 15; width: 288px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 18px 50px -20px rgba(20,26,40,.55); }
     /* Map pages (saved views) — top-left tab bar */
     .rmap-pagebar { position: absolute; top: 12px; left: 12px; z-index: 13; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; max-width: 60%; }
@@ -1096,7 +1103,7 @@
   <script type="text/babel" src="canvas.jsx?v=1783137934"></script>
   <script type="text/babel" src="notes.jsx?v=1783137934"></script>
   <script src="autopilot-core.js?v=1784160000"></script>
-  <script type="text/babel" src="research.jsx?v=1785020000"></script>
+  <script type="text/babel" src="research.jsx?v=1785030000"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>
