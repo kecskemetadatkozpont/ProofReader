@@ -4249,6 +4249,7 @@
     var dmS = useState([{ role: 'ai', text: '👋 Canvas-asszisztens. Adj utasítást vagy kérdést, vagy használd a gyors-parancsokat lent — az eredmény megjelenik a térképen.' }]), dMsgs = dmS[0], setDMsgs = dmS[1];
     var diS = useState(''), dInput = diS[0], setDInput = diS[1];
     var dbS = useState(false), dBusy = dbS[0], setDBusy = dbS[1];
+    var pxS = useState(null), proposal = pxS[0], setProposal = pxS[1];   // pending action proposed from the attached card (preview → confirm → execute)
     var rnS = useState(null), run = rnS[0], setRun = rnS[1];   // P1b: the project's active Autopilot run (live)
     var lyS = useState({}), layout = lyS[0], setLayout = lyS[1];   // saved free-drag positions (node_id → {x,y}); overrides the auto-layout + pins the card
     var dlS = useState(null), dlive = dlS[0], setDlive = dlS[1];   // the node currently being dragged {id,x,y} — follows the cursor 1:1
@@ -4691,6 +4692,53 @@
 
     // ---- Canvas assistant dock: quick pipeline commands + a free-text chat (research-chat) ----
     function dkSay(role, text) { if (alive.current) setDMsgs(function (m) { return m.concat([{ role: role, text: text }]); }); }
+    // Step 2 — act on the attached card: propose protocol step(s) to run AFTER the selected step from a natural-language
+    // instruction (reuses research-protocol append_steps, which only PROPOSES) → preview → dkInsertSteps executes on confirm.
+    function dkProposeSteps() {
+      var txt = String(dInput || '').trim(), an = sn;
+      if (!an || an.t !== 'step') { dkSay('ai', 'Jelölj ki egy protokoll-lépést, majd írd le, mit tegyek utána.'); return; }
+      if (!txt) { dkSay('ai', 'Írd le, milyen lépés(eke)t tegyek a kijelölt lépés után.'); return; }
+      if (!data || !data.protocol || !data.protocol.id) { dkSay('ai', 'Ehhez a projekthez még nincs protokoll — előbb generálj egyet (🧪 Protokoll).'); return; }
+      var CORE = window.PRAutopilotCore;
+      if (!CORE || !CORE.callEdge) { dkSay('ai', 'A generátor nem elérhető (autopilot-core).'); return; }
+      dkSay('user', '⚡ Lépés(ek) a „' + String(an.title || '').slice(0, 40) + '" után: ' + txt);
+      setDInput(''); setDBusy(true); setProposal(null);
+      CORE.callEdge('research-protocol', { action: 'append_steps', protocol_id: data.protocol.id, prompt: 'A(z) „' + String(an.title || '') + '" lépés UTÁN következzen: ' + txt, count: 4 }).then(function (d) {
+        if (!alive.current) return; setDBusy(false);
+        if (!d || d.error) { dkSay('ai', '⚠️ ' + ((d && d.error) || 'Nem sikerült javaslatot készíteni.')); return; }
+        var steps = (d.steps || []).filter(function (s) { return s && s.title; });
+        if (!steps.length) { dkSay('ai', 'Nem született beszúrható lépés.'); return; }
+        setProposal({ anchor: an, steps: steps });   // show the preview; nothing is written until the user confirms
+      }, function () { if (alive.current) { setDBusy(false); dkSay('ai', '⚠️ Hálózati hiba.'); } });
+    }
+    function dkInsertSteps() {
+      var pr = proposal; if (!pr || !data || !data.protocol) { setProposal(null); return; }
+      // Re-resolve the anchor by its STABLE id against the CURRENT steps — the protocol may have been regenerated
+      // (research-protocol `generate` archives + recreates fresh ords) or the anchor deleted since the preview was made.
+      // Trusting the snapshotted ord could wire depends_on to an unrelated / non-existent step.
+      var anchorId = pr.anchor && pr.anchor.ref && pr.anchor.ref.id;
+      var cur = (data.steps || []).filter(function (s) { return s.id === anchorId; })[0];
+      if (!cur) { setProposal(null); dkSay('ai', '⚠️ A horgony-lépés időközben megváltozott (a protokoll újragenerálódhatott) — jelöld ki újra a lépést, és próbáld meg ismét.'); return; }
+      var pid = data.protocol.id, maxOrd = 0;
+      (data.steps || []).forEach(function (s) { if (s.ord > maxOrd) maxOrd = s.ord; });
+      var anchorOrd = cur.ord;
+      // Append at the END (no ord-shift → other steps' depends_on stay valid) but wire depends_on so they RUN after the
+      // anchor: the first new step depends on the anchor, each subsequent one chains after the previous new step.
+      var rows = pr.steps.map(function (s, i) {
+        return {
+          protocol_id: pid, ord: maxOrd + 1 + i, title: String(s.title || 'Lépés').slice(0, 200), kind: String(s.kind || 'custom'),
+          spec: { instruction: s.instruction || '', inputs: s.inputs || [], expected_outputs: s.expected_outputs || [], acceptance: s.acceptance || [], command_hint: s.command_hint || '', est_minutes: s.est_minutes || null },
+          depends_on: [i === 0 ? anchorOrd : (maxOrd + i)], needs_approval: !!s.needs_approval
+        };
+      });
+      setDBusy(true);
+      sb.from('research_protocol_steps').insert(rows).then(function (r) {
+        if (!alive.current) return; setDBusy(false); setProposal(null);
+        if (r && r.error) { dkSay('ai', '⚠️ Beszúrás hiba: ' + r.error.message); return; }
+        dkSay('ai', '✓ ' + rows.length + ' lépés beszúrva a „' + String(pr.anchor.title || '').slice(0, 40) + '" után (függőségként utána futnak).');
+        setBump(function (x) { return x + 1; });   // re-materialize the map with the new steps
+      }, function () { if (alive.current) { setDBusy(false); dkSay('ai', '⚠️ Beszúrás hálózati hiba.'); } });
+    }
     function dkEnsureChat() {   // a dedicated "Canvas asszisztens" chat thread (separate from the Ideas-tab chat) → research-chat has multi-turn context
       if (dcRef.current) return Promise.resolve(dcRef.current);
       return sb.from('research_chats').select('id').eq('project_id', props.projectId).eq('title', 'Canvas asszisztens').order('created_at', { ascending: true }).limit(1).maybeSingle().then(function (r) {
@@ -4824,8 +4872,16 @@
             h('span', { style: { flex: 'none', fontSize: 13 } }, (RMAP_TYPE[sn.t] && RMAP_TYPE[sn.t].ic) || '📎'),
             h('span', { style: { minWidth: 0, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 11.5, fontWeight: 600, color: 'var(--accent-d, var(--accent))' } }, '📎 Becsatolva: ' + String(sn.title || 'kártya').slice(0, 46)),
             h('button', { style: { flex: 'none', border: 'none', background: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: 15, lineHeight: 1, padding: 0 }, title: 'Leválasztás a promptról', onClick: function () { setSel(null); } }, '×')) : null,
+          // Step 2 — preview of the protocol step(s) proposed from the attached step; nothing is written until confirmed
+          proposal ? h('div', { style: { margin: '2px 12px 8px', padding: '8px 10px', borderRadius: 8, background: 'var(--surface-2)', border: '1px solid var(--accent)' } },
+            h('div', { style: { fontSize: 11.5, fontWeight: 700, marginBottom: 5, color: 'var(--accent-d, var(--accent))' } }, '⚡ Beszúrandó lépés(ek) a „' + String((proposal.anchor && proposal.anchor.title) || '').slice(0, 34) + '" után:'),
+            h('ol', { style: { margin: '0 0 8px', paddingLeft: 18, fontSize: 12, lineHeight: 1.45 } }, proposal.steps.map(function (s, i) { return h('li', { key: i }, h('b', null, String(s.title || '').slice(0, 90)), s.kind ? h('span', { style: { color: 'var(--faint)', fontSize: 11 } }, ' · ' + s.kind) : null); })),
+            h('div', { style: { display: 'flex', gap: 7 } },
+              h('button', { className: 'btn pri', style: { fontSize: 12, padding: '4px 10px' }, disabled: dBusy, onClick: dkInsertSteps }, dBusy ? 'Beszúrás…' : '✅ Beszúrás'),
+              h('button', { className: 'btn', style: { fontSize: 12, padding: '4px 10px' }, disabled: dBusy, onClick: function () { setProposal(null); } }, 'Mégse'))) : null,
           h('div', { className: 'rmap-dock-in' },
-            h('textarea', { rows: 1, value: dInput, placeholder: sn ? 'Kérdezz vagy adj utasítást a becsatolt kártyáról…' : 'Írj utasítást vagy kérdést… (jelölj ki egy kártyát a becsatoláshoz)', disabled: dBusy, onChange: function (e) { setDInput(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); dkSend(); } } }),
+            h('textarea', { rows: 1, value: dInput, placeholder: (sn && sn.t === 'step') ? 'Mit tegyek e lépés után? (pl. „tegyél be egy validációs lépést")' : sn ? 'Kérdezz vagy adj utasítást a becsatolt kártyáról…' : 'Írj utasítást vagy kérdést… (jelölj ki egy kártyát a becsatoláshoz)', disabled: dBusy, onChange: function (e) { setDInput(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); dkSend(); } } }),
+            (sn && sn.t === 'step') ? h('button', { className: 'btn', style: { fontSize: 12, padding: '0 9px', flex: 'none' }, disabled: dBusy || !dInput.trim(), title: 'Az utasításból protokoll-lépés(eke)t javasol, és megerősítés után beszúrja a kijelölt lépés után', onClick: dkProposeSteps }, '⚡ Lépés') : null,
             h('button', { className: 'btn pri', style: { fontSize: 14, padding: '0 12px', flex: 'none' }, disabled: dBusy || !dInput.trim(), onClick: dkSend }, '➤')))
           : h('button', { className: 'rmap-dock-fab', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function () { setDkOpen(true); try { localStorage.setItem('pr-rmap-dock', '1'); } catch (e) { } } }, '🤖 Asszisztens')) : null),
       sn ? h('div', { className: 'rmap-insp' },
