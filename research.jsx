@@ -4822,7 +4822,7 @@
     // the point on a node's boundary along the ray toward another node → edges start/end AT the card edge (clean, and the arrowhead shows)
     function bpt(node, other) { var c = ndCtr(node), o = ndCtr(other), hw = NW / 2, hh = (node._h || NH) / 2, dx = o.x - c.x, dy = o.y - c.y; if (!dx && !dy) return c; var t = Math.min(hw / (Math.abs(dx) || 1e-6), hh / (Math.abs(dy) || 1e-6)); return { x: c.x + dx * t, y: c.y + dy * t }; }
     var svgW = 0; g.N.forEach(function (n) { svgW = Math.max(svgW, n.x + NW + 60); });
-    var edgeEls = g.E.map(function (e, i) { var a = g.by[e[0]], b = g.by[e[1]]; if (!a || !b) return null; var pa = bpt(a, b), pb = bpt(b, a); var dx = (pb.x - pa.x) * 0.5; var cite = e[2] === 'cite'; return h('path', { key: i, d: 'M' + pa.x + ',' + pa.y + ' C' + (pa.x + dx) + ',' + pa.y + ' ' + (pb.x - dx) + ',' + pb.y + ' ' + pb.x + ',' + pb.y, fill: 'none', stroke: cite ? 'var(--accent-tint)' : 'var(--line-2, var(--muted))', strokeWidth: cite ? 1.5 : 2, strokeDasharray: cite ? '5 5' : null, markerEnd: cite ? null : 'url(#rmap-arrow)' }); });
+    var edgeEls = g.E.map(function (e, i) { var a = g.by[e[0]], b = g.by[e[1]]; if (!a || !b) return null; var pa = bpt(a, b), pb = bpt(b, a); var dx = (pb.x - pa.x) * 0.5; var cite = e[2] === 'cite'; return h('path', { key: i, className: cite ? 'rmap-e-cite' : 'rmap-e-flow', d: 'M' + pa.x + ',' + pa.y + ' C' + (pa.x + dx) + ',' + pa.y + ' ' + (pb.x - dx) + ',' + pb.y + ' ' + pb.x + ',' + pb.y, fill: 'none', stroke: cite ? 'var(--accent-tint)' : 'var(--line-2, var(--muted))', strokeWidth: cite ? 1.5 : 2, markerEnd: cite ? null : 'url(#rmap-arrow)' }); });
     function body(n) {
       var k = [h('div', { className: 'rmap-nh', key: 'h' }, h('span', { className: 'rmap-ni' }, RMAP_TYPE[n.t].ic), h('span', { className: 'rmap-nt' }, n.title))];
       if (n.t === 'study') k.push(h('div', { className: 'rmap-nm', key: 'm' }, h('b', null, n.m.Források), ' forrás → ', h('b', null, n.m.Included), ' incl', n.pcount ? h('span', { className: 'rmap-exp' }, (litOpen ? '▾ ' : '▸ ') + n.pcount + ' cikk') : null));
@@ -4869,7 +4869,7 @@
         // edge legend — what the connecting lines mean (non-blocking overlay). Bottom-left, above the zoom controls,
         // so it never collides with the top-spanning autopilot runbar. Swatch colors match the actual edge strokes.
         h('div', { style: { position: 'absolute', left: 14, bottom: 84, zIndex: 8, display: 'flex', gap: 13, alignItems: 'center', padding: '5px 11px', borderRadius: 8, background: 'var(--surface)', border: '1px solid var(--line)', fontSize: 10.5, color: 'var(--muted)', boxShadow: '0 4px 14px -8px rgba(20,26,40,.4)', pointerEvents: 'none' } },
-          h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 5 } }, h('span', { style: { display: 'inline-block', width: 18, borderTop: '2px solid var(--line-2, var(--muted))' } }), 'származás'),
+          h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 5 } }, h('span', { style: { display: 'inline-block', width: 18, borderTop: '2px dashed var(--line-2, var(--muted))' } }), 'származás'),
           h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 5 } }, h('span', { style: { display: 'inline-block', width: 18, borderTop: '1.5px dashed var(--accent-tint)' } }), 'idézet')),
         props.canEdit ? (dkOpen ? h('div', { className: 'rmap-dock open', onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
           h('div', { className: 'rmap-dock-h' }, h('span', null, '🤖 Asszisztens'), h('button', { className: 'rmap-dock-x', title: 'Összecsukás', onClick: function () { setDkOpen(false); try { localStorage.setItem('pr-rmap-dock', '0'); } catch (e) { } } }, '▾')),
@@ -4937,6 +4937,8 @@
   function ProjectDetail(props) {
     var p = props.project;
     var plang = (p.language === 'hu' ? 'hu' : 'en');   // per-project UI language (migration-65) → core chrome via tr(plang, …)
+    var ncS = useState(function () { try { return localStorage.getItem('pr-rv-collapsed') === '1'; } catch (e) { return false; } }), navCollapsed = ncS[0], setNavCollapsed = ncS[1];
+    function toggleNav() { setNavCollapsed(function (v) { var n = !v; try { localStorage.setItem('pr-rv-collapsed', n ? '1' : '0'); } catch (e) { } return n; }); }
     var tS = useState(props.initTab || 'overview'), tab = tS[0], setTab = tS[1];   // Memory step deep-link opens the protocol tab
     var asS = useState(null), autoStudy = asS[0], setAutoStudy = asS[1];   // ideas to auto-create a study from (set by the Ideas "study basis" window → one-click create + Publify pre-fill)
     var agS = useState(0), autoSR = agS[0], setAutoSR = agS[1];   // signal from the Ideas "Study basis" → generate SR-question drafts in the SR studio
@@ -5051,10 +5053,11 @@
         h('details', { id: 'pr-funnel-details', className: 'panel', style: { marginTop: 14, padding: '12px 16px' } },
           h('summary', { style: { cursor: 'pointer', fontSize: 13, fontWeight: 600, color: 'var(--muted)' } }, '⏸ Keyword screening funnel (OpenAlex search → screen) — paused · click to open'),
           h('div', { style: { marginTop: 12 } }, h(LiteratureStudy, { projectId: p.id, project: p, studies: props.studies, sources: props.sources, ideas: props.ideas, loading: props.loading, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, autoCreateFrom: autoStudy, onAutoConsumed: function () { setAutoStudy(null); }, openStudyId: focusStudy, onStudyOpened: function () { setFocusStudy(null); } }))));
-      return h('div', { className: 'rv-2t' },
+      return h('div', { className: 'rv-2t' + (navCollapsed ? ' rv-collapsed' : '') },
         h('aside', { className: 'rv-ctx' },
           h('div', { className: 'rv-ctx-top' },
             h('div', { className: 'rv-ctx-brand' }, h('div', { className: 'mk' }, h('span')), h('b', null, 'Publify')),
+            h('button', { className: 'rv-ctx-collapse', onClick: toggleNav, title: 'Oldalsáv összecsukása — teljes szélességű tartalom' }, '«'),
             h('button', { className: 'rv-ctx-back', onClick: props.onBack, title: 'Back to all projects' }, tr(plang, '‹ Projects'))),
           h('div', { className: 'rv-ctx-proj' },
             h('div', { className: 'rv-ctx-title' }, p.title),
@@ -5071,7 +5074,7 @@
           subNav(),
           props.me ? h('div', { className: 'rv-ctx-foot' }, h(Avatar, { u: props.me, size: 28 }), h('div', { className: 'rv-ctx-acct' }, h('b', null, props.me.name), h('span', null, props.me.email)), h('a', { className: 'rv-ctx-exit', href: 'Projects.html', title: 'Back to Publify' }, '←')) : null
         ),
-        h('div', { className: 'rv-cmain' }, roBannerN, kpiN, content, funnelN),
+        h('div', { className: 'rv-cmain' }, navCollapsed ? h('button', { className: 'rv-ctx-expand', onClick: toggleNav, title: 'Oldalsáv megnyitása' }, '☰ Menü') : null, roBannerN, kpiN, content, funnelN),
         editOpen ? h(ProjectSettingsModal, { project: p, onClose: function () { setEditOpen(false); }, onSaved: function () { setEditOpen(false); props.onChanged(); } }) : null
       );
     }

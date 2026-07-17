@@ -787,6 +787,13 @@
     html.newdesign .rv-sub-c { margin-left: auto; font-size: 11px; font-weight: 800; color: var(--faint); background: var(--surface-2); border: 1px solid var(--line); border-radius: 999px; padding: 0 7px; }
     html.newdesign .rv-sub.on .rv-sub-c { color: var(--accent); }
     html.newdesign .rv-cmain { min-width: 0; }
+    /* collapse the left context panel → full-width content (fullscreen-ish Canvas/Map) */
+    html.newdesign .rv-2t.rv-collapsed { grid-template-columns: 1fr; }
+    html.newdesign .rv-2t.rv-collapsed .rv-ctx { display: none; }
+    .rv-ctx-collapse { border: 1px solid var(--line); background: var(--surface); color: var(--muted); border-radius: 7px; width: 26px; height: 26px; cursor: pointer; flex: none; font-size: 14px; line-height: 1; }
+    .rv-ctx-collapse:hover { border-color: var(--line-2); color: var(--ink); }
+    .rv-ctx-expand { align-self: flex-start; border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 8px; padding: 6px 12px; cursor: pointer; font-size: 13px; font-weight: 700; margin-bottom: 12px; box-shadow: 0 4px 14px -8px rgba(20, 26, 40, .35); }
+    .rv-ctx-expand:hover { border-color: var(--accent); color: var(--accent); }
 
     /* ===== Journal — Venue Comparison Table (direction A) ===== */
     html.newdesign .jt-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; }
@@ -834,6 +841,11 @@
     .rmap-stage:active { cursor: grabbing; }
     .rmap-world { position: absolute; top: 0; left: 0; transform-origin: 0 0; }
     .rmap-edges { position: absolute; top: 0; left: 0; overflow: visible; pointer-events: none; }
+    /* animated data-flow along the edges — dashes march from source → target (the path direction) */
+    @keyframes rmap-flow { to { stroke-dashoffset: -26; } }
+    .rmap-e-flow { stroke-dasharray: 7 6; animation: rmap-flow 1.7s linear infinite; }
+    .rmap-e-cite { stroke-dasharray: 5 6; animation: rmap-flow 2.1s linear infinite; }
+    @media (prefers-reduced-motion: reduce) { .rmap-e-flow, .rmap-e-cite { animation: none; } .rmap-e-flow { stroke-dasharray: none; } }
     .rmap-lane { position: absolute; top: 0; border-right: 1px dashed var(--line-2); }
     .rmap-lane.alt { background: color-mix(in srgb, var(--surface) 45%, transparent); }
     .rmap-lh { position: absolute; top: 12px; left: 14px; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; color: var(--faint); white-space: nowrap; }
@@ -949,7 +961,7 @@
   <script type="text/babel" src="canvas.jsx?v=1783137934"></script>
   <script type="text/babel" src="notes.jsx?v=1783137934"></script>
   <script src="autopilot-core.js?v=1784160000"></script>
-  <script type="text/babel" src="research.jsx?v=1784623000"></script>
+  <script type="text/babel" src="research.jsx?v=1784624000"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>
