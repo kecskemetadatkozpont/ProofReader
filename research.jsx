@@ -4422,6 +4422,8 @@
     var pgcS = useState(false), pagesCap = pgcS[0], setPagesCap = pgcS[1];   // migration-73 capability
     var apgS = useState(null), activePage = apgS[0], setActivePage = apgS[1];   // active page id or null (= full graph)
     var sfcS = useState(false), stepFlagsCap = sfcS[0], setStepFlagsCap = sfcS[1];   // migration-75 capability: step assignee/sign-off columns present
+    var htS = useState({}), hiddenTypes = htS[0], setHiddenTypes = htS[1];   // temporary per-type visibility filter {node_type: true = hidden} (client-only, localStorage)
+    var tfoS = useState(false), typeFilterOpen = tfoS[0], setTypeFilterOpen = tfoS[1];   // the type-filter popover
     var onlS = useState([]), online = onlS[0], setOnline = onlS[1];   // realtime presence: who else is viewing this Map
     var curS = useState({}), cursors = curS[0], setCursors = curS[1];   // live cursors from other users {id:{name,wx,wy,sel,ts,color}}
     var chRef = useRef(null);   // the Map realtime channel (for broadcasting my cursor)
@@ -4551,6 +4553,7 @@
       return function () { clearInterval(prune); chRef.current = null; try { sb.removeChannel(ch); } catch (e) { } };
     }, [props.projectId]);
     useEffect(function () { loadMembers(); }, [props.projectId]);   // collaborators (graceful: null pre-migration-74)
+    useEffect(function () { try { var v = JSON.parse(localStorage.getItem('pr-rmap-types:' + props.projectId) || '{}'); setHiddenTypes(v && typeof v === 'object' ? v : {}); } catch (e) { setHiddenTypes({}); } }, [props.projectId]);   // per-project type filter
     useEffect(function () { followingRef.current = following; }, [following]);
     // broadcast my viewport (throttled) so followers can mirror it — but NOT while I'm following someone (avoids echo loops)
     useEffect(function () {
@@ -4810,6 +4813,10 @@
         if (r && r.error) { window.PRUI.toast('Mentés sikertelen (fut a migration-70?): ' + r.error.message, { kind: 'error' }); setLayout(function (L) { var m = Object.assign({}, L); if (m[n.id]) { var c2 = Object.assign({}, m[n.id]); if (prev) c2[key] = true; else delete c2[key]; m[n.id] = c2; } return m; }); }
       });
     }
+    // temporary per-TYPE visibility (client-only; persisted to localStorage per project so it is convenient but reversible)
+    function typeStoreKey() { return 'pr-rmap-types:' + props.projectId; }
+    function toggleType(t) { setHiddenTypes(function (H) { var n = Object.assign({}, H); if (n[t]) delete n[t]; else n[t] = true; try { if (Object.keys(n).length) localStorage.setItem(typeStoreKey(), JSON.stringify(n)); else localStorage.removeItem(typeStoreKey()); } catch (e) { } return n; }); }
+    function showAllTypes() { setHiddenTypes({}); try { localStorage.removeItem(typeStoreKey()); } catch (e) { } }
     function nodeToggleHidden(n) { nodeSetFlag(n, 'hidden', !(layout[n.id] && layout[n.id].hidden)); }
     function nodeTogglePinned(n) { nodeSetFlag(n, 'pinned', !(layout[n.id] && layout[n.id].pinned)); }
     function groupHide() { Object.keys(msel).forEach(function (id) { var n = g.by[id]; if (n && !n.mapHidden) nodeSetFlag(n, 'hidden', true); }); setMsel({}); }
@@ -5437,7 +5444,7 @@
     // active page (saved view) filter: a "curated" page shows only pinned cards. Defined before edgeEls so edges honor it.
     var activePageObj = (activePage && pagesCap) ? (pages.filter(function (p) { return p.id === activePage; })[0] || null) : null;
     function pageHides(n) { return !!(activePageObj && activePageObj.only_pinned && !n.mapPinned); }
-    function nodeVisible(n) { return !n.mapHidden && !pageHides(n); }
+    function nodeVisible(n) { return !n.mapHidden && !hiddenTypes[n.t] && !pageHides(n); }
     var edgeEls = g.E.map(function (e, i) { var a = g.by[e[0]], b = g.by[e[1]]; if (!a || !b) return null; if (!nodeVisible(a) || !nodeVisible(b)) return null; var pa = bpt(a, b), pb = bpt(b, a); var dx = (pb.x - pa.x) * 0.5; var cite = e[2] === 'cite'; return h('path', { key: i, className: cite ? 'rmap-e-cite' : 'rmap-e-flow', d: 'M' + pa.x + ',' + pa.y + ' C' + (pa.x + dx) + ',' + pa.y + ' ' + (pb.x - dx) + ',' + pb.y + ' ' + pb.x + ',' + pb.y, fill: 'none', stroke: cite ? 'var(--accent-tint)' : 'var(--line-2, var(--muted))', strokeWidth: cite ? 1.5 : 2, markerEnd: cite ? null : 'url(#rmap-arrow)' }); });
     function body(n) {
       var k = [h('div', { className: 'rmap-nh', key: 'h' }, h('span', { className: 'rmap-ni' }, RMAP_TYPE[n.t].ic), h('span', { className: 'rmap-nt' }, n.title))];
@@ -5551,6 +5558,7 @@
           (run.status === 'awaiting_approval' && run.gate && props.canEdit) ? h('button', { className: 'btn pri', style: { padding: '3px 10px', fontSize: 11.5, marginLeft: 4 }, onClick: approveGate }, '✓ ' + (run.gate.title || 'Jóváhagyás')) : null,
           h('a', { className: 'btn', style: { padding: '3px 10px', fontSize: 11.5, textDecoration: 'none', marginLeft: 'auto' }, href: 'Autopilot.html?run=' + run.id, target: '_blank', rel: 'noopener' }, 'Dashboard ↗')) : null,
         h('div', { className: 'rmap-zoom' },
+          h('button', { className: (Object.keys(hiddenTypes).length ? 'on' : ''), title: 'Típusok ki/be kapcsolása a térképen (pl. Ábrák)', onClick: function () { setTypeFilterOpen(function (v) { return !v; }); } }, '👁' + (Object.keys(hiddenTypes).length ? Object.keys(hiddenTypes).length : '')),
           h('button', { title: 'Térkép újratöltése a legfrissebb adatokkal (a módosítások érvényesítése)', disabled: refreshing, onClick: refreshMap }, refreshing ? '⏳' : '🔄'),
           h('button', { title: 'Térkép exportálása PNG-be', onClick: exportMap }, '⤓'),
           (props.canEdit && framesCap) ? h('button', { title: 'Új keret (nevesített régió) hozzáadása', onClick: frameCreate }, '▦') : null,
@@ -5575,6 +5583,22 @@
               props.canEdit ? h('button', { className: 'btn', style: { fontSize: 11, padding: '3px 9px', flex: 'none' }, title: 'Vissza a térképre', onClick: function () { figSetOnMap(f.id, true); } }, '↩ Vissza') : null);
           })) : h('div', { style: { fontSize: 12, color: 'var(--faint)' } }, 'Nincs rejtett ábra.')) : null,
         // "hidden nodes" restore panel — bring Map-hidden cards (research_map_layout.hidden) back onto the Map (migration-70)
+        // type-visibility filter — temporarily hide/show whole object types (e.g. all Figures)
+        typeFilterOpen ? (function () {
+          var order = ['idea', 'paper', 'study', 'review', 'srq', 'sreview', 'step', 'venue', 'section', 'dataset', 'file', 'chat', 'figure'];
+          var counts = {}; g.N.forEach(function (n) { counts[n.t] = (counts[n.t] || 0) + 1; });
+          var types = order.filter(function (t) { return counts[t]; }); Object.keys(counts).forEach(function (t) { if (order.indexOf(t) < 0) types.push(t); });
+          return h('div', { className: 'rmap-typefilter', onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
+            h('div', { className: 'rmap-tf-h' }, h('b', { style: { flex: 1 } }, '👁 Típusok megjelenítése'), Object.keys(hiddenTypes).length ? h('button', { className: 'rmap-tf-all', onClick: showAllTypes }, 'Mind') : null, h('button', { className: 'rmap-cm-x', onClick: function () { setTypeFilterOpen(false); } }, '×')),
+            types.length ? h('div', { className: 'rmap-tf-list' }, types.map(function (t) {
+              var hidden = !!hiddenTypes[t];
+              return h('button', { key: t, className: 'rmap-tf-row' + (hidden ? ' off' : ''), title: (hidden ? 'Megjelenítés: ' : 'Elrejtés: ') + ((RMAP_TYPE[t] && RMAP_TYPE[t].lab) || t), onClick: function () { toggleType(t); } },
+                h('span', { className: 'rmap-tf-ic' }, (RMAP_TYPE[t] && RMAP_TYPE[t].ic) || '•'),
+                h('span', { className: 'rmap-tf-lab' }, (RMAP_TYPE[t] && RMAP_TYPE[t].lab) || t),
+                h('span', { className: 'rmap-tf-count' }, counts[t]),
+                h('span', { className: 'rmap-tf-eye' }, hidden ? '🚫' : '👁'));
+            })) : h('div', { className: 'rmap-cm-empty' }, 'Nincs elem a térképen.'));
+        })() : null,
         (nodeRestoreOpen && mapFlags) ? (function () {
           var hn = g.N.filter(function (n) { return n.mapHidden; });
           return h('div', { style: { position: 'absolute', left: 14, bottom: 96, zIndex: 15, width: 264, maxHeight: '58%', overflowY: 'auto', background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 12, boxShadow: '0 18px 50px -20px rgba(20,26,40,.55)', padding: 12 }, onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
