@@ -4797,8 +4797,21 @@
       sb.from('research_protocol_steps').update(patch).eq('id', step.id).then(function (r) { if (!alive.current) return; if (r && r.error) { window.PRUI.toast('Nem sikerült: ' + r.error.message, { kind: 'error' }); return; } setBump(function (x) { return x + 1; }); });
     }
     function stepSetAssignee(step, uid) { stepPatch(step, { assignee_id: uid || null }); }
-    function stepSignOff(step) { stepPatch(step, { signed_off_by: props.viewerId, signed_off_at: new Date().toISOString() }); }
-    function stepUnsignOff(step) { stepPatch(step, { signed_off_by: null, signed_off_at: null }); }
+    // sign-off goes through the research_step_signoff RPC so a read-only SUPERVISOR can also sign off (migration-77).
+    // Pre-migration-77 the RPC is absent → an editor falls back to a direct column update (migration-75).
+    function stepSignoffRpc(step, clear) {
+      if (!step || !step.id) return;
+      sb.rpc('research_step_signoff', { step_id: step.id, clear: clear }).then(function (r) {
+        if (!alive.current) return;
+        if (r && r.error) {
+          if (props.canEdit) { stepPatch(step, clear ? { signed_off_by: null, signed_off_at: null } : { signed_off_by: props.viewerId, signed_off_at: new Date().toISOString() }); return; }
+          window.PRUI.toast('Sign-off nem engedélyezett (fut a migration-77?): ' + r.error.message, { kind: 'error' }); return;
+        }
+        setBump(function (x) { return x + 1; });
+      }, function () { if (props.canEdit) stepPatch(step, clear ? { signed_off_by: null, signed_off_at: null } : { signed_off_by: props.viewerId, signed_off_at: new Date().toISOString() }); });
+    }
+    function stepSignOff(step) { stepSignoffRpc(step, false); }
+    function stepUnsignOff(step) { stepSignoffRpc(step, true); }
     function notifyMentions(body, target) {
       var cands = mentionCandidates(); if (!cands.length) return;
       // match longest name first and blank out the matched span, so a shorter PREFIX name
@@ -5607,16 +5620,16 @@
                 : h('div', { style: { fontSize: 12, color: 'var(--faint)', padding: '20px 0', textAlign: 'center', border: '1px dashed var(--line)', borderRadius: 8 } }, '⏳ Ábra betöltése…'),
               props.canEdit ? h('button', { className: 'btn', style: { fontSize: 12, marginTop: 8 }, title: 'A figyelmet elvéve a térképről (a Figure Boardon marad); a bal alsó „Rejtett ábrák" panelből visszahozható', onClick: function () { figSetOnMap(sn.ref.id, false); setSel(null); } }, '🙈 Levétel a térképről') : null);
           })() : null,
-          // protocol step: assignee + sign-off (migration-75) — collaboration controls (editors only)
-          (sn.t === 'step' && sn.ref && stepFlagsCap && props.canEdit) ? (function () {
+          // protocol step: assignee (editors) + sign-off (editors OR a supervisor via RPC — migration-75/77)
+          (sn.t === 'step' && sn.ref && stepFlagsCap) ? (function () {
             var seen = {}, cands = [{ id: props.viewerId, name: (props.viewer && props.viewer.name) || 'Te' }].concat(mentionCandidates()).filter(function (u) { if (!u.id || seen[u.id]) return false; seen[u.id] = 1; return true; });
             var st = sn.ref, signed = !!st.signed_off_by;
             return h('div', { className: 'rmap-step-collab' },
-              h('div', { className: 'rmap-step-row' }, h('span', { className: 'rmap-step-l' }, '👤 Felelős'),
-                h('select', { className: 'rmap-mem-role', style: { flex: 1 }, value: st.assignee_id || '', onChange: function (e) { stepSetAssignee(st, e.target.value || null); } }, [h('option', { key: '_none', value: '' }, '— nincs —')].concat(cands.map(function (u) { return h('option', { key: u.id, value: u.id }, u.name); })))),
+              props.canEdit ? h('div', { className: 'rmap-step-row' }, h('span', { className: 'rmap-step-l' }, '👤 Felelős'),
+                h('select', { className: 'rmap-mem-role', style: { flex: 1 }, value: st.assignee_id || '', onChange: function (e) { stepSetAssignee(st, e.target.value || null); } }, [h('option', { key: '_none', value: '' }, '— nincs —')].concat(cands.map(function (u) { return h('option', { key: u.id, value: u.id }, u.name); })))) : (st.assignee_id ? h('div', { className: 'rmap-step-row' }, h('span', { className: 'rmap-step-l' }, '👤 Felelős'), h('span', { style: { fontSize: 11.5, flex: 1 } }, nameOf(st.assignee_id))) : null),
               h('div', { className: 'rmap-step-row' }, h('span', { className: 'rmap-step-l' }, '✅ Sign-off'),
                 signed ? h('span', { style: { fontSize: 11.5, flex: 1, minWidth: 0 } }, nameOf(st.signed_off_by) + (st.signed_off_at ? ' · ' + String(st.signed_off_at).slice(0, 10) : '')) : h('span', { style: { fontSize: 11.5, color: 'var(--muted)', flex: 1 } }, 'nincs'),
-                signed ? h('button', { className: 'btn', style: { fontSize: 11, padding: '3px 8px', flex: 'none' }, onClick: function () { stepUnsignOff(st); } }, 'Visszavonás') : h('button', { className: 'btn pri', style: { fontSize: 11, padding: '3px 8px', flex: 'none' }, onClick: function () { stepSignOff(st); } }, 'Jóváhagyom')));
+                signed ? h('button', { className: 'btn', style: { fontSize: 11, padding: '3px 8px', flex: 'none' }, onClick: function () { stepUnsignOff(st); } }, 'Visszavonás') : h('button', { className: 'btn pri', style: { fontSize: 11, padding: '3px 8px', flex: 'none' }, title: props.canEdit ? 'Jóváhagyás' : 'Konzulensi jóváhagyás', onClick: function () { stepSignOff(st); } }, 'Jóváhagyom')));
           })() : null,
           h('div', { className: 'rmap-insp-acts' },
             (props.canEdit && editSpec(sn)) ? h('button', { className: 'btn pri', style: { fontSize: 12 }, onClick: function () { openEdit(sn); } }, '✎ Metaadat szerkesztése') : null,
