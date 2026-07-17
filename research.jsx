@@ -4237,6 +4237,8 @@
     var edS = useState(null), editing = edS[0], setEditing = edS[1];   // {spec} — the open edit dialog (P2)
     var efS = useState({}), eform = efS[0], setEform = efS[1];
     var bmS = useState(0), bump = bmS[0], setBump = bmS[1];   // reload after a save
+    var rfS = useState(false), refreshing = rfS[0], setRefreshing = rfS[1];   // manual "re-render" — reload the map data
+    function refreshMap() { setBump(function (x) { return x + 1; }); setRefreshing(true); setTimeout(function () { if (alive.current) setRefreshing(false); }, 700); }
     var loS = useState(false), litOpen = loS[0], setLitOpen = loS[1];   // F4: expand the study funnel's paper nodes (collapsed by default)
     var mnS = useState(null), menu = mnS[0], setMenu = mnS[1];   // F1: node "generate from here" context menu {node,x,y}
     var gbS = useState(false), genBusy = gbS[0], setGenBusy = gbS[1];
@@ -4860,6 +4862,7 @@
           (run.status === 'awaiting_approval' && run.gate && props.canEdit) ? h('button', { className: 'btn pri', style: { padding: '3px 10px', fontSize: 11.5, marginLeft: 4 }, onClick: approveGate }, '✓ ' + (run.gate.title || 'Jóváhagyás')) : null,
           h('a', { className: 'btn', style: { padding: '3px 10px', fontSize: 11.5, textDecoration: 'none', marginLeft: 'auto' }, href: 'Autopilot.html?run=' + run.id, target: '_blank', rel: 'noopener' }, 'Dashboard ↗')) : null,
         h('div', { className: 'rmap-zoom' },
+          h('button', { title: 'Térkép újratöltése a legfrissebb adatokkal (a módosítások érvényesítése)', disabled: refreshing, onClick: refreshMap }, refreshing ? '⏳' : '🔄'),
           (props.canEdit && Object.keys(layout).length) ? h('button', { title: 'Automatikus elrendezés (a saját pozíciók törlése)', onClick: resetLayout }, '↺') : null,
           h('button', { onClick: function () { zoom(1.18); } }, '+'), h('button', { onClick: function () { zoom(0.85); } }, '−')),
         h('div', { className: 'rmap-hint' }, (props.canEdit ? 'Húzd a kártyát = áthelyezés · ' : '') + 'húzd a hátteret = pan · görgő = zoom'),
