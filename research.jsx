@@ -5273,7 +5273,7 @@
           (online.length > 1) ? h('div', { className: 'rmap-avstack', title: online.length + ' online' },
             online.slice(0, 5).map(function (u, i) { return h('div', { key: u.id, className: 'rmap-av' + (u.self ? ' me' : ''), style: { zIndex: 10 - i }, title: (u.name || 'Kolléga') + (u.self ? ' (te)' : '') }, u.avatar ? h('img', { src: u.avatar, alt: '' }) : (String(u.name || '?').trim().charAt(0).toUpperCase() || '?')); }),
             online.length > 5 ? h('div', { className: 'rmap-av more' }, '+' + (online.length - 5)) : null) : null,
-          h('button', { className: 'rmap-share-btn', title: 'Megosztás / közreműködők', onClick: function () { setShareOpen(true); } }, '👥 Megosztás')),
+          h('button', { className: 'rmap-share-btn', title: 'Megosztás / közreműködők', onClick: function () { setShareOpen(true); loadMembers(); } }, '👥 Megosztás')),
         // marquee selection rectangle (shift-drag on the empty canvas)
         marquee ? h('div', { className: 'rmap-marquee', style: { position: 'absolute', left: Math.min(marquee.x0, marquee.x1) + 'px', top: Math.min(marquee.y0, marquee.y1) + 'px', width: Math.abs(marquee.x1 - marquee.x0) + 'px', height: Math.abs(marquee.y1 - marquee.y0) + 'px', pointerEvents: 'none', zIndex: 12 } }) : null,
         // free-position comment pins (screen coords → follow pan/zoom)

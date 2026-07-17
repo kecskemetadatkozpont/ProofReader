@@ -44,6 +44,10 @@ sorrendben. A service-key nem tud DDL-t futtatni, ezért ezek manuálisak.
      írás/olvasás jogát érinti (nem csak a Map-et). Ezért kérlek olvasd át a fájlt, mielőtt lefuttatod.
    - Tartalmaz egy `research_member_accept(pid)` SECURITY DEFINER RPC-t (a meghívott a SAJÁT
      meghívóját fogadja el, szerepkör-módosítás nélkül).
+   - **Tartalmaz egy `rp_guard_owner` BEFORE UPDATE triggert** a `research_projects`-en: mivel az
+     editor mostantól író, e nélkül egy elfogadott editor a `owner_id`-t magára írhatná és
+     átvehetné a projektet. A trigger csak a jelenlegi tulajdonosnak/adminnak engedi az
+     `owner_id`/`student_id` módosítását (az adversariális review találta meg — CONFIRMED, high).
    - Amíg nincs lefuttatva: a `👥 Megosztás` modalban a közreműködő-kezelés nem érhető el
      (a `members === null` ág üzenetet mutat), de a **jelenlét (presence) MÁR MOST MŰKÖDIK**
      (nem igényel migrációt) — a jobb-felső avatar-sor és a modal presence-sora élő.

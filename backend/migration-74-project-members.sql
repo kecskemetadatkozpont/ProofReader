@@ -89,6 +89,33 @@ language sql volatile security definer set search_path = public as $$
     where project_id = pid and user_id = auth.uid();
 $$;
 
+-- ---- CRITICAL: guard project ownership transfer ----------------------------------
+-- Because this migration grants accepted editors write access, they now satisfy the
+-- research_projects rp_update RLS policy (migration-11: using/with-check
+-- research_can_write_project, with NO column restriction). Without this guard an editor
+-- could `update research_projects set owner_id = <self>` and seize the project (then
+-- manage/delete it). RLS WITH CHECK cannot enforce this (it sees only the NEW row, not
+-- OLD), so we use a BEFORE UPDATE trigger: only the CURRENT owner or an admin may change
+-- owner_id or student_id (the access-defining columns). Editors keep write access to all
+-- normal columns (title, keywords, stage, nodes/tasks/log, …).
+create or replace function public.research_guard_owner() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if new.owner_id is distinct from old.owner_id
+     and not (public.is_admin() or auth.uid() = old.owner_id) then
+    raise exception 'only the current owner or an admin may transfer ownership';
+  end if;
+  if new.student_id is distinct from old.student_id
+     and not (public.is_admin() or auth.uid() = old.owner_id) then
+    raise exception 'only the current owner or an admin may change the linked student';
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists rp_guard_owner on research_projects;
+create trigger rp_guard_owner before update on research_projects
+  for each row execute function public.research_guard_owner();
+
 do $$
 begin
   if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and tablename = 'research_project_members') then
