@@ -30,6 +30,11 @@ sorrendben. A service-key nem tud DDL-t futtatni, ezért ezek manuálisak.
    - Utána: `💬` komment-mód → kattints a vászonra (pozícióhoz tűzött) vagy egy kártyára (kártyához tűzött) komment;
      kártyán `💬N` jelvény; pozíció-pin a vásznon; thread-popover (megoldva/törlés/válasz); `📋` összes-komment panel.
 
+4. **`backend/migration-73-map-pages.sql`** — Map lapok/nézetek: `research_map_pages` tábla.
+   - Amíg nincs lefuttatva: a bal-felső lap-sáv NEM jelenik meg; a Map változatlan.
+   - Utána: „Teljes gráf" + mentett nézetek (viewport) fülek; `＋` új nézet az aktuális nagyításból;
+     az aktív lapon `📌 Kurált` (csak kitűzöttek), `⟳ Nézet` (viewport-frissítés), átnevezés, törlés.
+
 ## Edge-function deploy-ok (explicit jóváhagyás + megnevezés kell)
 
 _(A lista alább bővül.)_

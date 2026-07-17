@@ -4295,6 +4295,9 @@
     var cmtS = useState(''), cmText = cmtS[0], setCmText = cmtS[1];   // composer textarea
     var cmoS = useState(null), openThread = cmoS[0], setOpenThread = cmoS[1];   // open thread key: node_id or 'pin:'+commentId
     var cmpanS = useState(false), cmPanelOpen = cmpanS[0], setCmPanelOpen = cmpanS[1];   // the all-comments side panel
+    var pgS = useState([]), pages = pgS[0], setPages = pgS[1];   // Map pages (saved views) — migration-73
+    var pgcS = useState(false), pagesCap = pgcS[0], setPagesCap = pgcS[1];   // migration-73 capability
+    var apgS = useState(null), activePage = apgS[0], setActivePage = apgS[1];   // active page id or null (= full graph)
     var drag = useRef(null), stageRef = useRef(null), alive = useRef(true), bumpT = useRef(null), driving = useRef(false), mapDriver = useRef(null), ndrag = useRef(null), selRef = useRef(null), refBusy = useRef({}), dcRef = useRef(null), dScroll = useRef(null);
     if (!mapDriver.current) mapDriver.current = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : ('00000000-0000-4000-8000-' + String(Date.now()).slice(-12));
     useEffect(function () { return function () { alive.current = false; driving.current = false; if (bumpT.current) clearTimeout(bumpT.current); }; }, []);
@@ -4346,6 +4349,10 @@
       sb.from('research_map_comments').select('id,node_id,x,y,body,author,resolved,created_at').eq('project_id', pid).order('created_at', { ascending: true }).then(function (r) {
         if (!alive.current) return; if (r && r.error) return; setCommentsCap(true); setComments((r && r.data) || []);
       });
+      // load Map pages (saved views) — graceful: pre-migration-73 the table is absent → pagesCap stays false, no page bar
+      sb.from('research_map_pages').select('id,name,tx,ty,k,only_pinned,ord').eq('project_id', pid).order('ord', { ascending: true }).order('created_at', { ascending: true }).then(function (r) {
+        if (!alive.current) return; if (r && r.error) return; setPagesCap(true); setPages((r && r.data) || []);
+      });
       var ch = sb.channel('rmap-ap:' + pid)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'research_autopilot_runs', filter: 'project_id=eq.' + pid }, function (p) { if (alive.current && p.new) { setRun(p.new); ensureDrive(p.new); bumpSoon(); } })
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'research_autopilot_events', filter: 'project_id=eq.' + pid }, function () { if (alive.current) bumpSoon(); })
@@ -4368,6 +4375,12 @@
           if (p.eventType === 'DELETE') { var oid = p.old && p.old.id; if (oid) setComments(function (C) { return C.filter(function (c) { return c.id !== oid; }); }); return; }
           var nc = p.new; if (!nc || !nc.id) return;
           setComments(function (C) { var found = false, out = C.map(function (c) { if (c.id === nc.id) { found = true; return nc; } return c; }); if (!found) out.push(nc); return out; });
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'research_map_pages', filter: 'project_id=eq.' + pid }, function (p) {
+          if (!alive.current) return;
+          if (p.eventType === 'DELETE') { var oid = p.old && p.old.id; if (oid) { setPages(function (P) { return P.filter(function (x) { return x.id !== oid; }); }); setActivePage(function (a) { return a === oid ? null : a; }); } return; }
+          var np = p.new; if (!np || !np.id) return;
+          setPages(function (P) { var found = false, out = P.map(function (x) { if (x.id === np.id) { found = true; return { id: np.id, name: np.name, tx: np.tx, ty: np.ty, k: np.k, only_pinned: np.only_pinned, ord: np.ord }; } return x; }); if (!found) out.push({ id: np.id, name: np.name, tx: np.tx, ty: np.ty, k: np.k, only_pinned: np.only_pinned, ord: np.ord }); return out; });
         })
         .subscribe();
       return function () { try { sb.removeChannel(ch); } catch (e) { } };
@@ -4566,7 +4579,8 @@
     function fitView() {
       var st = stageRef.current; if (!st || !g.N || !g.N.length) return;
       var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-      g.N.forEach(function (n) { if (n.x < minX) minX = n.x; if (n.y < minY) minY = n.y; if (n.x + 204 > maxX) maxX = n.x + 204; if (n.y + 74 > maxY) maxY = n.y + 74; });
+      g.N.forEach(function (n) { if (!nodeVisible(n)) return; if (n.x < minX) minX = n.x; if (n.y < minY) minY = n.y; if (n.x + 204 > maxX) maxX = n.x + 204; if (n.y + 74 > maxY) maxY = n.y + 74; });
+      if (minX === Infinity) return;
       var pad = 56, gw = Math.max(1, maxX - minX), gh = Math.max(1, maxY - minY), cw = st.clientWidth, ch = st.clientHeight;
       var k = Math.min(1.6, Math.max(.3, Math.min((cw - pad * 2) / gw, (ch - pad * 2) / gh)));
       setView({ tx: (cw - gw * k) / 2 - minX * k, ty: (ch - gh * k) / 2 - minY * k, k: k });
@@ -4638,6 +4652,29 @@
       setComments(function (C) { return C.filter(function (x) { return x.id !== c.id; }); });
       sb.from('research_map_comments').delete().eq('id', c.id).then(function (r) { if (r && r.error && alive.current) window.PRUI.toast('Törlés sikertelen: ' + r.error.message, { kind: 'error' }); });
     }
+    // ---- Map pages (saved views) — migration-73. A page stores a viewport + an optional "only pinned" curation lens. ----
+    function pageCreate() {
+      if (!props.canEdit || !pagesCap) return;
+      var nm = window.prompt('Nézet neve:', 'Nézet ' + (pages.length + 1)); if (nm == null) return;
+      sb.from('research_map_pages').insert({ project_id: props.projectId, name: String(nm).trim() || 'Nézet', tx: view.tx, ty: view.ty, k: view.k, only_pinned: false, ord: pages.length }).select('id,name,tx,ty,k,only_pinned,ord').single().then(function (r) {
+        if (!alive.current) return;
+        if (r && r.error) { window.PRUI.toast('Nézet mentése sikertelen: ' + r.error.message, { kind: 'error' }); return; }
+        if (r && r.data) { setPages(function (P) { return P.some(function (x) { return x.id === r.data.id; }) ? P : P.concat([r.data]); }); setActivePage(r.data.id); }
+      });
+    }
+    function pageApply(pg) { if (!pg) { setActivePage(null); return; } setActivePage(pg.id); setView({ tx: pg.tx, ty: pg.ty, k: pg.k }); }
+    function pageUpdateView(pg) {   // re-capture the current viewport into an existing page
+      if (!props.canEdit) return;
+      setPages(function (P) { return P.map(function (x) { return x.id === pg.id ? Object.assign({}, x, { tx: view.tx, ty: view.ty, k: view.k }) : x; }); });
+      sb.from('research_map_pages').update({ tx: view.tx, ty: view.ty, k: view.k }).eq('id', pg.id).then(function (r) { if (r && r.error && alive.current) window.PRUI.toast('Nézet frissítése sikertelen: ' + r.error.message, { kind: 'error' }); });
+    }
+    function pageToggleCurated(pg) {
+      if (!props.canEdit) return; var val = !pg.only_pinned;
+      setPages(function (P) { return P.map(function (x) { return x.id === pg.id ? Object.assign({}, x, { only_pinned: val }) : x; }); });
+      sb.from('research_map_pages').update({ only_pinned: val }).eq('id', pg.id).then(function (r) { if (r && r.error && alive.current) window.PRUI.toast('Nem sikerült: ' + r.error.message, { kind: 'error' }); });
+    }
+    function pageRename(pg) { if (!props.canEdit) return; var v = window.prompt('Nézet neve:', pg.name); if (v == null || !String(v).trim()) return; setPages(function (P) { return P.map(function (x) { return x.id === pg.id ? Object.assign({}, x, { name: String(v).trim() }) : x; }); }); sb.from('research_map_pages').update({ name: String(v).trim() }).eq('id', pg.id).then(function (r) { if (r && r.error && alive.current) window.PRUI.toast('Nem sikerült: ' + r.error.message, { kind: 'error' }); }); }
+    function pageDelete(pg) { if (!props.canEdit) return; setPages(function (P) { return P.filter(function (x) { return x.id !== pg.id; }); }); setActivePage(function (a) { return a === pg.id ? null : a; }); sb.from('research_map_pages').delete().eq('id', pg.id).then(function (r) { if (r && r.error && alive.current) window.PRUI.toast('Törlés sikertelen: ' + r.error.message, { kind: 'error' }); }); }
     function startFrameDrag(e, f, mode) {   // mode: 'move' (titlebar) | 'resize' (corner handle)
       if (e.button !== 0 || !props.canEdit) return; e.stopPropagation();
       var sx = e.clientX, sy = e.clientY, k = view.k || 1, ox = f.x, oy = f.y, ow = f.w, oh = f.h;
@@ -4698,7 +4735,7 @@
       vis.forEach(function (n) { expDrawCard(ctx, n, n.x, n.y); });
       expDownload(c, fname);
     }
-    function exportMap() { exportSet(g.N.filter(function (n) { return !n.mapHidden; }), 'publify-terkep.png'); }
+    function exportMap() { exportSet(g.N.filter(function (n) { return nodeVisible(n); }), 'publify-terkep.png'); }
     function exportSelection() { exportSet(g.N.filter(function (n) { return msel[n.id] && !n.mapHidden; }), 'publify-kijeloles.png'); }
     function resetLayout() {
       if (!props.canEdit) return;
@@ -5111,7 +5148,11 @@
     // the point on a node's boundary along the ray toward another node → edges start/end AT the card edge (clean, and the arrowhead shows)
     function bpt(node, other) { var c = ndCtr(node), o = ndCtr(other), hw = NW / 2, hh = (node._h || NH) / 2, dx = o.x - c.x, dy = o.y - c.y; if (!dx && !dy) return c; var t = Math.min(hw / (Math.abs(dx) || 1e-6), hh / (Math.abs(dy) || 1e-6)); return { x: c.x + dx * t, y: c.y + dy * t }; }
     var svgW = 0; g.N.forEach(function (n) { svgW = Math.max(svgW, n.x + NW + 60); });
-    var edgeEls = g.E.map(function (e, i) { var a = g.by[e[0]], b = g.by[e[1]]; if (!a || !b) return null; if (a.mapHidden || b.mapHidden) return null; var pa = bpt(a, b), pb = bpt(b, a); var dx = (pb.x - pa.x) * 0.5; var cite = e[2] === 'cite'; return h('path', { key: i, className: cite ? 'rmap-e-cite' : 'rmap-e-flow', d: 'M' + pa.x + ',' + pa.y + ' C' + (pa.x + dx) + ',' + pa.y + ' ' + (pb.x - dx) + ',' + pb.y + ' ' + pb.x + ',' + pb.y, fill: 'none', stroke: cite ? 'var(--accent-tint)' : 'var(--line-2, var(--muted))', strokeWidth: cite ? 1.5 : 2, markerEnd: cite ? null : 'url(#rmap-arrow)' }); });
+    // active page (saved view) filter: a "curated" page shows only pinned cards. Defined before edgeEls so edges honor it.
+    var activePageObj = (activePage && pagesCap) ? (pages.filter(function (p) { return p.id === activePage; })[0] || null) : null;
+    function pageHides(n) { return !!(activePageObj && activePageObj.only_pinned && !n.mapPinned); }
+    function nodeVisible(n) { return !n.mapHidden && !pageHides(n); }
+    var edgeEls = g.E.map(function (e, i) { var a = g.by[e[0]], b = g.by[e[1]]; if (!a || !b) return null; if (!nodeVisible(a) || !nodeVisible(b)) return null; var pa = bpt(a, b), pb = bpt(b, a); var dx = (pb.x - pa.x) * 0.5; var cite = e[2] === 'cite'; return h('path', { key: i, className: cite ? 'rmap-e-cite' : 'rmap-e-flow', d: 'M' + pa.x + ',' + pa.y + ' C' + (pa.x + dx) + ',' + pa.y + ' ' + (pb.x - dx) + ',' + pb.y + ' ' + pb.x + ',' + pb.y, fill: 'none', stroke: cite ? 'var(--accent-tint)' : 'var(--line-2, var(--muted))', strokeWidth: cite ? 1.5 : 2, markerEnd: cite ? null : 'url(#rmap-arrow)' }); });
     function body(n) {
       var k = [h('div', { className: 'rmap-nh', key: 'h' }, h('span', { className: 'rmap-ni' }, RMAP_TYPE[n.t].ic), h('span', { className: 'rmap-nt' }, n.title))];
       if (n.t === 'study') k.push(h('div', { className: 'rmap-nm', key: 'm' }, h('b', null, n.m.Források), ' forrás → ', h('b', null, n.m.Included), ' incl', n.pcount ? h('span', { className: 'rmap-exp' }, (litOpen ? '▾ ' : '▸ ') + n.pcount + ' cikk') : null));
@@ -5165,7 +5206,18 @@
           h('svg', { className: 'rmap-edges', width: svgW, height: g.height },
             h('defs', null, h('marker', { id: 'rmap-arrow', viewBox: '0 0 8 8', refX: 6.5, refY: 4, markerWidth: 6.5, markerHeight: 6.5, orient: 'auto-start-reverse' }, h('path', { d: 'M0.5,0.5 L7.5,4 L0.5,7.5 Z', fill: 'var(--line-2, var(--muted))' }))),
             edgeEls),
-          g.N.map(function (n) { if (n.mapHidden) return null; return h('div', { key: n.id, 'data-nid': n.id, className: 'rmap-node t-' + n.t + (sel === n.id ? ' sel' : '') + (msel[n.id] ? ' rmap-mselected' : '') + (n.mapPinned ? ' rmap-pinned' : '') + (activeKey && n.ph === RMAP_PHASE_IDX[activeKey] ? ' inphase' : '') + (props.canEdit ? ' editable' : '') + (dlive && dlive.id === n.id ? ' dragging' : ''), style: { left: n.x + 'px', top: n.y + 'px' }, onMouseDown: function (e) { e.stopPropagation(); startNodeDrag(e, n); }, onContextMenu: function (e) { e.preventDefault(); e.stopPropagation(); if (props.canEdit && (genActions(n).length || regenActions(n).length)) setMenu({ node: n, x: e.clientX, y: e.clientY }); } }, n.mapPinned ? h('span', { className: 'rmap-pin-badge', title: 'Kitűzött' }, '📌') : null, nodeCmCount(n.id) ? h('span', { className: 'rmap-cm-badge', title: nodeCmCount(n.id) + ' nyitott komment', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); setOpenThread(n.id); } }, '💬' + nodeCmCount(n.id)) : null, body(n)); })),
+          g.N.map(function (n) { if (!nodeVisible(n)) return null; return h('div', { key: n.id, 'data-nid': n.id, className: 'rmap-node t-' + n.t + (sel === n.id ? ' sel' : '') + (msel[n.id] ? ' rmap-mselected' : '') + (n.mapPinned ? ' rmap-pinned' : '') + (activeKey && n.ph === RMAP_PHASE_IDX[activeKey] ? ' inphase' : '') + (props.canEdit ? ' editable' : '') + (dlive && dlive.id === n.id ? ' dragging' : ''), style: { left: n.x + 'px', top: n.y + 'px' }, onMouseDown: function (e) { e.stopPropagation(); startNodeDrag(e, n); }, onContextMenu: function (e) { e.preventDefault(); e.stopPropagation(); if (props.canEdit && (genActions(n).length || regenActions(n).length)) setMenu({ node: n, x: e.clientX, y: e.clientY }); } }, n.mapPinned ? h('span', { className: 'rmap-pin-badge', title: 'Kitűzött' }, '📌') : null, nodeCmCount(n.id) ? h('span', { className: 'rmap-cm-badge', title: nodeCmCount(n.id) + ' nyitott komment', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); setOpenThread(n.id); } }, '💬' + nodeCmCount(n.id)) : null, body(n)); })),
+        // page bar (saved views) — top-left tabs; the active page can be curated (only pinned) / re-captured / renamed / deleted
+        pagesCap ? h('div', { className: 'rmap-pagebar', onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
+          h('div', { className: 'rmap-pagetabs' },
+            h('button', { className: 'rmap-pagetab' + (activePage === null ? ' on' : ''), onClick: function () { pageApply(null); } }, 'Teljes gráf'),
+            pages.map(function (pg) { return h('button', { key: pg.id, className: 'rmap-pagetab' + (activePage === pg.id ? ' on' : ''), title: 'kattints = nézet' + (props.canEdit ? ', dupla katt = átnevezés' : ''), onClick: function () { pageApply(pg); }, onDoubleClick: function () { pageRename(pg); } }, (pg.only_pinned ? '📌 ' : '') + pg.name); }),
+            props.canEdit ? h('button', { className: 'rmap-pagetab add', title: 'Aktuális nézet mentése lapként', onClick: pageCreate }, '＋') : null),
+          (activePageObj && props.canEdit) ? h('div', { className: 'rmap-pagectl' },
+            h('button', { className: activePageObj.only_pinned ? 'on' : '', title: 'Kurált nézet: csak a kitűzött kártyák', onClick: function () { pageToggleCurated(activePageObj); } }, '📌 Kurált'),
+            h('button', { title: 'A lap nézetének frissítése az aktuális nagyításra/pozícióra', onClick: function () { pageUpdateView(activePageObj); } }, '⟳ Nézet'),
+            h('button', { title: 'Átnevezés', onClick: function () { pageRename(activePageObj); } }, '✎'),
+            h('button', { title: 'Lap törlése', onClick: function () { pageDelete(activePageObj); } }, '🗑')) : null) : null,
         // marquee selection rectangle (shift-drag on the empty canvas)
         marquee ? h('div', { className: 'rmap-marquee', style: { position: 'absolute', left: Math.min(marquee.x0, marquee.x1) + 'px', top: Math.min(marquee.y0, marquee.y1) + 'px', width: Math.abs(marquee.x1 - marquee.x0) + 'px', height: Math.abs(marquee.y1 - marquee.y0) + 'px', pointerEvents: 'none', zIndex: 12 } }) : null,
         // free-position comment pins (screen coords → follow pan/zoom)
