@@ -1014,6 +1014,15 @@
     .rmap-beat-notes { font-size: 11px; color: var(--muted); }
     .rmap-beat-cap:focus, .rmap-beat-notes:focus { outline: none; border-color: var(--accent); }
     .rmap-beat-add { display: flex; flex-wrap: wrap; gap: 5px; }
+    /* Fázis 3 — semantic zoom (level of detail) + arm-to-enter chip */
+    .rmap-lod-0 .rmap-node { padding: 6px 8px; }
+    .rmap-lod-0 .rmap-node .rmap-nm { display: none; }
+    .rmap-lod-0 .rmap-node .rmap-nt { font-size: 11px; -webkit-line-clamp: 1; }
+    .rmap-lod-0 .rmap-edges { opacity: .5; }
+    .rmap-arm-chip { transform: translateX(-50%); border: none; background: var(--accent); color: #fff; font-family: inherit; font-size: 11.5px; font-weight: 800; padding: 5px 13px; border-radius: 999px; cursor: pointer; box-shadow: 0 8px 22px -6px var(--accent); animation: rmap-arm 1.5s ease-in-out infinite; white-space: nowrap; }
+    .rmap-arm-chip:hover { filter: brightness(1.06); }
+    @keyframes rmap-arm { 0%, 100% { box-shadow: 0 8px 22px -6px var(--accent), 0 0 0 0 color-mix(in srgb, var(--accent) 50%, transparent); } 50% { box-shadow: 0 8px 22px -6px var(--accent), 0 0 0 8px color-mix(in srgb, var(--accent) 0%, transparent); } }
+    @media (prefers-reduced-motion: reduce) { .rmap-arm-chip { animation: none; } }
     .rmap-tour-cap b { color: #fff; font-variant-numeric: tabular-nums; }
     .rmap-tour-bar { display: flex; align-items: center; gap: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 6px 9px; box-shadow: 0 12px 30px -14px rgba(20,26,40,.5); }
     .rmap-tour-bar button { border: none; background: none; cursor: pointer; font-size: 14px; color: var(--ink); width: 30px; height: 28px; border-radius: 8px; display: flex; align-items: center; justify-content: center; }
@@ -1198,7 +1207,7 @@
   <script type="text/babel" src="canvas.jsx?v=1783137934"></script>
   <script type="text/babel" src="notes.jsx?v=1783137934"></script>
   <script src="autopilot-core.js?v=1784160000"></script>
-  <script type="text/babel" src="research.jsx?v=1785230000"></script>
+  <script type="text/babel" src="research.jsx?v=1785240000"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>

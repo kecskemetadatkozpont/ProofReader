@@ -4425,6 +4425,7 @@
     var pthcS = useState(false), pathsCap = pthcS[0], setPathsCap = pthcS[1];   // migration-79 capability
     var presMgrS = useState(false), presMgrOpen = presMgrS[0], setPresMgrOpen = presMgrS[1];   // the presentations manager panel
     var editPathS = useState(null), editPath = editPathS[0], setEditPath = editPathS[1];   // the path id whose beat-editor is open
+    var pathWr = useRef({});   // per-path debounced write state + last-write ts (throttles keystroke writes; guards the realtime echo)
     var sfcS = useState(false), stepFlagsCap = sfcS[0], setStepFlagsCap = sfcS[1];   // migration-75 capability: step assignee/sign-off columns present
     var htS = useState({}), hiddenTypes = htS[0], setHiddenTypes = htS[1];   // temporary per-type visibility filter {node_type: true = hidden} (client-only, localStorage)
     var tfoS = useState(false), typeFilterOpen = tfoS[0], setTypeFilterOpen = tfoS[1];   // the type-filter popover
@@ -4445,6 +4446,7 @@
     var tourS = useState(null), tour = tourS[0], setTour = tourS[1];   // {list:[pages], i, playing} guided-tour state (Lap-based in Fázis 1)
     var tourT = useRef(null);   // tour autoplay timer
     var viewRef = useRef(view); viewRef.current = view;   // live mirror of `view` so a tween always starts from the true current camera
+    var armedRef = useRef(null);   // the card "armed to enter" at deep zoom (Fázis 3) — Enter dives into it
     var memS = useState(null), members = memS[0], setMembers = memS[1];   // project collaborators (migration-74) — null until loaded/capable
     var shareS = useState(false), shareOpen = shareS[0], setShareOpen = shareS[1];   // the Share/Collaborators modal
     var invqS = useState(''), invQ = invqS[0], setInvQ = invqS[1];   // invite: user search query
@@ -4561,6 +4563,7 @@
           if (!alive.current) return;
           if (p.eventType === 'DELETE') { var oid = p.old && p.old.id; if (oid) setPaths(function (P) { return P.filter(function (x) { return x.id !== oid; }); }); return; }
           var np = p.new; if (!np || !np.id) return;
+          var wg = pathWr.current[np.id]; if (wg && (wg.t || (wg.ts && Date.now() - wg.ts < 1500))) return;   // ignore the echo of my own in-flight/just-committed write (avoids flicker)
           setPaths(function (P) { var found = false, out = P.map(function (x) { if (x.id === np.id) { found = true; return { id: np.id, name: np.name, ord: np.ord, steps: np.steps }; } return x; }); if (!found) out.push({ id: np.id, name: np.name, ord: np.ord, steps: np.steps }); return out; });
         })
         .on('broadcast', { event: 'story_beat' }, function (m) {
@@ -4594,11 +4597,14 @@
       if (!following) return; var pv = peerViews[following]; if (!pv) return;
       setView(function (v) { return (v.tx === pv.tx && v.ty === pv.ty && v.k === pv.k) ? v : { tx: pv.tx, ty: pv.ty, k: pv.k }; });
     }, [following, peerViews]);
-    // Esc closes the focus overlay (or stops a tour); rebinds when focus/tour changes so it sees the current one
+    // keyboard: Esc closes focus / stops a tour; ←/→/Space navigate a tour; Enter enters an armed (deep-zoomed) card
     useEffect(function () {
-      if (!focus && !tour) return;
       function typing(el) { if (!el) return false; var tg = el.tagName || ''; return tg === 'INPUT' || tg === 'TEXTAREA' || tg === 'SELECT' || el.isContentEditable; }
-      function onKey(e) { if (e.key === 'Escape') { if (tour) tourStop(); else if (focus) exitFocus(); } else if (tour && tour.beats && !typing(e.target)) { if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); tourNext(); } else if (e.key === 'ArrowLeft') { e.preventDefault(); tourPrev(); } } }
+      function onKey(e) {
+        if (e.key === 'Escape') { if (tour) tourStop(); else if (focus) exitFocus(); }
+        else if (tour && tour.beats && !typing(e.target)) { if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); tourNext(); } else if (e.key === 'ArrowLeft') { e.preventDefault(); tourPrev(); } }
+        else if (e.key === 'Enter' && !focus && !tour && armedRef.current && !typing(e.target)) { e.preventDefault(); enterNode(armedRef.current); }
+      }
       window.addEventListener('keydown', onKey);
       return function () { window.removeEventListener('keydown', onKey); };
     }, [focus, tour]);
@@ -4925,8 +4931,13 @@
       });
     }
     function pathPatch(id, patch) {
-      setPaths(function (P) { return P.map(function (x) { return x.id === id ? Object.assign({}, x, patch) : x; }); });
-      sb.from('research_map_paths').update(Object.assign({}, patch, { updated_at: new Date().toISOString() })).eq('id', id).then(function (r) { if (r && r.error && alive.current) window.PRUI.toast('Mentés sikertelen: ' + r.error.message, { kind: 'error' }); });
+      setPaths(function (P) { return P.map(function (x) { return x.id === id ? Object.assign({}, x, patch) : x; }); });   // optimistic, immediate
+      // debounce the DB write so caption/notes typing does not issue a whole-steps write per keystroke; merge pending patches
+      var w = pathWr.current[id] || (pathWr.current[id] = {}); if (w.t) clearTimeout(w.t); w.pending = Object.assign(w.pending || {}, patch);
+      w.t = setTimeout(function () {
+        var p = w.pending; w.pending = null; w.t = null; w.ts = Date.now();
+        sb.from('research_map_paths').update(Object.assign({}, p, { updated_at: new Date().toISOString() })).eq('id', id).then(function (r) { w.ts = Date.now(); if (r && r.error && alive.current) window.PRUI.toast('Mentés sikertelen: ' + r.error.message, { kind: 'error' }); });
+      }, 420);
     }
     function pathRename(pt) { if (!props.canEdit) return; var v = window.prompt('Bemutató neve:', pt.name); if (v == null || !String(v).trim()) return; pathPatch(pt.id, { name: String(v).trim() }); }
     function pathDelete(pt) { if (!props.canEdit) return; setPaths(function (P) { return P.filter(function (x) { return x.id !== pt.id; }); }); if (editPath === pt.id) setEditPath(null); sb.from('research_map_paths').delete().eq('id', pt.id).then(function (r) { if (r && r.error && alive.current) window.PRUI.toast('Törlés sikertelen: ' + r.error.message, { kind: 'error' }); }); }
@@ -5645,6 +5656,14 @@
       runProg = dn + '/' + en; runActive = ['running', 'awaiting_approval', 'paused', 'queued'].indexOf(run.status) >= 0;
     }
     var sn = (sel && g.by[sel] && !g.by[sel].mapHidden) ? g.by[sel] : null;   // don't float the inspector/toolbar over a node that is (now) hidden
+    // Fázis 3 (semantic zoom / ZUI): a level-of-detail from view.k + an "arm-to-enter" card near the viewport center at deep zoom
+    var K_ARM = 1.9, lod = view.k < 0.55 ? 0 : (view.k < 1.3 ? 1 : 2);
+    var armedNode = null;
+    if (view.k >= K_ARM && !focus && !tour && props.renderPanel) {
+      var _st = stageRef.current, _cw = (_st && _st.clientWidth) || 900, _ch = (_st && _st.clientHeight) || 560, _best = Infinity;
+      g.N.forEach(function (n) { if (!nodeVisible(n) || !canEnter(n)) return; var sx = view.tx + (n.x + 102) * view.k, sy = view.ty + (n.y + 37) * view.k; var d = Math.abs(sx - _cw / 2) + Math.abs(sy - _ch / 2); if (d < _best && d < 240) { _best = d; armedNode = n; } });
+    }
+    armedRef.current = armedNode;
     // derive comment groupings: per-node threads + free-position pins (+ unresolved counts)
     var cmByNode = {}, cmPos = [];
     if (commentsCap) comments.forEach(function (c) { if (c.node_id) { (cmByNode[c.node_id] = cmByNode[c.node_id] || []).push(c); } else if (c.x != null) cmPos.push(c); });
@@ -5652,7 +5671,7 @@
     var cmUnresolved = commentsCap ? comments.filter(function (c) { return !c.resolved; }).length : 0;
     return h('div', { className: 'rmap-wrap' },
       h('div', { className: 'rmap-stage', ref: stageRef, onMouseDown: onDown, onWheel: onWheel, onMouseMove: broadcastCursor },
-        h('div', { className: 'rmap-world', style: { transform: 'translate(' + view.tx + 'px,' + view.ty + 'px) scale(' + view.k + ')' } },
+        h('div', { className: 'rmap-world rmap-lod-' + lod, style: { transform: 'translate(' + view.tx + 'px,' + view.ty + 'px) scale(' + view.k + ')' } },
           // frames (named regions) render BEHIND everything; the body is pointer-events:none so cards stay interactive
           frames.map(function (f) {
             var gg = (frLive && frLive.id === f.id) ? frLive : f;
@@ -5700,6 +5719,8 @@
           h('button', { onClick: function () { setFollowing(null); } }, 'Leállítás')) : null,
         // marquee selection rectangle (shift-drag on the empty canvas)
         marquee ? h('div', { className: 'rmap-marquee', style: { position: 'absolute', left: Math.min(marquee.x0, marquee.x1) + 'px', top: Math.min(marquee.y0, marquee.y1) + 'px', width: Math.abs(marquee.x1 - marquee.x0) + 'px', height: Math.abs(marquee.y1 - marquee.y0) + 'px', pointerEvents: 'none', zIndex: 12 } }) : null,
+        // Fázis 3: arm-to-enter chip on the deep-zoomed card nearest the viewport center
+        armedNode ? h('button', { className: 'rmap-arm-chip', style: { position: 'absolute', left: (view.tx + (armedNode.x + 102) * view.k) + 'px', top: (view.ty + (armedNode.y + 74) * view.k + 10) + 'px', zIndex: 15 }, title: 'Belépés a kártyába (Enter)', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); enterNode(armedNode); } }, '◇ Belépés ⏎') : null,
         // remote selection rings — highlight the card another user has selected, in their color
         Object.keys(cursors).map(function (uid) {
           var c = cursors[uid]; if (!c.sel) return null; var nn = g.by[c.sel]; if (!nn || !nodeVisible(nn)) return null;
