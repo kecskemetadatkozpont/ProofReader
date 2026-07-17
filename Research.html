@@ -1091,7 +1091,7 @@
     .rmap-lh { position: absolute; top: 12px; left: 14px; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; color: var(--faint); white-space: nowrap; }
     .rmap-node { position: absolute; width: 204px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 1px 2px rgba(20,26,40,.05), 0 10px 26px -20px rgba(20,26,40,.5); padding: 10px 12px 10px 14px; cursor: pointer; container-type: inline-size; }
     /* resizable cards (migration-80): a sized card is a full size-container; content reflows via @container tiers */
-    .rmap-node.rmap-sized { container-type: size; overflow: hidden; }
+    .rmap-node.rmap-sized { container-type: size; }   /* NO overflow:hidden — it would clip the corner badges; the .rmap-nb wrapper clips the tier content instead */
     .rmap-node.rmap-resizing { transition: none !important; user-select: none; }
     .rmap-nb { display: flex; flex-direction: column; gap: 5px; min-height: 0; }
     .rmap-node.rmap-sized .rmap-nb { height: 100%; overflow: hidden; }
@@ -1231,7 +1231,7 @@
   <script type="text/babel" src="canvas.jsx?v=1783137934"></script>
   <script type="text/babel" src="notes.jsx?v=1783137934"></script>
   <script src="autopilot-core.js?v=1784160000"></script>
-  <script type="text/babel" src="research.jsx?v=1785300000"></script>
+  <script type="text/babel" src="research.jsx?v=1785310000"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>

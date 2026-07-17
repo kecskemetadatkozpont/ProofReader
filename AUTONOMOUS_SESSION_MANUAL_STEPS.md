@@ -101,6 +101,13 @@ sorrendben. A service-key nem tud DDL-t futtatni, ezért ezek manuálisak.
     - **Fázis 2.5 (B):** `⌗` „Rendezés fázisokba" (opcionális, megerősítéssel). **Nincs migráció.**
     - **Fázis 3 (A):** szemantikus zoom (LOD) + „arm-to-enter" (Enter a mélyre-zoomolt kártyába). **Nincs migráció.**
 
+11. **`backend/migration-80-card-size.sql`** — kézzel átméretezhető kártyák: `research_map_layout.card_w/card_h`
+    (NULL = auto). RLS változatlan. Amíg nincs lefuttatva: a kártyák sarok-fogantyúja NEM jelenik meg, minden
+    kártya a mai módon méreteződik (graceful, a load-probe 3-szintű). Utána: a kártya sarkát (◢) húzva átméretezhető,
+    és a tartalom a mérethez igazodik (CSS `@container`) — pl. a lépés-kártyán progress + jóváhagyás, az ábra-kártyán
+    thumbnail, ha elég nagyra húzod; `↺ Auto méret` a jobb-katt menüben visszaáll. (Ez a „gazdag kártya + 5. LOD"
+    irány **P0+P1** része; a P2 finomítás + a P3 beágyazott panel-ablak még jön.)
+
 ## Edge-function deploy-ok (explicit jóváhagyás + megnevezés kell)
 
 **NINCS** — ebben a munkamenetben egyetlen edge-function sem változott, deploy nem szükséges.
