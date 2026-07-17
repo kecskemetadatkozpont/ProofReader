@@ -1772,7 +1772,43 @@
     var phS = useState(''), phase = phS[0], setPhase = phS[1];      // '', outline, sections, assemble, done
     var pgS = useState(''), prog = pgS[0], setProg = pgS[1];
     var drS = useState(null), draft = drS[0], setDraft = drS[1];
+    var sgS = useState([]), suggestions = sgS[0], setSuggestions = sgS[1];   // draft suggestions (migration-76)
+    var sgcS = useState(false), suggestCap = sgcS[0], setSuggestCap = sgcS[1];   // migration-76 capability
+    var sgfS = useState(null), suggestFor = sgfS[0], setSuggestFor = sgfS[1];   // section index whose suggest composer is open
+    var sgtS = useState(''), suggestText = sgtS[0], setSuggestText = sgtS[1];
+    var sgnS = useState(''), suggestNote = sgnS[0], setSuggestNote = sgnS[1];
+    var wAlive = useRef(true); useEffect(function () { wAlive.current = true; return function () { wAlive.current = false; }; }, []);
     var busy = phase === 'outline' || phase === 'sections' || phase === 'assemble';
+    function loadSuggestions(did) {
+      if (!did) return;
+      sb.from('research_draft_suggestions').select('id,draft_id,section_key,section_heading,original,suggested,note,author,status,created_at').eq('draft_id', did).order('created_at', { ascending: false }).then(function (r) {
+        if (!wAlive.current) return; if (r && r.error) { setSuggestCap(false); return; } setSuggestCap(true); setSuggestions((r && r.data) || []);
+      });
+    }
+    useEffect(function () { if (draft && draft.id) loadSuggestions(draft.id); }, [draft && draft.id]);
+    function submitSuggestion(sec) {
+      var txt = String(suggestText || '').trim(); if (!txt || !draft || !draft.id) return;
+      sb.from('research_draft_suggestions').insert({ project_id: pid, draft_id: draft.id, section_key: sec.key, section_heading: sec.heading || sec.key, original: sec.latex || '', suggested: txt, note: String(suggestNote || '').trim() || null, author: props.authorId, status: 'pending' }).select('id,draft_id,section_key,section_heading,original,suggested,note,author,status,created_at').single().then(function (r) {
+        if (!wAlive.current) return;
+        if (r && r.error) { window.PRUI.toast('Javaslat mentése sikertelen: ' + r.error.message, { kind: 'error' }); return; }
+        if (r && r.data) setSuggestions(function (S) { return [r.data].concat(S); });
+        setSuggestFor(null); setSuggestText(''); setSuggestNote(''); window.PRUI.toast('Javaslat elküldve', { kind: 'success' });
+      });
+    }
+    function resolveSuggestion(sg, status) {
+      setSuggestions(function (S) { return S.map(function (x) { return x.id === sg.id ? Object.assign({}, x, { status: status }) : x; }); });
+      sb.from('research_draft_suggestions').update({ status: status, resolved_at: new Date().toISOString(), resolved_by: props.authorId }).eq('id', sg.id).then(function (r) { if (r && r.error && wAlive.current) { window.PRUI.toast('Nem sikerült: ' + r.error.message, { kind: 'error' }); loadSuggestions(draft && draft.id); } });
+    }
+    function acceptSuggestion(sg) {
+      if (!ce || !draft || !draft.sections) return;
+      var newSecs = draft.sections.map(function (s) { return s.key === sg.section_key ? Object.assign({}, s, { latex: sg.suggested }) : s; });
+      sb.from('research_drafts').update({ sections: newSecs, updated_at: new Date().toISOString() }).eq('id', draft.id).then(function (r) {
+        if (!wAlive.current) return;
+        if (r && r.error) { window.PRUI.toast('Alkalmazás sikertelen: ' + r.error.message, { kind: 'error' }); return; }
+        setDraft(function (d) { return Object.assign({}, d, { sections: newSecs }); }); resolveSuggestion(sg, 'accepted'); window.PRUI.toast('Javaslat alkalmazva a szekcióra', { kind: 'success' });
+      });
+    }
+    function pendingFor(key) { return suggestions.filter(function (s) { return s.section_key === key && s.status === 'pending'; }).length; }
     useEffect(function () {
       sb.from('research_journal_picks').select('id,title,status,npi_level,template').eq('project_id', pid).order('created_at').then(function (r) {
         var d = (r && r.data) || []; setPicks(d); var pick = d.filter(function (x) { return x.status === 'submitted'; })[0] || d[0]; if (pick) setJid(pick.id);
@@ -1865,7 +1901,32 @@
           draft.files && draft.files['refs.bib'] ? h('button', { className: 'btn', style: { padding: '5px 12px' }, onClick: function () { dl('refs.bib', draft.files['refs.bib'].content); } }, '⬇ refs.bib') : null),
         draft.existing ? h('div', { style: { fontSize: 11.5, color: 'var(--faint)', marginTop: 2 } }, 'Previously generated draft. Re-generate to refresh.') : null,
         (draft.outline && draft.outline.abstract) ? h('div', { style: { fontSize: 12.5, color: 'var(--muted)', marginTop: 8, lineHeight: 1.5 } }, h('b', null, 'Abstract. '), draft.outline.abstract) : null,
-        (draft.sections && draft.sections.length) ? h('div', { style: { marginTop: 10 } }, h('b', { style: { fontSize: 12 } }, 'Sections:'), h('ol', { style: { margin: '4px 0', paddingLeft: 20, fontSize: 12.5 } }, draft.sections.map(function (s, i) { return h('li', { key: i }, s.heading || s.key); }))) : null,
+        (draft.sections && draft.sections.length) ? h('div', { style: { marginTop: 10 } }, h('b', { style: { fontSize: 12 } }, 'Sections:'),
+          h('ol', { className: 'wp-secs', style: { margin: '4px 0', paddingLeft: 20, fontSize: 12.5 } }, draft.sections.map(function (s, i) {
+            return h('li', { key: i },
+              h('span', null, s.heading || s.key),
+              suggestCap ? h('button', { className: 'wp-sg-btn', title: 'Javaslat erre a szekcióra', onClick: function () { setSuggestFor(suggestFor === i ? null : i); setSuggestText(s.latex || ''); setSuggestNote(''); } }, '💡 Javaslat') : null,
+              pendingFor(s.key) ? h('span', { className: 'wp-sg-count', title: pendingFor(s.key) + ' függő javaslat' }, pendingFor(s.key)) : null,
+              (suggestFor === i) ? h('div', { className: 'wp-sg-composer' },
+                h('textarea', { rows: 5, value: suggestText, placeholder: 'Javasolt szöveg…', onChange: function (e) { setSuggestText(e.target.value); } }),
+                h('input', { className: 'wp-sg-note', value: suggestNote, placeholder: 'Indoklás (opcionális)…', onChange: function (e) { setSuggestNote(e.target.value); } }),
+                h('div', { style: { display: 'flex', gap: 6, justifyContent: 'flex-end' } },
+                  h('button', { className: 'btn', style: { fontSize: 12, padding: '4px 10px' }, onClick: function () { setSuggestFor(null); setSuggestText(''); } }, 'Mégse'),
+                  h('button', { className: 'btn pri', style: { fontSize: 12, padding: '4px 10px' }, disabled: !suggestText.trim(), onClick: function () { submitSuggestion(s); } }, 'Javaslat küldése'))) : null);
+          }))) : null,
+        // suggestions review (open suggesting mode — accept/reject/withdraw)
+        (suggestCap && suggestions.filter(function (s) { return s.status === 'pending'; }).length) ? h('div', { className: 'wp-sg-panel' },
+          h('b', { style: { fontSize: 12 } }, '💡 Javaslatok (' + suggestions.filter(function (s) { return s.status === 'pending'; }).length + ' függő)'),
+          suggestions.filter(function (s) { return s.status === 'pending'; }).map(function (sg) {
+            return h('div', { key: sg.id, className: 'wp-sg-item' },
+              h('div', { style: { fontSize: 11, fontWeight: 700, color: 'var(--muted)', marginBottom: 4 } }, (sg.section_heading || sg.section_key || 'szekció') + (sg.note ? ' — „' + sg.note + '"' : '')),
+              h('div', { className: 'wp-sg-diff' },
+                h('div', { className: 'wp-sg-old' }, String(sg.original || '(üres)').slice(0, 600)),
+                h('div', { className: 'wp-sg-new' }, String(sg.suggested || '').slice(0, 600))),
+              h('div', { style: { display: 'flex', gap: 6, marginTop: 6, justifyContent: 'flex-end' } },
+                ce ? h('button', { className: 'btn pri', style: { fontSize: 11.5, padding: '3px 10px' }, onClick: function () { acceptSuggestion(sg); } }, '✓ Elfogad') : null,
+                (ce || sg.author === props.authorId) ? h('button', { className: 'btn', style: { fontSize: 11.5, padding: '3px 10px' }, onClick: function () { resolveSuggestion(sg, 'rejected'); } }, ce ? '✕ Elutasít' : 'Visszavonás') : null));
+          })) : null,
         nFig ? h('div', { style: { fontSize: 11.5, color: 'var(--faint)', marginTop: 4 } }, nFig + ' figure' + (nFig === 1 ? '' : 's') + ' included.') : null
       ) : null
     );

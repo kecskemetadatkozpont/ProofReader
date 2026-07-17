@@ -937,6 +937,21 @@
     .rmap-step-collab { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 10px; padding: 9px 10px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 9px; }
     .rmap-step-row { display: flex; align-items: center; gap: 8px; }
     .rmap-step-l { font-size: 11px; font-weight: 700; color: var(--muted); min-width: 66px; flex: none; }
+    /* draft suggesting mode (WritingPanel) */
+    .wp-secs li { margin-bottom: 3px; }
+    .wp-sg-btn { margin-left: 8px; border: 1px solid var(--line); background: var(--surface); cursor: pointer; font-family: inherit; font-size: 10.5px; font-weight: 600; color: var(--muted); padding: 1px 8px; border-radius: 999px; }
+    .wp-sg-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .wp-sg-count { margin-left: 6px; background: var(--accent); color: #fff; font-size: 10px; font-weight: 800; border-radius: 999px; padding: 1px 6px; }
+    .wp-sg-composer { margin: 6px 0 8px; display: flex; flex-direction: column; gap: 6px; }
+    .wp-sg-composer textarea, .wp-sg-note { width: 100%; box-sizing: border-box; font-family: inherit; font-size: 12px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); resize: vertical; }
+    .wp-sg-composer textarea:focus, .wp-sg-note:focus { outline: none; border-color: var(--accent); }
+    .wp-sg-panel { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+    .wp-sg-item { border: 1px solid var(--line); border-radius: 9px; padding: 9px 11px; background: var(--surface-2); }
+    .wp-sg-diff { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .wp-sg-old, .wp-sg-new { font-size: 11px; line-height: 1.4; white-space: pre-wrap; word-break: break-word; padding: 6px 8px; border-radius: 6px; max-height: 160px; overflow-y: auto; font-family: ui-monospace, Menlo, monospace; }
+    .wp-sg-old { background: color-mix(in srgb, #b42318 8%, transparent); border: 1px solid color-mix(in srgb, #b42318 22%, transparent); }
+    .wp-sg-new { background: color-mix(in srgb, #059669 9%, transparent); border: 1px solid color-mix(in srgb, #059669 24%, transparent); }
+    @media (max-width: 640px) { .wp-sg-diff { grid-template-columns: 1fr; } }
     .rmap-cm-panel { position: absolute; left: 14px; bottom: 96px; z-index: 15; width: 288px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 18px 50px -20px rgba(20,26,40,.55); }
     /* Map pages (saved views) — top-left tab bar */
     .rmap-pagebar { position: absolute; top: 12px; left: 12px; z-index: 13; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; max-width: 60%; }
@@ -1103,7 +1118,7 @@
   <script type="text/babel" src="canvas.jsx?v=1783137934"></script>
   <script type="text/babel" src="notes.jsx?v=1783137934"></script>
   <script src="autopilot-core.js?v=1784160000"></script>
-  <script type="text/babel" src="research.jsx?v=1785030000"></script>
+  <script type="text/babel" src="research.jsx?v=1785040000"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>
