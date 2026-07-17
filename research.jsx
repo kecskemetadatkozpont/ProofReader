@@ -4364,6 +4364,12 @@
     var curS = useState({}), cursors = curS[0], setCursors = curS[1];   // live cursors from other users {id:{name,wx,wy,sel,ts,color}}
     var chRef = useRef(null);   // the Map realtime channel (for broadcasting my cursor)
     var lastCur = useRef(0);   // cursor-broadcast throttle timestamp
+    var pvS = useState({}), peerViews = pvS[0], setPeerViews = pvS[1];   // other users' viewports {id:{tx,ty,k}} (for follow-mode)
+    var folS = useState(null), following = folS[0], setFollowing = folS[1];   // id of the user I'm following (viewport-synced) or null
+    var ccS = useState({}), cursorChats = ccS[0], setCursorChats = ccS[1];   // transient cursor-chat bubbles {id:{text,ts}}
+    var ccInS = useState(null), ccInput = ccInS[0], setCcInput = ccInS[1];   // my open cursor-chat input text (null = closed)
+    var lastView = useRef(0);   // view-broadcast throttle timestamp
+    var followingRef = useRef(null);   // mirror of `following` for use inside event handlers
     var memS = useState(null), members = memS[0], setMembers = memS[1];   // project collaborators (migration-74) — null until loaded/capable
     var shareS = useState(false), shareOpen = shareS[0], setShareOpen = shareS[1];   // the Share/Collaborators modal
     var invqS = useState(''), invQ = invqS[0], setInvQ = invqS[1];   // invite: user search query
@@ -4430,6 +4436,14 @@
           if (!alive.current) return; var pl = m && m.payload; if (!pl || !pl.id || pl.id === props.viewerId) return;
           setCursors(function (C) { var n = Object.assign({}, C); n[pl.id] = { name: pl.name, wx: pl.wx, wy: pl.wy, sel: pl.sel, color: userColor(pl.id), ts: Date.now() }; return n; });
         })
+        .on('broadcast', { event: 'view' }, function (m) {
+          if (!alive.current) return; var pl = m && m.payload; if (!pl || !pl.id || pl.id === props.viewerId) return;
+          setPeerViews(function (V) { var n = Object.assign({}, V); n[pl.id] = { tx: pl.tx, ty: pl.ty, k: pl.k }; return n; });
+        })
+        .on('broadcast', { event: 'cursorchat' }, function (m) {
+          if (!alive.current) return; var pl = m && m.payload; if (!pl || !pl.id || pl.id === props.viewerId) return;
+          setCursorChats(function (C) { var n = Object.assign({}, C); if (pl.text) n[pl.id] = { text: String(pl.text).slice(0, 120), ts: Date.now() }; else delete n[pl.id]; return n; });
+        })
         .on('presence', { event: 'sync' }, function () {
           if (!alive.current) return;
           var st = ch.presenceState(), seen = {}, list = [];
@@ -4467,10 +4481,27 @@
         .subscribe(function (status) { if (status === 'SUBSCRIBED' && props.viewerId) { try { ch.track({ id: props.viewerId, name: me.name || 'Kolléga', avatar: me.avatar || null }); } catch (e) { } } });
       chRef.current = ch;
       // prune stale remote cursors (a user who left / went idle)
-      var prune = setInterval(function () { if (!alive.current) return; var now = Date.now(); setCursors(function (C) { var n = {}, changed = false; Object.keys(C).forEach(function (k) { if (now - C[k].ts < 6000) n[k] = C[k]; else changed = true; }); return changed ? n : C; }); }, 3000);
+      var prune = setInterval(function () {
+        if (!alive.current) return; var now = Date.now();
+        setCursors(function (C) { var n = {}, changed = false; Object.keys(C).forEach(function (k) { if (now - C[k].ts < 6000) n[k] = C[k]; else changed = true; }); return changed ? n : C; });
+        setCursorChats(function (C) { var n = {}, changed = false; Object.keys(C).forEach(function (k) { if (now - C[k].ts < 7000) n[k] = C[k]; else changed = true; }); return changed ? n : C; });
+      }, 3000);
       return function () { clearInterval(prune); chRef.current = null; try { sb.removeChannel(ch); } catch (e) { } };
     }, [props.projectId]);
     useEffect(function () { loadMembers(); }, [props.projectId]);   // collaborators (graceful: null pre-migration-74)
+    useEffect(function () { followingRef.current = following; }, [following]);
+    // broadcast my viewport (throttled) so followers can mirror it — but NOT while I'm following someone (avoids echo loops)
+    useEffect(function () {
+      if (!chRef.current || !props.viewerId || online.length <= 1 || following) return;
+      var now = Date.now(); if (now - lastView.current < 120) { var t = setTimeout(function () { if (chRef.current && !followingRef.current) { try { chRef.current.send({ type: 'broadcast', event: 'view', payload: { id: props.viewerId, tx: view.tx, ty: view.ty, k: view.k } }); } catch (e) { } } }, 130); return function () { clearTimeout(t); }; }
+      lastView.current = now;
+      try { chRef.current.send({ type: 'broadcast', event: 'view', payload: { id: props.viewerId, tx: view.tx, ty: view.ty, k: view.k } }); } catch (e) { }
+    }, [view, online.length, following]);
+    // while following someone, mirror their viewport as it arrives
+    useEffect(function () {
+      if (!following) return; var pv = peerViews[following]; if (!pv) return;
+      setView(function (v) { return (v.tx === pv.tx && v.ty === pv.ty && v.k === pv.k) ? v : { tx: pv.tx, ty: pv.ty, k: pv.k }; });
+    }, [following, peerViews]);
     useEffect(function () {   // invite user-search (debounced), only while the Share modal is open
       if (!shareOpen || !invQ.trim()) { setInvRes([]); return; }
       var t = setTimeout(function () { sb.rpc('pr_search_users', { q: invQ.trim() }).then(function (r) { if (alive.current) setInvRes((r && r.data) || []); }); }, 300);
@@ -4659,6 +4690,9 @@
       var p = stageXY(e), wx = Math.round((p.x - view.tx) / view.k), wy = Math.round((p.y - view.ty) / view.k);
       try { chn.send({ type: 'broadcast', event: 'cursor', payload: { id: props.viewerId, name: (props.viewer && props.viewer.name) || 'Kolléga', wx: wx, wy: wy, sel: sel || null } }); } catch (err) { }
     }
+    function stopFollow() { if (followingRef.current) setFollowing(null); }   // any manual view change breaks follow-mode
+    function toggleFollow(uid) { setFollowing(function (f) { return f === uid ? null : uid; }); }
+    function sendCursorChat(text) { var chn = chRef.current; if (!chn || !props.viewerId) return; try { chn.send({ type: 'broadcast', event: 'cursorchat', payload: { id: props.viewerId, name: (props.viewer && props.viewer.name) || 'Kolléga', text: text || '' } }); } catch (e) { } }
     function onMarqCancel() { mqRef.current = null; window.removeEventListener('mousemove', onMarqMove); window.removeEventListener('mouseup', onMarqUp); window.removeEventListener('blur', onMarqCancel); setMarquee(null); }
     function onMarqMove(e) { var mq = mqRef.current; if (!mq) return; if (e.buttons === 0) { onMarqUp(e); return; } var p = stageXY(e); setMarquee({ x0: mq.x0, y0: mq.y0, x1: p.x, y1: p.y }); }
     function onMarqUp(e) {
@@ -4678,10 +4712,10 @@
       // shift + drag on the empty canvas = marquee multi-select; a plain drag pans; a plain click clears the selection
       if (e.shiftKey) { var p = stageXY(e); mqRef.current = { x0: p.x, y0: p.y }; setMarquee({ x0: p.x, y0: p.y, x1: p.x, y1: p.y }); window.addEventListener('mousemove', onMarqMove); window.addEventListener('mouseup', onMarqUp); window.addEventListener('blur', onMarqCancel); return; }
       if (Object.keys(msel).length) setMsel({});
-      drag.current = { sx: e.clientX, sy: e.clientY, tx: view.tx, ty: view.ty }; window.addEventListener('mousemove', onMove); window.addEventListener('mouseup', onUp);
+      stopFollow(); drag.current = { sx: e.clientX, sy: e.clientY, tx: view.tx, ty: view.ty }; window.addEventListener('mousemove', onMove); window.addEventListener('mouseup', onUp);
     }
-    function onWheel(e) { e.preventDefault(); var st = stageRef.current; if (!st) return; var r = st.getBoundingClientRect(); var mx = e.clientX - r.left, my = e.clientY - r.top; setView(function (v) { var nk = Math.min(2.2, Math.max(.3, v.k * (e.deltaY < 0 ? 1.12 : 0.89))); return { tx: mx - (mx - v.tx) * (nk / v.k), ty: my - (my - v.ty) * (nk / v.k), k: nk }; }); }
-    function zoom(f) { setView(function (v) { var nk = Math.min(2.2, Math.max(.3, v.k * f)); return { tx: v.tx, ty: v.ty, k: nk }; }); }
+    function onWheel(e) { e.preventDefault(); stopFollow(); var st = stageRef.current; if (!st) return; var r = st.getBoundingClientRect(); var mx = e.clientX - r.left, my = e.clientY - r.top; setView(function (v) { var nk = Math.min(2.2, Math.max(.3, v.k * (e.deltaY < 0 ? 1.12 : 0.89))); return { tx: mx - (mx - v.tx) * (nk / v.k), ty: my - (my - v.ty) * (nk / v.k), k: nk }; }); }
+    function zoom(f) { stopFollow(); setView(function (v) { var nk = Math.min(2.2, Math.max(.3, v.k * f)); return { tx: v.tx, ty: v.ty, k: nk }; }); }
     // fit the whole graph into the viewport (Luma "illeszd a nézetbe"). Uses card size 204x74.
     function fitView() {
       var st = stageRef.current; if (!st || !g.N || !g.N.length) return;
@@ -5397,10 +5431,18 @@
             h('button', { title: 'Lap törlése', onClick: function () { pageDelete(activePageObj); } }, '🗑')) : null) : null,
         // presence (who's online) + Share button — top-right
         h('div', { className: 'rmap-presence', onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
-          (online.length > 1) ? h('div', { className: 'rmap-avstack', title: online.length + ' online' },
-            online.slice(0, 5).map(function (u, i) { return h('div', { key: u.id, className: 'rmap-av' + (u.self ? ' me' : ''), style: { zIndex: 10 - i }, title: (u.name || 'Kolléga') + (u.self ? ' (te)' : '') }, u.avatar ? h('img', { src: u.avatar, alt: '' }) : (String(u.name || '?').trim().charAt(0).toUpperCase() || '?')); }),
+          (online.length > 1) ? h('div', { className: 'rmap-avstack', title: 'Kattints egy kollégára a követéshez' },
+            online.slice(0, 5).map(function (u, i) { return u.self ? h('div', { key: u.id, className: 'rmap-av me', style: { zIndex: 10 - i }, title: (u.name || 'Kolléga') + ' (te)' }, u.avatar ? h('img', { src: u.avatar, alt: '' }) : (String(u.name || '?').trim().charAt(0).toUpperCase() || '?')) : h('button', { key: u.id, className: 'rmap-av rmap-av-btn' + (following === u.id ? ' rmap-av-follow' : ''), style: { zIndex: 10 - i, boxShadow: following === u.id ? '0 0 0 2px ' + userColor(u.id) : null }, title: (following === u.id ? 'Követés leállítása: ' : 'Követés: ') + (u.name || 'Kolléga'), onClick: function () { toggleFollow(u.id); } }, u.avatar ? h('img', { src: u.avatar, alt: '' }) : (String(u.name || '?').trim().charAt(0).toUpperCase() || '?')); }),
             online.length > 5 ? h('div', { className: 'rmap-av more' }, '+' + (online.length - 5)) : null) : null,
+          (online.length > 1) ? h('button', { className: 'rmap-share-btn', title: 'Kurzor-chat: rövid üzenet a kurzorod mellett', onClick: function () { setCcInput(ccInput == null ? '' : null); if (ccInput != null) sendCursorChat(''); } }, ccInput == null ? '💬' : '✕') : null,
           h('button', { className: 'rmap-share-btn', title: 'Megosztás / közreműködők', onClick: function () { setShareOpen(true); loadMembers(); } }, '👥 Megosztás')),
+        // cursor-chat input (broadcasts live to peers, shown above my cursor on their screen)
+        (ccInput != null) ? h('div', { className: 'rmap-ccinput', onMouseDown: function (e) { e.stopPropagation(); } },
+          h('input', { autoFocus: true, value: ccInput, placeholder: 'Üzenet a kurzorod mellé…', maxLength: 120, onChange: function (e) { setCcInput(e.target.value); sendCursorChat(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter') { setCcInput(null); } else if (e.key === 'Escape') { sendCursorChat(''); setCcInput(null); } } })) : null,
+        // follow-mode banner
+        following ? h('div', { className: 'rmap-follow-bar', onMouseDown: function (e) { e.stopPropagation(); }, style: { borderColor: userColor(following) } },
+          h('span', null, '👁 Követed: ' + nameOf(following)),
+          h('button', { onClick: function () { setFollowing(null); } }, 'Leállítás')) : null,
         // marquee selection rectangle (shift-drag on the empty canvas)
         marquee ? h('div', { className: 'rmap-marquee', style: { position: 'absolute', left: Math.min(marquee.x0, marquee.x1) + 'px', top: Math.min(marquee.y0, marquee.y1) + 'px', width: Math.abs(marquee.x1 - marquee.x0) + 'px', height: Math.abs(marquee.y1 - marquee.y0) + 'px', pointerEvents: 'none', zIndex: 12 } }) : null,
         // remote selection rings — highlight the card another user has selected, in their color
@@ -5411,9 +5453,11 @@
         // live remote cursors (screen coords → follow pan/zoom)
         Object.keys(cursors).map(function (uid) {
           var c = cursors[uid];
+          var cc = cursorChats[uid];
           return h('div', { key: 'cur' + uid, className: 'rmap-cursor', style: { position: 'absolute', left: (view.tx + c.wx * view.k) + 'px', top: (view.ty + c.wy * view.k) + 'px', zIndex: 20, pointerEvents: 'none' } },
             h('svg', { width: 16, height: 16, viewBox: '0 0 16 16' }, h('path', { d: 'M2,2 L2,13 L5.5,9.5 L8,14 L10,13 L7.5,8.5 L12,8.5 Z', fill: c.color, stroke: '#fff', strokeWidth: 1 })),
-            h('span', { className: 'rmap-cursor-lbl', style: { background: c.color } }, c.name || 'Kolléga'));
+            h('span', { className: 'rmap-cursor-lbl', style: { background: c.color } }, c.name || 'Kolléga'),
+            (cc && cc.text) ? h('span', { className: 'rmap-cursor-chat', style: { borderColor: c.color } }, cc.text) : null);
         }),
         // free-position comment pins (screen coords → follow pan/zoom)
         (commentsCap && cmPos.length) ? cmPos.map(function (c) {
