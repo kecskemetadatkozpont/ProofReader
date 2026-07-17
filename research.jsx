@@ -4239,6 +4239,23 @@
     var bmS = useState(0), bump = bmS[0], setBump = bmS[1];   // reload after a save
     var rfS = useState(false), refreshing = rfS[0], setRefreshing = rfS[1];   // manual "re-render" — reload the map data
     function refreshMap() { setBump(function (x) { return x + 1; }); setRefreshing(true); setTimeout(function () { if (alive.current) setRefreshing(false); }, 700); }
+    var fuS = useState({}), figUrls = fuS[0], setFigUrls = fuS[1];   // storage_path → signed URL (figure previews)
+    var roS = useState(false), restoreOpen = roS[0], setRestoreOpen = roS[1];   // the "hidden figures" restore panel
+    var figLoading = useRef({});
+    // lazily sign the storage URLs for a set of figures (idempotent; in-flight guarded)
+    function ensureFigUrls(figs) {
+      var paths = (figs || []).map(function (f) { return f && f.storage_path; }).filter(function (pp) { return pp && !figUrls[pp] && !figLoading.current[pp]; });
+      if (!paths.length) return;
+      paths.forEach(function (pp) { figLoading.current[pp] = 1; });
+      sb.storage.from('research-data').createSignedUrls(paths, 3600).then(function (r) {
+        paths.forEach(function (pp) { delete figLoading.current[pp]; });
+        if (!alive.current) return; var add = {}; ((r && r.data) || []).forEach(function (x) { if (x && x.signedUrl && x.path) add[x.path] = x.signedUrl; });
+        if (Object.keys(add).length) setFigUrls(function (prev) { return Object.assign({}, prev, add); });
+      }, function () { paths.forEach(function (pp) { delete figLoading.current[pp]; }); });
+    }
+    // curate: show/hide a figure on the Map (research_figures.on_map). Fire-and-forget; refresh on success.
+    // Needs migration-69; the update silently no-ops if the column is absent (the Map just keeps showing all figures).
+    function figSetOnMap(figId, val) { sb.from('research_figures').update({ on_map: val }).eq('id', figId).then(function (r) { if (!alive.current) return; if (!(r && r.error)) setBump(function (x) { return x + 1; }); }, function () { }); }
     var loS = useState(false), litOpen = loS[0], setLitOpen = loS[1];   // F4: expand the study funnel's paper nodes (collapsed by default)
     var mnS = useState(null), menu = mnS[0], setMenu = mnS[1];   // F1: node "generate from here" context menu {node,x,y}
     var gbS = useState(false), genBusy = gbS[0], setGenBusy = gbS[1];
@@ -4321,16 +4338,22 @@
         sb.from('research_datasets').select('id,name,source,status,size_bytes,notes').eq('project_id', pid).order('created_at', { ascending: true }).limit(16),
         sb.from('research_files').select('id,path,size,source').eq('project_id', pid).not('path', 'like', 'writing/%').not('path', 'like', 'studies/%').order('updated_at', { ascending: false }).limit(16),
         sb.from('research_chats').select('id,title,updated_at').eq('project_id', pid).order('updated_at', { ascending: false }).limit(8),
-        sb.from('research_figures').select('id,source_id,fig_label,caption').eq('project_id', pid).eq('hidden', false).order('created_at', { ascending: true }).limit(16),
+        sb.from('research_figures').select('id,source_id,fig_label,caption,storage_path').eq('project_id', pid).eq('hidden', false).order('created_at', { ascending: true }).limit(16),
         // SR/Elicit provenance: the "Study basis" review-question candidates (linked to their idea) + the launched Elicit reviews
         sb.from('research_sr_candidates').select('id,idea_id,question,launched_job_id').eq('project_id', pid).eq('dismissed', false).order('created_at', { ascending: true }).limit(16),
-        sb.from('elicit_jobs').select('id,research_question,status,result_title').eq('project_id', pid).eq('kind', 'sysreview').order('created_at', { ascending: true }).limit(16)
+        sb.from('elicit_jobs').select('id,research_question,status,result_title').eq('project_id', pid).eq('kind', 'sysreview').order('created_at', { ascending: true }).limit(16),
+        // figures the user REMOVED from the Map (on_map=false) — for the restore panel. Graceful: pre-migration-69 the
+        // column is absent → this query errors → [] → no filtering, no panel (the Map shows all figures as before).
+        sb.from('research_figures').select('id,source_id,fig_label,caption,storage_path').eq('project_id', pid).eq('hidden', false).eq('on_map', false).order('created_at', { ascending: true }).limit(30)
       ]).then(function (r) {
         if (!alive.current) return;
         var base = { ideas: (r[0].data) || [], studies: (r[1].data) || [], topSrc: (r[2].data) || [], srcTotal: r[3].count || 0, inclTotal: r[4].count || 0, protocol: (r[5].data && r[5].data[0]) || null, journals: (r[6].data) || [], wfiles: (r[7].data) || [], datasets: (r[8] && r[8].data) || [], mfiles: (r[9] && r[9].data) || [], chats: (r[10] && r[10].data) || [], figures: (r[11] && r[11].data) || [], srcands: (r[12] && r[12].data) || [], sreviews: (r[13] && r[13].data) || [] };
+        // remove Map-hidden figures (on_map=false) client-side + keep them for the restore panel
+        var hiddenFigs = (r[14] && !r[14].error && r[14].data) ? r[14].data : []; var hidSet = {}; hiddenFigs.forEach(function (x) { hidSet[x.id] = 1; });
+        base.figures = base.figures.filter(function (f) { return !hidSet[f.id]; }); base.hiddenFigs = hiddenFigs;
         if (base.protocol) sb.from('research_protocol_steps').select('id,ord,title,kind,status,needs_approval').eq('protocol_id', base.protocol.id).order('ord', { ascending: true }).then(function (sr) { if (alive.current) setData(Object.assign(base, { steps: (sr.data) || [] })); });
         else setData(Object.assign(base, { steps: [] }));
-      }, function () { if (alive.current) setData({ ideas: [], studies: [], topSrc: [], srcTotal: 0, inclTotal: 0, protocol: null, journals: [], wfiles: [], steps: [], datasets: [], mfiles: [], chats: [], figures: [], srcands: [], sreviews: [] }); });
+      }, function () { if (alive.current) setData({ ideas: [], studies: [], topSrc: [], srcTotal: 0, inclTotal: 0, protocol: null, journals: [], wfiles: [], steps: [], datasets: [], mfiles: [], chats: [], figures: [], srcands: [], sreviews: [], hiddenFigs: [] }); });
     }, [props.projectId, bump]);
     // measure each card's REAL rendered height after paint → feed the no-overlap rule with true heights (estimates
     // undershoot long-title cards, e.g. the H1/H2 hypotheses, leaving residual overlap). Converges in one extra render.
@@ -4863,8 +4886,20 @@
           h('a', { className: 'btn', style: { padding: '3px 10px', fontSize: 11.5, textDecoration: 'none', marginLeft: 'auto' }, href: 'Autopilot.html?run=' + run.id, target: '_blank', rel: 'noopener' }, 'Dashboard ↗')) : null,
         h('div', { className: 'rmap-zoom' },
           h('button', { title: 'Térkép újratöltése a legfrissebb adatokkal (a módosítások érvényesítése)', disabled: refreshing, onClick: refreshMap }, refreshing ? '⏳' : '🔄'),
+          (data && data.hiddenFigs && data.hiddenFigs.length) ? h('button', { title: 'Térképről levett ábrák visszahozása', onClick: function () { setRestoreOpen(true); } }, '🖼' + data.hiddenFigs.length) : null,
           (props.canEdit && Object.keys(layout).length) ? h('button', { title: 'Automatikus elrendezés (a saját pozíciók törlése)', onClick: resetLayout }, '↺') : null,
           h('button', { onClick: function () { zoom(1.18); } }, '+'), h('button', { onClick: function () { zoom(0.85); } }, '−')),
+        // "hidden figures" restore panel — bring Map-removed figures (on_map=false) back onto the Map
+        (restoreOpen && data && data.hiddenFigs) ? h('div', { style: { position: 'absolute', left: 14, bottom: 96, zIndex: 14, width: 264, maxHeight: '58%', overflowY: 'auto', background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 12, boxShadow: '0 18px 50px -20px rgba(20,26,40,.55)', padding: 12 }, onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
+          (function () { ensureFigUrls(data.hiddenFigs); return null; })(),
+          h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 9 } }, h('b', { style: { fontSize: 12.5 } }, '🖼 Rejtett ábrák (' + data.hiddenFigs.length + ')'), h('button', { style: { border: 'none', background: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: 16, lineHeight: 1 }, onClick: function () { setRestoreOpen(false); } }, '×')),
+          data.hiddenFigs.length ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 7 } }, data.hiddenFigs.map(function (f) {
+            var furl = figUrls[f.storage_path];
+            return h('div', { key: f.id, style: { display: 'flex', gap: 8, alignItems: 'center' } },
+              furl ? h('img', { src: furl, alt: '', style: { width: 46, height: 34, objectFit: 'cover', borderRadius: 5, border: '1px solid var(--line)', flex: 'none' } }) : h('div', { style: { width: 46, height: 34, borderRadius: 5, background: 'var(--surface-2)', flex: 'none' } }),
+              h('span', { style: { flex: 1, minWidth: 0, fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, f.fig_label || String(f.caption || 'ábra').slice(0, 30)),
+              props.canEdit ? h('button', { className: 'btn', style: { fontSize: 11, padding: '3px 9px', flex: 'none' }, title: 'Vissza a térképre', onClick: function () { figSetOnMap(f.id, true); } }, '↩ Vissza') : null);
+          })) : h('div', { style: { fontSize: 12, color: 'var(--faint)' } }, 'Nincs rejtett ábra.')) : null,
         h('div', { className: 'rmap-hint' }, (props.canEdit ? 'Húzd a kártyát = áthelyezés · ' : '') + 'húzd a hátteret = pan · görgő = zoom'),
         // edge legend — what the connecting lines mean (non-blocking overlay). Bottom-left, above the zoom controls,
         // so it never collides with the top-spanning autopilot runbar. Swatch colors match the actual edge strokes.
@@ -4896,6 +4931,14 @@
         h('div', { className: 'rmap-insp-h' }, h('span', { className: 'rmap-ni' }, RMAP_TYPE[sn.t].ic), h('div', { style: { minWidth: 0 } }, h('b', null, sn.title), h('div', { className: 'rmap-insp-ty' }, RMAP_TYPE[sn.t].lab)), h('button', { className: 'rmap-insp-x', onClick: function () { setSel(null); } }, '×')),
         h('div', { className: 'rmap-insp-b' },
           h('div', { className: 'rmap-kv' }, Object.keys(sn.m).map(function (kk) { return [h('span', { className: 'k', key: 'k' + kk }, kk), h('span', { className: 'v', key: 'v' + kk }, sn.m[kk])]; })),
+          // figure node: expand → show the extracted image preview + "remove from the Map" (on_map=false)
+          (sn.t === 'figure' && sn.ref && sn.ref.storage_path) ? (function () {
+            ensureFigUrls([sn.ref]); var furl = figUrls[sn.ref.storage_path];
+            return h('div', { style: { margin: '4px 0 10px' } },
+              furl ? h('img', { src: furl, alt: sn.ref.fig_label || 'ábra', loading: 'lazy', style: { width: '100%', maxHeight: 220, objectFit: 'contain', borderRadius: 8, border: '1px solid var(--line)', background: 'var(--surface-2)', display: 'block' } })
+                : h('div', { style: { fontSize: 12, color: 'var(--faint)', padding: '20px 0', textAlign: 'center', border: '1px dashed var(--line)', borderRadius: 8 } }, '⏳ Ábra betöltése…'),
+              props.canEdit ? h('button', { className: 'btn', style: { fontSize: 12, marginTop: 8 }, title: 'A figyelmet elvéve a térképről (a Figure Boardon marad); a bal alsó „Rejtett ábrák" panelből visszahozható', onClick: function () { figSetOnMap(sn.ref.id, false); setSel(null); } }, '🙈 Levétel a térképről') : null);
+          })() : null,
           h('div', { className: 'rmap-insp-acts' },
             (props.canEdit && editSpec(sn)) ? h('button', { className: 'btn pri', style: { fontSize: 12 }, onClick: function () { openEdit(sn); } }, '✎ Metaadat szerkesztése') : null,
             (props.canEdit && regenActions(sn).length) ? h('button', { className: 'btn', style: { fontSize: 12 }, disabled: genBusy, onClick: function () { runGen(sn, regenActions(sn)[0][0]); } }, regenActions(sn)[0][1]) : null,
