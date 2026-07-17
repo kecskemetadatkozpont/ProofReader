@@ -1089,7 +1089,31 @@
     .rmap-lane { position: absolute; top: 0; border-right: 1px dashed var(--line-2); }
     .rmap-lane.alt { background: color-mix(in srgb, var(--surface) 45%, transparent); }
     .rmap-lh { position: absolute; top: 12px; left: 14px; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; color: var(--faint); white-space: nowrap; }
-    .rmap-node { position: absolute; width: 204px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 1px 2px rgba(20,26,40,.05), 0 10px 26px -20px rgba(20,26,40,.5); padding: 10px 12px 10px 14px; cursor: pointer; }
+    .rmap-node { position: absolute; width: 204px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 1px 2px rgba(20,26,40,.05), 0 10px 26px -20px rgba(20,26,40,.5); padding: 10px 12px 10px 14px; cursor: pointer; container-type: inline-size; }
+    /* resizable cards (migration-80): a sized card is a full size-container; content reflows via @container tiers */
+    .rmap-node.rmap-sized { container-type: size; overflow: hidden; }
+    .rmap-node.rmap-resizing { transition: none !important; user-select: none; }
+    .rmap-nb { display: flex; flex-direction: column; gap: 5px; min-height: 0; }
+    .rmap-node.rmap-sized .rmap-nb { height: 100%; overflow: hidden; }
+    .rmap-node-rz { position: absolute; right: 1px; bottom: 1px; width: 15px; height: 15px; cursor: nwse-resize; z-index: 4; opacity: 0; }
+    .rmap-node-rz::after { content: "◢"; position: absolute; right: 1px; bottom: -2px; font-size: 11px; color: var(--muted); }
+    .rmap-node:hover .rmap-node-rz, .rmap-node.sel .rmap-node-rz { opacity: .55; }
+    .rmap-node-rz:hover { opacity: 1 !important; }
+    /* tier blocks: hidden by default; revealed by @container as the card grows (size = the reflow driver) */
+    .rmap-t { display: none; }
+    .rmap-t-fig { flex: 1; min-height: 42px; }
+    .rmap-pv-img { width: 100%; height: 100%; object-fit: contain; border-radius: 6px; border: 1px solid var(--line); background: var(--surface-2); display: block; }
+    .rmap-pv-imgph { font-size: 10px; color: var(--faint); text-align: center; padding: 10px 0; border: 1px dashed var(--line); border-radius: 6px; }
+    .rmap-pv-prog { height: 6px; border-radius: 4px; background: var(--surface-2); border: 1px solid var(--line); overflow: hidden; } .rmap-pv-prog i { display: block; height: 100%; background: var(--accent); }
+    .rmap-pv-meta { font-size: 10px; color: var(--muted); }
+    .rmap-pv-btn { border: 1px solid var(--line); background: var(--surface); cursor: pointer; font-family: inherit; font-size: 10px; font-weight: 700; color: var(--ink); padding: 3px 9px; border-radius: 7px; align-self: flex-start; }
+    .rmap-pv-btn.ok { border-color: color-mix(in srgb, #12885f 60%, var(--line)); color: #12885f; }
+    .rmap-pv-btn.pri { border-color: var(--accent); color: var(--accent); }
+    @container (min-width: 184px) and (min-height: 104px) { .rmap-node.rmap-sized .rmap-t-l { display: flex; flex-direction: column; gap: 4px; } }
+    @container (min-height: 118px) { .rmap-node.rmap-sized .rmap-t-fig { display: block; } }
+    @container (min-width: 320px) and (min-height: 224px) { .rmap-node.rmap-sized .rmap-t-xl { display: block; } }
+    /* far-zoom cap: never render the heavy tiers when the whole map is zoomed way out (readability + paint budget) */
+    .rmap-lod-0 .rmap-t-l, .rmap-lod-0 .rmap-t-xl, .rmap-lod-0 .rmap-t-fig { display: none !important; }
     .rmap-node::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; border-radius: 12px 0 0 12px; background: var(--nc, var(--accent)); }
     .rmap-node:hover { border-color: var(--nc, var(--accent)); }
     .rmap-node.sel { border-color: var(--nc, var(--accent)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--nc, var(--accent)) 22%, transparent); }
@@ -1207,7 +1231,7 @@
   <script type="text/babel" src="canvas.jsx?v=1783137934"></script>
   <script type="text/babel" src="notes.jsx?v=1783137934"></script>
   <script src="autopilot-core.js?v=1784160000"></script>
-  <script type="text/babel" src="research.jsx?v=1785250000"></script>
+  <script type="text/babel" src="research.jsx?v=1785300000"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>

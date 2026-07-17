@@ -4399,6 +4399,10 @@
     var rnS = useState(null), run = rnS[0], setRun = rnS[1];   // P1b: the project's active Autopilot run (live)
     var lyS = useState({}), layout = lyS[0], setLayout = lyS[1];   // saved free-drag positions (node_id → {x,y,hidden,pinned}); overrides the auto-layout + pins the card
     var mfS = useState(false), mapFlags = mfS[0], setMapFlags = mfS[1];   // migration-70 capability: pin/hide columns present → show that UI
+    var cszS = useState(false), cardSizeCap = cszS[0], setCardSizeCap = cszS[1];   // migration-80 capability: card_w/card_h columns present → resizable cards
+    var nrzS = useState(null), nrzLive = nrzS[0], setNrzLive = nrzS[1];   // in-flight card resize {id,w,h}
+    var nrzRef = useRef(null);   // card-resize lifecycle guard
+    var sizeGenS = useState(0), sizeGen = sizeGenS[0], setSizeGen = sizeGenS[1];   // bump to re-run no-overlap after a resize settles
     var dlS = useState(null), dlive = dlS[0], setDlive = dlS[1];   // the node currently being dragged {id,x,y} — follows the cursor 1:1
     var msS = useState({}), msel = msS[0], setMsel = msS[1];   // multi-selection: {node_id: true} (shift-click / marquee)
     var glS = useState(null), gLive = glS[0], setGLive = glS[1];   // group drag {dx,dy,base:{id:{x,y}},ids} — moves all msel together
@@ -4488,13 +4492,20 @@
     useEffect(function () {
       var pid = props.projectId;
       sb.from('research_autopilot_runs').select('*').eq('project_id', pid).not('status', 'in', '("done","failed","cancelled")').order('updated_at', { ascending: false }).limit(1).maybeSingle().then(function (r) { if (alive.current) { setRun((r && r.data) || null); ensureDrive(r && r.data); } });
-      // load the saved free-drag layout (node_id → {x,y,hidden,pinned}); the Map overrides auto-layout with these.
-      // probe the migration-70 flag columns; if absent (pre-migration) fall back to the basic select and keep pin/hide UI off.
-      sb.from('research_map_layout').select('node_id,x,y,hidden,pinned').eq('project_id', pid).then(function (r) {
+      // load the saved free-drag layout (node_id → {x,y,hidden,pinned,card_w,card_h}); the Map overrides auto-layout.
+      // 3-tier graceful probe: migration-80 (card size) → migration-70 (pin/hide) → basic. Sets caps accordingly.
+      sb.from('research_map_layout').select('node_id,x,y,hidden,pinned,card_w,card_h').eq('project_id', pid).then(function (r) {
         if (!alive.current) return;
-        if (r && r.error) { sb.from('research_map_layout').select('node_id,x,y').eq('project_id', pid).then(function (r2) { if (!alive.current) return; var m = {}; ((r2 && r2.data) || []).forEach(function (row) { m[row.node_id] = { x: row.x, y: row.y }; }); setLayout(m); }); return; }
-        setMapFlags(true);
-        var m = {}; ((r && r.data) || []).forEach(function (row) { m[row.node_id] = { x: row.x, y: row.y, hidden: !!row.hidden, pinned: !!row.pinned }; }); setLayout(m);
+        if (r && r.error) {
+          sb.from('research_map_layout').select('node_id,x,y,hidden,pinned').eq('project_id', pid).then(function (r2) {
+            if (!alive.current) return;
+            if (r2 && r2.error) { sb.from('research_map_layout').select('node_id,x,y').eq('project_id', pid).then(function (r3) { if (!alive.current) return; var m = {}; ((r3 && r3.data) || []).forEach(function (row) { m[row.node_id] = { x: row.x, y: row.y }; }); setLayout(m); }); return; }
+            setMapFlags(true); var m2 = {}; ((r2 && r2.data) || []).forEach(function (row) { m2[row.node_id] = { x: row.x, y: row.y, hidden: !!row.hidden, pinned: !!row.pinned }; }); setLayout(m2);
+          });
+          return;
+        }
+        setMapFlags(true); setCardSizeCap(true);
+        var m = {}; ((r && r.data) || []).forEach(function (row) { m[row.node_id] = { x: row.x, y: row.y, hidden: !!row.hidden, pinned: !!row.pinned, card_w: row.card_w, card_h: row.card_h }; }); setLayout(m);
       });
       // load Map frames (named regions) — graceful: pre-migration-71 the table is absent → framesCap stays false, no frames UI
       sb.from('research_map_frames').select('id,title,x,y,w,h,color').eq('project_id', pid).then(function (r) {
@@ -4539,7 +4550,8 @@
           if (p.eventType === 'DELETE') { var oid = p.old && p.old.node_id; if (oid) setLayout(function (L) { var m = Object.assign({}, L); delete m[oid]; return m; }); return; }
           var nw = p.new; if (!nw || !nw.node_id) return;
           if (ndrag.current && ndrag.current.id === nw.node_id) return;   // ignore the echo of my own in-flight drag
-          setLayout(function (L) { var m = Object.assign({}, L); m[nw.node_id] = { x: nw.x, y: nw.y, hidden: !!nw.hidden, pinned: !!nw.pinned }; return m; });
+          if (nrzRef.current && nrzRef.current.id === nw.node_id) return;   // ignore the echo of my own in-flight card resize
+          setLayout(function (L) { var m = Object.assign({}, L); m[nw.node_id] = { x: nw.x, y: nw.y, hidden: !!nw.hidden, pinned: !!nw.pinned, card_w: nw.card_w, card_h: nw.card_h }; return m; });
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'research_map_frames', filter: 'project_id=eq.' + pid }, function (p) {
           if (!alive.current) return;
@@ -4663,7 +4675,7 @@
       for (var i = 0; i < els.length; i++) { var id = els[i].getAttribute('data-nid'), hh = els[i].offsetHeight; if (hh) { m[id] = hh; if (Math.abs((hgt[id] || 0) - hh) > 2) changed = true; } }
       if (Object.keys(m).length !== Object.keys(hgt).length) changed = true;
       if (changed) setHgt(m);
-    }, [data, bump, litOpen]);   // only re-measure when the node set/content changes — not on pan/zoom/select
+    }, [data, bump, litOpen, sizeGen]);   // re-measure when the node set/content changes or a card was resized/reset — not on pan/zoom/select
     // F7: the refine-chat thread is per-node → clear it whenever the selection changes; selRef tracks the live selection
     // so an in-flight refine callback knows whether the user is still on the node it was started from.
     useEffect(function () { setRcMsgs([]); setRcInput(''); setRcBusy(!!refBusy.current[sel]); selRef.current = sel; }, [sel]);
@@ -4676,15 +4688,15 @@
     // allowed to overlap them on purpose), and two movable cards split the push. So the user's own arrangement is
     // never disturbed; only never-placed cards auto-tuck into free space.
     function separateNodes(N, pinned) {
-      var W = 204, PX = 16, PY = 14;
+      var PX = 16, PY = 14;
       for (var it = 0; it < 60; it++) {
         var moved = false;
         for (var i = 0; i < N.length; i++) for (var j = i + 1; j < N.length; j++) {
           var a = N[i], b = N[j], pa = !!(pinned && pinned[a.id]), pb = !!(pinned && pinned[b.id]);
           if (pa && pb) continue;   // both user-placed → leave any overlap alone (deliberate)
-          var ha = a._h || 78, hb = b._h || 78;
-          var dx = (b.x + W / 2) - (a.x + W / 2), dy = (b.y + hb / 2) - (a.y + ha / 2);
-          var ox = (W + PX) - Math.abs(dx), oy = (ha / 2 + hb / 2 + PY) - Math.abs(dy);
+          var ha = a._h || 78, hb = b._h || 78, wa = a._w || 204, wb = b._w || 204;
+          var dx = (b.x + wb / 2) - (a.x + wa / 2), dy = (b.y + hb / 2) - (a.y + ha / 2);
+          var ox = (wa / 2 + wb / 2 + PX) - Math.abs(dx), oy = (ha / 2 + hb / 2 + PY) - Math.abs(dy);
           if (ox > 0.5 && oy > 0.5) {
             moved = true;
             if (ox <= oy) { var sx = (dx >= 0 ? 1 : -1) * ox; if (pa) b.x += sx; else if (pb) a.x -= sx; else { a.x -= sx / 2; b.x += sx / 2; } }
@@ -4768,7 +4780,12 @@
         else if (d.ideas.length) E.push(['i' + d.ideas[0].id, 'e' + jb.id]);
       });
       // each card's height: the REAL measured value once available (hgt), else a generous estimate for the first paint
-      N.forEach(function (n) { n._h = hgt[n.id] || (72 + Math.min(4, Math.ceil(String(n.title || '').length / 22)) * 17); });
+      N.forEach(function (n) {
+        var ly = layout[n.id];
+        n._w = (ly && ly.card_w) || 204;   // manual width (migration-80) or the default (NW)
+        n._h = (ly && ly.card_h) || hgt[n.id] || (72 + Math.min(4, Math.ceil(String(n.title || '').length / 22)) * 17);   // manual height or measured or estimated
+        if (nrzLive && nrzLive.id === n.id) { n._w = nrzLive.w; n._h = nrzLive.h; }   // follow the in-flight resize 1:1
+      });
       // column-less TIMELINE layout: phases seed left→right (ideas → literature → SR → protocol → journal → writing) so
       // derivation reads as a timeline; cards stack within a phase. Free-drag takes over from here.
       var cnt = {}, CEN = [{ x: 30, y: 90 }, { x: 350, y: 40 }, { x: 670, y: 150 }, { x: 990, y: 60 }, { x: 1310, y: 170 }, { x: 1630, y: 90 }];
@@ -4810,7 +4827,7 @@
       var p = stageXY(e), x0 = Math.min(mq.x0, p.x), x1 = Math.max(mq.x0, p.x), y0 = Math.min(mq.y0, p.y), y1 = Math.max(mq.y0, p.y);
       if (x1 - x0 < 5 && y1 - y0 < 5) return;   // a tiny box = a click, not a marquee
       var k = view.k, add = {};
-      g.N.forEach(function (n) { if (n.mapHidden) return; var nx = view.tx + n.x * k, ny = view.ty + n.y * k, nw = 204 * k, nh = 74 * k; if (nx < x1 && nx + nw > x0 && ny < y1 && ny + nh > y0) add[n.id] = true; });
+      g.N.forEach(function (n) { if (n.mapHidden) return; var nx = view.tx + n.x * k, ny = view.ty + n.y * k, nwid = nodeW(n) * k, nhig = nodeH(n) * k; if (nx < x1 && nx + nwid > x0 && ny < y1 && ny + nhig > y0) add[n.id] = true; });
       setMsel(function (M) { return Object.assign({}, M, add); });
     }
     function onDown(e) {
@@ -4828,7 +4845,7 @@
     function fitView() {
       var st = stageRef.current; if (!st || !g.N || !g.N.length) return;
       var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-      g.N.forEach(function (n) { if (!nodeVisible(n)) return; if (n.x < minX) minX = n.x; if (n.y < minY) minY = n.y; if (n.x + 204 > maxX) maxX = n.x + 204; if (n.y + 74 > maxY) maxY = n.y + 74; });
+      g.N.forEach(function (n) { if (!nodeVisible(n)) return; if (n.x < minX) minX = n.x; if (n.y < minY) minY = n.y; if (n.x + nodeW(n) > maxX) maxX = n.x + nodeW(n); if (n.y + nodeH(n) > maxY) maxY = n.y + nodeH(n); });
       if (minX === Infinity) return;
       var pad = 56, gw = Math.max(1, maxX - minX), gh = Math.max(1, maxY - minY), cw = st.clientWidth, ch = st.clientHeight;
       var k = Math.min(1.6, Math.max(.3, Math.min((cw - pad * 2) / gw, (ch - pad * 2) / gh)));
@@ -4853,7 +4870,7 @@
     function nodeTarget(n, kWanted) {
       var st = stageRef.current, cw = (st && st.clientWidth) || 900, ch = (st && st.clientHeight) || 560;
       var k = Math.min(2.2, Math.max(.3, kWanted || 1.9));
-      return { tx: cw / 2 - (n.x + 204 / 2) * k, ty: ch / 2 - (n.y + 74 / 2) * k, k: k };
+      return { tx: cw / 2 - (n.x + nodeW(n) / 2) * k, ty: ch / 2 - (n.y + nodeH(n) / 2) * k, k: k };
     }
     // deep-link prop bag for a node type (panels ignore what they do not use — graceful)
     function focusPropsFor(n) {
@@ -4954,6 +4971,43 @@
     function persistPos(id, x, y) {
       if (!props.canEdit) return;
       sb.from('research_map_layout').upsert({ project_id: props.projectId, node_id: id, x: x, y: y, updated_at: new Date().toISOString() }, { onConflict: 'project_id,node_id' }).then(function (r) { if (r && r.error && alive.current) window.PRUI.toast('Pozíció mentése sikertelen: ' + r.error.message, { kind: 'error' }); });
+    }
+    // P1: resize a card by its corner (migration-80). Mirrors the frame resize (startFrameDrag mode='resize'):
+    // world-delta = screen-delta / view.k (1:1 on screen), clamped, min NW×64, cap 760×600; persists card_w/card_h.
+    function persistSize(id, w, h, x, y) {
+      if (!props.canEdit || !cardSizeCap) return;
+      sb.from('research_map_layout').upsert({ project_id: props.projectId, node_id: id, x: x, y: y, card_w: Math.round(w), card_h: Math.round(h), updated_at: new Date().toISOString() }, { onConflict: 'project_id,node_id' }).then(function (r) { if (r && r.error && alive.current) window.PRUI.toast('Méret mentése sikertelen: ' + r.error.message, { kind: 'error' }); });
+    }
+    function startNodeResize(e, n) {
+      if (e.button !== 0 || !props.canEdit || !cardSizeCap) return; e.stopPropagation();
+      var sx = e.clientX, sy = e.clientY, k = view.k || 1, ow = n._w || NW, oh = n._h || NH, ox = n.x, oy = n.y;
+      nrzRef.current = { id: n.id, moved: false, w: ow, h: oh };
+      var rmv = function (ev) {
+        if (!nrzRef.current) return; if (ev.buttons === 0) { rfin(); return; }
+        if (Math.abs(ev.clientX - sx) > 2 || Math.abs(ev.clientY - sy) > 2) {
+          nrzRef.current.moved = true;
+          nrzRef.current.w = Math.min(760, Math.max(NW, Math.round(ow + (ev.clientX - sx) / k)));
+          nrzRef.current.h = Math.min(600, Math.max(64, Math.round(oh + (ev.clientY - sy) / k)));
+          setNrzLive({ id: n.id, w: nrzRef.current.w, h: nrzRef.current.h });
+        }
+      };
+      var rfin = function () {
+        var d = nrzRef.current; if (!d) return; nrzRef.current = null;
+        window.removeEventListener('mousemove', rmv); window.removeEventListener('mouseup', rup); window.removeEventListener('blur', rfin);
+        setNrzLive(null);
+        if (d.moved) {
+          setLayout(function (L) { var m = Object.assign({}, L); m[n.id] = Object.assign({ x: ox, y: oy }, m[n.id], { card_w: d.w, card_h: d.h }); return m; });
+          persistSize(n.id, d.w, d.h, ox, oy); setSizeGen(function (x) { return x + 1; });
+        }
+      };
+      var rup = function () { rfin(); };
+      window.addEventListener('mousemove', rmv); window.addEventListener('mouseup', rup); window.addEventListener('blur', rfin);
+    }
+    function resetCardSize(n) {
+      if (!props.canEdit || !cardSizeCap || !n) return;
+      setLayout(function (L) { var m = Object.assign({}, L); if (m[n.id]) { var c2 = Object.assign({}, m[n.id]); delete c2.card_w; delete c2.card_h; m[n.id] = c2; } return m; });
+      var cur = layout[n.id] || {};
+      sb.from('research_map_layout').upsert({ project_id: props.projectId, node_id: n.id, x: (cur.x != null ? cur.x : n.x), y: (cur.y != null ? cur.y : n.y), card_w: null, card_h: null, updated_at: new Date().toISOString() }, { onConflict: 'project_id,node_id' }).then(function () { if (alive.current) setSizeGen(function (x) { return x + 1; }); });
     }
     // per-node Map flags (migration-70): hide/show + pin. Upsert the node's CURRENT position with the flag (x/y NOT NULL).
     // Optimistic; on error revert + toast. Guarded by mapFlags so the UI only appears once the columns exist.
@@ -5603,30 +5657,32 @@
     var g = graph();
     if (!g.N.length) return h('div', { className: 'rmap-wrap' }, h('div', { className: 'rmap-empty' }, h('div', { style: { fontSize: 30 } }, '🗺️'), h('b', null, 'A térkép a projekt adataiból épül fel'), h('p', null, 'Adj hozzá ötleteket, irodalmat, protokollt — és itt egy összefüggő canvason látod majd az egészet, a provenance-élekkel.')));
     var NW = 204, NH = 74;
+    function nodeW(n) { return (n && n._w) || NW; }   // per-node card width (migration-80) or default
+    function nodeH(n) { return (n && n._h) || NH; }
     // float the inspector as a card NEXT TO the selected node (in front of the canvas), not as a side panel:
     // position it at the node's on-screen coords (view transform), to the right of the card, flipping left if no room.
     function inspStyle(node) {
       var kk = view.k, MW = 300;
       var stW = (stageRef.current && stageRef.current.clientWidth) || 900, stH = (stageRef.current && stageRef.current.clientHeight) || 560;
-      var cardX = view.tx + node.x * kk, cardY = view.ty + node.y * kk, cardW = NW * kk;
+      var cardX = view.tx + node.x * kk, cardY = view.ty + node.y * kk, cardW = nodeW(node) * kk;
       var ix = cardX + cardW + 12; if (ix + MW > stW - 8) ix = cardX - MW - 12; if (ix < 8) ix = 8;
       var iy = Math.max(8, Math.min(cardY, Math.max(8, stH - 150)));
       return { position: 'absolute', left: ix + 'px', top: iy + 'px', width: MW + 'px', maxHeight: (stH - 24) + 'px', zIndex: 13 };
     }
     // floating selection toolbar — a compact icon bar ABOVE the selected card (flips below if no room at top).
     function selToolStyle(node) {
-      var kk = view.k, cardX = view.tx + node.x * kk, cardY = view.ty + node.y * kk, cardW = NW * kk;
+      var kk = view.k, cardX = view.tx + node.x * kk, cardY = view.ty + node.y * kk, cardW = nodeW(node) * kk;
       var stW = (stageRef.current && stageRef.current.clientWidth) || 900;
       var left = cardX + cardW / 2, top = cardY - 46;
-      if (top < 6) top = cardY + (NH * kk) + 8;   // flip below the card
+      if (top < 6) top = cardY + (nodeH(node) * kk) + 8;   // flip below the card
       left = Math.max(70, Math.min(left, stW - 70));
       return { position: 'absolute', left: left + 'px', top: top + 'px', transform: 'translateX(-50%)', zIndex: 14 };
     }
-    function ctr(id) { var n = g.by[id]; return { x: n.x + NW / 2, y: n.y + NH / 2 }; }
-    function ndCtr(n) { return { x: n.x + NW / 2, y: n.y + (n._h || NH) / 2 }; }
+    function ctr(id) { var n = g.by[id]; return { x: n.x + nodeW(n) / 2, y: n.y + nodeH(n) / 2 }; }
+    function ndCtr(n) { return { x: n.x + nodeW(n) / 2, y: n.y + nodeH(n) / 2 }; }
     // the point on a node's boundary along the ray toward another node → edges start/end AT the card edge (clean, and the arrowhead shows)
-    function bpt(node, other) { var c = ndCtr(node), o = ndCtr(other), hw = NW / 2, hh = (node._h || NH) / 2, dx = o.x - c.x, dy = o.y - c.y; if (!dx && !dy) return c; var t = Math.min(hw / (Math.abs(dx) || 1e-6), hh / (Math.abs(dy) || 1e-6)); return { x: c.x + dx * t, y: c.y + dy * t }; }
-    var svgW = 0; g.N.forEach(function (n) { svgW = Math.max(svgW, n.x + NW + 60); });
+    function bpt(node, other) { var c = ndCtr(node), o = ndCtr(other), hw = nodeW(node) / 2, hh = nodeH(node) / 2, dx = o.x - c.x, dy = o.y - c.y; if (!dx && !dy) return c; var t = Math.min(hw / (Math.abs(dx) || 1e-6), hh / (Math.abs(dy) || 1e-6)); return { x: c.x + dx * t, y: c.y + dy * t }; }
+    var svgW = 0; g.N.forEach(function (n) { svgW = Math.max(svgW, n.x + nodeW(n) + 60); });
     // active page (saved view) filter: a "curated" page shows only pinned cards. Defined before edgeEls so edges honor it.
     var activePageObj = (activePage && pagesCap) ? (pages.filter(function (p) { return p.id === activePage; })[0] || null) : null;
     function pageHides(n) { return !!(activePageObj && activePageObj.only_pinned && !n.mapPinned); }
@@ -5648,6 +5704,25 @@
       else if (n.t === 'srq') k.push(h('div', { className: 'rmap-nm', key: 'm' }, '💡 ' + String(n.m.Alap || '').slice(0, 52)));
       else if (n.t === 'sreview') k.push(h('div', { className: 'rmap-nm', key: 'm' }, h('span', { className: 'rmap-chip ' + (n.m.Státusz === 'completed' ? 'done' : n.m.Státusz === 'failed' ? '' : 'run') }, n.m.Státusz || 'vár')));
       return k;
+    }
+    // P1: tier-gated EXTRA content revealed by CSS @container as the card grows (or by the zoom LOD floor).
+    // Appended after body(n); each block is display:none by default and shown by a @container/lod rule.
+    function richTier(n) {
+      var r = n.ref || {}, t = n.t, out = [];
+      if (t === 'figure' && r.storage_path) {
+        if ((n._h || 0) > 110) ensureFigUrls([r]);   // fetch the signed URL only for figure cards enlarged tall enough to SHOW the thumbnail
+        var url = figUrls[r.storage_path];
+        out.push(h('div', { key: 'fig', className: 'rmap-t rmap-t-fig' }, url ? h('img', { className: 'rmap-pv-img', src: url, alt: r.fig_label || 'ábra', loading: 'lazy' }) : h('div', { className: 'rmap-pv-imgph' }, '⏳ ábra')));
+      }
+      if (t === 'step') {
+        var prog = n.st === 'done' ? 100 : (n.st === 'running' ? 62 : 0);
+        out.push(h('div', { key: 'sl', className: 'rmap-t rmap-t-l' },
+          (n.st === 'running' || n.st === 'done') ? h('div', { className: 'rmap-pv-prog' }, h('i', { style: { width: prog + '%' } })) : null,
+          (stepFlagsCap && n.ref && n.ref.assignee_id) ? h('div', { className: 'rmap-pv-meta' }, '👤 ' + nameOf(n.ref.assignee_id)) : null,
+          (stepFlagsCap && props.canEdit && n.ref && n.ref.needs_approval && !n.ref.signed_off_by) ? h('button', { className: 'rmap-pv-btn ok', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); stepSignOff(n.ref); } }, '✅ Jóváhagyom') : null));
+      }
+      if (canEnter(n)) out.push(h('div', { key: 'xl', className: 'rmap-t rmap-t-xl' }, h('button', { className: 'rmap-pv-btn pri', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); enterNode(n); } }, '◇ Belépés — teljes panel ↗')));
+      return out.length ? out : null;
     }
     // P1b: the active run's phase drives the node .inphase highlight (activeKey) + the run bar
     var activeKey = null, activeLabel = null, runProg = null, runActive = false;
@@ -5693,7 +5768,7 @@
           h('svg', { className: 'rmap-edges', width: svgW, height: g.height },
             h('defs', null, h('marker', { id: 'rmap-arrow', viewBox: '0 0 8 8', refX: 6.5, refY: 4, markerWidth: 6.5, markerHeight: 6.5, orient: 'auto-start-reverse' }, h('path', { d: 'M0.5,0.5 L7.5,4 L0.5,7.5 Z', fill: 'var(--line-2, var(--muted))' }))),
             edgeEls),
-          g.N.map(function (n) { if (!nodeVisible(n)) return null; return h('div', { key: n.id, 'data-nid': n.id, className: 'rmap-node t-' + n.t + (sel === n.id ? ' sel' : '') + (msel[n.id] ? ' rmap-mselected' : '') + (n.mapPinned ? ' rmap-pinned' : '') + (activeKey && n.ph === RMAP_PHASE_IDX[activeKey] ? ' inphase' : '') + (props.canEdit ? ' editable' : '') + (dlive && dlive.id === n.id ? ' dragging' : ''), style: { left: n.x + 'px', top: n.y + 'px' }, onMouseDown: function (e) { e.stopPropagation(); startNodeDrag(e, n); }, onDoubleClick: function (e) { e.stopPropagation(); if (canEnter(n)) enterNode(n); }, onContextMenu: function (e) { e.preventDefault(); e.stopPropagation(); if (props.canEdit && (genActions(n).length || regenActions(n).length)) setMenu({ node: n, x: e.clientX, y: e.clientY }); } }, n.mapPinned ? h('span', { className: 'rmap-pin-badge', title: 'Kitűzött' }, '📌') : null, nodeCmCount(n.id) ? h('span', { className: 'rmap-cm-badge', title: nodeCmCount(n.id) + ' nyitott komment', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); setOpenThread(n.id); } }, '💬' + nodeCmCount(n.id)) : null, (n.t === 'step' && n.ref && (n.ref.assignee_id || n.ref.signed_off_by)) ? h('span', { className: 'rmap-step-badges' }, n.ref.assignee_id ? h('span', { className: 'rmap-assignee', title: 'Felelős: ' + nameOf(n.ref.assignee_id), style: { background: userColor(n.ref.assignee_id) } }, String(nameOf(n.ref.assignee_id) || '?').trim().charAt(0).toUpperCase()) : null, n.ref.signed_off_by ? h('span', { className: 'rmap-signoff', title: 'Jóváhagyta: ' + nameOf(n.ref.signed_off_by) }, '✅') : null) : null, body(n)); })),
+          g.N.map(function (n) { if (!nodeVisible(n)) return null; var _sized = !!((nrzLive && nrzLive.id === n.id) || (layout[n.id] && layout[n.id].card_h)); var _st = { left: n.x + 'px', top: n.y + 'px', width: (n._w || NW) + 'px' }; if (_sized) _st.height = (n._h || NH) + 'px'; return h('div', { key: n.id, 'data-nid': n.id, className: 'rmap-node t-' + n.t + (_sized ? ' rmap-sized' : '') + (sel === n.id ? ' sel' : '') + (msel[n.id] ? ' rmap-mselected' : '') + (n.mapPinned ? ' rmap-pinned' : '') + (activeKey && n.ph === RMAP_PHASE_IDX[activeKey] ? ' inphase' : '') + (props.canEdit ? ' editable' : '') + (dlive && dlive.id === n.id ? ' dragging' : '') + ((nrzLive && nrzLive.id === n.id) ? ' rmap-resizing' : ''), style: _st, onMouseDown: function (e) { e.stopPropagation(); startNodeDrag(e, n); }, onDoubleClick: function (e) { e.stopPropagation(); if (canEnter(n)) enterNode(n); }, onContextMenu: function (e) { e.preventDefault(); e.stopPropagation(); if (props.canEdit && (genActions(n).length || regenActions(n).length || (cardSizeCap && layout[n.id] && layout[n.id].card_h))) setMenu({ node: n, x: e.clientX, y: e.clientY }); } }, n.mapPinned ? h('span', { className: 'rmap-pin-badge', title: 'Kitűzött' }, '📌') : null, nodeCmCount(n.id) ? h('span', { className: 'rmap-cm-badge', title: nodeCmCount(n.id) + ' nyitott komment', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); setOpenThread(n.id); } }, '💬' + nodeCmCount(n.id)) : null, (n.t === 'step' && n.ref && (n.ref.assignee_id || n.ref.signed_off_by)) ? h('span', { className: 'rmap-step-badges' }, n.ref.assignee_id ? h('span', { className: 'rmap-assignee', title: 'Felelős: ' + nameOf(n.ref.assignee_id), style: { background: userColor(n.ref.assignee_id) } }, String(nameOf(n.ref.assignee_id) || '?').trim().charAt(0).toUpperCase()) : null, n.ref.signed_off_by ? h('span', { className: 'rmap-signoff', title: 'Jóváhagyta: ' + nameOf(n.ref.signed_off_by) }, '✅') : null) : null, h('div', { className: 'rmap-nb' }, body(n), richTier(n)), (props.canEdit && cardSizeCap) ? h('span', { className: 'rmap-node-rz', title: 'Átméretezés (húzd)', onMouseDown: function (e) { e.stopPropagation(); startNodeResize(e, n); } }) : null); })),
         // page bar (saved views) — top-left tabs; the active page can be curated (only pinned) / re-captured / renamed / deleted
         pagesCap ? h('div', { className: 'rmap-pagebar', onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
           h('div', { className: 'rmap-pagetabs' },
@@ -5726,7 +5801,7 @@
         // remote selection rings — highlight the card another user has selected, in their color
         Object.keys(cursors).map(function (uid) {
           var c = cursors[uid]; if (!c.sel) return null; var nn = g.by[c.sel]; if (!nn || !nodeVisible(nn)) return null;
-          return h('div', { key: 'rs' + uid, style: { position: 'absolute', left: (view.tx + nn.x * view.k) + 'px', top: (view.ty + nn.y * view.k) + 'px', width: (204 * view.k) + 'px', height: (74 * view.k) + 'px', border: '2px solid ' + c.color, borderRadius: (12 * view.k) + 'px', pointerEvents: 'none', zIndex: 9, boxSizing: 'border-box' } });
+          return h('div', { key: 'rs' + uid, style: { position: 'absolute', left: (view.tx + nn.x * view.k) + 'px', top: (view.ty + nn.y * view.k) + 'px', width: (nodeW(nn) * view.k) + 'px', height: (nodeH(nn) * view.k) + 'px', border: '2px solid ' + c.color, borderRadius: (12 * view.k) + 'px', pointerEvents: 'none', zIndex: 9, boxSizing: 'border-box' } });
         }),
         // live remote cursors (screen coords → follow pan/zoom)
         Object.keys(cursors).map(function (uid) {
@@ -6039,7 +6114,9 @@
           h('div', { className: 'rmap-menu-h' }, '✦ Generálás innen' + (RMAP_TYPE[menu.node.t] ? ' · ' + RMAP_TYPE[menu.node.t].lab : '')),
           genActions(menu.node).map(function (a) { return h('button', { key: a[0], className: 'rmap-menu-b', onClick: function () { runGen(menu.node, a[0]); } }, a[1]); }),
           regenActions(menu.node).length ? h('div', { className: 'rmap-menu-sep' }) : null,
-          regenActions(menu.node).map(function (a) { return h('button', { key: a[0], className: 'rmap-menu-b regen', onClick: function () { runGen(menu.node, a[0]); } }, a[1]); }))) : null);
+          regenActions(menu.node).map(function (a) { return h('button', { key: a[0], className: 'rmap-menu-b regen', onClick: function () { runGen(menu.node, a[0]); } }, a[1]); }),
+          (cardSizeCap && layout[menu.node.id] && layout[menu.node.id].card_h) ? h('div', { className: 'rmap-menu-sep' }) : null,
+          (cardSizeCap && layout[menu.node.id] && layout[menu.node.id].card_h) ? h('button', { className: 'rmap-menu-b', onClick: function () { resetCardSize(menu.node); setMenu(null); } }, '↺ Auto méret') : null)) : null);
   }
 
   function ProjectDetail(props) {
