@@ -4299,6 +4299,9 @@
     var pgcS = useState(false), pagesCap = pgcS[0], setPagesCap = pgcS[1];   // migration-73 capability
     var apgS = useState(null), activePage = apgS[0], setActivePage = apgS[1];   // active page id or null (= full graph)
     var onlS = useState([]), online = onlS[0], setOnline = onlS[1];   // realtime presence: who else is viewing this Map
+    var curS = useState({}), cursors = curS[0], setCursors = curS[1];   // live cursors from other users {id:{name,wx,wy,sel,ts,color}}
+    var chRef = useRef(null);   // the Map realtime channel (for broadcasting my cursor)
+    var lastCur = useRef(0);   // cursor-broadcast throttle timestamp
     var memS = useState(null), members = memS[0], setMembers = memS[1];   // project collaborators (migration-74) — null until loaded/capable
     var shareS = useState(false), shareOpen = shareS[0], setShareOpen = shareS[1];   // the Share/Collaborators modal
     var invqS = useState(''), invQ = invqS[0], setInvQ = invqS[1];   // invite: user search query
@@ -4361,6 +4364,10 @@
       });
       var me = props.viewer || {}, myKey = props.viewerId || ('anon-' + pid);
       var ch = sb.channel('rmap-ap:' + pid, { config: { presence: { key: myKey } } })
+        .on('broadcast', { event: 'cursor' }, function (m) {
+          if (!alive.current) return; var pl = m && m.payload; if (!pl || !pl.id || pl.id === props.viewerId) return;
+          setCursors(function (C) { var n = Object.assign({}, C); n[pl.id] = { name: pl.name, wx: pl.wx, wy: pl.wy, sel: pl.sel, color: userColor(pl.id), ts: Date.now() }; return n; });
+        })
         .on('presence', { event: 'sync' }, function () {
           if (!alive.current) return;
           var st = ch.presenceState(), seen = {}, list = [];
@@ -4396,7 +4403,10 @@
           setPages(function (P) { var found = false, out = P.map(function (x) { if (x.id === np.id) { found = true; return { id: np.id, name: np.name, tx: np.tx, ty: np.ty, k: np.k, only_pinned: np.only_pinned, ord: np.ord }; } return x; }); if (!found) out.push({ id: np.id, name: np.name, tx: np.tx, ty: np.ty, k: np.k, only_pinned: np.only_pinned, ord: np.ord }); return out; });
         })
         .subscribe(function (status) { if (status === 'SUBSCRIBED' && props.viewerId) { try { ch.track({ id: props.viewerId, name: me.name || 'Kolléga', avatar: me.avatar || null }); } catch (e) { } } });
-      return function () { try { sb.removeChannel(ch); } catch (e) { } };
+      chRef.current = ch;
+      // prune stale remote cursors (a user who left / went idle)
+      var prune = setInterval(function () { if (!alive.current) return; var now = Date.now(); setCursors(function (C) { var n = {}, changed = false; Object.keys(C).forEach(function (k) { if (now - C[k].ts < 6000) n[k] = C[k]; else changed = true; }); return changed ? n : C; }); }, 3000);
+      return function () { clearInterval(prune); chRef.current = null; try { sb.removeChannel(ch); } catch (e) { } };
     }, [props.projectId]);
     useEffect(function () { loadMembers(); }, [props.projectId]);   // collaborators (graceful: null pre-migration-74)
     useEffect(function () {   // invite user-search (debounced), only while the Share modal is open
@@ -4571,6 +4581,15 @@
     function onMove(e) { var dd = drag.current; if (!dd) return; setView(function (v) { return { tx: dd.tx + (e.clientX - dd.sx), ty: dd.ty + (e.clientY - dd.sy), k: v.k }; }); }
     function onUp() { drag.current = null; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); }
     function stageXY(e) { var st = stageRef.current; if (!st) return { x: e.clientX, y: e.clientY }; var r = st.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
+    // live cursors: a stable per-user color + a throttled broadcast of my world-space cursor + selection
+    var CURSOR_PALETTE = ['#e11d48', '#0891b2', '#7c3aed', '#ca8a04', '#059669', '#db2777', '#2563eb', '#ea580c'];
+    function userColor(id) { var s = String(id || ''), hh = 0; for (var i = 0; i < s.length; i++) hh = (hh * 31 + s.charCodeAt(i)) >>> 0; return CURSOR_PALETTE[hh % CURSOR_PALETTE.length]; }
+    function broadcastCursor(e) {
+      var chn = chRef.current; if (!chn || !props.viewerId || online.length <= 1) return;   // no point broadcasting when alone
+      var now = Date.now(); if (now - lastCur.current < 55) return; lastCur.current = now;
+      var p = stageXY(e), wx = Math.round((p.x - view.tx) / view.k), wy = Math.round((p.y - view.ty) / view.k);
+      try { chn.send({ type: 'broadcast', event: 'cursor', payload: { id: props.viewerId, name: (props.viewer && props.viewer.name) || 'Kolléga', wx: wx, wy: wy, sel: sel || null } }); } catch (err) { }
+    }
     function onMarqCancel() { mqRef.current = null; window.removeEventListener('mousemove', onMarqMove); window.removeEventListener('mouseup', onMarqUp); window.removeEventListener('blur', onMarqCancel); setMarquee(null); }
     function onMarqMove(e) { var mq = mqRef.current; if (!mq) return; if (e.buttons === 0) { onMarqUp(e); return; } var p = stageXY(e); setMarquee({ x0: mq.x0, y0: mq.y0, x1: p.x, y1: p.y }); }
     function onMarqUp(e) {
@@ -5235,7 +5254,7 @@
     function nodeCmCount(id) { var a = cmByNode[id]; return a ? a.filter(function (c) { return !c.resolved; }).length : 0; }
     var cmUnresolved = commentsCap ? comments.filter(function (c) { return !c.resolved; }).length : 0;
     return h('div', { className: 'rmap-wrap' },
-      h('div', { className: 'rmap-stage', ref: stageRef, onMouseDown: onDown, onWheel: onWheel },
+      h('div', { className: 'rmap-stage', ref: stageRef, onMouseDown: onDown, onWheel: onWheel, onMouseMove: broadcastCursor },
         h('div', { className: 'rmap-world', style: { transform: 'translate(' + view.tx + 'px,' + view.ty + 'px) scale(' + view.k + ')' } },
           // frames (named regions) render BEHIND everything; the body is pointer-events:none so cards stay interactive
           frames.map(function (f) {
@@ -5276,6 +5295,18 @@
           h('button', { className: 'rmap-share-btn', title: 'Megosztás / közreműködők', onClick: function () { setShareOpen(true); loadMembers(); } }, '👥 Megosztás')),
         // marquee selection rectangle (shift-drag on the empty canvas)
         marquee ? h('div', { className: 'rmap-marquee', style: { position: 'absolute', left: Math.min(marquee.x0, marquee.x1) + 'px', top: Math.min(marquee.y0, marquee.y1) + 'px', width: Math.abs(marquee.x1 - marquee.x0) + 'px', height: Math.abs(marquee.y1 - marquee.y0) + 'px', pointerEvents: 'none', zIndex: 12 } }) : null,
+        // remote selection rings — highlight the card another user has selected, in their color
+        Object.keys(cursors).map(function (uid) {
+          var c = cursors[uid]; if (!c.sel) return null; var nn = g.by[c.sel]; if (!nn || !nodeVisible(nn)) return null;
+          return h('div', { key: 'rs' + uid, style: { position: 'absolute', left: (view.tx + nn.x * view.k) + 'px', top: (view.ty + nn.y * view.k) + 'px', width: (204 * view.k) + 'px', height: (74 * view.k) + 'px', border: '2px solid ' + c.color, borderRadius: (12 * view.k) + 'px', pointerEvents: 'none', zIndex: 9, boxSizing: 'border-box' } });
+        }),
+        // live remote cursors (screen coords → follow pan/zoom)
+        Object.keys(cursors).map(function (uid) {
+          var c = cursors[uid];
+          return h('div', { key: 'cur' + uid, className: 'rmap-cursor', style: { position: 'absolute', left: (view.tx + c.wx * view.k) + 'px', top: (view.ty + c.wy * view.k) + 'px', zIndex: 20, pointerEvents: 'none' } },
+            h('svg', { width: 16, height: 16, viewBox: '0 0 16 16' }, h('path', { d: 'M2,2 L2,13 L5.5,9.5 L8,14 L10,13 L7.5,8.5 L12,8.5 Z', fill: c.color, stroke: '#fff', strokeWidth: 1 })),
+            h('span', { className: 'rmap-cursor-lbl', style: { background: c.color } }, c.name || 'Kolléga'));
+        }),
         // free-position comment pins (screen coords → follow pan/zoom)
         (commentsCap && cmPos.length) ? cmPos.map(function (c) {
           return h('button', { key: 'cmp' + c.id, className: 'rmap-cm-pin' + (c.resolved ? ' resolved' : ''), style: { position: 'absolute', left: (view.tx + c.x * view.k) + 'px', top: (view.ty + c.y * view.k) + 'px', zIndex: 11 }, title: String(c.body || '').slice(0, 80), onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); setOpenThread('pin:' + c.id); } }, '💬');

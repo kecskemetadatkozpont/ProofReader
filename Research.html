@@ -958,6 +958,10 @@
     .rmap-invite-res { display: flex; flex-direction: column; gap: 3px; max-height: 160px; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; padding: 4px; }
     .rmap-invite-opt { text-align: left; border: none; background: none; cursor: pointer; font-family: inherit; font-size: 12px; padding: 6px 8px; border-radius: 6px; color: var(--ink); }
     .rmap-invite-opt:hover { background: var(--surface-2); color: var(--accent); }
+    /* live cursors */
+    .rmap-cursor { transition: left .08s linear, top .08s linear; will-change: left, top; }
+    .rmap-cursor svg { display: block; filter: drop-shadow(0 1px 1px rgba(0,0,0,.35)); }
+    .rmap-cursor-lbl { position: absolute; left: 13px; top: 12px; color: #fff; font-size: 10.5px; font-weight: 700; padding: 1px 7px; border-radius: 999px; white-space: nowrap; box-shadow: 0 2px 6px rgba(0,0,0,.25); }
     .rmap-stage { flex: 1; position: relative; height: calc(100vh - 240px); min-height: 460px; overflow: hidden; background: var(--surface-2); border: 1px solid var(--line); border-radius: 14px; cursor: grab; }
     .rmap-stage:active { cursor: grabbing; }
     .rmap-world { position: absolute; top: 0; left: 0; transform-origin: 0 0; }
@@ -1088,7 +1092,7 @@
   <script type="text/babel" src="canvas.jsx?v=1783137934"></script>
   <script type="text/babel" src="notes.jsx?v=1783137934"></script>
   <script src="autopilot-core.js?v=1784160000"></script>
-  <script type="text/babel" src="research.jsx?v=1784980000"></script>
+  <script type="text/babel" src="research.jsx?v=1785010000"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>
