@@ -1788,7 +1788,7 @@
     useEffect(function () { if (draft && draft.id) loadSuggestions(draft.id); }, [draft && draft.id]);
     function submitSuggestion(sec) {
       var txt = String(suggestText || '').trim(); if (!txt || !draft || !draft.id) return;
-      sb.from('research_draft_suggestions').insert({ project_id: pid, draft_id: draft.id, section_key: sec.key, section_heading: sec.heading || sec.key, original: sec.latex || '', suggested: txt, note: String(suggestNote || '').trim() || null, author: props.authorId, status: 'pending' }).select('id,draft_id,section_key,section_heading,original,suggested,note,author,status,created_at').single().then(function (r) {
+      sb.from('research_draft_suggestions').insert({ project_id: pid, draft_id: draft.id, section_key: sec.key, section_heading: sec.heading || sec.key, original: sec.latex || '', suggested: txt, note: String(suggestNote || '').trim() || null, status: 'pending' }).select('id,draft_id,section_key,section_heading,original,suggested,note,author,status,created_at').single().then(function (r) {
         if (!wAlive.current) return;
         if (r && r.error) { window.PRUI.toast('Javaslat mentése sikertelen: ' + r.error.message, { kind: 'error' }); return; }
         if (r && r.data) setSuggestions(function (S) { return [r.data].concat(S); });
