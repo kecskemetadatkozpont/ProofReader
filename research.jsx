@@ -4863,6 +4863,11 @@
           (props.canEdit && Object.keys(layout).length) ? h('button', { title: 'Automatikus elrendezés (a saját pozíciók törlése)', onClick: resetLayout }, '↺') : null,
           h('button', { onClick: function () { zoom(1.18); } }, '+'), h('button', { onClick: function () { zoom(0.85); } }, '−')),
         h('div', { className: 'rmap-hint' }, (props.canEdit ? 'Húzd a kártyát = áthelyezés · ' : '') + 'húzd a hátteret = pan · görgő = zoom'),
+        // edge legend — what the connecting lines mean (non-blocking overlay). Bottom-left, above the zoom controls,
+        // so it never collides with the top-spanning autopilot runbar. Swatch colors match the actual edge strokes.
+        h('div', { style: { position: 'absolute', left: 14, bottom: 84, zIndex: 8, display: 'flex', gap: 13, alignItems: 'center', padding: '5px 11px', borderRadius: 8, background: 'var(--surface)', border: '1px solid var(--line)', fontSize: 10.5, color: 'var(--muted)', boxShadow: '0 4px 14px -8px rgba(20,26,40,.4)', pointerEvents: 'none' } },
+          h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 5 } }, h('span', { style: { display: 'inline-block', width: 18, borderTop: '2px solid var(--line-2, var(--muted))' } }), 'származás'),
+          h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 5 } }, h('span', { style: { display: 'inline-block', width: 18, borderTop: '1.5px dashed var(--accent-tint)' } }), 'idézet')),
         props.canEdit ? (dkOpen ? h('div', { className: 'rmap-dock open', onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
           h('div', { className: 'rmap-dock-h' }, h('span', null, '🤖 Asszisztens'), h('button', { className: 'rmap-dock-x', title: 'Összecsukás', onClick: function () { setDkOpen(false); try { localStorage.setItem('pr-rmap-dock', '0'); } catch (e) { } } }, '▾')),
           h('div', { className: 'rmap-dock-msgs', ref: dScroll }, dMsgs.map(function (mm, i) { return h('div', { key: i, className: 'rmap-dock-msg ' + (mm.role === 'user' ? 'u' : 'a') }, mm.text); }), dBusy ? h('div', { className: 'rmap-dock-msg a busy' }, '⏳ dolgozom…') : null),
@@ -4893,6 +4898,11 @@
             (props.canEdit && regenActions(sn).length) ? h('button', { className: 'btn', style: { fontSize: 12 }, disabled: genBusy, onClick: function () { runGen(sn, regenActions(sn)[0][0]); } }, regenActions(sn)[0][1]) : null,
             h('button', { className: 'btn', style: { fontSize: 12 }, onClick: function () { if (props.onGoTab) props.onGoTab(RMAP_TYPE[sn.t].tab); } }, 'Megnyitás a ' + RMAP_TYPE[sn.t].lab + ' fülön →'),
             (sn.ref && sn.ref.url) ? h('a', { className: 'btn', style: { fontSize: 12, textDecoration: 'none' }, href: sn.ref.url, target: '_blank', rel: 'noopener' }, 'Forrás ↗') : null),
+          // "Mit tehetsz innen?" — the node's one-click generations (idea→study, study→review, review→protocol/draft, …),
+          // surfaced inline so every card advertises how to move the research forward from here (not only via the menu).
+          (props.canEdit && genActions(sn).length) ? h('div', { style: { marginTop: 8, borderTop: '1px solid var(--line)', paddingTop: 8 } },
+            h('div', { style: { fontSize: 10, fontWeight: 800, color: 'var(--faint)', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 5 } }, '✦ Mit tehetsz innen'),
+            h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 6 } }, genActions(sn).map(function (a) { return h('button', { key: a[0], className: 'btn', style: { fontSize: 12 }, disabled: genBusy, onClick: function () { runGen(sn, a[0]); } }, a[1]); }))) : null,
           h('p', { className: 'rmap-insp-note' }, 'A metaadat itt közvetlenül szerkeszthető — ugyanazok az adatok, mint a fázis-paneleken. A canvason maradsz, modal helyett.'),
           (props.canEdit && sn.t === 'step') ? h('div', { className: 'rmap-chat' },
             h('div', { className: 'rmap-chat-h' }, '🔧 Finomítás — írd le, mit változtassak ezen a lépésen'),
