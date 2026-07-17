@@ -4,8 +4,11 @@
 > áttekintése + a saját javaslataink. Jelölés: ✅ kész · 🟡 részben · 🆕 új.
 > Effort: 🟢 kicsi · 🟡 közepes · 🔴 nagy. Prio sorrend a végén.
 
-## Folyamatban / soron következő
-- [ ] 🆕🟡 **Figure láthatóság-válogatás a térképen** (`#2`) — figure-node kibontás (előnézeti kép) + „mutasd/rejtsd a térképen" per-ábra jelölő. Migráció: `research_figures.on_map` (a következő szabad számon). *(Luma: eye/pin badge)*
+## Kész (legutóbbi)
+- [x] ✅ **Figure láthatóság-válogatás a térképen** (`#2`) — figure-node előnézeti kép + „🙈 Levétel a térképről" (`on_map`) + „Rejtett ábrák" restore panel. migration-69 alkalmazva. — *kész (c3f042a)*
+
+## Külön nagy kezdeményezés
+- [ ] 🆕🔴 **Kooperatív munka egy Research Projekten** (több user, Canvas + Workflow) — kutatás + fázisos terv + mockupok kész (Artifact: „Publify — Kooperatív Research Projekt"). Fázis 1 = `research_project_members` + a `research_can_write_project` write-gate átírása → minden `research_*` tábla egyszerre multi-writer; + komment/@mention + presence. Fázis 2 = élő kurzorok + hozzárendelés + sign-off. Fázis 3 = suggesting/CRDT a draft-editorra.
 
 ## Vászon-alapok
 - [ ] 🆕🟢 **Zoom%-kijelző + „illeszd a nézetbe" gomb** a Map-en. *(Luma: „35%")*
