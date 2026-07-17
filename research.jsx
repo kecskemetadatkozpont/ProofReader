@@ -4434,6 +4434,13 @@
     var ccInS = useState(null), ccInput = ccInS[0], setCcInput = ccInS[1];   // my open cursor-chat input text (null = closed)
     var lastView = useRef(0);   // view-broadcast throttle timestamp
     var followingRef = useRef(null);   // mirror of `following` for use inside event handlers
+    // Prezi-mód (Fázis 1): fly-to camera tween + in-canvas focus overlay (zoom INTO a card → its panel opens in place)
+    var fcS = useState(null), focus = fcS[0], setFocus = fcS[1];   // {nodeId, tab, ref, ...focusProps} or null
+    var rafRef = useRef(null);   // requestAnimationFrame id of the running camera tween
+    var returnView = useRef(null);   // the view to fly back to on exitFocus
+    var tourS = useState(null), tour = tourS[0], setTour = tourS[1];   // {list:[pages], i, playing} guided-tour state (Lap-based in Fázis 1)
+    var tourT = useRef(null);   // tour autoplay timer
+    var viewRef = useRef(view); viewRef.current = view;   // live mirror of `view` so a tween always starts from the true current camera
     var memS = useState(null), members = memS[0], setMembers = memS[1];   // project collaborators (migration-74) — null until loaded/capable
     var shareS = useState(false), shareOpen = shareS[0], setShareOpen = shareS[1];   // the Share/Collaborators modal
     var invqS = useState(''), invQ = invqS[0], setInvQ = invqS[1];   // invite: user search query
@@ -4567,6 +4574,14 @@
       if (!following) return; var pv = peerViews[following]; if (!pv) return;
       setView(function (v) { return (v.tx === pv.tx && v.ty === pv.ty && v.k === pv.k) ? v : { tx: pv.tx, ty: pv.ty, k: pv.k }; });
     }, [following, peerViews]);
+    // Esc closes the focus overlay (or stops a tour); rebinds when focus/tour changes so it sees the current one
+    useEffect(function () {
+      if (!focus && !tour) return;
+      function onKey(e) { if (e.key === 'Escape') { if (focus) exitFocus(); else if (tour) tourStop(); } }
+      window.addEventListener('keydown', onKey);
+      return function () { window.removeEventListener('keydown', onKey); };
+    }, [focus, tour]);
+    useEffect(function () { return function () { cancelFly(); if (tourT.current) clearTimeout(tourT.current); }; }, []);   // stop the tween/tour timer on unmount
     useEffect(function () {   // invite user-search (debounced), only while the Share modal is open
       if (!shareOpen || !invQ.trim()) { setInvRes([]); return; }
       var t = setTimeout(function () { sb.rpc('pr_search_users', { q: invQ.trim() }).then(function (r) { if (alive.current) setInvRes((r && r.data) || []); }); }, 300);
@@ -4777,10 +4792,10 @@
       // shift + drag on the empty canvas = marquee multi-select; a plain drag pans; a plain click clears the selection
       if (e.shiftKey) { var p = stageXY(e); mqRef.current = { x0: p.x, y0: p.y }; setMarquee({ x0: p.x, y0: p.y, x1: p.x, y1: p.y }); window.addEventListener('mousemove', onMarqMove); window.addEventListener('mouseup', onMarqUp); window.addEventListener('blur', onMarqCancel); return; }
       if (Object.keys(msel).length) setMsel({});
-      stopFollow(); drag.current = { sx: e.clientX, sy: e.clientY, tx: view.tx, ty: view.ty }; window.addEventListener('mousemove', onMove); window.addEventListener('mouseup', onUp);
+      stopFollow(); cancelFly(); tourStop(); drag.current = { sx: e.clientX, sy: e.clientY, tx: view.tx, ty: view.ty }; window.addEventListener('mousemove', onMove); window.addEventListener('mouseup', onUp);
     }
-    function onWheel(e) { e.preventDefault(); stopFollow(); var st = stageRef.current; if (!st) return; var r = st.getBoundingClientRect(); var mx = e.clientX - r.left, my = e.clientY - r.top; setView(function (v) { var nk = Math.min(2.2, Math.max(.3, v.k * (e.deltaY < 0 ? 1.12 : 0.89))); return { tx: mx - (mx - v.tx) * (nk / v.k), ty: my - (my - v.ty) * (nk / v.k), k: nk }; }); }
-    function zoom(f) { stopFollow(); setView(function (v) { var nk = Math.min(2.2, Math.max(.3, v.k * f)); return { tx: v.tx, ty: v.ty, k: nk }; }); }
+    function onWheel(e) { e.preventDefault(); stopFollow(); cancelFly(); tourStop(); var st = stageRef.current; if (!st) return; var r = st.getBoundingClientRect(); var mx = e.clientX - r.left, my = e.clientY - r.top; setView(function (v) { var nk = Math.min(2.2, Math.max(.3, v.k * (e.deltaY < 0 ? 1.12 : 0.89))); return { tx: mx - (mx - v.tx) * (nk / v.k), ty: my - (my - v.ty) * (nk / v.k), k: nk }; }); }
+    function zoom(f) { stopFollow(); cancelFly(); tourStop(); setView(function (v) { var nk = Math.min(2.2, Math.max(.3, v.k * f)); return { tx: v.tx, ty: v.ty, k: nk }; }); }
     // fit the whole graph into the viewport (Luma "illeszd a nézetbe"). Uses card size 204x74.
     function fitView() {
       var st = stageRef.current; if (!st || !g.N || !g.N.length) return;
@@ -4791,6 +4806,73 @@
       var k = Math.min(1.6, Math.max(.3, Math.min((cw - pad * 2) / gw, (ch - pad * 2) / gh)));
       setView({ tx: (cw - gw * k) / 2 - minX * k, ty: (ch - gh * k) / 2 - minY * k, k: k });
     }
+    // ---- Prezi-mód camera: flyTo tween (the single new primitive; every phase reuses it) ----
+    function cancelFly() { if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = null; } }
+    function flyTo(target, opt) {
+      opt = opt || {}; cancelFly();
+      var cur = viewRef.current || view, from = { tx: cur.tx, ty: cur.ty, k: cur.k }, ms = opt.ms || 420, t0 = null;
+      var reduce = false; try { reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { }
+      if (reduce || ms <= 0) { setView({ tx: target.tx, ty: target.ty, k: target.k }); if (opt.done) opt.done(); return; }
+      function ease(u) { return u < 0.5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2; }
+      function step(now) {
+        if (t0 === null) t0 = now; var u = Math.min(1, (now - t0) / ms), e = ease(u);
+        setView({ tx: from.tx + (target.tx - from.tx) * e, ty: from.ty + (target.ty - from.ty) * e, k: from.k + (target.k - from.k) * e });
+        if (u < 1) rafRef.current = requestAnimationFrame(step); else { rafRef.current = null; if (opt.done) opt.done(); }
+      }
+      rafRef.current = requestAnimationFrame(step);
+    }
+    // camera target that centers a node at a comfortable zoom (within the 2.2 clamp — no clamp-lift in Fázis 1)
+    function nodeTarget(n, kWanted) {
+      var st = stageRef.current, cw = (st && st.clientWidth) || 900, ch = (st && st.clientHeight) || 560;
+      var k = Math.min(2.2, Math.max(.3, kWanted || 1.9));
+      return { tx: cw / 2 - (n.x + 204 / 2) * k, ty: ch / 2 - (n.y + 74 / 2) * k, k: k };
+    }
+    // deep-link prop bag for a node type (panels ignore what they do not use — graceful)
+    function focusPropsFor(n) {
+      var id = n.ref && n.ref.id, m = {};
+      if (n.t === 'chat') m.focusChatId = id; else if (n.t === 'idea') m.focusIdeaId = id; else if (n.t === 'file') m.focusFileId = id;
+      else if (n.t === 'paper') m.focusSourceId = id; else if (n.t === 'figure') m.focusFigureId = id;
+      else if (n.t === 'review') m.focusReviewId = id; else if (n.t === 'srq') m.focusQuestionId = id; else if (n.t === 'sreview') m.focusJobId = id;
+      else if (n.t === 'step') m.focusStepId = id; else if (n.t === 'dataset') m.focusDatasetId = id;
+      else if (n.t === 'section') m.focusSection = n.ref && n.ref.path; else if (n.t === 'venue') m.focusVenueId = id;
+      return m;
+    }
+    var EMBEDDABLE = { ideas: 1, literature: 1, study: 1, protocol: 1, data: 1, writing: 1, journal: 1 };
+    function canEnter(n) { var tab = RMAP_TYPE[n.t] && RMAP_TYPE[n.t].tab; return !!(tab && EMBEDDABLE[tab] && props.renderPanel); }
+    // ENTER: fly the camera into the card, then mount its real workflow panel in-place (screen-space overlay)
+    function enterNode(n) {
+      if (!n) return; var tab = RMAP_TYPE[n.t] && RMAP_TYPE[n.t].tab;
+      if (!tab) return;
+      if (!canEnter(n)) { if (props.onGoTab) props.onGoTab(tab); return; }   // non-embeddable → hand off to the classic tab
+      stopFollow(); tourStop();
+      returnView.current = { tx: view.tx, ty: view.ty, k: view.k };
+      // mount the (possibly heavy) panel only AFTER the camera tween settles — a light placeholder shows during 'entering'
+      setFocus(Object.assign({ nodeId: n.id, tab: tab, t: n.t, title: n.title, ref: n.ref, phase: 'entering' }, focusPropsFor(n)));
+      flyTo(nodeTarget(n, 2.0), { ms: 420, done: function () { if (alive.current) setFocus(function (f) { return f ? Object.assign({}, f, { phase: 'open' }) : f; }); } });
+    }
+    function exitFocus() { var rv = returnView.current; setFocus(null); if (rv) flyTo(rv, { ms: 360 }); }
+    // ---- guided tour over the saved Lapok (pages) — Fázis 1; Fázis 2 upgrades this to authored story beats ----
+    function tourStop() { if (tourT.current) { clearTimeout(tourT.current); tourT.current = null; } setTour(null); }
+    function tourGoto(list, i) {
+      if (!list.length) return; var idx = (i + list.length) % list.length, pg = list[idx];
+      flyTo({ tx: pg.tx, ty: pg.ty, k: pg.k }, { ms: 620 });
+      setTour(function (t) { return Object.assign({}, t || {}, { list: list, i: idx }); });
+    }
+    function tourStart() {
+      if (!pagesCap || !pages.length) { window.PRUI.toast('Ments előbb legalább egy „Lapot" (nézetet) a túrához.', { kind: 'info' }); return; }
+      var list = pages.slice().sort(function (a, b) { return (a.ord || 0) - (b.ord || 0); });
+      setFocus(null); returnView.current = { tx: view.tx, ty: view.ty, k: view.k };
+      setTour({ list: list, i: -1, playing: true }); tourAdvance(list, 0, true);
+    }
+    function tourAdvance(list, i, playing) {
+      tourGoto(list, i);
+      if (tourT.current) { clearTimeout(tourT.current); tourT.current = null; }
+      if (playing && i < list.length - 1) tourT.current = setTimeout(function () { if (alive.current) tourAdvance(list, i + 1, true); }, 3200);
+      else setTour(function (t) { return Object.assign({}, t || { list: list }, { i: (i + list.length) % list.length, playing: playing && i < list.length - 1 }); });
+    }
+    function tourPrev() { if (tour) { if (tourT.current) { clearTimeout(tourT.current); tourT.current = null; } tourAdvance(tour.list, tour.i - 1, false); } }
+    function tourNext() { if (tour) { if (tourT.current) { clearTimeout(tourT.current); tourT.current = null; } tourAdvance(tour.list, tour.i + 1, false); } }
+    function tourToggle() { if (!tour) return; if (tour.playing) { if (tourT.current) { clearTimeout(tourT.current); tourT.current = null; } setTour(function (t) { return Object.assign({}, t, { playing: false }); }); } else tourAdvance(tour.list, tour.i, true); }
 
     // ---- free-drag: move a card anywhere and persist it (research_map_layout). A short press without motion = a click
     // (select / toggle). Only left-button + editors move cards; viewers still click to select. ----
@@ -5499,7 +5581,7 @@
           h('svg', { className: 'rmap-edges', width: svgW, height: g.height },
             h('defs', null, h('marker', { id: 'rmap-arrow', viewBox: '0 0 8 8', refX: 6.5, refY: 4, markerWidth: 6.5, markerHeight: 6.5, orient: 'auto-start-reverse' }, h('path', { d: 'M0.5,0.5 L7.5,4 L0.5,7.5 Z', fill: 'var(--line-2, var(--muted))' }))),
             edgeEls),
-          g.N.map(function (n) { if (!nodeVisible(n)) return null; return h('div', { key: n.id, 'data-nid': n.id, className: 'rmap-node t-' + n.t + (sel === n.id ? ' sel' : '') + (msel[n.id] ? ' rmap-mselected' : '') + (n.mapPinned ? ' rmap-pinned' : '') + (activeKey && n.ph === RMAP_PHASE_IDX[activeKey] ? ' inphase' : '') + (props.canEdit ? ' editable' : '') + (dlive && dlive.id === n.id ? ' dragging' : ''), style: { left: n.x + 'px', top: n.y + 'px' }, onMouseDown: function (e) { e.stopPropagation(); startNodeDrag(e, n); }, onContextMenu: function (e) { e.preventDefault(); e.stopPropagation(); if (props.canEdit && (genActions(n).length || regenActions(n).length)) setMenu({ node: n, x: e.clientX, y: e.clientY }); } }, n.mapPinned ? h('span', { className: 'rmap-pin-badge', title: 'Kitűzött' }, '📌') : null, nodeCmCount(n.id) ? h('span', { className: 'rmap-cm-badge', title: nodeCmCount(n.id) + ' nyitott komment', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); setOpenThread(n.id); } }, '💬' + nodeCmCount(n.id)) : null, (n.t === 'step' && n.ref && (n.ref.assignee_id || n.ref.signed_off_by)) ? h('span', { className: 'rmap-step-badges' }, n.ref.assignee_id ? h('span', { className: 'rmap-assignee', title: 'Felelős: ' + nameOf(n.ref.assignee_id), style: { background: userColor(n.ref.assignee_id) } }, String(nameOf(n.ref.assignee_id) || '?').trim().charAt(0).toUpperCase()) : null, n.ref.signed_off_by ? h('span', { className: 'rmap-signoff', title: 'Jóváhagyta: ' + nameOf(n.ref.signed_off_by) }, '✅') : null) : null, body(n)); })),
+          g.N.map(function (n) { if (!nodeVisible(n)) return null; return h('div', { key: n.id, 'data-nid': n.id, className: 'rmap-node t-' + n.t + (sel === n.id ? ' sel' : '') + (msel[n.id] ? ' rmap-mselected' : '') + (n.mapPinned ? ' rmap-pinned' : '') + (activeKey && n.ph === RMAP_PHASE_IDX[activeKey] ? ' inphase' : '') + (props.canEdit ? ' editable' : '') + (dlive && dlive.id === n.id ? ' dragging' : ''), style: { left: n.x + 'px', top: n.y + 'px' }, onMouseDown: function (e) { e.stopPropagation(); startNodeDrag(e, n); }, onDoubleClick: function (e) { e.stopPropagation(); if (canEnter(n)) enterNode(n); }, onContextMenu: function (e) { e.preventDefault(); e.stopPropagation(); if (props.canEdit && (genActions(n).length || regenActions(n).length)) setMenu({ node: n, x: e.clientX, y: e.clientY }); } }, n.mapPinned ? h('span', { className: 'rmap-pin-badge', title: 'Kitűzött' }, '📌') : null, nodeCmCount(n.id) ? h('span', { className: 'rmap-cm-badge', title: nodeCmCount(n.id) + ' nyitott komment', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); setOpenThread(n.id); } }, '💬' + nodeCmCount(n.id)) : null, (n.t === 'step' && n.ref && (n.ref.assignee_id || n.ref.signed_off_by)) ? h('span', { className: 'rmap-step-badges' }, n.ref.assignee_id ? h('span', { className: 'rmap-assignee', title: 'Felelős: ' + nameOf(n.ref.assignee_id), style: { background: userColor(n.ref.assignee_id) } }, String(nameOf(n.ref.assignee_id) || '?').trim().charAt(0).toUpperCase()) : null, n.ref.signed_off_by ? h('span', { className: 'rmap-signoff', title: 'Jóváhagyta: ' + nameOf(n.ref.signed_off_by) }, '✅') : null) : null, body(n)); })),
         // page bar (saved views) — top-left tabs; the active page can be curated (only pinned) / re-captured / renamed / deleted
         pagesCap ? h('div', { className: 'rmap-pagebar', onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
           h('div', { className: 'rmap-pagetabs' },
@@ -5561,6 +5643,7 @@
           h('button', { className: (Object.keys(hiddenTypes).length ? 'on' : ''), title: 'Típusok ki/be kapcsolása a térképen (pl. Ábrák)', onClick: function () { setTypeFilterOpen(function (v) { return !v; }); } }, '👁' + (Object.keys(hiddenTypes).length ? Object.keys(hiddenTypes).length : '')),
           h('button', { title: 'Térkép újratöltése a legfrissebb adatokkal (a módosítások érvényesítése)', disabled: refreshing, onClick: refreshMap }, refreshing ? '⏳' : '🔄'),
           h('button', { title: 'Térkép exportálása PNG-be', onClick: exportMap }, '⤓'),
+          (pagesCap && pages.length > 1) ? h('button', { title: 'Bemutató (Prezi-túra): végigzoomol a mentett Lapokon', onClick: tourStart }, '▶') : null,
           (props.canEdit && framesCap) ? h('button', { title: 'Új keret (nevesített régió) hozzáadása', onClick: frameCreate }, '▦') : null,
           commentsCap ? h('button', { className: commentMode ? 'on' : '', title: commentMode ? 'Komment-mód kikapcsolása' : 'Komment-mód: kattints a vászonra vagy egy kártyára', onClick: function () { setCommentMode(function (v) { return !v; }); setComposer(null); } }, '💬') : null,
           (commentsCap && comments.length) ? h('button', { title: 'Összes komment', onClick: function () { setCmPanelOpen(function (v) { return !v; }); } }, '📋' + (cmUnresolved || '')) : null,
@@ -5718,6 +5801,7 @@
                 signed ? h('button', { className: 'btn', style: { fontSize: 11, padding: '3px 8px', flex: 'none' }, onClick: function () { stepUnsignOff(st); } }, 'Visszavonás') : h('button', { className: 'btn pri', style: { fontSize: 11, padding: '3px 8px', flex: 'none' }, title: props.canEdit ? 'Jóváhagyás' : 'Konzulensi jóváhagyás', onClick: function () { stepSignOff(st); } }, 'Jóváhagyom')));
           })() : null,
           h('div', { className: 'rmap-insp-acts' },
+            canEnter(sn) ? h('button', { className: 'btn pri', style: { fontSize: 12 }, title: 'Zoomolj a kártyába — a ' + RMAP_TYPE[sn.t].lab + ' panel a helyén nyílik meg', onClick: function () { enterNode(sn); } }, '◇ Belépés (a helyén)') : null,
             (props.canEdit && editSpec(sn)) ? h('button', { className: 'btn pri', style: { fontSize: 12 }, onClick: function () { openEdit(sn); } }, '✎ Metaadat szerkesztése') : null,
             (props.canEdit && regenActions(sn).length) ? h('button', { className: 'btn', style: { fontSize: 12 }, disabled: genBusy, onClick: function () { runGen(sn, regenActions(sn)[0][0]); } }, regenActions(sn)[0][1]) : null,
             h('button', { className: 'btn', style: { fontSize: 12 }, onClick: function () { if (props.onGoTab) props.onGoTab(RMAP_TYPE[sn.t].tab); } }, 'Megnyitás a ' + RMAP_TYPE[sn.t].lab + ' fülön →'),
@@ -5776,6 +5860,28 @@
                     invRes.length ? h('div', { className: 'rmap-invite-res' }, invRes.filter(function (u) { return u.id !== props.viewerId && !(members || []).some(function (mm) { return mm.user_id === u.id; }); }).map(function (u) { return h('button', { key: u.id, className: 'rmap-invite-opt', onClick: function () { memberInvite(u, invRole); setInvQ(''); setInvRes([]); } }, (u.name || u.id) + ' — meghívás ' + roleLabel(invRole).toLowerCase() + 'ként'); })) : null)
                     : h('div', { className: 'rmap-cm-empty' }, 'Csak a projekt tulajdonosa hívhat meg közreműködőket.')))));
       })() : null,
+      // Prezi-mód focus overlay — the card's real workflow panel mounted in-place (screen-space, over the dimmed map)
+      focus ? h('div', { className: 'rmap-focus', onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
+        h('div', { className: 'rmap-focus-scrim', onClick: exitFocus }),
+        h('div', { className: 'rmap-focus-card' },
+          h('div', { className: 'rmap-focus-top' },
+            h('div', { className: 'rmap-focus-crumb' },
+              h('button', { onClick: exitFocus }, '🗺️ Térkép'),
+              h('span', { className: 'sep' }, '›'),
+              h('span', { className: 'cur' }, ((RMAP_TYPE[focus.t] && RMAP_TYPE[focus.t].ic) || '•') + ' ' + String(focus.title || (RMAP_TYPE[focus.t] && RMAP_TYPE[focus.t].lab) || '').slice(0, 44))),
+            h('div', { style: { flex: 1 } }),
+            h('button', { className: 'rmap-focus-hand', title: 'Megnyitás teljes fülként', onClick: function () { var tb = focus.tab; setFocus(null); cancelFly(); if (props.onGoTab) props.onGoTab(tb); } }, 'Fülként ↗'),
+            h('button', { className: 'rmap-focus-x', title: 'Vissza a térképre (Esc)', onClick: exitFocus }, '×')),
+          h('div', { className: 'rmap-focus-body' }, (focus.phase === 'open' && props.renderPanel) ? props.renderPanel(focus.tab, focus) : h('div', { className: 'rmap-focus-loading' }, h('div', { className: 'rmap-focus-ic' }, (RMAP_TYPE[focus.t] && RMAP_TYPE[focus.t].ic) || '◇'), h('div', null, 'Belépés…')))) ) : null,
+      // guided-tour player (Fázis 1: over saved Lapok)
+      tour ? h('div', { className: 'rmap-tour', onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
+        (tour.i >= 0 && tour.list[tour.i]) ? h('div', { className: 'rmap-tour-cap' }, h('b', null, (tour.i + 1) + '/' + tour.list.length), ' · ' + ((tour.list[tour.i].only_pinned ? '📌 ' : '') + (tour.list[tour.i].name || 'Nézet'))) : null,
+        h('div', { className: 'rmap-tour-bar' },
+          h('button', { title: 'Előző', disabled: tour.i <= 0, onClick: tourPrev }, '⏮'),
+          h('button', { className: 'play', title: tour.playing ? 'Szünet' : 'Lejátszás', onClick: tourToggle }, tour.playing ? '⏸' : '▶'),
+          h('button', { title: 'Következő', disabled: tour.i >= tour.list.length - 1, onClick: tourNext }, '⏭'),
+          h('span', { className: 'rmap-tour-dots' }, tour.list.map(function (pg, i) { return h('i', { key: i, className: i === tour.i ? 'on' : '' }); })),
+          h('button', { className: 'stop', title: 'Bemutató bezárása', onClick: tourStop }, '✕'))) : null,
       menu ? h('div', { className: 'rmap-menu-scrim', onClick: function () { setMenu(null); }, onContextMenu: function (e) { e.preventDefault(); setMenu(null); } },
         h('div', { className: 'rmap-menu', style: { left: Math.min(menu.x, (window.innerWidth || 1200) - 230) + 'px', top: Math.min(menu.y, (window.innerHeight || 800) - 140) + 'px' }, onClick: function (e) { e.stopPropagation(); } },
           h('div', { className: 'rmap-menu-h' }, '✦ Generálás innen' + (RMAP_TYPE[menu.node.t] ? ' · ' + RMAP_TYPE[menu.node.t].lab : '')),
@@ -5849,6 +5955,20 @@
           : h('div', { className: 'panel', style: { marginTop: 10 } }, h('div', { className: 'soon' }, 'No goal set yet — add one with ✎ Settings above.'))
       );
     }
+    // Prezi-mód (Fázis 1): build the SAME panel element the tab shows, for a given tab, for in-canvas "belépés".
+    // Passes an optional `focus` deep-link prop bag that each panel may ignore (graceful). Returns null for
+    // non-embeddable tabs → the Map falls back to onGoTab. Kept in sync with the tab switch below.
+    function panelForTab(t, focus) {
+      focus = focus || {};
+      if (t === 'ideas') return h('div', { className: nd() ? 'ideas2' : null }, h(ChatPanel, { projectId: p.id, supervised: !!p.student_id, canEdit: props.canEdit, authorId: props.authorId, fileOwnerId: props.fileOwnerId, sources: props.sources, onChanged: props.onChanged, focusChatId: focus.focusChatId, focusFileId: focus.focusFileId }), h(IdeasPanel, { projectId: p.id, ideas: props.ideas, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, onStartStudyMulti: function (ideas) { setAutoSR(function (x) { return x + 1; }); setTab('study'); }, onGoStudy: function () { setTab('study'); }, focusIdeaId: focus.focusIdeaId }));
+      if (t === 'literature') return h(React.Fragment, null, h(LiteraturePanel, { projectId: p.id, sources: props.sources, studies: props.studies, canEdit: props.canEdit, myEmail: props.myEmail, onChanged: props.onChanged, focusSourceId: focus.focusSourceId, focusFigureId: focus.focusFigureId }), h(ElicitReports, { projectId: p.id, project: p, canEdit: props.canEdit, authorId: props.authorId, onGoStudy: function () { setTab('study'); } }));
+      if (t === 'study') return h(ElicitSysReview, { projectId: p.id, project: p, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, autoGenerate: autoSR, onAutoGenerated: function () { setAutoSR(0); }, onOpenStudy: openFunnelStudy, focusReviewId: focus.focusReviewId, focusQuestionId: focus.focusQuestionId, focusJobId: focus.focusJobId });
+      if (t === 'protocol') return h(ProtocolPanel, { projectId: p.id, ideas: props.ideas, sources: props.sources, studies: props.studies, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, focusStepId: focus.focusStepId });
+      if (t === 'data') return h(DataPanel, { projectId: p.id, datasets: props.datasets, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, focusDatasetId: focus.focusDatasetId });
+      if (t === 'writing') return h(WritingPanel, { project: p, sources: props.sources, ideas: props.ideas, jobs: props.jobs, canEdit: props.canEdit, authorId: props.authorId, viewer: props.me, focusSection: focus.focusSection });
+      if (t === 'journal') return h(JournalPanel, { projectId: p.id, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, focusVenueId: focus.focusVenueId });
+      return null;   // compute/submission/map/canvas/notes/log/tasks are not embeddable
+    }
     var content;
     if (tab === 'ideas') content = h('div', { className: nd() ? 'ideas2' : null }, h(ChatPanel, { projectId: p.id, supervised: !!p.student_id, canEdit: props.canEdit, authorId: props.authorId, fileOwnerId: props.fileOwnerId, sources: props.sources, onChanged: props.onChanged }), h(IdeasPanel, { projectId: p.id, ideas: props.ideas, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, onStartStudyMulti: function (ideas) { setAutoSR(function (x) { return x + 1; }); setTab('study'); }, onGoStudy: function () { setTab('study'); } }));
     else if (tab === 'literature') content = h(React.Fragment, null,
@@ -5865,7 +5985,7 @@
       h('h3', { style: { marginTop: 0 } }, '📤 Submission'),
       h('p', { style: { fontSize: 13.5, color: 'var(--muted)', lineHeight: 1.55 } }, 'When the manuscript is ready, submit and track it in the Érkeztető (submission) workflow — desk-check, reviewers, decisions and camera-ready.'),
       h('a', { className: 'btn pri', href: 'Submissions.html' + (/[?&]adminView=1/.test(location.search) ? '?adminView=1' : ''), style: { textDecoration: 'none', display: 'inline-block' } }, 'Open the submission workflow →'));
-    else if (tab === 'map') content = h(PipelineCanvas, { projectId: p.id, project: p, canEdit: props.canEdit, authorId: props.authorId, viewerId: props.me && props.me.id, viewer: props.me, onGoTab: function (t) { setTab(t); } });
+    else if (tab === 'map') content = h(PipelineCanvas, { projectId: p.id, project: p, canEdit: props.canEdit, authorId: props.authorId, viewerId: props.me && props.me.id, viewer: props.me, onGoTab: function (t) { setTab(t); }, renderPanel: panelForTab });
     else if (tab === 'canvas') content = window.PRCanvas ? h(window.PRCanvas, { projectId: p.id, canEdit: props.canEdit, authorId: props.authorId }) : h('div', { className: 'empty' }, 'Loading Canvas…');
     else if (tab === 'notes') content = window.PRNotes ? h(window.PRNotes, { projectId: p.id, canEdit: props.canEdit, authorId: props.authorId }) : h('div', { className: 'empty' }, 'Loading Notes…');
     else if (tab === 'log') content = h(LogPanel, { projectId: p.id, authorId: props.authorId, entries: props.log, canEdit: props.canEdit, onChanged: props.onChanged });

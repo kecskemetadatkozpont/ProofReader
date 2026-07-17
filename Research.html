@@ -967,6 +967,40 @@
     .rmap-tf-lab { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .rmap-tf-count { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
     .rmap-tf-eye { font-size: 13px; flex: none; }
+    /* Prezi-mód: in-canvas focus overlay (a card's real workflow panel, in place) */
+    .rmap-focus { position: absolute; inset: 0; z-index: 30; display: flex; }
+    .rmap-focus-scrim { position: absolute; inset: 0; background: color-mix(in srgb, #0b0a15 44%, transparent); animation: rmap-fade .2s ease; }
+    @keyframes rmap-fade { from { opacity: 0; } to { opacity: 1; } }
+    .rmap-focus-card { position: relative; z-index: 2; margin: 14px; width: 100%; max-width: 1040px; margin-left: auto; margin-right: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; box-shadow: 0 44px 110px -44px rgba(0,0,0,.72); display: flex; flex-direction: column; overflow: hidden; animation: rmap-focus-pop .24s cubic-bezier(.2,.72,.28,1); }
+    @keyframes rmap-focus-pop { from { opacity: 0; transform: scale(.955) translateY(8px); } to { opacity: 1; transform: none; } }
+    @media (prefers-reduced-motion: reduce) { .rmap-focus-card, .rmap-focus-scrim { animation: none; } }
+    .rmap-focus-top { display: flex; align-items: center; gap: 8px; padding: 9px 11px; border-bottom: 1px solid var(--line); background: var(--surface-2); flex: none; }
+    .rmap-focus-crumb { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; }
+    .rmap-focus-crumb button { border: none; background: none; cursor: pointer; color: var(--muted); font-family: inherit; font-weight: 700; font-size: 12px; padding: 3px 9px; border-radius: 7px; }
+    .rmap-focus-crumb button:hover { background: var(--surface); color: var(--accent); }
+    .rmap-focus-crumb .sep { color: var(--faint); } .rmap-focus-crumb .cur { color: var(--accent); white-space: nowrap; }
+    .rmap-focus-hand { border: 1px solid var(--line); background: var(--surface); cursor: pointer; font-family: inherit; font-size: 11.5px; font-weight: 700; color: var(--ink); padding: 4px 11px; border-radius: 8px; flex: none; }
+    .rmap-focus-hand:hover { border-color: var(--accent); color: var(--accent); }
+    .rmap-focus-x { border: 1px solid var(--line); background: var(--surface); color: var(--muted); width: 30px; height: 28px; border-radius: 8px; cursor: pointer; font-size: 17px; line-height: 1; flex: none; }
+    .rmap-focus-x:hover { color: var(--danger, #b42318); border-color: var(--danger, #b42318); }
+    .rmap-focus-body { flex: 1; overflow: auto; padding: 14px 16px; background: var(--surface-2); }
+    .rmap-focus-loading { height: 100%; min-height: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--muted); font-size: 13px; font-weight: 600; }
+    .rmap-focus-ic { font-size: 34px; animation: rmap-focus-breathe 1.3s ease-in-out infinite; }
+    @keyframes rmap-focus-breathe { 0%, 100% { transform: scale(1); opacity: .8; } 50% { transform: scale(1.12); opacity: 1; } }
+    @media (prefers-reduced-motion: reduce) { .rmap-focus-ic { animation: none; } }
+    /* guided tour player */
+    .rmap-tour { position: absolute; left: 0; right: 0; bottom: 0; z-index: 24; display: flex; flex-direction: column; align-items: center; gap: 8px; padding-bottom: 14px; pointer-events: none; }
+    .rmap-tour > * { pointer-events: auto; }
+    .rmap-tour-cap { background: color-mix(in srgb, #14121f 84%, transparent); color: #fff; border-radius: 12px; padding: 7px 15px; font-size: 12px; box-shadow: 0 12px 30px -12px rgba(0,0,0,.6); }
+    .rmap-tour-cap b { color: #fff; font-variant-numeric: tabular-nums; }
+    .rmap-tour-bar { display: flex; align-items: center; gap: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 6px 9px; box-shadow: 0 12px 30px -14px rgba(20,26,40,.5); }
+    .rmap-tour-bar button { border: none; background: none; cursor: pointer; font-size: 14px; color: var(--ink); width: 30px; height: 28px; border-radius: 8px; display: flex; align-items: center; justify-content: center; }
+    .rmap-tour-bar button:hover:not(:disabled) { background: var(--surface-2); }
+    .rmap-tour-bar button:disabled { opacity: .38; cursor: default; }
+    .rmap-tour-bar button.play { background: var(--accent); color: #fff; }
+    .rmap-tour-bar button.stop { color: var(--muted); font-size: 13px; }
+    .rmap-tour-dots { display: flex; gap: 5px; align-items: center; padding: 0 6px; }
+    .rmap-tour-dots i { width: 7px; height: 7px; border-radius: 50%; background: var(--line); transition: width .2s; } .rmap-tour-dots i.on { background: var(--accent); width: 18px; border-radius: 999px; }
     /* Map pages (saved views) — top-left tab bar */
     .rmap-pagebar { position: absolute; top: 12px; left: 12px; z-index: 13; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; max-width: 60%; }
     .rmap-pagetabs { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 4px; box-shadow: 0 6px 18px rgba(20,26,40,.14); }
@@ -1142,7 +1176,7 @@
   <script type="text/babel" src="canvas.jsx?v=1783137934"></script>
   <script type="text/babel" src="notes.jsx?v=1783137934"></script>
   <script src="autopilot-core.js?v=1784160000"></script>
-  <script type="text/babel" src="research.jsx?v=1785110000"></script>
+  <script type="text/babel" src="research.jsx?v=1785200000"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>
