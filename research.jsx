@@ -4287,6 +4287,7 @@
     var flS = useState(null), frLive = flS[0], setFrLive = flS[1];   // in-flight frame move/resize live geometry {id,x,y,w,h}
     var frdrag = useRef(null);   // frame drag/resize lifecycle guard
     var fgS = useState({}), frGen = fgS[0], setFrGen = fgS[1];   // per-frame inline "generate here" input text
+    var fgoS = useState({}), frGenOpen = fgoS[0], setFrGenOpen = fgoS[1];   // per-frame: is the inline-generate bar open (toggled from the title bar)
     var cmS = useState([]), comments = cmS[0], setComments = cmS[1];   // Map comments/annotations — migration-72
     var cmcS = useState(false), commentsCap = cmcS[0], setCommentsCap = cmcS[1];   // migration-72 capability
     var cmmS = useState(false), commentMode = cmmS[0], setCommentMode = cmmS[1];   // click-to-comment mode
@@ -4538,10 +4539,11 @@
     function onMove(e) { var dd = drag.current; if (!dd) return; setView(function (v) { return { tx: dd.tx + (e.clientX - dd.sx), ty: dd.ty + (e.clientY - dd.sy), k: v.k }; }); }
     function onUp() { drag.current = null; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); }
     function stageXY(e) { var st = stageRef.current; if (!st) return { x: e.clientX, y: e.clientY }; var r = st.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
-    function onMarqMove(e) { var mq = mqRef.current; if (!mq) return; var p = stageXY(e); setMarquee({ x0: mq.x0, y0: mq.y0, x1: p.x, y1: p.y }); }
+    function onMarqCancel() { mqRef.current = null; window.removeEventListener('mousemove', onMarqMove); window.removeEventListener('mouseup', onMarqUp); window.removeEventListener('blur', onMarqCancel); setMarquee(null); }
+    function onMarqMove(e) { var mq = mqRef.current; if (!mq) return; if (e.buttons === 0) { onMarqUp(e); return; } var p = stageXY(e); setMarquee({ x0: mq.x0, y0: mq.y0, x1: p.x, y1: p.y }); }
     function onMarqUp(e) {
       var mq = mqRef.current; mqRef.current = null;
-      window.removeEventListener('mousemove', onMarqMove); window.removeEventListener('mouseup', onMarqUp);
+      window.removeEventListener('mousemove', onMarqMove); window.removeEventListener('mouseup', onMarqUp); window.removeEventListener('blur', onMarqCancel);
       setMarquee(null); if (!mq) return;
       var p = stageXY(e), x0 = Math.min(mq.x0, p.x), x1 = Math.max(mq.x0, p.x), y0 = Math.min(mq.y0, p.y), y1 = Math.max(mq.y0, p.y);
       if (x1 - x0 < 5 && y1 - y0 < 5) return;   // a tiny box = a click, not a marquee
@@ -4554,7 +4556,7 @@
       // comment mode: a click on the empty canvas drops a position-pinned comment composer
       if (commentMode) { var pc = stageXY(e); setComposer({ x: Math.round((pc.x - view.tx) / view.k), y: Math.round((pc.y - view.ty) / view.k) }); setCmText(''); return; }
       // shift + drag on the empty canvas = marquee multi-select; a plain drag pans; a plain click clears the selection
-      if (e.shiftKey) { var p = stageXY(e); mqRef.current = { x0: p.x, y0: p.y }; setMarquee({ x0: p.x, y0: p.y, x1: p.x, y1: p.y }); window.addEventListener('mousemove', onMarqMove); window.addEventListener('mouseup', onMarqUp); return; }
+      if (e.shiftKey) { var p = stageXY(e); mqRef.current = { x0: p.x, y0: p.y }; setMarquee({ x0: p.x, y0: p.y, x1: p.x, y1: p.y }); window.addEventListener('mousemove', onMarqMove); window.addEventListener('mouseup', onMarqUp); window.addEventListener('blur', onMarqCancel); return; }
       if (Object.keys(msel).length) setMsel({});
       drag.current = { sx: e.clientX, sy: e.clientY, tx: view.tx, ty: view.ty }; window.addEventListener('mousemove', onMove); window.addEventListener('mouseup', onUp);
     }
@@ -5151,11 +5153,12 @@
               h('div', { className: 'rmap-frame-h', onMouseDown: props.canEdit ? function (e) { startFrameDrag(e, f, 'move'); } : null },
                 h('span', { className: 'rmap-frame-t' }, f.title),
                 props.canEdit ? h('span', { className: 'rmap-frame-acts' },
+                  h('button', { title: 'Generálj ide', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); setFrGenOpen(function (M) { var m = Object.assign({}, M); if (m[f.id]) delete m[f.id]; else m[f.id] = true; return m; }); } }, '✨'),
                   h('button', { title: 'Átszínezés', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); frameRecolor(f); } }, '🎨'),
                   h('button', { title: 'Átnevezés', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); frameRename(f); } }, '✎'),
                   h('button', { title: 'Törlés', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); frameDelete(f.id); } }, '🗑')) : null),
-              props.canEdit ? h('div', { className: 'rmap-frame-gen', onMouseDown: function (e) { e.stopPropagation(); } },
-                h('input', { className: 'rmap-frame-geni', value: frGen[f.id] || '', placeholder: '✨ Generálj ide…', disabled: dBusy, onChange: function (e) { var v = e.target.value; setFrGen(function (M) { var m = Object.assign({}, M); m[f.id] = v; return m; }); }, onKeyDown: function (e) { if (e.key === 'Enter') { e.preventDefault(); frameGenerate(f, frGen[f.id]); } } }),
+              (props.canEdit && frGenOpen[f.id]) ? h('div', { className: 'rmap-frame-gen', onMouseDown: function (e) { e.stopPropagation(); } },
+                h('input', { className: 'rmap-frame-geni', autoFocus: true, value: frGen[f.id] || '', placeholder: '✨ Generálj ide…', disabled: dBusy, onChange: function (e) { var v = e.target.value; setFrGen(function (M) { var m = Object.assign({}, M); m[f.id] = v; return m; }); }, onKeyDown: function (e) { if (e.key === 'Enter') { e.preventDefault(); frameGenerate(f, frGen[f.id]); } if (e.key === 'Escape') { setFrGenOpen(function (M) { var m = Object.assign({}, M); delete m[f.id]; return m; }); } } }),
                 h('button', { title: 'Generálás', disabled: dBusy || !String(frGen[f.id] || '').trim(), onClick: function () { frameGenerate(f, frGen[f.id]); } }, '➤')) : null,
               props.canEdit ? h('div', { className: 'rmap-frame-rz', title: 'Átméretezés', onMouseDown: function (e) { startFrameDrag(e, f, 'resize'); } }) : null);
           }),
