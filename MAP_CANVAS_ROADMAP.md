@@ -48,11 +48,17 @@
 - [x] ✅ **Suggesting / track-changes** a draft-editorra — szekciónkénti javaslatok piros/zöld diff-fel,
   szerkesztő elfogad/elutasít, szerző visszavon (migr-76). *(3496d07)*
 
-## Hátralévő (jövő) — Phase 4+
+## ✅ Kooperatív Phase 4 — KÉSZ (2026-07-17)
+- [x] ✅ **Follow-mode** — kattints egy online kollégára az avatar-sorban, és a viewport-ját követed
+  (Realtime „view" broadcast; manuális pan/zoom kilép; „👁 Követed: X" sáv). *(a97ccbb)*
+- [x] ✅ **Cursor-chat** — `💬` input → rövid üzenet a kurzorod mellett, a kollégák buborékban látják
+  (élő gépelés, ~7s után elhalványul). *(a97ccbb)*
+- [x] ✅ **Supervisor sign-off** — `research_step_signoff` SECURITY DEFINER RPC: a konzulens is
+  aláírhat egy lépést általános írásjog nélkül (migr-77). *(05f7957)*
+
+## Hátralévő (jövő) — Phase 5+
 - [ ] 🔴 **Valós idejű együtt-gépelés (CRDT/Yjs)** a draft-editorra — a suggesting mode a jelenlegi
-  könnyűsúlyú alternatíva; a teljes CRDT nagy külső függőség, külön nekifutás.
-- [ ] 🟡 **Follow-mode / „ugorj a kurzorhoz"** + cursor-chat.
-- [ ] 🟡 **Supervisor sign-off** külön RLS-sel (jelenleg a sign-off szerkesztői jog).
+  könnyűsúlyú alternatíva; a teljes CRDT nagy külső függőség, külön nekifutás + dependency-döntés.
 
 > ⚠️ **A `migration-70..74` alkalmazása manuális** — lásd `AUTONOMOUS_SESSION_MANUAL_STEPS.md`.
 > A kliens minden funkciónál **kecsesen degradál**: a migráció előtt az adott UI egyszerűen nem jelenik meg.

@@ -70,6 +70,15 @@ sorrendben. A service-key nem tud DDL-t futtatni, ezért ezek manuálisak.
    lépés-felelős + sign-off (migr-75), draft suggesting mode (migr-76). A **Phase 3-ból CRDT-alapú**
    valós idejű együtt-gépelés szándékosan kimaradt (suggesting mode a könnyűsúlyú alternatíva).
 
+8. **`backend/migration-77-supervisor-signoff.sql`** — konzulensi sign-off. `research_step_signoff(step_id, clear)`
+   SECURITY DEFINER RPC: editor/owner/admin **VAGY konzulens** aláírhat egy lépést anélkül, hogy a
+   konzulens általános írásjogot kapna (egyébként read-only marad). `research_is_supervisor(pid)` segéd.
+   Amíg nincs lefuttatva: a konzulens nem tud sign-off-olni (editor a migr-75 közvetlen úton igen).
+
+   **PHASE 4 MEGÉPÜLT (2026-07-17):** follow-mode (kolléga viewport-jának követése) + cursor-chat
+   (kliens-only, nincs migráció) + konzulensi sign-off (migr-77). A **teljes CRDT/Yjs** valós idejű
+   együtt-gépelés továbbra is szándékosan kimaradt (nagy külső függőség — külön nekifutás).
+
 ## Edge-function deploy-ok (explicit jóváhagyás + megnevezés kell)
 
 **NINCS** — ebben a munkamenetben egyetlen edge-function sem változott, deploy nem szükséges.
@@ -102,6 +111,8 @@ Minden be van commitolva a `main`-re és deploy-olva (GitHub Pages).
 | `518f7a4` | Phase 2: `@mention` + értesítések a kommentekben | — |
 | `ed13134` | Phase 2: lépés-felelős + sign-off | **75** |
 | `3496d07` | Phase 3: draft suggesting mode (javaslatok szekciónként) | **76** |
+| `a97ccbb` | Phase 4: follow-mode + cursor-chat | — |
+| `05f7957` | Phase 4: konzulensi sign-off (RPC) | **77** |
 
 **Teendőd:** a `migration-70 … 74` már lefutott (2026-07-17, smoke-tesztelve). Már csak a
 **`migration-75` és `migration-76`** van hátra — futtasd le a Supabase SQL editorban (ref
