@@ -4767,7 +4767,15 @@
     function stepUnsignOff(step) { stepPatch(step, { signed_off_by: null, signed_off_at: null }); }
     function notifyMentions(body, target) {
       var cands = mentionCandidates(); if (!cands.length) return;
-      var hit = cands.filter(function (u) { return body.indexOf('@' + u.name) >= 0; });
+      // match longest name first and blank out the matched span, so a shorter PREFIX name
+      // (e.g. "Anna" ⊂ "Anna Kovács") cannot also match and send an unintended notification.
+      var scan = String(body);
+      var hit = cands.slice().sort(function (a, b) { return b.name.length - a.name.length; }).filter(function (u) {
+        var needle = '@' + u.name, idx = scan.indexOf(needle);
+        if (idx < 0) return false;
+        scan = scan.slice(0, idx) + ' '.repeat(needle.length) + scan.slice(idx + needle.length);
+        return true;
+      });
       if (!hit.length) return;
       var rows = hit.map(function (u) { return { recipient_id: u.id, kind: 'request', payload: { type: 'research_map_mention', project_id: props.projectId, project_title: (props.project && props.project.title) || '', from: (props.viewer && props.viewer.name) || 'Kolléga', excerpt: String(body).slice(0, 140), node_id: (target && target.node_id) || null } }; });
       sb.from('notifications').insert(rows).then(function () { }, function () { });
