@@ -1809,11 +1809,9 @@
     function acceptSuggestion(sg) {
       if (!ce || !draft || !draft.sections) return;
       var newSecs = draft.sections.map(function (s) { return s.key === sg.section_key ? Object.assign({}, s, { latex: sg.suggested }) : s; });
-      sb.from('research_drafts').update({ sections: newSecs, updated_at: new Date().toISOString() }).eq('id', draft.id).then(function (r) {
-        if (!wAlive.current) return;
-        if (r && r.error) { window.PRUI.toast('Alkalmazás sikertelen: ' + r.error.message, { kind: 'error' }); return; }
-        setDraft(function (d) { return Object.assign({}, d, { sections: newSecs }); }); resolveSuggestion(sg, 'accepted'); window.PRUI.toast('Javaslat alkalmazva a szekcióra', { kind: 'success' });
-      });
+      setDraft(function (d) { return Object.assign({}, d, { sections: newSecs }); });
+      bcSecUpdate(sg.section_key, sg.suggested);   // keep concurrent editors' local copies fresh so their saves don't revert this
+      persistSection(sg.section_key, sg.suggested, newSecs); resolveSuggestion(sg, 'accepted'); window.PRUI.toast('Javaslat alkalmazva a szekcióra', { kind: 'success' });
     }
     function pendingFor(key) { return suggestions.filter(function (s) { return s.section_key === key && s.status === 'pending'; }).length; }
     // Phase 5: live collaborative section editing over a per-draft Realtime channel (broadcast; no CRDT dependency).
@@ -1848,10 +1846,17 @@
       setDraft(function (d) { if (!d || !d.sections) return d; return Object.assign({}, d, { sections: d.sections.map(function (s) { return s.key === sec.key ? Object.assign({}, s, { latex: txt }) : s; }) }); });
       var now = Date.now(); if (now - lastEdBc.current > 220) { lastEdBc.current = now; bcSecUpdate(sec.key, txt); }
     }
+    // persist a SINGLE section. Prefer the row-locked RPC (migration-78) so a whole-array write can't revert a
+    // concurrently-edited/just-accepted OTHER section; fall back to the whole-array update if the RPC is absent.
+    function persistSection(key, latex, fallbackSecs) {
+      if (!draft || !draft.id) return; var dId = draft.id;
+      var whole = function () { sb.from('research_drafts').update({ sections: fallbackSecs, updated_at: new Date().toISOString() }).eq('id', dId).then(function (r2) { if (wAlive.current && r2 && r2.error) window.PRUI.toast('Mentés sikertelen: ' + r2.error.message, { kind: 'error' }); }); };
+      sb.rpc('research_draft_set_section', { d_id: dId, s_key: key, s_latex: latex }).then(function (r) { if (!wAlive.current) return; if (r && r.error) whole(); }, function () { whole(); });
+    }
     function saveSection(sec) {
       if (!draft || !draft.id) return; var txt = editTxt, newSecs = (draft.sections || []).map(function (s) { return s.key === sec.key ? Object.assign({}, s, { latex: txt }) : s; });
       bcSecUpdate(sec.key, txt); bcSecLock(sec.key, false); setEditSec(null);
-      sb.from('research_drafts').update({ sections: newSecs, updated_at: new Date().toISOString() }).eq('id', draft.id).then(function (r) { if (wAlive.current && r && r.error) window.PRUI.toast('Mentés sikertelen: ' + r.error.message, { kind: 'error' }); });
+      persistSection(sec.key, txt, newSecs);
     }
     function cancelEdit(sec) {
       var orig = edOrig.current;   // revert my live edits (local + peers) back to the pre-edit content
