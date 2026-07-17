@@ -1778,6 +1778,13 @@
     var sgtS = useState(''), suggestText = sgtS[0], setSuggestText = sgtS[1];
     var sgnS = useState(''), suggestNote = sgnS[0], setSuggestNote = sgnS[1];
     var wAlive = useRef(true); useEffect(function () { wAlive.current = true; return function () { wAlive.current = false; }; }, []);
+    // Phase 5: live collaborative section editing (Supabase-native, no CRDT dependency)
+    var edSecS = useState(null), editSec = edSecS[0], setEditSec = edSecS[1];   // section key currently open in MY inline editor
+    var edTxtS = useState(''), editTxt = edTxtS[0], setEditTxt = edTxtS[1];     // my in-progress section text
+    var lockS = useState({}), secLocks = lockS[0], setSecLocks = lockS[1];      // {section_key: {name, id, ts}} — who else is editing which section
+    var dChRef = useRef(null);   // the draft realtime channel
+    var edOrig = useRef('');   // the section's content when editing started (for Cancel revert)
+    var edSecRef = useRef(null); useEffect(function () { edSecRef.current = editSec; }, [editSec]);
     var busy = phase === 'outline' || phase === 'sections' || phase === 'assemble';
     function loadSuggestions(did) {
       if (!did) return;
@@ -1809,6 +1816,48 @@
       });
     }
     function pendingFor(key) { return suggestions.filter(function (s) { return s.section_key === key && s.status === 'pending'; }).length; }
+    // Phase 5: live collaborative section editing over a per-draft Realtime channel (broadcast; no CRDT dependency).
+    var myName = (props.viewer && props.viewer.name) || 'Kolléga', myId = props.authorId;
+    var lastEdBc = useRef(0);
+    useEffect(function () {
+      if (!draft || !draft.id) return;
+      var ch = sb.channel('rdraft:' + draft.id)
+        .on('broadcast', { event: 'seclock' }, function (m) {
+          if (!wAlive.current) return; var pl = m && m.payload; if (!pl || !pl.key || pl.id === myId) return;
+          setSecLocks(function (L) { var n = Object.assign({}, L); if (pl.editing) n[pl.key] = { name: pl.name, id: pl.id, ts: Date.now() }; else delete n[pl.key]; return n; });
+        })
+        .on('broadcast', { event: 'secupdate' }, function (m) {
+          if (!wAlive.current) return; var pl = m && m.payload; if (!pl || !pl.key || pl.id === myId) return;
+          if (edSecRef.current === pl.key) return;   // don't clobber the section I'm actively editing
+          setDraft(function (d) { if (!d || !d.sections) return d; return Object.assign({}, d, { sections: d.sections.map(function (s) { return s.key === pl.key ? Object.assign({}, s, { latex: pl.latex }) : s; }) }); });
+        })
+        .subscribe();
+      dChRef.current = ch;
+      var pl = setInterval(function () { if (!wAlive.current) return; var now = Date.now(); setSecLocks(function (L) { var n = {}, ch2 = false; Object.keys(L).forEach(function (k) { if (now - L[k].ts < 12000) n[k] = L[k]; else ch2 = true; }); return ch2 ? n : L; }); }, 4000);
+      return function () { clearInterval(pl); dChRef.current = null; try { sb.removeChannel(ch); } catch (e) { } };
+    }, [draft && draft.id]);
+    function bcSecLock(key, editing) { var ch = dChRef.current; if (!ch) return; try { ch.send({ type: 'broadcast', event: 'seclock', payload: { key: key, editing: editing, name: myName, id: myId } }); } catch (e) { } }
+    function bcSecUpdate(key, latex) { var ch = dChRef.current; if (!ch) return; try { ch.send({ type: 'broadcast', event: 'secupdate', payload: { key: key, latex: latex, id: myId } }); } catch (e) { } }
+    function startEditSection(sec) {
+      if (!ce) return;
+      var lk = secLocks[sec.key]; if (lk) { window.PRUI.toast(lk.name + ' épp szerkeszti ezt a szekciót', { kind: 'error' }); return; }
+      edOrig.current = sec.latex || ''; setEditSec(sec.key); setEditTxt(sec.latex || ''); bcSecLock(sec.key, true);
+    }
+    function onEditText(sec, txt) {
+      setEditTxt(txt);
+      setDraft(function (d) { if (!d || !d.sections) return d; return Object.assign({}, d, { sections: d.sections.map(function (s) { return s.key === sec.key ? Object.assign({}, s, { latex: txt }) : s; }) }); });
+      var now = Date.now(); if (now - lastEdBc.current > 220) { lastEdBc.current = now; bcSecUpdate(sec.key, txt); }
+    }
+    function saveSection(sec) {
+      if (!draft || !draft.id) return; var txt = editTxt, newSecs = (draft.sections || []).map(function (s) { return s.key === sec.key ? Object.assign({}, s, { latex: txt }) : s; });
+      bcSecUpdate(sec.key, txt); bcSecLock(sec.key, false); setEditSec(null);
+      sb.from('research_drafts').update({ sections: newSecs, updated_at: new Date().toISOString() }).eq('id', draft.id).then(function (r) { if (wAlive.current && r && r.error) window.PRUI.toast('Mentés sikertelen: ' + r.error.message, { kind: 'error' }); });
+    }
+    function cancelEdit(sec) {
+      var orig = edOrig.current;   // revert my live edits (local + peers) back to the pre-edit content
+      setDraft(function (d) { if (!d || !d.sections) return d; return Object.assign({}, d, { sections: d.sections.map(function (s) { return s.key === sec.key ? Object.assign({}, s, { latex: orig }) : s; }) }); });
+      bcSecUpdate(sec.key, orig); bcSecLock(sec.key, false); setEditSec(null);
+    }
     useEffect(function () {
       sb.from('research_journal_picks').select('id,title,status,npi_level,template').eq('project_id', pid).order('created_at').then(function (r) {
         var d = (r && r.data) || []; setPicks(d); var pick = d.filter(function (x) { return x.status === 'submitted'; })[0] || d[0]; if (pick) setJid(pick.id);
@@ -1905,8 +1954,16 @@
           h('ol', { className: 'wp-secs', style: { margin: '4px 0', paddingLeft: 20, fontSize: 12.5 } }, draft.sections.map(function (s, i) {
             return h('li', { key: i },
               h('span', null, s.heading || s.key),
+              (ce && editSec !== s.key && !secLocks[s.key]) ? h('button', { className: 'wp-sg-btn', title: 'Szekció szerkesztése (élő, közös)', onClick: function () { startEditSection(s); } }, '✎ Szerkeszt') : null,
+              secLocks[s.key] ? h('span', { className: 'wp-lock', title: secLocks[s.key].name + ' épp szerkeszti' }, '🔒 ' + secLocks[s.key].name) : null,
               suggestCap ? h('button', { className: 'wp-sg-btn', title: 'Javaslat erre a szekcióra', onClick: function () { setSuggestFor(suggestFor === i ? null : i); setSuggestText(s.latex || ''); setSuggestNote(''); } }, '💡 Javaslat') : null,
               pendingFor(s.key) ? h('span', { className: 'wp-sg-count', title: pendingFor(s.key) + ' függő javaslat' }, pendingFor(s.key)) : null,
+              (editSec === s.key) ? h('div', { className: 'wp-sg-composer' },
+                h('textarea', { rows: 7, value: editTxt, placeholder: 'Szekció tartalma (LaTeX)…', onChange: function (e) { onEditText(s, e.target.value); } }),
+                h('div', { style: { display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' } },
+                  h('span', { style: { flex: 1, fontSize: 10.5, color: 'var(--faint)' } }, '🟢 Élő közös szerkesztés — a kollégák valós időben látják'),
+                  h('button', { className: 'btn', style: { fontSize: 12, padding: '4px 10px' }, onClick: function () { cancelEdit(s); } }, 'Mégse'),
+                  h('button', { className: 'btn pri', style: { fontSize: 12, padding: '4px 10px' }, onClick: function () { saveSection(s); } }, 'Mentés'))) : null,
               (suggestFor === i) ? h('div', { className: 'wp-sg-composer' },
                 h('textarea', { rows: 5, value: suggestText, placeholder: 'Javasolt szöveg…', onChange: function (e) { setSuggestText(e.target.value); } }),
                 h('input', { className: 'wp-sg-note', value: suggestNote, placeholder: 'Indoklás (opcionális)…', onChange: function (e) { setSuggestNote(e.target.value); } }),
@@ -5774,7 +5831,7 @@
     else if (tab === 'data') content = h(DataPanel, { projectId: p.id, datasets: props.datasets, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
     else if (tab === 'compute') content = h(ComputePanel, { projectId: p.id, jobs: props.jobs, datasets: props.datasets, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
     else if (tab === 'journal') content = h(JournalPanel, { projectId: p.id, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
-    else if (tab === 'writing') content = h(WritingPanel, { project: p, sources: props.sources, ideas: props.ideas, jobs: props.jobs, canEdit: props.canEdit, authorId: props.authorId });
+    else if (tab === 'writing') content = h(WritingPanel, { project: p, sources: props.sources, ideas: props.ideas, jobs: props.jobs, canEdit: props.canEdit, authorId: props.authorId, viewer: props.me });
     else if (tab === 'submission') content = h('div', { className: 'panel' },
       h('h3', { style: { marginTop: 0 } }, '📤 Submission'),
       h('p', { style: { fontSize: 13.5, color: 'var(--muted)', lineHeight: 1.55 } }, 'When the manuscript is ready, submit and track it in the Érkeztető (submission) workflow — desk-check, reviewers, decisions and camera-ready.'),
