@@ -864,7 +864,10 @@
     }
 
     /* Pipeline Canvas (Map) — P1a swimlane materializer */
-    .rmap-wrap { display: flex; gap: 14px; align-items: stretch; }
+    .rmap-wrap { display: flex; gap: 14px; align-items: stretch; position: relative; }
+    /* floating on-canvas card modal: anchored next to the selected node, in front of the canvas (not a side panel) */
+    .rmap-insp-float { box-shadow: 0 14px 44px rgba(0,0,0,.30), 0 2px 8px rgba(0,0,0,.14); animation: rmap-insp-pop .13s ease-out; }
+    @keyframes rmap-insp-pop { from { opacity: 0; transform: scale(.97); } to { opacity: 1; transform: scale(1); } }
     .rmap-stage { flex: 1; position: relative; height: calc(100vh - 240px); min-height: 460px; overflow: hidden; background: var(--surface-2); border: 1px solid var(--line); border-radius: 14px; cursor: grab; }
     .rmap-stage:active { cursor: grabbing; }
     .rmap-world { position: absolute; top: 0; left: 0; transform-origin: 0 0; }
@@ -908,6 +911,12 @@
     .rmap-dock-chip { border: 1px solid var(--line); background: var(--surface); color: var(--ink); font-family: inherit; font-size: 11.5px; font-weight: 600; padding: 5px 9px; border-radius: 999px; cursor: pointer; }
     .rmap-dock-chip:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
     .rmap-dock-chip:disabled { opacity: .5; cursor: default; }
+    .rmap-dock-mode { display: flex; gap: 6px; padding: 9px 12px 0; }
+    .rmap-dock-modebtn { border: 1px solid var(--line); background: var(--surface); color: var(--muted); font-family: inherit; font-size: 11.5px; font-weight: 700; padding: 4px 11px; border-radius: 999px; cursor: pointer; }
+    .rmap-dock-modebtn.on { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+    .rmap-dock-modebtn:disabled { opacity: .45; cursor: default; }
+    .rmap-mic-on { border-color: var(--danger, #b42318) !important; color: var(--danger, #b42318) !important; animation: rmap-mic-pulse 1s ease-in-out infinite; }
+    @keyframes rmap-mic-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(180,35,24,.4); } 50% { box-shadow: 0 0 0 5px rgba(180,35,24,0); } }
     .rmap-dock-in { display: flex; gap: 7px; align-items: stretch; padding: 9px 12px 11px; }
     .rmap-dock-in textarea { flex: 1; resize: none; min-height: 36px; max-height: 120px; font-family: inherit; font-size: 12.5px; line-height: 1.4; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); }
     .rmap-dock-in textarea:focus { outline: none; border-color: var(--accent); }
@@ -989,7 +998,7 @@
   <script type="text/babel" src="canvas.jsx?v=1783137934"></script>
   <script type="text/babel" src="notes.jsx?v=1783137934"></script>
   <script src="autopilot-core.js?v=1784160000"></script>
-  <script type="text/babel" src="research.jsx?v=1784627000"></script>
+  <script type="text/babel" src="research.jsx?v=1784900000"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>

@@ -4268,6 +4268,9 @@
     var dmS = useState([{ role: 'ai', text: '👋 Canvas-asszisztens. Adj utasítást vagy kérdést, vagy használd a gyors-parancsokat lent — az eredmény megjelenik a térképen.' }]), dMsgs = dmS[0], setDMsgs = dmS[1];
     var diS = useState(''), dInput = diS[0], setDInput = diS[1];
     var dbS = useState(false), dBusy = dbS[0], setDBusy = dbS[1];
+    var dmoS = useState('chat'), dkMode = dmoS[0], setDkMode = dmoS[1];   // dock mode: 'chat' | 'action' (protocol step from instruction)
+    var recSt = useState(false), recOn = recSt[0], setRecOn = recSt[1];   // voice input active
+    var recRef = useRef(null);
     var pxS = useState(null), proposal = pxS[0], setProposal = pxS[1];   // pending action proposed from the attached card (preview → confirm → execute)
     var rnS = useState(null), run = rnS[0], setRun = rnS[1];   // P1b: the project's active Autopilot run (live)
     var lyS = useState({}), layout = lyS[0], setLayout = lyS[1];   // saved free-drag positions (node_id → {x,y}); overrides the auto-layout + pins the card
@@ -4489,6 +4492,15 @@
     function onDown(e) { if (e.target.closest && e.target.closest('.rmap-node')) return; drag.current = { sx: e.clientX, sy: e.clientY, tx: view.tx, ty: view.ty }; window.addEventListener('mousemove', onMove); window.addEventListener('mouseup', onUp); }
     function onWheel(e) { e.preventDefault(); var st = stageRef.current; if (!st) return; var r = st.getBoundingClientRect(); var mx = e.clientX - r.left, my = e.clientY - r.top; setView(function (v) { var nk = Math.min(2.2, Math.max(.3, v.k * (e.deltaY < 0 ? 1.12 : 0.89))); return { tx: mx - (mx - v.tx) * (nk / v.k), ty: my - (my - v.ty) * (nk / v.k), k: nk }; }); }
     function zoom(f) { setView(function (v) { var nk = Math.min(2.2, Math.max(.3, v.k * f)); return { tx: v.tx, ty: v.ty, k: nk }; }); }
+    // fit the whole graph into the viewport (Luma "illeszd a nézetbe"). Uses card size 204x74.
+    function fitView() {
+      var st = stageRef.current; if (!st || !g.N || !g.N.length) return;
+      var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      g.N.forEach(function (n) { if (n.x < minX) minX = n.x; if (n.y < minY) minY = n.y; if (n.x + 204 > maxX) maxX = n.x + 204; if (n.y + 74 > maxY) maxY = n.y + 74; });
+      var pad = 56, gw = Math.max(1, maxX - minX), gh = Math.max(1, maxY - minY), cw = st.clientWidth, ch = st.clientHeight;
+      var k = Math.min(1.6, Math.max(.3, Math.min((cw - pad * 2) / gw, (ch - pad * 2) / gh)));
+      setView({ tx: (cw - gw * k) / 2 - minX * k, ty: (ch - gh * k) / 2 - minY * k, k: k });
+    }
 
     // ---- free-drag: move a card anywhere and persist it (research_map_layout). A short press without motion = a click
     // (select / toggle). Only left-button + editors move cards; viewers still click to select. ----
@@ -4797,6 +4809,20 @@
         }, function () { bad('study insert'); });
       }
     }
+    // voice input (Web Speech API) — dictate into the dock. Hungarian recognition; falls back gracefully if unsupported.
+    function toggleMic() {
+      var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SR) { alert('A hangbevitel ebben a böngészőben nem támogatott (Chrome/Edge ajánlott).'); return; }
+      if (recRef.current) { try { recRef.current.stop(); } catch (e) { } return; }
+      var r; try { r = new SR(); } catch (e) { return; }
+      r.lang = 'hu-HU'; r.interimResults = false; r.continuous = false; r.maxAlternatives = 1;
+      r.onresult = function (e) { var txt = (e.results && e.results[0] && e.results[0][0] && e.results[0][0].transcript) || ''; if (txt) setDInput(function (prev) { return prev ? (prev.replace(/\s+$/, '') + ' ' + txt) : txt; }); };
+      r.onend = function () { recRef.current = null; if (alive.current) setRecOn(false); };
+      r.onerror = function () { recRef.current = null; if (alive.current) setRecOn(false); };
+      recRef.current = r; setRecOn(true); try { r.start(); } catch (e) { recRef.current = null; setRecOn(false); }
+    }
+    // send the dock input in the current mode: 'action' (needs a selected step) → propose protocol step(s); else chat.
+    function dkPrimary() { if (dkMode === 'action' && sn && sn.t === 'step') { dkProposeSteps(); } else { dkSend(); } }
     function dkSend() {   // free-text turn → research-chat (non-streaming); the reply may save files (→ file nodes)
       var txt = String(dInput || '').trim(); if (!txt || dBusy) return;
       // the currently SELECTED map card is "attached" as context — the assistant sees exactly which node you mean.
@@ -4840,6 +4866,16 @@
     var g = graph();
     if (!g.N.length) return h('div', { className: 'rmap-wrap' }, h('div', { className: 'rmap-empty' }, h('div', { style: { fontSize: 30 } }, '🗺️'), h('b', null, 'A térkép a projekt adataiból épül fel'), h('p', null, 'Adj hozzá ötleteket, irodalmat, protokollt — és itt egy összefüggő canvason látod majd az egészet, a provenance-élekkel.')));
     var NW = 204, NH = 74;
+    // float the inspector as a card NEXT TO the selected node (in front of the canvas), not as a side panel:
+    // position it at the node's on-screen coords (view transform), to the right of the card, flipping left if no room.
+    function inspStyle(node) {
+      var kk = view.k, MW = 300;
+      var stW = (stageRef.current && stageRef.current.clientWidth) || 900, stH = (stageRef.current && stageRef.current.clientHeight) || 560;
+      var cardX = view.tx + node.x * kk, cardY = view.ty + node.y * kk, cardW = NW * kk;
+      var ix = cardX + cardW + 12; if (ix + MW > stW - 8) ix = cardX - MW - 12; if (ix < 8) ix = 8;
+      var iy = Math.max(8, Math.min(cardY, Math.max(8, stH - 150)));
+      return { position: 'absolute', left: ix + 'px', top: iy + 'px', width: MW + 'px', maxHeight: (stH - 24) + 'px', zIndex: 13 };
+    }
     function ctr(id) { var n = g.by[id]; return { x: n.x + NW / 2, y: n.y + NH / 2 }; }
     function ndCtr(n) { return { x: n.x + NW / 2, y: n.y + (n._h || NH) / 2 }; }
     // the point on a node's boundary along the ray toward another node → edges start/end AT the card edge (clean, and the arrowhead shows)
@@ -4888,7 +4924,10 @@
           h('button', { title: 'Térkép újratöltése a legfrissebb adatokkal (a módosítások érvényesítése)', disabled: refreshing, onClick: refreshMap }, refreshing ? '⏳' : '🔄'),
           (data && data.hiddenFigs && data.hiddenFigs.length) ? h('button', { title: 'Térképről levett ábrák visszahozása', onClick: function () { setRestoreOpen(true); } }, '🖼' + data.hiddenFigs.length) : null,
           (props.canEdit && Object.keys(layout).length) ? h('button', { title: 'Automatikus elrendezés (a saját pozíciók törlése)', onClick: resetLayout }, '↺') : null,
-          h('button', { onClick: function () { zoom(1.18); } }, '+'), h('button', { onClick: function () { zoom(0.85); } }, '−')),
+          h('button', { title: 'Illeszd a nézetbe (a teljes gráf látszódjon)', onClick: fitView }, '⤢'),
+          h('button', { onClick: function () { zoom(1.18); } }, '+'),
+          h('span', { style: { fontSize: 11, fontWeight: 700, color: 'var(--muted)', minWidth: 34, textAlign: 'center', fontVariantNumeric: 'tabular-nums' }, title: 'Nagyítás — kattints a 100%-hoz', onClick: function () { setView(function (v) { return { tx: v.tx, ty: v.ty, k: 1 }; }); } }, Math.round(view.k * 100) + '%'),
+          h('button', { onClick: function () { zoom(0.85); } }, '−')),
         // "hidden figures" restore panel — bring Map-removed figures (on_map=false) back onto the Map
         (restoreOpen && data && data.hiddenFigs) ? h('div', { style: { position: 'absolute', left: 14, bottom: 96, zIndex: 14, width: 264, maxHeight: '58%', overflowY: 'auto', background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 12, boxShadow: '0 18px 50px -20px rgba(20,26,40,.55)', padding: 12 }, onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
           (function () { ensureFigUrls(data.hiddenFigs); return null; })(),
@@ -4922,12 +4961,15 @@
             h('div', { style: { display: 'flex', gap: 7 } },
               h('button', { className: 'btn pri', style: { fontSize: 12, padding: '4px 10px' }, disabled: dBusy, onClick: dkInsertSteps }, dBusy ? 'Beszúrás…' : '✅ Beszúrás'),
               h('button', { className: 'btn', style: { fontSize: 12, padding: '4px 10px' }, disabled: dBusy, onClick: function () { setProposal(null); } }, 'Mégse'))) : null,
+          h('div', { className: 'rmap-dock-mode' },
+            h('button', { className: 'rmap-dock-modebtn' + (dkMode === 'chat' ? ' on' : ''), disabled: dBusy, title: 'Beszélgetés / kérdés az asszisztenssel', onClick: function () { setDkMode('chat'); } }, '💬 Chat'),
+            h('button', { className: 'rmap-dock-modebtn' + (dkMode === 'action' ? ' on' : ''), disabled: dBusy || !(sn && sn.t === 'step'), title: (sn && sn.t === 'step') ? 'Az utasításból protokoll-lépést szúr be a kijelölt lépés után' : 'Jelölj ki egy protokoll-lépést az Akció módhoz', onClick: function () { setDkMode('action'); } }, '⚡ Akció')),
           h('div', { className: 'rmap-dock-in' },
-            h('textarea', { rows: 1, value: dInput, placeholder: (sn && sn.t === 'step') ? 'Mit tegyek e lépés után? (pl. „tegyél be egy validációs lépést")' : sn ? 'Kérdezz vagy adj utasítást a becsatolt kártyáról…' : 'Írj utasítást vagy kérdést… (jelölj ki egy kártyát a becsatoláshoz)', disabled: dBusy, onChange: function (e) { setDInput(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); dkSend(); } } }),
-            (sn && sn.t === 'step') ? h('button', { className: 'btn', style: { fontSize: 12, padding: '0 9px', flex: 'none' }, disabled: dBusy || !dInput.trim(), title: 'Az utasításból protokoll-lépés(eke)t javasol, és megerősítés után beszúrja a kijelölt lépés után', onClick: dkProposeSteps }, '⚡ Lépés') : null,
-            h('button', { className: 'btn pri', style: { fontSize: 14, padding: '0 12px', flex: 'none' }, disabled: dBusy || !dInput.trim(), onClick: dkSend }, '➤')))
+            h('textarea', { rows: 1, value: dInput, placeholder: (dkMode === 'action' && sn && sn.t === 'step') ? 'Mit tegyek e lépés után? (pl. „tegyél be egy validációs lépést")' : sn ? 'Kérdezz vagy adj utasítást a becsatolt kártyáról…' : 'Írj utasítást vagy kérdést… (jelölj ki egy kártyát a becsatoláshoz)', disabled: dBusy, onChange: function (e) { setDInput(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); dkPrimary(); } } }),
+            h('button', { className: 'btn' + (recOn ? ' rmap-mic-on' : ''), style: { fontSize: 14, padding: '0 9px', flex: 'none' }, disabled: dBusy, title: recOn ? 'Felvétel leállítása' : 'Hangbevitel — diktálás (magyar)', onClick: toggleMic }, recOn ? '⏺' : '🎤'),
+            h('button', { className: 'btn pri', style: { fontSize: 14, padding: '0 12px', flex: 'none' }, disabled: dBusy || !dInput.trim() || (dkMode === 'action' && !(sn && sn.t === 'step')), onClick: dkPrimary }, dkMode === 'action' ? '⚡' : '➤')))
           : h('button', { className: 'rmap-dock-fab', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function () { setDkOpen(true); try { localStorage.setItem('pr-rmap-dock', '1'); } catch (e) { } } }, '🤖 Asszisztens')) : null),
-      sn ? h('div', { className: 'rmap-insp' },
+      sn ? h('div', { className: 'rmap-insp rmap-insp-float', style: inspStyle(sn), onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
         h('div', { className: 'rmap-insp-h' }, h('span', { className: 'rmap-ni' }, RMAP_TYPE[sn.t].ic), h('div', { style: { minWidth: 0 } }, h('b', null, sn.title), h('div', { className: 'rmap-insp-ty' }, RMAP_TYPE[sn.t].lab)), h('button', { className: 'rmap-insp-x', onClick: function () { setSel(null); } }, '×')),
         h('div', { className: 'rmap-insp-b' },
           h('div', { className: 'rmap-kv' }, Object.keys(sn.m).map(function (kk) { return [h('span', { className: 'k', key: 'k' + kk }, kk), h('span', { className: 'v', key: 'v' + kk }, sn.m[kk])]; })),
