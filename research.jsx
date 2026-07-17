@@ -4298,6 +4298,12 @@
     var pgS = useState([]), pages = pgS[0], setPages = pgS[1];   // Map pages (saved views) — migration-73
     var pgcS = useState(false), pagesCap = pgcS[0], setPagesCap = pgcS[1];   // migration-73 capability
     var apgS = useState(null), activePage = apgS[0], setActivePage = apgS[1];   // active page id or null (= full graph)
+    var onlS = useState([]), online = onlS[0], setOnline = onlS[1];   // realtime presence: who else is viewing this Map
+    var memS = useState(null), members = memS[0], setMembers = memS[1];   // project collaborators (migration-74) — null until loaded/capable
+    var shareS = useState(false), shareOpen = shareS[0], setShareOpen = shareS[1];   // the Share/Collaborators modal
+    var invqS = useState(''), invQ = invqS[0], setInvQ = invqS[1];   // invite: user search query
+    var invrS = useState([]), invRes = invrS[0], setInvRes = invrS[1];   // invite: search results
+    var invrolS = useState('viewer'), invRole = invrolS[0], setInvRole = invrolS[1];   // invite: role to grant
     var drag = useRef(null), stageRef = useRef(null), alive = useRef(true), bumpT = useRef(null), driving = useRef(false), mapDriver = useRef(null), ndrag = useRef(null), selRef = useRef(null), refBusy = useRef({}), dcRef = useRef(null), dScroll = useRef(null);
     if (!mapDriver.current) mapDriver.current = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : ('00000000-0000-4000-8000-' + String(Date.now()).slice(-12));
     useEffect(function () { return function () { alive.current = false; driving.current = false; if (bumpT.current) clearTimeout(bumpT.current); }; }, []);
@@ -4353,7 +4359,14 @@
       sb.from('research_map_pages').select('id,name,tx,ty,k,only_pinned,ord').eq('project_id', pid).order('ord', { ascending: true }).order('created_at', { ascending: true }).then(function (r) {
         if (!alive.current) return; if (r && r.error) return; setPagesCap(true); setPages((r && r.data) || []);
       });
-      var ch = sb.channel('rmap-ap:' + pid)
+      var me = props.viewer || {}, myKey = props.viewerId || ('anon-' + pid);
+      var ch = sb.channel('rmap-ap:' + pid, { config: { presence: { key: myKey } } })
+        .on('presence', { event: 'sync' }, function () {
+          if (!alive.current) return;
+          var st = ch.presenceState(), seen = {}, list = [];
+          Object.keys(st).forEach(function (k) { (st[k] || []).forEach(function (m) { var id = m.id || k; if (!seen[id]) { seen[id] = 1; list.push({ id: id, name: m.name, avatar: m.avatar, self: id === props.viewerId }); } }); });
+          setOnline(list);
+        })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'research_autopilot_runs', filter: 'project_id=eq.' + pid }, function (p) { if (alive.current && p.new) { setRun(p.new); ensureDrive(p.new); bumpSoon(); } })
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'research_autopilot_events', filter: 'project_id=eq.' + pid }, function () { if (alive.current) bumpSoon(); })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'research_map_layout', filter: 'project_id=eq.' + pid }, function (p) {
@@ -4382,9 +4395,15 @@
           var np = p.new; if (!np || !np.id) return;
           setPages(function (P) { var found = false, out = P.map(function (x) { if (x.id === np.id) { found = true; return { id: np.id, name: np.name, tx: np.tx, ty: np.ty, k: np.k, only_pinned: np.only_pinned, ord: np.ord }; } return x; }); if (!found) out.push({ id: np.id, name: np.name, tx: np.tx, ty: np.ty, k: np.k, only_pinned: np.only_pinned, ord: np.ord }); return out; });
         })
-        .subscribe();
+        .subscribe(function (status) { if (status === 'SUBSCRIBED' && props.viewerId) { try { ch.track({ id: props.viewerId, name: me.name || 'Kolléga', avatar: me.avatar || null }); } catch (e) { } } });
       return function () { try { sb.removeChannel(ch); } catch (e) { } };
     }, [props.projectId]);
+    useEffect(function () { loadMembers(); }, [props.projectId]);   // collaborators (graceful: null pre-migration-74)
+    useEffect(function () {   // invite user-search (debounced), only while the Share modal is open
+      if (!shareOpen || !invQ.trim()) { setInvRes([]); return; }
+      var t = setTimeout(function () { sb.rpc('pr_search_users', { q: invQ.trim() }).then(function (r) { if (alive.current) setInvRes((r && r.data) || []); }); }, 300);
+      return function () { clearTimeout(t); };
+    }, [invQ, shareOpen]);
     function approveGate() { if (run) sb.from('research_autopilot_runs').update({ status: 'running', gate: null, updated_at: new Date().toISOString() }).eq('id', run.id); }
     useEffect(function () {
       var pid = props.projectId;
@@ -4675,6 +4694,37 @@
     }
     function pageRename(pg) { if (!props.canEdit) return; var v = window.prompt('Nézet neve:', pg.name); if (v == null || !String(v).trim()) return; setPages(function (P) { return P.map(function (x) { return x.id === pg.id ? Object.assign({}, x, { name: String(v).trim() }) : x; }); }); sb.from('research_map_pages').update({ name: String(v).trim() }).eq('id', pg.id).then(function (r) { if (r && r.error && alive.current) window.PRUI.toast('Nem sikerült: ' + r.error.message, { kind: 'error' }); }); }
     function pageDelete(pg) { if (!props.canEdit) return; setPages(function (P) { return P.filter(function (x) { return x.id !== pg.id; }); }); setActivePage(function (a) { return a === pg.id ? null : a; }); sb.from('research_map_pages').delete().eq('id', pg.id).then(function (r) { if (r && r.error && alive.current) window.PRUI.toast('Törlés sikertelen: ' + r.error.message, { kind: 'error' }); }); }
+    // ---- project members / collaborators (migration-74). members === null → pre-migration (no members UI). ----
+    function loadMembers() {
+      sb.from('research_project_members').select('user_id,role,accepted,invited_by,created_at').eq('project_id', props.projectId).then(function (r) {
+        if (!alive.current) return; if (r && r.error) { setMembers(null); return; }
+        var rows = r.data || [], ids = rows.map(function (m) { return m.user_id; });
+        if (!ids.length) { setMembers([]); return; }
+        sb.from('profiles_public').select('id,name,avatar').in('id', ids).then(function (pr) {
+          if (!alive.current) return; var byId = {}; ((pr && pr.data) || []).forEach(function (p) { byId[p.id] = p; });
+          setMembers(rows.map(function (m) { return Object.assign({}, m, { pname: (byId[m.user_id] && byId[m.user_id].name) || 'Kolléga', pavatar: byId[m.user_id] && byId[m.user_id].avatar }); }));
+        });
+      });
+    }
+    function memberInvite(u, role) {
+      if (!u || !u.id) return;
+      sb.from('research_project_members').insert({ project_id: props.projectId, user_id: u.id, role: role || 'viewer', accepted: false }).then(function (r) {
+        if (!alive.current) return;
+        if (r && r.error) { window.PRUI.toast('Meghívás sikertelen: ' + r.error.message, { kind: 'error' }); return; }
+        window.PRUI.toast('Meghívó elküldve' + (u.name ? ': ' + u.name : ''), { kind: 'success' }); loadMembers();
+      });
+    }
+    function memberSetRole(m, role) {
+      setMembers(function (M) { return (M || []).map(function (x) { return x.user_id === m.user_id ? Object.assign({}, x, { role: role }) : x; }); });
+      sb.from('research_project_members').update({ role: role }).eq('project_id', props.projectId).eq('user_id', m.user_id).then(function (r) { if (r && r.error && alive.current) { window.PRUI.toast('Nem sikerült: ' + r.error.message, { kind: 'error' }); loadMembers(); } });
+    }
+    function memberRemove(m) {
+      setMembers(function (M) { return (M || []).filter(function (x) { return x.user_id !== m.user_id; }); });
+      sb.from('research_project_members').delete().eq('project_id', props.projectId).eq('user_id', m.user_id).then(function (r) { if (r && r.error && alive.current) { window.PRUI.toast('Nem sikerült: ' + r.error.message, { kind: 'error' }); loadMembers(); } });
+    }
+    function memberAccept() { sb.rpc('research_member_accept', { pid: props.projectId }).then(function (r) { if (!alive.current) return; if (r && r.error) { window.PRUI.toast('Nem sikerült: ' + r.error.message, { kind: 'error' }); return; } window.PRUI.toast('Meghívó elfogadva', { kind: 'success' }); loadMembers(); }); }
+    var MEMBER_ROLES = [['editor', 'Szerkesztő'], ['commenter', 'Kommentelő'], ['viewer', 'Megfigyelő']];
+    function roleLabel(r) { var m = { owner: 'Tulajdonos', editor: 'Szerkesztő', commenter: 'Kommentelő', viewer: 'Megfigyelő' }; return m[r] || r; }
     function startFrameDrag(e, f, mode) {   // mode: 'move' (titlebar) | 'resize' (corner handle)
       if (e.button !== 0 || !props.canEdit) return; e.stopPropagation();
       var sx = e.clientX, sy = e.clientY, k = view.k || 1, ox = f.x, oy = f.y, ow = f.w, oh = f.h;
@@ -5218,6 +5268,12 @@
             h('button', { title: 'A lap nézetének frissítése az aktuális nagyításra/pozícióra', onClick: function () { pageUpdateView(activePageObj); } }, '⟳ Nézet'),
             h('button', { title: 'Átnevezés', onClick: function () { pageRename(activePageObj); } }, '✎'),
             h('button', { title: 'Lap törlése', onClick: function () { pageDelete(activePageObj); } }, '🗑')) : null) : null,
+        // presence (who's online) + Share button — top-right
+        h('div', { className: 'rmap-presence', onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
+          (online.length > 1) ? h('div', { className: 'rmap-avstack', title: online.length + ' online' },
+            online.slice(0, 5).map(function (u, i) { return h('div', { key: u.id, className: 'rmap-av' + (u.self ? ' me' : ''), style: { zIndex: 10 - i }, title: (u.name || 'Kolléga') + (u.self ? ' (te)' : '') }, u.avatar ? h('img', { src: u.avatar, alt: '' }) : (String(u.name || '?').trim().charAt(0).toUpperCase() || '?')); }),
+            online.length > 5 ? h('div', { className: 'rmap-av more' }, '+' + (online.length - 5)) : null) : null,
+          h('button', { className: 'rmap-share-btn', title: 'Megosztás / közreműködők', onClick: function () { setShareOpen(true); } }, '👥 Megosztás')),
         // marquee selection rectangle (shift-drag on the empty canvas)
         marquee ? h('div', { className: 'rmap-marquee', style: { position: 'absolute', left: Math.min(marquee.x0, marquee.x1) + 'px', top: Math.min(marquee.y0, marquee.y1) + 'px', width: Math.abs(marquee.x1 - marquee.x0) + 'px', height: Math.abs(marquee.y1 - marquee.y0) + 'px', pointerEvents: 'none', zIndex: 12 } }) : null,
         // free-position comment pins (screen coords → follow pan/zoom)
@@ -5397,6 +5453,35 @@
           })),
           h('div', { className: 'modal-foot' }, h('button', { className: 'btn', onClick: function () { setEditing(null); } }, 'Mégse'), h('button', { className: 'btn pri', onClick: saveEdit }, 'Mentés')))) : null,
       genBusy ? h('div', { className: 'rmap-genbusy' }, '⏳ Generálás…') : null,
+      // Share / Collaborators modal
+      shareOpen ? (function () {
+        var isOwner = !!(props.project && props.project.owner_id === props.viewerId);
+        var myPending = (members || []).filter(function (m) { return m.user_id === props.viewerId && !m.accepted; })[0];
+        return h('div', { className: 'scrim', onClick: function () { setShareOpen(false); } },
+          h('div', { className: 'modal', style: { width: 468, maxWidth: '94vw' }, onClick: function (e) { e.stopPropagation(); } },
+            h('div', { className: 'modal-h' }, h('b', { style: { flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, '👥 Megosztás — ' + String((props.project && props.project.title) || 'Projekt').slice(0, 44)), h('button', { className: 'x', 'aria-label': 'Close', onClick: function () { setShareOpen(false); } }, '×')),
+            h('div', { style: { padding: 16, display: 'flex', flexDirection: 'column', gap: 14 } },
+              h('div', { className: 'rmap-share-presence' },
+                h('b', { style: { fontSize: 12.5 } }, '🟢 ' + online.length + ' online most'),
+                h('div', { className: 'rmap-avstack' }, online.slice(0, 8).map(function (u) { return h('div', { key: u.id, className: 'rmap-av' + (u.self ? ' me' : ''), title: (u.name || 'Kolléga') + (u.self ? ' (te)' : '') }, u.avatar ? h('img', { src: u.avatar, alt: '' }) : String(u.name || '?').trim().charAt(0).toUpperCase()); }))),
+              myPending ? h('div', { className: 'rmap-invite-banner' }, h('span', { style: { flex: 1 } }, 'Meghívtak közreműködőnek (' + roleLabel(myPending.role) + ').'), h('button', { className: 'btn pri', style: { fontSize: 12, padding: '4px 12px' }, onClick: memberAccept }, 'Elfogadom')) : null,
+              (members === null) ? h('div', { className: 'rmap-cm-empty' }, 'A közreműködők kezeléséhez futtasd a migration-74-et. Addig csak a jelenlét (presence) működik — a fenti sor mutatja, ki nézi most a térképet.')
+                : h('div', { style: { display: 'flex', flexDirection: 'column', gap: 8 } },
+                  h('b', { style: { fontSize: 12.5 } }, 'Közreműködők (' + members.length + ')'),
+                  members.length ? members.map(function (m) {
+                    return h('div', { key: m.user_id, className: 'rmap-mem-row' },
+                      h('div', { className: 'rmap-av' }, m.pavatar ? h('img', { src: m.pavatar, alt: '' }) : String(m.pname || '?').trim().charAt(0).toUpperCase()),
+                      h('div', { style: { flex: 1, minWidth: 0 } }, h('div', { style: { fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, m.pname), h('div', { style: { fontSize: 11, color: 'var(--muted)' } }, (m.accepted ? '' : '⏳ függőben · ') + roleLabel(m.role))),
+                      isOwner ? h('select', { className: 'rmap-mem-role', value: (m.role === 'owner' ? 'editor' : m.role), onChange: function (e) { memberSetRole(m, e.target.value); } }, MEMBER_ROLES.map(function (r) { return h('option', { key: r[0], value: r[0] }, r[1]); })) : null,
+                      isOwner ? h('button', { className: 'btn', style: { fontSize: 12, padding: '3px 8px' }, title: 'Eltávolítás', onClick: function () { memberRemove(m); } }, '✕') : null);
+                  }) : h('div', { className: 'rmap-cm-empty' }, 'Még nincs közreműködő.'),
+                  isOwner ? h('div', { className: 'rmap-invite' },
+                    h('div', { style: { display: 'flex', gap: 6 } },
+                      h('input', { className: 'rmap-invite-in', placeholder: 'Meghívás e-mail alapján…', value: invQ, onChange: function (e) { setInvQ(e.target.value); } }),
+                      h('select', { className: 'rmap-mem-role', value: invRole, onChange: function (e) { setInvRole(e.target.value); } }, MEMBER_ROLES.map(function (r) { return h('option', { key: r[0], value: r[0] }, r[1]); }))),
+                    invRes.length ? h('div', { className: 'rmap-invite-res' }, invRes.filter(function (u) { return u.id !== props.viewerId && !(members || []).some(function (mm) { return mm.user_id === u.id; }); }).map(function (u) { return h('button', { key: u.id, className: 'rmap-invite-opt', onClick: function () { memberInvite(u, invRole); setInvQ(''); setInvRes([]); } }, (u.name || u.id) + ' — meghívás ' + roleLabel(invRole).toLowerCase() + 'ként'); })) : null)
+                    : h('div', { className: 'rmap-cm-empty' }, 'Csak a projekt tulajdonosa hívhat meg közreműködőket.')))));
+      })() : null,
       menu ? h('div', { className: 'rmap-menu-scrim', onClick: function () { setMenu(null); }, onContextMenu: function (e) { e.preventDefault(); setMenu(null); } },
         h('div', { className: 'rmap-menu', style: { left: Math.min(menu.x, (window.innerWidth || 1200) - 230) + 'px', top: Math.min(menu.y, (window.innerHeight || 800) - 140) + 'px' }, onClick: function (e) { e.stopPropagation(); } },
           h('div', { className: 'rmap-menu-h' }, '✦ Generálás innen' + (RMAP_TYPE[menu.node.t] ? ' · ' + RMAP_TYPE[menu.node.t].lab : '')),
@@ -5486,7 +5571,7 @@
       h('h3', { style: { marginTop: 0 } }, '📤 Submission'),
       h('p', { style: { fontSize: 13.5, color: 'var(--muted)', lineHeight: 1.55 } }, 'When the manuscript is ready, submit and track it in the Érkeztető (submission) workflow — desk-check, reviewers, decisions and camera-ready.'),
       h('a', { className: 'btn pri', href: 'Submissions.html' + (/[?&]adminView=1/.test(location.search) ? '?adminView=1' : ''), style: { textDecoration: 'none', display: 'inline-block' } }, 'Open the submission workflow →'));
-    else if (tab === 'map') content = h(PipelineCanvas, { projectId: p.id, project: p, canEdit: props.canEdit, authorId: props.authorId, viewerId: props.me && props.me.id, onGoTab: function (t) { setTab(t); } });
+    else if (tab === 'map') content = h(PipelineCanvas, { projectId: p.id, project: p, canEdit: props.canEdit, authorId: props.authorId, viewerId: props.me && props.me.id, viewer: props.me, onGoTab: function (t) { setTab(t); } });
     else if (tab === 'canvas') content = window.PRCanvas ? h(window.PRCanvas, { projectId: p.id, canEdit: props.canEdit, authorId: props.authorId }) : h('div', { className: 'empty' }, 'Loading Canvas…');
     else if (tab === 'notes') content = window.PRNotes ? h(window.PRNotes, { projectId: p.id, canEdit: props.canEdit, authorId: props.authorId }) : h('div', { className: 'empty' }, 'Loading Notes…');
     else if (tab === 'log') content = h(LogPanel, { projectId: p.id, authorId: props.authorId, entries: props.log, canEdit: props.canEdit, onChanged: props.onChanged });

@@ -35,6 +35,24 @@ sorrendben. A service-key nem tud DDL-t futtatni, ezért ezek manuálisak.
    - Utána: „Teljes gráf" + mentett nézetek (viewport) fülek; `＋` új nézet az aktuális nagyításból;
      az aktív lapon `📌 Kurált` (csak kitűzöttek), `⟳ Nézet` (viewport-frissítés), átnevezés, törlés.
 
+5. **`backend/migration-74-project-members.sql`** — ⚠️ **BIZTONSÁG-ÉRZÉKENY — NÉZD ÁT, MIELŐTT FUTTATOD.**
+   Kooperatív munka Phase 1: `research_project_members` tábla + a `research_can_write_project` /
+   `research_can_read_project` gate-függvények **átírása** úgy, hogy az elfogadott közreműködők is
+   hozzáférnek a projekthez (owner/editor → írás; commenter/viewer → olvasás). A meglévő
+   owner/admin/student/supervisor logika **változatlan**, a tagság OR-ral van hozzáadva.
+   - A migráció `create or replace`-eli a két gate-függvényt — ez **MINDEN `research_*` tábla**
+     írás/olvasás jogát érinti (nem csak a Map-et). Ezért kérlek olvasd át a fájlt, mielőtt lefuttatod.
+   - Tartalmaz egy `research_member_accept(pid)` SECURITY DEFINER RPC-t (a meghívott a SAJÁT
+     meghívóját fogadja el, szerepkör-módosítás nélkül).
+   - Amíg nincs lefuttatva: a `👥 Megosztás` modalban a közreműködő-kezelés nem érhető el
+     (a `members === null` ág üzenetet mutat), de a **jelenlét (presence) MÁR MOST MŰKÖDIK**
+     (nem igényel migrációt) — a jobb-felső avatar-sor és a modal presence-sora élő.
+   - Utána: a tulajdonos e-mail alapján meghívhat (Szerkesztő/Kommentelő/Megfigyelő), a meghívott
+     elfogadja; a write-gate az összes `research_*` táblán egyszerre engedi a szerkesztőket.
+
+   **Megjegyzés a jövőbeli Phase 2/3-hoz:** élő kurzorok, hozzárendelés, sign-off, suggesting/CRDT
+   a draft-editorra — ezek még NINCSENEK megépítve (lásd `MAP_CANVAS_ROADMAP.md`).
+
 ## Edge-function deploy-ok (explicit jóváhagyás + megnevezés kell)
 
 _(A lista alább bővül.)_
