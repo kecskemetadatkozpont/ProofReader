@@ -1,54 +1,48 @@
-# Map / Canvas — Roadmap (Next Steps)
+# Map / Canvas — Roadmap
 
-> A jelenlegi feladatok után ezek a **Next Step**-ek. Forrás: a LumaLabs Infinite Canvas Dashboard
-> áttekintése + a saját javaslataink. Jelölés: ✅ kész · 🟡 részben · 🆕 új.
-> Effort: 🟢 kicsi · 🟡 közepes · 🔴 nagy. Prio sorrend a végén.
+> Forrás: a LumaLabs Infinite Canvas Dashboard áttekintése + saját javaslatok.
+> Jelölés: ✅ kész · 🟡 részben · 🆕 új. Effort: 🟢 kicsi · 🟡 közepes · 🔴 nagy.
 
-## Kész (legutóbbi)
-- [x] ✅ **Figure láthatóság-válogatás a térképen** (`#2`) — figure-node előnézeti kép + „🙈 Levétel a térképről" (`on_map`) + „Rejtett ábrák" restore panel. migration-69 alkalmazva. — *kész (c3f042a)*
+## ✅ Kész (autonóm munkamenet, 2026-07 — a teljes Luma-lista + Kooperatív Phase 1)
 
-## Külön nagy kezdeményezés
-- [ ] 🆕🔴 **Kooperatív munka egy Research Projekten** (több user, Canvas + Workflow) — kutatás + fázisos terv + mockupok kész (Artifact: „Publify — Kooperatív Research Projekt"). Fázis 1 = `research_project_members` + a `research_can_write_project` write-gate átírása → minden `research_*` tábla egyszerre multi-writer; + komment/@mention + presence. Fázis 2 = élő kurzorok + hozzárendelés + sign-off. Fázis 3 = suggesting/CRDT a draft-editorra.
+### Vászon-alapok
+- [x] ✅ **Lebegő on-canvas kártya-modal** — a kijelölt kártya MELLETT lebeg (nem oldalsáv), a view-transzformból pozicionálva, ütközésnél balra fordul. *(edb4869)*
+- [x] ✅ **Zoom%-kijelző + „illeszd a nézetbe" (⤢)** — élő nagyítás (kattints=100%) + a teljes gráf nézetbe illesztése. *(edb4869)*
 
-## Vászon-alapok
-- [ ] 🆕🟢 **Zoom%-kijelző + „illeszd a nézetbe" gomb** a Map-en. *(Luma: „35%")*
-- [ ] 🆕🟡 **Több „Page" projektenként** — pl. „teljes gráf" vs „kurált nézet" lapok. *(Luma: PAGE 1 ▾)*
+### Asszisztens-dock
+- [x] ✅ **Mód-választó (💬 Chat / ⚡ Akció) + 🎤 hangbevitel** — Web Speech (hu-HU) diktálás a dockba. *(edb4869)*
+- [x] ✅ **Becsatolt-elem chip** + **cselekvés a kártyából** (protokoll-lépés) — korábbról.
 
-## Csoportosítás / keretek
-- [ ] 🆕🟡 **Fázis-lane-ek / nevesített keretek** — Ötlet → Irodalom → Protokoll → Írás → Beküldés sávok, vagy user-definiált keretek. *(Luma: „Batch 1/2/3" frames)*
+### Kártya-szintű jelölők + akciók
+- [x] ✅ **Lebegő selection-toolbar** a kijelölt kártya fölött (📌 kitűzés / 🙈 rejtés / ⚡ generálás / ⤓ export). *(79f4d22)*
+- [x] ✅ **Per-node pin + rejtés** (📌 badge + kiemelő gyűrű; rejtett kártyák kikerülnek a gráfból + `🫥N` restore-panel) — `migration-70`. *(79f4d22)*
 
-## Kártya-szintű jelölők + akciók
-- [ ] 🆕🟡 **Kártya-metaadat lebegő modalként a canvason** — a jelenlegi inspector (`rmap-insp`) az oldalsávban, a canvason KÍVÜL jelenik meg; helyette a kijelölt kártya MELLETT, a canvason lebegő popover/modalként jelenjen meg (a kártyához horgonyozva, pannal együtt mozog vagy a kártya mellé pozicionálva). *(Luma-szerű: a tartalom a vásznon marad)*
-- [ ] 🆕🟡 **Per-node badge-ek**: pin/kedvenc + láthatóság (a Figure #2 általánosítása minden node-ra). *(Luma: piros pin + eye)*
-- [ ] 🆕🟡 **Lebegő selection-toolbar** a kijelölt kártya fölött (megnyitás / generálás / rejtés / export). *(Luma: mini-toolbar a klaszter fölött)*
+### Több-kijelölés + csoport-műveletek
+- [x] ✅ **Shift-kattintás + marquee több-kijelölés** + csoport-mozgatás + csoport-sáv (📌/🙈/⤓/✕). *(e9e292f, marquee-leak fix 863ede8)*
 
-## Több-kijelölés + csoport-műveletek
-- [ ] 🆕🔴 **Marquee / shift-klikk több-kijelölés** + csoport-műveletek (együtt mozgatás, „generálj mindegyikből", csoportos rejtés). *(Luma: bounding-box + handles)*
+### Csoportosítás / keretek
+- [x] ✅ **Nevesített keretek / fázis-lane-ek** — world-térbeli, áthelyezhető/átméretezhető/átnevezhető/átszínezhető keretek, nem blokkolják a kártyákat — `migration-71`. *(2d5c06b)*
+- [x] ✅ **Inline „✨ Generálj ide"** a keret címsorából nyíló input → keret-témájú utasítás az asszisztensnek. *(2d5c06b, reachability fix 863ede8)*
 
-## Asszisztens-dock
-- [x] ✅ **Becsatolt-elem chip** (kijelölt kártya → becsatolás) — *kész (fcd09fe)*
-- [x] ✅ **Cselekvés a kártyából** (protokoll-lépés + utasítás → új lépés, megerősítéssel) — *kész (36bd464)*
-- [ ] 🆕🟢 **Mód-választó** (Chat / Generálás / Akció) az input mellett. *(Luma: „✨ Create ▾")*
-- [ ] 🆕🟢 **Hangbevitel (🎤)** a dockban. *(Luma: mic)*
-- [ ] 🟡🟡 **Streamelt, strukturált kimenet** (a #2 akció-blokk folytatása + streaming). *(Luma: gazdag emoji-listák)*
-- [ ] 🆕🟡 **Inline „generálj ide"** input egy kereten/sávon belül. *(Luma: „Type… 🎤" a klaszterben)*
+### Vászon-kommentek
+- [x] ✅ **Kommentek/annotációk** — kártyához (💬N badge + thread) vagy szabad pozícióhoz (pin) tűzve; megoldva/válasz/törlés; `📋` összes-komment panel; a read-only konzulens is kommentelhet — `migration-72`. *(16b259b)*
 
-## Alsó létrehozó-toolbar
-- [ ] 🆕🟡 **Alsó insert-sáv** — ötlet / jegyzet / fájl / keret / komment hozzáadása közvetlenül a vászonra. *(Luma: kép/videó/audió/keret/rajz/szöveg/komment/felvétel)*
+### Lapok
+- [x] ✅ **Több „Page" / mentett nézet** — „Teljes gráf" + nevesített viewport-lapok; `📌 Kurált` (csak kitűzöttek) lencse; `⟳` viewport-frissítés — `migration-73`. *(82d03b2)*
 
-## Kollaboráció
-- [ ] 🆕🟡 **Vászon-kommentek / annotációk** (node-hoz vagy pozícióhoz tűzve) — konzulensi visszajelzésre. *(Luma: komment-eszköz + panel)*
-- [ ] 🆕🟡 **Térkép/csoport export** (PNG/SVG, vagy egy keret tartalma). *(Luma: per-csoport download ↓)*
+### Export + fókusz
+- [x] ✅ **Térkép/kijelölés export** PNG-be (kliens-oldali canvas, CSP-safe). *(79f4d22)*
+- [x] ✅ **Teljes-szélességű vászon + oldalsáv-összecsukás** + **animált adat-folyam élek** — korábbról.
 
-## Fókusz / teljes képernyő
-- [x] ✅ **Teljes-szélességű vászon + oldalsáv összecsukás** — *kész (afd5fce)*
-- [x] ✅ **Animált adat-folyam élek** (forrás → cél) — *kész (afd5fce)*
+### Kooperatív munka — Phase 1
+- [x] ✅ **Jelenlét (presence)** — Realtime avatar-sor (ki nézi a térképet most), `👥 Megosztás` gomb. *(kliens-only, nincs migráció)* *(146f265)*
+- [x] ✅ **Közreműködők + szerepkörök + Share-modal** — `research_project_members` + a write/read-gate átírása (elfogadott editor→írás, commenter/viewer→olvasás); e-mailes meghívás, elfogadás-banner, szerep-kezelés — `migration-74`. *(146f265)*
 
----
+## Hátralévő (jövő) — Kooperatív Phase 2/3
+- [ ] 🔴 **Élő kurzorok + kijelölés-broadcast** a vásznon (presence már megvan, cursor még nincs).
+- [ ] 🟡 **Hozzárendelés (assignee) protokoll-lépésekhez + sign-off gate-ek** stádiumonként.
+- [ ] 🔴 **Suggesting / track-changes vagy CRDT** a draft-editorra.
+- [ ] 🟡 **@mention + értesítés** a kommentekben.
 
-## Javasolt sorrend (érték / erőfeszítés)
-1. **Figure láthatóság-jelölő (#2)** — folyamatban; egyben Luma eye/pin minta.
-2. **Mód-választó + hangbevitel a dockban** 🟢 — kicsi, nagy UX-ugrás.
-3. **Fázis-lane-ek / nevesített keretek** 🟡 — olvashatóság.
-4. **Lebegő selection-toolbar + több-kijelölés** 🟡/🔴 — Luma-szerű vezérlés.
-5. **Vászon-kommentek + export** 🟡 — kollaboráció.
+> ⚠️ **A `migration-70..74` alkalmazása manuális** — lásd `AUTONOMOUS_SESSION_MANUAL_STEPS.md`.
+> A kliens minden funkciónál **kecsesen degradál**: a migráció előtt az adott UI egyszerűen nem jelenik meg.

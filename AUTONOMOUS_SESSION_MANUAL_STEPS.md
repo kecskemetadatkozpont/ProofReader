@@ -55,14 +55,32 @@ sorrendben. A service-key nem tud DDL-t futtatni, ezért ezek manuálisak.
 
 ## Edge-function deploy-ok (explicit jóváhagyás + megnevezés kell)
 
-_(A lista alább bővül.)_
+**NINCS** — ebben a munkamenetben egyetlen edge-function sem változott, deploy nem szükséges.
+Minden funkció kliens (research.jsx / Research.html) + Supabase-tábla-migráció.
 
 ## Egyéb (megosztott DB-írás, konfig)
 
-_(A lista alább bővül.)_
+**NINCS** kötelező setup-lépés. Megosztott DB-be írás csak akkor történik, ha valaki ténylegesen
+használja az új funkciókat (keret/komment/lap/tag/meghívó létrehozása) — ezek RLS-gated felhasználói
+műveletek.
 
 ---
 
-## Elkészült funkciók (kliens kész, migráció-függő)
+## Összefoglaló — mit építettem (teljes Luma-lista + Kooperatív Phase 1)
 
-_(A lista alább bővül.)_
+Minden be van commitolva a `main`-re és deploy-olva (GitHub Pages).
+
+| Commit | Tartalom | Migráció |
+|---|---|---|
+| `edb4869` | Lebegő kártya-modal + zoom%/fit-to-view + dock mód-választó & hangbevitel | — |
+| `79f4d22` | Per-node pin/rejtés + selection-toolbar + PNG-export | **70** |
+| `e9e292f` | Több-kijelölés (shift/marquee) + csoport-műveletek + review-fixek | — |
+| `2d5c06b` | Nevesített keretek (fázis-lane) + inline „generálj ide" | **71** |
+| `16b259b` | Vászon-kommentek/annotációk | **72** |
+| `863ede8` | Fix: marquee-listener-leak + keret inline-generate elérhetőség | — |
+| `82d03b2` | Lapok / mentett nézetek (kurált lencse) | **73** |
+| `146f265` | Kooperatív Phase 1: presence + közreműködők/szerepek + Share-modal | **74** ⚠️ |
+
+**Teendőd (mire visszaérsz):** futtasd le sorban a `migration-70 … 74` fájlokat a Supabase SQL editorban
+(ref `jokqthwszkweyqmmdesn`). A **74-et nézd át előbb** (biztonság-érzékeny gate-változás). Amíg nem futnak,
+az app működik, csak az érintett új UI nem jelenik meg (graceful degradation). A **presence már most él**.
