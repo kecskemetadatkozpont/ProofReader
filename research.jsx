@@ -4672,13 +4672,29 @@
     function frameGenerate(f, text) { var t = String(text || '').trim(); if (!t || dBusy) return; setDkOpen(true); setFrGen(function (M) { var m = Object.assign({}, M); delete m[f.id]; return m; }); dkSend('A(z) „' + f.title + '" keret témájában: ' + t); }
     // ---- Map comments / annotations — migration-72. Any project READER can comment (supervisor feedback). ----
     function commentCanEditOne(c) { return c && (c.author === props.viewerId || props.canEdit); }
+    // @mention candidates = accepted members + currently-online users (deduped, minus self). Notifications table
+    // already allows client insert (RLS auth.uid() is not null) so no migration is needed for mentions.
+    function mentionCandidates() {
+      var seen = {}, list = [];
+      (members || []).forEach(function (m) { if (m.user_id && m.user_id !== props.viewerId && m.pname && !seen[m.user_id]) { seen[m.user_id] = 1; list.push({ id: m.user_id, name: m.pname }); } });
+      online.forEach(function (u) { if (u.id && u.id !== props.viewerId && u.name && !seen[u.id]) { seen[u.id] = 1; list.push({ id: u.id, name: u.name }); } });
+      return list;
+    }
+    function insertMention(name) { setCmText(function (v) { return (v && !/\s$/.test(v) ? v + ' ' : v) + '@' + name + ' '; }); }
+    function notifyMentions(body, target) {
+      var cands = mentionCandidates(); if (!cands.length) return;
+      var hit = cands.filter(function (u) { return body.indexOf('@' + u.name) >= 0; });
+      if (!hit.length) return;
+      var rows = hit.map(function (u) { return { recipient_id: u.id, kind: 'request', payload: { type: 'research_map_mention', project_id: props.projectId, project_title: (props.project && props.project.title) || '', from: (props.viewer && props.viewer.name) || 'Kolléga', excerpt: String(body).slice(0, 140), node_id: (target && target.node_id) || null } }; });
+      sb.from('notifications').insert(rows).then(function () { }, function () { });
+    }
     function commentAdd(target, text) {
       var t = String(text || '').trim(); if (!t || !commentsCap) return;
       var row = Object.assign({ project_id: props.projectId, body: t }, target);   // target = {node_id} or {x,y}
       sb.from('research_map_comments').insert(row).select('id,node_id,x,y,body,author,resolved,created_at').single().then(function (r) {
         if (!alive.current) return;
         if (r && r.error) { window.PRUI.toast('Komment mentése sikertelen: ' + r.error.message, { kind: 'error' }); return; }
-        if (r && r.data) setComments(function (C) { return C.some(function (c) { return c.id === r.data.id; }) ? C : C.concat([r.data]); });
+        if (r && r.data) { setComments(function (C) { return C.some(function (c) { return c.id === r.data.id; }) ? C : C.concat([r.data]); }); notifyMentions(t, target); }
       });
       setComposer(null); setCmText('');
     }
@@ -5370,6 +5386,7 @@
           return h('div', { className: 'rmap-cm-composer', style: { position: 'absolute', left: left + 'px', top: top + 'px', zIndex: 17 }, onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
             h('div', { className: 'rmap-cm-c-h' }, composer.node_id ? '💬 Komment a kártyához' : '💬 Komment ide'),
             h('textarea', { rows: 3, value: cmText, placeholder: 'Írd le a visszajelzést… (Ctrl/⌘+Enter = küldés)', onChange: function (e) { setCmText(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); commentAdd(tgt, cmText); } } }),
+            mentionCandidates().length ? h('div', { className: 'rmap-cm-mentions' }, h('span', { className: 'rmap-cm-mlbl' }, '@'), mentionCandidates().slice(0, 6).map(function (u) { return h('button', { key: u.id, className: 'rmap-cm-mchip', title: 'Megemlítés (értesítést kap)', onClick: function () { insertMention(u.name); } }, u.name); })) : null,
             h('div', { className: 'rmap-cm-c-a' },
               h('button', { className: 'btn', style: { fontSize: 12, padding: '4px 10px' }, onClick: function () { setComposer(null); setCmText(''); } }, 'Mégse'),
               h('button', { className: 'btn pri', style: { fontSize: 12, padding: '4px 10px' }, disabled: !cmText.trim(), onClick: function () { commentAdd(tgt, cmText); } }, 'Küldés')));
