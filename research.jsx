@@ -4287,6 +4287,13 @@
     var flS = useState(null), frLive = flS[0], setFrLive = flS[1];   // in-flight frame move/resize live geometry {id,x,y,w,h}
     var frdrag = useRef(null);   // frame drag/resize lifecycle guard
     var fgS = useState({}), frGen = fgS[0], setFrGen = fgS[1];   // per-frame inline "generate here" input text
+    var cmS = useState([]), comments = cmS[0], setComments = cmS[1];   // Map comments/annotations — migration-72
+    var cmcS = useState(false), commentsCap = cmcS[0], setCommentsCap = cmcS[1];   // migration-72 capability
+    var cmmS = useState(false), commentMode = cmmS[0], setCommentMode = cmmS[1];   // click-to-comment mode
+    var cmpS = useState(null), composer = cmpS[0], setComposer = cmpS[1];   // {node_id}|{x,y} compose popover
+    var cmtS = useState(''), cmText = cmtS[0], setCmText = cmtS[1];   // composer textarea
+    var cmoS = useState(null), openThread = cmoS[0], setOpenThread = cmoS[1];   // open thread key: node_id or 'pin:'+commentId
+    var cmpanS = useState(false), cmPanelOpen = cmpanS[0], setCmPanelOpen = cmpanS[1];   // the all-comments side panel
     var drag = useRef(null), stageRef = useRef(null), alive = useRef(true), bumpT = useRef(null), driving = useRef(false), mapDriver = useRef(null), ndrag = useRef(null), selRef = useRef(null), refBusy = useRef({}), dcRef = useRef(null), dScroll = useRef(null);
     if (!mapDriver.current) mapDriver.current = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : ('00000000-0000-4000-8000-' + String(Date.now()).slice(-12));
     useEffect(function () { return function () { alive.current = false; driving.current = false; if (bumpT.current) clearTimeout(bumpT.current); }; }, []);
@@ -4334,6 +4341,10 @@
       sb.from('research_map_frames').select('id,title,x,y,w,h,color').eq('project_id', pid).then(function (r) {
         if (!alive.current) return; if (r && r.error) return; setFramesCap(true); setFrames((r && r.data) || []);
       });
+      // load Map comments — graceful: pre-migration-72 the table is absent → commentsCap stays false, no comments UI
+      sb.from('research_map_comments').select('id,node_id,x,y,body,author,resolved,created_at').eq('project_id', pid).order('created_at', { ascending: true }).then(function (r) {
+        if (!alive.current) return; if (r && r.error) return; setCommentsCap(true); setComments((r && r.data) || []);
+      });
       var ch = sb.channel('rmap-ap:' + pid)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'research_autopilot_runs', filter: 'project_id=eq.' + pid }, function (p) { if (alive.current && p.new) { setRun(p.new); ensureDrive(p.new); bumpSoon(); } })
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'research_autopilot_events', filter: 'project_id=eq.' + pid }, function () { if (alive.current) bumpSoon(); })
@@ -4350,6 +4361,12 @@
           var nf = p.new; if (!nf || !nf.id) return;
           if (frdrag.current && frdrag.current.id === nf.id) return;   // ignore the echo of my own in-flight frame drag
           setFrames(function (F) { var found = false, out = F.map(function (f) { if (f.id === nf.id) { found = true; return { id: nf.id, title: nf.title, x: nf.x, y: nf.y, w: nf.w, h: nf.h, color: nf.color }; } return f; }); if (!found) out.push({ id: nf.id, title: nf.title, x: nf.x, y: nf.y, w: nf.w, h: nf.h, color: nf.color }); return out; });
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'research_map_comments', filter: 'project_id=eq.' + pid }, function (p) {
+          if (!alive.current) return;
+          if (p.eventType === 'DELETE') { var oid = p.old && p.old.id; if (oid) setComments(function (C) { return C.filter(function (c) { return c.id !== oid; }); }); return; }
+          var nc = p.new; if (!nc || !nc.id) return;
+          setComments(function (C) { var found = false, out = C.map(function (c) { if (c.id === nc.id) { found = true; return nc; } return c; }); if (!found) out.push(nc); return out; });
         })
         .subscribe();
       return function () { try { sb.removeChannel(ch); } catch (e) { } };
@@ -4534,6 +4551,8 @@
     }
     function onDown(e) {
       if (e.target.closest && e.target.closest('.rmap-node')) return;
+      // comment mode: a click on the empty canvas drops a position-pinned comment composer
+      if (commentMode) { var pc = stageXY(e); setComposer({ x: Math.round((pc.x - view.tx) / view.k), y: Math.round((pc.y - view.ty) / view.k) }); setCmText(''); return; }
       // shift + drag on the empty canvas = marquee multi-select; a plain drag pans; a plain click clears the selection
       if (e.shiftKey) { var p = stageXY(e); mqRef.current = { x0: p.x, y0: p.y }; setMarquee({ x0: p.x, y0: p.y, x1: p.x, y1: p.y }); window.addEventListener('mousemove', onMarqMove); window.addEventListener('mouseup', onMarqUp); return; }
       if (Object.keys(msel).length) setMsel({});
@@ -4597,6 +4616,26 @@
     function frameRecolor(f) { var i = FRAME_COLORS.indexOf(f.color); framePatch(f.id, { color: FRAME_COLORS[(i + 1) % FRAME_COLORS.length] }); }
     // inline "generate here" (Luma): the frame's footer input funnels a frame-scoped instruction to the assistant dock
     function frameGenerate(f, text) { var t = String(text || '').trim(); if (!t || dBusy) return; setDkOpen(true); setFrGen(function (M) { var m = Object.assign({}, M); delete m[f.id]; return m; }); dkSend('A(z) „' + f.title + '" keret témájában: ' + t); }
+    // ---- Map comments / annotations — migration-72. Any project READER can comment (supervisor feedback). ----
+    function commentCanEditOne(c) { return c && (c.author === props.viewerId || props.canEdit); }
+    function commentAdd(target, text) {
+      var t = String(text || '').trim(); if (!t || !commentsCap) return;
+      var row = Object.assign({ project_id: props.projectId, body: t }, target);   // target = {node_id} or {x,y}
+      sb.from('research_map_comments').insert(row).select('id,node_id,x,y,body,author,resolved,created_at').single().then(function (r) {
+        if (!alive.current) return;
+        if (r && r.error) { window.PRUI.toast('Komment mentése sikertelen: ' + r.error.message, { kind: 'error' }); return; }
+        if (r && r.data) setComments(function (C) { return C.some(function (c) { return c.id === r.data.id; }) ? C : C.concat([r.data]); });
+      });
+      setComposer(null); setCmText('');
+    }
+    function commentResolve(c, val) {
+      setComments(function (C) { return C.map(function (x) { return x.id === c.id ? Object.assign({}, x, { resolved: val }) : x; }); });
+      sb.from('research_map_comments').update({ resolved: val }).eq('id', c.id).then(function (r) { if (r && r.error && alive.current) window.PRUI.toast('Nem sikerült: ' + r.error.message, { kind: 'error' }); });
+    }
+    function commentDelete(c) {
+      setComments(function (C) { return C.filter(function (x) { return x.id !== c.id; }); });
+      sb.from('research_map_comments').delete().eq('id', c.id).then(function (r) { if (r && r.error && alive.current) window.PRUI.toast('Törlés sikertelen: ' + r.error.message, { kind: 'error' }); });
+    }
     function startFrameDrag(e, f, mode) {   // mode: 'move' (titlebar) | 'resize' (corner handle)
       if (e.button !== 0 || !props.canEdit) return; e.stopPropagation();
       var sx = e.clientX, sy = e.clientY, k = view.k || 1, ox = f.x, oy = f.y, ow = f.w, oh = f.h;
@@ -4667,6 +4706,7 @@
     function toggleMsel(id) { setMsel(function (M) { var m = Object.assign({}, M); if (m[id]) delete m[id]; else m[id] = true; return m; }); }
     function startNodeDrag(e, n) {
       if (e.button !== 0) return;   // left button only — right-click opens the generate menu
+      if (commentMode) { e.stopPropagation(); setComposer({ node_id: n.id }); setCmText(''); return; }   // comment mode: attach a comment to this card
       if (e.shiftKey) { toggleMsel(n.id); return; }   // shift-click toggles multi-selection (no drag)
       var startX = e.clientX, startY = e.clientY, k = view.k || 1, ox = n.x, oy = n.y, can = props.canEdit;
       // group drag: if this card is part of a multi-selection (>1), move ALL selected cards together
@@ -5096,6 +5136,11 @@
       runProg = dn + '/' + en; runActive = ['running', 'awaiting_approval', 'paused', 'queued'].indexOf(run.status) >= 0;
     }
     var sn = (sel && g.by[sel] && !g.by[sel].mapHidden) ? g.by[sel] : null;   // don't float the inspector/toolbar over a node that is (now) hidden
+    // derive comment groupings: per-node threads + free-position pins (+ unresolved counts)
+    var cmByNode = {}, cmPos = [];
+    if (commentsCap) comments.forEach(function (c) { if (c.node_id) { (cmByNode[c.node_id] = cmByNode[c.node_id] || []).push(c); } else if (c.x != null) cmPos.push(c); });
+    function nodeCmCount(id) { var a = cmByNode[id]; return a ? a.filter(function (c) { return !c.resolved; }).length : 0; }
+    var cmUnresolved = commentsCap ? comments.filter(function (c) { return !c.resolved; }).length : 0;
     return h('div', { className: 'rmap-wrap' },
       h('div', { className: 'rmap-stage', ref: stageRef, onMouseDown: onDown, onWheel: onWheel },
         h('div', { className: 'rmap-world', style: { transform: 'translate(' + view.tx + 'px,' + view.ty + 'px) scale(' + view.k + ')' } },
@@ -5117,9 +5162,13 @@
           h('svg', { className: 'rmap-edges', width: svgW, height: g.height },
             h('defs', null, h('marker', { id: 'rmap-arrow', viewBox: '0 0 8 8', refX: 6.5, refY: 4, markerWidth: 6.5, markerHeight: 6.5, orient: 'auto-start-reverse' }, h('path', { d: 'M0.5,0.5 L7.5,4 L0.5,7.5 Z', fill: 'var(--line-2, var(--muted))' }))),
             edgeEls),
-          g.N.map(function (n) { if (n.mapHidden) return null; return h('div', { key: n.id, 'data-nid': n.id, className: 'rmap-node t-' + n.t + (sel === n.id ? ' sel' : '') + (msel[n.id] ? ' rmap-mselected' : '') + (n.mapPinned ? ' rmap-pinned' : '') + (activeKey && n.ph === RMAP_PHASE_IDX[activeKey] ? ' inphase' : '') + (props.canEdit ? ' editable' : '') + (dlive && dlive.id === n.id ? ' dragging' : ''), style: { left: n.x + 'px', top: n.y + 'px' }, onMouseDown: function (e) { e.stopPropagation(); startNodeDrag(e, n); }, onContextMenu: function (e) { e.preventDefault(); e.stopPropagation(); if (props.canEdit && (genActions(n).length || regenActions(n).length)) setMenu({ node: n, x: e.clientX, y: e.clientY }); } }, n.mapPinned ? h('span', { className: 'rmap-pin-badge', title: 'Kitűzött' }, '📌') : null, body(n)); })),
+          g.N.map(function (n) { if (n.mapHidden) return null; return h('div', { key: n.id, 'data-nid': n.id, className: 'rmap-node t-' + n.t + (sel === n.id ? ' sel' : '') + (msel[n.id] ? ' rmap-mselected' : '') + (n.mapPinned ? ' rmap-pinned' : '') + (activeKey && n.ph === RMAP_PHASE_IDX[activeKey] ? ' inphase' : '') + (props.canEdit ? ' editable' : '') + (dlive && dlive.id === n.id ? ' dragging' : ''), style: { left: n.x + 'px', top: n.y + 'px' }, onMouseDown: function (e) { e.stopPropagation(); startNodeDrag(e, n); }, onContextMenu: function (e) { e.preventDefault(); e.stopPropagation(); if (props.canEdit && (genActions(n).length || regenActions(n).length)) setMenu({ node: n, x: e.clientX, y: e.clientY }); } }, n.mapPinned ? h('span', { className: 'rmap-pin-badge', title: 'Kitűzött' }, '📌') : null, nodeCmCount(n.id) ? h('span', { className: 'rmap-cm-badge', title: nodeCmCount(n.id) + ' nyitott komment', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); setOpenThread(n.id); } }, '💬' + nodeCmCount(n.id)) : null, body(n)); })),
         // marquee selection rectangle (shift-drag on the empty canvas)
         marquee ? h('div', { className: 'rmap-marquee', style: { position: 'absolute', left: Math.min(marquee.x0, marquee.x1) + 'px', top: Math.min(marquee.y0, marquee.y1) + 'px', width: Math.abs(marquee.x1 - marquee.x0) + 'px', height: Math.abs(marquee.y1 - marquee.y0) + 'px', pointerEvents: 'none', zIndex: 12 } }) : null,
+        // free-position comment pins (screen coords → follow pan/zoom)
+        (commentsCap && cmPos.length) ? cmPos.map(function (c) {
+          return h('button', { key: 'cmp' + c.id, className: 'rmap-cm-pin' + (c.resolved ? ' resolved' : ''), style: { position: 'absolute', left: (view.tx + c.x * view.k) + 'px', top: (view.ty + c.y * view.k) + 'px', zIndex: 11 }, title: String(c.body || '').slice(0, 80), onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); setOpenThread('pin:' + c.id); } }, '💬');
+        }) : null,
         // group action bar — appears when 2+ cards are multi-selected
         (Object.keys(msel).length > 1) ? h('div', { className: 'rmap-groupbar', onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
           h('b', null, Object.keys(msel).length + ' kijelölve'),
@@ -5136,6 +5185,8 @@
           h('button', { title: 'Térkép újratöltése a legfrissebb adatokkal (a módosítások érvényesítése)', disabled: refreshing, onClick: refreshMap }, refreshing ? '⏳' : '🔄'),
           h('button', { title: 'Térkép exportálása PNG-be', onClick: exportMap }, '⤓'),
           (props.canEdit && framesCap) ? h('button', { title: 'Új keret (nevesített régió) hozzáadása', onClick: frameCreate }, '▦') : null,
+          commentsCap ? h('button', { className: commentMode ? 'on' : '', title: commentMode ? 'Komment-mód kikapcsolása' : 'Komment-mód: kattints a vászonra vagy egy kártyára', onClick: function () { setCommentMode(function (v) { return !v; }); setComposer(null); } }, '💬') : null,
+          (commentsCap && comments.length) ? h('button', { title: 'Összes komment', onClick: function () { setCmPanelOpen(function (v) { return !v; }); } }, '📋' + (cmUnresolved || '')) : null,
           (data && data.hiddenFigs && data.hiddenFigs.length) ? h('button', { title: 'Térképről levett ábrák visszahozása', onClick: function () { setRestoreOpen(true); } }, '🖼' + data.hiddenFigs.length) : null,
           (mapFlags && g.N.filter(function (n) { return n.mapHidden; }).length) ? h('button', { title: 'Rejtett kártyák visszahozása', onClick: function () { setNodeRestoreOpen(true); } }, '🫥' + g.N.filter(function (n) { return n.mapHidden; }).length) : null,
           (props.canEdit && Object.keys(layout).length) ? h('button', { title: 'Automatikus elrendezés (a saját pozíciók törlése)', onClick: resetLayout }, '↺') : null,
@@ -5166,7 +5217,54 @@
                 props.canEdit ? h('button', { className: 'btn', style: { fontSize: 11, padding: '3px 9px', flex: 'none' }, title: 'Vissza a térképre', onClick: function () { nodeToggleHidden(n); } }, '↩ Vissza') : null);
             })) : h('div', { style: { fontSize: 12, color: 'var(--faint)' } }, 'Nincs rejtett kártya.'));
         })() : null,
-        h('div', { className: 'rmap-hint' }, (props.canEdit ? 'Húzd a kártyát = áthelyezés · ' : '') + 'húzd a hátteret = pan · görgő = zoom · Shift+kattintás/húzás = többes kijelölés'),
+        // comment composer popover (new comment on a card or a free position)
+        composer ? (function () {
+          var kk = view.k, cx, cy;
+          if (composer.node_id && g.by[composer.node_id]) { var nn = g.by[composer.node_id]; cx = view.tx + nn.x * kk + 210 * kk; cy = view.ty + nn.y * kk; }
+          else { cx = view.tx + composer.x * kk; cy = view.ty + composer.y * kk; }
+          var stW = (stageRef.current && stageRef.current.clientWidth) || 900, stH = (stageRef.current && stageRef.current.clientHeight) || 560;
+          var left = Math.max(8, Math.min(cx, stW - 264)), top = Math.max(8, Math.min(cy, stH - 150));
+          var tgt = composer.node_id ? { node_id: composer.node_id } : { x: composer.x, y: composer.y };
+          return h('div', { className: 'rmap-cm-composer', style: { position: 'absolute', left: left + 'px', top: top + 'px', zIndex: 17 }, onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
+            h('div', { className: 'rmap-cm-c-h' }, composer.node_id ? '💬 Komment a kártyához' : '💬 Komment ide'),
+            h('textarea', { rows: 3, value: cmText, placeholder: 'Írd le a visszajelzést… (Ctrl/⌘+Enter = küldés)', onChange: function (e) { setCmText(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); commentAdd(tgt, cmText); } } }),
+            h('div', { className: 'rmap-cm-c-a' },
+              h('button', { className: 'btn', style: { fontSize: 12, padding: '4px 10px' }, onClick: function () { setComposer(null); setCmText(''); } }, 'Mégse'),
+              h('button', { className: 'btn pri', style: { fontSize: 12, padding: '4px 10px' }, disabled: !cmText.trim(), onClick: function () { commentAdd(tgt, cmText); } }, 'Küldés')));
+        })() : null,
+        // comment thread popover (a card's thread, or a single position pin)
+        openThread ? (function () {
+          var isPin = String(openThread).indexOf('pin:') === 0, list, ax, ay, ttl, reply = null;
+          if (isPin) { var cid = openThread.slice(4), cc = comments.filter(function (x) { return x.id === cid; }); if (!cc.length) return null; list = cc; ax = view.tx + (cc[0].x || 0) * view.k; ay = view.ty + (cc[0].y || 0) * view.k; ttl = '💬 Komment'; }
+          else { var nn = g.by[openThread]; if (!nn) return null; list = cmByNode[openThread] || []; ax = view.tx + nn.x * view.k + 210 * view.k; ay = view.ty + nn.y * view.k; ttl = '💬 ' + String(nn.title || '').slice(0, 28); reply = { node_id: openThread }; }
+          var stW = (stageRef.current && stageRef.current.clientWidth) || 900, stH = (stageRef.current && stageRef.current.clientHeight) || 560;
+          var left = Math.max(8, Math.min(ax, stW - 284)), top = Math.max(8, Math.min(ay, stH - 200));
+          return h('div', { className: 'rmap-cm-thread', style: { position: 'absolute', left: left + 'px', top: top + 'px', zIndex: 17 }, onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
+            h('div', { className: 'rmap-cm-t-h' }, h('b', null, ttl), h('button', { className: 'rmap-cm-x', onClick: function () { setOpenThread(null); } }, '×')),
+            h('div', { className: 'rmap-cm-t-b' }, list.length ? list.map(function (c) {
+              return h('div', { key: c.id, className: 'rmap-cm-item' + (c.resolved ? ' done' : '') },
+                h('div', { className: 'rmap-cm-body' }, c.body),
+                h('div', { className: 'rmap-cm-meta' },
+                  h('span', null, (c.author === props.viewerId ? 'Te' : 'Kolléga') + ' · ' + (c.created_at ? String(c.created_at).slice(0, 10) : '')),
+                  commentCanEditOne(c) ? h('button', { title: c.resolved ? 'Újranyitás' : 'Megoldva', onClick: function () { commentResolve(c, !c.resolved); } }, c.resolved ? '↺' : '✓') : null,
+                  commentCanEditOne(c) ? h('button', { title: 'Törlés', onClick: function () { commentDelete(c); } }, '🗑') : null));
+            }) : h('div', { className: 'rmap-cm-empty' }, 'Nincs komment.')),
+            reply ? h('div', { className: 'rmap-cm-reply' },
+              h('textarea', { rows: 2, value: cmText, placeholder: 'Válasz…', onChange: function (e) { setCmText(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); commentAdd(reply, cmText); } } }),
+              h('button', { className: 'btn pri', style: { fontSize: 12, padding: '4px 10px' }, disabled: !cmText.trim(), onClick: function () { commentAdd(reply, cmText); } }, 'Küldés')) : null);
+        })() : null,
+        // all-comments side panel
+        (cmPanelOpen && commentsCap) ? h('div', { className: 'rmap-cm-panel', onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
+          h('div', { className: 'rmap-cm-t-h' }, h('b', null, '💬 Kommentek (' + cmUnresolved + ' nyitott)'), h('button', { className: 'rmap-cm-x', onClick: function () { setCmPanelOpen(false); } }, '×')),
+          h('div', { className: 'rmap-cm-t-b' }, comments.length ? comments.slice().sort(function (a, b) { return (a.resolved - b.resolved) || (String(b.created_at).localeCompare(String(a.created_at))); }).map(function (c) {
+            return h('div', { key: c.id, className: 'rmap-cm-item' + (c.resolved ? ' done' : '') },
+              h('div', { className: 'rmap-cm-body', style: { cursor: 'pointer' }, title: 'Ugrás', onClick: function () { setOpenThread(c.node_id ? c.node_id : ('pin:' + c.id)); if (c.node_id && g.by[c.node_id]) setSel(c.node_id); } }, c.body),
+              h('div', { className: 'rmap-cm-meta' },
+                h('span', null, (c.node_id ? '📌 kártya' : '📍 pozíció') + ' · ' + (c.author === props.viewerId ? 'Te' : 'Kolléga')),
+                commentCanEditOne(c) ? h('button', { title: c.resolved ? 'Újranyitás' : 'Megoldva', onClick: function () { commentResolve(c, !c.resolved); } }, c.resolved ? '↺' : '✓') : null,
+                commentCanEditOne(c) ? h('button', { title: 'Törlés', onClick: function () { commentDelete(c); } }, '🗑') : null));
+          }) : h('div', { className: 'rmap-cm-empty' }, 'Még nincs komment. Kapcsold be a 💬 komment-módot és kattints a vászonra vagy egy kártyára.'))) : null,
+        h('div', { className: 'rmap-hint' }, (props.canEdit ? 'Húzd a kártyát = áthelyezés · ' : '') + 'húzd a hátteret = pan · görgő = zoom · Shift+kattintás/húzás = többes kijelölés' + (commentMode ? ' · 💬 KOMMENT-MÓD: kattints a vászonra vagy egy kártyára' : '')),
         // edge legend — what the connecting lines mean (non-blocking overlay). Bottom-left, above the zoom controls,
         // so it never collides with the top-spanning autopilot runbar. Swatch colors match the actual edge strokes.
         h('div', { style: { position: 'absolute', left: 14, bottom: 84, zIndex: 8, display: 'flex', gap: 13, alignItems: 'center', padding: '5px 11px', borderRadius: 8, background: 'var(--surface)', border: '1px solid var(--line)', fontSize: 10.5, color: 'var(--muted)', boxShadow: '0 4px 14px -8px rgba(20,26,40,.4)', pointerEvents: 'none' } },

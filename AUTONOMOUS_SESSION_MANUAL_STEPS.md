@@ -23,6 +23,13 @@ sorrendben. A service-key nem tud DDL-t futtatni, ezért ezek manuálisak.
    - Utána: kereteket lehet létrehozni, mozgatni/átméretezni, átnevezni, átszínezni, törölni;
      a keret alján a hover-re megjelenő „✨ Generálj ide…" inline input a keret témájában küld az asszisztensnek.
 
+3. **`backend/migration-72-map-comments.sql`** — Map kommentek/annotációk: `research_map_comments` tábla.
+   - **Fontos RLS-döntés:** INSERT-et bármely projekt-OLVASÓ megtehet (a read-only konzulens is tud kommentelni);
+     az UPDATE/DELETE csak a szerző vagy egy szerkesztő joga.
+   - Amíg nincs lefuttatva: a `💬` komment-mód gomb + `📋` panel NEM jelenik meg; a Map változatlan.
+   - Utána: `💬` komment-mód → kattints a vászonra (pozícióhoz tűzött) vagy egy kártyára (kártyához tűzött) komment;
+     kártyán `💬N` jelvény; pozíció-pin a vásznon; thread-popover (megoldva/törlés/válasz); `📋` összes-komment panel.
+
 ## Edge-function deploy-ok (explicit jóváhagyás + megnevezés kell)
 
 _(A lista alább bővül.)_
