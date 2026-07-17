@@ -110,13 +110,12 @@
   var st = document.createElement('style'); st.id = 'pr-theme-style'; st.textContent = css;
   (document.head || document.documentElement).appendChild(st);
 
-  // ---- New design (beta): an OPT-IN visual language that re-skins the app via token overrides ----
-  // Orthogonal to dark mode; toggled from the nav drawer next to "Dark mode". Default = current design.
+  // ---- New design: now the DEFAULT for everyone — the opt-in toggle is retired (it proved out). ----
+  // Always on; the old (pre-newdesign) skin is no longer reachable. isNew() → true, set/toggle are no-ops.
   var DKEY = 'pr-design';
   function isNewDesign() { return document.documentElement.classList.contains('newdesign'); }
   function applyDesign(v) { document.documentElement.classList.toggle('newdesign', v === 'new'); }
-  var savedD = null; try { savedD = localStorage.getItem(DKEY); } catch (e) { }
-  applyDesign(savedD);   // opt-in: only 'new' turns it on
+  applyDesign('new');   // New design is the permanent default for all users
   var dcss = [
     // (font unchanged — keep Plus Jakarta so nothing shrinks; the real redesign will set typography per-page)
     // new LIGHT palette — cooler neutrals + refined semantic colours
@@ -126,11 +125,15 @@
     // feel — a touch crisper/flatter than the current rounded look
     'html.newdesign .btn, html.newdesign .field { border-radius: 8px; }',
     'html.newdesign .card, html.newdesign .panel, html.newdesign .modal { border-radius: 12px; }',
-    'html.newdesign .chip, html.newdesign .tag, html.newdesign .pill { border-radius: 6px; }'
+    'html.newdesign .chip, html.newdesign .tag, html.newdesign .pill { border-radius: 6px; }',
+    // the design switch is retired → hide the nav-drawer "New design" toggle row (the button is inert anyway)
+    '.pnd-theme:has(#pn-design) { display: none !important; }'
   ].join('\n');
   var dst = document.createElement('style'); dst.id = 'pr-design-style'; dst.textContent = dcss; (document.head || document.documentElement).appendChild(dst);
-  function setDesign(v) { applyDesign(v); try { localStorage.setItem(DKEY, v === 'new' ? 'new' : 'current'); } catch (e) { } window.dispatchEvent(new CustomEvent('pr-design', { detail: { 'new': isNewDesign() } })); }
-  window.PRDesign = { isNew: isNewDesign, set: setDesign, toggle: function () { setDesign(isNewDesign() ? 'current' : 'new'); } };
+  // The design switch is retired: New design is permanent. isNew() is always true; set/toggle are inert no-ops
+  // (kept so any lingering caller does not error, and the old skin can never be turned back on).
+  try { localStorage.setItem(DKEY, 'new'); } catch (e) { }
+  window.PRDesign = { isNew: function () { return true; }, set: function () { }, toggle: function () { } };
 
   // shared, themed toast + confirm — drop-in replacements for native alert()/confirm()
   function uiHost() { var h = document.getElementById('pr-ui'); if (!h) { h = document.createElement('div'); h.id = 'pr-ui'; (document.body || document.documentElement).appendChild(h); } return h; }
