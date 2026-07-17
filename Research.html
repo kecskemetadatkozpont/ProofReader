@@ -868,6 +868,14 @@
     /* floating on-canvas card modal: anchored next to the selected node, in front of the canvas (not a side panel) */
     .rmap-insp-float { box-shadow: 0 14px 44px rgba(0,0,0,.30), 0 2px 8px rgba(0,0,0,.14); animation: rmap-insp-pop .13s ease-out; }
     @keyframes rmap-insp-pop { from { opacity: 0; transform: scale(.97); } to { opacity: 1; transform: scale(1); } }
+    /* floating selection toolbar above the selected card */
+    .rmap-seltool { display: flex; gap: 2px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 3px; box-shadow: 0 8px 24px rgba(0,0,0,.20); animation: rmap-insp-pop .12s ease-out; }
+    .rmap-seltool button { border: none; background: none; cursor: pointer; font-size: 13.5px; width: 30px; height: 27px; border-radius: 7px; display: flex; align-items: center; justify-content: center; color: var(--ink); line-height: 1; }
+    .rmap-seltool button:hover { background: var(--surface-2); }
+    .rmap-seltool button.on { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+    /* per-node pin badge + pinned highlight ring */
+    .rmap-pin-badge { position: absolute; top: -8px; right: -6px; font-size: 13px; z-index: 2; filter: drop-shadow(0 1px 1px rgba(0,0,0,.3)); pointer-events: none; }
+    .rmap-node.rmap-pinned { box-shadow: 0 0 0 2px var(--accent), 0 8px 20px -8px rgba(20,26,40,.4); }
     .rmap-stage { flex: 1; position: relative; height: calc(100vh - 240px); min-height: 460px; overflow: hidden; background: var(--surface-2); border: 1px solid var(--line); border-radius: 14px; cursor: grab; }
     .rmap-stage:active { cursor: grabbing; }
     .rmap-world { position: absolute; top: 0; left: 0; transform-origin: 0 0; }
@@ -998,7 +1006,7 @@
   <script type="text/babel" src="canvas.jsx?v=1783137934"></script>
   <script type="text/babel" src="notes.jsx?v=1783137934"></script>
   <script src="autopilot-core.js?v=1784160000"></script>
-  <script type="text/babel" src="research.jsx?v=1784900000"></script>
+  <script type="text/babel" src="research.jsx?v=1784910000"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>

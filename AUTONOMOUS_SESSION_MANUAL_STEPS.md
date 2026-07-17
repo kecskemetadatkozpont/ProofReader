@@ -13,7 +13,10 @@ sorrendben. A service-key nem tud DDL-t futtatni, ezért ezek manuálisak.
 
 ## Alkalmazandó migrációk (sorrendben)
 
-_(A lista alább bővül, ahogy haladok.)_
+1. **`backend/migration-70-map-node-flags.sql`** — per-node Map pin + hide flag a `research_map_layout`-on.
+   - Amíg nincs lefuttatva: a Map-en NEM jelenik meg a 📌 kitűzés / 🙈 elrejtés / „Rejtett kártyák" panel
+     (a kliens érzékeli a hiányzó oszlopokat és kikapcsolva hagyja — semmi nem törik el).
+   - Utána: a lebegő selection-toolbar 📌/🙈 gombjai + a `🫥N` restore-panel élővé válnak.
 
 ## Edge-function deploy-ok (explicit jóváhagyás + megnevezés kell)
 
