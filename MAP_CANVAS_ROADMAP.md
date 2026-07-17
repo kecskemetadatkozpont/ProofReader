@@ -38,11 +38,21 @@
 - [x] ✅ **Jelenlét (presence)** — Realtime avatar-sor (ki nézi a térképet most), `👥 Megosztás` gomb. *(kliens-only, nincs migráció)* *(146f265)*
 - [x] ✅ **Közreműködők + szerepkörök + Share-modal** — `research_project_members` + a write/read-gate átírása (elfogadott editor→írás, commenter/viewer→olvasás); e-mailes meghívás, elfogadás-banner, szerep-kezelés — `migration-74`. *(146f265)*
 
-## Hátralévő (jövő) — Kooperatív Phase 2/3
-- [ ] 🔴 **Élő kurzorok + kijelölés-broadcast** a vásznon (presence már megvan, cursor még nincs).
-- [ ] 🟡 **Hozzárendelés (assignee) protokoll-lépésekhez + sign-off gate-ek** stádiumonként.
-- [ ] 🔴 **Suggesting / track-changes vagy CRDT** a draft-editorra.
-- [ ] 🟡 **@mention + értesítés** a kommentekben.
+## ✅ Kooperatív Phase 2/3 — KÉSZ (2026-07-17)
+- [x] ✅ **Élő kurzorok + kijelölés-broadcast** — Realtime broadcast a Map-csatornán; színes kurzorok
+  név-címkével, a másik user kijelölése színes gyűrűvel; throttle + 6s prune; kliens-only. *(51ced20)*
+- [x] ✅ **@mention + értesítés** a kommentekben — `@`-chipek (tagok+online) + `notifications` insert
+  a megemlítetteknek (nincs migráció). *(518f7a4)*
+- [x] ✅ **Hozzárendelés (assignee) protokoll-lépésekhez + sign-off** — felelős-avatar + ✅ badge a
+  step-node-on, inspector-vezérlők (migr-75). *(ed13134)*
+- [x] ✅ **Suggesting / track-changes** a draft-editorra — szekciónkénti javaslatok piros/zöld diff-fel,
+  szerkesztő elfogad/elutasít, szerző visszavon (migr-76). *(3496d07)*
+
+## Hátralévő (jövő) — Phase 4+
+- [ ] 🔴 **Valós idejű együtt-gépelés (CRDT/Yjs)** a draft-editorra — a suggesting mode a jelenlegi
+  könnyűsúlyú alternatíva; a teljes CRDT nagy külső függőség, külön nekifutás.
+- [ ] 🟡 **Follow-mode / „ugorj a kurzorhoz"** + cursor-chat.
+- [ ] 🟡 **Supervisor sign-off** külön RLS-sel (jelenleg a sign-off szerkesztői jog).
 
 > ⚠️ **A `migration-70..74` alkalmazása manuális** — lásd `AUTONOMOUS_SESSION_MANUAL_STEPS.md`.
 > A kliens minden funkciónál **kecsesen degradál**: a migráció előtt az adott UI egyszerűen nem jelenik meg.

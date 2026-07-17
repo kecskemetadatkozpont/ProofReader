@@ -54,8 +54,21 @@ sorrendben. A service-key nem tud DDL-t futtatni, ezért ezek manuálisak.
    - Utána: a tulajdonos e-mail alapján meghívhat (Szerkesztő/Kommentelő/Megfigyelő), a meghívott
      elfogadja; a write-gate az összes `research_*` táblán egyszerre engedi a szerkesztőket.
 
-   **Megjegyzés a jövőbeli Phase 2/3-hoz:** élő kurzorok, hozzárendelés, sign-off, suggesting/CRDT
-   a draft-editorra — ezek még NINCSENEK megépítve (lásd `MAP_CANVAS_ROADMAP.md`).
+6. **`backend/migration-75-step-assignee-signoff.sql`** — protokoll-lépés felelős + sign-off
+   (`research_protocol_steps.assignee_id / signed_off_by / signed_off_at`). Nincs RLS-változás
+   (a lépés a protokoll→projekt jogán íródik). Amíg nincs lefuttatva: a Map step-node-jain nem
+   jelenik meg felelős-avatar / ✅ sign-off; utána az inspectorban felelős-választó + „Jóváhagyom".
+
+7. **`backend/migration-76-draft-suggestions.sql`** — draft „suggesting mode"
+   (`research_draft_suggestions`). RLS: olvasás=olvasók; INSERT=bármely olvasó (author=self, a
+   read-only konzulens is javasolhat); accept/reject/withdraw=szerző vagy szerkesztő. Amíg nincs
+   lefuttatva: a Writing panel szekcióin nem jelenik meg a `💡 Javaslat` UI; utána szekció-szintű
+   javaslatok piros/zöld diff-fel, szerkesztő „✓ Elfogad" → beírja a `research_drafts.sections`-be.
+
+   **PHASE 2/3 MEGÉPÜLT (2026-07-17):** élő kurzorok + kijelölés-broadcast (kliens-only, nincs migráció),
+   `@mention` + értesítések a kommentekben (a meglévő `notifications` táblát használja, nincs migráció),
+   lépés-felelős + sign-off (migr-75), draft suggesting mode (migr-76). A **Phase 3-ból CRDT-alapú**
+   valós idejű együtt-gépelés szándékosan kimaradt (suggesting mode a könnyűsúlyú alternatíva).
 
 ## Edge-function deploy-ok (explicit jóváhagyás + megnevezés kell)
 
@@ -84,7 +97,14 @@ Minden be van commitolva a `main`-re és deploy-olva (GitHub Pages).
 | `863ede8` | Fix: marquee-listener-leak + keret inline-generate elérhetőség | — |
 | `82d03b2` | Lapok / mentett nézetek (kurált lencse) | **73** |
 | `146f265` | Kooperatív Phase 1: presence + közreműködők/szerepek + Share-modal | **74** ⚠️ |
+| `bfd7210` | Biztonsági fix: `rp_guard_owner` trigger (editor→owner eszkaláció) a migr-74-ben | (74) |
+| `51ced20` | Phase 2: élő kurzorok + kijelölés-broadcast | — |
+| `518f7a4` | Phase 2: `@mention` + értesítések a kommentekben | — |
+| `ed13134` | Phase 2: lépés-felelős + sign-off | **75** |
+| `3496d07` | Phase 3: draft suggesting mode (javaslatok szekciónként) | **76** |
 
-**Teendőd (mire visszaérsz):** futtasd le sorban a `migration-70 … 74` fájlokat a Supabase SQL editorban
-(ref `jokqthwszkweyqmmdesn`). A **74-et nézd át előbb** (biztonság-érzékeny gate-változás). Amíg nem futnak,
-az app működik, csak az érintett új UI nem jelenik meg (graceful degradation). A **presence már most él**.
+**Teendőd:** a `migration-70 … 74` már lefutott (2026-07-17, smoke-tesztelve). Már csak a
+**`migration-75` és `migration-76`** van hátra — futtasd le a Supabase SQL editorban (ref
+`jokqthwszkweyqmmdesn`). Ezek nem biztonság-érzékenyek (a 75 csak oszlopokat ad, a 76 új tábla saját
+RLS-sel). Amíg nem futnak: a lépés-felelős/sign-off és a draft-javaslatok UI nem jelenik meg
+(graceful) — minden más él, beleértve az **élő kurzorokat és a `@mention`-öket** (ezek migráció nélkül).
