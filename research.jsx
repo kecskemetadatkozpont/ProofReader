@@ -4282,6 +4282,11 @@
     var mqS = useState(null), marquee = mqS[0], setMarquee = mqS[1];   // marquee rect in stage coords {x0,y0,x1,y1} while shift-dragging the background
     var gdrag = useRef(null);   // in-flight group-drag lifecycle guard
     var mqRef = useRef(null);   // in-flight marquee start point (stage coords)
+    var frS = useState([]), frames = frS[0], setFrames = frS[1];   // Map frames (named regions / phase lanes) — migration-71
+    var frcS = useState(false), framesCap = frcS[0], setFramesCap = frcS[1];   // migration-71 capability
+    var flS = useState(null), frLive = flS[0], setFrLive = flS[1];   // in-flight frame move/resize live geometry {id,x,y,w,h}
+    var frdrag = useRef(null);   // frame drag/resize lifecycle guard
+    var fgS = useState({}), frGen = fgS[0], setFrGen = fgS[1];   // per-frame inline "generate here" input text
     var drag = useRef(null), stageRef = useRef(null), alive = useRef(true), bumpT = useRef(null), driving = useRef(false), mapDriver = useRef(null), ndrag = useRef(null), selRef = useRef(null), refBusy = useRef({}), dcRef = useRef(null), dScroll = useRef(null);
     if (!mapDriver.current) mapDriver.current = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : ('00000000-0000-4000-8000-' + String(Date.now()).slice(-12));
     useEffect(function () { return function () { alive.current = false; driving.current = false; if (bumpT.current) clearTimeout(bumpT.current); }; }, []);
@@ -4325,6 +4330,10 @@
         setMapFlags(true);
         var m = {}; ((r && r.data) || []).forEach(function (row) { m[row.node_id] = { x: row.x, y: row.y, hidden: !!row.hidden, pinned: !!row.pinned }; }); setLayout(m);
       });
+      // load Map frames (named regions) — graceful: pre-migration-71 the table is absent → framesCap stays false, no frames UI
+      sb.from('research_map_frames').select('id,title,x,y,w,h,color').eq('project_id', pid).then(function (r) {
+        if (!alive.current) return; if (r && r.error) return; setFramesCap(true); setFrames((r && r.data) || []);
+      });
       var ch = sb.channel('rmap-ap:' + pid)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'research_autopilot_runs', filter: 'project_id=eq.' + pid }, function (p) { if (alive.current && p.new) { setRun(p.new); ensureDrive(p.new); bumpSoon(); } })
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'research_autopilot_events', filter: 'project_id=eq.' + pid }, function () { if (alive.current) bumpSoon(); })
@@ -4334,6 +4343,13 @@
           var nw = p.new; if (!nw || !nw.node_id) return;
           if (ndrag.current && ndrag.current.id === nw.node_id) return;   // ignore the echo of my own in-flight drag
           setLayout(function (L) { var m = Object.assign({}, L); m[nw.node_id] = { x: nw.x, y: nw.y, hidden: !!nw.hidden, pinned: !!nw.pinned }; return m; });
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'research_map_frames', filter: 'project_id=eq.' + pid }, function (p) {
+          if (!alive.current) return;
+          if (p.eventType === 'DELETE') { var oid = p.old && p.old.id; if (oid) setFrames(function (F) { return F.filter(function (f) { return f.id !== oid; }); }); return; }
+          var nf = p.new; if (!nf || !nf.id) return;
+          if (frdrag.current && frdrag.current.id === nf.id) return;   // ignore the echo of my own in-flight frame drag
+          setFrames(function (F) { var found = false, out = F.map(function (f) { if (f.id === nf.id) { found = true; return { id: nf.id, title: nf.title, x: nf.x, y: nf.y, w: nf.w, h: nf.h, color: nf.color }; } return f; }); if (!found) out.push({ id: nf.id, title: nf.title, x: nf.x, y: nf.y, w: nf.w, h: nf.h, color: nf.color }); return out; });
         })
         .subscribe();
       return function () { try { sb.removeChannel(ch); } catch (e) { } };
@@ -4560,6 +4576,49 @@
     function nodeTogglePinned(n) { nodeSetFlag(n, 'pinned', !(layout[n.id] && layout[n.id].pinned)); }
     function groupHide() { Object.keys(msel).forEach(function (id) { var n = g.by[id]; if (n && !n.mapHidden) nodeSetFlag(n, 'hidden', true); }); setMsel({}); }
     function groupPin() { Object.keys(msel).forEach(function (id) { var n = g.by[id]; if (n) nodeSetFlag(n, 'pinned', true); }); }
+    // ---- Map frames (named regions / phase lanes) — migration-71. Frames live in WORLD coords (pan/zoom with the canvas). ----
+    var FRAME_COLORS = ['slate', 'violet', 'cyan', 'amber', 'green', 'rose'];
+    function frameCreate() {
+      if (!props.canEdit || !framesCap) return;
+      var st = stageRef.current, cx = st ? st.clientWidth / 2 : 300, cy = st ? st.clientHeight / 2 : 200;
+      var wx = Math.round((cx - view.tx) / view.k) - 210, wy = Math.round((cy - view.ty) / view.k) - 150;
+      sb.from('research_map_frames').insert({ project_id: props.projectId, title: 'Új keret', x: wx, y: wy, w: 420, h: 300, color: 'slate' }).select('id,title,x,y,w,h,color').single().then(function (r) {
+        if (!alive.current) return;
+        if (r && r.error) { window.PRUI.toast('Keret létrehozása sikertelen: ' + r.error.message, { kind: 'error' }); return; }
+        if (r && r.data) setFrames(function (F) { return F.some(function (f) { return f.id === r.data.id; }) ? F : F.concat([r.data]); });
+      });
+    }
+    function framePatch(id, patch) {
+      setFrames(function (F) { return F.map(function (f) { return f.id === id ? Object.assign({}, f, patch) : f; }); });
+      sb.from('research_map_frames').update(Object.assign({}, patch, { updated_at: new Date().toISOString() })).eq('id', id).then(function (r) { if (r && r.error && alive.current) window.PRUI.toast('Keret mentése sikertelen: ' + r.error.message, { kind: 'error' }); });
+    }
+    function frameDelete(id) { setFrames(function (F) { return F.filter(function (f) { return f.id !== id; }); }); sb.from('research_map_frames').delete().eq('id', id).then(function (r) { if (r && r.error && alive.current) window.PRUI.toast('Keret törlése sikertelen: ' + r.error.message, { kind: 'error' }); }); }
+    function frameRename(f) { var v = window.prompt('Keret neve:', f.title); if (v != null && String(v).trim()) framePatch(f.id, { title: String(v).trim() }); }
+    function frameRecolor(f) { var i = FRAME_COLORS.indexOf(f.color); framePatch(f.id, { color: FRAME_COLORS[(i + 1) % FRAME_COLORS.length] }); }
+    // inline "generate here" (Luma): the frame's footer input funnels a frame-scoped instruction to the assistant dock
+    function frameGenerate(f, text) { var t = String(text || '').trim(); if (!t || dBusy) return; setDkOpen(true); setFrGen(function (M) { var m = Object.assign({}, M); delete m[f.id]; return m; }); dkSend('A(z) „' + f.title + '" keret témájában: ' + t); }
+    function startFrameDrag(e, f, mode) {   // mode: 'move' (titlebar) | 'resize' (corner handle)
+      if (e.button !== 0 || !props.canEdit) return; e.stopPropagation();
+      var sx = e.clientX, sy = e.clientY, k = view.k || 1, ox = f.x, oy = f.y, ow = f.w, oh = f.h;
+      frdrag.current = { id: f.id, moved: false, geo: null };
+      var fmv = function (ev) {
+        if (!frdrag.current) return; if (ev.buttons === 0) { ffin(); return; }
+        if (Math.abs(ev.clientX - sx) > 2 || Math.abs(ev.clientY - sy) > 2) {
+          var ddx = Math.round((ev.clientX - sx) / k), ddy = Math.round((ev.clientY - sy) / k);
+          frdrag.current.moved = true;
+          frdrag.current.geo = (mode === 'move') ? { id: f.id, x: ox + ddx, y: oy + ddy, w: ow, h: oh } : { id: f.id, x: ox, y: oy, w: Math.max(140, ow + ddx), h: Math.max(90, oh + ddy) };
+          setFrLive(frdrag.current.geo);
+        }
+      };
+      var ffin = function () {
+        var d = frdrag.current; if (!d) return; frdrag.current = null;
+        window.removeEventListener('mousemove', fmv); window.removeEventListener('mouseup', fup); window.removeEventListener('blur', ffin);
+        setFrLive(null);
+        if (d.moved && d.geo) framePatch(d.id, { x: d.geo.x, y: d.geo.y, w: d.geo.w, h: d.geo.h });
+      };
+      var fup = function () { ffin(); };
+      window.addEventListener('mousemove', fmv); window.addEventListener('mouseup', fup); window.addEventListener('blur', ffin);
+    }
     // ---- export (client-only, CSP-safe canvas render → PNG download). Single card or the whole visible graph. ----
     // maps the ACTUAL node.t values (see RMAP_TYPE) to an accent color for the exported card stripe/label
     var EXP_COL = { idea: '#7c3aed', paper: '#0891b2', study: '#0891b2', figure: '#d97706', review: '#4f46e5', srq: '#4f46e5', sreview: '#4f46e5', step: '#2563eb', venue: '#c026d3', section: '#059669', dataset: '#0d9488', file: '#059669', chat: '#64748b' };
@@ -4941,10 +5000,12 @@
     }
     // send the dock input in the current mode: 'action' (needs a selected step) → propose protocol step(s); else chat.
     function dkPrimary() { if (dkMode === 'action' && sn && sn.t === 'step') { dkProposeSteps(); } else { dkSend(); } }
-    function dkSend() {   // free-text turn → research-chat (non-streaming); the reply may save files (→ file nodes)
-      var txt = String(dInput || '').trim(); if (!txt || dBusy) return;
+    function dkSend(overrideTxt) {   // free-text turn → research-chat (non-streaming); the reply may save files (→ file nodes)
+      var isOv = (overrideTxt != null);
+      var txt = String(isOv ? overrideTxt : (dInput || '')).trim(); if (!txt || dBusy) return;
       // the currently SELECTED map card is "attached" as context — the assistant sees exactly which node you mean.
-      var an = (sel && g && g.by) ? g.by[sel] : null;
+      // (an explicit override — e.g. a frame's inline "generate here" — carries its own context and attaches no card.)
+      var an = (!isOv && sel && g && g.by) ? g.by[sel] : null;
       var full = txt;
       if (an) {
         var lab = (RMAP_TYPE[an.t] && RMAP_TYPE[an.t].lab) || an.t;
@@ -4952,7 +5013,7 @@
         var idp = (an.ref && an.ref.id) ? (' [id: ' + an.ref.id + ']') : '';
         full = '[BECSATOLT KÁRTYA a térképről — erre a kártyára fókuszálj: ' + lab + ' — "' + String(an.title || '').slice(0, 160) + '"' + idp + (mbits.length ? ' — ' + mbits.slice(0, 6).join(', ') : '') + ']\n\n' + txt;
       }
-      dkSay('user', (an ? '📎 ' + String(an.title || 'kártya').slice(0, 44) + '\n' : '') + txt); setDInput(''); setDBusy(true);
+      dkSay('user', (an ? '📎 ' + String(an.title || 'kártya').slice(0, 44) + '\n' : '') + txt); if (!isOv) setDInput(''); setDBusy(true);
       var CFG = window.PR_CONFIG || {}, CORE = window.PRAutopilotCore, pid = props.projectId;
       function fail(msg) { if (alive.current) { setDBusy(false); dkSay('ai', msg || 'Hiba történt.'); } }   // single failure path → dBusy never strands
       dkEnsureChat().then(function (cid) {
@@ -5038,6 +5099,21 @@
     return h('div', { className: 'rmap-wrap' },
       h('div', { className: 'rmap-stage', ref: stageRef, onMouseDown: onDown, onWheel: onWheel },
         h('div', { className: 'rmap-world', style: { transform: 'translate(' + view.tx + 'px,' + view.ty + 'px) scale(' + view.k + ')' } },
+          // frames (named regions) render BEHIND everything; the body is pointer-events:none so cards stay interactive
+          frames.map(function (f) {
+            var gg = (frLive && frLive.id === f.id) ? frLive : f;
+            return h('div', { key: 'fr' + f.id, className: 'rmap-frame rmap-fc-' + (f.color || 'slate'), style: { position: 'absolute', left: gg.x + 'px', top: gg.y + 'px', width: gg.w + 'px', height: gg.h + 'px' } },
+              h('div', { className: 'rmap-frame-h', onMouseDown: props.canEdit ? function (e) { startFrameDrag(e, f, 'move'); } : null },
+                h('span', { className: 'rmap-frame-t' }, f.title),
+                props.canEdit ? h('span', { className: 'rmap-frame-acts' },
+                  h('button', { title: 'Átszínezés', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); frameRecolor(f); } }, '🎨'),
+                  h('button', { title: 'Átnevezés', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); frameRename(f); } }, '✎'),
+                  h('button', { title: 'Törlés', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); frameDelete(f.id); } }, '🗑')) : null),
+              props.canEdit ? h('div', { className: 'rmap-frame-gen', onMouseDown: function (e) { e.stopPropagation(); } },
+                h('input', { className: 'rmap-frame-geni', value: frGen[f.id] || '', placeholder: '✨ Generálj ide…', disabled: dBusy, onChange: function (e) { var v = e.target.value; setFrGen(function (M) { var m = Object.assign({}, M); m[f.id] = v; return m; }); }, onKeyDown: function (e) { if (e.key === 'Enter') { e.preventDefault(); frameGenerate(f, frGen[f.id]); } } }),
+                h('button', { title: 'Generálás', disabled: dBusy || !String(frGen[f.id] || '').trim(), onClick: function () { frameGenerate(f, frGen[f.id]); } }, '➤')) : null,
+              props.canEdit ? h('div', { className: 'rmap-frame-rz', title: 'Átméretezés', onMouseDown: function (e) { startFrameDrag(e, f, 'resize'); } }) : null);
+          }),
           h('svg', { className: 'rmap-edges', width: svgW, height: g.height },
             h('defs', null, h('marker', { id: 'rmap-arrow', viewBox: '0 0 8 8', refX: 6.5, refY: 4, markerWidth: 6.5, markerHeight: 6.5, orient: 'auto-start-reverse' }, h('path', { d: 'M0.5,0.5 L7.5,4 L0.5,7.5 Z', fill: 'var(--line-2, var(--muted))' }))),
             edgeEls),
@@ -5059,6 +5135,7 @@
         h('div', { className: 'rmap-zoom' },
           h('button', { title: 'Térkép újratöltése a legfrissebb adatokkal (a módosítások érvényesítése)', disabled: refreshing, onClick: refreshMap }, refreshing ? '⏳' : '🔄'),
           h('button', { title: 'Térkép exportálása PNG-be', onClick: exportMap }, '⤓'),
+          (props.canEdit && framesCap) ? h('button', { title: 'Új keret (nevesített régió) hozzáadása', onClick: frameCreate }, '▦') : null,
           (data && data.hiddenFigs && data.hiddenFigs.length) ? h('button', { title: 'Térképről levett ábrák visszahozása', onClick: function () { setRestoreOpen(true); } }, '🖼' + data.hiddenFigs.length) : null,
           (mapFlags && g.N.filter(function (n) { return n.mapHidden; }).length) ? h('button', { title: 'Rejtett kártyák visszahozása', onClick: function () { setNodeRestoreOpen(true); } }, '🫥' + g.N.filter(function (n) { return n.mapHidden; }).length) : null,
           (props.canEdit && Object.keys(layout).length) ? h('button', { title: 'Automatikus elrendezés (a saját pozíciók törlése)', onClick: resetLayout }, '↺') : null,
