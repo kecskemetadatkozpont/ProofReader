@@ -876,6 +876,13 @@
     /* per-node pin badge + pinned highlight ring */
     .rmap-pin-badge { position: absolute; top: -8px; right: -6px; font-size: 13px; z-index: 2; filter: drop-shadow(0 1px 1px rgba(0,0,0,.3)); pointer-events: none; }
     .rmap-node.rmap-pinned { box-shadow: 0 0 0 2px var(--accent), 0 8px 20px -8px rgba(20,26,40,.4); }
+    /* multi-select: marquee rect + selected outline + group action bar */
+    .rmap-marquee { border: 1.5px solid var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); border-radius: 4px; }
+    .rmap-node.rmap-mselected { box-shadow: 0 0 0 2px var(--accent); }
+    .rmap-groupbar { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 16; display: flex; gap: 6px; align-items: center; background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 5px 8px 5px 14px; box-shadow: 0 10px 28px rgba(0,0,0,.22); }
+    .rmap-groupbar b { font-size: 12px; font-weight: 800; color: var(--ink); }
+    .rmap-groupbar button { border: 1px solid var(--line); background: var(--surface); cursor: pointer; font-size: 13px; width: 30px; height: 27px; border-radius: 7px; display: flex; align-items: center; justify-content: center; color: var(--ink); }
+    .rmap-groupbar button:hover { background: var(--surface-2); border-color: var(--accent); }
     .rmap-stage { flex: 1; position: relative; height: calc(100vh - 240px); min-height: 460px; overflow: hidden; background: var(--surface-2); border: 1px solid var(--line); border-radius: 14px; cursor: grab; }
     .rmap-stage:active { cursor: grabbing; }
     .rmap-world { position: absolute; top: 0; left: 0; transform-origin: 0 0; }
@@ -1006,7 +1013,7 @@
   <script type="text/babel" src="canvas.jsx?v=1783137934"></script>
   <script type="text/babel" src="notes.jsx?v=1783137934"></script>
   <script src="autopilot-core.js?v=1784160000"></script>
-  <script type="text/babel" src="research.jsx?v=1784910000"></script>
+  <script type="text/babel" src="research.jsx?v=1784920000"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>

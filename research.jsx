@@ -4277,6 +4277,11 @@
     var lyS = useState({}), layout = lyS[0], setLayout = lyS[1];   // saved free-drag positions (node_id → {x,y,hidden,pinned}); overrides the auto-layout + pins the card
     var mfS = useState(false), mapFlags = mfS[0], setMapFlags = mfS[1];   // migration-70 capability: pin/hide columns present → show that UI
     var dlS = useState(null), dlive = dlS[0], setDlive = dlS[1];   // the node currently being dragged {id,x,y} — follows the cursor 1:1
+    var msS = useState({}), msel = msS[0], setMsel = msS[1];   // multi-selection: {node_id: true} (shift-click / marquee)
+    var glS = useState(null), gLive = glS[0], setGLive = glS[1];   // group drag {dx,dy,base:{id:{x,y}},ids} — moves all msel together
+    var mqS = useState(null), marquee = mqS[0], setMarquee = mqS[1];   // marquee rect in stage coords {x0,y0,x1,y1} while shift-dragging the background
+    var gdrag = useRef(null);   // in-flight group-drag lifecycle guard
+    var mqRef = useRef(null);   // in-flight marquee start point (stage coords)
     var drag = useRef(null), stageRef = useRef(null), alive = useRef(true), bumpT = useRef(null), driving = useRef(false), mapDriver = useRef(null), ndrag = useRef(null), selRef = useRef(null), refBusy = useRef({}), dcRef = useRef(null), dScroll = useRef(null);
     if (!mapDriver.current) mapDriver.current = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : ('00000000-0000-4000-8000-' + String(Date.now()).slice(-12));
     useEffect(function () { return function () { alive.current = false; driving.current = false; if (bumpT.current) clearTimeout(bumpT.current); }; }, []);
@@ -4490,6 +4495,8 @@
       separateNodes(N, pinned);   // ← the no-overlap rule now only tucks in un-placed cards, never the user's own layout
       // the card under the cursor follows the pointer 1:1 (edges recompute from this via `by`, so they track the drag)
       if (dlive && dlive.id) { for (var q = 0; q < N.length; q++) { if (N[q].id === dlive.id) { N[q].x = dlive.x; N[q].y = dlive.y; break; } } }
+      // group drag: every multi-selected card moves together by the same delta from its captured base position
+      if (gLive && gLive.base) { for (var gq = 0; gq < N.length; gq++) { var gb = gLive.base[N[gq].id]; if (gb) { N[gq].x = gb.x + gLive.dx; N[gq].y = gb.y + gLive.dy; } } }
       var maxY = 400; N.forEach(function (n) { maxY = Math.max(maxY, n.y + (n._h || 78) + 44); });
       var by = {}; N.forEach(function (n) { by[n.id] = n; });
       return { N: N, E: E, height: maxY, by: by };
@@ -4497,7 +4504,25 @@
 
     function onMove(e) { var dd = drag.current; if (!dd) return; setView(function (v) { return { tx: dd.tx + (e.clientX - dd.sx), ty: dd.ty + (e.clientY - dd.sy), k: v.k }; }); }
     function onUp() { drag.current = null; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); }
-    function onDown(e) { if (e.target.closest && e.target.closest('.rmap-node')) return; drag.current = { sx: e.clientX, sy: e.clientY, tx: view.tx, ty: view.ty }; window.addEventListener('mousemove', onMove); window.addEventListener('mouseup', onUp); }
+    function stageXY(e) { var st = stageRef.current; if (!st) return { x: e.clientX, y: e.clientY }; var r = st.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
+    function onMarqMove(e) { var mq = mqRef.current; if (!mq) return; var p = stageXY(e); setMarquee({ x0: mq.x0, y0: mq.y0, x1: p.x, y1: p.y }); }
+    function onMarqUp(e) {
+      var mq = mqRef.current; mqRef.current = null;
+      window.removeEventListener('mousemove', onMarqMove); window.removeEventListener('mouseup', onMarqUp);
+      setMarquee(null); if (!mq) return;
+      var p = stageXY(e), x0 = Math.min(mq.x0, p.x), x1 = Math.max(mq.x0, p.x), y0 = Math.min(mq.y0, p.y), y1 = Math.max(mq.y0, p.y);
+      if (x1 - x0 < 5 && y1 - y0 < 5) return;   // a tiny box = a click, not a marquee
+      var k = view.k, add = {};
+      g.N.forEach(function (n) { if (n.mapHidden) return; var nx = view.tx + n.x * k, ny = view.ty + n.y * k, nw = 204 * k, nh = 74 * k; if (nx < x1 && nx + nw > x0 && ny < y1 && ny + nh > y0) add[n.id] = true; });
+      setMsel(function (M) { return Object.assign({}, M, add); });
+    }
+    function onDown(e) {
+      if (e.target.closest && e.target.closest('.rmap-node')) return;
+      // shift + drag on the empty canvas = marquee multi-select; a plain drag pans; a plain click clears the selection
+      if (e.shiftKey) { var p = stageXY(e); mqRef.current = { x0: p.x, y0: p.y }; setMarquee({ x0: p.x, y0: p.y, x1: p.x, y1: p.y }); window.addEventListener('mousemove', onMarqMove); window.addEventListener('mouseup', onMarqUp); return; }
+      if (Object.keys(msel).length) setMsel({});
+      drag.current = { sx: e.clientX, sy: e.clientY, tx: view.tx, ty: view.ty }; window.addEventListener('mousemove', onMove); window.addEventListener('mouseup', onUp);
+    }
     function onWheel(e) { e.preventDefault(); var st = stageRef.current; if (!st) return; var r = st.getBoundingClientRect(); var mx = e.clientX - r.left, my = e.clientY - r.top; setView(function (v) { var nk = Math.min(2.2, Math.max(.3, v.k * (e.deltaY < 0 ? 1.12 : 0.89))); return { tx: mx - (mx - v.tx) * (nk / v.k), ty: my - (my - v.ty) * (nk / v.k), k: nk }; }); }
     function zoom(f) { setView(function (v) { var nk = Math.min(2.2, Math.max(.3, v.k * f)); return { tx: v.tx, ty: v.ty, k: nk }; }); }
     // fit the whole graph into the viewport (Luma "illeszd a nézetbe"). Uses card size 204x74.
@@ -4521,19 +4546,23 @@
     function nodeSetFlag(n, key, val) {
       if (!props.canEdit || !n) return;
       var cur = layout[n.id] || {}, x = (cur.x != null ? cur.x : n.x), y = (cur.y != null ? cur.y : n.y);
+      var prev = !!cur[key];   // capture the PRIOR value so an error reverts to it (not blindly to the default)
       var patch = {}; patch[key] = val;
       setLayout(function (L) { var m = Object.assign({}, L); m[n.id] = Object.assign({ x: x, y: y }, m[n.id], patch); return m; });
       if (key === 'hidden' && val) setSel(function (s) { return s === n.id ? null : s; });
       var row = { project_id: props.projectId, node_id: n.id, x: x, y: y, updated_at: new Date().toISOString() }; row[key] = val;
       sb.from('research_map_layout').upsert(row, { onConflict: 'project_id,node_id' }).then(function (r) {
         if (!alive.current) return;
-        if (r && r.error) { window.PRUI.toast('Mentés sikertelen (fut a migration-70?): ' + r.error.message, { kind: 'error' }); setLayout(function (L) { var m = Object.assign({}, L); if (m[n.id]) { var c2 = Object.assign({}, m[n.id]); delete c2[key]; m[n.id] = c2; } return m; }); }
+        if (r && r.error) { window.PRUI.toast('Mentés sikertelen (fut a migration-70?): ' + r.error.message, { kind: 'error' }); setLayout(function (L) { var m = Object.assign({}, L); if (m[n.id]) { var c2 = Object.assign({}, m[n.id]); if (prev) c2[key] = true; else delete c2[key]; m[n.id] = c2; } return m; }); }
       });
     }
     function nodeToggleHidden(n) { nodeSetFlag(n, 'hidden', !(layout[n.id] && layout[n.id].hidden)); }
     function nodeTogglePinned(n) { nodeSetFlag(n, 'pinned', !(layout[n.id] && layout[n.id].pinned)); }
+    function groupHide() { Object.keys(msel).forEach(function (id) { var n = g.by[id]; if (n && !n.mapHidden) nodeSetFlag(n, 'hidden', true); }); setMsel({}); }
+    function groupPin() { Object.keys(msel).forEach(function (id) { var n = g.by[id]; if (n) nodeSetFlag(n, 'pinned', true); }); }
     // ---- export (client-only, CSP-safe canvas render → PNG download). Single card or the whole visible graph. ----
-    var EXP_COL = { idea: '#7c3aed', source: '#0891b2', lit: '#0891b2', sr: '#0891b2', step: '#2563eb', journal: '#c026d3', file: '#059669', draft: '#059669', figure: '#d97706' };
+    // maps the ACTUAL node.t values (see RMAP_TYPE) to an accent color for the exported card stripe/label
+    var EXP_COL = { idea: '#7c3aed', paper: '#0891b2', study: '#0891b2', figure: '#d97706', review: '#4f46e5', srq: '#4f46e5', sreview: '#4f46e5', step: '#2563eb', venue: '#c026d3', section: '#059669', dataset: '#0d9488', file: '#059669', chat: '#64748b' };
     function expDownload(canvas, name) { try { var url = canvas.toDataURL('image/png'); var a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); document.body.removeChild(a); } catch (e) { window.PRUI.toast('Export sikertelen: ' + (e && e.message || e), { kind: 'error' }); } }
     function expRoundRect(ctx, x, y, w, hh, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + hh, r); ctx.arcTo(x + w, y + hh, x, y + hh, r); ctx.arcTo(x, y + hh, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
     function expWrap(ctx, text, maxW) { var words = String(text || '').split(/\s+/), lines = [], cur = ''; for (var i = 0; i < words.length; i++) { var t = cur ? cur + ' ' + words[i] : words[i]; if (ctx.measureText(t).width > maxW && cur) { lines.push(cur); cur = words[i]; } else cur = t; } if (cur) lines.push(cur); return lines; }
@@ -4554,8 +4583,9 @@
       ctx.fillStyle = '#f8fafc'; ctx.fillRect(0, 0, W, H); expDrawCard(ctx, n, pad, pad);
       expDownload(c, 'publify-' + (n.t || 'kartya') + '.png');
     }
-    function exportMap() {
-      var vis = g.N.filter(function (n) { return !n.mapHidden; }); if (!vis.length) return;
+    function exportSet(vis, fname) {
+      if (!vis.length) return;
+      var idset = {}; vis.forEach(function (n) { idset[n.id] = 1; });
       var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
       vis.forEach(function (n) { if (n.x < minX) minX = n.x; if (n.y < minY) minY = n.y; if (n.x + 204 > maxX) maxX = n.x + 204; if (n.y + 74 > maxY) maxY = n.y + 74; });
       var pad = 40, W = (maxX - minX) + pad * 2, H = (maxY - minY) + pad * 2, dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -4563,19 +4593,47 @@
       var c = document.createElement('canvas'); c.width = Math.round(W * dpr); c.height = Math.round(H * dpr); var ctx = c.getContext('2d'); ctx.scale(dpr, dpr);
       ctx.fillStyle = '#f8fafc'; ctx.fillRect(0, 0, W, H);
       ctx.translate(pad - minX, pad - minY);
-      // edges first
-      g.E.forEach(function (e) { var a = g.by[e[0]], b = g.by[e[1]]; if (!a || !b || a.mapHidden || b.mapHidden) return; var cite = e[2] === 'cite'; ctx.strokeStyle = cite ? '#c7b8f0' : '#cbd5e1'; ctx.lineWidth = cite ? 1.5 : 2; ctx.beginPath(); ctx.moveTo(a.x + 102, a.y + 37); ctx.lineTo(b.x + 102, b.y + 37); ctx.stroke(); });
+      // edges first (only between two nodes present in this export set)
+      g.E.forEach(function (e) { var a = g.by[e[0]], b = g.by[e[1]]; if (!a || !b || !idset[a.id] || !idset[b.id]) return; var cite = e[2] === 'cite'; ctx.strokeStyle = cite ? '#c7b8f0' : '#cbd5e1'; ctx.lineWidth = cite ? 1.5 : 2; ctx.beginPath(); ctx.moveTo(a.x + 102, a.y + 37); ctx.lineTo(b.x + 102, b.y + 37); ctx.stroke(); });
       vis.forEach(function (n) { expDrawCard(ctx, n, n.x, n.y); });
-      expDownload(c, 'publify-terkep.png');
+      expDownload(c, fname);
     }
+    function exportMap() { exportSet(g.N.filter(function (n) { return !n.mapHidden; }), 'publify-terkep.png'); }
+    function exportSelection() { exportSet(g.N.filter(function (n) { return msel[n.id] && !n.mapHidden; }), 'publify-kijeloles.png'); }
     function resetLayout() {
       if (!props.canEdit) return;
       setLayout({}); setDlive(null);
       sb.from('research_map_layout').delete().eq('project_id', props.projectId).then(function (r) { if (r && r.error && alive.current) window.PRUI.toast('Elrendezés visszaállítása: ' + r.error.message, { kind: 'error' }); });
     }
+    function toggleMsel(id) { setMsel(function (M) { var m = Object.assign({}, M); if (m[id]) delete m[id]; else m[id] = true; return m; }); }
     function startNodeDrag(e, n) {
       if (e.button !== 0) return;   // left button only — right-click opens the generate menu
+      if (e.shiftKey) { toggleMsel(n.id); return; }   // shift-click toggles multi-selection (no drag)
       var startX = e.clientX, startY = e.clientY, k = view.k || 1, ox = n.x, oy = n.y, can = props.canEdit;
+      // group drag: if this card is part of a multi-selection (>1), move ALL selected cards together
+      if (can && msel[n.id] && Object.keys(msel).length > 1) {
+        var gids = Object.keys(msel).filter(function (id) { return g.by[id] && !(g.by[id].mapHidden); });
+        var gbase = {}; gids.forEach(function (id) { gbase[id] = { x: g.by[id].x, y: g.by[id].y }; });
+        gdrag.current = { ids: gids, base: gbase, moved: false, dx: 0, dy: 0 };
+        var gmv = function (ev) {
+          if (!gdrag.current) return;
+          if (ev.buttons === 0) { gfin(); return; }
+          var mdx = ev.clientX - startX, mdy = ev.clientY - startY;
+          if (Math.abs(mdx) > 3 || Math.abs(mdy) > 3) { gdrag.current.moved = true; gdrag.current.dx = Math.round(mdx / k); gdrag.current.dy = Math.round(mdy / k); setGLive({ dx: gdrag.current.dx, dy: gdrag.current.dy, base: gbase }); }
+        };
+        var gfin = function () {
+          var d = gdrag.current; if (!d) return; gdrag.current = null;
+          window.removeEventListener('mousemove', gmv); window.removeEventListener('mouseup', gup); window.removeEventListener('blur', gfin);
+          setGLive(null);
+          if (d.moved) {
+            setLayout(function (L) { var m = Object.assign({}, L); d.ids.forEach(function (id) { m[id] = Object.assign({}, m[id], { x: d.base[id].x + d.dx, y: d.base[id].y + d.dy }); }); return m; });
+            d.ids.forEach(function (id) { persistPos(id, d.base[id].x + d.dx, d.base[id].y + d.dy); });
+          }
+        };
+        var gup = function () { gfin(); };
+        window.addEventListener('mousemove', gmv); window.addEventListener('mouseup', gup); window.addEventListener('blur', gfin);
+        return;
+      }
       ndrag.current = { id: n.id, moved: false, lx: ox, ly: oy };   // lx/ly = last visible position → persisted on any terminating event
       // finish() is the SINGLE termination path (guarded against double-call). It runs on mouseup, on a re-entry with
       // no button held (release happened off-window → mouseup was never delivered), and on window blur (alt-tab). This
@@ -4586,7 +4644,7 @@
         window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); window.removeEventListener('blur', finish);
         setDlive(null);
         if (d.moved) { setLayout(function (L) { var m = Object.assign({}, L); m[n.id] = Object.assign({}, m[n.id], { x: d.lx, y: d.ly }); return m; }); persistPos(n.id, d.lx, d.ly); }
-        else { setSel(n.id); if (n.id === 'lit') setLitOpen(function (v) { return !v; }); }
+        else { setSel(n.id); setMsel({}); if (n.id === 'lit') setLitOpen(function (v) { return !v; }); }
       }
       function mv(ev) {
         if (!ndrag.current) return;
@@ -4976,14 +5034,23 @@
       var dn = run.phases.filter(function (pp) { return pp.enabled && (pp.status === 'done' || pp.status === 'skipped'); }).length;
       runProg = dn + '/' + en; runActive = ['running', 'awaiting_approval', 'paused', 'queued'].indexOf(run.status) >= 0;
     }
-    var sn = sel ? g.by[sel] : null;
+    var sn = (sel && g.by[sel] && !g.by[sel].mapHidden) ? g.by[sel] : null;   // don't float the inspector/toolbar over a node that is (now) hidden
     return h('div', { className: 'rmap-wrap' },
       h('div', { className: 'rmap-stage', ref: stageRef, onMouseDown: onDown, onWheel: onWheel },
         h('div', { className: 'rmap-world', style: { transform: 'translate(' + view.tx + 'px,' + view.ty + 'px) scale(' + view.k + ')' } },
           h('svg', { className: 'rmap-edges', width: svgW, height: g.height },
             h('defs', null, h('marker', { id: 'rmap-arrow', viewBox: '0 0 8 8', refX: 6.5, refY: 4, markerWidth: 6.5, markerHeight: 6.5, orient: 'auto-start-reverse' }, h('path', { d: 'M0.5,0.5 L7.5,4 L0.5,7.5 Z', fill: 'var(--line-2, var(--muted))' }))),
             edgeEls),
-          g.N.map(function (n) { if (n.mapHidden) return null; return h('div', { key: n.id, 'data-nid': n.id, className: 'rmap-node t-' + n.t + (sel === n.id ? ' sel' : '') + (n.mapPinned ? ' rmap-pinned' : '') + (activeKey && n.ph === RMAP_PHASE_IDX[activeKey] ? ' inphase' : '') + (props.canEdit ? ' editable' : '') + (dlive && dlive.id === n.id ? ' dragging' : ''), style: { left: n.x + 'px', top: n.y + 'px' }, onMouseDown: function (e) { e.stopPropagation(); startNodeDrag(e, n); }, onContextMenu: function (e) { e.preventDefault(); e.stopPropagation(); if (props.canEdit && (genActions(n).length || regenActions(n).length)) setMenu({ node: n, x: e.clientX, y: e.clientY }); } }, n.mapPinned ? h('span', { className: 'rmap-pin-badge', title: 'Kitűzött' }, '📌') : null, body(n)); })),
+          g.N.map(function (n) { if (n.mapHidden) return null; return h('div', { key: n.id, 'data-nid': n.id, className: 'rmap-node t-' + n.t + (sel === n.id ? ' sel' : '') + (msel[n.id] ? ' rmap-mselected' : '') + (n.mapPinned ? ' rmap-pinned' : '') + (activeKey && n.ph === RMAP_PHASE_IDX[activeKey] ? ' inphase' : '') + (props.canEdit ? ' editable' : '') + (dlive && dlive.id === n.id ? ' dragging' : ''), style: { left: n.x + 'px', top: n.y + 'px' }, onMouseDown: function (e) { e.stopPropagation(); startNodeDrag(e, n); }, onContextMenu: function (e) { e.preventDefault(); e.stopPropagation(); if (props.canEdit && (genActions(n).length || regenActions(n).length)) setMenu({ node: n, x: e.clientX, y: e.clientY }); } }, n.mapPinned ? h('span', { className: 'rmap-pin-badge', title: 'Kitűzött' }, '📌') : null, body(n)); })),
+        // marquee selection rectangle (shift-drag on the empty canvas)
+        marquee ? h('div', { className: 'rmap-marquee', style: { position: 'absolute', left: Math.min(marquee.x0, marquee.x1) + 'px', top: Math.min(marquee.y0, marquee.y1) + 'px', width: Math.abs(marquee.x1 - marquee.x0) + 'px', height: Math.abs(marquee.y1 - marquee.y0) + 'px', pointerEvents: 'none', zIndex: 12 } }) : null,
+        // group action bar — appears when 2+ cards are multi-selected
+        (Object.keys(msel).length > 1) ? h('div', { className: 'rmap-groupbar', onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
+          h('b', null, Object.keys(msel).length + ' kijelölve'),
+          (mapFlags && props.canEdit) ? h('button', { title: 'A kijelöltek kitűzése', onClick: groupPin }, '📌') : null,
+          (mapFlags && props.canEdit) ? h('button', { title: 'A kijelöltek elrejtése a térképről', onClick: groupHide }, '🙈') : null,
+          h('button', { title: 'A kijelölés exportálása PNG-be', onClick: exportSelection }, '⤓'),
+          h('button', { title: 'Kijelölés törlése', onClick: function () { setMsel({}); } }, '✕')) : null,
         run && runActive ? h('div', { className: 'rmap-runbar' + (run.status === 'awaiting_approval' ? ' gate' : '') },
           h('span', { className: 'rmap-rb-dot' }), h('b', null, '⚡ Autopilot'),
           h('span', { className: 'rmap-rb-st' }, (AP_ST_LABEL[run.status] || run.status) + (activeLabel ? ' · ' + activeLabel : '') + (runProg ? ' · ' + runProg : '')),
@@ -5022,7 +5089,7 @@
                 props.canEdit ? h('button', { className: 'btn', style: { fontSize: 11, padding: '3px 9px', flex: 'none' }, title: 'Vissza a térképre', onClick: function () { nodeToggleHidden(n); } }, '↩ Vissza') : null);
             })) : h('div', { style: { fontSize: 12, color: 'var(--faint)' } }, 'Nincs rejtett kártya.'));
         })() : null,
-        h('div', { className: 'rmap-hint' }, (props.canEdit ? 'Húzd a kártyát = áthelyezés · ' : '') + 'húzd a hátteret = pan · görgő = zoom'),
+        h('div', { className: 'rmap-hint' }, (props.canEdit ? 'Húzd a kártyát = áthelyezés · ' : '') + 'húzd a hátteret = pan · görgő = zoom · Shift+kattintás/húzás = többes kijelölés'),
         // edge legend — what the connecting lines mean (non-blocking overlay). Bottom-left, above the zoom controls,
         // so it never collides with the top-spanning autopilot runbar. Swatch colors match the actual edge strokes.
         h('div', { style: { position: 'absolute', left: 14, bottom: 84, zIndex: 8, display: 'flex', gap: 13, alignItems: 'center', padding: '5px 11px', borderRadius: 8, background: 'var(--surface)', border: '1px solid var(--line)', fontSize: 10.5, color: 'var(--muted)', boxShadow: '0 4px 14px -8px rgba(20,26,40,.4)', pointerEvents: 'none' } },
