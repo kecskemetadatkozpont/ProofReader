@@ -56,9 +56,16 @@
 - [x] ✅ **Supervisor sign-off** — `research_step_signoff` SECURITY DEFINER RPC: a konzulens is
   aláírhat egy lépést általános írásjog nélkül (migr-77). *(05f7957)*
 
-## Hátralévő (jövő) — Phase 5+
-- [ ] 🔴 **Valós idejű együtt-gépelés (CRDT/Yjs)** a draft-editorra — a suggesting mode a jelenlegi
-  könnyűsúlyú alternatíva; a teljes CRDT nagy külső függőség, külön nekifutás + dependency-döntés.
+## ✅ Kooperatív Phase 5 — KÉSZ (2026-07-17)
+- [x] ✅ **Élő közös draft-szekció-szerkesztés** — szekció-szintű inline szerkesztő a Writing panelben;
+  a billentyűleütések valós időben broadcastolódnak (Supabase Realtime), a mentés a `research_drafts`-be
+  ír; **per-szekció soft-lock** („🔒 X szerkeszti") a felülírás ellen; Mégse visszaállít. Nincs CRDT-függőség.
+  Atomikus szekció-írás RPC-vel (migr-78) a cross-section lost-update ellen. *(d94be8f, 7b9aa27)*
+
+## Hátralévő (jövő) — Phase 6+
+- [ ] 🔴 **Teljes karakter-szintű CRDT/Yjs** — egyidejű azonos-szekció gépelés valós idejű merge-dzsel.
+  A jelenlegi soft-lock + LWW ennek a könnyűsúlyú, függőség-mentes alternatívája; a teljes CRDT nagy
+  külső függőség (Yjs + sync-provider) egy build-lépés nélküli, vendorelt kódbázisban — külön dependency-döntés.
 
 > ⚠️ **A `migration-70..74` alkalmazása manuális** — lásd `AUTONOMOUS_SESSION_MANUAL_STEPS.md`.
 > A kliens minden funkciónál **kecsesen degradál**: a migráció előtt az adott UI egyszerűen nem jelenik meg.

@@ -76,8 +76,18 @@ sorrendben. A service-key nem tud DDL-t futtatni, ezért ezek manuálisak.
    Amíg nincs lefuttatva: a konzulens nem tud sign-off-olni (editor a migr-75 közvetlen úton igen).
 
    **PHASE 4 MEGÉPÜLT (2026-07-17):** follow-mode (kolléga viewport-jának követése) + cursor-chat
-   (kliens-only, nincs migráció) + konzulensi sign-off (migr-77). A **teljes CRDT/Yjs** valós idejű
-   együtt-gépelés továbbra is szándékosan kimaradt (nagy külső függőség — külön nekifutás).
+   (kliens-only, nincs migráció) + konzulensi sign-off (migr-77).
+
+9. **`backend/migration-78-draft-set-section.sql`** — `research_draft_set_section(d_id, s_key, s_latex)`
+   SECURITY DEFINER RPC: EGY szekciót módosít a `research_drafts.sections` jsonb-ben, **sor-zárolással**
+   (`select … for update`), hogy a párhuzamos szekció-mentések ne írják felül egymást (a teljes-tömb
+   visszaírás lost-update-jét szünteti meg — az adversariális review találta meg, CONFIRMED major).
+   Amíg nincs lefuttatva: a kliens a teljes-tömb írásra esik vissza (graceful).
+
+   **PHASE 5 MEGÉPÜLT (2026-07-17):** élő közös draft-szekció-szerkesztés (Supabase Realtime + per-szekció
+   soft-lock, nincs CRDT-függőség) + a fenti atomikus szekció-írás (migr-78). A **teljes karakter-szintű
+   CRDT/Yjs** (egyidejű azonos-szekció gépelés valós idejű merge-dzsel) továbbra is szándékosan kimaradt
+   (Phase 6 — nagy külső függőség, külön dependency-döntés).
 
 ## Edge-function deploy-ok (explicit jóváhagyás + megnevezés kell)
 
@@ -113,6 +123,8 @@ Minden be van commitolva a `main`-re és deploy-olva (GitHub Pages).
 | `3496d07` | Phase 3: draft suggesting mode (javaslatok szekciónként) | **76** |
 | `a97ccbb` | Phase 4: follow-mode + cursor-chat | — |
 | `05f7957` | Phase 4: konzulensi sign-off (RPC) | **77** |
+| `d94be8f` | Phase 5: élő közös draft-szekció-szerkesztés (soft-lock) | — |
+| `7b9aa27` | Fix: atomikus szekció-írás RPC (cross-section lost-update) | **78** |
 
 **Teendőd:** a `migration-70 … 74` már lefutott (2026-07-17, smoke-tesztelve). Már csak a
 **`migration-75` és `migration-76`** van hátra — futtasd le a Supabase SQL editorban (ref
