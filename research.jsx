@@ -5885,9 +5885,9 @@
           (mapFlags && g.N.filter(function (n) { return n.mapHidden; }).length) ? h('button', { title: 'Rejtett kártyák visszahozása', onClick: function () { setNodeRestoreOpen(true); } }, '🫥' + g.N.filter(function (n) { return n.mapHidden; }).length) : null,
           (props.canEdit && Object.keys(layout).length) ? h('button', { title: 'Automatikus elrendezés (a saját pozíciók törlése)', onClick: resetLayout }, '↺') : null,
           h('button', { title: 'Illeszd a nézetbe (a teljes gráf látszódjon)', onClick: fitView }, '⤢'),
-          h('button', { onClick: function () { zoom(1.18); } }, '+'),
-          h('span', { style: { fontSize: 11, fontWeight: 700, color: 'var(--muted)', minWidth: 34, textAlign: 'center', fontVariantNumeric: 'tabular-nums' }, title: 'Nagyítás — kattints a 100%-hoz', onClick: function () { setView(function (v) { return { tx: v.tx, ty: v.ty, k: 1 }; }); } }, Math.round(view.k * 100) + '%'),
-          h('button', { onClick: function () { zoom(0.85); } }, '−')),
+          h('button', { title: 'Nagyítás', onClick: function () { zoom(1.18); } }, '+'),
+          h('button', { className: 'rmap-zoompct' + (Math.abs(view.k - 1) > 0.01 ? ' off' : ''), title: 'Vissza 100%-ra (1:1)', onClick: function () { setView(function (v) { return { tx: v.tx, ty: v.ty, k: 1 }; }); } }, (Math.abs(view.k - 1) > 0.01 ? '⟲ ' : '') + Math.round(view.k * 100) + '%'),
+          h('button', { title: 'Kicsinyítés', onClick: function () { zoom(0.85); } }, '−')),
         // "hidden figures" restore panel — bring Map-removed figures (on_map=false) back onto the Map
         (restoreOpen && data && data.hiddenFigs) ? h('div', { style: { position: 'absolute', left: 14, bottom: 96, zIndex: 14, width: 264, maxHeight: '58%', overflowY: 'auto', background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 12, boxShadow: '0 18px 50px -20px rgba(20,26,40,.55)', padding: 12 }, onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
           (function () { ensureFigUrls(data.hiddenFigs); return null; })(),
