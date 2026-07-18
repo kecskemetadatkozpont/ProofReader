@@ -5858,9 +5858,9 @@
       var M = opts.margin == null ? 8 : opts.margin, GAP = opts.gap == null ? 12 : opts.gap, CG = opts.colGap == null ? 11 : opts.colGap;
       var VW = vp.w || 900, VH = vp.h || 560, availW = VW - 2 * M, availH = VH - 2 * M;
       var colW = Math.min(desired.colW || desired.w, availW), chromeH = desired.chromeH || 0, bodyAvail = Math.max(40, availH - chromeH);
+      var padX = opts.padX || 0;   // the panel's fixed horizontal chrome (body padding) — budgeted here so the chosen cols always fit
       var cols = 1;
-      if (opts.canWiden && (desired.h - chromeH) > bodyAvail) { var fitCols = Math.max(1, Math.floor((availW + CG) / (colW + CG))), mc = Math.min(opts.maxCols || 3, fitCols); cols = Math.min(mc, Math.max(1, Math.ceil((desired.h - chromeH) / bodyAvail))); }
-      var padX = opts.padX || 0;   // the panel's fixed horizontal chrome (body padding) — added so N columns of colW fit exactly
+      if (opts.canWiden && (desired.h - chromeH) > bodyAvail) { var fitCols = Math.max(1, Math.floor((availW - 2 * padX + CG) / (colW + CG))), mc = Math.min(opts.maxCols || 3, fitCols); cols = Math.min(mc, Math.max(1, Math.ceil((desired.h - chromeH) / bodyAvail))); }
       var width = Math.min((opts.canWiden ? cols * colW + (cols - 1) * CG : desired.w) + 2 * padX, availW);
       var perCol = Math.ceil((desired.h - chromeH) / cols), scroll = opts.canWiden ? (perCol > bodyAvail) : (desired.h > availH);
       var bodyMaxH = opts.canWiden ? Math.min(bodyAvail, scroll ? bodyAvail : perCol) : availH;
@@ -5965,7 +5965,7 @@
       var einBody = floatNat[einKey] || ((7 + (edgeSpeedCap ? 2 : 0)) * 46);
       var f = fitFloat({ x: sx + 14, y: sy - 30, w: 0, h: 0 }, { w: 214, colW: 214, h: einChrome + einBody, chromeH: einChrome }, stageVP(), { prefer: 'point', gap: 4, canWiden: true, maxCols: 3, padX: 11 });
       function seg(label, opts, cur, onPick) { return h('div', { className: 'fld' }, h('div', { className: 'rmap-einsp-l' }, label), h('div', { className: 'rmap-eseg' }, opts.map(function (o) { return h('button', { key: o.v, className: (cur === o.v ? 'on' : ''), disabled: !ed, onClick: function () { onPick(o.v); } }, o.sw ? h('span', { className: 'sw', style: { background: o.sw } }) : null, o.lab); }))); }
-      return h('div', { className: 'rmap-einsp', 'data-cols': f.cols, 'data-scroll': f.scroll ? '1' : '0', style: { left: f.left + 'px', top: f.top + 'px', width: f.width + 'px', maxHeight: f.usedH + 'px', '--rcolw': f.colW + 'px', '--rbodyh': f.maxHeight + 'px' }, onMouseDown: function (ev) { ev.stopPropagation(); }, onWheel: function (ev) { ev.stopPropagation(); } },
+      return h('div', { className: 'rmap-einsp', 'data-cols': f.cols, 'data-scroll': f.scroll ? '1' : '0', style: { left: f.left + 'px', top: f.top + 'px', width: f.width + 'px', maxHeight: f.usedH + 'px', '--rcols': f.cols, '--rbodyh': f.maxHeight + 'px' }, onMouseDown: function (ev) { ev.stopPropagation(); }, onWheel: function (ev) { ev.stopPropagation(); } },
         h('div', { className: 'rmap-einsp-h' }, h('b', null, (RMAP_TYPE[a.t] && RMAP_TYPE[a.t].ic || '◻') + ' ' + a.title + ' → ' + (RMAP_TYPE[b.t] && RMAP_TYPE[b.t].ic || '◻') + ' ' + b.title), h('span', { className: 'bd' }, st.ov ? 'EGYÉNI' : 'ALAP'), h('button', { className: 'x', title: 'Bezárás', onClick: function () { setSelEdge(null); } }, '×')),
         h('div', { className: 'rmap-einsp-b', ref: measureNat(einKey, 11) },
           seg('Reláció-típus', EDGE_TYPE_ORDER.map(function (k) { return { v: k, lab: EDGE_TYPES[k].nm, sw: EDGE_TYPES[k].col }; }), st.kind, function (v) { persistEdge(e, { kind: v, color: null, anim: null, line_style: null, arrow: null, width: null }); }),
