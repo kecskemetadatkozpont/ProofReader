@@ -5834,6 +5834,14 @@
     // endpoint would leave has-esel dimming every edge with nothing looking selected. selEdge itself is left intact
     // so the highlight restores if the node is un-hidden; empty-canvas/node clicks clear it.
     var selEdgeVisible = !!(selEdgeObj && g.by[selEdgeObj[0]] && g.by[selEdgeObj[1]] && nodeVisible(g.by[selEdgeObj[0]]) && nodeVisible(g.by[selEdgeObj[1]]));
+    // P1 edge labels: screen-space pills at the edge midpoint (the exact bezier average) — crisp constant size, follows
+    // pan/zoom, click selects the edge. Only for edges that HAVE a label; hidden when zoomed far out to avoid clutter.
+    var edgeLabelEls = (edgesCap && view.k >= 0.45) ? g.E.map(function (e) {
+      var st = edgeStyle(e); if (!st.label) return null;
+      var a = g.by[e[0]], b = g.by[e[1]]; if (!a || !b || !nodeVisible(a) || !nodeVisible(b)) return null;
+      var pa = bpt(a, b), pb = bpt(b, a), ek = edgeKey(e);
+      return h('button', { key: 'el' + ek, className: 'rmap-elabel' + (selEdge === ek ? ' on' : ''), style: { left: (view.tx + (pa.x + pb.x) / 2 * view.k) + 'px', top: (view.ty + (pa.y + pb.y) / 2 * view.k) + 'px', color: st.col }, title: st.label, onMouseDown: function (ev) { ev.stopPropagation(); }, onClick: function (ev) { ev.stopPropagation(); selectEdge(ek); } }, h('span', { className: 'rmap-elabel-sw', style: { background: st.col } }), st.label);
+    }) : null;
     function edgeInspEl() {
       var e = selEdgeObj; if (!e) return null; var a = g.by[e[0]], b = g.by[e[1]]; if (!a || !b || !nodeVisible(a) || !nodeVisible(b)) return null;
       var st = edgeStyle(e), pa = bpt(a, b), pb = bpt(b, a), mid = { x: (pa.x + pb.x) / 2, y: (pa.y + pb.y) / 2 };
@@ -5851,7 +5859,8 @@
           seg('Animáció', EDGE_ANIM_ORDER.map(function (k) { return { v: k, lab: EDGE_ANIMS[k] }; }), st.anim, function (v) { persistEdge(e, { anim: v }); }),
           seg('Vonalstílus', Object.keys(EDGE_LINES).map(function (k) { return { v: k, lab: EDGE_LINES[k] }; }), st.line, function (v) { persistEdge(e, { line_style: v }); }),
           seg('Nyílhegy', Object.keys(EDGE_ARROWS).map(function (k) { return { v: k, lab: EDGE_ARROWS[k] }; }), st.arrow, function (v) { persistEdge(e, { arrow: v }); }),
-          seg('Vastagság', [{ v: 1.5, lab: 'Vékony' }, { v: 2, lab: 'Közepes' }, { v: 3, lab: 'Vastag' }], st.width, function (v) { persistEdge(e, { width: v }); })),
+          seg('Vastagság', [{ v: 1.5, lab: 'Vékony' }, { v: 2, lab: 'Közepes' }, { v: 3, lab: 'Vastag' }], st.width, function (v) { persistEdge(e, { width: v }); }),
+          h('div', { className: 'fld' }, h('div', { className: 'rmap-einsp-l' }, 'Címke (az élre írva)'), h('input', { key: 'lbl' + selEdge, className: 'rmap-einsp-txt', type: 'text', defaultValue: st.label, placeholder: 'Írj ide feliratot…', disabled: !ed, maxLength: 40, onMouseDown: function (ev) { ev.stopPropagation(); }, onKeyDown: function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); ev.target.blur(); } ev.stopPropagation(); }, onBlur: function (ev) { var v = ev.target.value.trim(); if (v !== (st.label || '')) persistEdge(e, { label: v || null }); } }))),
         ed ? h('div', { className: 'rmap-einsp-foot' }, h('button', { onClick: function () { resetEdge(e); } }, '↺ Alaphelyzet')) : null);
     }
     function body(n) {
@@ -6178,6 +6187,7 @@
         (genActions(sn).length || regenActions(sn).length) ? h('button', { title: 'Generálás innen', onClick: function (e) { e.stopPropagation(); setMenu({ node: sn, x: e.clientX, y: e.clientY }); } }, '⚡') : null,
         canEnter(sn) ? h('button', { title: 'Panel megnyitása ablakként (nem-modal, több is lehet)', onClick: function () { openWindow(sn); } }, '⊞') : null,
         h('button', { title: 'Kártya exportálása (PNG)', onClick: function () { exportNode(sn); } }, '⤓')) : null,
+      edgeLabelEls,
       edgeInspEl(),
       sn ? h('div', { className: 'rmap-insp rmap-insp-float', style: inspStyle(sn), onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
         h('div', { className: 'rmap-insp-h' }, h('span', { className: 'rmap-ni' }, RMAP_TYPE[sn.t].ic), h('div', { style: { minWidth: 0 } }, h('b', null, sn.title), h('div', { className: 'rmap-insp-ty' }, RMAP_TYPE[sn.t].lab)), h('button', { className: 'rmap-insp-x', onClick: function () { setSel(null); } }, '×')),
