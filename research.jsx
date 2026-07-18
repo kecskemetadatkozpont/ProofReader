@@ -4479,6 +4479,8 @@
     var espcS = useState(false), edgeSpeedCap = espcS[0], setEdgeSpeedCap = espcS[1];   // migration-82 capability: research_map_edges.speed column present → speed slider
     var hetS = useState({}), hiddenEdgeTypes = hetS[0], setHiddenEdgeTypes = hetS[1];   // P1: per-relation-type edge visibility filter {kind: true = hidden} (client-only, localStorage)
     var lfS = useState(null), linkFrom = lfS[0], setLinkFrom = lfS[1];   // P2 link-mode: the source node id while drawing a manual edge (null = off)
+    var fnS = useState({}), floatNat = fnS[0], setFloatNat = fnS[1];   // viewport-fit P1: measured NATURAL body height of reflowing floats {key: px} (widen-not-tall)
+    var floatNatRef = useRef({}); floatNatRef.current = floatNat;   // live mirror for the measure callback
     var ldS = useState(null), linkDrag = ldS[0], setLinkDrag = ldS[1];   // P2 drag-to-connect: {from, wx, wy, over} while dragging a rubber-band edge from a card port
     var linkDragRef = useRef(null);   // link-drag lifecycle guard
     var eovRef = useRef(null);   // in-flight edge-edit key (realtime self-echo guard)
@@ -5858,7 +5860,8 @@
       var colW = Math.min(desired.colW || desired.w, availW), chromeH = desired.chromeH || 0, bodyAvail = Math.max(40, availH - chromeH);
       var cols = 1;
       if (opts.canWiden && (desired.h - chromeH) > bodyAvail) { var fitCols = Math.max(1, Math.floor((availW + CG) / (colW + CG))), mc = Math.min(opts.maxCols || 3, fitCols); cols = Math.min(mc, Math.max(1, Math.ceil((desired.h - chromeH) / bodyAvail))); }
-      var width = opts.canWiden ? Math.min(cols * colW + (cols - 1) * CG, availW) : Math.min(desired.w, availW);
+      var padX = opts.padX || 0;   // the panel's fixed horizontal chrome (body padding) — added so N columns of colW fit exactly
+      var width = Math.min((opts.canWiden ? cols * colW + (cols - 1) * CG : desired.w) + 2 * padX, availW);
       var perCol = Math.ceil((desired.h - chromeH) / cols), scroll = opts.canWiden ? (perCol > bodyAvail) : (desired.h > availH);
       var bodyMaxH = opts.canWiden ? Math.min(bodyAvail, scroll ? bodyAvail : perCol) : availH;
       var usedH = opts.canWiden ? Math.min(availH, (scroll ? bodyAvail : perCol) + chromeH) : Math.min(availH, desired.h);
@@ -5874,6 +5877,9 @@
       return { left: left, top: top, width: width, maxHeight: bodyMaxH, usedH: usedH, cols: cols, colW: colW, scroll: scroll, placement: placement };
     }
     function stageVP() { return { w: (stageRef.current && stageRef.current.clientWidth) || 900, h: (stageRef.current && stageRef.current.clientHeight) || 560 }; }
+    // viewport-fit P1: a ref callback that measures the NATURAL body height by SUMMING children (colW-invariant, so the value
+    // is stable across column counts → no widen oscillation / RO loop). >4px guard + a ref mirror avoid a setState feedback loop.
+    function measureNat(key, gap) { return function (el) { if (!el) return; var kids = el.children, sum = 0, n = 0; for (var i = 0; i < kids.length; i++) { var hh = kids[i].offsetHeight; if (hh) { sum += hh; n++; } } if (n > 1) sum += (n - 1) * (gap || 11); if (sum && Math.abs((floatNatRef.current[key] || 0) - sum) > 4) { setFloatNat(function (M) { var m = Object.assign({}, M); m[key] = sum; return m; }); } }; }
     function cardScreenRect(node) { var kk = view.k; return { x: view.tx + node.x * kk, y: view.ty + node.y * kk, w: nodeW(node) * kk, h: nodeH(node) * kk }; }
     function inspStyle(node) {
       var f = fitFloat(cardScreenRect(node), { w: 300, colW: 300, h: 460 }, stageVP(), { prefer: 'right', gap: 12, canWiden: false });
@@ -5952,12 +5958,16 @@
       var st = edgeStyle(e); if (hiddenEdgeTypes[st.kind]) return null;   // the selected edge's type was filtered off in the legend
       var pa = bpt(a, b), pb = bpt(b, a), mid = { x: (pa.x + pb.x) / 2, y: (pa.y + pb.y) / 2 };
       var sx = view.tx + mid.x * view.k, sy = view.ty + mid.y * view.k;
-      var f = fitFloat({ x: sx + 14, y: sy - 30, w: 0, h: 0 }, { w: 236, colW: 236, h: 470 }, stageVP(), { prefer: 'point', gap: 4, canWiden: false });
       var ed = props.canEdit && edgesCap;
+      // P1 widen-not-tall: chrome (header+foot) is fixed; the body = the reflowing control stack. Use the MEASURED natural
+      // height (falls back to an estimate on first paint) so a too-tall inspector becomes 2–3 columns instead of a scroller.
+      var einKey = 'edge:' + selEdge, einChrome = 40 + (ed ? 40 : 0);
+      var einBody = floatNat[einKey] || ((7 + (edgeSpeedCap ? 2 : 0)) * 46);
+      var f = fitFloat({ x: sx + 14, y: sy - 30, w: 0, h: 0 }, { w: 214, colW: 214, h: einChrome + einBody, chromeH: einChrome }, stageVP(), { prefer: 'point', gap: 4, canWiden: true, maxCols: 3, padX: 11 });
       function seg(label, opts, cur, onPick) { return h('div', { className: 'fld' }, h('div', { className: 'rmap-einsp-l' }, label), h('div', { className: 'rmap-eseg' }, opts.map(function (o) { return h('button', { key: o.v, className: (cur === o.v ? 'on' : ''), disabled: !ed, onClick: function () { onPick(o.v); } }, o.sw ? h('span', { className: 'sw', style: { background: o.sw } }) : null, o.lab); }))); }
-      return h('div', { className: 'rmap-einsp', style: { left: f.left + 'px', top: f.top + 'px', width: f.width + 'px', maxHeight: f.usedH + 'px' }, onMouseDown: function (ev) { ev.stopPropagation(); }, onWheel: function (ev) { ev.stopPropagation(); } },
+      return h('div', { className: 'rmap-einsp', 'data-cols': f.cols, 'data-scroll': f.scroll ? '1' : '0', style: { left: f.left + 'px', top: f.top + 'px', width: f.width + 'px', maxHeight: f.usedH + 'px', '--rcolw': f.colW + 'px', '--rbodyh': f.maxHeight + 'px' }, onMouseDown: function (ev) { ev.stopPropagation(); }, onWheel: function (ev) { ev.stopPropagation(); } },
         h('div', { className: 'rmap-einsp-h' }, h('b', null, (RMAP_TYPE[a.t] && RMAP_TYPE[a.t].ic || '◻') + ' ' + a.title + ' → ' + (RMAP_TYPE[b.t] && RMAP_TYPE[b.t].ic || '◻') + ' ' + b.title), h('span', { className: 'bd' }, st.ov ? 'EGYÉNI' : 'ALAP'), h('button', { className: 'x', title: 'Bezárás', onClick: function () { setSelEdge(null); } }, '×')),
-        h('div', { className: 'rmap-einsp-b' },
+        h('div', { className: 'rmap-einsp-b', ref: measureNat(einKey, 11) },
           seg('Reláció-típus', EDGE_TYPE_ORDER.map(function (k) { return { v: k, lab: EDGE_TYPES[k].nm, sw: EDGE_TYPES[k].col }; }), st.kind, function (v) { persistEdge(e, { kind: v, color: null, anim: null, line_style: null, arrow: null, width: null }); }),
           h('div', { className: 'fld' }, h('div', { className: 'rmap-einsp-l' }, 'Szín'), h('div', { className: 'rmap-esw' },
             [h('button', { key: 'auto', className: (!(edgeOv[selEdge] || {}).color ? 'on' : ''), title: 'Típus szerinti', disabled: !ed, style: { background: 'repeating-linear-gradient(45deg,var(--surface),var(--surface) 3px,var(--line) 3px,var(--line) 6px)' }, onClick: function () { persistEdge(e, { color: null }); } })].concat(EDGE_SWATCHES.map(function (c) { return h('button', { key: c, className: ((edgeOv[selEdge] || {}).color === c ? 'on' : ''), disabled: !ed, style: { background: c }, onClick: function () { persistEdge(e, { color: c }); } }); })))),

@@ -104,8 +104,12 @@
   helyett), kontextmenü (`window`-viewport, fel/balra flip), komment-composer + thread (a `210*k`→`nodeW*k` hiba is javítva).
   **Kártya-sapka**: a kézzel átméretezett kártya render-időben ÉS resize közben a viewporthoz sapkázódik az aktuális
   zoomon (a `graph()`-geometria érintetlen). **Nulla új hook.** Magas panel egyelőre belül görget (a widen a P1).
-- [ ] 🟡 **P1 — szélesíts, ne nyújts** — 1 új `useState` (mért magasság, a guard-ok előtt) + flex column-wrap az él- és
-  node-inspectoron (fejléc/ábra/lábléc full-width marad); 5. LOD ablak teljes-rect clamp.
+- [x] ✅ **P1 — szélesíts, ne nyújts (él-inspector)** — az él-inspector magas nézetnél **2–3 oszlopra szélesedik** a magas
+  görgető helyett: `fitFloat canWiden` + **flex `column-wrap` fix oszlopszélességgel** (a mért természetes magasság
+  oszlopszám-független → nincs villódzás/RO-hurok); a fejléc + lábléc full-width. A magasság **mérve** (`measureNat` a
+  gyerekek összegzésével — colW-invariáns), 1 `useState` (`floatNat`) + 1 `useRef`-tükör a guard-ok ELŐTT; első painten
+  becslés, majd egy korrekciós frame. Belső görgetés csak a legvégső eset (`data-scroll`). (A node-inspector heterogén
+  tartalma miatt ott a mérés+görgetés marad — a column-widen a P2-ben mérlegelendő.)
 - [ ] 🟡 **P2** — `autoFitCard` + „Kártya a nézetbe" (explicit, nincs auto-pan); bal-alsó panelek fitFloat-on át; resize-figyelő.
 
 ## 🚧 Interaktív élek (folyamatban, 2026-07-18)
