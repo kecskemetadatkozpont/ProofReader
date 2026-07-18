@@ -5088,13 +5088,14 @@
     function startNodeResize(e, n) {
       if (e.button !== 0 || !props.canEdit || !cardSizeCap) return; e.stopPropagation();
       var sx = e.clientX, sy = e.clientY, k = view.k || 1, ow = n._w || NW, oh = n._h || NH, ox = n.x, oy = n.y;
+      var _rvp = stageVP(), capW = Math.max(NW, (_rvp.w - 16) / k), capH = Math.max(64, (_rvp.h - 16) / k);   // viewport-fit: can't resize a card bigger than the screen at this zoom
       nrzRef.current = { id: n.id, moved: false, w: ow, h: oh };
       var rmv = function (ev) {
         if (!nrzRef.current) return; if (ev.buttons === 0) { rfin(); return; }
         if (Math.abs(ev.clientX - sx) > 2 || Math.abs(ev.clientY - sy) > 2) {
           nrzRef.current.moved = true;
-          nrzRef.current.w = Math.min(760, Math.max(NW, Math.round(ow + (ev.clientX - sx) / k)));
-          nrzRef.current.h = Math.min(600, Math.max(64, Math.round(oh + (ev.clientY - sy) / k)));
+          nrzRef.current.w = Math.min(760, capW, Math.max(NW, Math.round(ow + (ev.clientX - sx) / k)));
+          nrzRef.current.h = Math.min(600, capH, Math.max(64, Math.round(oh + (ev.clientY - sy) / k)));
           setNrzLive({ id: n.id, w: nrzRef.current.w, h: nrzRef.current.h });
         }
       };
@@ -5846,28 +5847,51 @@
     function nodeH(n) { return (n && n._h) || NH; }
     // float the inspector as a card NEXT TO the selected node (in front of the canvas), not as a side panel:
     // position it at the node's on-screen coords (view transform), to the right of the card, flipping left if no room.
-    function inspStyle(node) {
-      var kk = view.k, MW = 300;
-      var stW = (stageRef.current && stageRef.current.clientWidth) || 900, stH = (stageRef.current && stageRef.current.clientHeight) || 560;
-      var cardX = view.tx + node.x * kk, cardY = view.ty + node.y * kk, cardW = nodeW(node) * kk;
-      var ix = cardX + cardW + 12; if (ix + MW > stW - 8) ix = cardX - MW - 12; if (ix < 8) ix = 8;
-      var iy = Math.max(8, Math.min(cardY, Math.max(8, stH - 150)));
-      return { position: 'absolute', left: ix + 'px', top: iy + 'px', width: MW + 'px', maxHeight: (stH - 24) + 'px', zIndex: 13 };
+    // ---- viewport-fit primitive: the ONE fit authority every floating overlay uses (see MAP_CANVAS_ROADMAP viewport-fit) ----
+    // Picks the side with the most room, clamps the final box fully inside the viewport (both axes, with a margin), and —
+    // when canWiden — reflows a too-tall panel into N columns (wider+shorter) instead of a tall scroller. Pure: vp is explicit.
+    function fitFloat(anchor, desired, vp, opts) {
+      opts = opts || {};
+      function fc(v, lo, hi) { return Math.max(lo, Math.min(v, hi)); }
+      var M = opts.margin == null ? 8 : opts.margin, GAP = opts.gap == null ? 12 : opts.gap, CG = opts.colGap == null ? 11 : opts.colGap;
+      var VW = vp.w || 900, VH = vp.h || 560, availW = VW - 2 * M, availH = VH - 2 * M;
+      var colW = Math.min(desired.colW || desired.w, availW), chromeH = desired.chromeH || 0, bodyAvail = Math.max(40, availH - chromeH);
+      var cols = 1;
+      if (opts.canWiden && (desired.h - chromeH) > bodyAvail) { var fitCols = Math.max(1, Math.floor((availW + CG) / (colW + CG))), mc = Math.min(opts.maxCols || 3, fitCols); cols = Math.min(mc, Math.max(1, Math.ceil((desired.h - chromeH) / bodyAvail))); }
+      var width = opts.canWiden ? Math.min(cols * colW + (cols - 1) * CG, availW) : Math.min(desired.w, availW);
+      var perCol = Math.ceil((desired.h - chromeH) / cols), scroll = opts.canWiden ? (perCol > bodyAvail) : (desired.h > availH);
+      var bodyMaxH = opts.canWiden ? Math.min(bodyAvail, scroll ? bodyAvail : perCol) : availH;
+      var usedH = opts.canWiden ? Math.min(availH, (scroll ? bodyAvail : perCol) + chromeH) : Math.min(availH, desired.h);
+      var left, placement, rightRoom = VW - (anchor.x + anchor.w) - M, leftRoom = anchor.x - M;
+      if (opts.prefer === 'point') { left = anchor.x; if (left + width > VW - M) left = anchor.x - width; placement = left < anchor.x ? 'left' : 'right'; }
+      else { if (rightRoom >= width) { left = anchor.x + anchor.w + GAP; placement = 'right'; } else if (leftRoom >= width) { left = anchor.x - width - GAP; placement = 'left'; } else { left = anchor.x; placement = 'overlay'; } }
+      left = fc(left, M, VW - width - M);
+      var top;
+      if (opts.prefer === 'above') { top = anchor.y - usedH - GAP; if (top < M) { top = anchor.y + anchor.h + GAP; placement = 'below'; } else placement = 'above'; }
+      else if (opts.prefer === 'point') { top = anchor.y; if (top + usedH > VH - M) top = anchor.y - usedH; }
+      else { top = placement === 'overlay' ? anchor.y - usedH - GAP : anchor.y; }
+      top = fc(top, M, VH - usedH - M);
+      return { left: left, top: top, width: width, maxHeight: bodyMaxH, usedH: usedH, cols: cols, colW: colW, scroll: scroll, placement: placement };
     }
-    // floating selection toolbar — a compact icon bar ABOVE the selected card (flips below if no room at top).
+    function stageVP() { return { w: (stageRef.current && stageRef.current.clientWidth) || 900, h: (stageRef.current && stageRef.current.clientHeight) || 560 }; }
+    function cardScreenRect(node) { var kk = view.k; return { x: view.tx + node.x * kk, y: view.ty + node.y * kk, w: nodeW(node) * kk, h: nodeH(node) * kk }; }
+    function inspStyle(node) {
+      var f = fitFloat(cardScreenRect(node), { w: 300, colW: 300, h: 460 }, stageVP(), { prefer: 'right', gap: 12, canWiden: false });
+      return { position: 'absolute', left: f.left + 'px', top: f.top + 'px', width: f.width + 'px', maxHeight: f.maxHeight + 'px', zIndex: 13 };
+    }
+    // floating selection toolbar — centered above the selected card (flips below + bottom-clamps via fitFloat).
     function selToolStyle(node) {
-      var kk = view.k, cardX = view.tx + node.x * kk, cardY = view.ty + node.y * kk, cardW = nodeW(node) * kk;
-      var stW = (stageRef.current && stageRef.current.clientWidth) || 900;
-      var left = cardX + cardW / 2, top = cardY - 46;
-      if (top < 6) top = cardY + (nodeH(node) * kk) + 8;   // flip below the card
-      left = Math.max(70, Math.min(left, stW - 70));
-      return { position: 'absolute', left: left + 'px', top: top + 'px', transform: 'translateX(-50%)', zIndex: 14 };
+      var vp = stageVP(), r = cardScreenRect(node);
+      var f = fitFloat(r, { w: 200, colW: 200, h: 33 }, vp, { prefer: 'above', gap: 8, canWiden: false });
+      var left = Math.max(74, Math.min(r.x + r.w / 2, vp.w - 74));   // keep center-based positioning (transform:translateX(-50%))
+      return { position: 'absolute', left: left + 'px', top: f.top + 'px', transform: 'translateX(-50%)', zIndex: 14 };
     }
     function ctr(id) { var n = g.by[id]; return { x: n.x + nodeW(n) / 2, y: n.y + nodeH(n) / 2 }; }
     function ndCtr(n) { return { x: n.x + nodeW(n) / 2, y: n.y + nodeH(n) / 2 }; }
     // the point on a node's boundary along the ray toward another node → edges start/end AT the card edge (clean, and the arrowhead shows)
     function bpt(node, other) { var c = ndCtr(node), o = ndCtr(other), hw = nodeW(node) / 2, hh = nodeH(node) / 2, dx = o.x - c.x, dy = o.y - c.y; if (!dx && !dy) return c; var t = Math.min(hw / (Math.abs(dx) || 1e-6), hh / (Math.abs(dy) || 1e-6)); return { x: c.x + dx * t, y: c.y + dy * t }; }
     var svgW = 0; g.N.forEach(function (n) { svgW = Math.max(svgW, n.x + nodeW(n) + 60); });
+    var cardVP = stageVP();   // viewport-fit: cap the DISPLAYED card size to the screen at the current zoom (render-only; graph() geometry untouched)
     // active page (saved view) filter: a "curated" page shows only pinned cards. Defined before edgeEls so edges honor it.
     var activePageObj = (activePage && pagesCap) ? (pages.filter(function (p) { return p.id === activePage; })[0] || null) : null;
     function pageHides(n) { return !!(activePageObj && activePageObj.only_pinned && !n.mapPinned); }
@@ -5927,12 +5951,11 @@
       var e = selEdgeObj; if (!e) return null; var a = g.by[e[0]], b = g.by[e[1]]; if (!a || !b || !nodeVisible(a) || !nodeVisible(b)) return null;
       var st = edgeStyle(e); if (hiddenEdgeTypes[st.kind]) return null;   // the selected edge's type was filtered off in the legend
       var pa = bpt(a, b), pb = bpt(b, a), mid = { x: (pa.x + pb.x) / 2, y: (pa.y + pb.y) / 2 };
-      var stW = (stageRef.current && stageRef.current.clientWidth) || 900, stH = (stageRef.current && stageRef.current.clientHeight) || 560;
       var sx = view.tx + mid.x * view.k, sy = view.ty + mid.y * view.k;
-      var ix = Math.max(8, Math.min(sx + 14, stW - 244)), iy = Math.max(8, Math.min(sy - 40, stH - 320));
+      var f = fitFloat({ x: sx + 14, y: sy - 30, w: 0, h: 0 }, { w: 236, colW: 236, h: 470 }, stageVP(), { prefer: 'point', gap: 4, canWiden: false });
       var ed = props.canEdit && edgesCap;
       function seg(label, opts, cur, onPick) { return h('div', { className: 'fld' }, h('div', { className: 'rmap-einsp-l' }, label), h('div', { className: 'rmap-eseg' }, opts.map(function (o) { return h('button', { key: o.v, className: (cur === o.v ? 'on' : ''), disabled: !ed, onClick: function () { onPick(o.v); } }, o.sw ? h('span', { className: 'sw', style: { background: o.sw } }) : null, o.lab); }))); }
-      return h('div', { className: 'rmap-einsp', style: { left: ix + 'px', top: iy + 'px' }, onMouseDown: function (ev) { ev.stopPropagation(); }, onWheel: function (ev) { ev.stopPropagation(); } },
+      return h('div', { className: 'rmap-einsp', style: { left: f.left + 'px', top: f.top + 'px', width: f.width + 'px', maxHeight: f.usedH + 'px' }, onMouseDown: function (ev) { ev.stopPropagation(); }, onWheel: function (ev) { ev.stopPropagation(); } },
         h('div', { className: 'rmap-einsp-h' }, h('b', null, (RMAP_TYPE[a.t] && RMAP_TYPE[a.t].ic || '◻') + ' ' + a.title + ' → ' + (RMAP_TYPE[b.t] && RMAP_TYPE[b.t].ic || '◻') + ' ' + b.title), h('span', { className: 'bd' }, st.ov ? 'EGYÉNI' : 'ALAP'), h('button', { className: 'x', title: 'Bezárás', onClick: function () { setSelEdge(null); } }, '×')),
         h('div', { className: 'rmap-einsp-b' },
           seg('Reláció-típus', EDGE_TYPE_ORDER.map(function (k) { return { v: k, lab: EDGE_TYPES[k].nm, sw: EDGE_TYPES[k].col }; }), st.kind, function (v) { persistEdge(e, { kind: v, color: null, anim: null, line_style: null, arrow: null, width: null }); }),
@@ -6042,7 +6065,7 @@
               h('marker', { id: 'rmap-ar', viewBox: '0 0 8 8', refX: 6.5, refY: 4, markerWidth: 6.5, markerHeight: 6.5, orient: 'auto-start-reverse', markerUnits: 'userSpaceOnUse' }, h('path', { d: 'M0.5,0.5 L7.5,4 L0.5,7.5 Z', fill: 'context-stroke' })),
               h('marker', { id: 'rmap-bl', viewBox: '0 0 8 8', refX: 5.5, refY: 4, markerWidth: 8, markerHeight: 8, orient: 'auto-start-reverse', markerUnits: 'userSpaceOnUse' }, h('path', { d: 'M5,1 L5,7', stroke: 'context-stroke', strokeWidth: 1.6 }))),
             edgeEls, linkRubber),
-          g.N.map(function (n) { if (!nodeVisible(n)) return null; var _sized = !!((nrzLive && nrzLive.id === n.id) || (layout[n.id] && layout[n.id].card_h)); var _st = { left: n.x + 'px', top: n.y + 'px', width: (n._w || NW) + 'px' }; if (_sized) _st.height = (n._h || NH) + 'px'; return h('div', { key: n.id, 'data-nid': n.id, className: 'rmap-node t-' + n.t + (_sized ? ' rmap-sized' : '') + (sel === n.id ? ' sel' : '') + (msel[n.id] ? ' rmap-mselected' : '') + (n.mapPinned ? ' rmap-pinned' : '') + (activeKey && n.ph === RMAP_PHASE_IDX[activeKey] ? ' inphase' : '') + (props.canEdit ? ' editable' : '') + (dlive && dlive.id === n.id ? ' dragging' : '') + ((nrzLive && nrzLive.id === n.id) ? ' rmap-resizing' : '') + (linkDrag && linkDrag.over === n.id ? ' rmap-linktarget' : '') + (linkDrag && linkDrag.from === n.id ? ' rmap-linksource' : ''), style: _st, onMouseDown: function (e) { e.stopPropagation(); startNodeDrag(e, n); }, onDoubleClick: function (e) { e.stopPropagation(); if (canEnter(n)) enterNode(n); }, onContextMenu: function (e) { e.preventDefault(); e.stopPropagation(); if (props.canEdit && (genActions(n).length || regenActions(n).length || (cardSizeCap && layout[n.id] && layout[n.id].card_h))) setMenu({ node: n, x: e.clientX, y: e.clientY }); } }, n.mapPinned ? h('span', { className: 'rmap-pin-badge', title: 'Kitűzött' }, '📌') : null, nodeCmCount(n.id) ? h('span', { className: 'rmap-cm-badge', title: nodeCmCount(n.id) + ' nyitott komment', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); setOpenThread(n.id); } }, '💬' + nodeCmCount(n.id)) : null, (n.t === 'step' && n.ref && (n.ref.assignee_id || n.ref.signed_off_by)) ? h('span', { className: 'rmap-step-badges' }, n.ref.assignee_id ? h('span', { className: 'rmap-assignee', title: 'Felelős: ' + nameOf(n.ref.assignee_id), style: { background: userColor(n.ref.assignee_id) } }, String(nameOf(n.ref.assignee_id) || '?').trim().charAt(0).toUpperCase()) : null, n.ref.signed_off_by ? h('span', { className: 'rmap-signoff', title: 'Jóváhagyta: ' + nameOf(n.ref.signed_off_by) }, '✅') : null) : null, h('div', { className: 'rmap-nb' }, body(n), richTier(n)),
+          g.N.map(function (n) { if (!nodeVisible(n)) return null; var _sized = !!((nrzLive && nrzLive.id === n.id) || (layout[n.id] && layout[n.id].card_h)); var _kk = view.k, _cw = Math.min((n._w || NW), (cardVP.w - 16) / _kk); var _st = { left: n.x + 'px', top: n.y + 'px', width: _cw + 'px' }; if (_sized) _st.height = Math.min((n._h || NH), (cardVP.h - 16) / _kk) + 'px'; return h('div', { key: n.id, 'data-nid': n.id, className: 'rmap-node t-' + n.t + (_sized ? ' rmap-sized' : '') + (sel === n.id ? ' sel' : '') + (msel[n.id] ? ' rmap-mselected' : '') + (n.mapPinned ? ' rmap-pinned' : '') + (activeKey && n.ph === RMAP_PHASE_IDX[activeKey] ? ' inphase' : '') + (props.canEdit ? ' editable' : '') + (dlive && dlive.id === n.id ? ' dragging' : '') + ((nrzLive && nrzLive.id === n.id) ? ' rmap-resizing' : '') + (linkDrag && linkDrag.over === n.id ? ' rmap-linktarget' : '') + (linkDrag && linkDrag.from === n.id ? ' rmap-linksource' : ''), style: _st, onMouseDown: function (e) { e.stopPropagation(); startNodeDrag(e, n); }, onDoubleClick: function (e) { e.stopPropagation(); if (canEnter(n)) enterNode(n); }, onContextMenu: function (e) { e.preventDefault(); e.stopPropagation(); if (props.canEdit && (genActions(n).length || regenActions(n).length || (cardSizeCap && layout[n.id] && layout[n.id].card_h))) setMenu({ node: n, x: e.clientX, y: e.clientY }); } }, n.mapPinned ? h('span', { className: 'rmap-pin-badge', title: 'Kitűzött' }, '📌') : null, nodeCmCount(n.id) ? h('span', { className: 'rmap-cm-badge', title: nodeCmCount(n.id) + ' nyitott komment', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); setOpenThread(n.id); } }, '💬' + nodeCmCount(n.id)) : null, (n.t === 'step' && n.ref && (n.ref.assignee_id || n.ref.signed_off_by)) ? h('span', { className: 'rmap-step-badges' }, n.ref.assignee_id ? h('span', { className: 'rmap-assignee', title: 'Felelős: ' + nameOf(n.ref.assignee_id), style: { background: userColor(n.ref.assignee_id) } }, String(nameOf(n.ref.assignee_id) || '?').trim().charAt(0).toUpperCase()) : null, n.ref.signed_off_by ? h('span', { className: 'rmap-signoff', title: 'Jóváhagyta: ' + nameOf(n.ref.signed_off_by) }, '✅') : null) : null, h('div', { className: 'rmap-nb' }, body(n), richTier(n)),
             (props.canEdit && edgesCap) ? ['n', 'e', 's', 'w'].map(function (dir) { return h('span', { key: 'port' + dir, className: 'rmap-port rmap-port-' + dir, title: 'Húzz kapcsolatot egy másik kártyához', onMouseDown: function (e) { e.stopPropagation(); startLinkDrag(e, n.id); } }); }) : null,
             (props.canEdit && cardSizeCap) ? h('span', { className: 'rmap-node-rz', title: 'Átméretezés (húzd)', onMouseDown: function (e) { e.stopPropagation(); startNodeResize(e, n); } }) : null); })),
         // page bar (saved views) — top-left tabs; the active page can be curated (only pinned) / re-captured / renamed / deleted
@@ -6194,10 +6217,10 @@
         // comment composer popover (new comment on a card or a free position)
         composer ? (function () {
           var kk = view.k, cx, cy;
-          if (composer.node_id && g.by[composer.node_id]) { var nn = g.by[composer.node_id]; cx = view.tx + nn.x * kk + 210 * kk; cy = view.ty + nn.y * kk; }
+          if (composer.node_id && g.by[composer.node_id]) { var nn = g.by[composer.node_id]; cx = view.tx + (nn.x + nodeW(nn)) * kk + 6; cy = view.ty + nn.y * kk; }
           else { cx = view.tx + composer.x * kk; cy = view.ty + composer.y * kk; }
-          var stW = (stageRef.current && stageRef.current.clientWidth) || 900, stH = (stageRef.current && stageRef.current.clientHeight) || 560;
-          var left = Math.max(8, Math.min(cx, stW - 264)), top = Math.max(8, Math.min(cy, stH - 150));
+          var _cf = fitFloat({ x: cx, y: cy, w: 0, h: 0 }, { w: 264, colW: 264, h: 200 }, stageVP(), { prefer: 'point', gap: 8, canWiden: false });
+          var left = _cf.left, top = _cf.top;
           var tgt = composer.node_id ? { node_id: composer.node_id } : { x: composer.x, y: composer.y };
           return h('div', { className: 'rmap-cm-composer', style: { position: 'absolute', left: left + 'px', top: top + 'px', zIndex: 17 }, onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
             h('div', { className: 'rmap-cm-c-h' }, composer.node_id ? '💬 Komment a kártyához' : '💬 Komment ide'),
@@ -6211,9 +6234,9 @@
         openThread ? (function () {
           var isPin = String(openThread).indexOf('pin:') === 0, list, ax, ay, ttl, reply = null;
           if (isPin) { var cid = openThread.slice(4), cc = comments.filter(function (x) { return x.id === cid; }); if (!cc.length) return null; list = cc; ax = view.tx + (cc[0].x || 0) * view.k; ay = view.ty + (cc[0].y || 0) * view.k; ttl = '💬 Komment'; }
-          else { var nn = g.by[openThread]; if (!nn) return null; list = cmByNode[openThread] || []; ax = view.tx + nn.x * view.k + 210 * view.k; ay = view.ty + nn.y * view.k; ttl = '💬 ' + String(nn.title || '').slice(0, 28); reply = { node_id: openThread }; }
-          var stW = (stageRef.current && stageRef.current.clientWidth) || 900, stH = (stageRef.current && stageRef.current.clientHeight) || 560;
-          var left = Math.max(8, Math.min(ax, stW - 284)), top = Math.max(8, Math.min(ay, stH - 200));
+          else { var nn = g.by[openThread]; if (!nn) return null; list = cmByNode[openThread] || []; ax = view.tx + (nn.x + nodeW(nn)) * view.k + 6; ay = view.ty + nn.y * view.k; ttl = '💬 ' + String(nn.title || '').slice(0, 28); reply = { node_id: openThread }; }
+          var _tf = fitFloat({ x: ax, y: ay, w: 0, h: 0 }, { w: 284, colW: 284, h: 300 }, stageVP(), { prefer: 'point', gap: 8, canWiden: false });
+          var left = _tf.left, top = _tf.top;
           return h('div', { className: 'rmap-cm-thread', style: { position: 'absolute', left: left + 'px', top: top + 'px', zIndex: 17 }, onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
             h('div', { className: 'rmap-cm-t-h' }, h('b', null, ttl), h('button', { className: 'rmap-cm-x', onClick: function () { setOpenThread(null); } }, '×')),
             h('div', { className: 'rmap-cm-t-b' }, list.length ? list.map(function (c) {
@@ -6435,7 +6458,7 @@
             tour.presenter ? h('span', { className: 'rmap-tour-live', title: 'Élő megosztott bemutató' }, '🔴 élő') : null,
             h('button', { className: 'stop', title: 'Bemutató bezárása (Esc)', onClick: tourStop }, '✕'))) : null,
       menu ? h('div', { className: 'rmap-menu-scrim', onClick: function () { setMenu(null); }, onContextMenu: function (e) { e.preventDefault(); setMenu(null); } },
-        h('div', { className: 'rmap-menu', style: { left: Math.min(menu.x, (window.innerWidth || 1200) - 230) + 'px', top: Math.min(menu.y, (window.innerHeight || 800) - 140) + 'px' }, onClick: function (e) { e.stopPropagation(); } },
+        h('div', { className: 'rmap-menu', style: (function () { var mn = menu.node, cnt = genActions(mn).length + regenActions(mn).length + ((cardSizeCap && layout[mn.id] && layout[mn.id].card_h) ? 1 : 0); var mf = fitFloat({ x: menu.x, y: menu.y, w: 0, h: 0 }, { w: 210, colW: 210, h: 44 + cnt * 34 }, { w: window.innerWidth || 1200, h: window.innerHeight || 800 }, { prefer: 'point', gap: 2, canWiden: false }); return { left: mf.left + 'px', top: mf.top + 'px' }; })(), onClick: function (e) { e.stopPropagation(); } },
           h('div', { className: 'rmap-menu-h' }, '✦ Generálás innen' + (RMAP_TYPE[menu.node.t] ? ' · ' + RMAP_TYPE[menu.node.t].lab : '')),
           genActions(menu.node).map(function (a) { return h('button', { key: a[0], className: 'rmap-menu-b', onClick: function () { runGen(menu.node, a[0]); } }, a[1]); }),
           regenActions(menu.node).length ? h('div', { className: 'rmap-menu-sep' }) : null,

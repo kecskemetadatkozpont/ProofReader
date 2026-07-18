@@ -95,6 +95,19 @@
   (a mount-kapuval egyezik, nincs panel-unmount+state-vesztés a holt sávban); (4) duplikált `sec-N` DOM-id — a TOC-ugrás
   a saját `.doc-embed`-jére szűkítve.
 
+## 🚧 Viewport-fit — lebegő elemek + kártyák a képernyőre (folyamatban, 2026-07-18)
+> Feltárás: 3-ágú design-workflow (fitFloat primitív · widen-not-tall · kártya-cap) + kód-katalógus → szintézis →
+> interaktív mockup-artifact (`fit-mockup`, a VALÓDI fitFloat-tal). A mai öt ad-hoc clamp helyett egy közös primitív.
+- [x] ✅ **P0 — állítsd meg a kilógást** — közös `fitFloat(anchor, desired, vp, opts)` tiszta primitív (a `vp` explicit):
+  a legtöbb helyet adó oldalt választja + MINDKÉT tengelyen a viewportba clampel margóval. Rákötve: node-inspector
+  (`inspStyle`), selection-toolbar (`selToolStyle` — most már ALUL is clampel), él-inspector (`edgeInspEl` — a magic 244/320
+  helyett), kontextmenü (`window`-viewport, fel/balra flip), komment-composer + thread (a `210*k`→`nodeW*k` hiba is javítva).
+  **Kártya-sapka**: a kézzel átméretezett kártya render-időben ÉS resize közben a viewporthoz sapkázódik az aktuális
+  zoomon (a `graph()`-geometria érintetlen). **Nulla új hook.** Magas panel egyelőre belül görget (a widen a P1).
+- [ ] 🟡 **P1 — szélesíts, ne nyújts** — 1 új `useState` (mért magasság, a guard-ok előtt) + flex column-wrap az él- és
+  node-inspectoron (fejléc/ábra/lábléc full-width marad); 5. LOD ablak teljes-rect clamp.
+- [ ] 🟡 **P2** — `autoFitCard` + „Kártya a nézetbe" (explicit, nincs auto-pan); bal-alsó panelek fitFloat-on át; resize-figyelő.
+
 ## 🚧 Interaktív élek (folyamatban, 2026-07-18)
 > Feltárás: 3-ágú design-workflow (pragmatikus · szemantikus tudásgráf · storytelling) + kód-megalapozás → szintézis →
 > interaktív mockup-artifact (`edge-mockup`). Az élek ma származtatott, néma provenance-vonalak; a terv elsőrangú,

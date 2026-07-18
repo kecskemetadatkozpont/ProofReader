@@ -866,7 +866,7 @@
     /* Pipeline Canvas (Map) — P1a swimlane materializer */
     .rmap-wrap { display: flex; gap: 14px; align-items: stretch; position: relative; }
     /* floating on-canvas card modal: anchored next to the selected node, in front of the canvas (not a side panel) */
-    .rmap-insp-float { box-shadow: 0 14px 44px rgba(0,0,0,.30), 0 2px 8px rgba(0,0,0,.14); animation: rmap-insp-pop .13s ease-out; }
+    .rmap-insp-float { box-shadow: 0 14px 44px rgba(0,0,0,.30), 0 2px 8px rgba(0,0,0,.14); animation: rmap-insp-pop .13s ease-out; overflow-y: auto; }
     @keyframes rmap-insp-pop { from { opacity: 0; transform: scale(.97); } to { opacity: 1; transform: scale(1); } }
     /* floating selection toolbar above the selected card */
     .rmap-seltool { display: flex; gap: 2px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 3px; box-shadow: 0 8px 24px rgba(0,0,0,.20); animation: rmap-insp-pop .12s ease-out; }
@@ -1123,12 +1123,12 @@
       .rmap-eb-comet, .rmap-eb-draw { display: none; }
     }
     /* edge inspector (floating, anchored to the edge midpoint) */
-    .rmap-einsp { position: absolute; z-index: 15; width: 236px; background: var(--surface); border: 1px solid var(--line); border-radius: 13px; box-shadow: 0 20px 50px -22px rgba(20,26,40,.55); font-size: 12.5px; overflow: hidden; }
+    .rmap-einsp { position: absolute; z-index: 15; width: 236px; background: var(--surface); border: 1px solid var(--line); border-radius: 13px; box-shadow: 0 20px 50px -22px rgba(20,26,40,.55); font-size: 12.5px; overflow: hidden; display: flex; flex-direction: column; }
     .rmap-einsp-h { display: flex; align-items: center; gap: 6px; padding: 9px 11px; border-bottom: 1px solid var(--line); background: var(--surface-2); }
     .rmap-einsp-h b { font-size: 11.5px; font-weight: 750; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
     .rmap-einsp-h .bd { font: 600 9px ui-monospace, monospace; letter-spacing: .04em; padding: 2px 5px; border-radius: 5px; background: var(--accent-tint); color: var(--accent); flex: none; }
     .rmap-einsp-h .x { margin-left: auto; border: none; background: none; color: var(--muted); cursor: pointer; font-size: 16px; line-height: 1; padding: 0 2px; flex: none; }
-    .rmap-einsp-b { padding: 10px 11px; display: flex; flex-direction: column; gap: 11px; max-height: 60vh; overflow-y: auto; }
+    .rmap-einsp-b { padding: 10px 11px; display: flex; flex-direction: column; gap: 11px; flex: 1 1 auto; min-height: 0; overflow-y: auto; }
     .rmap-einsp-l { font-size: 9.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); margin-bottom: 5px; }
     .rmap-eseg { display: flex; flex-wrap: wrap; gap: 3px; }
     .rmap-eseg button { font: inherit; font-size: 11px; padding: 3px 6px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); color: var(--muted); cursor: pointer; display: flex; align-items: center; gap: 4px; }
@@ -1330,7 +1330,7 @@
   <script type="text/babel" src="canvas.jsx?v=1783137934"></script>
   <script type="text/babel" src="notes.jsx?v=1783137934"></script>
   <script src="autopilot-core.js?v=1784160000"></script>
-  <script type="text/babel" src="research.jsx?v=1785590000"></script>
+  <script type="text/babel" src="research.jsx?v=1785600000"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>
