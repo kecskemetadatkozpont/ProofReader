@@ -4367,6 +4367,7 @@
   var EDGE_TYPE_ORDER = ['erd', 'idz', 'bem', 'tam', 'ell', 'fug', 'kap'];
   var EDGE_ANIMS = { flow: 'Áramlás', comet: 'Üstökös', pulse: 'Pulzus', draw: 'Rajzolódás', pingpong: 'Oda-vissza', calm: 'Nyugodt' };
   var EDGE_ANIM_ORDER = ['flow', 'comet', 'pulse', 'draw', 'pingpong', 'calm'];
+  var EDGE_ANIM_SP = { flow: 1.7, comet: 1.5, pulse: 1.6, draw: 2.1, pingpong: 1.4, calm: 0 };   // per-animation default duration (s); the speed slider overrides it
   var EDGE_LINES = { solid: 'Folytonos', dashed: 'Szaggatott', dotted: 'Pontozott' };
   var EDGE_ARROWS = { '': 'nincs', ar: '→', bl: '⊣' };
   var EDGE_SWATCHES = ['#64748b', '#5b63e6', '#0b93b8', '#17a34a', '#db3b41', '#d1810b', '#8493ab'];
@@ -4475,6 +4476,8 @@
     var selEdgeS = useState(null), selEdge = selEdgeS[0], setSelEdge = selEdgeS[1];   // interactive edges (migration-81): selected edge_key — mutually exclusive with node `sel`
     var eovS = useState({}), edgeOv = eovS[0], setEdgeOv = eovS[1];   // edge_key → {kind,color,anim,line_style,arrow,width,label} override rows
     var edgeCapS = useState(false), edgesCap = edgeCapS[0], setEdgesCap = edgeCapS[1];   // research_map_edges migration capability
+    var espcS = useState(false), edgeSpeedCap = espcS[0], setEdgeSpeedCap = espcS[1];   // migration-82 capability: research_map_edges.speed column present → speed slider
+    var hetS = useState({}), hiddenEdgeTypes = hetS[0], setHiddenEdgeTypes = hetS[1];   // P1: per-relation-type edge visibility filter {kind: true = hidden} (client-only, localStorage)
     var eovRef = useRef(null);   // in-flight edge-edit key (realtime self-echo guard)
     var stagesBusy = useRef(false);   // re-entry guard for autoLayoutStages (prevents duplicate phase frames on rapid double-invoke)
     var memS = useState(null), members = memS[0], setMembers = memS[1];   // project collaborators (migration-74) — null until loaded/capable
@@ -4548,9 +4551,18 @@
       sb.from('research_map_paths').select('id,name,ord,steps').eq('project_id', pid).order('ord', { ascending: true }).order('created_at', { ascending: true }).then(function (r) {
         if (!alive.current) return; if (r && r.error) return; setPathsCap(true); setPaths((r && r.data) || []);
       });
-      // load Map edge style overrides — graceful: pre-migration-81 the table is absent → edgesCap stays false, edges render as today
-      sb.from('research_map_edges').select('edge_key,kind,color,anim,line_style,arrow,width,label').eq('project_id', pid).then(function (r) {
-        if (!alive.current) return; if (r && r.error) return; setEdgesCap(true);
+      // load Map edge style overrides — 2-tier graceful probe: migration-82 (speed col) → migration-81 (base) → absent.
+      // pre-migration-81 both selects error → edgesCap stays false → edges render as today.
+      sb.from('research_map_edges').select('edge_key,kind,color,anim,line_style,arrow,width,label,speed').eq('project_id', pid).then(function (r) {
+        if (!alive.current) return;
+        if (r && r.error) {
+          sb.from('research_map_edges').select('edge_key,kind,color,anim,line_style,arrow,width,label').eq('project_id', pid).then(function (r2) {
+            if (!alive.current) return; if (r2 && r2.error) return; setEdgesCap(true);
+            var m2 = {}; ((r2 && r2.data) || []).forEach(function (row) { m2[row.edge_key] = row; }); setEdgeOv(m2);
+          });
+          return;
+        }
+        setEdgesCap(true); setEdgeSpeedCap(true);
         var m = {}; ((r && r.data) || []).forEach(function (row) { m[row.edge_key] = row; }); setEdgeOv(m);
       });
       var me = props.viewer || {}, myKey = props.viewerId || ('anon-' + pid);
@@ -4634,6 +4646,7 @@
     }, [props.projectId]);
     useEffect(function () { loadMembers(); }, [props.projectId]);   // collaborators (graceful: null pre-migration-74)
     useEffect(function () { try { var v = JSON.parse(localStorage.getItem('pr-rmap-types:' + props.projectId) || '{}'); setHiddenTypes(v && typeof v === 'object' ? v : {}); } catch (e) { setHiddenTypes({}); } }, [props.projectId]);   // per-project type filter
+    useEffect(function () { try { var v = JSON.parse(localStorage.getItem('pr-rmap-etypes:' + props.projectId) || '{}'); setHiddenEdgeTypes(v && typeof v === 'object' ? v : {}); } catch (e) { setHiddenEdgeTypes({}); } }, [props.projectId]);   // per-project edge-relation filter (P1)
     useEffect(function () { followingRef.current = following; }, [following]);
     // broadcast my viewport (throttled) so followers can mirror it — but NOT while I'm following someone (avoids echo loops)
     useEffect(function () {
@@ -5101,12 +5114,20 @@
     // ---- interactive edges (migration-81) ----
     // stable key: fromId|toId|kind (the structural cite/flow flag disambiguates the rare same-pair double edge)
     function edgeKey(e) { return e[0] + '|' + e[1] + '|' + (e[2] || 'flow'); }
-    // resolve an edge to its concrete style: the semantic TYPE default (derived kind → erd/idz), then the saved override on top.
+    // P1 inferRel: give a DERIVED edge a smart default relation from its endpoints (zero user work) — cite → Idézet;
+    // data/material/chat/figure feeding a step or idea → Bemenete; everything else (provenance) → Származás.
+    function inferRel(e) {
+      if (e[2] === 'cite') return 'idz';
+      var a = g.by[e[0]], b = g.by[e[1]], at = a && a.t, bt = b && b.t;
+      if ((at === 'dataset' || at === 'file' || at === 'chat' || at === 'figure') && (bt === 'step' || bt === 'idea')) return 'bem';
+      return 'erd';
+    }
+    // resolve an edge to its concrete style: the semantic TYPE default (override kind, else inferRel), then the saved override on top.
     function edgeStyle(e) {
       var ov = edgeOv[edgeKey(e)] || {};
-      var kind = ov.kind || (e[2] === 'cite' ? 'idz' : 'erd');
+      var kind = ov.kind || inferRel(e);
       var T = EDGE_TYPES[kind] || EDGE_TYPES.erd;
-      return { kind: kind, col: ov.color || T.col, anim: ov.anim || T.anim, line: ov.line_style || T.line, arrow: (ov.arrow != null ? ov.arrow : T.arrow), width: ov.width || (kind === 'idz' ? 1.5 : 2), label: ov.label || '', ov: !!edgeOv[edgeKey(e)] };
+      return { kind: kind, col: ov.color || T.col, anim: ov.anim || T.anim, line: ov.line_style || T.line, arrow: (ov.arrow != null ? ov.arrow : T.arrow), width: ov.width || (kind === 'idz' ? 1.5 : 2), label: ov.label || '', sp: (ov.speed != null ? ov.speed : (EDGE_ANIM_SP[ov.anim || T.anim] || 1.7)), ov: !!edgeOv[edgeKey(e)] };
     }
     // upsert an override row (merges a partial patch into the current override); optimistic + graceful.
     function persistEdge(e, patch) {
@@ -5114,7 +5135,9 @@
       var key = edgeKey(e), cur = edgeOv[key] || {}, next = Object.assign({ edge_key: key, from_id: e[0], to_id: e[1] }, cur, patch);
       eovRef.current = key;
       setEdgeOv(function (O) { var m = Object.assign({}, O); m[key] = next; return m; });
-      sb.from('research_map_edges').upsert({ project_id: props.projectId, edge_key: key, from_id: e[0], to_id: e[1], kind: next.kind || null, color: next.color || null, anim: next.anim || null, line_style: next.line_style || null, arrow: (next.arrow != null ? next.arrow : null), width: next.width || null, label: next.label || null, manual: false, updated_at: new Date().toISOString() }, { onConflict: 'project_id,edge_key' }).then(function (r) {
+      var row = { project_id: props.projectId, edge_key: key, from_id: e[0], to_id: e[1], kind: next.kind || null, color: next.color || null, anim: next.anim || null, line_style: next.line_style || null, arrow: (next.arrow != null ? next.arrow : null), width: next.width || null, label: next.label || null, manual: false, updated_at: new Date().toISOString() };
+      if (edgeSpeedCap) row.speed = (next.speed != null ? next.speed : null);   // only write speed once migration-82 added the column
+      sb.from('research_map_edges').upsert(row, { onConflict: 'project_id,edge_key' }).then(function (r) {
         setTimeout(function () { if (eovRef.current === key) eovRef.current = null; }, 400);
         if (r && r.error && alive.current) window.PRUI.toast('Él mentése sikertelen: ' + r.error.message, { kind: 'error' });
       });
@@ -5146,6 +5169,10 @@
     function typeStoreKey() { return 'pr-rmap-types:' + props.projectId; }
     function toggleType(t) { setHiddenTypes(function (H) { var n = Object.assign({}, H); if (n[t]) delete n[t]; else n[t] = true; try { if (Object.keys(n).length) localStorage.setItem(typeStoreKey(), JSON.stringify(n)); else localStorage.removeItem(typeStoreKey()); } catch (e) { } return n; }); }
     function showAllTypes() { setHiddenTypes({}); try { localStorage.removeItem(typeStoreKey()); } catch (e) { } }
+    // P1: toggle a whole EDGE relation type off/on from the live legend (client-only, localStorage). A selected edge of a
+    // now-hidden type is handled in the render (selEdgeVisible + the inspector both gate on hiddenEdgeTypes), no stale UI.
+    function edgeTypeStoreKey() { return 'pr-rmap-etypes:' + props.projectId; }
+    function toggleEdgeType(k) { setHiddenEdgeTypes(function (H) { var n = Object.assign({}, H); if (n[k]) delete n[k]; else n[k] = true; try { if (Object.keys(n).length) localStorage.setItem(edgeTypeStoreKey(), JSON.stringify(n)); else localStorage.removeItem(edgeTypeStoreKey()); } catch (e) { } return n; }); }
     function nodeToggleHidden(n) { nodeSetFlag(n, 'hidden', !(layout[n.id] && layout[n.id].hidden)); }
     function nodeTogglePinned(n) { nodeSetFlag(n, 'pinned', !(layout[n.id] && layout[n.id].pinned)); }
     function groupHide() { Object.keys(msel).forEach(function (id) { var n = g.by[id]; if (n && !n.mapHidden) nodeSetFlag(n, 'hidden', true); }); setMsel({}); }
@@ -5818,12 +5845,13 @@
       // pre-migration-81: keep today's exact look (no override, no hit-path, no selection)
       if (!edgesCap) { var cite0 = e[2] === 'cite'; return h('path', { key: i, className: cite0 ? 'rmap-e-cite' : 'rmap-e-flow', d: d, fill: 'none', stroke: cite0 ? 'var(--accent-tint)' : 'var(--line-2, var(--muted))', strokeWidth: cite0 ? 1.5 : 2, markerEnd: cite0 ? null : 'url(#rmap-arrow)' }); }
       var ek = edgeKey(e), st = edgeStyle(e), on = selEdge === ek;
+      if (hiddenEdgeTypes[st.kind]) return null;   // P1: this relation type is filtered off in the legend
       var animCls = st.anim === 'flow' ? ' rmap-ea-flow' : st.anim === 'pulse' ? ' rmap-ea-pulse' : st.anim === 'pingpong' ? ' rmap-ea-pingpong' : '';
-      // per-type animation timing comes from the CSS class default (P0); comet/draw/pulse/calm keep the chosen line-style dash
-      var bstyle = { stroke: st.col, strokeWidth: (on ? st.width + 1 : st.width) + 'px' };
+      // --esp = per-edge animation duration (type default unless the speed slider overrode it); comet/draw/pulse/calm keep the chosen line-style dash
+      var bstyle = { stroke: st.col, strokeWidth: (on ? st.width + 1 : st.width) + 'px', '--esp': st.sp + 's' };
       if (st.anim !== 'flow' && st.anim !== 'pingpong') bstyle.strokeDasharray = edgeDash(st.line);
       var base = h('path', { key: 'b', className: 'rmap-e-base' + animCls + (on ? ' rmap-e-sel' : ''), d: d, style: bstyle, markerEnd: st.arrow ? ('url(#rmap-' + st.arrow + ')') : null });
-      var bead = (st.anim === 'comet' || st.anim === 'draw') ? h('path', { key: 'd', className: 'rmap-e-bead ' + (st.anim === 'comet' ? 'rmap-eb-comet' : 'rmap-eb-draw'), d: d, pathLength: 200, style: { stroke: st.col, strokeWidth: (st.width + 1.5) + 'px' } }) : null;
+      var bead = (st.anim === 'comet' || st.anim === 'draw') ? h('path', { key: 'd', className: 'rmap-e-bead ' + (st.anim === 'comet' ? 'rmap-eb-comet' : 'rmap-eb-draw'), d: d, pathLength: 200, style: { stroke: st.col, strokeWidth: (st.width + 1.5) + 'px', '--esp': st.sp + 's' } }) : null;
       var ring = on ? [h('circle', { key: 'r1', className: 'rmap-e-ring', cx: pa.x, cy: pa.y, r: 7 }), h('circle', { key: 'r2', className: 'rmap-e-ring', cx: pb.x, cy: pb.y, r: 7 })] : null;
       var hit = h('path', { key: 'h', className: 'rmap-e-hit', d: d, onClick: function (ev) { ev.stopPropagation(); selectEdge(ek); } });
       return h('g', { key: ek, style: { color: st.col } }, ring, base, bead, hit);
@@ -5833,18 +5861,23 @@
     // only dim the other edges while the selected edge is actually rendered (both endpoints visible) — else a hidden
     // endpoint would leave has-esel dimming every edge with nothing looking selected. selEdge itself is left intact
     // so the highlight restores if the node is un-hidden; empty-canvas/node clicks clear it.
-    var selEdgeVisible = !!(selEdgeObj && g.by[selEdgeObj[0]] && g.by[selEdgeObj[1]] && nodeVisible(g.by[selEdgeObj[0]]) && nodeVisible(g.by[selEdgeObj[1]]));
+    var selEdgeVisible = !!(selEdgeObj && g.by[selEdgeObj[0]] && g.by[selEdgeObj[1]] && nodeVisible(g.by[selEdgeObj[0]]) && nodeVisible(g.by[selEdgeObj[1]]) && !hiddenEdgeTypes[edgeStyle(selEdgeObj).kind]);
     // P1 edge labels: screen-space pills at the edge midpoint (the exact bezier average) — crisp constant size, follows
     // pan/zoom, click selects the edge. Only for edges that HAVE a label; hidden when zoomed far out to avoid clutter.
     var edgeLabelEls = (edgesCap && view.k >= 0.45) ? g.E.map(function (e) {
-      var st = edgeStyle(e); if (!st.label) return null;
+      var st = edgeStyle(e); if (!st.label || hiddenEdgeTypes[st.kind]) return null;
       var a = g.by[e[0]], b = g.by[e[1]]; if (!a || !b || !nodeVisible(a) || !nodeVisible(b)) return null;
       var pa = bpt(a, b), pb = bpt(b, a), ek = edgeKey(e);
       return h('button', { key: 'el' + ek, className: 'rmap-elabel' + (selEdge === ek ? ' on' : ''), style: { left: (view.tx + (pa.x + pb.x) / 2 * view.k) + 'px', top: (view.ty + (pa.y + pb.y) / 2 * view.k) + 'px', color: st.col }, title: st.label, onMouseDown: function (ev) { ev.stopPropagation(); }, onClick: function (ev) { ev.stopPropagation(); selectEdge(ek); } }, h('span', { className: 'rmap-elabel-sw', style: { background: st.col } }), st.label);
     }) : null;
+    // P1 live legend: which relation types are actually PRESENT (among visible-node edges) + their counts → a filterable legend.
+    var edgeKindCounts = {};
+    if (edgesCap) g.E.forEach(function (e) { var a = g.by[e[0]], b = g.by[e[1]]; if (!a || !b || !nodeVisible(a) || !nodeVisible(b)) return; var k = edgeStyle(e).kind; edgeKindCounts[k] = (edgeKindCounts[k] || 0) + 1; });
+    var edgeKindsPresent = EDGE_TYPE_ORDER.filter(function (k) { return edgeKindCounts[k]; });
     function edgeInspEl() {
       var e = selEdgeObj; if (!e) return null; var a = g.by[e[0]], b = g.by[e[1]]; if (!a || !b || !nodeVisible(a) || !nodeVisible(b)) return null;
-      var st = edgeStyle(e), pa = bpt(a, b), pb = bpt(b, a), mid = { x: (pa.x + pb.x) / 2, y: (pa.y + pb.y) / 2 };
+      var st = edgeStyle(e); if (hiddenEdgeTypes[st.kind]) return null;   // the selected edge's type was filtered off in the legend
+      var pa = bpt(a, b), pb = bpt(b, a), mid = { x: (pa.x + pb.x) / 2, y: (pa.y + pb.y) / 2 };
       var stW = (stageRef.current && stageRef.current.clientWidth) || 900, stH = (stageRef.current && stageRef.current.clientHeight) || 560;
       var sx = view.tx + mid.x * view.k, sy = view.ty + mid.y * view.k;
       var ix = Math.max(8, Math.min(sx + 14, stW - 244)), iy = Math.max(8, Math.min(sy - 40, stH - 320));
@@ -5857,6 +5890,7 @@
           h('div', { className: 'fld' }, h('div', { className: 'rmap-einsp-l' }, 'Szín'), h('div', { className: 'rmap-esw' },
             [h('button', { key: 'auto', className: (!(edgeOv[selEdge] || {}).color ? 'on' : ''), title: 'Típus szerinti', disabled: !ed, style: { background: 'repeating-linear-gradient(45deg,var(--surface),var(--surface) 3px,var(--line) 3px,var(--line) 6px)' }, onClick: function () { persistEdge(e, { color: null }); } })].concat(EDGE_SWATCHES.map(function (c) { return h('button', { key: c, className: ((edgeOv[selEdge] || {}).color === c ? 'on' : ''), disabled: !ed, style: { background: c }, onClick: function () { persistEdge(e, { color: c }); } }); })))),
           seg('Animáció', EDGE_ANIM_ORDER.map(function (k) { return { v: k, lab: EDGE_ANIMS[k] }; }), st.anim, function (v) { persistEdge(e, { anim: v }); }),
+          (edgeSpeedCap && st.anim !== 'calm') ? h('div', { className: 'fld' }, h('div', { className: 'rmap-einsp-l' }, 'Sebesség'), h('input', { className: 'rmap-einsp-rng', type: 'range', min: 0.6, max: 3.2, step: 0.1, value: (3.8 - st.sp).toFixed(1), disabled: !ed, onMouseDown: function (ev) { ev.stopPropagation(); }, onChange: function (ev) { var sp = +(3.8 - parseFloat(ev.target.value)).toFixed(1); setEdgeOv(function (O) { var m = Object.assign({}, O); m[selEdge] = Object.assign({ edge_key: selEdge, from_id: e[0], to_id: e[1] }, m[selEdge] || {}, { speed: sp }); return m; }); }, onMouseUp: function (ev) { persistEdge(e, { speed: +(3.8 - parseFloat(ev.target.value)).toFixed(1) }); }, onBlur: function (ev) { persistEdge(e, { speed: +(3.8 - parseFloat(ev.target.value)).toFixed(1) }); } })) : null,
           seg('Vonalstílus', Object.keys(EDGE_LINES).map(function (k) { return { v: k, lab: EDGE_LINES[k] }; }), st.line, function (v) { persistEdge(e, { line_style: v }); }),
           seg('Nyílhegy', Object.keys(EDGE_ARROWS).map(function (k) { return { v: k, lab: EDGE_ARROWS[k] }; }), st.arrow, function (v) { persistEdge(e, { arrow: v }); }),
           seg('Vastagság', [{ v: 1.5, lab: 'Vékony' }, { v: 2, lab: 'Közepes' }, { v: 3, lab: 'Vastag' }], st.width, function (v) { persistEdge(e, { width: v }); }),
@@ -6151,11 +6185,21 @@
                 commentCanEditOne(c) ? h('button', { title: 'Törlés', onClick: function () { commentDelete(c); } }, '🗑') : null));
           }) : h('div', { className: 'rmap-cm-empty' }, 'Még nincs komment. Kapcsold be a 💬 komment-módot és kattints a vászonra vagy egy kártyára.'))) : null,
         h('div', { className: 'rmap-hint' }, (props.canEdit ? 'Húzd a kártyát = áthelyezés · ' : '') + 'húzd a hátteret = pan · görgő = zoom · Shift+kattintás/húzás = többes kijelölés' + (commentMode ? ' · 💬 KOMMENT-MÓD: kattints a vászonra vagy egy kártyára' : '')),
-        // edge legend — what the connecting lines mean (non-blocking overlay). Bottom-left, above the zoom controls,
-        // so it never collides with the top-spanning autopilot runbar. Swatch colors match the actual edge strokes.
-        h('div', { style: { position: 'absolute', left: 14, bottom: 84, zIndex: 8, display: 'flex', gap: 13, alignItems: 'center', padding: '5px 11px', borderRadius: 8, background: 'var(--surface)', border: '1px solid var(--line)', fontSize: 10.5, color: 'var(--muted)', boxShadow: '0 4px 14px -8px rgba(20,26,40,.4)', pointerEvents: 'none' } },
-          h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 5 } }, h('span', { style: { display: 'inline-block', width: 18, borderTop: '2px dashed var(--line-2, var(--muted))' } }), 'származás'),
-          h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 5 } }, h('span', { style: { display: 'inline-block', width: 18, borderTop: '1.5px dashed var(--accent-tint)' } }), 'idézet')),
+        // edge legend — bottom-left, above the zoom controls. Pre-migration-81: the static two-line legend.
+        // With edgesCap: a LIVE, filterable legend of the relation types actually present — click a row to hide/show that type.
+        (edgesCap && edgeKindsPresent.length) ? h('div', { className: 'rmap-elegend', onMouseDown: function (e) { e.stopPropagation(); } },
+          edgeKindsPresent.map(function (k) {
+            var off = !!hiddenEdgeTypes[k];
+            return h('button', { key: k, className: 'rmap-eleg-row' + (off ? ' off' : ''), title: (off ? 'Mutatás' : 'Elrejtés') + ': ' + EDGE_TYPES[k].nm, onClick: function () { toggleEdgeType(k); } },
+              h('span', { className: 'rmap-eleg-sw', style: { background: EDGE_TYPES[k].col } }),
+              h('span', { className: 'rmap-eleg-nm' }, EDGE_TYPES[k].nm),
+              h('span', { className: 'rmap-eleg-n' }, edgeKindCounts[k]),
+              h('span', { className: 'rmap-eleg-eye' }, off ? '🙈' : '👁'));
+          }),
+          Object.keys(hiddenEdgeTypes).length ? h('button', { className: 'rmap-eleg-all', title: 'Összes él mutatása', onClick: function () { setHiddenEdgeTypes({}); try { localStorage.removeItem(edgeTypeStoreKey()); } catch (e) { } } }, 'mind') : null)
+          : h('div', { style: { position: 'absolute', left: 14, bottom: 84, zIndex: 8, display: 'flex', gap: 13, alignItems: 'center', padding: '5px 11px', borderRadius: 8, background: 'var(--surface)', border: '1px solid var(--line)', fontSize: 10.5, color: 'var(--muted)', boxShadow: '0 4px 14px -8px rgba(20,26,40,.4)', pointerEvents: 'none' } },
+            h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 5 } }, h('span', { style: { display: 'inline-block', width: 18, borderTop: '2px dashed var(--line-2, var(--muted))' } }), 'származás'),
+            h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 5 } }, h('span', { style: { display: 'inline-block', width: 18, borderTop: '1.5px dashed var(--accent-tint)' } }), 'idézet')),
         props.canEdit ? (dkOpen ? h('div', { className: 'rmap-dock open', onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
           h('div', { className: 'rmap-dock-h' }, h('span', null, '🤖 Asszisztens'), h('button', { className: 'rmap-dock-x', title: 'Összecsukás', onClick: function () { setDkOpen(false); try { localStorage.setItem('pr-rmap-dock', '0'); } catch (e) { } } }, '▾')),
           h('div', { className: 'rmap-dock-msgs', ref: dScroll }, dMsgs.map(function (mm, i) { return h('div', { key: i, className: 'rmap-dock-msg ' + (mm.role === 'user' ? 'u' : 'a') }, mm.text); }), dBusy ? h('div', { className: 'rmap-dock-msg a busy' }, '⏳ dolgozom…') : null),

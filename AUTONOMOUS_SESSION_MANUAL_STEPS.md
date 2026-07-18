@@ -115,6 +115,11 @@ sorrendben. A service-key nem tud DDL-t futtatni, ezért ezek manuálisak.
     animáció / vonalstílus / nyílhegy / vastagság + `↺ Alaphelyzet`), a stílus perzisztál és realtime szinkronizál.
     (Ez az „interaktív élek" irány **P0** része; a P1 címke+legenda+inferRel és a P2 kézi élek+story-fonál még jön.)
 
+13. **`backend/migration-82-edge-speed.sql`** — per-él animáció-sebesség: `research_map_edges.speed real` oszlop
+    (idempotens `add column if not exists`). Amíg nincs lefuttatva: a **sebesség-csúszka** egyszerűen nem jelenik meg
+    az él-inspectorban (2-szintű graceful probe: `select …,speed` → hibánál `select …` speed nélkül), minden él a
+    típus-alapértelmezett tempóján animál — minden más (címke, inferRel, legenda) a migráció NÉLKÜL is működik.
+
 ## Edge-function deploy-ok (explicit jóváhagyás + megnevezés kell)
 
 **NINCS** — ebben a munkamenetben egyetlen edge-function sem változott, deploy nem szükséges.
