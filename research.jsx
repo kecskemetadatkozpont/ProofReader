@@ -4443,6 +4443,7 @@
     var cmpS = useState(null), composer = cmpS[0], setComposer = cmpS[1];   // {node_id}|{x,y} compose popover
     var cmtS = useState(''), cmText = cmtS[0], setCmText = cmtS[1];   // composer textarea
     var cmoS = useState(null), openThread = cmoS[0], setOpenThread = cmoS[1];   // open thread key: node_id or 'pin:'+commentId
+    var cmHoverT = useRef(null);   // hover-card close timer — a comment pin opens its thread on hover; the timer keeps it open while moving to the popover
     var cmpanS = useState(false), cmPanelOpen = cmpanS[0], setCmPanelOpen = cmpanS[1];   // the all-comments side panel
     var pgS = useState([]), pages = pgS[0], setPages = pgS[1];   // Map pages (saved views) — migration-73
     var pgcS = useState(false), pagesCap = pgcS[0], setPagesCap = pgcS[1];   // migration-73 capability
@@ -6089,8 +6090,10 @@
     }
     armedRef.current = armedNode;
     // derive comment groupings: per-node threads + free-position pins (+ unresolved counts)
-    var cmByNode = {}, cmPos = [];
-    if (commentsCap) comments.forEach(function (c) { if (c.node_id) { (cmByNode[c.node_id] = cmByNode[c.node_id] || []).push(c); } else if (c.x != null) cmPos.push(c); });
+    var cmByNode = {}, cmPos = [], cmPosGroups = {};
+    if (commentsCap) comments.forEach(function (c) { if (c.node_id) { (cmByNode[c.node_id] = cmByNode[c.node_id] || []).push(c); } else if (c.x != null) { cmPos.push(c); var gk = c.x + ',' + c.y; (cmPosGroups[gk] = cmPosGroups[gk] || []).push(c); } });
+    // thread position comments by their (x,y) point: one pin per group (the earliest = the root); replies land at the same point
+    var cmPosRoots = Object.keys(cmPosGroups).map(function (gk) { return cmPosGroups[gk].slice().sort(function (a, b) { return String(a.created_at || '').localeCompare(String(b.created_at || '')); })[0]; });
     function nodeCmCount(id) { var a = cmByNode[id]; return a ? a.filter(function (c) { return !c.resolved; }).length : 0; }
     var cmUnresolved = commentsCap ? comments.filter(function (c) { return !c.resolved; }).length : 0;
     return h('div', { className: 'rmap-wrap' },
@@ -6166,8 +6169,9 @@
             (cc && cc.text) ? h('span', { className: 'rmap-cursor-chat', style: { borderColor: c.color } }, cc.text) : null);
         }),
         // free-position comment pins (screen coords → follow pan/zoom)
-        (commentsCap && cmPos.length) ? cmPos.map(function (c) {
-          return h('button', { key: 'cmp' + c.id, className: 'rmap-cm-pin' + (c.resolved ? ' resolved' : ''), style: { position: 'absolute', left: (view.tx + c.x * view.k) + 'px', top: (view.ty + c.y * view.k) + 'px', zIndex: 11 }, title: String(c.body || '').slice(0, 80), onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); setOpenThread('pin:' + c.id); } }, '💬');
+        (commentsCap && cmPosRoots.length) ? cmPosRoots.map(function (c) {
+          var grp = cmPosGroups[c.x + ',' + c.y] || [c], cnt = grp.length, allDone = grp.every(function (x) { return x.resolved; });
+          return h('button', { key: 'cmp' + c.id, className: 'rmap-cm-pin' + (allDone ? ' resolved' : ''), style: { position: 'absolute', left: (view.tx + c.x * view.k) + 'px', top: (view.ty + c.y * view.k) + 'px', zIndex: 11 }, onMouseDown: function (e) { e.stopPropagation(); }, onMouseEnter: function () { clearTimeout(cmHoverT.current); setOpenThread('pin:' + c.id); }, onMouseLeave: function () { clearTimeout(cmHoverT.current); cmHoverT.current = setTimeout(function () { if (alive.current && !(document.activeElement && /TEXTAREA|INPUT/.test(document.activeElement.tagName || ''))) setOpenThread(null); }, 320); }, onClick: function (e) { e.stopPropagation(); clearTimeout(cmHoverT.current); setOpenThread('pin:' + c.id); } }, '💬', cnt > 1 ? h('span', { className: 'rmap-cm-pin-n' }, cnt) : null);
         }) : null,
         // group action bar — appears when 2+ cards are multi-selected
         (Object.keys(msel).length > 1) ? h('div', { className: 'rmap-groupbar', onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
@@ -6307,11 +6311,11 @@
         // comment thread popover (a card's thread, or a single position pin)
         openThread ? (function () {
           var isPin = String(openThread).indexOf('pin:') === 0, list, ax, ay, ttl, reply = null;
-          if (isPin) { var cid = openThread.slice(4), cc = comments.filter(function (x) { return x.id === cid; }); if (!cc.length) return null; list = cc; ax = view.tx + (cc[0].x || 0) * view.k; ay = view.ty + (cc[0].y || 0) * view.k; ttl = '💬 Komment'; }
+          if (isPin) { var cid = openThread.slice(4), root = comments.filter(function (x) { return x.id === cid; })[0]; if (!root) return null; list = comments.filter(function (x) { return !x.node_id && x.x === root.x && x.y === root.y; }).sort(function (a, b) { return String(a.created_at || '').localeCompare(String(b.created_at || '')); }); ax = view.tx + (root.x || 0) * view.k; ay = view.ty + (root.y || 0) * view.k; ttl = '💬 Komment'; reply = { x: root.x, y: root.y }; }
           else { var nn = g.by[openThread]; if (!nn) return null; list = cmByNode[openThread] || []; ax = view.tx + (nn.x + nodeW(nn)) * view.k + 6; ay = view.ty + nn.y * view.k; ttl = '💬 ' + String(nn.title || '').slice(0, 28); reply = { node_id: openThread }; }
           var _tf = fitFloat({ x: ax, y: ay, w: 0, h: 0 }, { w: 284, colW: 284, h: 300 }, stageVP(), { prefer: 'point', gap: 8, canWiden: false });
           var left = _tf.left, top = _tf.top;
-          return h('div', { className: 'rmap-cm-thread', style: { position: 'absolute', left: left + 'px', top: top + 'px', zIndex: 17 }, onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
+          return h('div', { className: 'rmap-cm-thread', style: { position: 'absolute', left: left + 'px', top: top + 'px', zIndex: 17 }, onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); }, onMouseEnter: function () { clearTimeout(cmHoverT.current); }, onMouseLeave: function () { clearTimeout(cmHoverT.current); cmHoverT.current = setTimeout(function () { if (alive.current && !(document.activeElement && /TEXTAREA|INPUT/.test(document.activeElement.tagName || ''))) setOpenThread(null); }, 320); } },
             h('div', { className: 'rmap-cm-t-h' }, h('b', null, ttl), h('button', { className: 'rmap-cm-x', onClick: function () { setOpenThread(null); } }, '×')),
             h('div', { className: 'rmap-cm-t-b' }, list.length ? list.map(function (c) {
               return h('div', { key: c.id, className: 'rmap-cm-item' + (c.resolved ? ' done' : '') },
