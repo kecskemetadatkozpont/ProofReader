@@ -5252,7 +5252,10 @@
         var nid = 'i' + r.data.id, X = Math.round(wx), Y = Math.round(wy);
         setLayout(function (L) { var m = Object.assign({}, L); m[nid] = Object.assign({ x: X, y: Y }, m[nid]); return m; });
         sb.from('research_map_layout').upsert({ project_id: props.projectId, node_id: nid, x: X, y: Y, updated_at: new Date().toISOString() }, { onConflict: 'project_id,node_id' });
-        setSel(nid); setBump(function (x) { return x + 1; });
+        // optimistically APPEND the idea to data.ideas so the node materializes at the cursor even past the 24-oldest reload cap
+        // (a setBump reload would drop the newest idea when ≥24 exist); concat keeps d.ideas[0] — the graph anchor — unchanged.
+        setData(function (D) { return D ? Object.assign({}, D, { ideas: (D.ideas || []).concat([{ id: r.data.id, question: 'Új ötlet', hypothesis: null, rationale: null, novelty: null, status: 'candidate', source: 'own' }]) }) : D; });
+        setSel(nid);
       });
     }
     // the frame SVG icon for the radial segment (a dashed rounded region + a small title tab) — currentColor = the segment color
@@ -6275,7 +6278,7 @@
           var vp = stageVP(), R = 100, pad = R + 44, n = segs.length || 1;
           var cx = Math.max(pad, Math.min(radial.sx, vp.w - pad)), cy = Math.max(pad, Math.min(radial.sy, vp.h - pad));
           return h('div', { className: 'rmap-radial-scrim', onMouseDown: function (e) { e.stopPropagation(); setRadial(null); }, onWheel: function (e) { e.stopPropagation(); }, onContextMenu: function (e) { e.preventDefault(); setRadial(null); } },
-            h('div', { className: 'rmap-radial', style: { left: cx + 'px', top: cy + 'px' } },
+            h('div', { className: 'rmap-radial', style: { left: cx + 'px', top: cy + 'px' }, onMouseDown: function (e) { e.stopPropagation(); } },
               segs.map(function (s, i) {
                 var th = -Math.PI / 2 + i * (2 * Math.PI / n);
                 return h('button', { key: s.key, className: 'rmap-radial-seg', style: { '--dx': (R * Math.cos(th)) + 'px', '--dy': (R * Math.sin(th)) + 'px', '--i': i, '--segc': s.col }, onClick: function (e) { e.stopPropagation(); var wx = radial.wx, wy = radial.wy, sx = radial.sx, sy = radial.sy; setRadial(null); s.run(wx, wy); setDrop({ sx: sx, sy: sy }); setTimeout(function () { if (alive.current) setDrop(null); }, 430); } },
