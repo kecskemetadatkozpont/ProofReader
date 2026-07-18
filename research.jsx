@@ -5377,7 +5377,7 @@
         setTimeout(function () { if (alive.current) fitView(); stagesBusy.current = false; }, 620);
       }, function () { stagesBusy.current = false; });
     }
-    function toggleMsel(id) { setMsel(function (M) { var m = Object.assign({}, M); if (m[id]) delete m[id]; else m[id] = true; return m; }); }
+    function toggleMsel(id) { setSelEdge(null); setMsel(function (M) { var m = Object.assign({}, M); if (m[id]) delete m[id]; else m[id] = true; return m; }); }   // node multi-select clears any edge selection (mutual exclusion)
     function startNodeDrag(e, n) {
       if (e.button !== 0) return;   // left button only — right-click opens the generate menu
       if (commentMode) { e.stopPropagation(); setComposer({ node_id: n.id }); setCmText(''); return; }   // comment mode: attach a comment to this card
@@ -5808,6 +5808,10 @@
     });
     // the floating edge inspector (migration-81) — anchored to the selected edge's midpoint, screen-space
     var selEdgeObj = (edgesCap && selEdge) ? g.E.filter(function (e) { return edgeKey(e) === selEdge; })[0] : null;
+    // only dim the other edges while the selected edge is actually rendered (both endpoints visible) — else a hidden
+    // endpoint would leave has-esel dimming every edge with nothing looking selected. selEdge itself is left intact
+    // so the highlight restores if the node is un-hidden; empty-canvas/node clicks clear it.
+    var selEdgeVisible = !!(selEdgeObj && g.by[selEdgeObj[0]] && g.by[selEdgeObj[1]] && nodeVisible(g.by[selEdgeObj[0]]) && nodeVisible(g.by[selEdgeObj[1]]));
     function edgeInspEl() {
       var e = selEdgeObj; if (!e) return null; var a = g.by[e[0]], b = g.by[e[1]]; if (!a || !b || !nodeVisible(a) || !nodeVisible(b)) return null;
       var st = edgeStyle(e), pa = bpt(a, b), pb = bpt(b, a), mid = { x: (pa.x + pb.x) / 2, y: (pa.y + pb.y) / 2 };
@@ -5905,7 +5909,7 @@
                 h('button', { title: 'Generálás', disabled: dBusy || !String(frGen[f.id] || '').trim(), onClick: function () { frameGenerate(f, frGen[f.id]); } }, '➤')) : null,
               props.canEdit ? h('div', { className: 'rmap-frame-rz', title: 'Átméretezés', onMouseDown: function (e) { startFrameDrag(e, f, 'resize'); } }) : null);
           }),
-          h('svg', { className: 'rmap-edges' + (selEdge ? ' has-esel' : ''), width: svgW, height: g.height },
+          h('svg', { className: 'rmap-edges' + (selEdgeVisible ? ' has-esel' : ''), width: svgW, height: g.height },
             h('defs', null,
               h('marker', { id: 'rmap-arrow', viewBox: '0 0 8 8', refX: 6.5, refY: 4, markerWidth: 6.5, markerHeight: 6.5, orient: 'auto-start-reverse' }, h('path', { d: 'M0.5,0.5 L7.5,4 L0.5,7.5 Z', fill: 'var(--line-2, var(--muted))' })),
               // interactive-edge markers inherit the edge stroke via context-stroke (migration-81)
@@ -6101,7 +6105,7 @@
           h('div', { className: 'rmap-cm-t-h' }, h('b', null, '💬 Kommentek (' + cmUnresolved + ' nyitott)'), h('button', { className: 'rmap-cm-x', onClick: function () { setCmPanelOpen(false); } }, '×')),
           h('div', { className: 'rmap-cm-t-b' }, comments.length ? comments.slice().sort(function (a, b) { return (a.resolved - b.resolved) || (String(b.created_at).localeCompare(String(a.created_at))); }).map(function (c) {
             return h('div', { key: c.id, className: 'rmap-cm-item' + (c.resolved ? ' done' : '') },
-              h('div', { className: 'rmap-cm-body', style: { cursor: 'pointer' }, title: 'Ugrás', onClick: function () { setOpenThread(c.node_id ? c.node_id : ('pin:' + c.id)); if (c.node_id && g.by[c.node_id]) setSel(c.node_id); } }, c.body),
+              h('div', { className: 'rmap-cm-body', style: { cursor: 'pointer' }, title: 'Ugrás', onClick: function () { setOpenThread(c.node_id ? c.node_id : ('pin:' + c.id)); if (c.node_id && g.by[c.node_id]) { setSelEdge(null); setSel(c.node_id); } } }, c.body),
               h('div', { className: 'rmap-cm-meta' },
                 h('span', null, (c.node_id ? '📌 kártya' : '📍 pozíció') + ' · ' + (c.author === props.viewerId ? 'Te' : 'Kolléga')),
                 commentCanEditOne(c) ? h('button', { title: c.resolved ? 'Újranyitás' : 'Megoldva', onClick: function () { commentResolve(c, !c.resolved); } }, c.resolved ? '↺' : '✓') : null,
