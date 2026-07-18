@@ -4481,6 +4481,7 @@
     var lfS = useState(null), linkFrom = lfS[0], setLinkFrom = lfS[1];   // P2 link-mode: the source node id while drawing a manual edge (null = off)
     var fnS = useState({}), floatNat = fnS[0], setFloatNat = fnS[1];   // viewport-fit P1: measured NATURAL body height of reflowing floats {key: px} (widen-not-tall)
     var floatNatRef = useRef({}); floatNatRef.current = floatNat;   // live mirror for the measure callback
+    var vpgS = useState(0), vpGen = vpgS[0], setVpGen = vpgS[1];   // viewport-fit P2: bumped when the STAGE resizes → re-render so all floats + the card cap re-fit
     var ldS = useState(null), linkDrag = ldS[0], setLinkDrag = ldS[1];   // P2 drag-to-connect: {from, wx, wy, over} while dragging a rubber-band edge from a card port
     var linkDragRef = useRef(null);   // link-drag lifecycle guard
     var eovRef = useRef(null);   // in-flight edge-edit key (realtime self-echo guard)
@@ -4652,6 +4653,14 @@
     useEffect(function () { loadMembers(); }, [props.projectId]);   // collaborators (graceful: null pre-migration-74)
     useEffect(function () { try { var v = JSON.parse(localStorage.getItem('pr-rmap-types:' + props.projectId) || '{}'); setHiddenTypes(v && typeof v === 'object' ? v : {}); } catch (e) { setHiddenTypes({}); } }, [props.projectId]);   // per-project type filter
     useEffect(function () { try { var v = JSON.parse(localStorage.getItem('pr-rmap-etypes:' + props.projectId) || '{}'); setHiddenEdgeTypes(v && typeof v === 'object' ? v : {}); } catch (e) { setHiddenEdgeTypes({}); } }, [props.projectId]);   // per-project edge-relation filter (P1)
+    // viewport-fit P2: re-fit every open float + the card cap when the STAGE box resizes (window resize / sidebar collapse).
+    // Pan/zoom already re-render via `view`; only a size change without a view change needs this. Bumping vpGen never resizes
+    // the stage, so there is no observe→setState loop.
+    useEffect(function () {
+      var st = stageRef.current; if (!st || typeof ResizeObserver === 'undefined') return;
+      var ro = new ResizeObserver(function () { if (alive.current) setVpGen(function (x) { return (x + 1) % 1000000; }); });
+      ro.observe(st); return function () { ro.disconnect(); };
+    }, []);
     useEffect(function () { followingRef.current = following; }, [following]);
     // broadcast my viewport (throttled) so followers can mirror it — but NOT while I'm following someone (avoids echo loops)
     useEffect(function () {
@@ -4946,6 +4955,8 @@
       var k = Math.min(2.2, Math.max(.3, kWanted || 1.9));
       return { tx: cw / 2 - (n.x + nodeW(n) / 2) * k, ty: ch / 2 - (n.y + nodeH(n) / 2) * k, k: k };
     }
+    // viewport-fit P2: fly the camera so this card fills ~90% of the viewport (explicit action — never automatic).
+    function cardIntoView(n) { var vp = stageVP(); var k = Math.min(2.2, Math.max(0.3, Math.min((vp.w * 0.9) / nodeW(n), (vp.h * 0.9) / nodeH(n)))); flyTo(nodeTarget(n, k), { ms: 420 }); }
     // deep-link prop bag for a node type (panels ignore what they do not use — graceful)
     function focusPropsFor(n) {
       var id = n.ref && n.ref.id, m = {};
@@ -6325,6 +6336,7 @@
         (genActions(sn).length || regenActions(sn).length) ? h('button', { title: 'Generálás innen', onClick: function (e) { e.stopPropagation(); setMenu({ node: sn, x: e.clientX, y: e.clientY }); } }, '⚡') : null,
         canEnter(sn) ? h('button', { title: 'Panel megnyitása ablakként (nem-modal, több is lehet)', onClick: function () { openWindow(sn); } }, '⊞') : null,
         (props.canEdit && edgesCap) ? h('button', { className: linkFrom === sn.id ? 'on' : '', title: 'Kapcsolat húzása egy másik kártyához (kézi él)', onClick: function () { setLinkFrom(linkFrom === sn.id ? null : sn.id); } }, '🔗') : null,
+        h('button', { title: 'Kártya a nézetbe (a képernyőre igazítja)', onClick: function () { cardIntoView(sn); } }, '⤢'),
         h('button', { title: 'Kártya exportálása (PNG)', onClick: function () { exportNode(sn); } }, '⤓')) : null,
       edgeLabelEls,
       edgeInspEl(),

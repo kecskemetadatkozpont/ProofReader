@@ -110,7 +110,11 @@
   gyerekek összegzésével — colW-invariáns), 1 `useState` (`floatNat`) + 1 `useRef`-tükör a guard-ok ELŐTT; első painten
   becslés, majd egy korrekciós frame. Belső görgetés csak a legvégső eset (`data-scroll`). (A node-inspector heterogén
   tartalma miatt ott a mérés+görgetés marad — a column-widen a P2-ben mérlegelendő.)
-- [ ] 🟡 **P2** — `autoFitCard` + „Kártya a nézetbe" (explicit, nincs auto-pan); bal-alsó panelek fitFloat-on át; resize-figyelő.
+- [x] ✅ **P2 — resize-újra-illesztő + „Kártya a nézetbe"** — egy stage-`ResizeObserver` a böngésző/oldalsáv-átméretezésre
+  újrarendereli a nézetet (`vpGen` bump) → minden float ÉS a kártya-sapka újra-illeszkedik (pan/zoom eddig is, de a puszta
+  méret-változás nem); a selection-toolbar `⤢` gombja a kártyát a viewport ~90%-ára igazítja (`cardIntoView` → `flyTo`,
+  **explicit — nincs auto-pan**). *(Elhalasztva: `autoFitCard` méret-illesztés — mérés-a-cél-szélességen nélkül pontatlan;
+  bal-alsó panelek fitFloat-ja — már dokkoltak+maxHeight-esek; node-inspector column-widen — heterogén tartalom.)*
 
 ## 🚧 Interaktív élek (folyamatban, 2026-07-18)
 > Feltárás: 3-ágú design-workflow (pragmatikus · szemantikus tudásgráf · storytelling) + kód-megalapozás → szintézis →
