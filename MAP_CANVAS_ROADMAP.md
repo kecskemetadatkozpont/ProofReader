@@ -111,7 +111,9 @@
   ténylegesen jelen lévő relációk szín+név+darabszám, szemre kattintva típusonként elrejthető — `hiddenEdgeTypes`,
   localStorage); **sebesség-csúszka** (per-él `--esp`, `research_map_edges.speed` — **migration-82**, graceful 2-szintű
   probe, a csúszka csak akkor jelenik meg). A rejtett-típusú kijelölt él inspectora + dim-je `hiddenEdgeTypes`-ra van kötve.
-- [x] ✅ **P2 (részben) — kézi élek + érvelési lencse** — **link-mód**: a kártya selection-toolbar `🔗` gombja → felső
+- [x] ✅ **P2 (részben) — kézi élek + érvelési lencse** — **drag-to-connect** (a preferált, természetes mód): a kártya
+  fölé húzva a mutatót a szélein **csatlakozási pontok** (⚪ N/E/S/W) jelennek meg; egy pontból **kihúzva egy gumiszalag-élt**
+  és egy másik kártyára **ejtve** létrejön a kézi kapcsolat (a cél-kártya kijelölődik húzás közben). Alternatíva/érintős **link-mód**: a selection-toolbar `🔗` gombja → felső
   banner („Kapcsolat innen: … — kattints a cél-kártyára", Esc/Mégse), a cél-kártyára kattintva **kézi él** jön létre
   (`manual=true` sor, alap-reláció *Kapcsolódik*, edge_key `from|to|manual`), amit a `graph()` beolvaszt az `E`-be és
   rögtön kijelöl (inspector → típus/stílus). A manuális él inspectorában `🗑 Kapcsolat törlése` (a sor törlése).

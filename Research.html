@@ -1165,6 +1165,16 @@
     .rmap-linkbar-h { color: var(--muted); }
     .rmap-linkbar button { border: 1px solid var(--line); background: var(--surface); cursor: pointer; font: inherit; font-size: 11px; font-weight: 650; color: var(--muted); padding: 3px 9px; border-radius: 999px; flex: none; }
     .rmap-linkbar button:hover { border-color: var(--accent); color: var(--accent); }
+    /* P2 drag-to-connect: hover ports + rubber band + target highlight */
+    .rmap-port { position: absolute; width: 12px; height: 12px; border-radius: 50%; background: var(--accent); border: 2px solid var(--surface); opacity: 0; pointer-events: none; transition: opacity .12s, transform .1s; cursor: crosshair; z-index: 4; box-shadow: 0 1px 4px rgba(0,0,0,.3); }
+    .rmap-node:hover .rmap-port, .rmap-node.rmap-linksource .rmap-port { opacity: 1; pointer-events: auto; }
+    .rmap-port:hover { transform: scale(1.4); }
+    .rmap-port-n { top: -6px; left: 50%; margin-left: -6px; }
+    .rmap-port-s { bottom: -6px; left: 50%; margin-left: -6px; }
+    .rmap-port-e { right: -6px; top: 50%; margin-top: -6px; }
+    .rmap-port-w { left: -6px; top: 50%; margin-top: -6px; }
+    .rmap-node.rmap-linktarget { outline: 2.5px solid var(--accent); outline-offset: 2px; }
+    .rmap-e-rubber { fill: none; stroke: var(--accent); stroke-width: 2.4; stroke-dasharray: 6 5; pointer-events: none; }
     .rmap-lane { position: absolute; top: 0; border-right: 1px dashed var(--line-2); }
     .rmap-lane.alt { background: color-mix(in srgb, var(--surface) 45%, transparent); }
     .rmap-lh { position: absolute; top: 12px; left: 14px; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; color: var(--faint); white-space: nowrap; }
@@ -1319,7 +1329,7 @@
   <script type="text/babel" src="canvas.jsx?v=1783137934"></script>
   <script type="text/babel" src="notes.jsx?v=1783137934"></script>
   <script src="autopilot-core.js?v=1784160000"></script>
-  <script type="text/babel" src="research.jsx?v=1785570000"></script>
+  <script type="text/babel" src="research.jsx?v=1785580000"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>

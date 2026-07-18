@@ -4479,6 +4479,8 @@
     var espcS = useState(false), edgeSpeedCap = espcS[0], setEdgeSpeedCap = espcS[1];   // migration-82 capability: research_map_edges.speed column present → speed slider
     var hetS = useState({}), hiddenEdgeTypes = hetS[0], setHiddenEdgeTypes = hetS[1];   // P1: per-relation-type edge visibility filter {kind: true = hidden} (client-only, localStorage)
     var lfS = useState(null), linkFrom = lfS[0], setLinkFrom = lfS[1];   // P2 link-mode: the source node id while drawing a manual edge (null = off)
+    var ldS = useState(null), linkDrag = ldS[0], setLinkDrag = ldS[1];   // P2 drag-to-connect: {from, wx, wy, over} while dragging a rubber-band edge from a card port
+    var linkDragRef = useRef(null);   // link-drag lifecycle guard
     var eovRef = useRef(null);   // in-flight edge-edit key (realtime self-echo guard)
     var stagesBusy = useRef(false);   // re-entry guard for autoLayoutStages (prevents duplicate phase frames on rapid double-invoke)
     var memS = useState(null), members = memS[0], setMembers = memS[1];   // project collaborators (migration-74) — null until loaded/capable
@@ -5164,6 +5166,20 @@
         setTimeout(function () { if (eovRef.current === key) eovRef.current = null; }, 400);
         if (r && r.error && alive.current) window.PRUI.toast('Kapcsolat mentése sikertelen: ' + r.error.message, { kind: 'error' });
       });
+    }
+    // P2 drag-to-connect: pull an edge straight out of a card port and drop it on another card (the natural graph gesture).
+    function startLinkDrag(e, nodeId) {
+      if (e.button !== 0 || !props.canEdit || !edgesCap) return;
+      e.stopPropagation(); e.preventDefault();
+      linkDragRef.current = { from: nodeId }; setLinkFrom(null);
+      function targetAt(ev) { var el = (typeof document !== 'undefined' && document.elementFromPoint) ? document.elementFromPoint(ev.clientX, ev.clientY) : null; var card = el && el.closest ? el.closest('.rmap-node[data-nid]') : null; var id = card ? card.getAttribute('data-nid') : null; return (id && id !== nodeId) ? id : null; }
+      function upd(ev) { var st = stageRef.current; if (!st) return; var r = st.getBoundingClientRect(), v = viewRef.current; setLinkDrag({ from: nodeId, wx: (ev.clientX - r.left - v.tx) / v.k, wy: (ev.clientY - r.top - v.ty) / v.k, over: targetAt(ev) }); }
+      function fin(ev) { window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); window.removeEventListener('blur', cancel); var ld = linkDragRef.current; linkDragRef.current = null; setLinkDrag(null); if (ev && ld) { var to = targetAt(ev); if (to) createManualEdge(ld.from, to); } }
+      function cancel() { window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); window.removeEventListener('blur', cancel); linkDragRef.current = null; setLinkDrag(null); }
+      function mv(ev) { if (ev.buttons === 0) { fin(ev); return; } upd(ev); }
+      function up(ev) { fin(ev); }
+      window.addEventListener('mousemove', mv); window.addEventListener('mouseup', up); window.addEventListener('blur', cancel);
+      upd(e);
     }
     // P2 reasoning lens: isolate one relation type (hide every OTHER present type). `present` is passed from the legend.
     function soloEdgeType(k, present) { setHiddenEdgeTypes(function () { var n = {}; (present || []).forEach(function (kk) { if (kk !== k) n[kk] = true; }); try { localStorage.setItem(edgeTypeStoreKey(), JSON.stringify(n)); } catch (e) { } return n; }); setSelEdge(null); }
@@ -5892,6 +5908,15 @@
     var edgeKindCounts = {};
     if (edgesCap) g.E.forEach(function (e) { var a = g.by[e[0]], b = g.by[e[1]]; if (!a || !b || !nodeVisible(a) || !nodeVisible(b)) return; var k = edgeStyle(e).kind; edgeKindCounts[k] = (edgeKindCounts[k] || 0) + 1; });
     var edgeKindsPresent = EDGE_TYPE_ORDER.filter(function (k) { return edgeKindCounts[k]; });
+    // P2 drag-to-connect: the rubber-band edge from the source card's boundary to the cursor while dragging a new link
+    var linkRubber = null;
+    if (linkDrag && g.by[linkDrag.from]) {
+      var _ls = g.by[linkDrag.from], _lcx = _ls.x + nodeW(_ls) / 2, _lcy = _ls.y + nodeH(_ls) / 2;
+      var _ldx = linkDrag.wx - _lcx, _ldy = linkDrag.wy - _lcy, _lhw = nodeW(_ls) / 2, _lhh = nodeH(_ls) / 2;
+      var _lt = (_ldx || _ldy) ? Math.min(_lhw / (Math.abs(_ldx) || 1e-6), _lhh / (Math.abs(_ldy) || 1e-6)) : 0;
+      var _lpx = _lcx + _ldx * _lt, _lpy = _lcy + _ldy * _lt, _lmdx = (linkDrag.wx - _lpx) * 0.5;
+      linkRubber = h('path', { className: 'rmap-e-rubber', d: 'M' + _lpx + ',' + _lpy + ' C' + (_lpx + _lmdx) + ',' + _lpy + ' ' + (linkDrag.wx - _lmdx) + ',' + linkDrag.wy + ' ' + linkDrag.wx + ',' + linkDrag.wy, markerEnd: 'url(#rmap-ar)' });
+    }
     function edgeInspEl() {
       var e = selEdgeObj; if (!e) return null; var a = g.by[e[0]], b = g.by[e[1]]; if (!a || !b || !nodeVisible(a) || !nodeVisible(b)) return null;
       var st = edgeStyle(e); if (hiddenEdgeTypes[st.kind]) return null;   // the selected edge's type was filtered off in the legend
@@ -6006,8 +6031,10 @@
               // interactive-edge markers inherit the edge stroke via context-stroke (migration-81)
               h('marker', { id: 'rmap-ar', viewBox: '0 0 8 8', refX: 6.5, refY: 4, markerWidth: 6.5, markerHeight: 6.5, orient: 'auto-start-reverse', markerUnits: 'userSpaceOnUse' }, h('path', { d: 'M0.5,0.5 L7.5,4 L0.5,7.5 Z', fill: 'context-stroke' })),
               h('marker', { id: 'rmap-bl', viewBox: '0 0 8 8', refX: 5.5, refY: 4, markerWidth: 8, markerHeight: 8, orient: 'auto-start-reverse', markerUnits: 'userSpaceOnUse' }, h('path', { d: 'M5,1 L5,7', stroke: 'context-stroke', strokeWidth: 1.6 }))),
-            edgeEls),
-          g.N.map(function (n) { if (!nodeVisible(n)) return null; var _sized = !!((nrzLive && nrzLive.id === n.id) || (layout[n.id] && layout[n.id].card_h)); var _st = { left: n.x + 'px', top: n.y + 'px', width: (n._w || NW) + 'px' }; if (_sized) _st.height = (n._h || NH) + 'px'; return h('div', { key: n.id, 'data-nid': n.id, className: 'rmap-node t-' + n.t + (_sized ? ' rmap-sized' : '') + (sel === n.id ? ' sel' : '') + (msel[n.id] ? ' rmap-mselected' : '') + (n.mapPinned ? ' rmap-pinned' : '') + (activeKey && n.ph === RMAP_PHASE_IDX[activeKey] ? ' inphase' : '') + (props.canEdit ? ' editable' : '') + (dlive && dlive.id === n.id ? ' dragging' : '') + ((nrzLive && nrzLive.id === n.id) ? ' rmap-resizing' : ''), style: _st, onMouseDown: function (e) { e.stopPropagation(); startNodeDrag(e, n); }, onDoubleClick: function (e) { e.stopPropagation(); if (canEnter(n)) enterNode(n); }, onContextMenu: function (e) { e.preventDefault(); e.stopPropagation(); if (props.canEdit && (genActions(n).length || regenActions(n).length || (cardSizeCap && layout[n.id] && layout[n.id].card_h))) setMenu({ node: n, x: e.clientX, y: e.clientY }); } }, n.mapPinned ? h('span', { className: 'rmap-pin-badge', title: 'Kitűzött' }, '📌') : null, nodeCmCount(n.id) ? h('span', { className: 'rmap-cm-badge', title: nodeCmCount(n.id) + ' nyitott komment', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); setOpenThread(n.id); } }, '💬' + nodeCmCount(n.id)) : null, (n.t === 'step' && n.ref && (n.ref.assignee_id || n.ref.signed_off_by)) ? h('span', { className: 'rmap-step-badges' }, n.ref.assignee_id ? h('span', { className: 'rmap-assignee', title: 'Felelős: ' + nameOf(n.ref.assignee_id), style: { background: userColor(n.ref.assignee_id) } }, String(nameOf(n.ref.assignee_id) || '?').trim().charAt(0).toUpperCase()) : null, n.ref.signed_off_by ? h('span', { className: 'rmap-signoff', title: 'Jóváhagyta: ' + nameOf(n.ref.signed_off_by) }, '✅') : null) : null, h('div', { className: 'rmap-nb' }, body(n), richTier(n)), (props.canEdit && cardSizeCap) ? h('span', { className: 'rmap-node-rz', title: 'Átméretezés (húzd)', onMouseDown: function (e) { e.stopPropagation(); startNodeResize(e, n); } }) : null); })),
+            edgeEls, linkRubber),
+          g.N.map(function (n) { if (!nodeVisible(n)) return null; var _sized = !!((nrzLive && nrzLive.id === n.id) || (layout[n.id] && layout[n.id].card_h)); var _st = { left: n.x + 'px', top: n.y + 'px', width: (n._w || NW) + 'px' }; if (_sized) _st.height = (n._h || NH) + 'px'; return h('div', { key: n.id, 'data-nid': n.id, className: 'rmap-node t-' + n.t + (_sized ? ' rmap-sized' : '') + (sel === n.id ? ' sel' : '') + (msel[n.id] ? ' rmap-mselected' : '') + (n.mapPinned ? ' rmap-pinned' : '') + (activeKey && n.ph === RMAP_PHASE_IDX[activeKey] ? ' inphase' : '') + (props.canEdit ? ' editable' : '') + (dlive && dlive.id === n.id ? ' dragging' : '') + ((nrzLive && nrzLive.id === n.id) ? ' rmap-resizing' : '') + (linkDrag && linkDrag.over === n.id ? ' rmap-linktarget' : '') + (linkDrag && linkDrag.from === n.id ? ' rmap-linksource' : ''), style: _st, onMouseDown: function (e) { e.stopPropagation(); startNodeDrag(e, n); }, onDoubleClick: function (e) { e.stopPropagation(); if (canEnter(n)) enterNode(n); }, onContextMenu: function (e) { e.preventDefault(); e.stopPropagation(); if (props.canEdit && (genActions(n).length || regenActions(n).length || (cardSizeCap && layout[n.id] && layout[n.id].card_h))) setMenu({ node: n, x: e.clientX, y: e.clientY }); } }, n.mapPinned ? h('span', { className: 'rmap-pin-badge', title: 'Kitűzött' }, '📌') : null, nodeCmCount(n.id) ? h('span', { className: 'rmap-cm-badge', title: nodeCmCount(n.id) + ' nyitott komment', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); setOpenThread(n.id); } }, '💬' + nodeCmCount(n.id)) : null, (n.t === 'step' && n.ref && (n.ref.assignee_id || n.ref.signed_off_by)) ? h('span', { className: 'rmap-step-badges' }, n.ref.assignee_id ? h('span', { className: 'rmap-assignee', title: 'Felelős: ' + nameOf(n.ref.assignee_id), style: { background: userColor(n.ref.assignee_id) } }, String(nameOf(n.ref.assignee_id) || '?').trim().charAt(0).toUpperCase()) : null, n.ref.signed_off_by ? h('span', { className: 'rmap-signoff', title: 'Jóváhagyta: ' + nameOf(n.ref.signed_off_by) }, '✅') : null) : null, h('div', { className: 'rmap-nb' }, body(n), richTier(n)),
+            (props.canEdit && edgesCap) ? ['n', 'e', 's', 'w'].map(function (dir) { return h('span', { key: 'port' + dir, className: 'rmap-port rmap-port-' + dir, title: 'Húzz kapcsolatot egy másik kártyához', onMouseDown: function (e) { e.stopPropagation(); startLinkDrag(e, n.id); } }); }) : null,
+            (props.canEdit && cardSizeCap) ? h('span', { className: 'rmap-node-rz', title: 'Átméretezés (húzd)', onMouseDown: function (e) { e.stopPropagation(); startNodeResize(e, n); } }) : null); })),
         // page bar (saved views) — top-left tabs; the active page can be curated (only pinned) / re-captured / renamed / deleted
         pagesCap ? h('div', { className: 'rmap-pagebar', onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
           h('div', { className: 'rmap-pagetabs' },
