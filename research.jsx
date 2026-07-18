@@ -4478,6 +4478,7 @@
     var edgeCapS = useState(false), edgesCap = edgeCapS[0], setEdgesCap = edgeCapS[1];   // research_map_edges migration capability
     var espcS = useState(false), edgeSpeedCap = espcS[0], setEdgeSpeedCap = espcS[1];   // migration-82 capability: research_map_edges.speed column present → speed slider
     var hetS = useState({}), hiddenEdgeTypes = hetS[0], setHiddenEdgeTypes = hetS[1];   // P1: per-relation-type edge visibility filter {kind: true = hidden} (client-only, localStorage)
+    var lfS = useState(null), linkFrom = lfS[0], setLinkFrom = lfS[1];   // P2 link-mode: the source node id while drawing a manual edge (null = off)
     var eovRef = useRef(null);   // in-flight edge-edit key (realtime self-echo guard)
     var stagesBusy = useRef(false);   // re-entry guard for autoLayoutStages (prevents duplicate phase frames on rapid double-invoke)
     var memS = useState(null), members = memS[0], setMembers = memS[1];   // project collaborators (migration-74) — null until loaded/capable
@@ -4664,7 +4665,7 @@
     useEffect(function () {
       function typing(el) { if (!el) return false; var tg = el.tagName || ''; return tg === 'INPUT' || tg === 'TEXTAREA' || tg === 'SELECT' || el.isContentEditable; }
       function onKey(e) {
-        if (e.key === 'Escape') { if (tour) tourStop(); else if (focus) exitFocus(); }
+        if (e.key === 'Escape') { if (tour) tourStop(); else if (focus) exitFocus(); else { setLinkFrom(null); setSelEdge(null); } }   // Esc also cancels link-mode + edge selection
         else if (tour && tour.beats && !typing(e.target)) { if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); tourNext(); } else if (e.key === 'ArrowLeft') { e.preventDefault(); tourPrev(); } }
         else if (e.key === 'Enter' && !focus && !tour && armedRef.current && !typing(e.target)) { e.preventDefault(); enterNode(armedRef.current); }   // armedRef is null while a modal is open (guarded at compute)
       }
@@ -4865,6 +4866,8 @@
       if (gLive && gLive.base) { for (var gq = 0; gq < N.length; gq++) { var gb = gLive.base[N[gq].id]; if (gb) { N[gq].x = gb.x + gLive.dx; N[gq].y = gb.y + gLive.dy; } } }
       var maxY = 400; N.forEach(function (n) { maxY = Math.max(maxY, n.y + (n._h || 78) + 44); });
       var by = {}; N.forEach(function (n) { by[n.id] = n; });
+      // P2 manual edges: fold user-drawn links (manual override rows, edge_key = from|to|manual) into E when both ends exist
+      if (edgesCap) Object.keys(edgeOv).forEach(function (k) { var ov = edgeOv[k]; if (ov && ov.manual && ov.from_id && ov.to_id && by[ov.from_id] && by[ov.to_id]) E.push([ov.from_id, ov.to_id, 'manual']); });
       return { N: N, E: E, height: maxY, by: by };
     }
 
@@ -5127,7 +5130,7 @@
       var ov = edgeOv[edgeKey(e)] || {};
       var kind = ov.kind || inferRel(e);
       var T = EDGE_TYPES[kind] || EDGE_TYPES.erd;
-      return { kind: kind, col: ov.color || T.col, anim: ov.anim || T.anim, line: ov.line_style || T.line, arrow: (ov.arrow != null ? ov.arrow : T.arrow), width: ov.width || (kind === 'idz' ? 1.5 : 2), label: ov.label || '', sp: (ov.speed != null ? ov.speed : (EDGE_ANIM_SP[ov.anim || T.anim] || 1.7)), ov: !!edgeOv[edgeKey(e)] };
+      return { kind: kind, col: ov.color || T.col, anim: ov.anim || T.anim, line: ov.line_style || T.line, arrow: (ov.arrow != null ? ov.arrow : T.arrow), width: ov.width || (kind === 'idz' ? 1.5 : 2), label: ov.label || '', sp: (ov.speed != null ? ov.speed : (EDGE_ANIM_SP[ov.anim || T.anim] || 1.7)), manual: !!ov.manual, ov: !!edgeOv[edgeKey(e)] };
     }
     // upsert an override row (merges a partial patch into the current override); optimistic + graceful.
     function persistEdge(e, patch) {
@@ -5150,6 +5153,20 @@
       sb.from('research_map_edges').delete().eq('project_id', props.projectId).eq('edge_key', key).then(function () { setTimeout(function () { if (eovRef.current === key) eovRef.current = null; }, 400); });
     }
     function selectEdge(key) { setSel(null); setMsel({}); setSelEdge(key); }   // edges + nodes are mutually exclusive
+    // P2: draw a MANUAL edge between two cards (link-mode). edge_key = from|to|manual; a manual override row that graph() folds into E.
+    function createManualEdge(fromId, toId) {
+      if (!props.canEdit || !edgesCap || !fromId || !toId || fromId === toId) { setLinkFrom(null); return; }
+      var key = fromId + '|' + toId + '|manual', row = { edge_key: key, from_id: fromId, to_id: toId, kind: 'kap', manual: true };
+      eovRef.current = key;
+      setEdgeOv(function (O) { var m = Object.assign({}, O); m[key] = Object.assign({}, m[key], row); return m; });
+      setLinkFrom(null); setSel(null); setMsel({}); setSelEdge(key);
+      sb.from('research_map_edges').upsert({ project_id: props.projectId, edge_key: key, from_id: fromId, to_id: toId, kind: 'kap', manual: true, updated_at: new Date().toISOString() }, { onConflict: 'project_id,edge_key' }).then(function (r) {
+        setTimeout(function () { if (eovRef.current === key) eovRef.current = null; }, 400);
+        if (r && r.error && alive.current) window.PRUI.toast('Kapcsolat mentése sikertelen: ' + r.error.message, { kind: 'error' });
+      });
+    }
+    // P2 reasoning lens: isolate one relation type (hide every OTHER present type). `present` is passed from the legend.
+    function soloEdgeType(k, present) { setHiddenEdgeTypes(function () { var n = {}; (present || []).forEach(function (kk) { if (kk !== k) n[kk] = true; }); try { localStorage.setItem(edgeTypeStoreKey(), JSON.stringify(n)); } catch (e) { } return n; }); setSelEdge(null); }
     // per-node Map flags (migration-70): hide/show + pin. Upsert the node's CURRENT position with the flag (x/y NOT NULL).
     // Optimistic; on error revert + toast. Guarded by mapFlags so the UI only appears once the columns exist.
     function nodeSetFlag(n, key, val) {
@@ -5466,6 +5483,7 @@
         window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); window.removeEventListener('blur', finish);
         setDlive(null);
         if (d.moved) { setLayout(function (L) { var m = Object.assign({}, L); m[n.id] = Object.assign({}, m[n.id], { x: d.lx, y: d.ly }); return m; }); persistPos(n.id, d.lx, d.ly); }
+        else if (linkFrom) { createManualEdge(linkFrom, n.id); }   // P2 link-mode: this card is the target of a manual edge
         else { setSel(n.id); setMsel({}); setSelEdge(null); if (n.id === 'lit') setLitOpen(function (v) { return !v; }); }
       }
       function mv(ev) {
@@ -5895,7 +5913,7 @@
           seg('Nyílhegy', Object.keys(EDGE_ARROWS).map(function (k) { return { v: k, lab: EDGE_ARROWS[k] }; }), st.arrow, function (v) { persistEdge(e, { arrow: v }); }),
           seg('Vastagság', [{ v: 1.5, lab: 'Vékony' }, { v: 2, lab: 'Közepes' }, { v: 3, lab: 'Vastag' }], st.width, function (v) { persistEdge(e, { width: v }); }),
           h('div', { className: 'fld' }, h('div', { className: 'rmap-einsp-l' }, 'Címke (az élre írva)'), h('input', { key: 'lbl' + selEdge, className: 'rmap-einsp-txt', type: 'text', defaultValue: st.label, placeholder: 'Írj ide feliratot…', disabled: !ed, maxLength: 40, onMouseDown: function (ev) { ev.stopPropagation(); }, onKeyDown: function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); ev.target.blur(); } ev.stopPropagation(); }, onBlur: function (ev) { var v = ev.target.value.trim(); if (v !== (st.label || '')) persistEdge(e, { label: v || null }); } }))),
-        ed ? h('div', { className: 'rmap-einsp-foot' }, h('button', { onClick: function () { resetEdge(e); } }, '↺ Alaphelyzet')) : null);
+        ed ? h('div', { className: 'rmap-einsp-foot' }, h('button', { style: st.manual ? { color: 'var(--danger, #d6323a)' } : null, onClick: function () { resetEdge(e); } }, st.manual ? '🗑 Kapcsolat törlése' : '↺ Alaphelyzet')) : null);
     }
     function body(n) {
       var k = [h('div', { className: 'rmap-nh', key: 'h' }, h('span', { className: 'rmap-ni' }, RMAP_TYPE[n.t].ic), h('span', { className: 'rmap-nt' }, n.title))];
@@ -6185,16 +6203,22 @@
                 commentCanEditOne(c) ? h('button', { title: 'Törlés', onClick: function () { commentDelete(c); } }, '🗑') : null));
           }) : h('div', { className: 'rmap-cm-empty' }, 'Még nincs komment. Kapcsold be a 💬 komment-módot és kattints a vászonra vagy egy kártyára.'))) : null,
         h('div', { className: 'rmap-hint' }, (props.canEdit ? 'Húzd a kártyát = áthelyezés · ' : '') + 'húzd a hátteret = pan · görgő = zoom · Shift+kattintás/húzás = többes kijelölés' + (commentMode ? ' · 💬 KOMMENT-MÓD: kattints a vászonra vagy egy kártyára' : '')),
+        // P2 link-mode banner: drawing a manual edge from a source card
+        (linkFrom && g.by[linkFrom]) ? h('div', { className: 'rmap-linkbar', onMouseDown: function (e) { e.stopPropagation(); } },
+          h('span', null, '🔗 Kapcsolat innen: '), h('b', null, (RMAP_TYPE[g.by[linkFrom].t] && RMAP_TYPE[g.by[linkFrom].t].ic || '◻') + ' ' + String(g.by[linkFrom].title || '').slice(0, 30)),
+          h('span', { className: 'rmap-linkbar-h' }, '— kattints a cél-kártyára'),
+          h('button', { onClick: function () { setLinkFrom(null); } }, 'Mégse (Esc)')) : null,
         // edge legend — bottom-left, above the zoom controls. Pre-migration-81: the static two-line legend.
         // With edgesCap: a LIVE, filterable legend of the relation types actually present — click a row to hide/show that type.
         (edgesCap && edgeKindsPresent.length) ? h('div', { className: 'rmap-elegend', onMouseDown: function (e) { e.stopPropagation(); } },
           edgeKindsPresent.map(function (k) {
             var off = !!hiddenEdgeTypes[k];
-            return h('button', { key: k, className: 'rmap-eleg-row' + (off ? ' off' : ''), title: (off ? 'Mutatás' : 'Elrejtés') + ': ' + EDGE_TYPES[k].nm, onClick: function () { toggleEdgeType(k); } },
-              h('span', { className: 'rmap-eleg-sw', style: { background: EDGE_TYPES[k].col } }),
-              h('span', { className: 'rmap-eleg-nm' }, EDGE_TYPES[k].nm),
-              h('span', { className: 'rmap-eleg-n' }, edgeKindCounts[k]),
-              h('span', { className: 'rmap-eleg-eye' }, off ? '🙈' : '👁'));
+            return h('div', { key: k, className: 'rmap-eleg-row' + (off ? ' off' : '') },
+              h('button', { className: 'rmap-eleg-tog', title: (off ? 'Mutatás' : 'Elrejtés') + ': ' + EDGE_TYPES[k].nm, onClick: function () { toggleEdgeType(k); } },
+                h('span', { className: 'rmap-eleg-sw', style: { background: EDGE_TYPES[k].col } }),
+                h('span', { className: 'rmap-eleg-nm' }, EDGE_TYPES[k].nm),
+                h('span', { className: 'rmap-eleg-n' }, edgeKindCounts[k])),
+              h('button', { className: 'rmap-eleg-solo', title: 'Csak ez — érvelési lencse (a többi típus elrejtése)', onClick: function () { soloEdgeType(k, edgeKindsPresent); } }, '◎'));
           }),
           Object.keys(hiddenEdgeTypes).length ? h('button', { className: 'rmap-eleg-all', title: 'Összes él mutatása', onClick: function () { setHiddenEdgeTypes({}); try { localStorage.removeItem(edgeTypeStoreKey()); } catch (e) { } } }, 'mind') : null)
           : h('div', { style: { position: 'absolute', left: 14, bottom: 84, zIndex: 8, display: 'flex', gap: 13, alignItems: 'center', padding: '5px 11px', borderRadius: 8, background: 'var(--surface)', border: '1px solid var(--line)', fontSize: 10.5, color: 'var(--muted)', boxShadow: '0 4px 14px -8px rgba(20,26,40,.4)', pointerEvents: 'none' } },
@@ -6230,6 +6254,7 @@
         mapFlags ? h('button', { title: 'Elrejtés a térképről', onClick: function () { nodeToggleHidden(sn); } }, '🙈') : null,
         (genActions(sn).length || regenActions(sn).length) ? h('button', { title: 'Generálás innen', onClick: function (e) { e.stopPropagation(); setMenu({ node: sn, x: e.clientX, y: e.clientY }); } }, '⚡') : null,
         canEnter(sn) ? h('button', { title: 'Panel megnyitása ablakként (nem-modal, több is lehet)', onClick: function () { openWindow(sn); } }, '⊞') : null,
+        (props.canEdit && edgesCap) ? h('button', { className: linkFrom === sn.id ? 'on' : '', title: 'Kapcsolat húzása egy másik kártyához (kézi él)', onClick: function () { setLinkFrom(linkFrom === sn.id ? null : sn.id); } }, '🔗') : null,
         h('button', { title: 'Kártya exportálása (PNG)', onClick: function () { exportNode(sn); } }, '⤓')) : null,
       edgeLabelEls,
       edgeInspEl(),

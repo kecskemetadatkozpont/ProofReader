@@ -1148,15 +1148,23 @@
     .rmap-elabel-sw { width: 6px; height: 6px; border-radius: 50%; flex: none; }
     /* P1 live filterable edge legend (bottom-left) */
     .rmap-elegend { position: absolute; left: 14px; bottom: 84px; z-index: 8; display: flex; flex-wrap: wrap; gap: 3px; align-items: center; padding: 4px; border-radius: 9px; background: var(--surface); border: 1px solid var(--line); box-shadow: 0 4px 14px -8px rgba(20,26,40,.4); max-width: 340px; }
-    .rmap-eleg-row { display: inline-flex; align-items: center; gap: 5px; border: none; background: none; cursor: pointer; font: inherit; font-size: 10.5px; color: var(--muted); padding: 3px 7px; border-radius: 6px; }
+    .rmap-eleg-row { display: inline-flex; align-items: center; border-radius: 6px; }
     .rmap-eleg-row:hover { background: var(--surface-2); }
     .rmap-eleg-row.off { opacity: .45; }
     .rmap-eleg-row.off .rmap-eleg-nm { text-decoration: line-through; }
+    .rmap-eleg-tog { display: inline-flex; align-items: center; gap: 5px; border: none; background: none; cursor: pointer; font: inherit; font-size: 10.5px; color: var(--muted); padding: 3px 4px 3px 7px; border-radius: 6px; }
     .rmap-eleg-sw { width: 9px; height: 9px; border-radius: 50%; flex: none; }
     .rmap-eleg-nm { font-weight: 700; }
     .rmap-eleg-n { font-family: ui-monospace, monospace; font-size: 9.5px; color: var(--faint); }
-    .rmap-eleg-eye { font-size: 10px; }
+    .rmap-eleg-solo { border: none; background: none; cursor: pointer; font-size: 10px; color: var(--faint); padding: 3px 6px 3px 2px; border-radius: 6px; }
+    .rmap-eleg-solo:hover { color: var(--accent); }
     .rmap-eleg-all { border: 1px solid var(--line); background: var(--surface); cursor: pointer; font: inherit; font-size: 10px; font-weight: 700; color: var(--accent); padding: 3px 8px; border-radius: 6px; }
+    /* P2 link-mode banner (top-center) */
+    .rmap-linkbar { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 16; display: flex; align-items: center; gap: 7px; padding: 6px 10px 6px 13px; border-radius: 999px; background: var(--surface); border: 1px solid var(--accent); box-shadow: 0 8px 24px -10px rgba(20,26,40,.5); font-size: 12px; color: var(--ink); white-space: nowrap; max-width: 92%; overflow: hidden; }
+    .rmap-linkbar b { font-weight: 750; }
+    .rmap-linkbar-h { color: var(--muted); }
+    .rmap-linkbar button { border: 1px solid var(--line); background: var(--surface); cursor: pointer; font: inherit; font-size: 11px; font-weight: 650; color: var(--muted); padding: 3px 9px; border-radius: 999px; flex: none; }
+    .rmap-linkbar button:hover { border-color: var(--accent); color: var(--accent); }
     .rmap-lane { position: absolute; top: 0; border-right: 1px dashed var(--line-2); }
     .rmap-lane.alt { background: color-mix(in srgb, var(--surface) 45%, transparent); }
     .rmap-lh { position: absolute; top: 12px; left: 14px; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; color: var(--faint); white-space: nowrap; }
@@ -1311,7 +1319,7 @@
   <script type="text/babel" src="canvas.jsx?v=1783137934"></script>
   <script type="text/babel" src="notes.jsx?v=1783137934"></script>
   <script src="autopilot-core.js?v=1784160000"></script>
-  <script type="text/babel" src="research.jsx?v=1785550000"></script>
+  <script type="text/babel" src="research.jsx?v=1785560000"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>

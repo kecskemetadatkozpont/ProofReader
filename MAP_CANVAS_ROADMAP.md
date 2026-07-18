@@ -111,7 +111,13 @@
   ténylegesen jelen lévő relációk szín+név+darabszám, szemre kattintva típusonként elrejthető — `hiddenEdgeTypes`,
   localStorage); **sebesség-csúszka** (per-él `--esp`, `research_map_edges.speed` — **migration-82**, graceful 2-szintű
   probe, a csúszka csak akkor jelenik meg). A rejtett-típusú kijelölt él inspectora + dim-je `hiddenEdgeTypes`-ra van kötve.
-- [ ] 🔴 **P2** — kézi élek (link-mód húzással); érvelési lencse; Prezi story-fonál az élek mentén; fontosság-preset.
+- [x] ✅ **P2 (részben) — kézi élek + érvelési lencse** — **link-mód**: a kártya selection-toolbar `🔗` gombja → felső
+  banner („Kapcsolat innen: … — kattints a cél-kártyára", Esc/Mégse), a cél-kártyára kattintva **kézi él** jön létre
+  (`manual=true` sor, alap-reláció *Kapcsolódik*, edge_key `from|to|manual`), amit a `graph()` beolvaszt az `E`-be és
+  rögtön kijelöl (inspector → típus/stílus). A manuális él inspectorában `🗑 Kapcsolat törlése` (a sor törlése).
+  **Érvelési lencse**: a legenda minden során egy `◎` „csak ez" gomb → a többi reláció-típus elrejtése (a `hiddenEdgeTypes`-ra
+  épül), így egy kattintással előhívható pl. csak a *Támogatja*+*Ellentmond* váz; „mind" visszaáll.
+- [ ] 🟡 **P2 hátralévő** — Prezi story-fonál (él-animáció a bemutató-jelenetek mentén); fontosság-preset (tempó+vastagság+fényerő).
 
 ## Hátralévő (jövő) — Phase 6+
 - [ ] 🔴 **Teljes karakter-szintű CRDT/Yjs** — egyidejű azonos-szekció gépelés valós idejű merge-dzsel.
