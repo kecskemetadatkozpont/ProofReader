@@ -4554,10 +4554,10 @@
       });
       // load Map edge style overrides — 2-tier graceful probe: migration-82 (speed col) → migration-81 (base) → absent.
       // pre-migration-81 both selects error → edgesCap stays false → edges render as today.
-      sb.from('research_map_edges').select('edge_key,kind,color,anim,line_style,arrow,width,label,speed').eq('project_id', pid).then(function (r) {
+      sb.from('research_map_edges').select('edge_key,from_id,to_id,manual,kind,color,anim,line_style,arrow,width,label,speed').eq('project_id', pid).then(function (r) {
         if (!alive.current) return;
         if (r && r.error) {
-          sb.from('research_map_edges').select('edge_key,kind,color,anim,line_style,arrow,width,label').eq('project_id', pid).then(function (r2) {
+          sb.from('research_map_edges').select('edge_key,from_id,to_id,manual,kind,color,anim,line_style,arrow,width,label').eq('project_id', pid).then(function (r2) {
             if (!alive.current) return; if (r2 && r2.error) return; setEdgesCap(true);
             var m2 = {}; ((r2 && r2.data) || []).forEach(function (row) { m2[row.edge_key] = row; }); setEdgeOv(m2);
           });
