@@ -4911,6 +4911,7 @@
       if (!n) return; var tab = RMAP_TYPE[n.t] && RMAP_TYPE[n.t].tab;
       if (!canEnter(n)) { if (props.onGoTab && tab) props.onGoTab(tab); return; }
       setWindows(function (W) {
+        W = W.filter(function (w) { return g.by[w.id]; });   // drop ghost windows whose anchor node was deleted (frees the slot lazily; no hook needed)
         if (W.filter(function (w) { return w.id === n.id; })[0]) return reZ(W, n.id);   // already open → front
         if (W.length >= MAX_WIN) { window.PRUI.toast('Legfeljebb ' + MAX_WIN + ' panel-ablak lehet nyitva.', { kind: 'info' }); return W; }
         return reZ(W.concat([{ id: n.id, tab: tab, t: n.t, title: n.title, ref: n.ref, fp: focusPropsFor(n), dx: 16, dy: 0, w: 380, h: 300, z: 999 }]), n.id);
@@ -5691,13 +5692,6 @@
 
     if (!data) return h('div', { className: 'rmap-wrap' }, h('div', { className: 'empty' }, 'Térkép betöltése…'));
     var g = graph();
-    // prune ghost windows whose anchor node was DELETED (row removed) so a dead window never permanently eats a MAX_WIN
-    // slot. Keyed on the node-id set (not g itself) → runs only when nodes are added/removed, not on every pan/zoom.
-    // Merely-hidden/filtered anchors keep their window (still in g.by) and stay user-recoverable via the render below.
-    var winPruneKey = windows.length ? g.N.map(function (n) { return n.id; }).join(',') : '';
-    useEffect(function () {
-      setWindows(function (W) { if (!W.length) return W; var nx = W.filter(function (w) { return g.by[w.id]; }); return nx.length === W.length ? W : nx; });
-    }, [winPruneKey]);
     if (!g.N.length) return h('div', { className: 'rmap-wrap' }, h('div', { className: 'rmap-empty' }, h('div', { style: { fontSize: 30 } }, '🗺️'), h('b', null, 'A térkép a projekt adataiból épül fel'), h('p', null, 'Adj hozzá ötleteket, irodalmat, protokollt — és itt egy összefüggő canvason látod majd az egészet, a provenance-élekkel.')));
     var NW = 204, NH = 74;
     function nodeW(n) { return (n && n._w) || NW; }   // per-node card width (migration-80) or default
@@ -6129,7 +6123,7 @@
       // 5th LOD: embedded panel windows — screen-space (siblings of the world, so crisp), anchored to the card, non-modal
       windows.map(function (w, wi) {
         var n = g.by[w.id];
-        if (!n) return null;   // anchor node was deleted → the winPruneKey effect removes it from the array
+        if (!n) return null;   // anchor node was deleted → openWindow lazily drops it from the array on the next open
         var stW = (stageRef.current && stageRef.current.clientWidth) || 900, stH = (stageRef.current && stageRef.current.clientHeight) || 560;
         if (n.mapHidden || !nodeVisible(n)) {
           // the anchor card is hidden/type-filtered/off a curated page — the node still exists, so keep the window
