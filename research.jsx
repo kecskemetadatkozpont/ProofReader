@@ -5877,7 +5877,7 @@
     function cardScreenRect(node) { var kk = view.k; return { x: view.tx + node.x * kk, y: view.ty + node.y * kk, w: nodeW(node) * kk, h: nodeH(node) * kk }; }
     function inspStyle(node) {
       var f = fitFloat(cardScreenRect(node), { w: 300, colW: 300, h: 460 }, stageVP(), { prefer: 'right', gap: 12, canWiden: false });
-      return { position: 'absolute', left: f.left + 'px', top: f.top + 'px', width: f.width + 'px', maxHeight: f.maxHeight + 'px', zIndex: 13 };
+      return { position: 'absolute', left: f.left + 'px', top: f.top + 'px', width: f.width + 'px', maxHeight: f.usedH + 'px', zIndex: 13 };   // usedH (not maxHeight) — the height the top-clamp was computed for; .rmap-insp-float then scrolls the overflow
     }
     // floating selection toolbar — centered above the selected card (flips below + bottom-clamps via fitFloat).
     function selToolStyle(node) {
