@@ -5872,6 +5872,10 @@
     var activePageObj = (activePage && pagesCap) ? (pages.filter(function (p) { return p.id === activePage; })[0] || null) : null;
     function pageHides(n) { return !!(activePageObj && activePageObj.only_pinned && !n.mapPinned); }
     function nodeVisible(n) { return !n.mapHidden && !hiddenTypes[n.t] && !pageHides(n); }
+    // P2 Prezi story-thread: during a tour, the edge between the previous and current NODE-beat lights up (a comet runs the
+    // narrative path). Derived from the live tour state — no extra state. Page/viewport beats (no nodeId) yield no thread.
+    var storyPair = null;
+    if (tour && tour.beats && tour.i > 0) { var _pbe = tour.beats[tour.i - 1], _cbe = tour.beats[tour.i]; if (_pbe && _cbe && _pbe.nodeId && _cbe.nodeId) storyPair = { a: _pbe.nodeId, b: _cbe.nodeId }; }
     var edgeEls = g.E.map(function (e, i) {
       var a = g.by[e[0]], b = g.by[e[1]]; if (!a || !b) return null; if (!nodeVisible(a) || !nodeVisible(b)) return null;
       var pa = bpt(a, b), pb = bpt(b, a); var dx = (pb.x - pa.x) * 0.5;
@@ -5879,13 +5883,15 @@
       // pre-migration-81: keep today's exact look (no override, no hit-path, no selection)
       if (!edgesCap) { var cite0 = e[2] === 'cite'; return h('path', { key: i, className: cite0 ? 'rmap-e-cite' : 'rmap-e-flow', d: d, fill: 'none', stroke: cite0 ? 'var(--accent-tint)' : 'var(--line-2, var(--muted))', strokeWidth: cite0 ? 1.5 : 2, markerEnd: cite0 ? null : 'url(#rmap-arrow)' }); }
       var ek = edgeKey(e), st = edgeStyle(e), on = selEdge === ek;
-      if (hiddenEdgeTypes[st.kind]) return null;   // P1: this relation type is filtered off in the legend
+      var isStory = !!(storyPair && ((e[0] === storyPair.a && e[1] === storyPair.b) || (e[0] === storyPair.b && e[1] === storyPair.a)));
+      if (hiddenEdgeTypes[st.kind] && !isStory) return null;   // P1: filtered off in the legend (the story thread always shows)
       var animCls = st.anim === 'flow' ? ' rmap-ea-flow' : st.anim === 'pulse' ? ' rmap-ea-pulse' : st.anim === 'pingpong' ? ' rmap-ea-pingpong' : '';
+      var extraW = isStory ? 1.5 : (on ? 1 : 0);
       // --esp = per-edge animation duration (type default unless the speed slider overrode it); comet/draw/pulse/calm keep the chosen line-style dash
-      var bstyle = { stroke: st.col, strokeWidth: (on ? st.width + 1 : st.width) + 'px', '--esp': st.sp + 's' };
+      var bstyle = { stroke: st.col, strokeWidth: (st.width + extraW) + 'px', '--esp': st.sp + 's' };
       if (st.anim !== 'flow' && st.anim !== 'pingpong') bstyle.strokeDasharray = edgeDash(st.line);
-      var base = h('path', { key: 'b', className: 'rmap-e-base' + animCls + (on ? ' rmap-e-sel' : ''), d: d, style: bstyle, markerEnd: st.arrow ? ('url(#rmap-' + st.arrow + ')') : null });
-      var bead = (st.anim === 'comet' || st.anim === 'draw') ? h('path', { key: 'd', className: 'rmap-e-bead ' + (st.anim === 'comet' ? 'rmap-eb-comet' : 'rmap-eb-draw'), d: d, pathLength: 200, style: { stroke: st.col, strokeWidth: (st.width + 1.5) + 'px', '--esp': st.sp + 's' } }) : null;
+      var base = h('path', { key: 'b', className: 'rmap-e-base' + animCls + (on ? ' rmap-e-sel' : '') + (isStory ? ' rmap-e-story' : ''), d: d, style: bstyle, markerEnd: st.arrow ? ('url(#rmap-' + st.arrow + ')') : null });
+      var bead = (isStory || st.anim === 'comet' || st.anim === 'draw') ? h('path', { key: 'd', className: 'rmap-e-bead ' + (isStory || st.anim === 'comet' ? 'rmap-eb-comet' : 'rmap-eb-draw'), d: d, pathLength: 200, style: { stroke: st.col, strokeWidth: (st.width + 1.5) + 'px', '--esp': (isStory ? 1.2 : st.sp) + 's' } }) : null;
       var ring = on ? [h('circle', { key: 'r1', className: 'rmap-e-ring', cx: pa.x, cy: pa.y, r: 7 }), h('circle', { key: 'r2', className: 'rmap-e-ring', cx: pb.x, cy: pb.y, r: 7 })] : null;
       var hit = h('path', { key: 'h', className: 'rmap-e-hit', d: d, onClick: function (ev) { ev.stopPropagation(); selectEdge(ek); } });
       return h('g', { key: ek, style: { color: st.col } }, ring, base, bead, hit);
@@ -5937,6 +5943,10 @@
           seg('Vonalstílus', Object.keys(EDGE_LINES).map(function (k) { return { v: k, lab: EDGE_LINES[k] }; }), st.line, function (v) { persistEdge(e, { line_style: v }); }),
           seg('Nyílhegy', Object.keys(EDGE_ARROWS).map(function (k) { return { v: k, lab: EDGE_ARROWS[k] }; }), st.arrow, function (v) { persistEdge(e, { arrow: v }); }),
           seg('Vastagság', [{ v: 1.5, lab: 'Vékony' }, { v: 2, lab: 'Közepes' }, { v: 3, lab: 'Vastag' }], st.width, function (v) { persistEdge(e, { width: v }); }),
+          edgeSpeedCap ? h('div', { className: 'fld' }, h('div', { className: 'rmap-einsp-l' }, 'Fontosság (tempó + vastagság)'), h('div', { className: 'rmap-eseg' }, [1, 2, 3, 4, 5].map(function (imp) {
+            var pw = [1.5, 2, 2.5, 3, 3.5][imp - 1], ps = [2.8, 2.2, 1.6, 1.1, 0.7][imp - 1];
+            return h('button', { key: imp, className: (Math.abs(st.width - pw) < 0.01 && Math.abs(st.sp - ps) < 0.05 ? 'on' : ''), disabled: !ed, title: 'Fontosság ' + imp, onClick: function () { persistEdge(e, { width: pw, speed: ps }); } }, String(imp));
+          }))) : null,
           h('div', { className: 'fld' }, h('div', { className: 'rmap-einsp-l' }, 'Címke (az élre írva)'), h('input', { key: 'lbl' + selEdge, className: 'rmap-einsp-txt', type: 'text', defaultValue: st.label, placeholder: 'Írj ide feliratot…', disabled: !ed, maxLength: 40, onMouseDown: function (ev) { ev.stopPropagation(); }, onKeyDown: function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); ev.target.blur(); } ev.stopPropagation(); }, onBlur: function (ev) { var v = ev.target.value.trim(); if (v !== (st.label || '')) persistEdge(e, { label: v || null }); } }))),
         ed ? h('div', { className: 'rmap-einsp-foot' }, h('button', { style: st.manual ? { color: 'var(--danger, #d6323a)' } : null, onClick: function () { resetEdge(e); } }, st.manual ? '🗑 Kapcsolat törlése' : '↺ Alaphelyzet')) : null);
     }

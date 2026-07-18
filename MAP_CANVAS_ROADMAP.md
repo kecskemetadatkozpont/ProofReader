@@ -119,7 +119,11 @@
   rögtön kijelöl (inspector → típus/stílus). A manuális él inspectorában `🗑 Kapcsolat törlése` (a sor törlése).
   **Érvelési lencse**: a legenda minden során egy `◎` „csak ez" gomb → a többi reláció-típus elrejtése (a `hiddenEdgeTypes`-ra
   épül), így egy kattintással előhívható pl. csak a *Támogatja*+*Ellentmond* váz; „mind" visszaáll.
-- [ ] 🟡 **P2 hátralévő** — Prezi story-fonál (él-animáció a bemutató-jelenetek mentén); fontosság-preset (tempó+vastagság+fényerő).
+- [x] ✅ **P2 zárás — Prezi story-fonál + fontosság-preset** — **story-fonál**: bemutató (🎬) közben az előző→jelenlegi
+  **node-jelenet** közti él kigyúl és **üstököst** játszik le a narratíva útján (glow + vastagabb vonal + gyors comet;
+  a `tour` állapotból származtatva, extra state nélkül; a rejtett-típusú él is látszik ilyenkor). **Fontosság-preset**:
+  az él-inspector **1–5** gyors-beállítója egyszerre állítja a **tempót + vastagságot** (csak ha migration-82 fut, mert
+  a sebesség onnan jön). **Ezzel az interaktív-él vonal (P0→P2) teljes.**
 
 ## Hátralévő (jövő) — Phase 6+
 - [ ] 🔴 **Teljes karakter-szintű CRDT/Yjs** — egyidejű azonos-szekció gépelés valós idejű merge-dzsel.
