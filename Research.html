@@ -1100,6 +1100,45 @@
     .rmap-e-flow { stroke-dasharray: 7 6; animation: rmap-flow 1.7s linear infinite; }
     .rmap-e-cite { stroke-dasharray: 5 6; animation: rmap-flow 2.1s linear infinite; }
     @media (prefers-reduced-motion: reduce) { .rmap-e-flow, .rmap-e-cite { animation: none; } .rmap-e-flow { stroke-dasharray: none; } }
+    /* interactive edges (migration-81): selectable + typed + animated */
+    @keyframes rmap-e-pulse { 0%,100% { stroke-opacity:.34; } 50% { stroke-opacity:1; } }
+    @keyframes rmap-e-pingpong { 0%,100% { stroke-dashoffset:0; } 50% { stroke-dashoffset:-22; } }
+    @keyframes rmap-e-travel { from { stroke-dashoffset:200; } to { stroke-dashoffset:0; } }
+    @keyframes rmap-e-ring { 0%,100% { opacity:.35; } 50% { opacity:.85; } }
+    .rmap-e-hit { stroke: transparent; fill: none; stroke-width: 16; vector-effect: non-scaling-stroke; pointer-events: stroke; cursor: pointer; }
+    .rmap-e-base { fill: none; stroke-linecap: round; }
+    .rmap-ea-flow { stroke-dasharray: 7 6; animation: rmap-flow var(--esp,1.7s) linear infinite; }
+    .rmap-ea-pulse { animation: rmap-e-pulse var(--esp,1.6s) ease-in-out infinite; }
+    .rmap-ea-pingpong { stroke-dasharray: 6 6; animation: rmap-e-pingpong var(--esp,1.4s) ease-in-out infinite; }
+    .rmap-e-bead { fill: none; stroke-linecap: round; pointer-events: none; }
+    .rmap-eb-comet { stroke-dasharray: 3 197; animation: rmap-e-travel var(--esp,1.5s) linear infinite; }
+    .rmap-eb-draw { stroke-dasharray: 34 166; animation: rmap-e-travel var(--esp,2.1s) linear infinite; }
+    .rmap-e-sel { filter: drop-shadow(0 0 5px currentColor); }
+    .rmap-edges.has-esel .rmap-e-base:not(.rmap-e-sel) { opacity: .3; }
+    .rmap-edges.has-esel .rmap-e-bead { opacity: .28; }
+    .rmap-e-ring { fill: none; stroke: var(--accent); stroke-width: 2; animation: rmap-e-ring 1.6s ease-in-out infinite; }
+    @media (prefers-reduced-motion: reduce) {
+      .rmap-ea-flow, .rmap-ea-pulse, .rmap-ea-pingpong, .rmap-eb-comet, .rmap-eb-draw, .rmap-e-ring { animation: none; }
+      .rmap-eb-comet, .rmap-eb-draw { display: none; }
+    }
+    /* edge inspector (floating, anchored to the edge midpoint) */
+    .rmap-einsp { position: absolute; z-index: 15; width: 236px; background: var(--surface); border: 1px solid var(--line); border-radius: 13px; box-shadow: 0 20px 50px -22px rgba(20,26,40,.55); font-size: 12.5px; overflow: hidden; }
+    .rmap-einsp-h { display: flex; align-items: center; gap: 6px; padding: 9px 11px; border-bottom: 1px solid var(--line); background: var(--surface-2); }
+    .rmap-einsp-h b { font-size: 11.5px; font-weight: 750; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+    .rmap-einsp-h .bd { font: 600 9px ui-monospace, monospace; letter-spacing: .04em; padding: 2px 5px; border-radius: 5px; background: var(--accent-tint); color: var(--accent); flex: none; }
+    .rmap-einsp-h .x { margin-left: auto; border: none; background: none; color: var(--muted); cursor: pointer; font-size: 16px; line-height: 1; padding: 0 2px; flex: none; }
+    .rmap-einsp-b { padding: 10px 11px; display: flex; flex-direction: column; gap: 11px; max-height: 60vh; overflow-y: auto; }
+    .rmap-einsp-l { font-size: 9.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); margin-bottom: 5px; }
+    .rmap-eseg { display: flex; flex-wrap: wrap; gap: 3px; }
+    .rmap-eseg button { font: inherit; font-size: 11px; padding: 3px 6px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); color: var(--muted); cursor: pointer; display: flex; align-items: center; gap: 4px; }
+    .rmap-eseg button.on { background: var(--ink, #16203a); color: var(--surface); border-color: var(--ink, #16203a); }
+    .rmap-eseg .sw { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+    .rmap-esw { display: flex; flex-wrap: wrap; gap: 5px; }
+    .rmap-esw button { width: 21px; height: 21px; border-radius: 6px; border: 2px solid var(--line); cursor: pointer; padding: 0; }
+    .rmap-esw button.on { border-color: var(--ink, #16203a); transform: scale(1.1); }
+    .rmap-einsp-rng { width: 100%; accent-color: var(--accent); }
+    .rmap-einsp-foot { padding: 8px 11px; border-top: 1px solid var(--line); }
+    .rmap-einsp-foot button { width: 100%; font: inherit; font-size: 11.5px; font-weight: 650; padding: 6px; border-radius: 7px; border: 1px solid var(--line); background: var(--surface); color: var(--muted); cursor: pointer; }
     .rmap-lane { position: absolute; top: 0; border-right: 1px dashed var(--line-2); }
     .rmap-lane.alt { background: color-mix(in srgb, var(--surface) 45%, transparent); }
     .rmap-lh { position: absolute; top: 12px; left: 14px; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; color: var(--faint); white-space: nowrap; }
@@ -1248,7 +1287,7 @@
   <script type="text/babel" src="canvas.jsx?v=1783137934"></script>
   <script type="text/babel" src="notes.jsx?v=1783137934"></script>
   <script src="autopilot-core.js?v=1784160000"></script>
-  <script type="text/babel" src="research.jsx?v=1785430000"></script>
+  <script type="text/babel" src="research.jsx?v=1785500000"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>

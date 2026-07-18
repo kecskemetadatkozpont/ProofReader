@@ -108,6 +108,13 @@ sorrendben. A service-key nem tud DDL-t futtatni, ezért ezek manuálisak.
     thumbnail, ha elég nagyra húzod; `↺ Auto méret` a jobb-katt menüben visszaáll. (Ez a „gazdag kártya + 5. LOD"
     irány **P0+P1** része; a P2 finomítás + a P3 beágyazott panel-ablak még jön.)
 
+12. **`backend/migration-81-map-edges.sql`** — interaktív élek: `research_map_edges` tábla (per-él stílus-override +
+    kézi élek), kulcs `edge_key = from|to|kind`. RLS + realtime a `migration-79` mintájára (`research_can_read/write_project`).
+    Amíg nincs lefuttatva: az élek NEM kijelölhetők, nincs inspector/override — az élek **pontosan a maiak** (graceful,
+    3-szintű probe, `edgesCap=false`). Utána: az élre kattintva megnyílik az **él-inspector** (reláció-típus / szín /
+    animáció / vonalstílus / nyílhegy / vastagság + `↺ Alaphelyzet`), a stílus perzisztál és realtime szinkronizál.
+    (Ez az „interaktív élek" irány **P0** része; a P1 címke+legenda+inferRel és a P2 kézi élek+story-fonál még jön.)
+
 ## Edge-function deploy-ok (explicit jóváhagyás + megnevezés kell)
 
 **NINCS** — ebben a munkamenetben egyetlen edge-function sem változott, deploy nem szükséges.

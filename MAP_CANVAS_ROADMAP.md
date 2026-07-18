@@ -88,7 +88,20 @@
   visszaállítható sarok-chippé alakul (nem eszi meg a slotot); (2) z-rend — a `zTopRef` korlátlan számláló helyett
   `reZ` kompakt újrarangsorolás (20-tól), így ablak z sosem éri el a modal 200-at; (3) resize min-szélesség 300→320
   (a mount-kapuval egyezik, nincs panel-unmount+state-vesztés a holt sávban); (4) duplikált `sec-N` DOM-id — a TOC-ugrás
-  a saját `.doc-embed`-jére szűkítve. *(pending commit)*
+  a saját `.doc-embed`-jére szűkítve.
+
+## 🚧 Interaktív élek (folyamatban, 2026-07-18)
+> Feltárás: 3-ágú design-workflow (pragmatikus · szemantikus tudásgráf · storytelling) + kód-megalapozás → szintézis →
+> interaktív mockup-artifact (`edge-mockup`). Az élek ma származtatott, néma provenance-vonalak; a terv elsőrangú,
+> kijelölhető, tipizált, animált, címkézhető kapcsolatokká teszi őket.
+- [x] ✅ **P0 — kijelölés + inspector + perzisztencia** — átlátszó „kövér” hit-path (`non-scaling-stroke`, 16px) minden
+  zoomon; stabil `edge_key = from|to|kind`; kölcsönösen kizáró él/node-kijelölés; lebegő **él-inspector** (típus / szín /
+  animáció / vonalstílus / nyílhegy / vastagság + `↺ Alaphelyzet`), az él felezőpontjához horgonyozva; 7 reláció-típus
+  (Származás/Idézet/Bemenete/Támogatja/Ellentmond/Függőség/Kapcsolódik) look-presetként; animációk (Áramlás/Üstökös/
+  Pulzus/Rajzolódás/Oda-vissza/Nyugodt) + reduced-motion guard; `research_map_edges` (**migration-81**) graceful
+  betöltés + realtime self-echo guarddal; stabil React key = `edge_key`. ⚠️ **migration-81 alkalmazása manuális.**
+- [ ] 🟡 **P1** — címke-pill az éleken; `inferRel()` automatikus alapreláció; élő, szűrhető legenda (hiddenEdgeTypes); sebesség-csúszka.
+- [ ] 🔴 **P2** — kézi élek (link-mód húzással); érvelési lencse; Prezi story-fonál az élek mentén; fontosság-preset.
 
 ## Hátralévő (jövő) — Phase 6+
 - [ ] 🔴 **Teljes karakter-szintű CRDT/Yjs** — egyidejű azonos-szekció gépelés valós idejű merge-dzsel.

@@ -4353,6 +4353,24 @@
   var RMAP_PHASES = [['ideas', 'Ideas', '💡'], ['literature', 'Literature', '📚'], ['sr', 'Systematic review', '🔬'], ['protocol', 'Protocol', '🧪'], ['journal', 'Journal', '🎯'], ['writing', 'Writing', '✍️']];
   var RMAP_PHASE_IDX = {}; RMAP_PHASES.forEach(function (p, i) { RMAP_PHASE_IDX[p[0]] = i; });
   var RMAP_TYPE = { idea: { ic: '💡', lab: 'Ötlet', tab: 'ideas' }, paper: { ic: '📄', lab: 'Cikk', tab: 'literature' }, study: { ic: '🔎', lab: 'Irodalom', tab: 'literature' }, review: { ic: '📝', lab: 'Áttekintés', tab: 'study' }, step: { ic: '🧪', lab: 'Protokoll-lépés', tab: 'protocol' }, venue: { ic: '🎯', lab: 'Folyóirat', tab: 'journal' }, section: { ic: '✍️', lab: 'Draft-szekció', tab: 'writing' }, dataset: { ic: '🗂️', lab: 'Adathalmaz', tab: 'data' }, file: { ic: '📎', lab: 'Fájl', tab: 'ideas' }, chat: { ic: '💬', lab: 'Beszélgetés', tab: 'ideas' }, figure: { ic: '🖼️', lab: 'Ábra', tab: 'literature' }, srq: { ic: '❓', lab: 'Review-kérdés', tab: 'study' }, sreview: { ic: '🔬', lab: 'Szisztematikus áttekintés', tab: 'study' } };
+  // interactive-edge relation presets (migration-81). Each type is a full look-preset: color + line-style + arrow + default animation.
+  // The two structural derived kinds (flow/cite) map to erd/idz and keep today's exact stroke for backward-compat.
+  var EDGE_TYPES = {
+    erd: { nm: 'Származás', verb: 'ered', col: 'var(--line-2, var(--muted))', line: 'dashed', arrow: 'ar', anim: 'flow' },
+    idz: { nm: 'Idézet', verb: 'hivatkozik', col: 'var(--accent-tint)', line: 'dashed', arrow: '', anim: 'flow' },
+    bem: { nm: 'Bemenete', verb: 'táplálja', col: '#0b93b8', line: 'solid', arrow: 'ar', anim: 'comet' },
+    tam: { nm: 'Támogatja', verb: 'alátámasztja', col: '#17a34a', line: 'solid', arrow: 'ar', anim: 'pulse' },
+    ell: { nm: 'Ellentmond', verb: 'cáfolja', col: '#db3b41', line: 'dashed', arrow: 'bl', anim: 'pingpong' },
+    fug: { nm: 'Függőség', verb: 'előfeltétele', col: '#d1810b', line: 'solid', arrow: 'ar', anim: 'flow' },
+    kap: { nm: 'Kapcsolódik', verb: 'kapcsolódik', col: '#8493ab', line: 'dotted', arrow: '', anim: 'calm' }
+  };
+  var EDGE_TYPE_ORDER = ['erd', 'idz', 'bem', 'tam', 'ell', 'fug', 'kap'];
+  var EDGE_ANIMS = { flow: 'Áramlás', comet: 'Üstökös', pulse: 'Pulzus', draw: 'Rajzolódás', pingpong: 'Oda-vissza', calm: 'Nyugodt' };
+  var EDGE_ANIM_ORDER = ['flow', 'comet', 'pulse', 'draw', 'pingpong', 'calm'];
+  var EDGE_LINES = { solid: 'Folytonos', dashed: 'Szaggatott', dotted: 'Pontozott' };
+  var EDGE_ARROWS = { '': 'nincs', ar: '→', bl: '⊣' };
+  var EDGE_SWATCHES = ['#64748b', '#5b63e6', '#0b93b8', '#17a34a', '#db3b41', '#d1810b', '#8493ab'];
+  function edgeDash(line) { return line === 'dashed' ? '7 6' : line === 'dotted' ? '2 6' : 'none'; }
   function PipelineCanvas(props) {
     var dS = useState(null), data = dS[0], setData = dS[1];   // null = loading
     var vS = useState({ tx: 30, ty: 18, k: 1 }), view = vS[0], setView = vS[1];
@@ -4453,6 +4471,10 @@
     var armedRef = useRef(null);   // the card "armed to enter" at deep zoom (Fázis 3) — Enter dives into it
     var winsS = useState([]), windows = winsS[0], setWindows = winsS[1];   // 5th LOD: embedded screen-space panel windows [{id,tab,t,title,ref,fp,dx,dy,w,h,z}]
     var winDragRef = useRef(null);   // window move/resize lifecycle guard
+    var selEdgeS = useState(null), selEdge = selEdgeS[0], setSelEdge = selEdgeS[1];   // interactive edges (migration-81): selected edge_key — mutually exclusive with node `sel`
+    var eovS = useState({}), edgeOv = eovS[0], setEdgeOv = eovS[1];   // edge_key → {kind,color,anim,line_style,arrow,width,label} override rows
+    var edgeCapS = useState(false), edgesCap = edgeCapS[0], setEdgesCap = edgeCapS[1];   // research_map_edges migration capability
+    var eovRef = useRef(null);   // in-flight edge-edit key (realtime self-echo guard)
     var stagesBusy = useRef(false);   // re-entry guard for autoLayoutStages (prevents duplicate phase frames on rapid double-invoke)
     var memS = useState(null), members = memS[0], setMembers = memS[1];   // project collaborators (migration-74) — null until loaded/capable
     var shareS = useState(false), shareOpen = shareS[0], setShareOpen = shareS[1];   // the Share/Collaborators modal
@@ -4525,6 +4547,11 @@
       sb.from('research_map_paths').select('id,name,ord,steps').eq('project_id', pid).order('ord', { ascending: true }).order('created_at', { ascending: true }).then(function (r) {
         if (!alive.current) return; if (r && r.error) return; setPathsCap(true); setPaths((r && r.data) || []);
       });
+      // load Map edge style overrides — graceful: pre-migration-81 the table is absent → edgesCap stays false, edges render as today
+      sb.from('research_map_edges').select('edge_key,kind,color,anim,line_style,arrow,width,label').eq('project_id', pid).then(function (r) {
+        if (!alive.current) return; if (r && r.error) return; setEdgesCap(true);
+        var m = {}; ((r && r.data) || []).forEach(function (row) { m[row.edge_key] = row; }); setEdgeOv(m);
+      });
       var me = props.viewer || {}, myKey = props.viewerId || ('anon-' + pid);
       var ch = sb.channel('rmap-ap:' + pid, { config: { presence: { key: myKey } } })
         .on('broadcast', { event: 'cursor' }, function (m) {
@@ -4554,6 +4581,13 @@
           if (ndrag.current && ndrag.current.id === nw.node_id) return;   // ignore the echo of my own in-flight drag
           if (nrzRef.current && nrzRef.current.id === nw.node_id) return;   // ignore the echo of my own in-flight card resize
           setLayout(function (L) { var m = Object.assign({}, L); m[nw.node_id] = { x: nw.x, y: nw.y, hidden: !!nw.hidden, pinned: !!nw.pinned, card_w: nw.card_w, card_h: nw.card_h }; return m; });
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'research_map_edges', filter: 'project_id=eq.' + pid }, function (p) {
+          if (!alive.current) return;
+          if (p.eventType === 'DELETE') { var ok = p.old && p.old.edge_key; if (ok) setEdgeOv(function (O) { var m = Object.assign({}, O); delete m[ok]; return m; }); return; }
+          var ne = p.new; if (!ne || !ne.edge_key) return;
+          if (eovRef.current && eovRef.current === ne.edge_key) return;   // ignore the echo of my own in-flight edge edit
+          setEdgeOv(function (O) { var m = Object.assign({}, O); m[ne.edge_key] = ne; return m; });
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'research_map_frames', filter: 'project_id=eq.' + pid }, function (p) {
           if (!alive.current) return;
@@ -4834,8 +4868,10 @@
     }
     function onDown(e) {
       if (e.target.closest && e.target.closest('.rmap-node')) return;
+      if (!e.shiftKey && e.target.closest && e.target.closest('.rmap-e-hit')) return;   // a plain edge click selects (its own onClick) — don't start a pan; shift still falls through to marquee
       // comment mode: a click on the empty canvas drops a position-pinned comment composer
       if (commentMode) { var pc = stageXY(e); setComposer({ x: Math.round((pc.x - view.tx) / view.k), y: Math.round((pc.y - view.ty) / view.k) }); setCmText(''); return; }
+      if (selEdge) setSelEdge(null);   // empty-canvas mousedown clears the edge selection
       // shift + drag on the empty canvas = marquee multi-select; a plain drag pans; a plain click clears the selection
       if (e.shiftKey) { cancelFly(); tourStop(); var p = stageXY(e); mqRef.current = { x0: p.x, y0: p.y }; setMarquee({ x0: p.x, y0: p.y, x1: p.x, y1: p.y }); window.addEventListener('mousemove', onMarqMove); window.addEventListener('mouseup', onMarqUp); window.addEventListener('blur', onMarqCancel); return; }
       if (Object.keys(msel).length) setMsel({});
@@ -5046,6 +5082,35 @@
       var cur = layout[n.id] || {};
       sb.from('research_map_layout').upsert({ project_id: props.projectId, node_id: n.id, x: (cur.x != null ? cur.x : n.x), y: (cur.y != null ? cur.y : n.y), card_w: null, card_h: null, updated_at: new Date().toISOString() }, { onConflict: 'project_id,node_id' }).then(function () { if (alive.current) setSizeGen(function (x) { return x + 1; }); });
     }
+    // ---- interactive edges (migration-81) ----
+    // stable key: fromId|toId|kind (the structural cite/flow flag disambiguates the rare same-pair double edge)
+    function edgeKey(e) { return e[0] + '|' + e[1] + '|' + (e[2] || 'flow'); }
+    // resolve an edge to its concrete style: the semantic TYPE default (derived kind → erd/idz), then the saved override on top.
+    function edgeStyle(e) {
+      var ov = edgeOv[edgeKey(e)] || {};
+      var kind = ov.kind || (e[2] === 'cite' ? 'idz' : 'erd');
+      var T = EDGE_TYPES[kind] || EDGE_TYPES.erd;
+      return { kind: kind, col: ov.color || T.col, anim: ov.anim || T.anim, line: ov.line_style || T.line, arrow: (ov.arrow != null ? ov.arrow : T.arrow), width: ov.width || (kind === 'idz' ? 1.5 : 2), label: ov.label || '', ov: !!edgeOv[edgeKey(e)] };
+    }
+    // upsert an override row (merges a partial patch into the current override); optimistic + graceful.
+    function persistEdge(e, patch) {
+      if (!props.canEdit || !edgesCap) return;
+      var key = edgeKey(e), cur = edgeOv[key] || {}, next = Object.assign({ edge_key: key, from_id: e[0], to_id: e[1] }, cur, patch);
+      eovRef.current = key;
+      setEdgeOv(function (O) { var m = Object.assign({}, O); m[key] = next; return m; });
+      sb.from('research_map_edges').upsert({ project_id: props.projectId, edge_key: key, from_id: e[0], to_id: e[1], kind: next.kind || null, color: next.color || null, anim: next.anim || null, line_style: next.line_style || null, arrow: (next.arrow != null ? next.arrow : null), width: next.width || null, label: next.label || null, manual: false, updated_at: new Date().toISOString() }, { onConflict: 'project_id,edge_key' }).then(function (r) {
+        setTimeout(function () { if (eovRef.current === key) eovRef.current = null; }, 400);
+        if (r && r.error && alive.current) window.PRUI.toast('Él mentése sikertelen: ' + r.error.message, { kind: 'error' });
+      });
+    }
+    // "↺ Alaphelyzet": drop the override row → the edge returns to its derived default
+    function resetEdge(e) {
+      if (!props.canEdit || !edgesCap) return; var key = edgeKey(e);
+      eovRef.current = key;
+      setEdgeOv(function (O) { var m = Object.assign({}, O); delete m[key]; return m; });
+      sb.from('research_map_edges').delete().eq('project_id', props.projectId).eq('edge_key', key).then(function () { setTimeout(function () { if (eovRef.current === key) eovRef.current = null; }, 400); });
+    }
+    function selectEdge(key) { setSel(null); setMsel({}); setSelEdge(key); }   // edges + nodes are mutually exclusive
     // per-node Map flags (migration-70): hide/show + pin. Upsert the node's CURRENT position with the flag (x/y NOT NULL).
     // Optimistic; on error revert + toast. Guarded by mapFlags so the UI only appears once the columns exist.
     function nodeSetFlag(n, key, val) {
@@ -5352,7 +5417,7 @@
         window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); window.removeEventListener('blur', finish);
         setDlive(null);
         if (d.moved) { setLayout(function (L) { var m = Object.assign({}, L); m[n.id] = Object.assign({}, m[n.id], { x: d.lx, y: d.ly }); return m; }); persistPos(n.id, d.lx, d.ly); }
-        else { setSel(n.id); setMsel({}); if (n.id === 'lit') setLitOpen(function (v) { return !v; }); }
+        else { setSel(n.id); setMsel({}); setSelEdge(null); if (n.id === 'lit') setLitOpen(function (v) { return !v; }); }
       }
       function mv(ev) {
         if (!ndrag.current) return;
@@ -5724,7 +5789,45 @@
     var activePageObj = (activePage && pagesCap) ? (pages.filter(function (p) { return p.id === activePage; })[0] || null) : null;
     function pageHides(n) { return !!(activePageObj && activePageObj.only_pinned && !n.mapPinned); }
     function nodeVisible(n) { return !n.mapHidden && !hiddenTypes[n.t] && !pageHides(n); }
-    var edgeEls = g.E.map(function (e, i) { var a = g.by[e[0]], b = g.by[e[1]]; if (!a || !b) return null; if (!nodeVisible(a) || !nodeVisible(b)) return null; var pa = bpt(a, b), pb = bpt(b, a); var dx = (pb.x - pa.x) * 0.5; var cite = e[2] === 'cite'; return h('path', { key: i, className: cite ? 'rmap-e-cite' : 'rmap-e-flow', d: 'M' + pa.x + ',' + pa.y + ' C' + (pa.x + dx) + ',' + pa.y + ' ' + (pb.x - dx) + ',' + pb.y + ' ' + pb.x + ',' + pb.y, fill: 'none', stroke: cite ? 'var(--accent-tint)' : 'var(--line-2, var(--muted))', strokeWidth: cite ? 1.5 : 2, markerEnd: cite ? null : 'url(#rmap-arrow)' }); });
+    var edgeEls = g.E.map(function (e, i) {
+      var a = g.by[e[0]], b = g.by[e[1]]; if (!a || !b) return null; if (!nodeVisible(a) || !nodeVisible(b)) return null;
+      var pa = bpt(a, b), pb = bpt(b, a); var dx = (pb.x - pa.x) * 0.5;
+      var d = 'M' + pa.x + ',' + pa.y + ' C' + (pa.x + dx) + ',' + pa.y + ' ' + (pb.x - dx) + ',' + pb.y + ' ' + pb.x + ',' + pb.y;
+      // pre-migration-81: keep today's exact look (no override, no hit-path, no selection)
+      if (!edgesCap) { var cite0 = e[2] === 'cite'; return h('path', { key: i, className: cite0 ? 'rmap-e-cite' : 'rmap-e-flow', d: d, fill: 'none', stroke: cite0 ? 'var(--accent-tint)' : 'var(--line-2, var(--muted))', strokeWidth: cite0 ? 1.5 : 2, markerEnd: cite0 ? null : 'url(#rmap-arrow)' }); }
+      var ek = edgeKey(e), st = edgeStyle(e), on = selEdge === ek;
+      var animCls = st.anim === 'flow' ? ' rmap-ea-flow' : st.anim === 'pulse' ? ' rmap-ea-pulse' : st.anim === 'pingpong' ? ' rmap-ea-pingpong' : '';
+      // per-type animation timing comes from the CSS class default (P0); comet/draw/pulse/calm keep the chosen line-style dash
+      var bstyle = { stroke: st.col, strokeWidth: (on ? st.width + 1 : st.width) + 'px' };
+      if (st.anim !== 'flow' && st.anim !== 'pingpong') bstyle.strokeDasharray = edgeDash(st.line);
+      var base = h('path', { key: 'b', className: 'rmap-e-base' + animCls + (on ? ' rmap-e-sel' : ''), d: d, style: bstyle, markerEnd: st.arrow ? ('url(#rmap-' + st.arrow + ')') : null });
+      var bead = (st.anim === 'comet' || st.anim === 'draw') ? h('path', { key: 'd', className: 'rmap-e-bead ' + (st.anim === 'comet' ? 'rmap-eb-comet' : 'rmap-eb-draw'), d: d, pathLength: 200, style: { stroke: st.col, strokeWidth: (st.width + 1.5) + 'px' } }) : null;
+      var ring = on ? [h('circle', { key: 'r1', className: 'rmap-e-ring', cx: pa.x, cy: pa.y, r: 7 }), h('circle', { key: 'r2', className: 'rmap-e-ring', cx: pb.x, cy: pb.y, r: 7 })] : null;
+      var hit = h('path', { key: 'h', className: 'rmap-e-hit', d: d, onClick: function (ev) { ev.stopPropagation(); selectEdge(ek); } });
+      return h('g', { key: ek, style: { color: st.col } }, ring, base, bead, hit);
+    });
+    // the floating edge inspector (migration-81) — anchored to the selected edge's midpoint, screen-space
+    var selEdgeObj = (edgesCap && selEdge) ? g.E.filter(function (e) { return edgeKey(e) === selEdge; })[0] : null;
+    function edgeInspEl() {
+      var e = selEdgeObj; if (!e) return null; var a = g.by[e[0]], b = g.by[e[1]]; if (!a || !b || !nodeVisible(a) || !nodeVisible(b)) return null;
+      var st = edgeStyle(e), pa = bpt(a, b), pb = bpt(b, a), mid = { x: (pa.x + pb.x) / 2, y: (pa.y + pb.y) / 2 };
+      var stW = (stageRef.current && stageRef.current.clientWidth) || 900, stH = (stageRef.current && stageRef.current.clientHeight) || 560;
+      var sx = view.tx + mid.x * view.k, sy = view.ty + mid.y * view.k;
+      var ix = Math.max(8, Math.min(sx + 14, stW - 244)), iy = Math.max(8, Math.min(sy - 40, stH - 320));
+      var ed = props.canEdit && edgesCap;
+      function seg(label, opts, cur, onPick) { return h('div', { className: 'fld' }, h('div', { className: 'rmap-einsp-l' }, label), h('div', { className: 'rmap-eseg' }, opts.map(function (o) { return h('button', { key: o.v, className: (cur === o.v ? 'on' : ''), disabled: !ed, onClick: function () { onPick(o.v); } }, o.sw ? h('span', { className: 'sw', style: { background: o.sw } }) : null, o.lab); }))); }
+      return h('div', { className: 'rmap-einsp', style: { left: ix + 'px', top: iy + 'px' }, onMouseDown: function (ev) { ev.stopPropagation(); }, onWheel: function (ev) { ev.stopPropagation(); } },
+        h('div', { className: 'rmap-einsp-h' }, h('b', null, (RMAP_TYPE[a.t] && RMAP_TYPE[a.t].ic || '◻') + ' ' + a.title + ' → ' + (RMAP_TYPE[b.t] && RMAP_TYPE[b.t].ic || '◻') + ' ' + b.title), h('span', { className: 'bd' }, st.ov ? 'EGYÉNI' : 'ALAP'), h('button', { className: 'x', title: 'Bezárás', onClick: function () { setSelEdge(null); } }, '×')),
+        h('div', { className: 'rmap-einsp-b' },
+          seg('Reláció-típus', EDGE_TYPE_ORDER.map(function (k) { return { v: k, lab: EDGE_TYPES[k].nm, sw: EDGE_TYPES[k].col }; }), st.kind, function (v) { persistEdge(e, { kind: v, color: null, anim: null, line_style: null, arrow: null, width: null }); }),
+          h('div', { className: 'fld' }, h('div', { className: 'rmap-einsp-l' }, 'Szín'), h('div', { className: 'rmap-esw' },
+            [h('button', { key: 'auto', className: (!(edgeOv[selEdge] || {}).color ? 'on' : ''), title: 'Típus szerinti', disabled: !ed, style: { background: 'repeating-linear-gradient(45deg,var(--surface),var(--surface) 3px,var(--line) 3px,var(--line) 6px)' }, onClick: function () { persistEdge(e, { color: null }); } })].concat(EDGE_SWATCHES.map(function (c) { return h('button', { key: c, className: ((edgeOv[selEdge] || {}).color === c ? 'on' : ''), disabled: !ed, style: { background: c }, onClick: function () { persistEdge(e, { color: c }); } }); })))),
+          seg('Animáció', EDGE_ANIM_ORDER.map(function (k) { return { v: k, lab: EDGE_ANIMS[k] }; }), st.anim, function (v) { persistEdge(e, { anim: v }); }),
+          seg('Vonalstílus', Object.keys(EDGE_LINES).map(function (k) { return { v: k, lab: EDGE_LINES[k] }; }), st.line, function (v) { persistEdge(e, { line_style: v }); }),
+          seg('Nyílhegy', Object.keys(EDGE_ARROWS).map(function (k) { return { v: k, lab: EDGE_ARROWS[k] }; }), st.arrow, function (v) { persistEdge(e, { arrow: v }); }),
+          seg('Vastagság', [{ v: 1.5, lab: 'Vékony' }, { v: 2, lab: 'Közepes' }, { v: 3, lab: 'Vastag' }], st.width, function (v) { persistEdge(e, { width: v }); })),
+        ed ? h('div', { className: 'rmap-einsp-foot' }, h('button', { onClick: function () { resetEdge(e); } }, '↺ Alaphelyzet')) : null);
+    }
     function body(n) {
       var k = [h('div', { className: 'rmap-nh', key: 'h' }, h('span', { className: 'rmap-ni' }, RMAP_TYPE[n.t].ic), h('span', { className: 'rmap-nt' }, n.title))];
       if (n.t === 'study') k.push(h('div', { className: 'rmap-nm', key: 'm' }, h('b', null, n.m.Források), ' forrás → ', h('b', null, n.m.Included), ' incl', n.pcount ? h('span', { className: 'rmap-exp' }, (litOpen ? '▾ ' : '▸ ') + n.pcount + ' cikk') : null));
@@ -5802,8 +5905,12 @@
                 h('button', { title: 'Generálás', disabled: dBusy || !String(frGen[f.id] || '').trim(), onClick: function () { frameGenerate(f, frGen[f.id]); } }, '➤')) : null,
               props.canEdit ? h('div', { className: 'rmap-frame-rz', title: 'Átméretezés', onMouseDown: function (e) { startFrameDrag(e, f, 'resize'); } }) : null);
           }),
-          h('svg', { className: 'rmap-edges', width: svgW, height: g.height },
-            h('defs', null, h('marker', { id: 'rmap-arrow', viewBox: '0 0 8 8', refX: 6.5, refY: 4, markerWidth: 6.5, markerHeight: 6.5, orient: 'auto-start-reverse' }, h('path', { d: 'M0.5,0.5 L7.5,4 L0.5,7.5 Z', fill: 'var(--line-2, var(--muted))' }))),
+          h('svg', { className: 'rmap-edges' + (selEdge ? ' has-esel' : ''), width: svgW, height: g.height },
+            h('defs', null,
+              h('marker', { id: 'rmap-arrow', viewBox: '0 0 8 8', refX: 6.5, refY: 4, markerWidth: 6.5, markerHeight: 6.5, orient: 'auto-start-reverse' }, h('path', { d: 'M0.5,0.5 L7.5,4 L0.5,7.5 Z', fill: 'var(--line-2, var(--muted))' })),
+              // interactive-edge markers inherit the edge stroke via context-stroke (migration-81)
+              h('marker', { id: 'rmap-ar', viewBox: '0 0 8 8', refX: 6.5, refY: 4, markerWidth: 6.5, markerHeight: 6.5, orient: 'auto-start-reverse', markerUnits: 'userSpaceOnUse' }, h('path', { d: 'M0.5,0.5 L7.5,4 L0.5,7.5 Z', fill: 'context-stroke' })),
+              h('marker', { id: 'rmap-bl', viewBox: '0 0 8 8', refX: 5.5, refY: 4, markerWidth: 8, markerHeight: 8, orient: 'auto-start-reverse', markerUnits: 'userSpaceOnUse' }, h('path', { d: 'M5,1 L5,7', stroke: 'context-stroke', strokeWidth: 1.6 }))),
             edgeEls),
           g.N.map(function (n) { if (!nodeVisible(n)) return null; var _sized = !!((nrzLive && nrzLive.id === n.id) || (layout[n.id] && layout[n.id].card_h)); var _st = { left: n.x + 'px', top: n.y + 'px', width: (n._w || NW) + 'px' }; if (_sized) _st.height = (n._h || NH) + 'px'; return h('div', { key: n.id, 'data-nid': n.id, className: 'rmap-node t-' + n.t + (_sized ? ' rmap-sized' : '') + (sel === n.id ? ' sel' : '') + (msel[n.id] ? ' rmap-mselected' : '') + (n.mapPinned ? ' rmap-pinned' : '') + (activeKey && n.ph === RMAP_PHASE_IDX[activeKey] ? ' inphase' : '') + (props.canEdit ? ' editable' : '') + (dlive && dlive.id === n.id ? ' dragging' : '') + ((nrzLive && nrzLive.id === n.id) ? ' rmap-resizing' : ''), style: _st, onMouseDown: function (e) { e.stopPropagation(); startNodeDrag(e, n); }, onDoubleClick: function (e) { e.stopPropagation(); if (canEnter(n)) enterNode(n); }, onContextMenu: function (e) { e.preventDefault(); e.stopPropagation(); if (props.canEdit && (genActions(n).length || regenActions(n).length || (cardSizeCap && layout[n.id] && layout[n.id].card_h))) setMenu({ node: n, x: e.clientX, y: e.clientY }); } }, n.mapPinned ? h('span', { className: 'rmap-pin-badge', title: 'Kitűzött' }, '📌') : null, nodeCmCount(n.id) ? h('span', { className: 'rmap-cm-badge', title: nodeCmCount(n.id) + ' nyitott komment', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); setOpenThread(n.id); } }, '💬' + nodeCmCount(n.id)) : null, (n.t === 'step' && n.ref && (n.ref.assignee_id || n.ref.signed_off_by)) ? h('span', { className: 'rmap-step-badges' }, n.ref.assignee_id ? h('span', { className: 'rmap-assignee', title: 'Felelős: ' + nameOf(n.ref.assignee_id), style: { background: userColor(n.ref.assignee_id) } }, String(nameOf(n.ref.assignee_id) || '?').trim().charAt(0).toUpperCase()) : null, n.ref.signed_off_by ? h('span', { className: 'rmap-signoff', title: 'Jóváhagyta: ' + nameOf(n.ref.signed_off_by) }, '✅') : null) : null, h('div', { className: 'rmap-nb' }, body(n), richTier(n)), (props.canEdit && cardSizeCap) ? h('span', { className: 'rmap-node-rz', title: 'Átméretezés (húzd)', onMouseDown: function (e) { e.stopPropagation(); startNodeResize(e, n); } }) : null); })),
         // page bar (saved views) — top-left tabs; the active page can be curated (only pinned) / re-captured / renamed / deleted
@@ -6037,6 +6144,7 @@
         (genActions(sn).length || regenActions(sn).length) ? h('button', { title: 'Generálás innen', onClick: function (e) { e.stopPropagation(); setMenu({ node: sn, x: e.clientX, y: e.clientY }); } }, '⚡') : null,
         canEnter(sn) ? h('button', { title: 'Panel megnyitása ablakként (nem-modal, több is lehet)', onClick: function () { openWindow(sn); } }, '⊞') : null,
         h('button', { title: 'Kártya exportálása (PNG)', onClick: function () { exportNode(sn); } }, '⤓')) : null,
+      edgeInspEl(),
       sn ? h('div', { className: 'rmap-insp rmap-insp-float', style: inspStyle(sn), onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
         h('div', { className: 'rmap-insp-h' }, h('span', { className: 'rmap-ni' }, RMAP_TYPE[sn.t].ic), h('div', { style: { minWidth: 0 } }, h('b', null, sn.title), h('div', { className: 'rmap-insp-ty' }, RMAP_TYPE[sn.t].lab)), h('button', { className: 'rmap-insp-x', onClick: function () { setSel(null); } }, '×')),
         h('div', { className: 'rmap-insp-b' },
