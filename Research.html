@@ -1298,6 +1298,22 @@
     .rmap-exp { margin-left: 6px; font-size: 10.5px; font-weight: 700; color: var(--accent); }
     .rmap-menu-scrim { position: fixed; inset: 0; z-index: 80; }
     .rmap-menu { position: fixed; min-width: 210px; background: var(--surface); border: 1px solid var(--line); border-radius: 11px; box-shadow: 0 16px 44px -18px rgba(20, 26, 40, .5); padding: 6px; z-index: 81; }
+    /* radial quick-add menu (double-click the empty canvas) */
+    .rmap-radial-scrim { position: absolute; inset: 0; z-index: 18; }
+    .rmap-radial { position: absolute; z-index: 19; }
+    .rmap-radial-seg { position: absolute; left: 0; top: 0; width: 0; height: 0; display: flex; flex-direction: column; align-items: center; border: none; background: none; padding: 0; transform: translate(var(--dx), var(--dy)); animation: rmap-radial-bloom .26s cubic-bezier(.34,1.56,.64,1) backwards; animation-delay: calc(var(--i) * 24ms); }
+    @keyframes rmap-radial-bloom { from { opacity: 0; transform: translate(0,0) scale(.2); } to { opacity: 1; transform: translate(var(--dx), var(--dy)) scale(1); } }
+    .rr-ic { width: 38px; height: 38px; border-radius: 50%; background: var(--surface); border: 1.5px solid var(--line); box-shadow: 0 6px 16px -8px rgba(0,0,0,.4); display: grid; place-items: center; font-size: 18px; transform: translate(-50%, -50%); transition: transform .16s cubic-bezier(.34,1.56,.64,1), box-shadow .16s, border-color .16s; cursor: pointer; }
+    .rmap-radial-seg:hover .rr-ic { transform: translate(-50%, -50%) scale(1.16); border-color: var(--segc); box-shadow: 0 0 0 3px color-mix(in srgb, var(--segc) 30%, transparent), 0 8px 20px -8px rgba(0,0,0,.4); }
+    .rr-lab { position: absolute; top: 25px; left: 50%; transform: translateX(-50%); font-size: 10.5px; font-weight: 700; color: var(--muted); background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; white-space: nowrap; opacity: 0; transition: opacity .15s; box-shadow: 0 2px 6px -3px rgba(0,0,0,.3); pointer-events: none; }
+    .rmap-radial-seg:hover .rr-lab { opacity: 1; color: var(--segc); border-color: color-mix(in srgb, var(--segc) 40%, var(--line)); }
+    .rr-hub { position: absolute; left: 0; top: 0; transform: translate(-50%, -50%); background: var(--ink); color: var(--surface); border-radius: 999px; padding: 6px 13px; font-size: 11.5px; font-weight: 700; white-space: nowrap; display: flex; align-items: center; gap: 9px; animation: rmap-radial-hub .14s cubic-bezier(.34,1.56,.64,1) backwards; box-shadow: 0 8px 24px -10px rgba(0,0,0,.5); }
+    @keyframes rmap-radial-hub { from { opacity: 0; transform: translate(-50%,-50%) scale(.3); } to { opacity: 1; transform: translate(-50%,-50%) scale(1); } }
+    .rr-hub .x { cursor: pointer; opacity: .6; font-size: 12px; line-height: 1; }
+    .rr-hub .x:hover { opacity: 1; }
+    .rmap-drop { position: absolute; z-index: 17; transform: translate(-50%, -50%); width: 22px; height: 22px; border-radius: 50%; border: 2.5px solid var(--accent); pointer-events: none; animation: rmap-drop .43s ease-out forwards; }
+    @keyframes rmap-drop { from { opacity: .9; transform: translate(-50%,-50%) scale(.5); } to { opacity: 0; transform: translate(-50%,-50%) scale(2.6); } }
+    @media (prefers-reduced-motion: reduce) { .rmap-radial-seg { animation: none; opacity: 1; transform: translate(var(--dx), var(--dy)); } .rr-hub { animation: none; } .rmap-drop { display: none; } }
     .rmap-menu-h { font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; color: var(--faint); padding: 5px 9px 7px; }
     .rmap-menu-b { display: block; width: 100%; text-align: left; border: 0; background: transparent; color: var(--ink); font-family: inherit; font-size: 13px; font-weight: 600; padding: 8px 10px; border-radius: 8px; cursor: pointer; }
     .rmap-menu-b:hover { background: var(--accent-tint); color: var(--accent); }
@@ -1335,7 +1351,7 @@
   <script type="text/babel" src="canvas.jsx?v=1783137934"></script>
   <script type="text/babel" src="notes.jsx?v=1783137934"></script>
   <script src="autopilot-core.js?v=1784160000"></script>
-  <script type="text/babel" src="research.jsx?v=1785640000"></script>
+  <script type="text/babel" src="research.jsx?v=1785650000"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>

@@ -4401,6 +4401,8 @@
     function figSetOnMap(figId, val) { sb.from('research_figures').update({ on_map: val }).eq('id', figId).then(function (r) { if (!alive.current) return; if (!(r && r.error)) setBump(function (x) { return x + 1; }); }, function () { }); }
     var loS = useState(false), litOpen = loS[0], setLitOpen = loS[1];   // F4: expand the study funnel's paper nodes (collapsed by default)
     var mnS = useState(null), menu = mnS[0], setMenu = mnS[1];   // F1: node "generate from here" context menu {node,x,y}
+    var rmadS = useState(null), radial = rmadS[0], setRadial = rmadS[1];   // radial quick-add menu on canvas double-click {sx,sy,wx,wy}
+    var drpS = useState(null), drop = drpS[0], setDrop = drpS[1];   // the "it landed here" drop-pulse {sx,sy}
     var gbS = useState(false), genBusy = gbS[0], setGenBusy = gbS[1];
     var hgS = useState({}), hgt = hgS[0], setHgt = hgS[1];   // measured real card heights (id → px) → the no-overlap rule uses them, not an estimate
     var hgtRef = useRef({}); hgtRef.current = hgt;   // live mirror for the shared ResizeObserver callback (P2 height-fit)
@@ -4678,7 +4680,7 @@
     useEffect(function () {
       function typing(el) { if (!el) return false; var tg = el.tagName || ''; return tg === 'INPUT' || tg === 'TEXTAREA' || tg === 'SELECT' || el.isContentEditable; }
       function onKey(e) {
-        if (e.key === 'Escape') { if (tour) tourStop(); else if (focus) exitFocus(); else { setLinkFrom(null); setSelEdge(null); } }   // Esc also cancels link-mode + edge selection
+        if (e.key === 'Escape') { setRadial(null); if (tour) tourStop(); else if (focus) exitFocus(); else { setLinkFrom(null); setSelEdge(null); } }   // Esc closes the radial add-menu + cancels link-mode/edge selection
         else if (tour && tour.beats && !typing(e.target)) { if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); tourNext(); } else if (e.key === 'ArrowLeft') { e.preventDefault(); tourPrev(); } }
         else if (e.key === 'Enter' && !focus && !tour && armedRef.current && !typing(e.target)) { e.preventDefault(); enterNode(armedRef.current); }   // armedRef is null while a modal is open (guarded at compute)
       }
@@ -4914,6 +4916,7 @@
     function onDown(e) {
       if (e.target.closest && e.target.closest('.rmap-node')) return;
       if (!e.shiftKey && e.target.closest && e.target.closest('.rmap-e-hit')) return;   // a plain edge click selects (its own onClick) — don't start a pan; shift still falls through to marquee
+      if (e.detail > 1) return;   // the 2nd mousedown of a double-click → let onStageDbl open the radial add-menu; don't re-clear/re-pan
       // comment mode: a click on the empty canvas drops a position-pinned comment composer
       if (commentMode) { var pc = stageXY(e); setComposer({ x: Math.round((pc.x - view.tx) / view.k), y: Math.round((pc.y - view.ty) / view.k) }); setCmText(''); return; }
       if (selEdge) setSelEdge(null);   // empty-canvas mousedown clears the edge selection
@@ -5226,15 +5229,42 @@
     function groupPin() { Object.keys(msel).forEach(function (id) { var n = g.by[id]; if (n) nodeSetFlag(n, 'pinned', true); }); }
     // ---- Map frames (named regions / phase lanes) — migration-71. Frames live in WORLD coords (pan/zoom with the canvas). ----
     var FRAME_COLORS = ['slate', 'violet', 'cyan', 'amber', 'green', 'rose'];
-    function frameCreate() {
+    // frameCreate(wx,wy): CENTER a new frame on the given world point (radial add-menu); with no args → the viewport centre (▦ button).
+    function frameCreate(wx, wy) {
       if (!props.canEdit || !framesCap) return;
-      var st = stageRef.current, cx = st ? st.clientWidth / 2 : 300, cy = st ? st.clientHeight / 2 : 200;
-      var wx = Math.round((cx - view.tx) / view.k) - 210, wy = Math.round((cy - view.ty) / view.k) - 150;
-      sb.from('research_map_frames').insert({ project_id: props.projectId, title: 'Új keret', x: wx, y: wy, w: 420, h: 300, color: 'slate' }).select('id,title,x,y,w,h,color').single().then(function (r) {
+      var fx, fy;
+      if (typeof wx === 'number' && typeof wy === 'number') { fx = Math.round(wx) - 210; fy = Math.round(wy) - 150; }
+      else { var st = stageRef.current, cx = st ? st.clientWidth / 2 : 300, cy = st ? st.clientHeight / 2 : 200; fx = Math.round((cx - view.tx) / view.k) - 210; fy = Math.round((cy - view.ty) / view.k) - 150; }
+      sb.from('research_map_frames').insert({ project_id: props.projectId, title: 'Új keret', x: fx, y: fy, w: 420, h: 300, color: 'slate' }).select('id,title,x,y,w,h,color').single().then(function (r) {
         if (!alive.current) return;
         if (r && r.error) { window.PRUI.toast('Keret létrehozása sikertelen: ' + r.error.message, { kind: 'error' }); return; }
         if (r && r.data) setFrames(function (F) { return F.some(function (f) { return f.id === r.data.id; }) ? F : F.concat([r.data]); });
       });
+    }
+    // radial add-menu: create an IDEA node at the world point — insert the idea, then pin its Map position to the cursor
+    // (node_id = "i"+id, mirrors graph()), optimistic + reload so it materializes exactly there, and select it.
+    function ideaAtPos(wx, wy) {
+      if (!props.canEdit) return;
+      sb.from('research_ideas').insert({ project_id: props.projectId, source: 'own', question: 'Új ötlet', created_by: props.authorId, status: 'candidate' }).select('id').single().then(function (r) {
+        if (!alive.current) return;
+        if (r && r.error) { window.PRUI.toast('Ötlet létrehozása sikertelen: ' + r.error.message, { kind: 'error' }); return; }
+        if (!r || !r.data) return;
+        var nid = 'i' + r.data.id, X = Math.round(wx), Y = Math.round(wy);
+        setLayout(function (L) { var m = Object.assign({}, L); m[nid] = Object.assign({ x: X, y: Y }, m[nid]); return m; });
+        sb.from('research_map_layout').upsert({ project_id: props.projectId, node_id: nid, x: X, y: Y, updated_at: new Date().toISOString() }, { onConflict: 'project_id,node_id' });
+        setSel(nid); setBump(function (x) { return x + 1; });
+      });
+    }
+    // the frame SVG icon for the radial segment (a dashed rounded region + a small title tab) — currentColor = the segment color
+    function keretIcon() { return h('svg', { viewBox: '0 0 24 20', width: 20, height: 17, fill: 'none', style: { display: 'block' } }, h('rect', { x: 2, y: 3.6, width: 20, height: 14.4, rx: 3, stroke: 'currentColor', strokeWidth: 2, strokeDasharray: '3 2.4' }), h('rect', { x: 3.4, y: 1.4, width: 9.6, height: 4.7, rx: 1.6, fill: 'currentColor' })); }
+    function onStageDbl(e) {
+      if (e.target.closest && e.target.closest('.rmap-node, .rmap-e-hit, .rmap-cm-composer, .rmap-cm-thread, .rmap-menu, .rmap-seltool, .rmap-insp-float, .rmap-einsp, .rmap-win, .rmap-frame, .rmap-radial, .rmap-dock, .rmap-zoom, .rmap-pagebar, .rmap-runbar')) return;   // overlays / real objects only
+      if (commentMode) return;   // comment-mode owns the single-click canvas flow
+      if (!props.canEdit && !commentsCap) return;   // nothing to add → no menu (a commenter-only viewer still gets Komment)
+      e.preventDefault();
+      cancelFly(); tourStop(); setMenu(null); setComposer(null); setSelEdge(null);
+      var p = stageXY(e);
+      setRadial({ sx: p.x, sy: p.y, wx: Math.round((p.x - view.tx) / view.k), wy: Math.round((p.y - view.ty) / view.k) });
     }
     function framePatch(id, patch) {
       setFrames(function (F) { return F.map(function (f) { return f.id === id ? Object.assign({}, f, patch) : f; }); });
@@ -6061,7 +6091,7 @@
     function nodeCmCount(id) { var a = cmByNode[id]; return a ? a.filter(function (c) { return !c.resolved; }).length : 0; }
     var cmUnresolved = commentsCap ? comments.filter(function (c) { return !c.resolved; }).length : 0;
     return h('div', { className: 'rmap-wrap' },
-      h('div', { className: 'rmap-stage', ref: stageRef, onMouseDown: onDown, onWheel: onWheel, onMouseMove: broadcastCursor },
+      h('div', { className: 'rmap-stage', ref: stageRef, onMouseDown: onDown, onWheel: onWheel, onMouseMove: broadcastCursor, onDoubleClick: onStageDbl },
         h('div', { className: 'rmap-world rmap-lod-' + lod, style: { transform: 'translate(' + view.tx + 'px,' + view.ty + 'px) scale(' + view.k + ')' } },
           // frames (named regions) render BEHIND everything; the body is pointer-events:none so cards stay interactive
           frames.map(function (f) {
@@ -6154,7 +6184,7 @@
           h('button', { title: 'Térkép exportálása PNG-be', onClick: exportMap }, '⤓'),
           (pagesCap && pages.length > 1) ? h('button', { title: 'Gyors túra: végigzoomol a mentett Lapokon', onClick: tourStart }, '▶') : null,
           pathsCap ? h('button', { className: presMgrOpen ? 'on' : '', title: 'Bemutatók (Prezi-story): jelenetekből álló, vezetett túra', onClick: function () { setPresMgrOpen(function (v) { return !v; }); } }, '🎬') : null,
-          (props.canEdit && framesCap) ? h('button', { title: 'Új keret (nevesített régió) hozzáadása', onClick: frameCreate }, '▦') : null,
+          (props.canEdit && framesCap) ? h('button', { title: 'Új keret (nevesített régió) — vagy dupla-katt a vászonra', onClick: function () { frameCreate(); } }, '▦') : null,
           (props.canEdit && framesCap) ? h('button', { title: 'Rendezés fázisokba (sávok + keretek) — felülírja a kézi elrendezést', onClick: autoLayoutStages }, '⌗') : null,
           commentsCap ? h('button', { className: commentMode ? 'on' : '', title: commentMode ? 'Komment-mód kikapcsolása' : 'Komment-mód: kattints a vászonra vagy egy kártyára', onClick: function () { setCommentMode(function (v) { return !v; }); setComposer(null); } }, '💬') : null,
           (commentsCap && comments.length) ? h('button', { title: 'Összes komment', onClick: function () { setCmPanelOpen(function (v) { return !v; }); } }, '📋' + (cmUnresolved || '')) : null,
@@ -6235,6 +6265,26 @@
                 props.canEdit ? h('button', { className: 'btn', style: { fontSize: 11, padding: '3px 9px', flex: 'none' }, title: 'Vissza a térképre', onClick: function () { nodeToggleHidden(n); } }, '↩ Vissza') : null);
             })) : h('div', { style: { fontSize: 12, color: 'var(--faint)' } }, 'Nincs rejtett kártya.'));
         })() : null,
+        // radial quick-add menu (double-click the empty canvas) — a bloom ring of object types at the cursor
+        radial ? (function () {
+          var segs = [
+            { key: 'keret', label: 'Keret', col: '#5b63e6', on: props.canEdit && framesCap, run: function (wx, wy) { frameCreate(wx, wy); } },
+            { key: 'otlet', label: 'Ötlet', col: '#d1810b', on: props.canEdit, run: function (wx, wy) { ideaAtPos(wx, wy); } },
+            { key: 'komment', label: 'Komment', col: '#17a34a', on: commentsCap, run: function (wx, wy) { setComposer({ x: wx, y: wy }); setCmText(''); } }
+          ].filter(function (s) { return s.on; });
+          var vp = stageVP(), R = 100, pad = R + 44, n = segs.length || 1;
+          var cx = Math.max(pad, Math.min(radial.sx, vp.w - pad)), cy = Math.max(pad, Math.min(radial.sy, vp.h - pad));
+          return h('div', { className: 'rmap-radial-scrim', onMouseDown: function (e) { e.stopPropagation(); setRadial(null); }, onWheel: function (e) { e.stopPropagation(); }, onContextMenu: function (e) { e.preventDefault(); setRadial(null); } },
+            h('div', { className: 'rmap-radial', style: { left: cx + 'px', top: cy + 'px' } },
+              segs.map(function (s, i) {
+                var th = -Math.PI / 2 + i * (2 * Math.PI / n);
+                return h('button', { key: s.key, className: 'rmap-radial-seg', style: { '--dx': (R * Math.cos(th)) + 'px', '--dy': (R * Math.sin(th)) + 'px', '--i': i, '--segc': s.col }, onClick: function (e) { e.stopPropagation(); var wx = radial.wx, wy = radial.wy, sx = radial.sx, sy = radial.sy; setRadial(null); s.run(wx, wy); setDrop({ sx: sx, sy: sy }); setTimeout(function () { if (alive.current) setDrop(null); }, 430); } },
+                  h('span', { className: 'rr-ic', style: { color: s.col } }, s.key === 'keret' ? keretIcon() : (s.key === 'otlet' ? '💡' : '💬')),
+                  h('span', { className: 'rr-lab' }, s.label));
+              }),
+              h('div', { className: 'rr-hub' }, h('span', null, 'Mit hozzunk létre?'), h('span', { className: 'x', title: 'Mégse (Esc)', onClick: function (e) { e.stopPropagation(); setRadial(null); } }, '✕'))));
+        })() : null,
+        drop ? h('div', { className: 'rmap-drop', style: { left: drop.sx + 'px', top: drop.sy + 'px' } }) : null,
         // comment composer popover (new comment on a card or a free position)
         composer ? (function () {
           var kk = view.k, cx, cy;

@@ -95,6 +95,18 @@
   (a mount-kapuval egyezik, nincs panel-unmount+state-vesztés a holt sávban); (4) duplikált `sec-N` DOM-id — a TOC-ugrás
   a saját `.doc-embed`-jére szűkítve.
 
+## 🚧 Radiális gyors-hozzáadó (bloom menü) — folyamatban, 2026-07-18
+> Feltárás: 2-ágú design-workflow (interakció+mozgás · objektum-készlet+megvalósíthatóság) + kód-katalógus → szintézis →
+> interaktív mockup-artifact (`radial-mockup`, favicon ✨). A lenti gombok helyett a kurzornál dobálhatsz objektumot.
+- [x] ✅ **P0 — a gesztus + 3 szegmens** — **dupla-katt az üres vásznon** → a kurzor köré egy animált **kör-menü** „bloomol"
+  (staggered rugó, R≈100px); a stage `onDoubleClick` (a node-ok dupla-kattja `stopPropagation`-öl → nincs ütközés; az `onDown`
+  `if(e.detail>1)return` guard a 2. mousedown ellen). **click-to-open → hover → click-to-pick.** 3 capability-gate-elt
+  szegmens: **Keret** (SVG keret-ikon, `frameCreate(wx,wy)` a kurzorra centrálva), **Ötlet** (`ideaAtPos` → `research_ideas`
+  insert + `research_map_layout` pin `i<id>`-re + reload → ott terem), **Komment** (a meglévő composer a kurzornál).
+  Pick-re: bezár + **drop-pulzus** a kurzoron. Mégse: scrim-katt / hub `✕` / Esc. Kézi clamp a viewportba. Reduced-motion
+  guard. **2 új `useState`** (radial + drop) a guard-ok ELŐTT. A lenti `▦` gomb fallbacknek megmarad. Nincs migráció.
+- [ ] 🟡 **P1** — ✨ Generálj ide (pont-anchor prompt); Ötlet inline átnevezés; 📎 Jegyzet/fájl szegmens; billentyűzet-fókusz.
+
 ## 🚧 Viewport-fit — lebegő elemek + kártyák a képernyőre (folyamatban, 2026-07-18)
 > Feltárás: 3-ágú design-workflow (fitFloat primitív · widen-not-tall · kártya-cap) + kód-katalógus → szintézis →
 > interaktív mockup-artifact (`fit-mockup`, a VALÓDI fitFloat-tal). A mai öt ad-hoc clamp helyett egy közös primitív.
