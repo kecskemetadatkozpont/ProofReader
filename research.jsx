@@ -4451,6 +4451,9 @@
     var tourT = useRef(null);   // tour autoplay timer
     var viewRef = useRef(view); viewRef.current = view;   // live mirror of `view` so a tween always starts from the true current camera
     var armedRef = useRef(null);   // the card "armed to enter" at deep zoom (Fázis 3) — Enter dives into it
+    var winsS = useState([]), windows = winsS[0], setWindows = winsS[1];   // 5th LOD: embedded screen-space panel windows [{id,tab,t,title,ref,fp,dx,dy,w,h,z}]
+    var zTopRef = useRef(18);   // window z-order counter (stays below the modal focus overlay z-index)
+    var winDragRef = useRef(null);   // window move/resize lifecycle guard
     var stagesBusy = useRef(false);   // re-entry guard for autoLayoutStages (prevents duplicate phase frames on rapid double-invoke)
     var memS = useState(null), members = memS[0], setMembers = memS[1];   // project collaborators (migration-74) — null until loaded/capable
     var shareS = useState(false), shareOpen = shareS[0], setShareOpen = shareS[1];   // the Share/Collaborators modal
@@ -4896,6 +4899,34 @@
       flyTo(nodeTarget(n, 2.0), { ms: 420, done: function () { if (alive.current) setFocus(function (f) { return f ? Object.assign({}, f, { phase: 'open' }) : f; }); } });
     }
     function exitFocus() { var rv = returnView.current; setFocus(null); if (rv) flyTo(rv, { ms: 360 }); }
+    // ---- 5th LOD: embedded, non-modal, resizable panel WINDOWS anchored to a card (screen-space; several at once) ----
+    var MAX_WIN = 3;
+    function openWindow(n) {
+      if (!n) return; var tab = RMAP_TYPE[n.t] && RMAP_TYPE[n.t].tab;
+      if (!canEnter(n)) { if (props.onGoTab && tab) props.onGoTab(tab); return; }
+      setWindows(function (W) {
+        var ex = W.filter(function (w) { return w.id === n.id; })[0];
+        if (ex) return W.map(function (w) { return w.id === n.id ? Object.assign({}, w, { z: ++zTopRef.current }) : w; });   // already open → front
+        if (W.length >= MAX_WIN) { window.PRUI.toast('Legfeljebb ' + MAX_WIN + ' panel-ablak lehet nyitva.', { kind: 'info' }); return W; }
+        return W.concat([{ id: n.id, tab: tab, t: n.t, title: n.title, ref: n.ref, fp: focusPropsFor(n), dx: 16, dy: 0, w: 380, h: 300, z: ++zTopRef.current }]);
+      });
+    }
+    function closeWindow(id) { setWindows(function (W) { return W.filter(function (w) { return w.id !== id; }); }); }
+    function winFront(id) { setWindows(function (W) { return W.map(function (w) { return w.id === id ? Object.assign({}, w, { z: ++zTopRef.current }) : w; }); }); }
+    function winToModal(w) { var n = g.by[w.id]; closeWindow(w.id); if (n) enterNode(n); }   // promote a window to the exclusive modal Prezi
+    function startWinDrag(e, w, mode) {
+      if (e.button !== 0) return; e.stopPropagation(); winFront(w.id);
+      var sx = e.clientX, sy = e.clientY, odx = w.dx, ody = w.dy, ow = w.w, oh = w.h;
+      var wmv = function (ev) {
+        if (!winDragRef.current) return; if (ev.buttons === 0) { wfin(); return; }
+        var ddx = ev.clientX - sx, ddy = ev.clientY - sy;   // RAW screen delta — windows live in screen px, never scaled by view.k
+        if (mode === 'move') setWindows(function (W) { return W.map(function (x) { return x.id === w.id ? Object.assign({}, x, { dx: odx + ddx, dy: ody + ddy }) : x; }); });
+        else setWindows(function (W) { return W.map(function (x) { return x.id === w.id ? Object.assign({}, x, { w: Math.min(760, Math.max(300, ow + ddx)), h: Math.min(600, Math.max(200, oh + ddy)) }) : x; }); });
+      };
+      var wfin = function () { winDragRef.current = null; window.removeEventListener('mousemove', wmv); window.removeEventListener('mouseup', wup); window.removeEventListener('blur', wfin); };
+      var wup = function () { wfin(); };
+      winDragRef.current = { id: w.id }; window.addEventListener('mousemove', wmv); window.addEventListener('mouseup', wup); window.addEventListener('blur', wfin);
+    }
     // ---- guided tour over the saved Lapok (pages) — Fázis 1; Fázis 2 upgrades this to authored story beats ----
     function tourStop() { if (tourT.current) { clearTimeout(tourT.current); tourT.current = null; } setFocus(null); setTour(null); }
     function fitFrameTarget(f) {
@@ -5998,6 +6029,7 @@
         mapFlags ? h('button', { className: (layout[sn.id] && layout[sn.id].pinned) ? 'on' : '', title: (layout[sn.id] && layout[sn.id].pinned) ? 'Kitűzés levétele' : 'Kitűzés (fontos)', onClick: function () { nodeTogglePinned(sn); } }, '📌') : null,
         mapFlags ? h('button', { title: 'Elrejtés a térképről', onClick: function () { nodeToggleHidden(sn); } }, '🙈') : null,
         (genActions(sn).length || regenActions(sn).length) ? h('button', { title: 'Generálás innen', onClick: function (e) { e.stopPropagation(); setMenu({ node: sn, x: e.clientX, y: e.clientY }); } }, '⚡') : null,
+        canEnter(sn) ? h('button', { title: 'Panel megnyitása ablakként (nem-modal, több is lehet)', onClick: function () { openWindow(sn); } }, '⊞') : null,
         h('button', { title: 'Kártya exportálása (PNG)', onClick: function () { exportNode(sn); } }, '⤓')) : null,
       sn ? h('div', { className: 'rmap-insp rmap-insp-float', style: inspStyle(sn), onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
         h('div', { className: 'rmap-insp-h' }, h('span', { className: 'rmap-ni' }, RMAP_TYPE[sn.t].ic), h('div', { style: { minWidth: 0 } }, h('b', null, sn.title), h('div', { className: 'rmap-insp-ty' }, RMAP_TYPE[sn.t].lab)), h('button', { className: 'rmap-insp-x', onClick: function () { setSel(null); } }, '×')),
@@ -6082,6 +6114,30 @@
                     invRes.length ? h('div', { className: 'rmap-invite-res' }, invRes.filter(function (u) { return u.id !== props.viewerId && !(members || []).some(function (mm) { return mm.user_id === u.id; }); }).map(function (u) { return h('button', { key: u.id, className: 'rmap-invite-opt', onClick: function () { memberInvite(u, invRole); setInvQ(''); setInvRes([]); } }, (u.name || u.id) + ' — meghívás ' + roleLabel(invRole).toLowerCase() + 'ként'); })) : null)
                     : h('div', { className: 'rmap-cm-empty' }, 'Csak a projekt tulajdonosa hívhat meg közreműködőket.')))));
       })() : null,
+      // 5th LOD: embedded panel windows — screen-space (siblings of the world, so crisp), anchored to the card, non-modal
+      windows.map(function (w) {
+        var n = g.by[w.id];
+        if (!n || n.mapHidden || !nodeVisible(n)) return null;   // the card is gone/hidden → drop the window quietly
+        var stW = (stageRef.current && stageRef.current.clientWidth) || 900, stH = (stageRef.current && stageRef.current.clientHeight) || 560;
+        var cardRight = view.tx + (n.x + (n._w || NW)) * view.k, cardTop = view.ty + n.y * view.k;
+        var offscreen = cardRight < -40 || cardTop > stH + 40 || (view.tx + n.x * view.k) > stW + 40 || cardTop < -140;
+        if (offscreen) {
+          // the anchor card scrolled off-screen → an edge chip that brings it back
+          var ex = Math.max(6, Math.min(cardRight, stW - 150)), ey = Math.max(6, Math.min(cardTop, stH - 30));
+          return h('button', { key: 'wchip' + w.id, className: 'rmap-winchip', style: { position: 'absolute', left: ex + 'px', top: ey + 'px', zIndex: w.z }, onMouseDown: function (e) { e.stopPropagation(); }, onClick: function () { flyTo(nodeTarget(n, Math.max(0.8, Math.min(1.6, view.k))), { ms: 420 }); winFront(w.id); } }, ((RMAP_TYPE[w.t] && RMAP_TYPE[w.t].ic) || '◻') + ' ' + String(w.title || '').slice(0, 18) + ' ↩');
+        }
+        var wl = Math.max(6, Math.min(cardRight + w.dx, stW - 60)), wt = Math.max(6, Math.min(cardTop + w.dy, stH - 40));
+        return h('div', { key: 'win' + w.id, className: 'rmap-win', style: { position: 'absolute', left: wl + 'px', top: wt + 'px', width: w.w + 'px', height: w.h + 'px', zIndex: w.z }, onMouseDown: function (e) { winFront(w.id); }, onWheel: function (e) { e.stopPropagation(); } },
+          h('div', { className: 'rmap-win-h', onMouseDown: function (e) { startWinDrag(e, w, 'move'); } },
+            h('span', { className: 'rmap-win-ic' }, (RMAP_TYPE[w.t] && RMAP_TYPE[w.t].ic) || '◻'),
+            h('b', null, String(w.title || (RMAP_TYPE[w.t] && RMAP_TYPE[w.t].lab) || '').slice(0, 40)),
+            h('span', { className: 'rmap-win-sp' }),
+            h('button', { title: 'Teljes képernyő (modal)', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function () { winToModal(w); } }, '⛶'),
+            h('button', { title: 'Megnyitás a fülön', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function () { closeWindow(w.id); if (props.onGoTab) props.onGoTab(w.tab); } }, '↗'),
+            h('button', { title: 'Bezárás', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function () { closeWindow(w.id); } }, '×')),
+          h('div', { className: 'rmap-win-b' }, (props.renderPanel && w.w >= 320 && w.h >= 200) ? props.renderPanel(w.tab, w.fp) : h('div', { className: 'rmap-focus-loading' }, h('div', { className: 'rmap-focus-ic' }, (RMAP_TYPE[w.t] && RMAP_TYPE[w.t].ic) || '◻'), h('div', null, 'Húzd nagyobbra…'))),
+          h('span', { className: 'rmap-win-rz', title: 'Átméretezés', onMouseDown: function (e) { startWinDrag(e, w, 'resize'); } }));
+      }),
       // Prezi-mód focus overlay — the card's real workflow panel mounted in-place (screen-space, over the dimmed map)
       focus ? h('div', { className: 'rmap-focus', onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
         h('div', { className: 'rmap-focus-scrim', onClick: function () { (tour ? tourStop : exitFocus)(); } }),
