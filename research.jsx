@@ -5211,7 +5211,7 @@
     function stepSignOff(step) { stepSignoffRpc(step, false); }
     function stepUnsignOff(step) { stepSignoffRpc(step, true); }
     // P2 inline controls (on an enlarged card): advance a protocol-step status, or set a paper screening decision.
-    function stepCycleStatus(step) { if (!step || !props.canEdit) return; var s = step.status; var next = (s === 'done') ? 'todo' : ((s === 'doing' || s === 'running') ? 'done' : 'doing'); stepPatch(step, { status: next }); }
+    function stepCycleStatus(step) { if (!step || !props.canEdit) return; var s = step.status; var next = (s === 'done') ? 'todo' : ((s === 'doing' || s === 'running') ? 'done' : 'running'); stepPatch(step, { status: next }); }   // protocol-step vocab = running (NOT doing, which is research_todos) so the Kanban board + autopilot agree
     function setPaperScreen(paper, v) {
       if (!paper || !paper.id || !props.canEdit) return;
       sb.from('research_sources').update({ screening: v }).eq('id', paper.id).then(function (r) { if (!alive.current) return; if (r && r.error) { window.PRUI.toast('Nem sikerült: ' + r.error.message, { kind: 'error' }); return; } setBump(function (x) { return x + 1; }); });
