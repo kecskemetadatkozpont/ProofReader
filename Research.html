@@ -981,6 +981,8 @@
     .rmap-win-rz { position: absolute; right: 1px; bottom: 1px; width: 16px; height: 16px; cursor: nwse-resize; z-index: 2; }
     .rmap-win-rz::after { content: "◢"; position: absolute; right: 2px; bottom: -1px; font-size: 11px; color: var(--muted); }
     .rmap-winchip { display: flex; align-items: center; gap: 4px; background: var(--surface); border: 1px solid var(--accent); border-radius: 999px; padding: 4px 11px; font-size: 11px; font-weight: 800; color: var(--accent); cursor: pointer; box-shadow: 0 8px 22px -10px rgba(0,0,0,.4); }
+    .rmap-winchip-hid { border-color: var(--muted); color: var(--muted); }
+    .rmap-winchip-hid:hover { border-color: var(--danger, #d6323a); color: var(--danger, #d6323a); }
     .rmap-focus-scrim { position: absolute; inset: 0; background: color-mix(in srgb, #0b0a15 44%, transparent); animation: rmap-fade .2s ease; }
     @keyframes rmap-fade { from { opacity: 0; } to { opacity: 1; } }
     .rmap-focus-card { position: relative; z-index: 2; margin: 14px; width: 100%; max-width: 1040px; margin-left: auto; margin-right: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; box-shadow: 0 44px 110px -44px rgba(0,0,0,.72); display: flex; flex-direction: column; overflow: hidden; animation: rmap-focus-pop .24s cubic-bezier(.2,.72,.28,1); }
@@ -1243,7 +1245,7 @@
   <script type="text/babel" src="canvas.jsx?v=1783137934"></script>
   <script type="text/babel" src="notes.jsx?v=1783137934"></script>
   <script src="autopilot-core.js?v=1784160000"></script>
-  <script type="text/babel" src="research.jsx?v=1785400000"></script>
+  <script type="text/babel" src="research.jsx?v=1785410000"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>

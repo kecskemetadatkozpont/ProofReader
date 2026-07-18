@@ -3829,7 +3829,7 @@
             h('button', { className: 'btn', style: { marginLeft: 'auto', padding: '3px 9px', fontSize: 11.5, flex: 'none' }, title: 'Download the report as PDF (opens the print dialog)', onClick: function () { setRvMd(buildFullReport()); setTimeout(function () { try { window.print(); } catch (e) { } }, 350); } }, '⬇ PDF'),
             h('button', { className: 'btn', style: { padding: '3px 9px', fontSize: 11.5, flex: 'none' }, title: 'Open full screen', onClick: function () { setRvMd(buildFullReport()); } }, '⛶ Full screen')),
           h('div', { className: 'doc-embed-wrap' }, h('div', { className: 'doc-embed' },
-            doc.toc.length > 2 ? h('nav', { className: 'rv-toc doc-embed-toc' }, h('div', { className: 'rv-toc-h' }, 'Contents'), doc.toc.map(function (t) { return h('button', { key: t.id, className: 'rv-toc-i lvl' + t.level, onClick: function () { var el = document.getElementById(t.id); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); } }, t.text); })) : null,
+            doc.toc.length > 2 ? h('nav', { className: 'rv-toc doc-embed-toc' }, h('div', { className: 'rv-toc-h' }, 'Contents'), doc.toc.map(function (t) { return h('button', { key: t.id, className: 'rv-toc-i lvl' + t.level, onClick: function (e) { var root = (e.currentTarget.closest && e.currentTarget.closest('.doc-embed')) || document; var el = root.querySelector('#' + (window.CSS && CSS.escape ? CSS.escape(t.id) : t.id)); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); } }, t.text); })) : null,
             h('article', { className: 'report-doc', dangerouslySetInnerHTML: { __html: doc.html } })
           ))
         ) : null
@@ -4452,7 +4452,6 @@
     var viewRef = useRef(view); viewRef.current = view;   // live mirror of `view` so a tween always starts from the true current camera
     var armedRef = useRef(null);   // the card "armed to enter" at deep zoom (Fázis 3) — Enter dives into it
     var winsS = useState([]), windows = winsS[0], setWindows = winsS[1];   // 5th LOD: embedded screen-space panel windows [{id,tab,t,title,ref,fp,dx,dy,w,h,z}]
-    var zTopRef = useRef(18);   // window z-order counter (stays below the modal focus overlay z-index)
     var winDragRef = useRef(null);   // window move/resize lifecycle guard
     var stagesBusy = useRef(false);   // re-entry guard for autoLayoutStages (prevents duplicate phase frames on rapid double-invoke)
     var memS = useState(null), members = memS[0], setMembers = memS[1];   // project collaborators (migration-74) — null until loaded/capable
@@ -4901,18 +4900,24 @@
     function exitFocus() { var rv = returnView.current; setFocus(null); if (rv) flyTo(rv, { ms: 360 }); }
     // ---- 5th LOD: embedded, non-modal, resizable panel WINDOWS anchored to a card (screen-space; several at once) ----
     var MAX_WIN = 3;
+    // re-rank window z-order to a COMPACT band starting at 20 (frontId gets the top), so window z can never climb to the
+    // modal focus overlay z-index (200) no matter how many times a window is fronted — fixes unbounded ++counter drift.
+    function reZ(W, frontId) {
+      var order = W.slice().sort(function (a, b) { return (((a.id === frontId) ? 1 : 0) - ((b.id === frontId) ? 1 : 0)) || (a.z - b.z); });
+      var zmap = {}; order.forEach(function (w, i) { zmap[w.id] = 20 + i; });
+      return W.map(function (w) { return w.z === zmap[w.id] ? w : Object.assign({}, w, { z: zmap[w.id] }); });
+    }
     function openWindow(n) {
       if (!n) return; var tab = RMAP_TYPE[n.t] && RMAP_TYPE[n.t].tab;
       if (!canEnter(n)) { if (props.onGoTab && tab) props.onGoTab(tab); return; }
       setWindows(function (W) {
-        var ex = W.filter(function (w) { return w.id === n.id; })[0];
-        if (ex) return W.map(function (w) { return w.id === n.id ? Object.assign({}, w, { z: ++zTopRef.current }) : w; });   // already open → front
+        if (W.filter(function (w) { return w.id === n.id; })[0]) return reZ(W, n.id);   // already open → front
         if (W.length >= MAX_WIN) { window.PRUI.toast('Legfeljebb ' + MAX_WIN + ' panel-ablak lehet nyitva.', { kind: 'info' }); return W; }
-        return W.concat([{ id: n.id, tab: tab, t: n.t, title: n.title, ref: n.ref, fp: focusPropsFor(n), dx: 16, dy: 0, w: 380, h: 300, z: ++zTopRef.current }]);
+        return reZ(W.concat([{ id: n.id, tab: tab, t: n.t, title: n.title, ref: n.ref, fp: focusPropsFor(n), dx: 16, dy: 0, w: 380, h: 300, z: 999 }]), n.id);
       });
     }
     function closeWindow(id) { setWindows(function (W) { return W.filter(function (w) { return w.id !== id; }); }); }
-    function winFront(id) { setWindows(function (W) { return W.map(function (w) { return w.id === id ? Object.assign({}, w, { z: ++zTopRef.current }) : w; }); }); }
+    function winFront(id) { setWindows(function (W) { if (W.length < 2) return W; var mx = 0, cur = null; W.forEach(function (w) { if (w.z > mx) mx = w.z; if (w.id === id) cur = w; }); return (!cur || cur.z === mx) ? W : reZ(W, id); }); }
     function winToModal(w) { var n = g.by[w.id]; closeWindow(w.id); if (n) enterNode(n); }   // promote a window to the exclusive modal Prezi
     function startWinDrag(e, w, mode) {
       if (e.button !== 0) return; e.stopPropagation(); winFront(w.id);
@@ -4921,7 +4926,7 @@
         if (!winDragRef.current) return; if (ev.buttons === 0) { wfin(); return; }
         var ddx = ev.clientX - sx, ddy = ev.clientY - sy;   // RAW screen delta — windows live in screen px, never scaled by view.k
         if (mode === 'move') setWindows(function (W) { return W.map(function (x) { return x.id === w.id ? Object.assign({}, x, { dx: odx + ddx, dy: ody + ddy }) : x; }); });
-        else setWindows(function (W) { return W.map(function (x) { return x.id === w.id ? Object.assign({}, x, { w: Math.min(760, Math.max(300, ow + ddx)), h: Math.min(600, Math.max(200, oh + ddy)) }) : x; }); });
+        else setWindows(function (W) { return W.map(function (x) { return x.id === w.id ? Object.assign({}, x, { w: Math.min(760, Math.max(320, ow + ddx)), h: Math.min(600, Math.max(200, oh + ddy)) }) : x; }); });
       };
       var wfin = function () { winDragRef.current = null; window.removeEventListener('mousemove', wmv); window.removeEventListener('mouseup', wup); window.removeEventListener('blur', wfin); };
       var wup = function () { wfin(); };
@@ -5686,6 +5691,13 @@
 
     if (!data) return h('div', { className: 'rmap-wrap' }, h('div', { className: 'empty' }, 'Térkép betöltése…'));
     var g = graph();
+    // prune ghost windows whose anchor node was DELETED (row removed) so a dead window never permanently eats a MAX_WIN
+    // slot. Keyed on the node-id set (not g itself) → runs only when nodes are added/removed, not on every pan/zoom.
+    // Merely-hidden/filtered anchors keep their window (still in g.by) and stay user-recoverable via the render below.
+    var winPruneKey = windows.length ? g.N.map(function (n) { return n.id; }).join(',') : '';
+    useEffect(function () {
+      setWindows(function (W) { if (!W.length) return W; var nx = W.filter(function (w) { return g.by[w.id]; }); return nx.length === W.length ? W : nx; });
+    }, [winPruneKey]);
     if (!g.N.length) return h('div', { className: 'rmap-wrap' }, h('div', { className: 'rmap-empty' }, h('div', { style: { fontSize: 30 } }, '🗺️'), h('b', null, 'A térkép a projekt adataiból épül fel'), h('p', null, 'Adj hozzá ötleteket, irodalmat, protokollt — és itt egy összefüggő canvason látod majd az egészet, a provenance-élekkel.')));
     var NW = 204, NH = 74;
     function nodeW(n) { return (n && n._w) || NW; }   // per-node card width (migration-80) or default
@@ -6115,10 +6127,15 @@
                     : h('div', { className: 'rmap-cm-empty' }, 'Csak a projekt tulajdonosa hívhat meg közreműködőket.')))));
       })() : null,
       // 5th LOD: embedded panel windows — screen-space (siblings of the world, so crisp), anchored to the card, non-modal
-      windows.map(function (w) {
+      windows.map(function (w, wi) {
         var n = g.by[w.id];
-        if (!n || n.mapHidden || !nodeVisible(n)) return null;   // the card is gone/hidden → drop the window quietly
+        if (!n) return null;   // anchor node was deleted → the winPruneKey effect removes it from the array
         var stW = (stageRef.current && stageRef.current.clientWidth) || 900, stH = (stageRef.current && stageRef.current.clientHeight) || 560;
+        if (n.mapHidden || !nodeVisible(n)) {
+          // the anchor card is hidden/type-filtered/off a curated page — the node still exists, so keep the window
+          // RECOVERABLE with a stacked corner chip that closes it (reclaims the slot); no ghost silently eats a slot.
+          return h('button', { key: 'whid' + w.id, className: 'rmap-winchip rmap-winchip-hid', style: { position: 'absolute', right: '12px', top: (12 + wi * 34) + 'px', zIndex: w.z }, title: 'A kártya rejtett — kattints az ablak bezárásához', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function () { closeWindow(w.id); } }, ((RMAP_TYPE[w.t] && RMAP_TYPE[w.t].ic) || '◻') + ' ' + String(w.title || '').slice(0, 16) + ' · rejtett ✕');
+        }
         var cardRight = view.tx + (n.x + (n._w || NW)) * view.k, cardTop = view.ty + n.y * view.k;
         var offscreen = cardRight < -40 || cardTop > stH + 40 || (view.tx + n.x * view.k) > stW + 40 || cardTop < -140;
         if (offscreen) {
@@ -6127,7 +6144,7 @@
           return h('button', { key: 'wchip' + w.id, className: 'rmap-winchip', style: { position: 'absolute', left: ex + 'px', top: ey + 'px', zIndex: w.z }, onMouseDown: function (e) { e.stopPropagation(); }, onClick: function () { flyTo(nodeTarget(n, Math.max(0.8, Math.min(1.6, view.k))), { ms: 420 }); winFront(w.id); } }, ((RMAP_TYPE[w.t] && RMAP_TYPE[w.t].ic) || '◻') + ' ' + String(w.title || '').slice(0, 18) + ' ↩');
         }
         var wl = Math.max(6, Math.min(cardRight + w.dx, stW - 60)), wt = Math.max(6, Math.min(cardTop + w.dy, stH - 40));
-        return h('div', { key: 'win' + w.id, className: 'rmap-win', style: { position: 'absolute', left: wl + 'px', top: wt + 'px', width: w.w + 'px', height: w.h + 'px', zIndex: w.z }, onMouseDown: function (e) { winFront(w.id); }, onWheel: function (e) { e.stopPropagation(); } },
+        return h('div', { key: 'win' + w.id, className: 'rmap-win', style: { position: 'absolute', left: wl + 'px', top: wt + 'px', width: w.w + 'px', height: w.h + 'px', zIndex: w.z }, onMouseDown: function (e) { e.stopPropagation(); winFront(w.id); }, onWheel: function (e) { e.stopPropagation(); } },
           h('div', { className: 'rmap-win-h', onMouseDown: function (e) { startWinDrag(e, w, 'move'); } },
             h('span', { className: 'rmap-win-ic' }, (RMAP_TYPE[w.t] && RMAP_TYPE[w.t].ic) || '◻'),
             h('b', null, String(w.title || (RMAP_TYPE[w.t] && RMAP_TYPE[w.t].lab) || '').slice(0, 40)),
