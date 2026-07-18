@@ -4402,6 +4402,7 @@
     var mnS = useState(null), menu = mnS[0], setMenu = mnS[1];   // F1: node "generate from here" context menu {node,x,y}
     var gbS = useState(false), genBusy = gbS[0], setGenBusy = gbS[1];
     var hgS = useState({}), hgt = hgS[0], setHgt = hgS[1];   // measured real card heights (id → px) → the no-overlap rule uses them, not an estimate
+    var hgtRef = useRef({}); hgtRef.current = hgt;   // live mirror for the shared ResizeObserver callback (P2 height-fit)
     var rcS = useState([]), rcMsgs = rcS[0], setRcMsgs = rcS[1];   // F7: per-node refine-chat thread [{role,text}]
     var riS = useState(''), rcInput = riS[0], setRcInput = riS[1];
     var rbS = useState(false), rcBusy = rbS[0], setRcBusy = rbS[1];
@@ -4712,6 +4713,21 @@
       if (Object.keys(m).length !== Object.keys(hgt).length) changed = true;
       if (changed) setHgt(m);
     }, [data, bump, litOpen, sizeGen]);   // re-measure when the node set/content changes or a card was resized/reset — not on pan/zoom/select
+    // P2 height-fit: a SHARED ResizeObserver catches ASYNC card-height changes the deps-based measure misses — chiefly a
+    // figure thumbnail that loads after the URL resolves (which grows the card) — so the no-overlap rule uses the true
+    // height and figure cards do not overlap their neighbours once the image paints. One observer for all cards.
+    useEffect(function () {
+      var st = stageRef.current; if (!st || typeof ResizeObserver === 'undefined') return;
+      var ro = new ResizeObserver(function (entries) {
+        if (nrzRef.current) return;   // a manual card resize drives size directly — don't fight it
+        var m = null;
+        for (var i = 0; i < entries.length; i++) { var t = entries[i].target, id = t.getAttribute && t.getAttribute('data-nid'); if (!id) continue; var hh = t.offsetHeight; if (hh && Math.abs((hgtRef.current[id] || 0) - hh) > 2) { if (!m) m = Object.assign({}, hgtRef.current); m[id] = hh; } }
+        if (m && alive.current) { hgtRef.current = m; setHgt(m); }
+      });
+      var els = st.querySelectorAll('.rmap-node[data-nid]');
+      for (var i = 0; i < els.length; i++) ro.observe(els[i]);
+      return function () { ro.disconnect(); };
+    }, [data, bump, litOpen, sizeGen]);   // re-observe the current card set (same triggers as the measure); RO then catches async growth
     // F7: the refine-chat thread is per-node → clear it whenever the selection changes; selRef tracks the live selection
     // so an in-flight refine callback knows whether the user is still on the node it was started from.
     useEffect(function () { setRcMsgs([]); setRcInput(''); setRcBusy(!!refBusy.current[sel]); selRef.current = sel; }, [sel]);
@@ -5194,6 +5210,12 @@
     }
     function stepSignOff(step) { stepSignoffRpc(step, false); }
     function stepUnsignOff(step) { stepSignoffRpc(step, true); }
+    // P2 inline controls (on an enlarged card): advance a protocol-step status, or set a paper screening decision.
+    function stepCycleStatus(step) { if (!step || !props.canEdit) return; var s = step.status; var next = (s === 'done') ? 'todo' : ((s === 'doing' || s === 'running') ? 'done' : 'doing'); stepPatch(step, { status: next }); }
+    function setPaperScreen(paper, v) {
+      if (!paper || !paper.id || !props.canEdit) return;
+      sb.from('research_sources').update({ screening: v }).eq('id', paper.id).then(function (r) { if (!alive.current) return; if (r && r.error) { window.PRUI.toast('Nem sikerült: ' + r.error.message, { kind: 'error' }); return; } setBump(function (x) { return x + 1; }); });
+    }
     function notifyMentions(body, target) {
       var cands = mentionCandidates(); if (!cands.length) return;
       // match longest name first and blank out the matched span, so a shorter PREFIX name
@@ -5836,7 +5858,7 @@
       var k = [h('div', { className: 'rmap-nh', key: 'h' }, h('span', { className: 'rmap-ni' }, RMAP_TYPE[n.t].ic), h('span', { className: 'rmap-nt' }, n.title))];
       if (n.t === 'study') k.push(h('div', { className: 'rmap-nm', key: 'm' }, h('b', null, n.m.Források), ' forrás → ', h('b', null, n.m.Included), ' incl', n.pcount ? h('span', { className: 'rmap-exp' }, (litOpen ? '▾ ' : '▸ ') + n.pcount + ' cikk') : null));
       else if (n.t === 'paper') k.push(h('div', { className: 'rmap-nm', key: 'm' }, (n.m.Venue || '') + ' · ' + n.m.Idézettség + ' cite', n.dec === 'include' ? h('span', { className: 'rmap-chip inc' }, '✓ incl') : null));
-      else if (n.t === 'step') k.push(h('div', { className: 'rmap-nm', key: 'm' }, h('span', { className: 'rmap-chip ' + (n.st === 'done' ? 'done' : n.st === 'running' ? 'run' : 'pend') }, n.st || 'vár'), ' ' + (n.m.Kind || ''), n.gate ? h('span', { className: 'rmap-chip gate' }, 'gate') : null));
+      else if (n.t === 'step') k.push(h('div', { className: 'rmap-nm', key: 'm' }, h('span', { className: 'rmap-chip ' + (n.st === 'done' ? 'done' : (n.st === 'running' || n.st === 'doing') ? 'run' : 'pend') }, n.st || 'vár'), ' ' + (n.m.Kind || ''), n.gate ? h('span', { className: 'rmap-chip gate' }, 'gate') : null));
       else if (n.t === 'venue') k.push(h('div', { className: 'rmap-nm', key: 'm' }, n.m.NPI + ' · ' + n.m.Státusz));
       else if (n.t === 'section') k.push(h('div', { className: 'rmap-nm', key: 'm' }, n.m.Méret));
       else if (n.t === 'idea') k.push(h('div', { className: 'rmap-nm', key: 'm' }, 'novelty ' + n.m.Novelty));
@@ -5859,11 +5881,19 @@
         out.push(h('div', { key: 'fig', className: 'rmap-t rmap-t-fig' }, url ? h('img', { className: 'rmap-pv-img', src: url, alt: r.fig_label || 'ábra', loading: 'lazy' }) : h('div', { className: 'rmap-pv-imgph' }, '⏳ ábra')));
       }
       if (t === 'step') {
-        var prog = n.st === 'done' ? 100 : (n.st === 'running' ? 62 : 0);
+        var inprog = n.st === 'running' || n.st === 'doing';
+        var prog = n.st === 'done' ? 100 : (inprog ? 62 : 0);
+        var cycleLbl = n.st === 'done' ? '↺ Újranyit' : (inprog ? '✓ Kész' : '▶ Indít');
         out.push(h('div', { key: 'sl', className: 'rmap-t rmap-t-l' },
-          (n.st === 'running' || n.st === 'done') ? h('div', { className: 'rmap-pv-prog' }, h('i', { style: { width: prog + '%' } })) : null,
+          (inprog || n.st === 'done') ? h('div', { className: 'rmap-pv-prog' }, h('i', { style: { width: prog + '%' } })) : null,
           (stepFlagsCap && n.ref && n.ref.assignee_id) ? h('div', { className: 'rmap-pv-meta' }, '👤 ' + nameOf(n.ref.assignee_id)) : null,
+          (props.canEdit && n.ref && n.ref.id) ? h('button', { className: 'rmap-pv-btn', title: 'Státusz léptetése', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); stepCycleStatus(n.ref); } }, cycleLbl) : null,
           (stepFlagsCap && props.canEdit && n.ref && n.ref.needs_approval && !n.ref.signed_off_by) ? h('button', { className: 'rmap-pv-btn ok', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); stepSignOff(n.ref); } }, '✅ Jóváhagyom') : null));
+      }
+      if (t === 'paper' && props.canEdit && r.id) {
+        out.push(h('div', { key: 'scr', className: 'rmap-t rmap-t-l' }, h('div', { className: 'rmap-pv-seg' }, ['include', 'maybe', 'exclude'].map(function (v) {
+          return h('button', { key: v, className: 'rmap-pv-sb' + (r.screening === v ? ' on s-' + v : ''), title: 'Szűrés: ' + v, onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); setPaperScreen(r, v); } }, v === 'include' ? '✓ incl' : v === 'maybe' ? '~ maybe' : '✕ excl');
+        }))));
       }
       if (canEnter(n)) out.push(h('div', { key: 'xl', className: 'rmap-t rmap-t-xl' }, h('button', { className: 'rmap-pv-btn pri', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); enterNode(n); } }, '◇ Belépés — teljes panel ↗')));
       return out.length ? out : null;

@@ -1162,6 +1162,12 @@
     .rmap-pv-btn { border: 1px solid var(--line); background: var(--surface); cursor: pointer; font-family: inherit; font-size: 10px; font-weight: 700; color: var(--ink); padding: 3px 9px; border-radius: 7px; align-self: flex-start; }
     .rmap-pv-btn.ok { border-color: color-mix(in srgb, #12885f 60%, var(--line)); color: #12885f; }
     .rmap-pv-btn.pri { border-color: var(--accent); color: var(--accent); }
+    /* P2 inline per-type controls: paper screening segment */
+    .rmap-pv-seg { display: flex; gap: 3px; }
+    .rmap-pv-sb { flex: 1; border: 1px solid var(--line); background: var(--surface); cursor: pointer; font-family: inherit; font-size: 9.5px; font-weight: 700; color: var(--muted); padding: 3px 4px; border-radius: 6px; text-align: center; }
+    .rmap-pv-sb.on.s-include { border-color: color-mix(in srgb, #12885f 60%, var(--line)); background: color-mix(in srgb, #12885f 12%, var(--surface)); color: #12885f; }
+    .rmap-pv-sb.on.s-maybe { border-color: color-mix(in srgb, var(--warn, #b45309) 55%, var(--line)); background: color-mix(in srgb, var(--warn, #b45309) 12%, var(--surface)); color: var(--warn, #b45309); }
+    .rmap-pv-sb.on.s-exclude { border-color: color-mix(in srgb, var(--danger, #b42318) 55%, var(--line)); background: color-mix(in srgb, var(--danger, #b42318) 12%, var(--surface)); color: var(--danger, #b42318); }
     @container (min-width: 184px) and (min-height: 104px) { .rmap-node.rmap-sized .rmap-t-l { display: flex; flex-direction: column; gap: 4px; } }
     @container (min-height: 118px) { .rmap-node.rmap-sized .rmap-t-fig { display: block; } }
     @container (min-width: 320px) and (min-height: 224px) { .rmap-node.rmap-sized .rmap-t-xl { display: block; } }
@@ -1287,7 +1293,7 @@
   <script type="text/babel" src="canvas.jsx?v=1783137934"></script>
   <script type="text/babel" src="notes.jsx?v=1783137934"></script>
   <script src="autopilot-core.js?v=1784160000"></script>
-  <script type="text/babel" src="research.jsx?v=1785510000"></script>
+  <script type="text/babel" src="research.jsx?v=1785520000"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>
