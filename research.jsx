@@ -6441,6 +6441,19 @@
         var d = res && res.data; if (d && d.text) setDInput(d.text);
       }, function () { if (alive.current) { setDEnhancing(false); window.PRUI.toast('A prompt-javítás nem elérhető.', { kind: 'error' }); } });
     }
+    function dkSuggest() {   // 💡 idea candidates FROM the current dock conversation (research-ai suggest) → new idea nodes on the map; mirrors ChatPanel.suggestIdeas
+      if (dBusy) return;
+      var convo = dMsgs.filter(function (m) { return m.text; }).slice(-16).map(function (m) { return (m.role === 'ai' ? 'AI: ' : 'User: ') + String(m.text || ''); }).join('\n\n').slice(0, 12000);
+      if (dMsgs.length <= 1 || !convo.trim()) { dkSay('ai', '💡 Előbb beszélgess a projektről — abból javaslok ötleteket.'); return; }
+      dkSay('user', '💡 Ötletek a beszélgetésből'); setDBusy(true);
+      sb.functions.invoke('research-ai', { body: { action: 'suggest', project_id: props.projectId, text: convo } }).then(function (res) {
+        if (!alive.current) return; setDBusy(false);
+        if (res && res.error) { dkSay('ai', '⚠️ Az AI nem elérhető (research-ai / ANTHROPIC_API_KEY).'); return; }
+        var d = res && res.data;
+        if (d && d.count) { dkSay('ai', '✓ ' + d.count + ' új ötlet-jelölt a térképen.'); setBump(function (x) { return x + 1; }); }
+        else dkSay('ai', 'Nem találtam új ötletet ebből a beszélgetésből.');
+      }, function () { if (alive.current) { setDBusy(false); dkSay('ai', '⚠️ Hálózati hiba.'); } });
+    }
     function dkSend(overrideTxt, skipEcho) {   // free-text turn → research-chat (streaming); the reply may save files (→ file nodes). skipEcho: caller already echoed the user turn (frame-generation chat fallback)
       var isOv = (overrideTxt != null);
       var txt = String(isOv ? overrideTxt : (dInput || '')).trim(); if (!txt || dBusy) return;
@@ -7040,7 +7053,7 @@
               ) : null
             ];
           }), dStream ? h('div', { className: 'rmap-dock-msg a', key: 'dstream' }, dStream.text || '', h('span', { className: 'rmap-dock-cursor' }, '▌')) : (dBusy ? h('div', { className: 'rmap-dock-msg a busy' }, '⏳ dolgozom…') : null)),
-          h('div', { className: 'rmap-dock-cmds' }, [['ideas', '✦ Ötletek'], ['study', '📚 Irodalom'], ['protocol', '🧪 Protokoll'], ['writing', '✍️ Draft']].map(function (c) { return h('button', { key: c[0], className: 'rmap-dock-chip', disabled: dBusy, onClick: function () { dkCmd(c[0]); } }, c[1]); })),
+          h('div', { className: 'rmap-dock-cmds' }, [['ideas', '✦ Ötletek'], ['study', '📚 Irodalom'], ['protocol', '🧪 Protokoll'], ['writing', '✍️ Draft']].map(function (c) { return h('button', { key: c[0], className: 'rmap-dock-chip', disabled: dBusy, onClick: function () { dkCmd(c[0]); } }, c[1]); }).concat([h('button', { key: 'suggest', className: 'rmap-dock-chip', disabled: dBusy, title: 'Ötlet-jelöltek a mostani beszélgetésből (AI) — új kártyák a térképen', onClick: dkSuggest }, '💡 A beszélgetésből')])),
           // the selected card is "attached" to the next prompt — shown here like an attachment chip (× to detach)
           sn ? h('div', { style: { display: 'flex', alignItems: 'center', gap: 6, margin: '2px 12px 6px', padding: '4px 8px', borderRadius: 8, background: 'var(--accent-tint)', border: '1px solid var(--accent)' } },
             h('span', { style: { flex: 'none', fontSize: 13 } }, (RMAP_TYPE[sn.t] && RMAP_TYPE[sn.t].ic) || '📎'),
