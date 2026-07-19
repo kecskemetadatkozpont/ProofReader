@@ -201,9 +201,13 @@
   ÚJ ötletet hoz létre + **linkeli** (`addressed_by_idea_id`) → a rés „Előléptetve" marad (feeds a rés→ötlet él). Az edge
   `gap_analyze` most `source_id`-t is tesz az `evidence`-be (a forrás→rés élhez) — **edge-redeploy kell hozzá**. Adversariális
   review után. *(Elhalasztva P1.5-re: rose rés-fészek keret futásonként + újdonság-gyűrű a node-on.)*
-- [ ] ⏳ **P2 — keret-scoped dock (#2)** — `boundFrame` useState (guard-ok előtt); `💬` gomb a keret-fejlécen → dock a
-  kerethez kötve + scope-pill; `dkSend` → `classifyFrameIntent` → `runFrameGap`/`frameGenerate` → `placeInFrame`.
-  (+ evidence-gap **Mátrix** nézet a GapPanelben.)
+- [x] ✅ **P2 — keret-scoped dock (#2)** — `boundFrame` useState (a guard-ok előtt); **`💬` gomb a keret-fejlécen** →
+  a dock chat a kerethez **kötve** (sel/msel/selEdge törölve + dock nyílik), scope-**pill** a dock-fejlécen (✕ leválaszt);
+  a dockba írt parancs a `dkSend`-ben **átirányítva** → `frameGenerate(boundFrame, txt)` → döntés-csipek → `placeInFrame`
+  (a MÁR kész chat-action gépezetet használja: undo/pulzus/toast változatlan). A törölt-keret eset unbind + normál chatre
+  esik vissza; az override-hívók (chat-fallback) nem irányítódnak át (nincs rekurzió). Placeholder-csere kötött állapotban.
+- [ ] ⏳ **P3 — evidence-gap Mátrix** — intervenció×kimenet rács a GapPanelben (üres cella = rés); a tengelyeket az
+  edge-nek kell visszaadnia (`matrix_row/col`) vagy kliens-klaszterezés — külön edge-kör kell hozzá. + rose rés-fészek keret (P1.5).
 
 ## Hátralévő (jövő) — Phase 6+
 - [ ] 🔴 **Teljes karakter-szintű CRDT/Yjs** — egyidejű azonos-szekció gépelés valós idejű merge-dzsel.

@@ -4570,6 +4570,7 @@
     var mqRef = useRef(null);   // in-flight marquee start point (stage coords)
     var frS = useState([]), frames = frS[0], setFrames = frS[1];   // Map frames (named regions / phase lanes) — migration-71
     var jpS = useState(null), justPlaced = jpS[0], setJustPlaced = jpS[1];   // node-ids just materialized into a frame (pulse cue); cleared after ~1.6s
+    var bfS = useState(null), boundFrame = bfS[0], setBoundFrame = bfS[1];   // #2: the dock chat is bound to this frame → typed commands create objects INSIDE it
     var frcS = useState(false), framesCap = frcS[0], setFramesCap = frcS[1];   // migration-71 capability
     var flS = useState(null), frLive = flS[0], setFrLive = flS[1];   // in-flight frame move/resize live geometry {id,x,y,w,h}
     var frdrag = useRef(null);   // frame drag/resize lifecycle guard
@@ -6151,9 +6152,16 @@
     function dkSend(overrideTxt, skipEcho) {   // free-text turn → research-chat (non-streaming); the reply may save files (→ file nodes). skipEcho: caller already echoed the user turn (frame-generation chat fallback)
       var isOv = (overrideTxt != null);
       var txt = String(isOv ? overrideTxt : (dInput || '')).trim(); if (!txt || dBusy) return;
+      // #2 — when the dock is BOUND to a frame, a real (non-override) typed command is frame-scoped: route it through the
+      // frame chat-actions (frameGenerate → decision chips → placeInFrame), not the free-text chat. Fully reuses the shipped flow.
+      if (boundFrame && !isOv) {
+        var bf = frames.filter(function (x) { return x.id === boundFrame.id; })[0];
+        if (bf) { setDInput(''); frameGenerate(bf, txt); return; }
+        setBoundFrame(null);   // the bound frame was deleted → unbind, fall through to normal chat
+      }
       // the currently SELECTED map card is "attached" as context — the assistant sees exactly which node you mean.
       // (an explicit override — e.g. a frame's inline "generate here" — carries its own context and attaches no card.)
-      var an = (!isOv && sel && g && g.by) ? g.by[sel] : null;
+      var an = (!isOv && !boundFrame && sel && g && g.by) ? g.by[sel] : null;
       var full = txt;
       if (an) {
         var lab = (RMAP_TYPE[an.t] && RMAP_TYPE[an.t].lab) || an.t;
@@ -6410,6 +6418,7 @@
                 h('span', { className: 'rmap-frame-t' }, f.title),
                 props.canEdit ? h('span', { className: 'rmap-frame-acts' },
                   h('button', { title: 'Generálj ide', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); setFrGenOpen(function (M) { var m = Object.assign({}, M); if (m[f.id]) delete m[f.id]; else m[f.id] = true; return m; }); } }, '✨'),
+                  h('button', { className: (boundFrame && boundFrame.id === f.id) ? 'on' : '', title: 'Chat a kerethez kötése — a dockba írt parancs ide hoz létre objektumokat', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); if (boundFrame && boundFrame.id === f.id) { setBoundFrame(null); } else { setBoundFrame(f); setSel(null); setMsel({}); setSelEdge(null); setDkOpen(true); } } }, '💬'),
                   h('button', { title: 'Átszínezés', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); frameRecolor(f); } }, '🎨'),
                   h('button', { title: 'Átnevezés', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); frameRename(f); } }, '✎'),
                   h('button', { title: 'Törlés', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); frameDelete(f.id); } }, '🗑')) : null),
@@ -6669,7 +6678,9 @@
           h('div', { className: 'rmap-dock-rz rmap-dock-rz-l', title: 'Átméretezés', onMouseDown: function (e) { startDockResize(e, 'w'); } }),
           h('div', { className: 'rmap-dock-rz rmap-dock-rz-t', title: 'Átméretezés', onMouseDown: function (e) { startDockResize(e, 'h'); } }),
           h('div', { className: 'rmap-dock-rz rmap-dock-rz-tl', title: 'Átméretezés', onMouseDown: function (e) { startDockResize(e, 'wh'); } }),
-          h('div', { className: 'rmap-dock-h' }, h('span', null, '🤖 Asszisztens'), h('div', { style: { display: 'flex', gap: 2 } },
+          h('div', { className: 'rmap-dock-h' }, h('span', null, '🤖 Asszisztens'),
+            boundFrame ? h('button', { className: 'rmap-dock-framepill', title: 'Keret leválasztása a chatről', onClick: function () { setBoundFrame(null); } }, '🖼️ ' + String(boundFrame.title || 'Keret').slice(0, 18), h('span', { className: 'x' }, '✕')) : null,
+            h('div', { style: { display: 'flex', gap: 2, marginLeft: 'auto' } },
             h('button', { className: 'rmap-dock-x', title: dkFull ? 'Eredeti magasság' : 'Teljes magasság', onClick: toggleDockFull }, dkFull ? '⤡' : '⤢'),
             h('button', { className: 'rmap-dock-x', title: 'Összecsukás', onClick: function () { setDkOpen(false); try { localStorage.setItem('pr-rmap-dock', '0'); } catch (e) { } } }, '▾'))),
           h('div', { className: 'rmap-dock-msgs', ref: dScroll }, dMsgs.map(function (mm, i) {
@@ -6699,7 +6710,7 @@
             h('button', { className: 'rmap-dock-modebtn' + (dkMode === 'chat' ? ' on' : ''), disabled: dBusy, title: 'Beszélgetés / kérdés az asszisztenssel', onClick: function () { setDkMode('chat'); } }, '💬 Chat'),
             h('button', { className: 'rmap-dock-modebtn' + (dkMode === 'action' ? ' on' : ''), disabled: dBusy || !(sn && sn.t === 'step'), title: (sn && sn.t === 'step') ? 'Az utasításból protokoll-lépést szúr be a kijelölt lépés után' : 'Jelölj ki egy protokoll-lépést az Akció módhoz', onClick: function () { setDkMode('action'); } }, '⚡ Akció')),
           h('div', { className: 'rmap-dock-in' },
-            h('textarea', { rows: 1, value: dInput, placeholder: (dkMode === 'action' && sn && sn.t === 'step') ? 'Mit tegyek e lépés után? (pl. „tegyél be egy validációs lépést")' : sn ? 'Kérdezz vagy adj utasítást a becsatolt kártyáról…' : 'Írj utasítást vagy kérdést… (jelölj ki egy kártyát a becsatoláshoz)', disabled: dBusy, onChange: function (e) { setDInput(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); dkPrimary(); } } }),
+            h('textarea', { rows: 1, value: dInput, placeholder: boundFrame ? ('„' + String(boundFrame.title || 'Keret').slice(0, 20) + '" keretbe — pl. hozz létre kutatási réseket…') : (dkMode === 'action' && sn && sn.t === 'step') ? 'Mit tegyek e lépés után? (pl. „tegyél be egy validációs lépést")' : sn ? 'Kérdezz vagy adj utasítást a becsatolt kártyáról…' : 'Írj utasítást vagy kérdést… (jelölj ki egy kártyát a becsatoláshoz)', disabled: dBusy, onChange: function (e) { setDInput(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); dkPrimary(); } } }),
             h('button', { className: 'btn' + (recOn ? ' rmap-mic-on' : ''), style: { fontSize: 14, padding: '0 9px', flex: 'none' }, disabled: dBusy, title: recOn ? 'Felvétel leállítása' : 'Hangbevitel — diktálás (magyar)', onClick: toggleMic }, recOn ? '⏺' : '🎤'),
             h('button', { className: 'btn pri', style: { fontSize: 14, padding: '0 12px', flex: 'none' }, disabled: dBusy || !dInput.trim() || (dkMode === 'action' && !(sn && sn.t === 'step')), onClick: dkPrimary }, dkMode === 'action' ? '⚡' : '➤')))
           : h('button', { className: 'rmap-dock-fab', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function () { setDkOpen(true); try { localStorage.setItem('pr-rmap-dock', '1'); } catch (e) { } } }, '🤖 Asszisztens')) : null),
