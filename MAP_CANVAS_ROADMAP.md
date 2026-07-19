@@ -253,6 +253,21 @@
   a húzás alatt elnyomva) · **dedup-guard** (ha már van keret e bbox köré [±10px] → `framePatch` frissítés + toast, nem új keret).
   Adversariális review után.
 
+## ✅ Kártya-törlés + P2-polish — 2026-07-20
+> User: „lehessen törölni kártyákat amiket a User úgy dönt" + dock kijelölés→ötlet + böngésző-törlés/átnevezés frissítse a térképet.
+- [x] ✅ **Kártya-törlés (destruktív, confirm-gated)** — `nodeDelete`/`nodesDelete`/`delOneNode`/`nodeDeletable` (guardok előtt, plain fv-ek):
+  `DEL_BY_TYPE` típusonként a helyes táblát törli (`idea/gap→research_ideas`, `step→research_protocol_steps`, `venue→research_journal_picks`,
+  `dataset→research_datasets`, `file/section/review-fájl→research_files`, `chat→research_chats`, `figure→research_figures`) `n.ref.id` szerint,
+  + a storage-blob + a `research_map_layout` sor törlése, majd `setSel/setMsel/setBump`. **Biztonságos scope:** a megosztott/pipeline-adat
+  (`paper→research_sources`, `srq`, `sreview`) és az **összesítő** node-ok (`lit`/`sr`, nincs `ref.id`) **NEM törölhetők** (`nodeDeletable` false →
+  nincs 🗑, csak 🙈 rejtés). **FK-graceful** hibaüzenet. Gombok: **🗑 a kijelölés-toolbaron** (`.rmap-dbtn-danger`) · **🗑 Törlés az inspectorban** ·
+  **🗑 a groupbaron** (több kijelölt, egy confirm, `Promise.all`, részleges-hiba jelentés). A groupbar ✕ átnevezve „Kijelölés megszüntetése".
+- [x] ✅ **P2-polish** — **(a)** böngésző `del/renameFile/moveTo` → `props.onChanged()` a `load()` után; a dock `onChanged: setBump`-ot ad → a fájl
+  törlése/átnevezése a Térképet is frissíti (nincs loop, mert `load()` nem hív `onChanged`-et; az Idea-chat változatlan). **(b)** **dock kijelölés→ötlet:**
+  `dkSelUp` (msgs `onMouseUp`) → lebegő `.sel-idea-btn` „✚ Ötletnek" → `dkSelToIdea` insert `research_ideas` + `setBump`; a gomb `dkOpen && dkTab!=='files'`-re kapuzva.
+- **Adversariális review (4 ágens): 1 minor javítva** — a storage-blob törlése nem futott file/review/section-nél, mert a két `research_files` loader-select
+  nem hozta a `storage_path`-ot → árva blob; **fix:** `storage_path` hozzáadva mindkét selecthez. (1 kozmetikai elvetve, mégis lezárva a render-kapuval.) **NINCS migráció/edge.**
+
 ## ✅ Üres projekt: a Térkép a nulláról is használható — 2026-07-19
 > Bug: üres projekten (0 node) a `if (!g.N.length) return <placeholder>` korai visszatérés ELREJTETTE a vásznat + a chat-dockot → a Térképről el sem lehetett kezdeni a munkát. (Egybevág a map-only audit „node-genesis / kezdés a Térképről" pontjával.)
 - [x] ✅ **Fix** — a korai visszatérés **eltávolítva**; a teljes vászon + a 🤖 chat-dock + a radiális gyors-hozzáadás mostantól **üres projekten is renderel**. Üres állapotban egy **kis, nem-blokkoló üdvözlő kártya** (`.rmap-empty-hint`, a stage első gyermeke, `(!g.N.length)?…:null`) vezet: `onMouseDown` stopPropagation csak a kártyán (a vásznon máshol a dupla-katt továbbra is nyitja a radiálist), gyors-start gombok (szerkesztőnek): **✦ Első ötlet** (`ideaAtPos` a `stageVP`+`view` alapján a nézet közepére) · **📎 Adat feltöltése** (dock → Fájlok fül) · **💬 Asszisztens** (dock → Chat). A szöveg **read-only nézőnek** külön változat.

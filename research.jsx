@@ -757,7 +757,7 @@
     function del(f) {
       window.PRUI.confirm({ title: 'Delete “' + f.path + '”?', body: 'This file will be permanently removed.', confirmLabel: 'Delete', danger: true }).then(function (ok) {
         if (!ok) return;
-        sb.from('research_files').delete().eq('id', f.id).then(function () { if (f.storage_path) { try { sb.storage.from('research-data').remove([f.storage_path]); } catch (e) { } } if (preview && preview.id === f.id) setPreview(null); load(); });
+        sb.from('research_files').delete().eq('id', f.id).then(function () { if (f.storage_path) { try { sb.storage.from('research-data').remove([f.storage_path]); } catch (e) { } } if (preview && preview.id === f.id) setPreview(null); load(); if (props.onChanged) props.onChanged(); });
       });
     }
     function openSigned(path) { sb.storage.from('research-data').createSignedUrl(path, 3600).then(function (r) { if (r && r.data && r.data.signedUrl) window.open(r.data.signedUrl, '_blank'); }); }
@@ -780,12 +780,12 @@
       var np = (folderKey ? folderKey + '/' : '') + baseName(f.path); if (np === f.path) return;
       sb.from('research_files').update({ path: np, updated_at: new Date().toISOString() }).eq('id', f.id).then(function (r) {
         if (r && r.error) { window.PRUI.toast(/duplicate|unique/i.test(r.error.message) ? 'Már van ilyen nevű fájl a mappában.' : r.error.message, { kind: 'error' }); return; }
-        if (folderKey) setOpenF(function (o) { var n = Object.assign({}, o); n[folderKey] = true; return n; }); load();
+        if (folderKey) setOpenF(function (o) { var n = Object.assign({}, o); n[folderKey] = true; return n; }); load(); if (props.onChanged) props.onChanged();
       });
     }
     function renameFile(f) {
       var np = (window.prompt('Útvonal (mappa/fájlnév — új mappához írj „mappa/" prefixet):', f.path) || '').trim(); if (!np || np === f.path) return;
-      sb.from('research_files').update({ path: np, updated_at: new Date().toISOString() }).eq('id', f.id).then(function (r) { if (r && r.error) { window.PRUI.toast(/duplicate|unique/i.test(r.error.message) ? 'Már foglalt útvonal.' : r.error.message, { kind: 'error' }); return; } load(); });
+      sb.from('research_files').update({ path: np, updated_at: new Date().toISOString() }).eq('id', f.id).then(function (r) { if (r && r.error) { window.PRUI.toast(/duplicate|unique/i.test(r.error.message) ? 'Már foglalt útvonal.' : r.error.message, { kind: 'error' }); return; } load(); if (props.onChanged) props.onChanged(); });
     }
     function saveEdit() {
       if (!edit) return; var e = edit;
@@ -4738,6 +4738,7 @@
     var dtbS = useState('chat'), dkTab = dtbS[0], setDkTab = dtbS[1];   // dock body tab: 'chat' | 'files' (in-dock SessionFileBrowser — P1)
     var denS = useState(false), dEnhancing = denS[0], setDEnhancing = denS[1];   // ✨ dock prompt-enhance in flight
     var dstS = useState(null), dStream = dstS[0], setDStream = dstS[1];   // live streaming reply bubble {text} while a dock turn streams in
+    var dspS = useState(null), dSelPop = dspS[0], setDSelPop = dspS[1];   // dock: text selection in the messages → floating "add to idea" button {text,x,y}
     // safety: any aborted drag anywhere clears the dock dropzone so it can't stay stuck over the chat
     useEffect(function () { if (!dDrop) return; function reset() { setDDrop(false); } window.addEventListener('dragend', reset); window.addEventListener('drop', reset); return function () { window.removeEventListener('dragend', reset); window.removeEventListener('drop', reset); }; }, [dDrop]);
     var dockRef = useRef(null);   // the open dock element (for edge-drag resize geometry)
@@ -5051,10 +5052,10 @@
         sb.from('research_sources').select('id', { count: 'exact', head: true }).eq('project_id', pid).eq('screening', 'include'),
         sb.from('research_protocols').select('id,title,status,idea_id').eq('project_id', pid).neq('status', 'archived').order('created_at', { ascending: false }).limit(1),
         sb.from('research_journal_picks').select('id,title,status,npi_level').eq('project_id', pid),
-        sb.from('research_files').select('id,path,size').eq('project_id', pid).or('path.like.writing/%,path.like.studies/%'),
+        sb.from('research_files').select('id,path,size,storage_path').eq('project_id', pid).or('path.like.writing/%,path.like.studies/%'),
         // F5 — multi-modal nodes: datasets, uploaded/material files (NOT writing/studies), chat threads, paper figures
         sb.from('research_datasets').select('id,name,source,status,size_bytes,notes').eq('project_id', pid).order('created_at', { ascending: true }).limit(16),
-        sb.from('research_files').select('id,path,size,source').eq('project_id', pid).not('path', 'like', 'writing/%').not('path', 'like', 'studies/%').order('updated_at', { ascending: false }).limit(16),
+        sb.from('research_files').select('id,path,size,source,storage_path').eq('project_id', pid).not('path', 'like', 'writing/%').not('path', 'like', 'studies/%').order('updated_at', { ascending: false }).limit(16),
         sb.from('research_chats').select('id,title,updated_at').eq('project_id', pid).order('updated_at', { ascending: false }).limit(8),
         sb.from('research_figures').select('id,source_id,fig_label,caption,storage_path').eq('project_id', pid).eq('hidden', false).order('created_at', { ascending: true }).limit(16),
         // SR/Elicit provenance: the "Study basis" review-question candidates (linked to their idea) + the launched Elicit reviews
@@ -5595,6 +5596,45 @@
     function toggleEdgeType(k) { setHiddenEdgeTypes(function (H) { var n = Object.assign({}, H); if (n[k]) delete n[k]; else n[k] = true; try { if (Object.keys(n).length) localStorage.setItem(edgeTypeStoreKey(), JSON.stringify(n)); else localStorage.removeItem(edgeTypeStoreKey()); } catch (e) { } return n; }); }
     function nodeToggleHidden(n) { nodeSetFlag(n, 'hidden', !(layout[n.id] && layout[n.id].hidden)); }
     function nodeTogglePinned(n) { nodeSetFlag(n, 'pinned', !(layout[n.id] && layout[n.id].pinned)); }
+    // ── DELETE a card = delete its underlying row (per node type) + the map layout + any storage blob. Confirm-gated,
+    // FK-graceful. Scoped to the user's OWN artifacts; shared/pipeline data (paper library, SR jobs) is NOT deletable here
+    // (those have their own management + FK dependents) → they can only be 🙈 hidden. Aggregate nodes (lit/sr) excluded.
+    var DEL_BY_TYPE = { idea: 'research_ideas', gap: 'research_ideas', step: 'research_protocol_steps', venue: 'research_journal_picks', section: 'research_files', review: 'research_files', dataset: 'research_datasets', file: 'research_files', chat: 'research_chats', figure: 'research_figures' };
+    function nodeDeletable(n) { return !!(props.canEdit && n && n.ref && n.ref.id && DEL_BY_TYPE[n.t] && n.id !== 'lit' && n.id !== 'sr'); }
+    function delOneNode(n) {   // no confirm — deletes the row (+ storage blob + map layout); resolves {ok}|{error}|{skipped}
+      if (!nodeDeletable(n)) return Promise.resolve({ skipped: true });
+      var table = DEL_BY_TYPE[n.t], blob = ((n.t === 'figure' || n.t === 'file' || n.t === 'review' || n.t === 'section') && n.ref.storage_path) ? n.ref.storage_path : null;
+      return sb.from(table).delete().eq('id', n.ref.id).then(function (r) {
+        if (r && r.error) return { error: r.error };
+        if (blob) { try { sb.storage.from('research-data').remove([blob]); } catch (e) { } }
+        sb.from('research_map_layout').delete().eq('project_id', props.projectId).eq('node_id', n.id);
+        return { ok: true };
+      }, function () { return { error: { message: 'hálózat' } }; });
+    }
+    function nodeDelete(n) {   // single-card delete (selection toolbar / inspector) — confirm then delete
+      if (!nodeDeletable(n)) { window.PRUI.toast('Ez a kártya nem törölhető közvetlenül (összesítő vagy megosztott adat — használd a 🙈 rejtést).', { kind: 'error' }); return; }
+      window.PRUI.confirm({ title: ((RMAP_TYPE[n.t] && RMAP_TYPE[n.t].lab) || 'Kártya') + ' törlése?', body: '„' + String(n.title || '').slice(0, 80) + '" — véglegesen törlődik a projektből. Ez nem vonható vissza.', confirmLabel: 'Törlés', danger: true }).then(function (ok) {
+        if (!ok || !alive.current) return;
+        delOneNode(n).then(function (r) {
+          if (!alive.current) return;
+          if (r && r.error) { window.PRUI.toast('Törlés sikertelen: ' + (/(foreign key|violates|constraint)/i.test(String(r.error.message || '')) ? 'kapcsolódó elemek hivatkoznak rá — előbb töröld azokat, vagy rejtsd el a kártyát (🙈).' : (r.error.message || 'hiba')), { kind: 'error' }); return; }
+          setSel(null); setMsel(function (M) { var m = Object.assign({}, M); delete m[n.id]; return m; }); setBump(function (x) { return x + 1; }); window.PRUI.toast('Törölve', { kind: 'ok' });
+        });
+      });
+    }
+    function nodesDelete(nodes) {   // group delete (multi-select) — one confirm, then delete each deletable node
+      var dels = (nodes || []).filter(nodeDeletable);
+      if (!dels.length) { window.PRUI.toast('A kijelöltek nem törölhetők közvetlenül (megosztott/összesítő adat).', { kind: 'error' }); return; }
+      window.PRUI.confirm({ title: dels.length + ' kártya törlése?', body: 'A kijelölt törölhető kártyák véglegesen törlődnek. Ez nem vonható vissza.', confirmLabel: 'Törlés', danger: true }).then(function (ok) {
+        if (!ok || !alive.current) return;
+        Promise.all(dels.map(delOneNode)).then(function (rs) {
+          if (!alive.current) return;
+          var errs = rs.filter(function (r) { return r && r.error; }).length;
+          setMsel({}); setSel(null); setBump(function (x) { return x + 1; });
+          window.PRUI.toast(errs ? ((dels.length - errs) + ' törölve · ' + errs + ' sikertelen (hivatkozott)') : (dels.length + ' kártya törölve'), { kind: errs ? 'error' : 'ok' });
+        });
+      });
+    }
     function groupHide() { Object.keys(msel).forEach(function (id) { var n = g.by[id]; if (n && !n.mapHidden) nodeSetFlag(n, 'hidden', true); }); setMsel({}); }
     function groupPin() { Object.keys(msel).forEach(function (id) { var n = g.by[id]; if (n) nodeSetFlag(n, 'pinned', true); }); }
     // ---- Map frames (named regions / phase lanes) — migration-71. Frames live in WORLD coords (pan/zoom with the canvas). ----
@@ -6441,6 +6481,22 @@
         var d = res && res.data; if (d && d.text) setDInput(d.text);
       }, function () { if (alive.current) { setDEnhancing(false); window.PRUI.toast('A prompt-javítás nem elérhető.', { kind: 'error' }); } });
     }
+    function dkSelUp() {   // text selected in the dock messages → show a floating "✚ Ötletnek" button (mirrors the Idea chat's selection→idea)
+      if (!props.canEdit) return;
+      setTimeout(function () {
+        var s = window.getSelection ? window.getSelection() : null, txt = s ? String(s).trim() : '';
+        if (txt && txt.length > 3) { try { var r = s.getRangeAt(0).getBoundingClientRect(); setDSelPop({ text: txt, x: r.left + r.width / 2, y: r.top }); } catch (e) { setDSelPop(null); } }
+        else setDSelPop(null);
+      }, 1);
+    }
+    function dkSelToIdea(text) {   // save the selected text as a new idea → appears on the map
+      sb.from('research_ideas').insert({ project_id: props.projectId, source: 'own', question: String(text || '').slice(0, 8000), created_by: props.authorId, status: 'candidate' }).then(function (r) {
+        if (!alive.current) return;
+        if (r && r.error) { window.PRUI.toast(r.error.message, { kind: 'error' }); return; }
+        setDSelPop(null); setBump(function (x) { return x + 1; }); window.PRUI.toast('✚ Ötletként mentve — a térképen', { kind: 'ok' });
+        try { window.getSelection().removeAllRanges(); } catch (e) { }
+      }, function () { if (alive.current) window.PRUI.toast('Mentés sikertelen.', { kind: 'error' }); });
+    }
     function dkSuggest() {   // 💡 idea candidates FROM the current dock conversation (research-ai suggest) → new idea nodes on the map; mirrors ChatPanel.suggestIdeas
       if (dBusy) return;
       var convo = dMsgs.filter(function (m) { return m.text; }).slice(-16).map(function (m) { return (m.role === 'ai' ? 'AI: ' : 'User: ') + String(m.text || ''); }).join('\n\n').slice(0, 12000);
@@ -6832,7 +6888,8 @@
           (mapFlags && props.canEdit) ? h('button', { title: 'A kijelöltek elrejtése a térképről', onClick: groupHide }, '🙈') : null,
           h('button', { title: 'A kijelölés exportálása PNG-be', onClick: exportSelection }, '⤓'),
           (framesCap && props.canEdit) ? h('button', { title: 'Kijelöltek keretbe csoportosítása (⌘/Ctrl+G)', onClick: groupIntoFrame }, '▢+') : null,
-          h('button', { title: 'Kijelölés törlése', onClick: function () { setMsel({}); } }, '✕')) : null,
+          props.canEdit ? h('button', { title: 'A kijelölt kártyák végleges törlése', style: { color: 'var(--danger, #b42318)' }, onClick: function () { nodesDelete(Object.keys(msel).map(function (id) { return g.by[id]; })); } }, '🗑') : null,
+          h('button', { title: 'Kijelölés megszüntetése', onClick: function () { setMsel({}); } }, '✕')) : null,
         run && runActive ? h('div', { className: 'rmap-runbar' + (run.status === 'awaiting_approval' ? ' gate' : '') },
           h('span', { className: 'rmap-rb-dot' }), h('b', null, '⚡ Autopilot'),
           h('span', { className: 'rmap-rb-st' }, (AP_ST_LABEL[run.status] || run.status) + (activeLabel ? ' · ' + activeLabel : '') + (runProg ? ' · ' + runProg : '')),
@@ -7043,7 +7100,7 @@
             h('button', { className: 'rmap-dock-x', title: dkFull ? 'Eredeti magasság' : 'Teljes magasság', onClick: toggleDockFull }, dkFull ? '⤡' : '⤢'),
             h('button', { className: 'rmap-dock-x', title: 'Összecsukás', onClick: function () { setDkOpen(false); try { localStorage.setItem('pr-rmap-dock', '0'); } catch (e) { } } }, '▾'))),
           (dkTab !== 'files') ? h(React.Fragment, null,
-          h('div', { className: 'rmap-dock-msgs', ref: dScroll }, dMsgs.map(function (mm, i) {
+          h('div', { className: 'rmap-dock-msgs', ref: dScroll, onMouseUp: dkSelUp, onScroll: function () { if (dSelPop) setDSelPop(null); } }, dMsgs.map(function (mm, i) {
             return [
               h('div', { key: 'm' + i, className: 'rmap-dock-msg ' + (mm.role === 'user' ? 'u' : 'a') }, mm.text),
               (mm.actions && mm.actions.length) ? h('div', { key: 'a' + i, className: 'rmap-dock-cmds rmap-dock-acts' + (mm.done ? ' done' : '') },
@@ -7079,10 +7136,11 @@
             h('textarea', { rows: 1, value: dInput, placeholder: boundFrame ? ('„' + String(boundFrame.title || 'Keret').slice(0, 20) + '" keretbe — pl. hozz létre kutatási réseket…') : (dkMode === 'action' && sn && sn.t === 'step') ? 'Mit tegyek e lépés után? (pl. „tegyél be egy validációs lépést")' : sn ? 'Kérdezz vagy adj utasítást a becsatolt kártyáról…' : 'Írj utasítást vagy kérdést… (jelölj ki egy kártyát a becsatoláshoz)', disabled: dBusy, onChange: function (e) { setDInput(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); dkPrimary(); } } }),
             h('button', { className: 'btn' + (recOn ? ' rmap-mic-on' : ''), style: { fontSize: 14, padding: '0 9px', flex: 'none' }, disabled: dBusy, title: recOn ? 'Felvétel leállítása' : 'Hangbevitel — diktálás (magyar)', onClick: toggleMic }, recOn ? '⏺' : '🎤'),
             h('button', { className: 'btn pri', style: { fontSize: 14, padding: '0 12px', flex: 'none' }, disabled: dBusy || !dInput.trim() || (dkMode === 'action' && !(sn && sn.t === 'step')), onClick: dkPrimary }, dkMode === 'action' ? '⚡' : '➤')))
-          : h('div', { className: 'rmap-dock-files' }, h(SessionFileBrowser, { projectId: props.projectId, version: bump, canEdit: props.canEdit, authorId: props.authorId, onAttach: function (a) { setDAttach(function (p) { return p.concat([a]); }); if (window.PRUI) window.PRUI.toast('📎 Csatolva: ' + String(a.label || a.name || 'fájl').slice(0, 40), { kind: 'ok' }); } })))
+          : h('div', { className: 'rmap-dock-files' }, h(SessionFileBrowser, { projectId: props.projectId, version: bump, canEdit: props.canEdit, authorId: props.authorId, onChanged: function () { setBump(function (x) { return x + 1; }); }, onAttach: function (a) { setDAttach(function (p) { return p.concat([a]); }); if (window.PRUI) window.PRUI.toast('📎 Csatolva: ' + String(a.label || a.name || 'fájl').slice(0, 40), { kind: 'ok' }); } })))
           : h('button', { className: 'rmap-dock-fab', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function () { setDkOpen(true); try { localStorage.setItem('pr-rmap-dock', '1'); } catch (e) { } } }, '🤖 Asszisztens')) : null),
       // dock attach picker (library source / publication file / LaTeX / upload) — the same reusable modal the Idea chat uses
       (props.canEdit && dPick) ? h(AttachModal, { projectId: props.projectId, sources: props.sources, fileOwnerId: props.fileOwnerId, authorId: props.authorId, onUploadFile: dkUpload, onPick: function (a) { setDAttach(function (p) { return p.concat([a]); }); }, onClose: function () { setDPick(false); } }) : null,
+      (props.canEdit && dSelPop && dkOpen && dkTab !== 'files') ? h('button', { className: 'sel-idea-btn', style: { position: 'fixed', left: dSelPop.x, top: dSelPop.y - 40, transform: 'translateX(-50%)', zIndex: 60 }, onMouseDown: function (e) { e.preventDefault(); }, onClick: function () { dkSelToIdea(dSelPop.text); } }, '✚ Ötletnek') : null,
       // floating selection toolbar — compact quick-actions above the selected card (pin / hide / generate / export)
       (sn && props.canEdit) ? h('div', { className: 'rmap-seltool', style: selToolStyle(sn), onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); }, onMouseMove: function (e) { dockMagnify(e.currentTarget, e.clientX, 78, 26); }, onMouseLeave: function (e) { dockReset(e.currentTarget); } },
         mapFlags ? h('button', { className: 'rmap-dbtn' + ((layout[sn.id] && layout[sn.id].pinned) ? ' on' : ''), title: (layout[sn.id] && layout[sn.id].pinned) ? 'Kitűzés levétele' : 'Kitűzés (fontos)', onClick: function () { nodeTogglePinned(sn); } }, '📌', h('span', { className: 'rmap-dlab' }, (layout[sn.id] && layout[sn.id].pinned) ? 'Kitűzés levétele' : 'Kitűzés')) : null,
@@ -7091,7 +7149,8 @@
         canEnter(sn) ? h('button', { className: 'rmap-dbtn', title: 'Panel megnyitása ablakként (nem-modal, több is lehet)', onClick: function () { openWindow(sn); } }, '⊞', h('span', { className: 'rmap-dlab' }, 'Ablak')) : null,
         (props.canEdit && edgesCap) ? h('button', { className: 'rmap-dbtn' + (linkFrom === sn.id ? ' on' : ''), title: 'Kapcsolat húzása egy másik kártyához (kézi él)', onClick: function () { setLinkFrom(linkFrom === sn.id ? null : sn.id); } }, '🔗', h('span', { className: 'rmap-dlab' }, 'Kapcsolat')) : null,
         h('button', { className: 'rmap-dbtn', title: 'Kártya a nézetbe (a képernyőre igazítja)', onClick: function () { cardIntoView(sn); } }, '⤢', h('span', { className: 'rmap-dlab' }, 'Nézetbe')),
-        h('button', { className: 'rmap-dbtn', title: 'Kártya exportálása (PNG)', onClick: function () { exportNode(sn); } }, '⤓', h('span', { className: 'rmap-dlab' }, 'Export'))) : null,
+        h('button', { className: 'rmap-dbtn', title: 'Kártya exportálása (PNG)', onClick: function () { exportNode(sn); } }, '⤓', h('span', { className: 'rmap-dlab' }, 'Export')),
+        nodeDeletable(sn) ? h('button', { className: 'rmap-dbtn rmap-dbtn-danger', title: 'Kártya törlése (véglegesen)', onClick: function () { nodeDelete(sn); } }, '🗑', h('span', { className: 'rmap-dlab' }, 'Törlés')) : null) : null,
       edgeLabelEls,
       edgeInspEl(),
       sn ? h('div', { className: 'rmap-insp rmap-insp-float', style: inspStyle(sn), onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
@@ -7122,7 +7181,8 @@
             (props.canEdit && editSpec(sn)) ? h('button', { className: 'btn pri', style: { fontSize: 12 }, onClick: function () { openEdit(sn); } }, '✎ Metaadat szerkesztése') : null,
             (props.canEdit && regenActions(sn).length) ? h('button', { className: 'btn', style: { fontSize: 12 }, disabled: genBusy, onClick: function () { runGen(sn, regenActions(sn)[0][0]); } }, regenActions(sn)[0][1]) : null,
             h('button', { className: 'btn', style: { fontSize: 12 }, onClick: function () { if (props.onGoTab) props.onGoTab(RMAP_TYPE[sn.t].tab); } }, 'Megnyitás a ' + RMAP_TYPE[sn.t].lab + ' fülön →'),
-            (sn.ref && sn.ref.url) ? h('a', { className: 'btn', style: { fontSize: 12, textDecoration: 'none' }, href: sn.ref.url, target: '_blank', rel: 'noopener' }, 'Forrás ↗') : null),
+            (sn.ref && sn.ref.url) ? h('a', { className: 'btn', style: { fontSize: 12, textDecoration: 'none' }, href: sn.ref.url, target: '_blank', rel: 'noopener' }, 'Forrás ↗') : null,
+            nodeDeletable(sn) ? h('button', { className: 'btn', style: { fontSize: 12, color: 'var(--danger, #b42318)' }, title: 'A kártya és adatai végleges törlése', onClick: function () { nodeDelete(sn); } }, '🗑 Törlés') : null),
           // "Mit tehetsz innen?" — the node's one-click generations (idea→study, study→review, review→protocol/draft, …),
           // surfaced inline so every card advertises how to move the research forward from here (not only via the menu).
           (props.canEdit && genActions(sn).length) ? h('div', { style: { marginTop: 8, borderTop: '1px solid var(--line)', paddingTop: 8 } },

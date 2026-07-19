@@ -876,6 +876,7 @@
     .rmap-dbtn { position: relative; border: none; background: none; cursor: pointer; display: flex; align-items: center; justify-content: center; color: var(--ink); line-height: 1; transform-origin: bottom center; flex: none; transition: transform .13s cubic-bezier(.3,1.4,.5,1), background .12s; }
     .rmap-dbtn:hover { background: var(--surface-2); }
     .rmap-dbtn:disabled { cursor: default; opacity: .5; }
+    .rmap-dbtn-danger:hover { background: color-mix(in srgb, var(--danger, #b42318) 15%, transparent); color: var(--danger, #b42318); }
     .rmap-seltool .rmap-dbtn { width: 34px; height: 30px; border-radius: 8px; font-size: 14.5px; }
     .rmap-dbtn .rmap-dlab { position: absolute; bottom: calc(100% + 9px); left: 50%; transform: translateX(-50%) scale(calc(1 / var(--s, 1))); white-space: nowrap; font-size: 11px; font-weight: 650; background: var(--ink); color: var(--surface); padding: 3px 9px; border-radius: 7px; opacity: 0; pointer-events: none; transition: opacity .12s; z-index: 20; }
     .rmap-dbtn .rmap-dlab::after { content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%); border: 5px solid transparent; border-top-color: var(--ink); }
@@ -1475,7 +1476,7 @@
   <script type="text/babel" src="canvas.jsx?v=1783137934"></script>
   <script type="text/babel" src="notes.jsx?v=1783137934"></script>
   <script src="autopilot-core.js?v=1784160000"></script>
-  <script type="text/babel" src="research.jsx?v=1785950000"></script>
+  <script type="text/babel" src="research.jsx?v=1785961000"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>
