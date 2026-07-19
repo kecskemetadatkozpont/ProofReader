@@ -1294,6 +1294,10 @@
     .gcard { border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 12px; padding: 13px 15px; background: var(--surface); }
     .gcard-top { display: flex; align-items: center; gap: 10px; margin-bottom: 7px; flex-wrap: wrap; }
     .gbadge { font-size: 10px; font-weight: 800; color: #fff; padding: 2px 9px; border-radius: 5px; }
+    .gbadge-sel { font-size: 10px; font-weight: 800; color: #fff; padding: 2px 8px; border-radius: 5px; border: none; cursor: pointer; font-family: inherit; max-width: 220px; }
+    .gbadge-sel:hover { filter: brightness(1.07); }
+    .gbadge-sel option { color: var(--ink); background: var(--surface); font-weight: 600; }
+    .gdup { font-size: 10px; font-weight: 700; color: #b45309; background: color-mix(in srgb, #d1810b 14%, transparent); border: 1px solid color-mix(in srgb, #d1810b 40%, var(--line)); border-radius: 5px; padding: 1px 7px; }
     .gnov { margin-left: auto; display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--faint); font-weight: 600; }
     .gnov-bar { width: 76px; height: 6px; border-radius: 999px; background: var(--surface-2, var(--bg)); overflow: hidden; border: 1px solid var(--line); }
     .gnov-bar i { display: block; height: 100%; background: var(--accent); }
@@ -1428,7 +1432,7 @@
   <script type="text/babel" src="canvas.jsx?v=1783137934"></script>
   <script type="text/babel" src="notes.jsx?v=1783137934"></script>
   <script src="autopilot-core.js?v=1784160000"></script>
-  <script type="text/babel" src="research.jsx?v=1785745000"></script>
+  <script type="text/babel" src="research.jsx?v=1785750000"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>

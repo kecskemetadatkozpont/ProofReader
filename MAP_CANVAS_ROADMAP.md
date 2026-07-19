@@ -219,6 +219,14 @@
   Lista + reload + toast). A kattintható gap-cellák `＋`-t mutatnak, hover-kiemeléssel. **P4.2** — a rés-fészek keret a
   **meglévő keretek ALÁ** kerül (`research_map_frames` y/h lekérdezés → `maxBottom+28`), a P3 Int32-jitter kivéve.
   Adversariális review után.
+- [x] ✅ **P5 Tier 1 — rés-workflow finomítások (kliens-oldali)** — **P5.1** „Study a résből" (a 🔍 gomb valódi SR-tanulmányt
+  indít a résből: `startStudyFromIdea(gap)`, a rés `idea_id`-vel linkelve, a study kérdése a rés javasolt kérdése);
+  **P5.2a** szerkeszthető rés-típus (legördülő a 7 típusból a kártyán; optimista + hibánál visszaáll); **P5.3** Markdown
+  **export** (rangsorolt rés-lista + mátrix; pipe/újsor escapelve, `cells`-guard); **P5.4b** dedup-jelzés („⚠ hasonló #N"
+  konzervatív Jaccard-heurisztika, nem destruktív). Review: 1 minor javítva (export `cells`-guard + escape).
+- [ ] ⏳ **P5 Tier 2 — deploy/migráció-igényes** — **P5.2b** AI-cellagap (új edge `action='gap_cell'` → egy tipizált rés a
+  cellához, a sablon helyett; **edge-deploy**); **P5.4a** konzulensi rés-jóváhagyás („⭐ Fontos", **migration-84** + SECURITY
+  DEFINER RPC a lépés-sign-off mintájára, hogy a témavezető írás-jog nélkül is jelölhessen).
 
 ## Hátralévő (jövő) — Phase 6+
 - [ ] 🔴 **Teljes karakter-szintű CRDT/Yjs** — egyidejű azonos-szekció gépelés valós idejű merge-dzsel.
