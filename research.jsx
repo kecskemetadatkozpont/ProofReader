@@ -4415,6 +4415,10 @@
     var diS = useState(''), dInput = diS[0], setDInput = diS[1];
     var dbS = useState(false), dBusy = dbS[0], setDBusy = dbS[1];
     var dmoS = useState('chat'), dkMode = dmoS[0], setDkMode = dmoS[1];   // dock mode: 'chat' | 'action' (protocol step from instruction)
+    var dockRef = useRef(null);   // the open dock element (for edge-drag resize geometry)
+    var ddS = useState(function () { try { return JSON.parse(localStorage.getItem('pr-rmap-dock-dim') || 'null'); } catch (e) { return null; } }), dkDim = ddS[0], setDkDim = ddS[1];   // user-resized {w,h} or null=default
+    var dkDimRef = useRef(dkDim); dkDimRef.current = dkDim;   // latest dim for the drag mouseup persist (closure-stale otherwise)
+    var dfS = useState(function () { try { return localStorage.getItem('pr-rmap-dock-full') === '1'; } catch (e) { return false; } }), dkFull = dfS[0], setDkFull = dfS[1];   // vertical-maximize toggle
     var recSt = useState(false), recOn = recSt[0], setRecOn = recSt[1];   // voice input active
     var recRef = useRef(null);
     var pxS = useState(null), proposal = pxS[0], setProposal = pxS[1];   // pending action proposed from the attached card (preview → confirm → execute)
@@ -5404,6 +5408,36 @@
           }, function () { if (alive.current) { setDBusy(false); dkSay('ai', '⚠️ hálózat'); } });
         }, function () { if (alive.current) { setDBusy(false); dkSay('ai', '⚠️ hálózat'); } });
       }, function () { if (alive.current) { setDBusy(false); dkSay('ai', '⚠️ hálózat'); } });
+    }
+    // ---- assistant dock: user-resize (drag the left/top edge) + vertical-maximize (⤢). Persisted to localStorage. ----
+    function dockVP() { var st = stageRef.current; return { w: st ? st.clientWidth : (window.innerWidth || 1200), h: st ? st.clientHeight : (window.innerHeight || 800) }; }
+    var DOCK_MIN_W = 300, DOCK_MIN_H = 240;
+    function startDockResize(e, mode) {   // mode: 'w' (left edge) | 'h' (top edge) | 'wh' (top-left corner)
+      e.preventDefault(); e.stopPropagation();
+      var el = dockRef.current; if (!el) return;
+      var sx = e.clientX, sy = e.clientY, sw = el.offsetWidth, sh = el.offsetHeight, vp = dockVP();
+      var maxW = vp.w - 28, maxH = vp.h - 28;
+      // width-only drag while maximized must NOT capture the full height as the restore height — keep the prior stored h (or none)
+      var baseH = (mode === 'w' && dkFull) ? ((dkDim && dkDim.h) || null) : sh;
+      function mv(ev) {
+        var nw = sw, nh = baseH;
+        if (mode === 'w' || mode === 'wh') nw = Math.max(DOCK_MIN_W, Math.min(maxW, sw + (sx - ev.clientX)));   // anchored bottom-right → grows leftward
+        if (mode === 'h' || mode === 'wh') nh = Math.max(DOCK_MIN_H, Math.min(maxH, sh + (sy - ev.clientY)));   // grows upward
+        setDkDim({ w: Math.round(nw), h: (nh == null ? undefined : Math.round(nh)) });
+      }
+      function up() {
+        document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up);
+        if (mode !== 'w' && dkFull) { setDkFull(false); try { localStorage.setItem('pr-rmap-dock-full', '0'); } catch (er) { } }   // a manual height drag exits full mode
+        try { localStorage.setItem('pr-rmap-dock-dim', JSON.stringify(dkDimRef.current)); } catch (er) { }
+      }
+      document.addEventListener('mousemove', mv); document.addEventListener('mouseup', up);
+    }
+    function toggleDockFull() { var nv = !dkFull; setDkFull(nv); try { localStorage.setItem('pr-rmap-dock-full', nv ? '1' : '0'); } catch (e) { } }
+    function dockStyle() {
+      var s = {};
+      if (dkFull) { s.height = 'calc(100% - 28px)'; s.maxHeight = 'calc(100% - 28px)'; if (dkDim && dkDim.w) s.width = dkDim.w + 'px'; return s; }
+      if (dkDim) { if (dkDim.w) s.width = dkDim.w + 'px'; if (dkDim.h) { s.height = dkDim.h + 'px'; s.maxHeight = 'calc(100% - 28px)'; } }
+      return s;
     }
     // ---- Map comments / annotations — migration-72. Any project READER can comment (supervisor feedback). ----
     function commentCanEditOne(c) { return c && (c.author === props.viewerId || props.canEdit); }
@@ -6489,8 +6523,13 @@
           : h('div', { style: { position: 'absolute', left: 14, bottom: 84, zIndex: 8, display: 'flex', gap: 13, alignItems: 'center', padding: '5px 11px', borderRadius: 8, background: 'var(--surface)', border: '1px solid var(--line)', fontSize: 10.5, color: 'var(--muted)', boxShadow: '0 4px 14px -8px rgba(20,26,40,.4)', pointerEvents: 'none' } },
             h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 5 } }, h('span', { style: { display: 'inline-block', width: 18, borderTop: '2px dashed var(--line-2, var(--muted))' } }), 'származás'),
             h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 5 } }, h('span', { style: { display: 'inline-block', width: 18, borderTop: '1.5px dashed var(--accent-tint)' } }), 'idézet')),
-        props.canEdit ? (dkOpen ? h('div', { className: 'rmap-dock open', onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
-          h('div', { className: 'rmap-dock-h' }, h('span', null, '🤖 Asszisztens'), h('button', { className: 'rmap-dock-x', title: 'Összecsukás', onClick: function () { setDkOpen(false); try { localStorage.setItem('pr-rmap-dock', '0'); } catch (e) { } } }, '▾')),
+        props.canEdit ? (dkOpen ? h('div', { className: 'rmap-dock open' + (dkFull ? ' full' : ''), ref: dockRef, style: dockStyle(), onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
+          h('div', { className: 'rmap-dock-rz rmap-dock-rz-l', title: 'Átméretezés', onMouseDown: function (e) { startDockResize(e, 'w'); } }),
+          h('div', { className: 'rmap-dock-rz rmap-dock-rz-t', title: 'Átméretezés', onMouseDown: function (e) { startDockResize(e, 'h'); } }),
+          h('div', { className: 'rmap-dock-rz rmap-dock-rz-tl', title: 'Átméretezés', onMouseDown: function (e) { startDockResize(e, 'wh'); } }),
+          h('div', { className: 'rmap-dock-h' }, h('span', null, '🤖 Asszisztens'), h('div', { style: { display: 'flex', gap: 2 } },
+            h('button', { className: 'rmap-dock-x', title: dkFull ? 'Eredeti magasság' : 'Teljes magasság', onClick: toggleDockFull }, dkFull ? '⤡' : '⤢'),
+            h('button', { className: 'rmap-dock-x', title: 'Összecsukás', onClick: function () { setDkOpen(false); try { localStorage.setItem('pr-rmap-dock', '0'); } catch (e) { } } }, '▾'))),
           h('div', { className: 'rmap-dock-msgs', ref: dScroll }, dMsgs.map(function (mm, i) {
             return [
               h('div', { key: 'm' + i, className: 'rmap-dock-msg ' + (mm.role === 'user' ? 'u' : 'a') }, mm.text),

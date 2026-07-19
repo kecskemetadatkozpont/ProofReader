@@ -1236,7 +1236,18 @@
     .rmap-hint { position: absolute; left: 14px; bottom: 14px; font-size: 11px; color: var(--faint); background: color-mix(in srgb, var(--surface) 80%, transparent); padding: 4px 9px; border-radius: 7px; }
     /* Canvas assistant dock (Luma-style, bottom-right) */
     .rmap-dock { position: absolute; right: 14px; bottom: 14px; z-index: 12; }
-    .rmap-dock.open { width: 340px; max-width: calc(100% - 28px); display: flex; flex-direction: column; max-height: min(66%, 470px); background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 18px 50px -20px rgba(20, 26, 40, .55); overflow: hidden; }
+    .rmap-dock.open { width: 384px; max-width: calc(100% - 28px); display: flex; flex-direction: column; max-height: min(74%, 540px); background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 18px 50px -20px rgba(20, 26, 40, .55); overflow: hidden; }
+    /* user-resize handles (dock is anchored bottom-right → drag the left/top edge). ~9px hit strips inset from the
+       edge so overflow:hidden does not clip them; a thin accent line hints the edge on hover. */
+    .rmap-dock-rz { position: absolute; z-index: 3; }
+    .rmap-dock-rz-l { left: 0; top: 14px; bottom: 8px; width: 9px; cursor: ew-resize; }
+    .rmap-dock-rz-t { top: 0; left: 14px; right: 8px; height: 9px; cursor: ns-resize; }
+    .rmap-dock-rz-tl { top: 0; left: 0; width: 15px; height: 15px; cursor: nwse-resize; z-index: 4; }
+    .rmap-dock-rz-l::after, .rmap-dock-rz-t::after { content: ''; position: absolute; opacity: 0; transition: opacity .12s; background: var(--accent); border-radius: 2px; }
+    .rmap-dock-rz-l::after { left: 1px; top: 0; bottom: 0; width: 2px; }
+    .rmap-dock-rz-t::after { top: 1px; left: 0; right: 0; height: 2px; }
+    .rmap-dock:hover .rmap-dock-rz-l::after, .rmap-dock:hover .rmap-dock-rz-t::after { opacity: .3; }
+    .rmap-dock-rz-l:hover::after, .rmap-dock-rz-t:hover::after { opacity: .9 !important; }
     .rmap-dock-h { display: flex; align-items: center; justify-content: space-between; padding: 9px 12px; border-bottom: 1px solid var(--line); font-size: 12.5px; font-weight: 800; }
     .rmap-dock-x { border: 0; background: transparent; color: var(--muted); font-size: 14px; cursor: pointer; padding: 2px 7px; border-radius: 6px; }
     .rmap-dock-x:hover { background: var(--accent-tint); color: var(--accent); }
@@ -1360,7 +1371,7 @@
   <script type="text/babel" src="canvas.jsx?v=1783137934"></script>
   <script type="text/babel" src="notes.jsx?v=1783137934"></script>
   <script src="autopilot-core.js?v=1784160000"></script>
-  <script type="text/babel" src="research.jsx?v=1785703000"></script>
+  <script type="text/babel" src="research.jsx?v=1785710000"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>
