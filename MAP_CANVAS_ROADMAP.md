@@ -213,6 +213,12 @@
   + `research_map_layout` upsert; frames+layout realtime → élőben megjelenik; csak az edge-redeploy utáni futásoktól, mert
   a keret a visszaadott id-kből épül). ⚠️ **Deploy-sorrend:** a P3 frontend push CSAK az edge-redeploy UTÁN — különben
   a Mátrix megnyitása a régi edge-en mellékhatásként gap-ötleteket írna (write-on-view). Adversariális review után.
+- [x] ✅ **P4 — Mátrix-akció + rés-fészek ütközés** (kliens-oldali, nincs edge/deploy): **P4.1** — egy üres (0) Mátrix-cellára
+  kattintva **rés jön létre** az adott módszer×domén metszethez (`createGapFromCell` → `research_ideas` insert
+  `gap_type='population'`, `evidence:[]`; csak szerkesztőnek, `cellBusyRef` szinkron guard a dupla-katt ellen; utána
+  Lista + reload + toast). A kattintható gap-cellák `＋`-t mutatnak, hover-kiemeléssel. **P4.2** — a rés-fészek keret a
+  **meglévő keretek ALÁ** kerül (`research_map_frames` y/h lekérdezés → `maxBottom+28`), a P3 Int32-jitter kivéve.
+  Adversariális review után.
 
 ## Hátralévő (jövő) — Phase 6+
 - [ ] 🔴 **Teljes karakter-szintű CRDT/Yjs** — egyidejű azonos-szekció gépelés valós idejű merge-dzsel.

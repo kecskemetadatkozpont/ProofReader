@@ -1320,6 +1320,8 @@
     .gp-egm .egm th.rowh { text-align: right; white-space: nowrap; }
     .egm-cell { min-width: 74px; height: 48px; border-radius: 9px; display: grid; place-items: center; font-family: ui-monospace, monospace; font-size: 15px; font-weight: 800; border: 1px solid var(--line); color: var(--ink); }
     .egm-cell.gapcell { border: 2px dashed #d6455f; background: color-mix(in srgb, #d6455f 10%, transparent); color: #d6455f; }
+    .egm-cell.clk { cursor: pointer; transition: background .12s, transform .12s; }
+    .egm-cell.clk:hover { background: color-mix(in srgb, #d6455f 22%, transparent); transform: scale(1.04); }
     .egm-note { margin-top: 12px; font-size: 11.5px; color: var(--muted); text-align: center; }
     /* P1.5 — novelty ring on a gap node */
     .rmap-gap-ring { position: absolute; top: 3px; right: 3px; z-index: 3; line-height: 0; filter: drop-shadow(0 1px 2px rgba(0,0,0,.22)); }
@@ -1426,7 +1428,7 @@
   <script type="text/babel" src="canvas.jsx?v=1783137934"></script>
   <script type="text/babel" src="notes.jsx?v=1783137934"></script>
   <script src="autopilot-core.js?v=1784160000"></script>
-  <script type="text/babel" src="research.jsx?v=1785740000"></script>
+  <script type="text/babel" src="research.jsx?v=1785745000"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>

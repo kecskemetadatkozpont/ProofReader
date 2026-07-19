@@ -1137,6 +1137,7 @@
     var mbS = useState(false), mxBusy = mbS[0], setMxBusy = mbS[1];
     var aliveR = useRef(true);
     var promotingRef = useRef({});   // synchronous in-flight guard (gap id → 1) so a same-tick double-click can't double-insert
+    var cellBusyRef = useRef(false);   // in-flight guard for "create gap from matrix cell" (the matrix stays mounted until insert resolves)
     useEffect(function () { aliveR.current = true; return function () { aliveR.current = false; }; }, []);
     useEffect(function () { loadGaps(); }, [props.projectId]);
     function loadGaps() {
@@ -1208,17 +1209,36 @@
       }, function () { if (aliveR.current) { setMxBusy(false); setMatrix('error'); } });
     }
     function showMatrix() { setView('matrix'); if (matrix === null && !mxBusy) fetchMatrix(); }
-    // P1.5 — group a gap-analysis run into a rose "rés-fészek" frame on the Map (frames + layout have realtime → appears live).
+    // P1.5/P4.2 — group a gap-analysis run into a rose "rés-fészek" frame on the Map, placed BELOW any existing frames
+    // (no overlap). frames + layout have realtime → appears live.
     function placeGapsInNewFrame(gaps) {
       if (!gaps || !gaps.length) return;
       var NW = 204, NH = 74, pad = 16, hdr = 44, gp = 16;
       var cols = Math.min(3, gaps.length), rws = Math.ceil(gaps.length / cols);
-      var fw = 2 * pad + cols * NW + (cols - 1) * gp, fh = hdr + 2 * pad + rws * NH + (rws - 1) * gp;
-      var _t = Date.now(), ox = 40 + Math.floor(_t / 512) % 480, oy = 40 + Math.floor(_t / 128) % 300;   // spread successive runs (arithmetic, not bitwise — Date.now() overflows Int32 → negative coords)
-      var dt = new Date().toISOString().slice(0, 10);
-      sb.from('research_map_frames').insert({ project_id: props.projectId, title: '🕳️ Rés-elemzés · ' + dt, x: ox, y: oy, w: Math.round(fw), h: Math.round(fh), color: 'rose' });
-      var rows = gaps.map(function (g, i) { return { project_id: props.projectId, node_id: 'i' + g.id, x: Math.round(ox + pad + (i % cols) * (NW + gp)), y: Math.round(oy + hdr + Math.floor(i / cols) * (NH + gp)), updated_at: new Date().toISOString() }; });
-      sb.from('research_map_layout').upsert(rows, { onConflict: 'project_id,node_id' });
+      var fw = Math.round(2 * pad + cols * NW + (cols - 1) * gp), fh = Math.round(hdr + 2 * pad + rws * NH + (rws - 1) * gp);
+      function doPlace(ox, oy) {
+        var dt = new Date().toISOString().slice(0, 10);
+        sb.from('research_map_frames').insert({ project_id: props.projectId, title: '🕳️ Rés-elemzés · ' + dt, x: ox, y: oy, w: fw, h: fh, color: 'rose' });
+        var rows = gaps.map(function (g, i) { return { project_id: props.projectId, node_id: 'i' + g.id, x: Math.round(ox + pad + (i % cols) * (NW + gp)), y: Math.round(oy + hdr + Math.floor(i / cols) * (NH + gp)), updated_at: new Date().toISOString() }; });
+        sb.from('research_map_layout').upsert(rows, { onConflict: 'project_id,node_id' });
+      }
+      sb.from('research_map_frames').select('y,h').eq('project_id', props.projectId).then(function (fr) {
+        if (!aliveR.current) return;
+        var fs = (fr && fr.data) || [], maxB = 0; fs.forEach(function (f) { var b = (f.y || 0) + (f.h || 0); if (b > maxB) maxB = b; });
+        doPlace(40, fs.length ? maxB + 28 : 40);
+      }, function () { if (aliveR.current) doPlace(40, 40); });
+    }
+    // P4.1 — turn an empty (0) matrix cell into a concrete gap the user can then refine/promote.
+    function createGapFromCell(row, col) {
+      if (!props.canEdit || cellBusyRef.current) return;
+      cellBusyRef.current = true;
+      var q = String(row) + ' × ' + String(col) + ' — feltáratlan terület: a szakirodalom nem fedi le ezt a metszetet.';
+      sb.from('research_ideas').insert({ project_id: props.projectId, source: 'gap', status: 'candidate', question: q, gap_type: 'population', evidence: [] }).select('id').maybeSingle().then(function (r) {
+        cellBusyRef.current = false; if (!aliveR.current) return;
+        if (r && r.error) { window.PRUI.toast('Nem sikerült: ' + r.error.message, { kind: 'error' }); return; }
+        window.PRUI.toast('✓ Rés létrehozva a(z) „' + String(row) + ' × ' + String(col) + '" cellából', { kind: 'success' });
+        setView('lista'); loadGaps(); if (props.onChanged) props.onChanged();
+      }, function () { cellBusyRef.current = false; if (aliveR.current) window.PRUI.toast('Hálózati hiba', { kind: 'error' }); });
     }
 
     function gapMatrixEl() {
@@ -1233,8 +1253,8 @@
           mrows.map(function (rlab, ri) {
             return h('tr', { key: ri }, h('th', { className: 'rowh' }, String(rlab)),
               mcols.map(function (c, ci) {
-                var n = (cells[ri] && cells[ri][ci] != null) ? cells[ri][ci] : 0, isGap = !n;
-                return h('td', { key: ci }, h('div', { className: 'egm-cell' + (isGap ? ' gapcell' : ''), style: isGap ? null : { background: 'color-mix(in srgb, var(--accent) ' + Math.round((0.12 + (n / maxN) * 0.5) * 100) + '%, transparent)', color: (n / maxN > 0.6 ? '#fff' : 'var(--ink)') }, title: isGap ? 'RÉS — 0 forrás fedi le' : (n + ' forrás') }, String(n)));
+                var n = (cells[ri] && cells[ri][ci] != null) ? cells[ri][ci] : 0, isGap = !n, clickable = isGap && props.canEdit;
+                return h('td', { key: ci }, h('div', { className: 'egm-cell' + (isGap ? ' gapcell' : '') + (clickable ? ' clk' : ''), style: isGap ? null : { background: 'color-mix(in srgb, var(--accent) ' + Math.round((0.12 + (n / maxN) * 0.5) * 100) + '%, transparent)', color: (n / maxN > 0.6 ? '#fff' : 'var(--ink)') }, title: isGap ? (clickable ? 'Kattints: rés létrehozása ehhez a cellához (' + String(rlab) + ' × ' + String(c) + ')' : 'RÉS — 0 forrás fedi le') : (n + ' forrás'), onClick: clickable ? function () { createGapFromCell(rlab, c); } : null }, isGap && clickable ? '＋' : String(n)));
               }));
           }))),
         h('div', { className: 'egm-note' }, 'Az üres (0) cellák a kutatási rések — ahol a szakirodalom nem fed le egy módszer×domén kombinációt.'));
