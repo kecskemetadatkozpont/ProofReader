@@ -273,6 +273,15 @@
           onClick: function () { if (props.onStudy) props.onStudy(); }
         }, h('span', { className: 'dot', 'aria-hidden': 'true' }, svg('M3 4 13 4 9.2 8.8 9.2 12 6.8 13 6.8 8.8Z')), tr(props.lang, 'Studies')));
       }
+      // "Rések" — research-gap analysis, after Literature (not a lifecycle stage; never shifts project.stage)
+      if (i === 2) {
+        kids.push(h('div', { className: 'step-sep', key: 'sep-gap' }));
+        kids.push(h('button', {
+          key: 'gap', className: 'step step-gap' + (props.tab === 'gap' ? ' cur' : ''),
+          title: 'Kutatási rés-elemzés — mit nem fed le a szakirodalom',
+          onClick: function () { if (props.onGap) props.onGap(); }
+        }, h('span', { className: 'dot', 'aria-hidden': 'true' }, '🕳'), tr(props.lang, 'Rések')));
+      }
     });
     return h('div', { className: 'stepper' }, kids);
   }
@@ -1100,6 +1109,118 @@
   }
 
   // ---------- Ideas (R1) ----------
+  // ---------- Research-gap taxonomy (migration-83) — shared by GapPanel (+ the Map gap node in P1) ----------
+  var GAP_TYPES = [
+    { slug: 'evidence', lab: 'Bizonyíték-rés', c: '#2f66d8' },
+    { slug: 'knowledge', lab: 'Tudás-rés', c: '#7c5cd6' },
+    { slug: 'methodological', lab: 'Módszertani rés', c: '#d1810b' },
+    { slug: 'population', lab: 'Populációs/kontextus-rés', c: '#17a34a' },
+    { slug: 'theoretical', lab: 'Elméleti rés', c: '#64748b' },
+    { slug: 'practical', lab: 'Gyakorlati/cselekvési rés', c: '#0e9aa7' },
+    { slug: 'contradictory', lab: 'Ellentmondó-bizonyíték rés', c: '#d6455f' }
+  ];
+  var GAP_TYPE_MAP = {}; GAP_TYPES.forEach(function (t) { GAP_TYPE_MAP[t.slug] = t; });
+  function gapType(slug) { return GAP_TYPE_MAP[slug] || { slug: slug || 'egyeb', lab: 'Egyéb rés', c: '#64748b' }; }
+
+  // ---------- GapPanel — first-class research-gap analysis (a "Rések" sub-tab; migration-83 + edge action='gap_analyze') ----------
+  // A gap = a research_ideas row with source='gap' + gap_type/evidence. Self-fetches (graceful column probe) so it does
+  // NOT depend on the main idea loaders having the new columns — keeps P0 isolated from the Map/Ideas loaders.
+  function GapPanel(props) {
+    var gsS = useState(null), gaps = gsS[0], setGaps = gsS[1];   // null = loading
+    var tyS = useState(true), typedOk = tyS[0], setTypedOk = tyS[1];   // did the typed-columns select succeed (migration-83 present)?
+    var byS = useState(false), busy = byS[0], setBusy = byS[1];
+    var pgS = useState(0), prog = pgS[0], setProg = pgS[1];
+    var msgS = useState(''), msg = msgS[0], setMsg = msgS[1];
+    var ofS = useState({}), off = ofS[0], setOff = ofS[1];   // legend type-filter
+    var aliveR = useRef(true);
+    useEffect(function () { aliveR.current = true; return function () { aliveR.current = false; }; }, []);
+    useEffect(function () { loadGaps(); }, [props.projectId]);
+    function loadGaps() {
+      var pid = props.projectId;
+      sb.from('research_ideas').select('id,question,hypothesis,rationale,novelty,status,source,gap_type,evidence,addressed_by_idea_id').eq('project_id', pid).eq('source', 'gap').neq('status', 'rejected').order('novelty', { ascending: false, nullsFirst: false }).then(function (r) {
+        if (!aliveR.current) return;
+        if (r && r.error) {
+          // Only treat an actual SCHEMA/column error (migration-83 not applied) as "degraded" + refetch base columns.
+          // A transient network/server error must NOT falsely assert the schema is missing (wrong degrade banner).
+          var e = r.error, sig = (e.message || '') + ' ' + (e.code || '');
+          if (/column|42703|pgrst204|does not exist|schema cache/i.test(sig)) {
+            setTypedOk(false);
+            sb.from('research_ideas').select('id,question,hypothesis,rationale,novelty,status,source').eq('project_id', pid).eq('source', 'gap').neq('status', 'rejected').order('novelty', { ascending: false, nullsFirst: false }).then(function (r2) { if (aliveR.current) setGaps((r2 && r2.data) || []); }, function () { if (aliveR.current) setGaps([]); });
+          } else { setGaps([]); }   // transient → empty (retry via Elemezd), typedOk unchanged
+          return;
+        }
+        setTypedOk(true); setGaps((r && r.data) || []);
+      }, function () { if (aliveR.current) setGaps([]); });
+    }
+    function analyze() {
+      if (busy) return;
+      setBusy(true); setMsg(''); setProg(0);
+      var iv = setInterval(function () { if (aliveR.current) setProg(function (x) { return Math.min(94, x + 8); }); }, 420);
+      sb.functions.invoke('research-ai', { body: { action: 'gap_analyze', project_id: props.projectId } }).then(function (res) {
+        clearInterval(iv); if (!aliveR.current) return; setBusy(false); setProg(100);
+        var d = res && res.data;
+        if ((res && res.error) || (d && d.error)) { setMsg('A rés-elemzéshez telepítsd a research-ai edge-et (gap_analyze) és futtasd a migration-83-at. Addig a lista a meglévő gap-ötleteket mutatja.'); loadGaps(); return; }
+        loadGaps(); if (props.onChanged) props.onChanged();
+      }, function () { clearInterval(iv); if (!aliveR.current) return; setBusy(false); setMsg('Hálózati hiba — próbáld újra.'); });
+    }
+    function toIdea(g) {   // promote: the gap becomes a normal idea (moves to the Ideas list). Gap→idea link is a P1/Map concern.
+      sb.from('research_ideas').update({ source: 'own', status: 'candidate' }).eq('id', g.id).then(function (r) {
+        if (!aliveR.current) return;
+        if (r && r.error) { window.PRUI.toast('Nem sikerült: ' + r.error.message, { kind: 'error' }); return; }
+        setGaps(function (L) { return (L || []).filter(function (x) { return x.id !== g.id; }); });
+        window.PRUI.toast('✓ Ötletté alakítva — megjelenik az Ötletek fülön', { kind: 'success' });
+        if (props.onChanged) props.onChanged();
+      }, function () { if (aliveR.current) window.PRUI.toast('Hálózati hiba', { kind: 'error' }); });
+    }
+    function dismiss(g) {
+      sb.from('research_ideas').update({ status: 'rejected' }).eq('id', g.id).then(function (r) {
+        if (!aliveR.current) return;
+        if (r && r.error) { window.PRUI.toast(r.error.message, { kind: 'error' }); return; }
+        setGaps(function (L) { return (L || []).filter(function (x) { return x.id !== g.id; }); });
+        if (props.onChanged) props.onChanged();
+      }, function () { if (aliveR.current) window.PRUI.toast('Hálózati hiba', { kind: 'error' }); });
+    }
+    function toggleType(slug) { setOff(function (o) { var n = Object.assign({}, o); if (n[slug]) delete n[slug]; else n[slug] = 1; return n; }); }
+
+    if (gaps === null) return h('div', { className: 'panel gappanel' }, h('div', { className: 'gp-empty' }, '⏳ Rések betöltése…'));
+    if (!gaps.length) {
+      return h('div', { className: 'panel gappanel' },
+        msg ? h('div', { className: 'gp-degrade' }, msg) : null,
+        h('div', { className: 'gp-empty gp-firstrun' },
+          h('div', { style: { fontSize: 36 } }, '🕳️'),
+          h('b', null, 'Kutatási rés-elemzés'),
+          h('p', null, 'Az AI átnézi a Könyvtárat, a szisztematikus áttekintést és a projekt célját, és megkeresi, mit nem fed le a szakirodalom — típus, bizonyíték és következő lépés szerint.'),
+          props.canEdit ? h('button', { className: 'gp-bigbtn', disabled: busy, onClick: analyze }, busy ? ('✨ AI elemez… ' + prog + '%') : '✨ Elemezd a kutatási réseket') : h('div', { className: 'muted', style: { fontSize: 13 } }, 'Még nincs feltárt kutatási rés.')));
+    }
+    var present = {}; gaps.forEach(function (g) { present[g.gap_type || 'knowledge'] = 1; });
+    var list = gaps.filter(function (g) { return !off[g.gap_type || 'knowledge']; });
+    return h('div', { className: 'panel gappanel' },
+      h('div', { className: 'gp-head' },
+        h('h3', null, '🕳️ Kutatási rések ', h('span', { className: 'gp-cnt' }, '· ' + gaps.length)),
+        props.canEdit ? h('button', { className: 'gp-rebtn', disabled: busy, onClick: analyze }, busy ? ('AI elemez… ' + prog + '%') : '↻ Újraelemzés') : null),
+      (typedOk === false) ? h('div', { className: 'gp-degrade' }, 'Degradált mód: futtasd a migration-83-at + deploy-old a research-ai edge-et a tipizált résekhez (típus, bizonyíték). Most a meglévő gap-ötletek jelennek meg.') : null,
+      msg ? h('div', { className: 'gp-degrade' }, msg) : null,
+      h('div', { className: 'gp-legend' }, GAP_TYPES.filter(function (t) { return present[t.slug]; }).map(function (t) {
+        return h('button', { key: t.slug, className: 'gp-lchip' + (off[t.slug] ? ' off' : ''), style: { borderColor: t.c, color: t.c }, onClick: function () { toggleType(t.slug); } }, t.lab);
+      })),
+      h('div', { className: 'gp-list' }, list.map(function (g) {
+        var t = gapType(g.gap_type || 'knowledge'), ev = Array.isArray(g.evidence) ? g.evidence : [];
+        return h('div', { className: 'gcard', key: g.id, style: { borderLeftColor: t.c } },
+          h('div', { className: 'gcard-top' },
+            h('span', { className: 'gbadge', style: { background: t.c } }, t.lab),
+            g.novelty != null ? h('span', { className: 'gnov' }, 'Újdonság ', h('span', { className: 'gnov-bar' }, h('i', { style: { width: g.novelty + '%' } })), ' ' + g.novelty) : null),
+          h('div', { className: 'gstmt' }, g.question),
+          g.rationale ? h('div', { className: 'gwhy' }, h('b', null, 'Miért rés? '), g.rationale) : null,
+          ev.length ? h('div', { className: 'gev' }, h('b', null, 'Bizonyíték: '), ev.map(function (e, i) { return h('span', { className: 'gsrc', key: i, title: e.coverage || '' }, String(e.title || 'forrás').slice(0, 44)); })) : null,
+          g.hypothesis ? h('div', { className: 'gev' }, h('b', null, 'Következő lépés: '), g.hypothesis) : null,
+          h('div', { className: 'gacts' },
+            props.canEdit ? h('button', { className: 'gact pri', onClick: function () { toIdea(g); } }, '→ Ötletté alakítás') : null,
+            props.canEdit ? h('button', { className: 'gact', title: 'Ugrás a Tanulmányok fülre', onClick: function () { if (props.onGoStudy) props.onGoStudy(); } }, '🔍 Study indítása') : null,
+            props.canEdit ? h('button', { className: 'gact', onClick: function () { dismiss(g); } }, '✕ Elvetés') : null,
+            h('span', { className: 'gstatus' }, h('span', { className: 'gdot' }), 'Nyitott')));
+      })));
+  }
+
   function IdeasPanel(props) {
     var f = useState({ question: '', hypothesis: '' }), form = f[0], setForm = f[1];
     var b = useState(false), busy = b[0], setBusy = b[1];
@@ -1189,6 +1310,9 @@
     function setStatus(idea, st) { sb.from('research_ideas').update({ status: st }).eq('id', idea.id).then(props.onChanged); }
     function del(idea) { sb.from('research_ideas').delete().eq('id', idea.id).then(props.onChanged); }
     function gap() {
+      // route to the dedicated "🕳️ Rések" tab (typed, evidence-grounded gaps) instead of silently inserting untyped
+      // gap ideas here — one source of truth. (Falls back to the inline gap analysis if the host didn't wire onGoGap.)
+      if (props.onGoGap) { props.onGoGap(); return; }
       setBusy(true); setMsg('Running gap analysis (AI)…');
       sb.functions.invoke('research-ai', { body: { action: 'gap', project_id: props.projectId } }).then(function (res) {
         setBusy(false);
@@ -1205,7 +1329,7 @@
       return h('div', { className: 'idb-rail' },
         h('div', { className: 'idb-card' },
           h('div', { className: 'idb-h' }, h('span', null, 'Shortlist'), h('span', { className: 'idb-c' }, String(rest.length)),
-            props.canEdit ? h('button', { className: 'idb-gap', disabled: busy, onClick: gap }, '✨ Gap analysis') : null),
+            props.canEdit ? h('button', { className: 'idb-gap', disabled: busy, onClick: gap, title: 'Kutatási rés-elemzés (Rések fül)' }, '✨ Rés-elemzés →') : null),
           msg ? h('div', { className: 'idb-msg' }, msg) : null,
           props.canEdit ? h('div', { className: 'idb-add' },
             h('textarea', { rows: 2, className: 'idb-in', value: form.question, placeholder: 'A research question…  (⌘/Ctrl+Enter)', onChange: function (e) { setForm(Object.assign({}, form, { question: e.target.value })); }, onKeyDown: onKey }),
@@ -1290,7 +1414,7 @@
         ) : h('div', { style: { fontSize: 12.5, color: 'var(--faint)' } }, 'Still empty. Press the “Select” button on an idea below — it moves here, and these become the study basis.')
       ),
       h('div', { className: 'panel' },
-      h('h3', null, 'Research ideas', props.canEdit ? h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12 }, disabled: busy, onClick: gap }, '✨ Gap analysis (AI)') : null),
+      h('h3', null, 'Research ideas', props.canEdit ? h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12 }, disabled: busy, onClick: gap }, '✨ Rés-elemzés →') : null),
       msg ? h('div', { style: { fontSize: 12.5, color: 'var(--muted)', marginBottom: 8 } }, msg) : null,
       props.canEdit ? h('div', { style: { marginBottom: 10 } },
         h('textarea', { rows: 2, style: { width: '100%', minHeight: 40, border: '1px solid var(--line)', borderRadius: 8, padding: '8px 10px', fontFamily: 'inherit', fontSize: 13, lineHeight: 1.45, resize: 'vertical', boxSizing: 'border-box' }, value: form.question, placeholder: 'A research question…  (Ctrl/⌘+Enter = add)', onChange: function (e) { setForm(Object.assign({}, form, { question: e.target.value })); }, onKeyDown: onKey }),
@@ -6791,7 +6915,8 @@
     // non-embeddable tabs → the Map falls back to onGoTab. Kept in sync with the tab switch below.
     function panelForTab(t, focus) {
       focus = focus || {};
-      if (t === 'ideas') return h('div', { className: nd() ? 'ideas2' : null }, h(ChatPanel, { projectId: p.id, supervised: !!p.student_id, canEdit: props.canEdit, authorId: props.authorId, fileOwnerId: props.fileOwnerId, sources: props.sources, onChanged: props.onChanged, focusChatId: focus.focusChatId, focusFileId: focus.focusFileId }), h(IdeasPanel, { projectId: p.id, ideas: props.ideas, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, onStartStudyMulti: function (ideas) { setAutoSR(function (x) { return x + 1; }); setTab('study'); }, onGoStudy: function () { setTab('study'); }, focusIdeaId: focus.focusIdeaId }));
+      if (t === 'ideas') return h('div', { className: nd() ? 'ideas2' : null }, h(ChatPanel, { projectId: p.id, supervised: !!p.student_id, canEdit: props.canEdit, authorId: props.authorId, fileOwnerId: props.fileOwnerId, sources: props.sources, onChanged: props.onChanged, focusChatId: focus.focusChatId, focusFileId: focus.focusFileId }), h(IdeasPanel, { projectId: p.id, ideas: props.ideas, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, onStartStudyMulti: function (ideas) { setAutoSR(function (x) { return x + 1; }); setTab('study'); }, onGoStudy: function () { setTab('study'); }, onGoGap: function () { setTab('gap'); }, focusIdeaId: focus.focusIdeaId }));
+      if (t === 'gap') return h(GapPanel, { projectId: p.id, project: p, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, onGoIdeas: function () { setTab('ideas'); }, onGoStudy: function () { setTab('study'); }, focusGapId: focus.focusGapId });
       if (t === 'literature') return h(React.Fragment, null, h(LiteraturePanel, { projectId: p.id, sources: props.sources, studies: props.studies, canEdit: props.canEdit, myEmail: props.myEmail, onChanged: props.onChanged, focusSourceId: focus.focusSourceId, focusFigureId: focus.focusFigureId }), h(ElicitReports, { projectId: p.id, project: p, canEdit: props.canEdit, authorId: props.authorId, onGoStudy: function () { setTab('study'); } }), h(ElicitTrials, { projectId: p.id, canEdit: props.canEdit }));
       if (t === 'study') return h(ElicitSysReview, { projectId: p.id, project: p, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, autoGenerate: autoSR, onAutoGenerated: function () { setAutoSR(0); }, onOpenStudy: openFunnelStudy, focusReviewId: focus.focusReviewId, focusQuestionId: focus.focusQuestionId, focusJobId: focus.focusJobId });
       if (t === 'protocol') return h(ProtocolPanel, { projectId: p.id, ideas: props.ideas, sources: props.sources, studies: props.studies, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, focusStepId: focus.focusStepId });
@@ -6801,7 +6926,8 @@
       return null;   // compute/submission/map/canvas/notes/log/tasks are not embeddable
     }
     var content;
-    if (tab === 'ideas') content = h('div', { className: nd() ? 'ideas2' : null }, h(ChatPanel, { projectId: p.id, supervised: !!p.student_id, canEdit: props.canEdit, authorId: props.authorId, fileOwnerId: props.fileOwnerId, sources: props.sources, onChanged: props.onChanged }), h(IdeasPanel, { projectId: p.id, ideas: props.ideas, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, onStartStudyMulti: function (ideas) { setAutoSR(function (x) { return x + 1; }); setTab('study'); }, onGoStudy: function () { setTab('study'); } }));
+    if (tab === 'ideas') content = h('div', { className: nd() ? 'ideas2' : null }, h(ChatPanel, { projectId: p.id, supervised: !!p.student_id, canEdit: props.canEdit, authorId: props.authorId, fileOwnerId: props.fileOwnerId, sources: props.sources, onChanged: props.onChanged }), h(IdeasPanel, { projectId: p.id, ideas: props.ideas, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, onStartStudyMulti: function (ideas) { setAutoSR(function (x) { return x + 1; }); setTab('study'); }, onGoStudy: function () { setTab('study'); }, onGoGap: function () { setTab('gap'); } }));
+    else if (tab === 'gap') content = h(GapPanel, { projectId: p.id, project: p, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, onGoIdeas: function () { setTab('ideas'); }, onGoStudy: function () { setTab('study'); } });
     else if (tab === 'literature') content = h(React.Fragment, null,
       h(LiteraturePanel, { projectId: p.id, sources: props.sources, studies: props.studies, canEdit: props.canEdit, myEmail: props.myEmail, onChanged: props.onChanged }),
       h(ElicitReports, { projectId: p.id, project: p, canEdit: props.canEdit, authorId: props.authorId, onGoStudy: function () { setTab('study'); } }),
@@ -6832,6 +6958,8 @@
           h('span', { className: 'rv-st-dot' }, isDone ? '✓' : (i + 1)), h('span', { className: 'rv-st-lbl' }, tr(plang, name))));
         if (i === 1) kids.push(h('button', { key: 'study', className: 'rv-st sub' + (tab === 'study' ? ' cur' : ''), onClick: function () { setTab('study'); } },
           h('span', { className: 'rv-st-dot' }, '›'), h('span', { className: 'rv-st-lbl' }, tr(plang, 'Studies'))));
+        if (i === 2) kids.push(h('button', { key: 'gap', className: 'rv-st sub' + (tab === 'gap' ? ' cur' : ''), title: 'Kutatási rés-elemzés', onClick: function () { setTab('gap'); } },
+          h('span', { className: 'rv-st-dot' }, '🕳'), h('span', { className: 'rv-st-lbl' }, 'Rések')));
       });
       return h('div', { className: 'rv-stnav' }, kids);
     }
@@ -6895,7 +7023,7 @@
           props.canEdit ? h('button', { className: 'btn', style: { height: 32, flex: 'none' }, title: 'Project base settings (title, field, keywords, goal)', onClick: function () { setEditOpen(true); } }, tr(plang, '✎ Settings')) : null
         )
       ),
-      h(Stepper, { stage: p.stage, tab: tab, lang: plang, canEdit: props.canEdit, onSet: setStage, onStudy: function () { setTab('study'); }, onNav: function (i) { setTab(STAGE_TAB[i] || 'overview'); } }),
+      h(Stepper, { stage: p.stage, tab: tab, lang: plang, canEdit: props.canEdit, onSet: setStage, onStudy: function () { setTab('study'); }, onGap: function () { setTab('gap'); }, onNav: function (i) { setTab(STAGE_TAB[i] || 'overview'); } }),
       h('div', { className: 'subtabs' }, [['overview', 'Overview', null], ['canvas', 'Canvas', null], ['notes', 'Notes', null], ['log', 'Log', (props.log || []).length], ['tasks', 'Tasks', openTasks]].map(function (nt) {
         return h('button', { key: nt[0], className: tab === nt[0] ? 'on' : '', onClick: function () { setTab(nt[0]); } }, tr(plang, nt[1]), nt[2] ? h('span', { className: 'c' }, nt[2]) : null);
       })),

@@ -1268,6 +1268,41 @@
     /* pulse cue for idea cards just materialized into a frame */
     .rmap-justplaced { animation: rmap-jp-pulse 1.5s ease-out 1; z-index: 6; }
     @keyframes rmap-jp-pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--otlet, #d1810b) 60%, transparent); } 70% { box-shadow: 0 0 0 10px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+    /* ---- Research-gap panel (🕳️ Rések tab, migration-83 + edge gap_analyze) ---- */
+    .gappanel { padding: 0; overflow: hidden; }
+    .gp-empty { padding: 40px 24px; text-align: center; color: var(--muted); }
+    .gp-firstrun b { display: block; font-size: 16px; color: var(--ink); margin: 8px 0 6px; }
+    .gp-firstrun p { max-width: 52ch; margin: 0 auto 16px; font-size: 13px; line-height: 1.5; }
+    .gp-bigbtn { border: none; background: var(--accent); color: #fff; font-family: inherit; font-size: 14px; font-weight: 700; padding: 11px 22px; border-radius: 11px; cursor: pointer; box-shadow: 0 10px 26px -12px var(--accent); }
+    .gp-bigbtn:disabled { opacity: .7; cursor: default; }
+    .gp-degrade { margin: 12px 14px 0; padding: 8px 12px; border-radius: 8px; font-size: 12px; color: var(--ink); border: 1px solid color-mix(in srgb, #d1810b 45%, var(--line)); background: color-mix(in srgb, #d1810b 9%, transparent); }
+    .gp-head { display: flex; align-items: center; gap: 10px; padding: 13px 16px; border-bottom: 1px solid var(--line); }
+    .gp-head h3 { margin: 0; font-size: 15px; font-weight: 800; }
+    .gp-cnt { font-family: ui-monospace, monospace; font-size: 13px; color: var(--muted); font-weight: 700; }
+    .gp-rebtn { margin-left: auto; border: 1px solid var(--line); background: var(--surface); color: var(--muted); font-family: inherit; font-size: 12px; font-weight: 650; padding: 5px 11px; border-radius: 8px; cursor: pointer; }
+    .gp-rebtn:disabled { opacity: .6; cursor: default; }
+    .gp-legend { display: flex; gap: 6px; flex-wrap: wrap; padding: 11px 16px; border-bottom: 1px solid var(--line); }
+    .gp-lchip { font-family: inherit; font-size: 11px; font-weight: 700; border-radius: 999px; padding: 3px 11px; cursor: pointer; border: 1.5px solid; background: transparent; }
+    .gp-lchip.off { opacity: .38; }
+    .gp-list { padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
+    .gcard { border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 12px; padding: 13px 15px; background: var(--surface); }
+    .gcard-top { display: flex; align-items: center; gap: 10px; margin-bottom: 7px; flex-wrap: wrap; }
+    .gbadge { font-size: 10px; font-weight: 800; color: #fff; padding: 2px 9px; border-radius: 5px; }
+    .gnov { margin-left: auto; display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--faint); font-weight: 600; }
+    .gnov-bar { width: 76px; height: 6px; border-radius: 999px; background: var(--surface-2, var(--bg)); overflow: hidden; border: 1px solid var(--line); }
+    .gnov-bar i { display: block; height: 100%; background: var(--accent); }
+    .gstmt { font-size: 14px; font-weight: 650; line-height: 1.4; margin-bottom: 5px; color: var(--ink); }
+    .gwhy { font-size: 12.5px; color: var(--muted); margin-bottom: 6px; }
+    .gwhy b, .gev b { color: var(--ink); font-weight: 650; }
+    .gev { font-size: 12px; color: var(--muted); margin-bottom: 7px; display: flex; flex-wrap: wrap; gap: 5px; align-items: baseline; }
+    .gsrc { font-size: 10.5px; font-weight: 600; color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); border-radius: 5px; padding: 1px 7px; }
+    .gacts { display: flex; gap: 7px; flex-wrap: wrap; align-items: center; margin-top: 9px; }
+    .gact { font-family: inherit; font-size: 12px; font-weight: 650; border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 8px; padding: 5px 11px; cursor: pointer; }
+    .gact.pri { border-color: var(--accent); background: var(--accent); color: #fff; }
+    .gact:hover:not(:disabled) { border-color: var(--accent); }
+    .gact:disabled { opacity: .55; cursor: default; }
+    .gstatus { margin-left: auto; font-size: 11px; font-weight: 700; color: var(--muted); display: inline-flex; align-items: center; gap: 6px; }
+    .gdot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok, #17a34a); }
     .rmap-dock-mode { display: flex; gap: 6px; padding: 9px 12px 0; }
     .rmap-dock-modebtn { border: 1px solid var(--line); background: var(--surface); color: var(--muted); font-family: inherit; font-size: 11.5px; font-weight: 700; padding: 4px 11px; border-radius: 999px; cursor: pointer; }
     .rmap-dock-modebtn.on { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
@@ -1371,7 +1406,7 @@
   <script type="text/babel" src="canvas.jsx?v=1783137934"></script>
   <script type="text/babel" src="notes.jsx?v=1783137934"></script>
   <script src="autopilot-core.js?v=1784160000"></script>
-  <script type="text/babel" src="research.jsx?v=1785710000"></script>
+  <script type="text/babel" src="research.jsx?v=1785720000"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>

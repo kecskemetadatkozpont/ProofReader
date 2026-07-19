@@ -178,6 +178,28 @@
   alapozva; az edge adjon vissza **id-ket** (ne created_at-diff kelljen); a protokoll/study kereten-belüli elhelyezése +
   **inline** megerősítés a natív `confirm` helyett; ha a chat gépi `ideas` blokkot ad → **exact** címekkel kártyázás.
 
+## 🚧 Kutatási rés-elemző (Research Gap Analyser) — 2026-07-19
+> Feltárás: 2-ágú + kód-megalapozás **research + design workflow** (rés-taxonómia lekutatva: Miles 2017 + 3ie/Campbell
+> evidence-gap-map) → szintézis → interaktív mockup (`gap-analyser`, favicon 🕳️). **A hiányzó láncszem:** a klasszikus
+> workflow-ban nem volt dedikált rés-elemzés — a `gap` edge csak tipizálatlan ötlet-jelölteket dobott a listába.
+- [x] ✅ **P0 — klasszikus-workflow „🕳️ Rések" fül** — a rés **egy `research_ideas` sor** (`source='gap'`) + 3 additív
+  oszlop (**migration-83**: `gap_type`, `evidence jsonb`, `addressed_by_idea_id`) → a Map-materializáció, layout,
+  `placeInFrame`/undo és RLS **öröklődik** (nincs külön tábla). Új edge **`action='gap_analyze'`** (a régi `gap`
+  érintetlen): 7-típusú taxonómia, `source_ref` index-validálva, `{ok,count,ideas}` — oszlop-fallbackkel pre-migration is
+  működik. **`GapPanel`** al-fül (a `study`-mintára, az Irodalom után, NEM életciklus-lépés → nem töri a Stepper
+  index-kötését): önállóan tölt (graceful oszlop-probe), rangsorolt rés-kártyák (típus-badge, újdonság-mérő,
+  bizonyíték-chipek, „miért rés", következő lépés), **típus-legenda szűrő**, akciók (**→ Ötletté alakítás** [a résből
+  ötlet lesz, az Ötletek közé], 🔍 Study, ✕ Elvetés), üres/degradált állapot. Bekötve: nd stageNav + klasszikus Stepper
+  gap-sub (`i===2`), `panelForTab` + content-switch, a régi IdeasPanel gap-gomb **átirányítva** a fülre (`onGoGap`).
+  **migration-83 + `research-ai` deploy manuális; a kliens addig gracefully degradál.**
+- [ ] ⏳ **P1 — Térkép-objektumok** — `RMAP_TYPE.gap` (🕳️) + `.t-gap` (szaggatott, típus-badge, újdonság-gyűrű);
+  `graph()` `source==='gap'` → gap node (id marad `i+id`); forrás→rés + rés→ötlet (`addressed_by_idea_id`) élek;
+  rose **rés-fészek** keret futásonként; a klasszikus-fül futás → toast → Térkép. Ekkor a főbetöltők (4706/7271)
+  kapnak graceful oszlop-gatinget + `EMBEDDABLE.gap` a deep-linkhez.
+- [ ] ⏳ **P2 — keret-scoped dock (#2)** — `boundFrame` useState (guard-ok előtt); `💬` gomb a keret-fejlécen → dock a
+  kerethez kötve + scope-pill; `dkSend` → `classifyFrameIntent` → `runFrameGap`/`frameGenerate` → `placeInFrame`.
+  (+ evidence-gap **Mátrix** nézet a GapPanelben.)
+
 ## Hátralévő (jövő) — Phase 6+
 - [ ] 🔴 **Teljes karakter-szintű CRDT/Yjs** — egyidejű azonos-szekció gépelés valós idejű merge-dzsel.
   A jelenlegi soft-lock + LWW ennek a könnyűsúlyú, függőség-mentes alternatívája; a teljes CRDT nagy

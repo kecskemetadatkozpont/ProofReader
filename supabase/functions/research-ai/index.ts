@@ -81,6 +81,44 @@ Deno.serve(async (req) => {
       }
       return json({ ok: true, count: 0, ideas: [] });
     }
+    // #3 — first-class RESEARCH-GAP ANALYSIS: typed, evidence-grounded gaps (migration-83). Distinct from the legacy
+    // action='gap' (untyped questions) which stays byte-identical. Returns the SAME {ok,count,ideas} shape.
+    if (action === 'gap_analyze') {
+      const { data: gsrc } = await sb.from('research_sources')
+        .select('title,year,venue,abstract,screening').eq('project_id', project_id).order('cited_by', { ascending: false, nullsFirst: false }).limit(60);
+      const all = gsrc || [];
+      const inc = all.filter((s: any) => s.screening === 'include' || s.screening === 'included');
+      const lib = (inc.length >= 4 ? inc : all);   // prefer the screened-in library; fall back to everything
+      const N = lib.length;
+      const TYPES = ['evidence', 'knowledge', 'methodological', 'population', 'theoretical', 'practical', 'contradictory'];
+      const gaps = await askClaudeGaps(proj, lib, userModel, _lang);
+      const rows = (gaps || []).slice(0, 8).map((g: any) => {
+        // validate evidence source_ref indices against the ACTUAL library length — drop hallucinated citations
+        const ev = Array.isArray(g.evidence) ? g.evidence.map((e: any) => {
+          const ref = Number(e && e.source_ref);
+          const src = (Number.isFinite(ref) && ref >= 1 && ref <= N) ? lib[ref - 1] : null;
+          return src ? { title: String(src.title || '').slice(0, 200), coverage: String((e && e.coverage) || '').slice(0, 200) } : null;
+        }).filter(Boolean).slice(0, 6) : [];
+        const gt = TYPES.indexOf(String(g.gap_type || '').toLowerCase().trim()) >= 0 ? String(g.gap_type).toLowerCase().trim() : 'knowledge';
+        return {
+          project_id, source: 'gap', status: 'candidate', gap_type: gt, evidence: ev,
+          question: String(g.statement || g.question || '').slice(0, 600),
+          rationale: g.rationale ? String(g.rationale).slice(0, 1000) : null,
+          hypothesis: g.suggested_question ? String(g.suggested_question).slice(0, 800) : null,
+          novelty: Number.isFinite(g.novelty) ? Math.max(0, Math.min(100, Math.round(g.novelty))) : null,
+        };
+      }).filter((r: any) => r.question);
+      if (!rows.length) return json({ ok: true, count: 0, ideas: [] });
+      let res = await sb.from('research_ideas').insert(rows).select('id,question,source,novelty,status,gap_type,evidence,created_at');
+      if (res.error && /gap_type|evidence|addressed_by|column/i.test(res.error.message)) {
+        // migration-83 not applied yet → insert untyped gaps so the feature still works (client shows a degrade banner)
+        const bare = rows.map((r: any) => { const { gap_type, evidence, ...rest } = r; return rest; });
+        res = await sb.from('research_ideas').insert(bare).select('id,question,source,novelty,status,created_at');
+      }
+      if (res.error) return json({ error: 'insert failed: ' + res.error.message }, 403);
+      return json({ ok: true, count: (res.data || rows).length, ideas: res.data || [] });
+    }
+
     const { data: sources } = await sb.from('research_sources')
       .select('title,year,venue,abstract').eq('project_id', project_id).limit(40);
 
@@ -198,4 +236,45 @@ Return ONLY a JSON array, no prose, each item:
   const text = (j?.content?.[0]?.text) || '';
   const m = text.match(/\[[\s\S]*\]/);
   try { return m ? JSON.parse(m[0]) : []; } catch { return []; }
+}
+
+// Typed, evidence-grounded gap analysis (action='gap_analyze'). Returns [{gap_type,statement,evidence:[{source_ref,coverage}],rationale,novelty,suggested_question}].
+async function askClaudeGaps(proj: any, sources: any[], model: string, lang: 'en' | 'hu'): Promise<any[]> {
+  const lib = sources.map((s, i) =>
+    `[${i + 1}] ${s.title} (${s.year ?? 'n.d.'}, ${s.venue ?? ''})\n${(s.abstract ?? '').slice(0, 500)}`).join('\n\n');
+  const prompt =
+`You are a research methodology assistant performing a rigorous RESEARCH-GAP ANALYSIS.
+
+PROJECT
+Title: ${proj.title}
+Field: ${proj.field ?? '—'}
+Keywords: ${(proj.keywords ?? []).join(', ') || '—'}
+Goal: ${proj.goal ?? '—'}
+
+LITERATURE LIBRARY (${sources.length} items, numbered)
+${lib || '(none yet)'}
+
+Identify 4-6 concrete research GAPS: what the literature above does NOT resolve or cover, given the goal.
+Classify EACH gap by exactly ONE type slug from this taxonomy:
+- evidence: little or no empirical evidence for a claim
+- knowledge: the knowledge does not exist, or not where one would expect it
+- methodological: the topic was studied only with the same limited method/measurement
+- population: not tested on a given population / domain / operational context
+- theoretical: a missing or competing theoretical framework
+- practical: a gap between the recommendation and actual practice
+- contradictory: multiple credible sources conflict and it is unresolved
+
+Ground every gap in the library: cite supporting papers by their [number] and state what is ABSENT.
+
+Return ONLY a JSON array, no prose. Each item:
+{"gap_type":"<one slug from the list>","statement":"the gap in one clear sentence","evidence":[{"source_ref":<library item number>,"coverage":"what this paper covers regarding the gap"}],"rationale":"why this is a gap — what the library does or does not cover","novelty":0-100,"suggested_question":"a concrete, testable research question that would close the gap"}` + langDirective(lang);
+  const r = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'x-api-key': ANTHROPIC_KEY!, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+    body: JSON.stringify({ model, max_tokens: Math.max(MAX_TOKENS, 2200), messages: [{ role: 'user', content: prompt }] }),
+  });
+  const j = await r.json();
+  const text = (j?.content?.[0]?.text) || '';
+  const mm = text.match(/\[[\s\S]*\]/);
+  try { return mm ? JSON.parse(mm[0]) : []; } catch { return []; }
 }

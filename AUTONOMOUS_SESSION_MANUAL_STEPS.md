@@ -120,17 +120,27 @@ sorrendben. A service-key nem tud DDL-t futtatni, ezért ezek manuálisak.
     az él-inspectorban (2-szintű graceful probe: `select …,speed` → hibánál `select …` speed nélkül), minden él a
     típus-alapértelmezett tempóján animál — minden más (címke, inferRel, legenda) a migráció NÉLKÜL is működik.
 
+14. **`backend/migration-83-research-gaps.sql`** — kutatási rés-elemzés: 3 additív oszlop a `research_ideas`-en
+    (`gap_type text`, `evidence jsonb`, `addressed_by_idea_id uuid`) + egy részleges index. Csak additív, RLS változatlan
+    (a `research_ideas` policy-k öröklődnek). Amíg nincs lefuttatva: a **🕳️ Rések** fül működik, de **degradált módban** —
+    a rés-elemzés tipizálatlan gap-ötleteket ad (a `GapPanel` 2-szintű probe-ja érzékeli a hiányzó oszlopokat és
+    típus/bizonyíték nélkül listáz, degradált-banner-rel). Utána: tipizált rések (7 típus) + bizonyíték-hivatkozások.
+
 ## Edge-function deploy-ok (explicit jóváhagyás + megnevezés kell)
 
-**AJÁNLOTT (nem kötelező): `research-ai`** — a keret-generálás chat-akciókhoz (`✦ Ötlet-kártyák ide`) a
-`supabase/functions/research-ai/index.ts` `gap` és `suggest` ága most a beszúrt sorokat is visszaadja
-(`.insert(rows).select('id,question,…')` → `{ok, count, ideas}`). Ettől a kliens **pontosan** a most létrehozott
-ötleteket teszi a keretbe (verseny-mentes), nem „a projekt N legújabb ötletét" idő-ablak alapján kell találgatnia.
-- **Deploy nélkül is működik** (graceful): ha a régi edge fut (nincs `ideas` a válaszban), a kliens visszaesik egy
-  **before/after id-diff** találgatásra (a művelet ELŐTTI összes ötlet-id kizárásával) — ez kizárja az összes régi
-  ötletet, csak a párhuzamos-író ritka versenyhelyzete marad, amíg a deploy meg nem történik.
-- **Ha jóváhagyod:** `supabase functions deploy research-ai` (ref `jokqthwszkweyqmmdesn`). Visszafelé kompatibilis:
-  a többi hívó (`dkCmd`, `runGen`) csak a `count`-ot olvassa, azt nem érinti az új `ideas` mező.
+**`research-ai`** — KÉT független ok is indokolja a redeploy-t (mindkettő graceful, deploy nélkül sem törik semmi):
+1. **Rés-elemzés (`action='gap_analyze'`, ÚJ)** — a **🕳️ Rések** fül „✨ Elemezd a kutatási réseket" gombja ezt hívja;
+   tipizált, bizonyítékhoz kötött réseket (7-típusú taxonómia, `source_ref` index-validálva) ír `research_ideas`-be
+   (`source='gap'` + `gap_type`/`evidence`). A régi `action='gap'` **érintetlen**. Az edge-be ELŐBB a **migration-83**
+   kell (különben a beszúrás visszaesik tipizálatlan sorokra — az edge kezeli, de a tipizált érték elvész).
+   - Deploy NÉLKÜL: a régi edge nem ismeri a `gap_analyze`-t → a `GapPanel` degradált-bannert mutat, a meglévő
+     gap-ötletek listázódnak. **Ajánlott sorrend:** migration-83 → `supabase functions deploy research-ai`.
+2. **Chat-akciók verseny-mentessége** — a `gap`/`suggest` ág most a beszúrt sorokat is visszaadja
+   (`.insert(rows).select(…)` → `{ok,count,ideas}`), így a keret-generálás **pontosan** a most létrehozott ötleteket
+   teszi a keretbe. Deploy nélkül a kliens before/after id-diff fallbackre esik vissza.
+   - Visszafelé kompatibilis: a `count`-ot olvasó hívók (`dkCmd`, `runGen`) érintetlenek.
+
+**Deploy parancs:** `supabase functions deploy research-ai` (ref `jokqthwszkweyqmmdesn`).
 
 ## Egyéb (megosztott DB-írás, konfig)
 
