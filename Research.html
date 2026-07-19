@@ -1370,6 +1370,8 @@
     .rmap-dock-files { flex: 1; min-height: 0; display: flex; overflow: hidden; }
     .rmap-dock-files .filebrowser { flex: 1; width: auto !important; align-self: stretch; border: 0; border-radius: 0; padding: 6px; max-height: none; min-height: 0; }
     .rmap-dock-files .filebrowser.fbx { display: flex; flex-direction: column; min-height: 0; }
+    .rmap-dock-cursor { display: inline-block; margin-left: 1px; color: var(--accent); font-weight: 700; animation: rmap-blink 1s steps(2, start) infinite; }
+    @keyframes rmap-blink { 0%, 50% { opacity: 1; } 50.01%, 100% { opacity: 0; } }
     .rmap-dock-in { display: flex; gap: 7px; align-items: stretch; padding: 9px 12px 11px; }
     .rmap-dock-in textarea { flex: 1; resize: none; min-height: 36px; max-height: 120px; font-family: inherit; font-size: 12.5px; line-height: 1.4; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); }
     .rmap-dock-in textarea:focus { outline: none; border-color: var(--accent); }
@@ -1473,7 +1475,7 @@
   <script type="text/babel" src="canvas.jsx?v=1783137934"></script>
   <script type="text/babel" src="notes.jsx?v=1783137934"></script>
   <script src="autopilot-core.js?v=1784160000"></script>
-  <script type="text/babel" src="research.jsx?v=1785930000"></script>
+  <script type="text/babel" src="research.jsx?v=1785940000"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>
