@@ -869,10 +869,18 @@
     .rmap-insp-float { box-shadow: 0 14px 44px rgba(0,0,0,.30), 0 2px 8px rgba(0,0,0,.14); animation: rmap-insp-pop .13s ease-out; overflow-y: auto; }
     @keyframes rmap-insp-pop { from { opacity: 0; transform: scale(.97); } to { opacity: 1; transform: scale(1); } }
     /* floating selection toolbar above the selected card */
-    .rmap-seltool { display: flex; gap: 2px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 3px; box-shadow: 0 8px 24px rgba(0,0,0,.20); animation: rmap-insp-pop .12s ease-out; }
-    .rmap-seltool button { border: none; background: none; cursor: pointer; font-size: 13.5px; width: 30px; height: 27px; border-radius: 7px; display: flex; align-items: center; justify-content: center; color: var(--ink); line-height: 1; }
-    .rmap-seltool button:hover { background: var(--surface-2); }
-    .rmap-seltool button.on { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+    /* ── macOS-Dock toolbars — shared by the card selection toolbar (.rmap-seltool) + the Map menu bar (.rmap-zoom).
+       Cursor-distance magnifies each .rmap-dbtn (JS sets transform:scale + --s); the floating .rmap-dlab label is
+       counter-scaled (1/--s) so its text stays crisp; the nearest icon gets .rmap-dhot → its label shows. ── */
+    .rmap-seltool { display: flex; align-items: flex-end; gap: 3px; background: color-mix(in srgb, var(--surface) 90%, transparent); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid var(--line); border-radius: 14px; padding: 5px; box-shadow: 0 14px 34px -12px rgba(20,30,55,.42), 0 2px 8px -4px rgba(20,30,55,.3); animation: rmap-insp-pop .12s ease-out; }
+    .rmap-dbtn { position: relative; border: none; background: none; cursor: pointer; display: flex; align-items: center; justify-content: center; color: var(--ink); line-height: 1; transform-origin: bottom center; flex: none; transition: transform .13s cubic-bezier(.3,1.4,.5,1), background .12s; }
+    .rmap-dbtn:hover { background: var(--surface-2); }
+    .rmap-dbtn:disabled { cursor: default; opacity: .5; }
+    .rmap-seltool .rmap-dbtn { width: 34px; height: 30px; border-radius: 8px; font-size: 14.5px; }
+    .rmap-dbtn .rmap-dlab { position: absolute; bottom: calc(100% + 9px); left: 50%; transform: translateX(-50%) scale(calc(1 / var(--s, 1))); white-space: nowrap; font-size: 11px; font-weight: 650; background: var(--ink); color: var(--surface); padding: 3px 9px; border-radius: 7px; opacity: 0; pointer-events: none; transition: opacity .12s; z-index: 20; }
+    .rmap-dbtn .rmap-dlab::after { content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%); border: 5px solid transparent; border-top-color: var(--ink); }
+    .rmap-dbtn.rmap-dhot .rmap-dlab { opacity: 1; }
+    @media (prefers-reduced-motion: reduce) { .rmap-dbtn { transition: transform .06s linear, background .12s; } }
     /* per-node pin badge + pinned highlight ring */
     .rmap-pin-badge { position: absolute; top: -8px; right: -6px; font-size: 13px; z-index: 2; filter: drop-shadow(0 1px 1px rgba(0,0,0,.3)); pointer-events: none; }
     .rmap-node.rmap-pinned { box-shadow: 0 0 0 2px var(--accent), 0 8px 20px -8px rgba(20,26,40,.4); }
@@ -963,9 +971,9 @@
     .wp-sg-old { background: color-mix(in srgb, #b42318 8%, transparent); border: 1px solid color-mix(in srgb, #b42318 22%, transparent); }
     .wp-sg-new { background: color-mix(in srgb, #059669 9%, transparent); border: 1px solid color-mix(in srgb, #059669 24%, transparent); }
     @media (max-width: 640px) { .wp-sg-diff { grid-template-columns: 1fr; } }
-    .rmap-cm-panel { position: absolute; left: 14px; bottom: 96px; z-index: 15; width: 288px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 18px 50px -20px rgba(20,26,40,.55); }
+    .rmap-cm-panel { position: absolute; left: 50%; bottom: 74px; transform: translateX(-50%); z-index: 15; width: 288px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 18px 50px -20px rgba(20,26,40,.55); }
     /* type-visibility filter (hide whole object types, e.g. Figures) */
-    .rmap-typefilter { position: absolute; left: 14px; bottom: 96px; z-index: 16; width: 240px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 18px 50px -20px rgba(20,26,40,.55); padding: 10px; }
+    .rmap-typefilter { position: absolute; left: 50%; bottom: 74px; transform: translateX(-50%); z-index: 16; width: 240px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 18px 50px -20px rgba(20,26,40,.55); padding: 10px; }
     .rmap-tf-h { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; } .rmap-tf-h b { font-size: 12.5px; }
     .rmap-tf-all { border: 1px solid var(--line); background: var(--surface); cursor: pointer; font-family: inherit; font-size: 10.5px; font-weight: 700; color: var(--accent); padding: 2px 8px; border-radius: 999px; }
     .rmap-tf-all:hover { border-color: var(--accent); }
@@ -1020,7 +1028,7 @@
     .rmap-tour-notes b { color: var(--accent); }
     .rmap-tour-live { font-size: 10.5px; font-weight: 800; color: var(--danger, #b42318); padding: 0 6px; }
     /* presentations manager + beat editor */
-    .rmap-pres { position: absolute; left: 14px; bottom: 96px; z-index: 17; width: 306px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 18px 50px -20px rgba(20,26,40,.55); max-height: 66%; display: flex; flex-direction: column; }
+    .rmap-pres { position: absolute; left: 50%; bottom: 74px; transform: translateX(-50%); z-index: 17; width: 306px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 18px 50px -20px rgba(20,26,40,.55); max-height: 66%; display: flex; flex-direction: column; }
     .rmap-pres .rmap-cm-t-b { max-height: none; }
     .rmap-pres-item { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; background: var(--surface-2); }
     .rmap-pres-row { display: flex; align-items: center; gap: 8px; }
@@ -1238,11 +1246,13 @@
     .rmap-node.t-dataset { --nc: #0891b2; } .rmap-node.t-file { --nc: #64748b; } .rmap-node.t-chat { --nc: #9333ea; } .rmap-node.t-figure { --nc: #ea580c; }
     .rmap-node.t-srq { --nc: #6366f1; } .rmap-node.t-sreview { --nc: #0f766e; }
     .rmap-node.t-gap { --nc: #d6455f; border-left: 3px dashed #d6455f; }   /* research-gap node (🕳️) — visually distinct dashed rose edge */
-    .rmap-zoom { position: absolute; left: 14px; bottom: 50px; display: flex; gap: 6px; }
-    .rmap-zoom button { width: 32px; height: 32px; border: 1px solid var(--line); background: var(--surface); color: var(--muted); border-radius: 8px; font-size: 15px; cursor: pointer; }
-    .rmap-zoom button.rmap-zoompct { width: auto; min-width: 48px; padding: 0 9px; font-size: 11.5px; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: .01em; }
-    .rmap-zoom button.rmap-zoompct.off { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--surface)); }
-    .rmap-zoom button.rmap-zoompct.off:hover { background: color-mix(in srgb, var(--accent) 20%, var(--surface)); }
+    /* Map menu bar — centered macOS-Dock at the bottom-middle of the canvas (was a flat bottom-left row). */
+    .rmap-zoom { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 12; display: flex; align-items: flex-end; gap: 3px; background: color-mix(in srgb, var(--surface) 86%, transparent); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid var(--line); border-radius: 16px; padding: 6px; box-shadow: 0 16px 38px -12px rgba(20,30,55,.45), 0 2px 8px -4px rgba(20,30,55,.32); max-width: calc(100% - 28px); }
+    .rmap-zoom .rmap-dbtn { width: 34px; height: 31px; border-radius: 9px; font-size: 15px; }
+    .rmap-zoom .rmap-dbtn.rmap-zoompct { width: auto; min-width: 44px; padding: 0 9px; font-size: 11.5px; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: .01em; }
+    .rmap-zoom .rmap-dbtn.rmap-zoompct.off { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+    .rmap-zoom .rmap-dbtn.rmap-zoompct.off:hover { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+    .rmap-dsep { width: 1px; align-self: stretch; background: var(--line); margin: 4px 3px; flex: none; }
     .rmap-hint { position: absolute; left: 14px; bottom: 14px; font-size: 11px; color: var(--faint); background: color-mix(in srgb, var(--surface) 80%, transparent); padding: 4px 9px; border-radius: 7px; }
     /* Canvas assistant dock (Luma-style, bottom-right) */
     .rmap-dock { position: absolute; right: 14px; bottom: 14px; z-index: 12; }
@@ -1441,7 +1451,7 @@
   <script type="text/babel" src="canvas.jsx?v=1783137934"></script>
   <script type="text/babel" src="notes.jsx?v=1783137934"></script>
   <script src="autopilot-core.js?v=1784160000"></script>
-  <script type="text/babel" src="research.jsx?v=1785790000"></script>
+  <script type="text/babel" src="research.jsx?v=1785900000"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>

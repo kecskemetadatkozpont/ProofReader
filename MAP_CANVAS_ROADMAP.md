@@ -253,6 +253,28 @@
   a húzás alatt elnyomva) · **dedup-guard** (ha már van keret e bbox köré [±10px] → `framePatch` frissítés + toast, nem új keret).
   Adversariális review után.
 
+## ✅ macOS-Dock nagyítás — kártya-toolbar + Map-menüsor (egy közös réteg) — 2026-07-19
+> 2 jóváhagyott mockup (`dock-toolbar-mockup` V1 kártya · `map-dock-mockup` középre-igazított menüsor), egyben implementálva.
+- [x] ✅ **Közös motor** (`research.jsx`, modul-szint, `STAGE_ICONS` előtt): `dockMagnify(host,cx,spread,hotDist)` +
+  `dockReset(host)` — kurzor-távolság → per-ikon skála **smoothstep** görbével (`t=t²(3−2t)`, `s=1+amp·t`,
+  `amp=DOCK_REDUCE?0.28:0.95`), a `.rmap-dbtn` gombokat imperatíven skálázza (`transform`+`--s`+`zIndex`), a legközelebbi
+  (< hotDist) kap `.rmap-dhot`-ot → megjelenik a neve. A lebegő címke **ellen-skálázott** (`scale(1/--s)`) → éles szöveg.
+  Reduced-motion: amplitúdó 0,95→0,28. **React nem ad `style` propot a gomboknak** → az imperatív mutáció megmarad
+  re-renderen át, a `mouseLeave→dockReset` törli (a következő `mouseMove` amúgy is újraszámol).
+- [x] ✅ **① Kártya-toolbar** (`.rmap-seltool`): 7 ikon (📌🙈⚡⊞🔗⤢⤓) `rmap-dbtn` + `.rmap-dlab` címke; a sáv dock-stílust
+  kap (blur, r14); `onMouseMove/Leave` (spread 78, hot 26). `selToolStyle` doboz 200×33 → 264×42 (fölfelé nagyít).
+- [x] ✅ **② Map-menüsor** (`.rmap-zoom`): bal-alsó lapos sáv → **vászon-alja-közép** (`left:50%; translateX(-50%); bottom:16`);
+  IIFE 3 csoportba szedi (**nézet ⎪ szerkesztés ⎪ zoom**), `.rmap-dsep` elválasztó **csak nem-üres csoportok között**;
+  minden eredeti onClick/title/badge változatlan; `h.apply` spread (nincs key-warning); spread 82, hot 30.
+- [x] ✅ **Review-fix (minor, medium):** minden **dock-triggerelt popup** (👁 típus-szűrő, 🖼/🫥 visszahozó, 📋 kommentek,
+  🎬 bemutatók) a bal-alsó sarokból **a dock fölé, középre** került (`left:50%; bottom:74; translateX(-50%)`) — a régi
+  `left:14;bottom:96` sarok-horgony leszakadva hatott az elmozdított gomboktól. A perzisztens bal-alsó chrome
+  (`.rmap-elegend` él-legenda, `.rmap-hint`) marad — nem dock-triggerelt, nem ütközik.
+- [ ] ⚠️ **Ismert korlát (nit, low — NEM javítva, szándékosan):** teljes eszközkészlet + **nyitott** Asszisztens-dock esetén
+  ~≤1100px-es vászonon a centrált sáv jobb széle a jobb-alsó `.rmap-dock` alá érhet (mindkettő z-index:12). A javasolt
+  `dkOpen`-feltételes −199px eltolás a **gyakori** széles esetben látható „ugrást" okozna a centrált sávon → rosszabb, mint
+  a ritka overlap. `wheel`-zoom végig elérhető. Ha valaha bántó lesz: mérésalapú (csak-ha-szűk-ÉS-dkOpen) eltolás.
+
 ## 🚧 Figure Board + Citation Optimizer → Literature-alfülek — 2026-07-19
 > Feltárás: 2-ágú (IA/nav · embed-mechanizmus) + kód-megalapozás design-workflow → szintézis → interaktív mockup
 > (`litsub-mockup`, favicon 🖼). **A kérés:** a két külön-oldalas eszköz a Literature alá, mint a Rések.

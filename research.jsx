@@ -14,6 +14,30 @@
   var STAGE_TAB = ['overview', 'ideas', 'literature', 'protocol', 'journal', 'writing', 'submission'];
   function nd() { return !!(window.PRDesign && window.PRDesign.isNew()); }   // "New design" flag → Academic Data-Dense redesign (behind the toggle; reads at render time, flip triggers a reload)
   function svg() { var args = Array.prototype.slice.call(arguments); return h('svg', { viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round', strokeLinejoin: 'round' }, args.map(function (d, i) { return h('path', { key: i, d: d }); })); }
+  // ── macOS-Dock magnification (shared by the card selection toolbar .rmap-seltool + the Map menu bar .rmap-zoom) ──
+  // Cursor-distance → per-icon scale with a smoothstep falloff (authentic Dock curve); the floating label is
+  // counter-scaled (scale 1/s via the --s custom prop) so its text stays crisp over the grown icon. The nearest
+  // icon (within hotDist px) gets .rmap-dhot → its label shows. Reduced-motion lowers the amplitude (0.95→0.28).
+  var DOCK_REDUCE = false;
+  try { DOCK_REDUCE = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); } catch (e) { }
+  function dockMagnify(host, cx, spread, hotDist) {
+    var btns = host.querySelectorAll('.rmap-dbtn'), best = null, bestD = 1e9, amp = DOCK_REDUCE ? 0.28 : 0.95, i, b, r, c, dist, t, s;
+    for (i = 0; i < btns.length; i++) {
+      b = btns[i]; r = b.getBoundingClientRect(); c = r.left + r.width / 2; dist = Math.abs(cx - c);
+      t = Math.max(0, 1 - dist / spread); t = t * t * (3 - 2 * t);   // smoothstep falloff
+      s = 1 + amp * t;
+      b.style.transform = 'scale(' + s.toFixed(3) + ')';
+      b.style.setProperty('--s', s.toFixed(3));
+      b.style.zIndex = String(Math.round(s * 10));
+      b.classList.remove('rmap-dhot');
+      if (dist < bestD) { bestD = dist; best = b; }
+    }
+    if (best && bestD < hotDist) best.classList.add('rmap-dhot');
+  }
+  function dockReset(host) {
+    var btns = host.querySelectorAll('.rmap-dbtn'), i, b;
+    for (i = 0; i < btns.length; i++) { b = btns[i]; b.style.transform = ''; b.style.zIndex = ''; b.style.removeProperty('--s'); b.classList.remove('rmap-dhot'); }
+  }
   var STAGE_ICONS = [
     svg('M4 14V2.5', 'M4 3h7l-1.4 2.3L11 7.6H4'),                                         // Setup — flag
     svg('M5.6 9.6A3.5 3.5 0 1 1 10.4 9.6c-.5.5-.8 1-.8 1.6H6.4c0-.6-.3-1.1-.8-1.6Z', 'M6.6 13.2h2.8'), // Idea — bulb
@@ -6449,7 +6473,7 @@
     // floating selection toolbar — centered above the selected card (flips below + bottom-clamps via fitFloat).
     function selToolStyle(node) {
       var vp = stageVP(), r = cardScreenRect(node);
-      var f = fitFloat(r, { w: 200, colW: 200, h: 33 }, vp, { prefer: 'above', gap: 8, canWiden: false });
+      var f = fitFloat(r, { w: 264, colW: 264, h: 42 }, vp, { prefer: 'above', gap: 8, canWiden: false });   // taller/wider: Dock buttons magnify upward
       var left = Math.max(74, Math.min(r.x + r.w / 2, vp.w - 74));   // keep center-based positioning (transform:translateX(-50%))
       return { position: 'absolute', left: left + 'px', top: f.top + 'px', transform: 'translateX(-50%)', zIndex: 14 };
     }
@@ -6716,25 +6740,39 @@
           h('span', { className: 'rmap-rb-st' }, (AP_ST_LABEL[run.status] || run.status) + (activeLabel ? ' · ' + activeLabel : '') + (runProg ? ' · ' + runProg : '')),
           (run.status === 'awaiting_approval' && run.gate && props.canEdit) ? h('button', { className: 'btn pri', style: { padding: '3px 10px', fontSize: 11.5, marginLeft: 4 }, onClick: approveGate }, '✓ ' + (run.gate.title || 'Jóváhagyás')) : null,
           h('a', { className: 'btn', style: { padding: '3px 10px', fontSize: 11.5, textDecoration: 'none', marginLeft: 'auto' }, href: 'Autopilot.html?run=' + run.id, target: '_blank', rel: 'noopener' }, 'Dashboard ↗')) : null,
-        h('div', { className: 'rmap-zoom' },
-          h('button', { className: (Object.keys(hiddenTypes).length ? 'on' : ''), title: 'Típusok ki/be kapcsolása a térképen (pl. Ábrák)', onClick: function () { setTypeFilterOpen(function (v) { return !v; }); } }, '👁' + (Object.keys(hiddenTypes).length ? Object.keys(hiddenTypes).length : '')),
-          h('button', { title: 'Térkép újratöltése a legfrissebb adatokkal (a módosítások érvényesítése)', disabled: refreshing, onClick: refreshMap }, refreshing ? '⏳' : '🔄'),
-          h('button', { title: 'Térkép exportálása PNG-be', onClick: exportMap }, '⤓'),
-          (pagesCap && pages.length > 1) ? h('button', { title: 'Gyors túra: végigzoomol a mentett Lapokon', onClick: tourStart }, '▶') : null,
-          pathsCap ? h('button', { className: presMgrOpen ? 'on' : '', title: 'Bemutatók (Prezi-story): jelenetekből álló, vezetett túra', onClick: function () { setPresMgrOpen(function (v) { return !v; }); } }, '🎬') : null,
-          (props.canEdit && framesCap) ? h('button', { title: 'Új keret (nevesített régió) — vagy dupla-katt a vászonra', onClick: function () { frameCreate(); } }, '▦') : null,
-          (props.canEdit && framesCap) ? h('button', { title: 'Rendezés fázisokba (sávok + keretek) — felülírja a kézi elrendezést', onClick: autoLayoutStages }, '⌗') : null,
-          commentsCap ? h('button', { className: commentMode ? 'on' : '', title: commentMode ? 'Komment-mód kikapcsolása' : 'Komment-mód: kattints a vászonra vagy egy kártyára', onClick: function () { setCommentMode(function (v) { return !v; }); setComposer(null); } }, '💬') : null,
-          (commentsCap && comments.length) ? h('button', { title: 'Összes komment', onClick: function () { setCmPanelOpen(function (v) { return !v; }); } }, '📋' + (cmUnresolved || '')) : null,
-          (data && data.hiddenFigs && data.hiddenFigs.length) ? h('button', { title: 'Térképről levett ábrák visszahozása', onClick: function () { setRestoreOpen(true); } }, '🖼' + data.hiddenFigs.length) : null,
-          (mapFlags && g.N.filter(function (n) { return n.mapHidden; }).length) ? h('button', { title: 'Rejtett kártyák visszahozása', onClick: function () { setNodeRestoreOpen(true); } }, '🫥' + g.N.filter(function (n) { return n.mapHidden; }).length) : null,
-          (props.canEdit && Object.keys(layout).length) ? h('button', { title: 'Automatikus elrendezés (a saját pozíciók törlése)', onClick: resetLayout }, '↺') : null,
-          h('button', { title: 'Illeszd a nézetbe (a teljes gráf látszódjon)', onClick: fitView }, '⤢'),
-          h('button', { title: 'Nagyítás', onClick: function () { zoom(1.18); } }, '+'),
-          h('button', { className: 'rmap-zoompct' + (Math.abs(view.k - 1) > 0.01 ? ' off' : ''), title: 'Vissza 100%-ra (1:1)', onClick: function () { setView(function (v) { return { tx: v.tx, ty: v.ty, k: 1 }; }); } }, (Math.abs(view.k - 1) > 0.01 ? '⟲ ' : '') + Math.round(view.k * 100) + '%'),
-          h('button', { title: 'Kicsinyítés', onClick: function () { zoom(0.85); } }, '−')),
+        // Map menu bar → centered macOS-Dock: cursor magnifies icons + floating labels. Grouped (view · edit · zoom);
+        // separators appear only between non-empty groups (all middle buttons are capability/state-gated). IIFE keeps it
+        // an expression in this children list; h.apply spreads the built array so no key-warning on the separators.
+        (function () {
+          function L(t) { return h('span', { className: 'rmap-dlab' }, t); }
+          var g1 = [
+            h('button', { key: 'tf', className: 'rmap-dbtn' + (Object.keys(hiddenTypes).length ? ' on' : ''), title: 'Típusok ki/be kapcsolása a térképen (pl. Ábrák)', onClick: function () { setTypeFilterOpen(function (v) { return !v; }); } }, '👁' + (Object.keys(hiddenTypes).length ? Object.keys(hiddenTypes).length : ''), L('Típus-szűrő')),
+            h('button', { key: 'refresh', className: 'rmap-dbtn', title: 'Térkép újratöltése a legfrissebb adatokkal (a módosítások érvényesítése)', disabled: refreshing, onClick: refreshMap }, refreshing ? '⏳' : '🔄', L('Frissítés')),
+            h('button', { key: 'exp', className: 'rmap-dbtn', title: 'Térkép exportálása PNG-be', onClick: exportMap }, '⤓', L('Export (PNG)')),
+            (pagesCap && pages.length > 1) ? h('button', { key: 'tour', className: 'rmap-dbtn', title: 'Gyors túra: végigzoomol a mentett Lapokon', onClick: tourStart }, '▶', L('Lap-túra')) : null,
+            pathsCap ? h('button', { key: 'pres', className: 'rmap-dbtn' + (presMgrOpen ? ' on' : ''), title: 'Bemutatók (Prezi-story): jelenetekből álló, vezetett túra', onClick: function () { setPresMgrOpen(function (v) { return !v; }); } }, '🎬', L('Bemutató')) : null
+          ].filter(Boolean);
+          var g2 = [
+            (props.canEdit && framesCap) ? h('button', { key: 'frame', className: 'rmap-dbtn', title: 'Új keret (nevesített régió) — vagy dupla-katt a vászonra', onClick: function () { frameCreate(); } }, '▦', L('Új keret')) : null,
+            (props.canEdit && framesCap) ? h('button', { key: 'auto', className: 'rmap-dbtn', title: 'Rendezés fázisokba (sávok + keretek) — felülírja a kézi elrendezést', onClick: autoLayoutStages }, '⌗', L('Fázisokba')) : null,
+            commentsCap ? h('button', { key: 'cm', className: 'rmap-dbtn' + (commentMode ? ' on' : ''), title: commentMode ? 'Komment-mód kikapcsolása' : 'Komment-mód: kattints a vászonra vagy egy kártyára', onClick: function () { setCommentMode(function (v) { return !v; }); setComposer(null); } }, '💬', L('Komment-mód')) : null,
+            (commentsCap && comments.length) ? h('button', { key: 'cmp', className: 'rmap-dbtn', title: 'Összes komment', onClick: function () { setCmPanelOpen(function (v) { return !v; }); } }, '📋' + (cmUnresolved || ''), L('Kommentek')) : null,
+            (data && data.hiddenFigs && data.hiddenFigs.length) ? h('button', { key: 'hf', className: 'rmap-dbtn', title: 'Térképről levett ábrák visszahozása', onClick: function () { setRestoreOpen(true); } }, '🖼' + data.hiddenFigs.length, L('Rejtett ábrák')) : null,
+            (mapFlags && g.N.filter(function (n) { return n.mapHidden; }).length) ? h('button', { key: 'hn', className: 'rmap-dbtn', title: 'Rejtett kártyák visszahozása', onClick: function () { setNodeRestoreOpen(true); } }, '🫥' + g.N.filter(function (n) { return n.mapHidden; }).length, L('Rejtett kártyák')) : null,
+            (props.canEdit && Object.keys(layout).length) ? h('button', { key: 'reset', className: 'rmap-dbtn', title: 'Automatikus elrendezés (a saját pozíciók törlése)', onClick: resetLayout }, '↺', L('Auto-elrendezés')) : null
+          ].filter(Boolean);
+          var g3 = [
+            h('button', { key: 'fit', className: 'rmap-dbtn', title: 'Illeszd a nézetbe (a teljes gráf látszódjon)', onClick: fitView }, '⤢', L('Nézetbe')),
+            h('button', { key: 'zin', className: 'rmap-dbtn', title: 'Nagyítás', onClick: function () { zoom(1.18); } }, '+', L('Nagyítás')),
+            h('button', { key: 'pct', className: 'rmap-dbtn rmap-zoompct' + (Math.abs(view.k - 1) > 0.01 ? ' off' : ''), title: 'Vissza 100%-ra (1:1)', onClick: function () { setView(function (v) { return { tx: v.tx, ty: v.ty, k: 1 }; }); } }, (Math.abs(view.k - 1) > 0.01 ? '⟲ ' : '') + Math.round(view.k * 100) + '%', L('Vissza 100%-ra')),
+            h('button', { key: 'zout', className: 'rmap-dbtn', title: 'Kicsinyítés', onClick: function () { zoom(0.85); } }, '−', L('Kicsinyítés'))
+          ];
+          var kids = [];
+          [g1, g2, g3].forEach(function (grp, gi) { if (!grp.length) return; if (kids.length) kids.push(h('span', { className: 'rmap-dsep', key: 'dsep' + gi })); grp.forEach(function (el) { kids.push(el); }); });
+          return h.apply(null, ['div', { className: 'rmap-zoom', onMouseMove: function (e) { dockMagnify(e.currentTarget, e.clientX, 82, 30); }, onMouseLeave: function (e) { dockReset(e.currentTarget); } }].concat(kids));
+        })(),
         // "hidden figures" restore panel — bring Map-removed figures (on_map=false) back onto the Map
-        (restoreOpen && data && data.hiddenFigs) ? h('div', { style: { position: 'absolute', left: 14, bottom: 96, zIndex: 14, width: 264, maxHeight: '58%', overflowY: 'auto', background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 12, boxShadow: '0 18px 50px -20px rgba(20,26,40,.55)', padding: 12 }, onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
+        (restoreOpen && data && data.hiddenFigs) ? h('div', { style: { position: 'absolute', left: '50%', bottom: 74, transform: 'translateX(-50%)', zIndex: 14, width: 264, maxHeight: '58%', overflowY: 'auto', background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 12, boxShadow: '0 18px 50px -20px rgba(20,26,40,.55)', padding: 12 }, onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
           (function () { ensureFigUrls(data.hiddenFigs); return null; })(),
           h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 9 } }, h('b', { style: { fontSize: 12.5 } }, '🖼 Rejtett ábrák (' + data.hiddenFigs.length + ')'), h('button', { style: { border: 'none', background: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: 16, lineHeight: 1 }, onClick: function () { setRestoreOpen(false); } }, '×')),
           data.hiddenFigs.length ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 7 } }, data.hiddenFigs.map(function (f) {
@@ -6794,7 +6832,7 @@
           }) : h('div', { className: 'rmap-cm-empty' }, props.canEdit ? 'Készíts egy bemutatót a ＋ Új gombbal. Egy bemutató jelenetekből áll: mentett nézet, keret vagy kártya (opcionális panel-megnyitással). A ▶ végigzoomol rajtuk; az „🔴 Élő" a jelenlévőket is viszi.' : 'Még nincs bemutató.'))) : null,
         (nodeRestoreOpen && mapFlags) ? (function () {
           var hn = g.N.filter(function (n) { return n.mapHidden; });
-          return h('div', { style: { position: 'absolute', left: 14, bottom: 96, zIndex: 15, width: 264, maxHeight: '58%', overflowY: 'auto', background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 12, boxShadow: '0 18px 50px -20px rgba(20,26,40,.55)', padding: 12 }, onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
+          return h('div', { style: { position: 'absolute', left: '50%', bottom: 74, transform: 'translateX(-50%)', zIndex: 15, width: 264, maxHeight: '58%', overflowY: 'auto', background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 12, boxShadow: '0 18px 50px -20px rgba(20,26,40,.55)', padding: 12 }, onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
             h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 9 } }, h('b', { style: { fontSize: 12.5 } }, '🫥 Rejtett kártyák (' + hn.length + ')'), h('button', { style: { border: 'none', background: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: 16, lineHeight: 1 }, onClick: function () { setNodeRestoreOpen(false); } }, '×')),
             hn.length ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 7 } }, hn.map(function (n) {
               return h('div', { key: n.id, style: { display: 'flex', gap: 8, alignItems: 'center' } },
@@ -6934,14 +6972,14 @@
             h('button', { className: 'btn pri', style: { fontSize: 14, padding: '0 12px', flex: 'none' }, disabled: dBusy || !dInput.trim() || (dkMode === 'action' && !(sn && sn.t === 'step')), onClick: dkPrimary }, dkMode === 'action' ? '⚡' : '➤')))
           : h('button', { className: 'rmap-dock-fab', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function () { setDkOpen(true); try { localStorage.setItem('pr-rmap-dock', '1'); } catch (e) { } } }, '🤖 Asszisztens')) : null),
       // floating selection toolbar — compact quick-actions above the selected card (pin / hide / generate / export)
-      (sn && props.canEdit) ? h('div', { className: 'rmap-seltool', style: selToolStyle(sn), onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
-        mapFlags ? h('button', { className: (layout[sn.id] && layout[sn.id].pinned) ? 'on' : '', title: (layout[sn.id] && layout[sn.id].pinned) ? 'Kitűzés levétele' : 'Kitűzés (fontos)', onClick: function () { nodeTogglePinned(sn); } }, '📌') : null,
-        mapFlags ? h('button', { title: 'Elrejtés a térképről', onClick: function () { nodeToggleHidden(sn); } }, '🙈') : null,
-        (genActions(sn).length || regenActions(sn).length) ? h('button', { title: 'Generálás innen', onClick: function (e) { e.stopPropagation(); setMenu({ node: sn, x: e.clientX, y: e.clientY }); } }, '⚡') : null,
-        canEnter(sn) ? h('button', { title: 'Panel megnyitása ablakként (nem-modal, több is lehet)', onClick: function () { openWindow(sn); } }, '⊞') : null,
-        (props.canEdit && edgesCap) ? h('button', { className: linkFrom === sn.id ? 'on' : '', title: 'Kapcsolat húzása egy másik kártyához (kézi él)', onClick: function () { setLinkFrom(linkFrom === sn.id ? null : sn.id); } }, '🔗') : null,
-        h('button', { title: 'Kártya a nézetbe (a képernyőre igazítja)', onClick: function () { cardIntoView(sn); } }, '⤢'),
-        h('button', { title: 'Kártya exportálása (PNG)', onClick: function () { exportNode(sn); } }, '⤓')) : null,
+      (sn && props.canEdit) ? h('div', { className: 'rmap-seltool', style: selToolStyle(sn), onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); }, onMouseMove: function (e) { dockMagnify(e.currentTarget, e.clientX, 78, 26); }, onMouseLeave: function (e) { dockReset(e.currentTarget); } },
+        mapFlags ? h('button', { className: 'rmap-dbtn' + ((layout[sn.id] && layout[sn.id].pinned) ? ' on' : ''), title: (layout[sn.id] && layout[sn.id].pinned) ? 'Kitűzés levétele' : 'Kitűzés (fontos)', onClick: function () { nodeTogglePinned(sn); } }, '📌', h('span', { className: 'rmap-dlab' }, (layout[sn.id] && layout[sn.id].pinned) ? 'Kitűzés levétele' : 'Kitűzés')) : null,
+        mapFlags ? h('button', { className: 'rmap-dbtn', title: 'Elrejtés a térképről', onClick: function () { nodeToggleHidden(sn); } }, '🙈', h('span', { className: 'rmap-dlab' }, 'Elrejtés')) : null,
+        (genActions(sn).length || regenActions(sn).length) ? h('button', { className: 'rmap-dbtn', title: 'Generálás innen', onClick: function (e) { e.stopPropagation(); setMenu({ node: sn, x: e.clientX, y: e.clientY }); } }, '⚡', h('span', { className: 'rmap-dlab' }, 'Generálás')) : null,
+        canEnter(sn) ? h('button', { className: 'rmap-dbtn', title: 'Panel megnyitása ablakként (nem-modal, több is lehet)', onClick: function () { openWindow(sn); } }, '⊞', h('span', { className: 'rmap-dlab' }, 'Ablak')) : null,
+        (props.canEdit && edgesCap) ? h('button', { className: 'rmap-dbtn' + (linkFrom === sn.id ? ' on' : ''), title: 'Kapcsolat húzása egy másik kártyához (kézi él)', onClick: function () { setLinkFrom(linkFrom === sn.id ? null : sn.id); } }, '🔗', h('span', { className: 'rmap-dlab' }, 'Kapcsolat')) : null,
+        h('button', { className: 'rmap-dbtn', title: 'Kártya a nézetbe (a képernyőre igazítja)', onClick: function () { cardIntoView(sn); } }, '⤢', h('span', { className: 'rmap-dlab' }, 'Nézetbe')),
+        h('button', { className: 'rmap-dbtn', title: 'Kártya exportálása (PNG)', onClick: function () { exportNode(sn); } }, '⤓', h('span', { className: 'rmap-dlab' }, 'Export'))) : null,
       edgeLabelEls,
       edgeInspEl(),
       sn ? h('div', { className: 'rmap-insp rmap-insp-float', style: inspStyle(sn), onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
