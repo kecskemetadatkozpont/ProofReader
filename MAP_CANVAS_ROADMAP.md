@@ -158,6 +158,26 @@
   az él-inspector **1–5** gyors-beállítója egyszerre állítja a **tempót + vastagságot** (csak ha migration-82 fut, mert
   a sebesség onnan jön). **Ezzel az interaktív-él vonal (P0→P2) teljes.**
 
+## 🚧 Keret-generálás → chat-akciók (2026-07-19)
+> Feltárás: 2-ágú design-workflow (chat-akció-csipek · keret-hatókörű generálás) + kód-megalapozás → szintézis →
+> interaktív mockup-artifact (`chatact-mockup`). **A probléma:** a keret „✨ Generálj ide" mezője eddig némán a
+> research-CHAT edge-be tölcsérezte a szöveget → csak chat-válasz jött, **kártya nem**. A user kutatási-rés ötleteket
+> kért egy kerethez, és csak szöveget kapott.
+- [x] ✅ **P0 — döntés-csipek + ötlet-kártyák a keretbe** — a `frameGenerate` átírva: **nincs több néma chat-tölcsér**.
+  Új folyamat: (1) a kérés visszhangzik a dockban; (2) **`classifyFrameIntent`** magyar kulcsszó-routing
+  (rés/hiány/gap → gap · ötlet/kapcsolódó → suggest · protokoll/lépés → protocol · irodalom/study → study · egyéb → chat);
+  (3) az AI-buborék alá **4 kattintható döntés-csip** kerül (**✦ Ötlet-kártyák ide** [elsődleges], **① Csak egyet**,
+  **🧪 Protokoll a keretbe**, **💬 Csak beszéljük meg**), az intent az elsődlegest promotálja. Az **✦** a **meglévő
+  strukturált** `research-ai` **gap** generátort hívja (novelty-scoring + dedup), az új ötleteket a **`placeInFrame`** a
+  keret világ-koordinátás határain belülre rácsozza (auto-**nő** a keret, ha nem férnek), optimista append a 24-es
+  reload-cap felett is; **pulzáló kiemelés** az új kártyákon (`.rmap-justplaced`), **toast + ↩ Visszavonás**-csip
+  (`undoPlaced` → törli az ötleteket+layoutot). A dock minden üzenete hordozhat csip-sort (`dMsgs[i].actions`,
+  `.done` → egyetlen „✓ Kész"); **nincs új hook a guard-ok után** (a csip-adat az üzenetbe ágyazva). A protokoll-út
+  destruktív → `window.confirm`. Az utó-csipek: **➕ Még · 🧪 Protokoll · ↩ Visszavonás**.
+- [ ] ⏳ **P1 — grounded suggest + strukturált id-k + inline confirm** — a gap helyett **suggest** a keret témájára
+  alapozva; az edge adjon vissza **id-ket** (ne created_at-diff kelljen); a protokoll/study kereten-belüli elhelyezése +
+  **inline** megerősítés a natív `confirm` helyett; ha a chat gépi `ideas` blokkot ad → **exact** címekkel kártyázás.
+
 ## Hátralévő (jövő) — Phase 6+
 - [ ] 🔴 **Teljes karakter-szintű CRDT/Yjs** — egyidejű azonos-szekció gépelés valós idejű merge-dzsel.
   A jelenlegi soft-lock + LWW ennek a könnyűsúlyú, függőség-mentes alternatívája; a teljes CRDT nagy

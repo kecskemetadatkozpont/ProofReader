@@ -4432,6 +4432,7 @@
     var gdrag = useRef(null);   // in-flight group-drag lifecycle guard
     var mqRef = useRef(null);   // in-flight marquee start point (stage coords)
     var frS = useState([]), frames = frS[0], setFrames = frS[1];   // Map frames (named regions / phase lanes) — migration-71
+    var jpS = useState(null), justPlaced = jpS[0], setJustPlaced = jpS[1];   // node-ids just materialized into a frame (pulse cue); cleared after ~1.6s
     var frcS = useState(false), framesCap = frcS[0], setFramesCap = frcS[1];   // migration-71 capability
     var flS = useState(null), frLive = flS[0], setFrLive = flS[1];   // in-flight frame move/resize live geometry {id,x,y,w,h}
     var frdrag = useRef(null);   // frame drag/resize lifecycle guard
@@ -5277,8 +5278,133 @@
     function frameDelete(id) { setFrames(function (F) { return F.filter(function (f) { return f.id !== id; }); }); sb.from('research_map_frames').delete().eq('id', id).then(function (r) { if (r && r.error && alive.current) window.PRUI.toast('Keret törlése sikertelen: ' + r.error.message, { kind: 'error' }); }); }
     function frameRename(f) { var v = window.prompt('Keret neve:', f.title); if (v != null && String(v).trim()) framePatch(f.id, { title: String(v).trim() }); }
     function frameRecolor(f) { var i = FRAME_COLORS.indexOf(f.color); framePatch(f.id, { color: FRAME_COLORS[(i + 1) % FRAME_COLORS.length] }); }
-    // inline "generate here" (Luma): the frame's footer input funnels a frame-scoped instruction to the assistant dock
-    function frameGenerate(f, text) { var t = String(text || '').trim(); if (!t || dBusy) return; setDkOpen(true); setFrGen(function (M) { var m = Object.assign({}, M); delete m[f.id]; return m; }); dkSend('A(z) „' + f.title + '" keret témájában: ' + t); }
+    // inline "generate here" (Luma): the frame ✨-input no longer funnels silently into the chat edge (→ text only).
+    // It echoes the request, classifies the intent, and offers CLICKABLE ACTION CHIPS in the dock; a chip runs a
+    // STRUCTURED generator (research-ai gap/suggest) whose ideas land as real cards INSIDE the frame (placeInFrame).
+    function classifyFrameIntent(t) {
+      var s = String(t || '').toLowerCase();
+      if (/protokoll|lépés|kísérlet|módszer|protocol|eljárás/.test(s)) return 'protocol';
+      if (/irodalom|cikk|study|forrás|szakirodalom|review|keresés/.test(s)) return 'study';
+      if (/rés|hiány|hézag|gap|nyitott\s*kérdés/.test(s)) return 'gap';
+      if (/ötlet|javasol|kapcsolódó|hasonló|irány|felvet|suggest/.test(s)) return 'suggest';
+      return null;   // ambiguous → chat fallback, still offer chips
+    }
+    function frameGenerate(f, text) {
+      var t = String(text || '').trim(); if (!t || dBusy) return;
+      setDkOpen(true); setFrGen(function (M) { var m = Object.assign({}, M); delete m[f.id]; return m; }); setFrGenOpen(function (M) { var m = Object.assign({}, M); delete m[f.id]; return m; });
+      dkSay('user', 'A(z) „' + f.title + '" keretbe: ' + t);
+      var intent = classifyFrameIntent(t);
+      // the four decision chips; the classified intent is promoted to primary (pri) and shown first
+      var chips = [
+        { key: 'gap', label: '✦ Ötlet-kártyák ide', frameId: f.id, frameText: t },
+        { key: 'one', label: '① Csak egyet', frameId: f.id, frameText: t },
+        { key: 'protocol', label: '🧪 Protokoll a keretbe', frameId: f.id, frameText: t },
+        { key: 'chat', label: '💬 Csak beszéljük meg', frameId: f.id, frameText: t }
+      ];
+      if (intent === 'protocol') { chips.unshift(chips.splice(2, 1)[0]); }   // protocol → front
+      else if (intent === 'study') { chips.splice(2, 1, { key: 'study', label: '📚 Irodalom a keretbe', frameId: f.id, frameText: t }); }   // swap protocol→study (keeps the 💬 fallback)
+      chips[0].pri = true;
+      dkSay('ai', intent ? ('Mit hozzak létre a(z) „' + f.title + '" keretbe?') : ('Nem voltam biztos, mit hozzak létre — válassz:'), { frameId: f.id, actions: chips });
+    }
+    // place a list of freshly-created idea rows as cards INSIDE the frame bounds (world coords); grid-fills, clamps to
+    // bounds, persists each layout, optimistically appends to data.ideas (past the 24-oldest reload cap). Returns [{nid,id}].
+    function placeInFrame(f, rows, selOne) {
+      var CW = 204, CH = 74, pad = 16, hdr = 44, gap = 16;
+      var cols = Math.max(1, Math.floor((f.w - 2 * pad + gap) / (CW + gap)));
+      var needH = hdr + pad + Math.ceil(rows.length / cols) * (CH + gap);
+      var H = Math.max(f.h, needH);   // auto-grow the frame so the cards fit inside instead of overlapping at the bottom edge
+      if (H > f.h) framePatch(f.id, { h: H });
+      var placed = [], append = [];
+      rows.forEach(function (row, i) {
+        var nid = 'i' + row.id;
+        var cx = Math.round(f.x + pad + (i % cols) * (CW + gap));
+        var cy = Math.round(f.y + hdr + Math.floor(i / cols) * (CH + gap));
+        cx = Math.max(f.x, Math.min(cx, f.x + f.w - CW));
+        cy = Math.max(f.y + hdr, Math.min(cy, f.y + H - CH));
+        setLayout(function (L) { var m = Object.assign({}, L); m[nid] = Object.assign({ x: cx, y: cy }, m[nid]); return m; });
+        sb.from('research_map_layout').upsert({ project_id: props.projectId, node_id: nid, x: cx, y: cy, updated_at: new Date().toISOString() }, { onConflict: 'project_id,node_id' });
+        placed.push({ nid: nid, id: row.id });
+        append.push({ id: row.id, question: row.question || 'Új ötlet', hypothesis: null, rationale: null, novelty: row.novelty != null ? row.novelty : null, status: row.status || 'candidate', source: row.source || 'gap' });
+      });
+      setData(function (D) { if (!D) return D; var have = {}; (D.ideas || []).forEach(function (x) { have[x.id] = 1; }); return Object.assign({}, D, { ideas: (D.ideas || []).concat(append.filter(function (x) { return !have[x.id]; })) }); });
+      if (selOne && placed.length === 1) setSel(placed[0].nid);
+      setJustPlaced(placed.map(function (x) { return x.nid; }));
+      setTimeout(function () { if (alive.current) setJustPlaced(null); }, 1600);
+      return placed;
+    }
+    // undo a placeInFrame batch: remove the ideas + layout, locally + remotely. Optimistic, but confirm ONLY after
+    // the server delete succeeds; if it fails (network/RLS) restore the cards + report, so a failed undo never
+    // silently claims success and leaves orphans that reappear on the next reload.
+    function undoPlaced(placed) {
+      var ids = (placed || []).map(function (x) { return x.id; }), nids = (placed || []).map(function (x) { return x.nid; });
+      if (!ids.length) return;
+      var idset = {}; ids.forEach(function (i) { idset[i] = 1; });
+      var restoreRows = ((data && data.ideas) || []).filter(function (x) { return idset[x.id]; });   // snapshot for rollback
+      var restoreLayout = {}; nids.forEach(function (n) { if (layout[n]) restoreLayout[n] = layout[n]; });
+      setData(function (D) { if (!D) return D; return Object.assign({}, D, { ideas: (D.ideas || []).filter(function (x) { return !idset[x.id]; }) }); });
+      setLayout(function (L) { var m = Object.assign({}, L); nids.forEach(function (n) { delete m[n]; }); return m; });
+      function undoFail(msg) {
+        if (!alive.current) return;
+        setData(function (D) { if (!D) return D; var have = {}; (D.ideas || []).forEach(function (x) { have[x.id] = 1; }); return Object.assign({}, D, { ideas: (D.ideas || []).concat(restoreRows.filter(function (x) { return !have[x.id]; })) }); });
+        setLayout(function (L) { var m = Object.assign({}, L); Object.keys(restoreLayout).forEach(function (n) { m[n] = restoreLayout[n]; }); return m; });
+        window.PRUI.toast('A visszavonás nem sikerült: ' + msg, { kind: 'error' });
+      }
+      sb.from('research_ideas').delete().in('id', ids).then(function (r) {
+        if (r && r.error) { undoFail(r.error.message); return; }
+        sb.from('research_map_layout').delete().eq('project_id', props.projectId).in('node_id', nids);   // layout rows: best-effort cleanup
+        if (alive.current) dkSay('ai', '↩ Visszavontam a(z) ' + ids.length + ' ötletet.');
+      }, function () { undoFail('hálózat'); });
+    }
+    // dispatcher for an action chip attached to a dock message (i = message index, a = the chip's action object)
+    function dkRunAction(i, a) {
+      if (a.key === 'undo') { undoPlaced(a.placed || []); dkMarkDone(i); return; }
+      if (dBusy) return;
+      var f = a.frameId ? frames.filter(function (x) { return x.id === a.frameId; })[0] : null;
+      if (a.key === 'chat') { dkMarkDone(i); dkSend(a.frameText || '', true); return; }   // the old text-only path, on demand (frameGenerate already echoed the request)
+      if (a.key === 'protocol') {
+        if (!window.confirm('Ez felülírja a projekt jelenlegi protokollját. Létrehozzam a keret témájából?')) return;
+        dkMarkDone(i); dkCmd('protocol'); return;
+      }
+      if (a.key === 'study') { dkMarkDone(i); dkCmd('study'); return; }
+      // gap / one / more / redo → generate research-gap ideas, then place them inside the frame
+      if (!f) { dkSay('ai', '⚠️ A keret időközben megszűnt.'); return; }
+      var CORE = window.PRAutopilotCore; if (!CORE || !CORE.callEdge) { dkSay('ai', 'A generátor nem elérhető (autopilot-core).'); return; }
+      // shared tail: slice by chip, place the rows in the frame, post the closing turn with follow-up chips
+      function finishPlace(rows) {
+        if (!alive.current) return; setDBusy(false);
+        if (a.key === 'one') rows = rows.slice(0, 1); else if (a.key === 'more') rows = rows.slice(0, 3);
+        if (!rows.length) { dkSay('ai', '⚠️ Nem jött létre új ötlet (lehet, mind ismétlődés volt).'); return; }
+        var placed = placeInFrame(f, rows, a.key === 'one');
+        dkMarkDone(i);
+        window.PRUI.toast('✓ ' + placed.length + ' ötlet a(z) „' + f.title + '" keretbe.', { kind: 'success' });
+        dkSay('ai', '✓ ' + placed.length + ' ötlet-kártya a(z) „' + f.title + '" keretbe került.', { frameId: f.id, actions: [
+          { key: 'more', label: '➕ Még', frameId: f.id, frameText: a.frameText },
+          { key: 'protocol', label: '🧪 Protokoll', frameId: f.id, frameText: a.frameText },
+          { key: 'undo', label: '↩ Visszavonás', placed: placed }
+        ] });
+      }
+      setDBusy(true);
+      var ts = new Date(Date.now() - 4000).toISOString();
+      // snapshot existing idea-ids so the fallback (old edge, no ids) can exclude EVERYTHING that predates this action —
+      // not just a fragile time window — leaving only genuinely-new rows.
+      sb.from('research_ideas').select('id').eq('project_id', props.projectId).then(function (pre) {
+        var beforeIds = {}; ((pre && pre.data) || []).forEach(function (x) { beforeIds[x.id] = 1; });
+        CORE.callEdge('research-ai', { action: 'gap', project_id: props.projectId }).then(function (d) {
+          if (!alive.current) return;
+          if (d && d.error) { setDBusy(false); dkSay('ai', '⚠️ ' + d.error); return; }
+          // PREFERRED: the (updated) edge returns exactly the rows it inserted → race-free, no guessing.
+          if (d && d.ideas && d.ideas.length) { finishPlace(d.ideas.slice()); return; }
+          var want = Math.max(1, (d && d.count) || 5);
+          // FALLBACK (old edge): newest rows created since `ts` that were NOT present before this action.
+          sb.from('research_ideas').select('id,question,source,novelty,status,created_at').eq('project_id', props.projectId).gt('created_at', ts).order('created_at', { ascending: false }).limit(want + 10).then(function (r) {
+            if (!alive.current) return;
+            if (r && r.error) { setDBusy(false); dkSay('ai', '⚠️ ' + r.error.message); return; }
+            var rows = ((r && r.data) || []).filter(function (x) { return !beforeIds[x.id]; }).slice(0, want);
+            finishPlace(rows);
+          }, function () { if (alive.current) { setDBusy(false); dkSay('ai', '⚠️ hálózat'); } });
+        }, function () { if (alive.current) { setDBusy(false); dkSay('ai', '⚠️ hálózat'); } });
+      }, function () { if (alive.current) { setDBusy(false); dkSay('ai', '⚠️ hálózat'); } });
+    }
     // ---- Map comments / annotations — migration-72. Any project READER can comment (supervisor feedback). ----
     function commentCanEditOne(c) { return c && (c.author === props.viewerId || props.canEdit); }
     // @mention candidates = accepted members + currently-online users (deduped, minus self). Notifications table
@@ -5750,7 +5876,8 @@
     }
 
     // ---- Canvas assistant dock: quick pipeline commands + a free-text chat (research-chat) ----
-    function dkSay(role, text) { if (alive.current) setDMsgs(function (m) { return m.concat([{ role: role, text: text }]); }); }
+    function dkSay(role, text, extra) { if (alive.current) setDMsgs(function (m) { return m.concat([Object.assign({ role: role, text: text }, extra || {})]); }); }
+    function dkMarkDone(i) { setDMsgs(function (M) { var m = M.slice(); if (m[i]) m[i] = Object.assign({}, m[i], { done: true }); return m; }); }
     // Step 2 — act on the attached card: propose protocol step(s) to run AFTER the selected step from a natural-language
     // instruction (reuses research-protocol append_steps, which only PROPOSES) → preview → dkInsertSteps executes on confirm.
     function dkProposeSteps() {
@@ -5845,7 +5972,7 @@
     }
     // send the dock input in the current mode: 'action' (needs a selected step) → propose protocol step(s); else chat.
     function dkPrimary() { if (dkMode === 'action' && sn && sn.t === 'step') { dkProposeSteps(); } else { dkSend(); } }
-    function dkSend(overrideTxt) {   // free-text turn → research-chat (non-streaming); the reply may save files (→ file nodes)
+    function dkSend(overrideTxt, skipEcho) {   // free-text turn → research-chat (non-streaming); the reply may save files (→ file nodes). skipEcho: caller already echoed the user turn (frame-generation chat fallback)
       var isOv = (overrideTxt != null);
       var txt = String(isOv ? overrideTxt : (dInput || '')).trim(); if (!txt || dBusy) return;
       // the currently SELECTED map card is "attached" as context — the assistant sees exactly which node you mean.
@@ -5858,7 +5985,7 @@
         var idp = (an.ref && an.ref.id) ? (' [id: ' + an.ref.id + ']') : '';
         full = '[BECSATOLT KÁRTYA a térképről — erre a kártyára fókuszálj: ' + lab + ' — "' + String(an.title || '').slice(0, 160) + '"' + idp + (mbits.length ? ' — ' + mbits.slice(0, 6).join(', ') : '') + ']\n\n' + txt;
       }
-      dkSay('user', (an ? '📎 ' + String(an.title || 'kártya').slice(0, 44) + '\n' : '') + txt); if (!isOv) setDInput(''); setDBusy(true);
+      if (!skipEcho) dkSay('user', (an ? '📎 ' + String(an.title || 'kártya').slice(0, 44) + '\n' : '') + txt); if (!isOv) setDInput(''); setDBusy(true);
       var CFG = window.PR_CONFIG || {}, CORE = window.PRAutopilotCore, pid = props.projectId;
       function fail(msg) { if (alive.current) { setDBusy(false); dkSay('ai', msg || 'Hiba történt.'); } }   // single failure path → dBusy never strands
       dkEnsureChat().then(function (cid) {
@@ -6122,7 +6249,7 @@
               h('marker', { id: 'rmap-ar', viewBox: '0 0 8 8', refX: 6.5, refY: 4, markerWidth: 6.5, markerHeight: 6.5, orient: 'auto-start-reverse', markerUnits: 'userSpaceOnUse' }, h('path', { d: 'M0.5,0.5 L7.5,4 L0.5,7.5 Z', fill: 'context-stroke' })),
               h('marker', { id: 'rmap-bl', viewBox: '0 0 8 8', refX: 5.5, refY: 4, markerWidth: 8, markerHeight: 8, orient: 'auto-start-reverse', markerUnits: 'userSpaceOnUse' }, h('path', { d: 'M5,1 L5,7', stroke: 'context-stroke', strokeWidth: 1.6 }))),
             edgeEls, linkRubber),
-          g.N.map(function (n) { if (!nodeVisible(n)) return null; var _sized = !!((nrzLive && nrzLive.id === n.id) || (layout[n.id] && layout[n.id].card_h)); var _kk = view.k, _cw = Math.min((n._w || NW), (cardVP.w - 16) / _kk); var _st = { left: n.x + 'px', top: n.y + 'px', width: _cw + 'px' }; if (_sized) _st.height = Math.min((n._h || NH), (cardVP.h - 16) / _kk) + 'px'; return h('div', { key: n.id, 'data-nid': n.id, className: 'rmap-node t-' + n.t + (_sized ? ' rmap-sized' : '') + (sel === n.id ? ' sel' : '') + (msel[n.id] ? ' rmap-mselected' : '') + (n.mapPinned ? ' rmap-pinned' : '') + (activeKey && n.ph === RMAP_PHASE_IDX[activeKey] ? ' inphase' : '') + (props.canEdit ? ' editable' : '') + (dlive && dlive.id === n.id ? ' dragging' : '') + ((nrzLive && nrzLive.id === n.id) ? ' rmap-resizing' : '') + (linkDrag && linkDrag.over === n.id ? ' rmap-linktarget' : '') + (linkDrag && linkDrag.from === n.id ? ' rmap-linksource' : ''), style: _st, onMouseDown: function (e) { e.stopPropagation(); startNodeDrag(e, n); }, onDoubleClick: function (e) { e.stopPropagation(); if (canEnter(n)) enterNode(n); }, onContextMenu: function (e) { e.preventDefault(); e.stopPropagation(); if (props.canEdit && (genActions(n).length || regenActions(n).length || (cardSizeCap && layout[n.id] && layout[n.id].card_h))) setMenu({ node: n, x: e.clientX, y: e.clientY }); } }, n.mapPinned ? h('span', { className: 'rmap-pin-badge', title: 'Kitűzött' }, '📌') : null, nodeCmCount(n.id) ? h('span', { className: 'rmap-cm-badge', title: nodeCmCount(n.id) + ' nyitott komment', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); setOpenThread(n.id); } }, '💬' + nodeCmCount(n.id)) : null, (n.t === 'step' && n.ref && (n.ref.assignee_id || n.ref.signed_off_by)) ? h('span', { className: 'rmap-step-badges' }, n.ref.assignee_id ? h('span', { className: 'rmap-assignee', title: 'Felelős: ' + nameOf(n.ref.assignee_id), style: { background: userColor(n.ref.assignee_id) } }, String(nameOf(n.ref.assignee_id) || '?').trim().charAt(0).toUpperCase()) : null, n.ref.signed_off_by ? h('span', { className: 'rmap-signoff', title: 'Jóváhagyta: ' + nameOf(n.ref.signed_off_by) }, '✅') : null) : null, h('div', { className: 'rmap-nb' }, body(n), richTier(n)),
+          g.N.map(function (n) { if (!nodeVisible(n)) return null; var _sized = !!((nrzLive && nrzLive.id === n.id) || (layout[n.id] && layout[n.id].card_h)); var _kk = view.k, _cw = Math.min((n._w || NW), (cardVP.w - 16) / _kk); var _st = { left: n.x + 'px', top: n.y + 'px', width: _cw + 'px' }; if (_sized) _st.height = Math.min((n._h || NH), (cardVP.h - 16) / _kk) + 'px'; return h('div', { key: n.id, 'data-nid': n.id, className: 'rmap-node t-' + n.t + (_sized ? ' rmap-sized' : '') + (sel === n.id ? ' sel' : '') + (msel[n.id] ? ' rmap-mselected' : '') + (n.mapPinned ? ' rmap-pinned' : '') + (activeKey && n.ph === RMAP_PHASE_IDX[activeKey] ? ' inphase' : '') + (props.canEdit ? ' editable' : '') + (dlive && dlive.id === n.id ? ' dragging' : '') + ((nrzLive && nrzLive.id === n.id) ? ' rmap-resizing' : '') + (linkDrag && linkDrag.over === n.id ? ' rmap-linktarget' : '') + (linkDrag && linkDrag.from === n.id ? ' rmap-linksource' : '') + (justPlaced && justPlaced.indexOf(n.id) >= 0 ? ' rmap-justplaced' : ''), style: _st, onMouseDown: function (e) { e.stopPropagation(); startNodeDrag(e, n); }, onDoubleClick: function (e) { e.stopPropagation(); if (canEnter(n)) enterNode(n); }, onContextMenu: function (e) { e.preventDefault(); e.stopPropagation(); if (props.canEdit && (genActions(n).length || regenActions(n).length || (cardSizeCap && layout[n.id] && layout[n.id].card_h))) setMenu({ node: n, x: e.clientX, y: e.clientY }); } }, n.mapPinned ? h('span', { className: 'rmap-pin-badge', title: 'Kitűzött' }, '📌') : null, nodeCmCount(n.id) ? h('span', { className: 'rmap-cm-badge', title: nodeCmCount(n.id) + ' nyitott komment', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); setOpenThread(n.id); } }, '💬' + nodeCmCount(n.id)) : null, (n.t === 'step' && n.ref && (n.ref.assignee_id || n.ref.signed_off_by)) ? h('span', { className: 'rmap-step-badges' }, n.ref.assignee_id ? h('span', { className: 'rmap-assignee', title: 'Felelős: ' + nameOf(n.ref.assignee_id), style: { background: userColor(n.ref.assignee_id) } }, String(nameOf(n.ref.assignee_id) || '?').trim().charAt(0).toUpperCase()) : null, n.ref.signed_off_by ? h('span', { className: 'rmap-signoff', title: 'Jóváhagyta: ' + nameOf(n.ref.signed_off_by) }, '✅') : null) : null, h('div', { className: 'rmap-nb' }, body(n), richTier(n)),
             (props.canEdit && edgesCap) ? ['n', 'e', 's', 'w'].map(function (dir) { return h('span', { key: 'port' + dir, className: 'rmap-port rmap-port-' + dir, title: 'Húzz kapcsolatot egy másik kártyához', onMouseDown: function (e) { e.stopPropagation(); startLinkDrag(e, n.id); } }); }) : null,
             (props.canEdit && cardSizeCap) ? h('span', { className: 'rmap-node-rz', title: 'Átméretezés (húzd)', onMouseDown: function (e) { e.stopPropagation(); startNodeResize(e, n); } }) : null); })),
         // page bar (saved views) — top-left tabs; the active page can be curated (only pinned) / re-captured / renamed / deleted
@@ -6364,7 +6491,16 @@
             h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 5 } }, h('span', { style: { display: 'inline-block', width: 18, borderTop: '1.5px dashed var(--accent-tint)' } }), 'idézet')),
         props.canEdit ? (dkOpen ? h('div', { className: 'rmap-dock open', onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
           h('div', { className: 'rmap-dock-h' }, h('span', null, '🤖 Asszisztens'), h('button', { className: 'rmap-dock-x', title: 'Összecsukás', onClick: function () { setDkOpen(false); try { localStorage.setItem('pr-rmap-dock', '0'); } catch (e) { } } }, '▾')),
-          h('div', { className: 'rmap-dock-msgs', ref: dScroll }, dMsgs.map(function (mm, i) { return h('div', { key: i, className: 'rmap-dock-msg ' + (mm.role === 'user' ? 'u' : 'a') }, mm.text); }), dBusy ? h('div', { className: 'rmap-dock-msg a busy' }, '⏳ dolgozom…') : null),
+          h('div', { className: 'rmap-dock-msgs', ref: dScroll }, dMsgs.map(function (mm, i) {
+            return [
+              h('div', { key: 'm' + i, className: 'rmap-dock-msg ' + (mm.role === 'user' ? 'u' : 'a') }, mm.text),
+              (mm.actions && mm.actions.length) ? h('div', { key: 'a' + i, className: 'rmap-dock-cmds rmap-dock-acts' + (mm.done ? ' done' : '') },
+                mm.done
+                  ? [h('button', { key: 'done', className: 'rmap-dock-chip', disabled: true }, '✓ Kész')]
+                  : mm.actions.map(function (a) { return h('button', { key: a.key, className: 'rmap-dock-chip' + (a.pri ? ' pri' : ''), disabled: (dBusy && a.key !== 'undo'), onClick: function () { dkRunAction(i, a); } }, a.label); })
+              ) : null
+            ];
+          }), dBusy ? h('div', { className: 'rmap-dock-msg a busy' }, '⏳ dolgozom…') : null),
           h('div', { className: 'rmap-dock-cmds' }, [['ideas', '✦ Ötletek'], ['study', '📚 Irodalom'], ['protocol', '🧪 Protokoll'], ['writing', '✍️ Draft']].map(function (c) { return h('button', { key: c[0], className: 'rmap-dock-chip', disabled: dBusy, onClick: function () { dkCmd(c[0]); } }, c[1]); })),
           // the selected card is "attached" to the next prompt — shown here like an attachment chip (× to detach)
           sn ? h('div', { style: { display: 'flex', alignItems: 'center', gap: 6, margin: '2px 12px 6px', padding: '4px 8px', borderRadius: 8, background: 'var(--accent-tint)', border: '1px solid var(--accent)' } },

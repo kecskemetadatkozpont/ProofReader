@@ -122,8 +122,15 @@ sorrendben. A service-key nem tud DDL-t futtatni, ezért ezek manuálisak.
 
 ## Edge-function deploy-ok (explicit jóváhagyás + megnevezés kell)
 
-**NINCS** — ebben a munkamenetben egyetlen edge-function sem változott, deploy nem szükséges.
-Minden funkció kliens (research.jsx / Research.html) + Supabase-tábla-migráció.
+**AJÁNLOTT (nem kötelező): `research-ai`** — a keret-generálás chat-akciókhoz (`✦ Ötlet-kártyák ide`) a
+`supabase/functions/research-ai/index.ts` `gap` és `suggest` ága most a beszúrt sorokat is visszaadja
+(`.insert(rows).select('id,question,…')` → `{ok, count, ideas}`). Ettől a kliens **pontosan** a most létrehozott
+ötleteket teszi a keretbe (verseny-mentes), nem „a projekt N legújabb ötletét" idő-ablak alapján kell találgatnia.
+- **Deploy nélkül is működik** (graceful): ha a régi edge fut (nincs `ideas` a válaszban), a kliens visszaesik egy
+  **before/after id-diff** találgatásra (a művelet ELŐTTI összes ötlet-id kizárásával) — ez kizárja az összes régi
+  ötletet, csak a párhuzamos-író ritka versenyhelyzete marad, amíg a deploy meg nem történik.
+- **Ha jóváhagyod:** `supabase functions deploy research-ai` (ref `jokqthwszkweyqmmdesn`). Visszafelé kompatibilis:
+  a többi hívó (`dkCmd`, `runGen`) csak a `count`-ot olvassa, azt nem érinti az új `ideas` mező.
 
 ## Egyéb (megosztott DB-írás, konfig)
 

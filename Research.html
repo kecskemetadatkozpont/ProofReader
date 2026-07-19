@@ -1249,6 +1249,14 @@
     .rmap-dock-chip { border: 1px solid var(--line); background: var(--surface); color: var(--ink); font-family: inherit; font-size: 11.5px; font-weight: 600; padding: 5px 9px; border-radius: 999px; cursor: pointer; }
     .rmap-dock-chip:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
     .rmap-dock-chip:disabled { opacity: .5; cursor: default; }
+    /* per-message action chips beneath an assistant bubble (frame-generation decisions) */
+    .rmap-dock-acts { padding: 6px 12px 2px; }
+    .rmap-dock-chip.pri { border-color: var(--accent); background: var(--accent); color: #fff; }
+    .rmap-dock-chip.pri:hover:not(:disabled) { color: #fff; filter: brightness(1.06); }
+    .rmap-dock-acts.done .rmap-dock-chip { opacity: .7; color: var(--ok, #17a34a); border-color: color-mix(in srgb, var(--ok, #17a34a) 40%, var(--line)); }
+    /* pulse cue for idea cards just materialized into a frame */
+    .rmap-justplaced { animation: rmap-jp-pulse 1.5s ease-out 1; z-index: 6; }
+    @keyframes rmap-jp-pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--otlet, #d1810b) 60%, transparent); } 70% { box-shadow: 0 0 0 10px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
     .rmap-dock-mode { display: flex; gap: 6px; padding: 9px 12px 0; }
     .rmap-dock-modebtn { border: 1px solid var(--line); background: var(--surface); color: var(--muted); font-family: inherit; font-size: 11.5px; font-weight: 700; padding: 4px 11px; border-radius: 999px; cursor: pointer; }
     .rmap-dock-modebtn.on { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
@@ -1352,7 +1360,7 @@
   <script type="text/babel" src="canvas.jsx?v=1783137934"></script>
   <script type="text/babel" src="notes.jsx?v=1783137934"></script>
   <script src="autopilot-core.js?v=1784160000"></script>
-  <script type="text/babel" src="research.jsx?v=1785670000"></script>
+  <script type="text/babel" src="research.jsx?v=1785703000"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>

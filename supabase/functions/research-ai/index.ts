@@ -73,10 +73,13 @@ Deno.serve(async (req) => {
         status: 'candidate',
       })).filter((r: any) => r.question);
       if (rows.length) {
-        const { error } = await sb.from('research_ideas').insert(rows);
+        // return the inserted rows (id + fields) so the client can place EXACTLY these (race-free) instead of
+        // guessing "newest N in the project" by created_at — which can grab a concurrent writer's ideas.
+        const { data: ins, error } = await sb.from('research_ideas').insert(rows).select('id,question,source,novelty,status,created_at');
         if (error) return json({ error: 'insert failed: ' + error.message }, 403);
+        return json({ ok: true, count: (ins || rows).length, ideas: ins || [] });
       }
-      return json({ ok: true, count: rows.length });
+      return json({ ok: true, count: 0, ideas: [] });
     }
     const { data: sources } = await sb.from('research_sources')
       .select('title,year,venue,abstract').eq('project_id', project_id).limit(40);
@@ -90,10 +93,12 @@ Deno.serve(async (req) => {
         novelty: Number.isFinite(i.novelty) ? Math.max(0, Math.min(100, Math.round(i.novelty))) : null,
         status: 'candidate',
       }));
-      const { error } = await sb.from('research_ideas').insert(rows);   // caller's RLS — needs write access
+      // return the inserted rows so a frame-scoped caller can place EXACTLY these ideas (race-free), not "newest N".
+      const { data: ins, error } = await sb.from('research_ideas').insert(rows).select('id,question,source,novelty,status,created_at');   // caller's RLS — needs write access
       if (error) return json({ error: 'insert failed: ' + error.message }, 403);
+      return json({ ok: true, count: (ins || rows).length, ideas: ins || [] });
     }
-    return json({ ok: true, count: ideas.length });
+    return json({ ok: true, count: 0, ideas: [] });
   } catch (e) {
     return json({ error: String(e) }, 500);
   }
