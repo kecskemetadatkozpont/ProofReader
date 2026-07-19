@@ -281,6 +281,12 @@
           title: 'Kutatási rés-elemzés — mit nem fed le a szakirodalom',
           onClick: function () { if (props.onGap) props.onGap(); }
         }, h('span', { className: 'dot', 'aria-hidden': 'true' }, '🕳'), tr(props.lang, 'Rések')));
+        if (props.hasLib) {   // Literature analyzers (embedded) as sub-tabs after Rések
+          kids.push(h('div', { className: 'step-sep', key: 'sep-fb' }));
+          kids.push(h('button', { key: 'figboard', className: 'step step-littool' + (props.tab === 'figboard' ? ' cur' : ''), title: 'Ábra-tábla', onClick: function () { if (props.onFigboard) props.onFigboard(); } }, h('span', { className: 'dot', 'aria-hidden': 'true' }, '🖼'), tr(props.lang, 'Ábrák')));
+          kids.push(h('div', { className: 'step-sep', key: 'sep-co' }));
+          kids.push(h('button', { key: 'citopt', className: 'step step-littool' + (props.tab === 'citopt' ? ' cur' : ''), title: 'Citáció-optimalizáló', onClick: function () { if (props.onCitopt) props.onCitopt(); } }, h('span', { className: 'dot', 'aria-hidden': 'true' }, '🔗'), tr(props.lang, 'Idézetek')));
+        }
       }
     });
     return h('div', { className: 'stepper' }, kids);
@@ -1923,11 +1929,10 @@
           h('span', { style: { fontWeight: 600, color: 'var(--faint)' } }, lib.length + ' source' + (lib.length === 1 ? '' : 's')),
           lib.length ? (function () {
             var fr = PRFigureRunner.status(props.projectId), running = PRFigureRunner.isRunning(props.projectId), doneRun = !!(fr && fr.stage === 'done');
-            return h('a', { className: 'btn' + (running ? ' pulse-run' : (doneRun ? ' fig-done' : '')), style: { padding: '4px 10px', fontSize: 12, textDecoration: 'none' }, href: 'FigureBoard.html?project=' + encodeURIComponent(props.projectId), title: running ? ('Ábra-kinyerés fut a háttérben — ' + (fr.done || 0) + '/' + (fr.total || 0)) : 'Extract figures from these papers onto an infinite canvas' },
+            return h('a', { className: 'btn' + (running ? ' pulse-run' : (doneRun ? ' fig-done' : '')), style: { padding: '4px 10px', fontSize: 12, textDecoration: 'none' }, href: 'FigureBoard.html?project=' + encodeURIComponent(props.projectId), onClick: props.onOpenFigboard ? function (e) { e.preventDefault(); props.onOpenFigboard(); } : null, title: running ? ('Ábra-kinyerés fut a háttérben — ' + (fr.done || 0) + '/' + (fr.total || 0)) : 'Ábra-tábla megnyitása (ábrák a szakirodalomból)' },
               running ? ('⏳ Figure Board · ' + (fr.done || 0) + '/' + (fr.total || 0)) : (doneRun ? '✓ Figure Board' : '🖼 Figure Board'));
           })() : null,
           (lib.length && props.canEdit) ? h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12 }, disabled: PRFigureRunner.isRunning(props.projectId), title: 'Ábrák kinyerése a háttérben — fut tovább, amíg az appot használod (teljes újratöltés állítja csak le, onnan folytatható)', onClick: startFigExtract }, PRFigureRunner.isRunning(props.projectId) ? '⏳ Kinyerés…' : '✨ Ábrák kinyerése (háttér)') : null,
-          lib.length ? h('a', { className: 'btn', style: { padding: '4px 10px', fontSize: 12, textDecoration: 'none' }, href: 'CitationOptimizer.html?project=' + encodeURIComponent(props.projectId), title: 'Analyze what your top-cited included papers are cited FOR' }, '🔗 Citation Optimizer') : null,
           lib.length ? h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12 }, title: 'Export included (or all) as BibTeX', onClick: function () { var inc = lib.filter(function (x) { return x.screening === 'include'; }); downloadText('library.bib', genBibtex(inc.length ? inc : lib)); } }, '⬇ BibTeX') : null
         )),
         (function () {   // realtime figure-extraction progress (background runner) — survives tab/view switches
@@ -7155,12 +7160,18 @@
     }
     // Prezi-mód (Fázis 1): build the SAME panel element the tab shows, for a given tab, for in-canvas "belépés".
     // Passes an optional `focus` deep-link prop bag that each panel may ignore (graceful). Returns null for
+    // Literature analyzers (Figure Board, Citation Optimizer) live as sub-tabs UNDER Literature, rendered as chromeless
+    // same-origin iframes (?embed=1 hides the standalone page's own topbar). Only shown when the project has literature.
+    var hasLib = (props.sources || []).length > 0;
+    function embedFrame(page) { return h('iframe', { key: page + '-' + p.id, className: 'pr-embed-frame', title: page, src: page + '.html?project=' + encodeURIComponent(p.id) + '&embed=1' }); }
     // non-embeddable tabs → the Map falls back to onGoTab. Kept in sync with the tab switch below.
     function panelForTab(t, focus) {
       focus = focus || {};
       if (t === 'ideas') return h('div', { className: nd() ? 'ideas2' : null }, h(ChatPanel, { projectId: p.id, supervised: !!p.student_id, canEdit: props.canEdit, authorId: props.authorId, fileOwnerId: props.fileOwnerId, sources: props.sources, onChanged: props.onChanged, focusChatId: focus.focusChatId, focusFileId: focus.focusFileId }), h(IdeasPanel, { projectId: p.id, ideas: props.ideas, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, onStartStudyMulti: function (ideas) { setAutoSR(function (x) { return x + 1; }); setTab('study'); }, onGoStudy: function () { setTab('study'); }, onGoGap: function () { setTab('gap'); }, focusIdeaId: focus.focusIdeaId }));
       if (t === 'gap') return h(GapPanel, { projectId: p.id, project: p, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, onGoIdeas: function () { setTab('ideas'); }, onGoStudy: function () { setTab('study'); }, onStartStudy: startStudyFromIdea, focusGapId: focus.focusGapId });
-      if (t === 'literature') return h(React.Fragment, null, h(LiteraturePanel, { projectId: p.id, sources: props.sources, studies: props.studies, canEdit: props.canEdit, myEmail: props.myEmail, onChanged: props.onChanged, focusSourceId: focus.focusSourceId, focusFigureId: focus.focusFigureId }), h(ElicitReports, { projectId: p.id, project: p, canEdit: props.canEdit, authorId: props.authorId, onGoStudy: function () { setTab('study'); } }), h(ElicitTrials, { projectId: p.id, canEdit: props.canEdit }));
+      if (t === 'figboard') return embedFrame('FigureBoard');
+      if (t === 'citopt') return embedFrame('CitationOptimizer');
+      if (t === 'literature') return h(React.Fragment, null, h(LiteraturePanel, { projectId: p.id, sources: props.sources, studies: props.studies, canEdit: props.canEdit, myEmail: props.myEmail, onChanged: props.onChanged, onOpenFigboard: function () { setTab('figboard'); }, focusSourceId: focus.focusSourceId, focusFigureId: focus.focusFigureId }), h(ElicitReports, { projectId: p.id, project: p, canEdit: props.canEdit, authorId: props.authorId, onGoStudy: function () { setTab('study'); } }), h(ElicitTrials, { projectId: p.id, canEdit: props.canEdit }));
       if (t === 'study') return h(ElicitSysReview, { projectId: p.id, project: p, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, autoGenerate: autoSR, onAutoGenerated: function () { setAutoSR(0); }, onOpenStudy: openFunnelStudy, focusReviewId: focus.focusReviewId, focusQuestionId: focus.focusQuestionId, focusJobId: focus.focusJobId });
       if (t === 'protocol') return h(ProtocolPanel, { projectId: p.id, ideas: props.ideas, sources: props.sources, studies: props.studies, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, focusStepId: focus.focusStepId });
       if (t === 'data') return h(DataPanel, { projectId: p.id, datasets: props.datasets, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, focusDatasetId: focus.focusDatasetId });
@@ -7171,8 +7182,10 @@
     var content;
     if (tab === 'ideas') content = h('div', { className: nd() ? 'ideas2' : null }, h(ChatPanel, { projectId: p.id, supervised: !!p.student_id, canEdit: props.canEdit, authorId: props.authorId, fileOwnerId: props.fileOwnerId, sources: props.sources, onChanged: props.onChanged }), h(IdeasPanel, { projectId: p.id, ideas: props.ideas, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, onStartStudyMulti: function (ideas) { setAutoSR(function (x) { return x + 1; }); setTab('study'); }, onGoStudy: function () { setTab('study'); }, onGoGap: function () { setTab('gap'); } }));
     else if (tab === 'gap') content = h(GapPanel, { projectId: p.id, project: p, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, onGoIdeas: function () { setTab('ideas'); }, onGoStudy: function () { setTab('study'); }, onStartStudy: startStudyFromIdea });
+    else if (tab === 'figboard') content = embedFrame('FigureBoard');
+    else if (tab === 'citopt') content = embedFrame('CitationOptimizer');
     else if (tab === 'literature') content = h(React.Fragment, null,
-      h(LiteraturePanel, { projectId: p.id, sources: props.sources, studies: props.studies, canEdit: props.canEdit, myEmail: props.myEmail, onChanged: props.onChanged }),
+      h(LiteraturePanel, { projectId: p.id, sources: props.sources, studies: props.studies, canEdit: props.canEdit, myEmail: props.myEmail, onChanged: props.onChanged, onOpenFigboard: function () { setTab('figboard'); } }),
       h(ElicitReports, { projectId: p.id, project: p, canEdit: props.canEdit, authorId: props.authorId, onGoStudy: function () { setTab('study'); } }),
       h(ElicitTrials, { projectId: p.id, canEdit: props.canEdit }));
     else if (tab === 'study') content = h(ElicitSysReview, { projectId: p.id, project: p, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, autoGenerate: autoSR, onAutoGenerated: function () { setAutoSR(0); }, onOpenStudy: openFunnelStudy });   // SR Studio (primary); the keyword funnel renders persistently below
@@ -7203,6 +7216,10 @@
           h('span', { className: 'rv-st-dot' }, '›'), h('span', { className: 'rv-st-lbl' }, tr(plang, 'Studies'))));
         if (i === 2) kids.push(h('button', { key: 'gap', className: 'rv-st sub' + (tab === 'gap' ? ' cur' : ''), title: 'Kutatási rés-elemzés', onClick: function () { setTab('gap'); } },
           h('span', { className: 'rv-st-dot' }, '🕳'), h('span', { className: 'rv-st-lbl' }, 'Rések')));
+        if (i === 2 && hasLib) {   // Literature analyzers as sub-tabs (embedded via iframe) — only with a library
+          kids.push(h('button', { key: 'figboard', className: 'rv-st sub' + (tab === 'figboard' ? ' cur' : ''), title: 'Ábra-tábla — ábrák kinyerése a szakirodalomból', onClick: function () { setTab('figboard'); } }, h('span', { className: 'rv-st-dot' }, '🖼'), h('span', { className: 'rv-st-lbl' }, 'Ábrák')));
+          kids.push(h('button', { key: 'citopt', className: 'rv-st sub' + (tab === 'citopt' ? ' cur' : ''), title: 'Citáció-optimalizáló — mire hivatkoznak a legidézettebb cikkeid', onClick: function () { setTab('citopt'); } }, h('span', { className: 'rv-st-dot' }, '🔗'), h('span', { className: 'rv-st-lbl' }, 'Idézetek')));
+        }
       });
       return h('div', { className: 'rv-stnav' }, kids);
     }
@@ -7266,7 +7283,7 @@
           props.canEdit ? h('button', { className: 'btn', style: { height: 32, flex: 'none' }, title: 'Project base settings (title, field, keywords, goal)', onClick: function () { setEditOpen(true); } }, tr(plang, '✎ Settings')) : null
         )
       ),
-      h(Stepper, { stage: p.stage, tab: tab, lang: plang, canEdit: props.canEdit, onSet: setStage, onStudy: function () { setTab('study'); }, onGap: function () { setTab('gap'); }, onNav: function (i) { setTab(STAGE_TAB[i] || 'overview'); } }),
+      h(Stepper, { stage: p.stage, tab: tab, lang: plang, canEdit: props.canEdit, onSet: setStage, onStudy: function () { setTab('study'); }, onGap: function () { setTab('gap'); }, hasLib: hasLib, onFigboard: function () { setTab('figboard'); }, onCitopt: function () { setTab('citopt'); }, onNav: function (i) { setTab(STAGE_TAB[i] || 'overview'); } }),
       h('div', { className: 'subtabs' }, [['overview', 'Overview', null], ['canvas', 'Canvas', null], ['notes', 'Notes', null], ['log', 'Log', (props.log || []).length], ['tasks', 'Tasks', openTasks]].map(function (nt) {
         return h('button', { key: nt[0], className: tab === nt[0] ? 'on' : '', onClick: function () { setTab(nt[0]); } }, tr(plang, nt[1]), nt[2] ? h('span', { className: 'c' }, nt[2]) : null);
       })),

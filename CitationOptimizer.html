@@ -5,10 +5,14 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Publify — Citation Optimizer</title>
+  <script>if (new URLSearchParams(location.search).get('embed')) document.documentElement.classList.add('embed');</script>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <style>
+    /* embedded in the Publify app as a Literature sub-tab (?embed=1) → drop our own chrome; the parent nav owns it */
+    html.embed .topbar { display:none !important; }
+    html.embed .version-badge, html.embed .vbadge { display:none !important; }
     :root { --surface:#fff; --surface-2:#f2f4f8; --surface-3:#e9ecf4; --accent-tint:#eef0ff; --ok:#15803d; --ok-bg:#e7f6ee; --warn:#b45309; --warn-bg:#fbf1dd; --danger:#b42318; --danger-bg:#fdeef0;
       --accent:#4f46e5; --accent-d:#4338ca; --ink:#1a2030; --muted:#5b6473; --faint:#8a92a0; --line:#e4e7ef; --line-2:#d7dbe8; --soft:#f5f6f9; --softer:#f7f8fb;
       /* citation-intent instrument palette */

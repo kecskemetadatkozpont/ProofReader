@@ -5,6 +5,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Publify — Figure Board</title>
+  <script>if (new URLSearchParams(location.search).get('embed')) document.documentElement.classList.add('embed');</script>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -13,6 +14,13 @@
       --accent:#4f46e5; --accent-d:#4338ca; --ink:#1a2030; --muted:#5b6473; --faint:#8a92a0; --line:#e4e7ef; --line-2:#d7dbe8; --soft:#f5f6f9; --softer:#f7f8fb; --canvas-bg:#f6f7fb; }
     * { box-sizing:border-box; }
     html,body { margin:0; height:100%; overflow:hidden; }
+    /* embedded in the Publify app as a Literature sub-tab (?embed=1) → drop only the CHROME (brand + ← Research + dark
+       toggle); KEEP the functional topbar controls (#modeseg Simple/Pro, #grpseg By-paper/All-figures, #toghide Show-hidden)
+       so the embedded board is fully usable. The .app auto grid-row shrinks to fit the remaining controls. */
+    html.embed .topbar a[href^="Research"] { display:none !important; }   /* the .brand link AND the ← Research link */
+    html.embed #fb-dark { display:none !important; }
+    html.embed .topbar { padding-left:14px; }
+    html.embed .version-badge, html.embed .vbadge { display:none !important; }
     body { background:var(--softer); color:var(--ink); font-family:'IBM Plex Sans',system-ui,sans-serif; -webkit-font-smoothing:antialiased; font-size:14px; line-height:1.45; }
     a { color:var(--accent); text-decoration:none; }
     .mk { width:26px; height:26px; border-radius:8px; display:grid; place-items:center; background:linear-gradient(135deg,#6366f1,#d946ef); box-shadow:0 3px 10px rgba(79,70,229,.34); flex:none; }

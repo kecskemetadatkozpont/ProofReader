@@ -253,6 +253,19 @@
   a húzás alatt elnyomva) · **dedup-guard** (ha már van keret e bbox köré [±10px] → `framePatch` frissítés + toast, nem új keret).
   Adversariális review után.
 
+## 🚧 Figure Board + Citation Optimizer → Literature-alfülek — 2026-07-19
+> Feltárás: 2-ágú (IA/nav · embed-mechanizmus) + kód-megalapozás design-workflow → szintézis → interaktív mockup
+> (`litsub-mockup`, favicon 🖼). **A kérés:** a két külön-oldalas eszköz a Literature alá, mint a Rések.
+- [x] ✅ **P0 — al-fülek iframe-embeddel** — két új al-fül a Literature (`i===2`) után, a Rések mellé, MINDKÉT navban
+  (nd stageNav + klasszikus Stepper), `hasLib`-gated (**🖼 Ábrák** / **🔗 Idézetek**). A render **same-origin iframe**
+  (`embedFrame(page)` → `Page.html?project=..&embed=1`), a két standalone app `embed=1`-nél elrejti a saját chrome-ját.
+  panelForTab + content-switch ág; nincs `EMBEDDABLE` (nincs Map-deep-link). A régi Library **Citáció-link törölve**, az
+  **Ábra-tábla gomb** in-app `setTab`-re konvertálva (élő kinyerés-badge marad), ✨ háttér-kinyerés + ⬇ BibTeX marad.
+  **Nincs migráció, nincs séma.** Adversariális review: 1 minor javítva — az embed-CSS a FigureBoard topbar CHROME-ját
+  rejti csak (`.brand`/`← Research`/`#fb-dark`), a FUNKCIONÁLIS vezérlők (`#grpseg` nézet · `#toghide` rejtett · `#modeseg`
+  Simple/Pro) elérhetők maradnak; a CitationOptimizer topbar-ja tisztán chrome → teljes rejtés OK.
+- [ ] ⏳ **P1** — mindkét iframe mountolva marad (`display` váltás, nincs újratöltés tabváltáskor) · in-frame dark-toggle rejtve · a keret-magasság flex-oszloppal. **P2** — natív `window.PRFigureBoard`/`PRCitationOptimizer` (mint PRCanvas/PRNotes), csak ha az iframe kevés.
+
 ## Hátralévő (jövő) — Phase 6+
 - [ ] 🔴 **Teljes karakter-szintű CRDT/Yjs** — egyidejű azonos-szekció gépelés valós idejű merge-dzsel.
   A jelenlegi soft-lock + LWW ennek a könnyűsúlyú, függőség-mentes alternatívája; a teljes CRDT nagy
