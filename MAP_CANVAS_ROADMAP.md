@@ -253,6 +253,24 @@
   a húzás alatt elnyomva) · **dedup-guard** (ha már van keret e bbox köré [±10px] → `framePatch` frissítés + toast, nem új keret).
   Adversariális review után.
 
+## ✅ Dock-chat fájl-feltöltés + csatolás (P0) — 2026-07-19
+> Előzmény: a Map-dock „🤖 Asszisztens" chat vs. az Idea-fül `ChatPanel` parity-audit (→ `map-only-audit` artifact, `dock-chat` kategória).
+> Design: interaktív mockup 3 verzióval (`dock-upload-mockup`, favicon 📎) → V1 (inline, az Idea-chat mintája) jóváhagyva.
+- [x] ✅ **P0 (V1)** — a Map-dock chatbe bekerül a **fájl-feltöltés + csatolás**, az Idea-chat mintáját újrahasználva:
+  - **`dkUpload(fileList)`** (a `ChatPanel.chatUpload` ~975 hű portja): drag-drop → `research-data` storage + `research_files`
+    (`uploads/`), Office-kinyerés (docx/xlsx/pptx/csv), `freePath` verziózás. A feltöltött fájl `setBump`-pal **Map file-node**
+    is lesz (loader ~5053 → `t:file` node ~5186, `updated_at desc limit 16` → a friss feltöltés benne van), és **a következő
+    dock-üzenet csatolmánya** lesz.
+  - **Drag-drop dropzone** a dock fölött (`.rmap-dock-dz` overlay + `[dDrop]` reset-effect az elakadás ellen) + **📎 gomb**
+    az input-sorban → a meglévő **`AttachModal`** (~381) picker (könyvtári forrás / publikáció / LaTeX / feltöltés), a dock
+    **testvéreként** mountolva (nem vágja le az `overflow:hidden`).
+  - **Csatolmány-chipek** (`.rmap-dock-atts`) az input fölött (× eltávolítás); `dkSend` az `attachments` payloadba köti
+    (a `research-chat` ugyanúgy olvassa, mint az Idea-chatnél; üresen kihagyva → pre-migration-17-safe; csak normál gépelt
+    turn viszi, boundFrame/override nem). A `PipelineCanvas` mount most `sources` + `fileOwnerId` propot is kap.
+  - **Hook-biztos:** 3 új useState (`dAttach`/`dDrop`/`dPick`) + a reset-effect **a guardok előtt**.
+  - **Adversariális review: 0 találat** (2 reviewer × Read+Bash, hooks/upload-parity/materializáció mind tiszta). **NINCS migráció/edge.**
+- [ ] ⏳ **P1** — mini **fájl-böngésző/vizualizáció** a dockból (a `FileManager` újrahasznosítása, előnézet/letöltés). **P1+** — a picker „Feltöltés" ága is hozzon létre `research_files` sort (most attach-only, mint az Idea-chatnél) · dock-transzkript hidratálás + streaming · ✨enhance/ötlet-javaslat.
+
 ## ✅ macOS-Dock nagyítás — kártya-toolbar + Map-menüsor (egy közös réteg) — 2026-07-19
 > 2 jóváhagyott mockup (`dock-toolbar-mockup` V1 kártya · `map-dock-mockup` középre-igazított menüsor), egyben implementálva.
 - [x] ✅ **Közös motor** (`research.jsx`, modul-szint, `STAGE_ICONS` előtt): `dockMagnify(host,cx,spread,hotDist)` +

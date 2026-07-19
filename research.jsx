@@ -4731,6 +4731,11 @@
     var diS = useState(''), dInput = diS[0], setDInput = diS[1];
     var dbS = useState(false), dBusy = dbS[0], setDBusy = dbS[1];
     var dmoS = useState('chat'), dkMode = dmoS[0], setDkMode = dmoS[1];   // dock mode: 'chat' | 'action' (protocol step from instruction)
+    var datS = useState([]), dAttach = datS[0], setDAttach = datS[1];   // dock-chat pending attachments (uploaded files / library sources) for the next message
+    var ddzS = useState(false), dDrop = ddzS[0], setDDrop = ddzS[1];   // drag files over the dock → show the dropzone overlay
+    var dpkS = useState(false), dPick = dpkS[0], setDPick = dpkS[1];   // the attach picker (AttachModal) is open
+    // safety: any aborted drag anywhere clears the dock dropzone so it can't stay stuck over the chat
+    useEffect(function () { if (!dDrop) return; function reset() { setDDrop(false); } window.addEventListener('dragend', reset); window.addEventListener('drop', reset); return function () { window.removeEventListener('dragend', reset); window.removeEventListener('drop', reset); }; }, [dDrop]);
     var dockRef = useRef(null);   // the open dock element (for edge-drag resize geometry)
     var ddS = useState(function () { try { return JSON.parse(localStorage.getItem('pr-rmap-dock-dim') || 'null'); } catch (e) { return null; } }), dkDim = ddS[0], setDkDim = ddS[1];   // user-resized {w,h} or null=default
     var dkDimRef = useRef(dkDim); dkDimRef.current = dkDim;   // latest dim for the drag mouseup persist (closure-stale otherwise)
@@ -6378,6 +6383,37 @@
     }
     // send the dock input in the current mode: 'action' (needs a selected step) → propose protocol step(s); else chat.
     function dkPrimary() { if (dkMode === 'action' && sn && sn.t === 'step') { dkProposeSteps(); } else { dkSend(); } }
+    // dock file upload (drag-drop or the 📎 picker's file input) — mirrors ChatPanel.chatUpload: storage + research_files
+    // (uploads/), Office-text extraction, versioned same-name paths, then it re-materializes the Map (a file node appears)
+    // AND queues the file as a pending attachment so the next dock turn hands its content to the assistant.
+    function dkUpload(fileList) {
+      setDDrop(false);
+      var arr = [].slice.call(fileList || []); if (!arr.length) return;
+      var pid = props.projectId, aid = props.authorId;
+      function freePath(base, taken) { if (taken.indexOf(base) < 0) return base; var d = base.lastIndexOf('.'); var stem = d > 0 ? base.slice(0, d) : base, ext = d > 0 ? base.slice(d) : ''; var i = 2; while (taken.indexOf(stem + ' (' + i + ')' + ext) >= 0) i++; return stem + ' (' + i + ')' + ext; }
+      sb.from('research_files').select('path').eq('project_id', pid).then(function (er) {
+        var taken = ((er && er.data) || []).map(function (x) { return x.path; });
+        arr.forEach(function (f) {
+          if (window.PROffice && window.PROffice.isOffice(f.name)) {
+            window.PROffice.extract(f).then(function (r) {
+              var path = freePath('uploads/' + f.name.replace(/\.(docx|xlsx|xlsm|xls|pptx)$/i, '') + '.' + (r.ext || 'md'), taken); taken.push(path);
+              sb.from('research_files').upsert({ project_id: pid, path: path, content: r.text || '', storage_path: null, mime: r.ext === 'csv' ? 'text/csv' : 'text/markdown', size: (r.text || '').length, source: 'upload', created_by: aid, updated_by: aid, updated_at: new Date().toISOString() }, { onConflict: 'project_id,path' }).then(function () { if (alive.current) setBump(function (v) { return v + 1; }); });
+            }, function () { window.PRUI.toast('Office-feldolgozási hiba: ' + f.name, { kind: 'error' }); });
+            return;
+          }
+          var path = freePath('uploads/' + f.name, taken); taken.push(path);
+          var sp = pid + '/files/' + Date.now() + '_' + f.name.replace(/[^A-Za-z0-9._-]/g, '_');
+          sb.storage.from('research-data').upload(sp, f).then(function (res) {
+            if (res && res.error) { window.PRUI.toast(res.error.message, { kind: 'error' }); return; }
+            sb.from('research_files').upsert({ project_id: pid, path: path, storage_path: sp, content: null, mime: f.type || 'application/octet-stream', size: f.size, source: 'upload', created_by: aid, updated_by: aid, updated_at: new Date().toISOString() }, { onConflict: 'project_id,path' }).then(function (rr) {
+              if (rr && rr.error) { try { sb.storage.from('research-data').remove([sp]); } catch (e) { } window.PRUI.toast(rr.error.message, { kind: 'error' }); return; }
+              if (alive.current) { setBump(function (v) { return v + 1; }); setDAttach(function (p) { return p.concat([{ kind: 'file', bucket: 'research-data', path: sp, name: f.name, mime: f.type, label: f.name }]); }); }
+            });
+          });
+        });
+        window.PRUI.toast(arr.length + ' fájl feltöltve — a térképen fájl-kártyaként is megjelenik', { kind: 'ok' });
+      });
+    }
     function dkSend(overrideTxt, skipEcho) {   // free-text turn → research-chat (non-streaming); the reply may save files (→ file nodes). skipEcho: caller already echoed the user turn (frame-generation chat fallback)
       var isOv = (overrideTxt != null);
       var txt = String(isOv ? overrideTxt : (dInput || '')).trim(); if (!txt || dBusy) return;
@@ -6391,6 +6427,7 @@
       // the currently SELECTED map card is "attached" as context — the assistant sees exactly which node you mean.
       // (an explicit override — e.g. a frame's inline "generate here" — carries its own context and attaches no card.)
       var an = (!isOv && !boundFrame && sel && g && g.by) ? g.by[sel] : null;
+      var atts = (!isOv) ? dAttach : [];   // pending file/source attachments ride the normal typed turn (not overrides/frame-gen)
       var full = txt;
       if (an) {
         var lab = (RMAP_TYPE[an.t] && RMAP_TYPE[an.t].lab) || an.t;
@@ -6398,12 +6435,14 @@
         var idp = (an.ref && an.ref.id) ? (' [id: ' + an.ref.id + ']') : '';
         full = '[BECSATOLT KÁRTYA a térképről — erre a kártyára fókuszálj: ' + lab + ' — "' + String(an.title || '').slice(0, 160) + '"' + idp + (mbits.length ? ' — ' + mbits.slice(0, 6).join(', ') : '') + ']\n\n' + txt;
       }
-      if (!skipEcho) dkSay('user', (an ? '📎 ' + String(an.title || 'kártya').slice(0, 44) + '\n' : '') + txt); if (!isOv) setDInput(''); setDBusy(true);
+      var attEcho = atts.length ? atts.map(function (a) { return '📎 ' + String(a.label || a.name || a.title || 'csatolmány').slice(0, 44); }).join('\n') + '\n' : '';
+      if (!skipEcho) dkSay('user', attEcho + (an ? '📎 ' + String(an.title || 'kártya').slice(0, 44) + '\n' : '') + txt); if (!isOv) { setDInput(''); setDAttach([]); } setDBusy(true);
       var CFG = window.PR_CONFIG || {}, CORE = window.PRAutopilotCore, pid = props.projectId;
       function fail(msg) { if (alive.current) { setDBusy(false); dkSay('ai', msg || 'Hiba történt.'); } }   // single failure path → dBusy never strands
       dkEnsureChat().then(function (cid) {
         if (!cid) { fail('Nem sikerült elindítani a beszélgetést.'); return; }
-        sb.from('research_messages').insert({ chat_id: cid, role: 'user', content: full }).then(function (ins) {
+        var _pl = { chat_id: cid, role: 'user', content: full }; if (atts.length) _pl.attachments = atts;   // attachments col omitted when empty → works pre-migration-17
+        sb.from('research_messages').insert(_pl).then(function (ins) {
           if (ins && ins.error) { fail('Hiba: ' + ins.error.message); return; }
           sb.auth.getSession().then(function (s) {
             var token = (s && s.data && s.data.session && s.data.session.access_token) || CFG.supabaseAnonKey;
@@ -6931,7 +6970,8 @@
           : h('div', { style: { position: 'absolute', left: 14, bottom: 84, zIndex: 8, display: 'flex', gap: 13, alignItems: 'center', padding: '5px 11px', borderRadius: 8, background: 'var(--surface)', border: '1px solid var(--line)', fontSize: 10.5, color: 'var(--muted)', boxShadow: '0 4px 14px -8px rgba(20,26,40,.4)', pointerEvents: 'none' } },
             h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 5 } }, h('span', { style: { display: 'inline-block', width: 18, borderTop: '2px dashed var(--line-2, var(--muted))' } }), 'származás'),
             h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 5 } }, h('span', { style: { display: 'inline-block', width: 18, borderTop: '1.5px dashed var(--accent-tint)' } }), 'idézet')),
-        props.canEdit ? (dkOpen ? h('div', { className: 'rmap-dock open' + (dkFull ? ' full' : ''), ref: dockRef, style: dockStyle(), onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
+        props.canEdit ? (dkOpen ? h('div', { className: 'rmap-dock open' + (dkFull ? ' full' : ''), ref: dockRef, style: dockStyle(), onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); }, onDragOver: function (e) { if (e.dataTransfer && [].slice.call(e.dataTransfer.types || []).indexOf('Files') >= 0) { e.preventDefault(); if (!dDrop) setDDrop(true); } } },
+          dDrop ? h('div', { className: 'rmap-dock-dz', onDragOver: function (e) { e.preventDefault(); }, onDragLeave: function () { setDDrop(false); }, onDrop: function (e) { e.preventDefault(); dkUpload(e.dataTransfer.files); } }, h('div', { className: 'big' }, '📎'), h('b', null, 'Engedd el a fájlokat'), h('span', null, 'Feltöltés + csatolás az üzenethez')) : null,
           h('div', { className: 'rmap-dock-rz rmap-dock-rz-l', title: 'Átméretezés', onMouseDown: function (e) { startDockResize(e, 'w'); } }),
           h('div', { className: 'rmap-dock-rz rmap-dock-rz-t', title: 'Átméretezés', onMouseDown: function (e) { startDockResize(e, 'h'); } }),
           h('div', { className: 'rmap-dock-rz rmap-dock-rz-tl', title: 'Átméretezés', onMouseDown: function (e) { startDockResize(e, 'wh'); } }),
@@ -6966,11 +7006,18 @@
           h('div', { className: 'rmap-dock-mode' },
             h('button', { className: 'rmap-dock-modebtn' + (dkMode === 'chat' ? ' on' : ''), disabled: dBusy, title: 'Beszélgetés / kérdés az asszisztenssel', onClick: function () { setDkMode('chat'); } }, '💬 Chat'),
             h('button', { className: 'rmap-dock-modebtn' + (dkMode === 'action' ? ' on' : ''), disabled: dBusy || !(sn && sn.t === 'step'), title: (sn && sn.t === 'step') ? 'Az utasításból protokoll-lépést szúr be a kijelölt lépés után' : 'Jelölj ki egy protokoll-lépést az Akció módhoz', onClick: function () { setDkMode('action'); } }, '⚡ Akció')),
+          dAttach.length ? h('div', { className: 'rmap-dock-atts' }, dAttach.map(function (a, i) {
+            return h('span', { className: 'rmap-dock-att', key: 'da' + i }, (a.kind === 'source' ? '📄 ' : '📎 ') + String(a.label || a.name || a.title || 'csatolmány').slice(0, 30),
+              h('button', { title: 'Eltávolítás', onClick: function () { setDAttach(dAttach.filter(function (_, j) { return j !== i; })); } }, '×'));
+          })) : null,
           h('div', { className: 'rmap-dock-in' },
+            h('button', { className: 'btn', style: { fontSize: 14, padding: '0 9px', flex: 'none' }, disabled: dBusy, title: 'Fájl feltöltése / forrás csatolása', onClick: function () { setDPick(true); } }, '📎'),
             h('textarea', { rows: 1, value: dInput, placeholder: boundFrame ? ('„' + String(boundFrame.title || 'Keret').slice(0, 20) + '" keretbe — pl. hozz létre kutatási réseket…') : (dkMode === 'action' && sn && sn.t === 'step') ? 'Mit tegyek e lépés után? (pl. „tegyél be egy validációs lépést")' : sn ? 'Kérdezz vagy adj utasítást a becsatolt kártyáról…' : 'Írj utasítást vagy kérdést… (jelölj ki egy kártyát a becsatoláshoz)', disabled: dBusy, onChange: function (e) { setDInput(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); dkPrimary(); } } }),
             h('button', { className: 'btn' + (recOn ? ' rmap-mic-on' : ''), style: { fontSize: 14, padding: '0 9px', flex: 'none' }, disabled: dBusy, title: recOn ? 'Felvétel leállítása' : 'Hangbevitel — diktálás (magyar)', onClick: toggleMic }, recOn ? '⏺' : '🎤'),
             h('button', { className: 'btn pri', style: { fontSize: 14, padding: '0 12px', flex: 'none' }, disabled: dBusy || !dInput.trim() || (dkMode === 'action' && !(sn && sn.t === 'step')), onClick: dkPrimary }, dkMode === 'action' ? '⚡' : '➤')))
           : h('button', { className: 'rmap-dock-fab', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function () { setDkOpen(true); try { localStorage.setItem('pr-rmap-dock', '1'); } catch (e) { } } }, '🤖 Asszisztens')) : null),
+      // dock attach picker (library source / publication file / LaTeX / upload) — the same reusable modal the Idea chat uses
+      (props.canEdit && dPick) ? h(AttachModal, { projectId: props.projectId, sources: props.sources, fileOwnerId: props.fileOwnerId, authorId: props.authorId, onPick: function (a) { setDAttach(function (p) { return p.concat([a]); }); }, onClose: function () { setDPick(false); } }) : null,
       // floating selection toolbar — compact quick-actions above the selected card (pin / hide / generate / export)
       (sn && props.canEdit) ? h('div', { className: 'rmap-seltool', style: selToolStyle(sn), onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); }, onMouseMove: function (e) { dockMagnify(e.currentTarget, e.clientX, 78, 26); }, onMouseLeave: function (e) { dockReset(e.currentTarget); } },
         mapFlags ? h('button', { className: 'rmap-dbtn' + ((layout[sn.id] && layout[sn.id].pinned) ? ' on' : ''), title: (layout[sn.id] && layout[sn.id].pinned) ? 'Kitűzés levétele' : 'Kitűzés (fontos)', onClick: function () { nodeTogglePinned(sn); } }, '📌', h('span', { className: 'rmap-dlab' }, (layout[sn.id] && layout[sn.id].pinned) ? 'Kitűzés levétele' : 'Kitűzés')) : null,
@@ -7236,7 +7283,7 @@
       h('h3', { style: { marginTop: 0 } }, '📤 Submission'),
       h('p', { style: { fontSize: 13.5, color: 'var(--muted)', lineHeight: 1.55 } }, 'When the manuscript is ready, submit and track it in the Érkeztető (submission) workflow — desk-check, reviewers, decisions and camera-ready.'),
       h('a', { className: 'btn pri', href: 'Submissions.html' + (/[?&]adminView=1/.test(location.search) ? '?adminView=1' : ''), style: { textDecoration: 'none', display: 'inline-block' } }, 'Open the submission workflow →'));
-    else if (tab === 'map') content = h(PipelineCanvas, { projectId: p.id, project: p, canEdit: props.canEdit, authorId: props.authorId, viewerId: props.me && props.me.id, viewer: props.me, onGoTab: function (t) { setTab(t); }, renderPanel: panelForTab });
+    else if (tab === 'map') content = h(PipelineCanvas, { projectId: p.id, project: p, canEdit: props.canEdit, authorId: props.authorId, viewerId: props.me && props.me.id, viewer: props.me, sources: props.sources, fileOwnerId: props.fileOwnerId, onGoTab: function (t) { setTab(t); }, renderPanel: panelForTab });
     else if (tab === 'canvas') content = window.PRCanvas ? h(window.PRCanvas, { projectId: p.id, canEdit: props.canEdit, authorId: props.authorId }) : h('div', { className: 'empty' }, 'Loading Canvas…');
     else if (tab === 'notes') content = window.PRNotes ? h(window.PRNotes, { projectId: p.id, canEdit: props.canEdit, authorId: props.authorId }) : h('div', { className: 'empty' }, 'Loading Notes…');
     else if (tab === 'log') content = h(LogPanel, { projectId: p.id, authorId: props.authorId, entries: props.log, canEdit: props.canEdit, onChanged: props.onChanged });

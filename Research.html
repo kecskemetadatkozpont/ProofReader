@@ -1354,6 +1354,14 @@
     .rmap-dock-modebtn:disabled { opacity: .45; cursor: default; }
     .rmap-mic-on { border-color: var(--danger, #b42318) !important; color: var(--danger, #b42318) !important; animation: rmap-mic-pulse 1s ease-in-out infinite; }
     @keyframes rmap-mic-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(180,35,24,.4); } 50% { box-shadow: 0 0 0 5px rgba(180,35,24,0); } }
+    /* dock-chat file upload + attach (P0): drag-drop dropzone overlay + pending-attachment chips */
+    .rmap-dock-dz { position: absolute; inset: 0; z-index: 20; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; background: color-mix(in srgb, var(--accent) 12%, var(--surface)); border: 2px dashed var(--accent); border-radius: 14px; color: var(--accent); font-weight: 750; font-size: 13px; text-align: center; padding: 12px; }
+    .rmap-dock-dz .big { font-size: 32px; }
+    .rmap-dock-dz span { font-size: 11px; color: var(--muted); font-weight: 600; }
+    .rmap-dock-atts { display: flex; flex-wrap: wrap; gap: 5px; padding: 2px 12px 0; }
+    .rmap-dock-att { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; font-size: 11px; font-weight: 600; background: var(--accent-tint, var(--surface-2)); color: var(--accent-d, var(--accent)); border: 1px solid var(--accent); border-radius: 999px; padding: 2px 4px 2px 9px; overflow: hidden; }
+    .rmap-dock-att button { flex: none; border: none; background: none; color: inherit; cursor: pointer; font-size: 13px; line-height: 1; opacity: .7; padding: 0 2px; }
+    .rmap-dock-att button:hover { opacity: 1; }
     .rmap-dock-in { display: flex; gap: 7px; align-items: stretch; padding: 9px 12px 11px; }
     .rmap-dock-in textarea { flex: 1; resize: none; min-height: 36px; max-height: 120px; font-family: inherit; font-size: 12.5px; line-height: 1.4; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); }
     .rmap-dock-in textarea:focus { outline: none; border-color: var(--accent); }
@@ -1451,7 +1459,7 @@
   <script type="text/babel" src="canvas.jsx?v=1783137934"></script>
   <script type="text/babel" src="notes.jsx?v=1783137934"></script>
   <script src="autopilot-core.js?v=1784160000"></script>
-  <script type="text/babel" src="research.jsx?v=1785900000"></script>
+  <script type="text/babel" src="research.jsx?v=1785910000"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>
