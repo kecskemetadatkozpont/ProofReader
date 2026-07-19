@@ -6468,7 +6468,9 @@
 
     if (!data) return h('div', { className: 'rmap-wrap' }, h('div', { className: 'empty' }, 'Térkép betöltése…'));
     var g = graph();
-    if (!g.N.length) return h('div', { className: 'rmap-wrap' }, h('div', { className: 'rmap-empty' }, h('div', { style: { fontSize: 30 } }, '🗺️'), h('b', null, 'A térkép a projekt adataiból épül fel'), h('p', null, 'Adj hozzá ötleteket, irodalmat, protokollt — és itt egy összefüggő canvason látod majd az egészet, a provenance-élekkel.')));
+    // An EMPTY project (0 nodes) no longer early-returns a placeholder — the full canvas + dock + radial render so work can
+    // START from the Map (chat, upload, double-click to add); a non-blocking welcome overlay (rmap-empty-hint) guides the user.
+    // fitView + graph() are already empty-safe; every render map/forEach handles the empty g.N/g.E.
     var NW = 204, NH = 74;
     function nodeW(n) { return (n && n._w) || NW; }   // per-node card width (migration-80) or default
     function nodeH(n) { return (n && n._h) || NH; }
@@ -6691,6 +6693,15 @@
     var cmUnresolved = commentsCap ? comments.filter(function (c) { return !c.resolved; }).length : 0;
     return h('div', { className: 'rmap-wrap' },
       h('div', { className: 'rmap-stage', ref: stageRef, onMouseDown: onDown, onWheel: onWheel, onMouseMove: broadcastCursor, onDoubleClick: onStageDbl },
+        // empty project: a small non-blocking welcome overlay so work can start from the Map (canvas + dock render normally underneath)
+        (!g.N.length) ? h('div', { className: 'rmap-empty-hint', onMouseDown: function (e) { e.stopPropagation(); } },
+          h('div', { className: 'rmap-eh-ic' }, '🗺️'),
+          h('b', null, 'Üres térkép — kezdd el itt'),
+          h('p', null, props.canEdit ? 'Beszélgess a jobb-alsó 🤖 asszisztenssel, tölts fel adatot, vagy dupla-katt a vászonra. Ahogy tartalmat adsz hozzá, itt épül fel az összefüggő térkép a provenance-élekkel.' : 'Ez a térkép még üres — ahogy a szerkesztők tartalmat adnak hozzá (ötletek, irodalom, protokoll), itt épül fel az összefüggő térkép a provenance-élekkel.'),
+          props.canEdit ? h('div', { className: 'rmap-eh-acts' },
+            h('button', { className: 'btn pri', style: { fontSize: 12.5 }, onClick: function () { var vp = stageVP(); ideaAtPos((vp.w / 2 - view.tx) / view.k - NW / 2, (vp.h / 2 - view.ty) / view.k - NH / 2); } }, '✦ Első ötlet'),
+            h('button', { className: 'btn', style: { fontSize: 12.5 }, onClick: function () { setDkOpen(true); try { localStorage.setItem('pr-rmap-dock', '1'); } catch (e) { } setDkTab('files'); } }, '📎 Adat feltöltése'),
+            h('button', { className: 'btn', style: { fontSize: 12.5 }, onClick: function () { setDkOpen(true); try { localStorage.setItem('pr-rmap-dock', '1'); } catch (e) { } setDkTab('chat'); } }, '💬 Asszisztens')) : null) : null,
         h('div', { className: 'rmap-world rmap-lod-' + lod, style: { transform: 'translate(' + view.tx + 'px,' + view.ty + 'px) scale(' + view.k + ')' } },
           // frames (named regions) render BEHIND everything; the body is pointer-events:none so cards stay interactive
           frames.map(function (f) {

@@ -253,6 +253,11 @@
   a húzás alatt elnyomva) · **dedup-guard** (ha már van keret e bbox köré [±10px] → `framePatch` frissítés + toast, nem új keret).
   Adversariális review után.
 
+## ✅ Üres projekt: a Térkép a nulláról is használható — 2026-07-19
+> Bug: üres projekten (0 node) a `if (!g.N.length) return <placeholder>` korai visszatérés ELREJTETTE a vásznat + a chat-dockot → a Térképről el sem lehetett kezdeni a munkát. (Egybevág a map-only audit „node-genesis / kezdés a Térképről" pontjával.)
+- [x] ✅ **Fix** — a korai visszatérés **eltávolítva**; a teljes vászon + a 🤖 chat-dock + a radiális gyors-hozzáadás mostantól **üres projekten is renderel**. Üres állapotban egy **kis, nem-blokkoló üdvözlő kártya** (`.rmap-empty-hint`, a stage első gyermeke, `(!g.N.length)?…:null`) vezet: `onMouseDown` stopPropagation csak a kártyán (a vásznon máshol a dupla-katt továbbra is nyitja a radiálist), gyors-start gombok (szerkesztőnek): **✦ Első ötlet** (`ideaAtPos` a `stageVP`+`view` alapján a nézet közepére) · **📎 Adat feltöltése** (dock → Fájlok fül) · **💬 Asszisztens** (dock → Chat). A szöveg **read-only nézőnek** külön változat.
+- Üres-biztonság kódból igazolva: `fitView` guardolt (5285), `graph()` eddig is lefutott üresen, nincs `g.N[0]`/osztás a render-úton. **Adversariális review: 0 megerősített** (3 nit elvetve: néző-szöveg [javítva], kártya-mögötti dupla-katt, dupla ötlet-insert — mind ártalmatlan). **NINCS migráció/edge.**
+
 ## ✅ Dock-chat fájl-feltöltés + csatolás (P0) — 2026-07-19
 > Előzmény: a Map-dock „🤖 Asszisztens" chat vs. az Idea-fül `ChatPanel` parity-audit (→ `map-only-audit` artifact, `dock-chat` kategória).
 > Design: interaktív mockup 3 verzióval (`dock-upload-mockup`, favicon 📎) → V1 (inline, az Idea-chat mintája) jóváhagyva.
