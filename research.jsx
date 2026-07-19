@@ -1135,11 +1135,14 @@
     var gvS = useState('lista'), view = gvS[0], setView = gvS[1];   // P3: Lista | Mátrix (evidence-gap map)
     var mxS = useState(null), matrix = mxS[0], setMatrix = mxS[1];   // null=not loaded; {rows,cols,cells}; 'error'; 'none' (too few sources)
     var mbS = useState(false), mxBusy = mbS[0], setMxBusy = mbS[1];
+    var isS = useState(false), isSupervisor = isS[0], setIsSupervisor = isS[1];   // P5.4a: can the viewer approve gaps (supervisor)?
+    var icS = useState(false), impCap = icS[0], setImpCap = icS[1];   // gap_important column present (migration-84)?
     var aliveR = useRef(true);
     var promotingRef = useRef({});   // synchronous in-flight guard (gap id → 1) so a same-tick double-click can't double-insert
     var cellBusyRef = useRef(false);   // in-flight guard for "create gap from matrix cell" (the matrix stays mounted until insert resolves)
     useEffect(function () { aliveR.current = true; return function () { aliveR.current = false; }; }, []);
     useEffect(function () { loadGaps(); }, [props.projectId]);
+    useEffect(function () { sb.rpc('research_is_supervisor', { pid: props.projectId }).then(function (r) { if (aliveR.current && r && !r.error) setIsSupervisor(!!r.data); }, function () { }); }, [props.projectId]);
     function loadGaps() {
       var pid = props.projectId;
       sb.from('research_ideas').select('id,question,hypothesis,rationale,novelty,status,source,gap_type,evidence,addressed_by_idea_id').eq('project_id', pid).eq('source', 'gap').neq('status', 'rejected').order('novelty', { ascending: false, nullsFirst: false }).then(function (r) {
@@ -1155,6 +1158,13 @@
           return;
         }
         setTypedOk(true); setGaps((r && r.data) || []);
+        // P5.4a — separately fetch the gap_important flag (migration-84), gated: absent → no ⭐ (impCap stays false)
+        sb.from('research_ideas').select('id,gap_important').eq('project_id', pid).eq('source', 'gap').then(function (ir) {
+          if (!aliveR.current) return;
+          if (ir && ir.error) { setImpCap(false); return; }
+          setImpCap(true); var imp = {}; ((ir && ir.data) || []).forEach(function (x) { imp[x.id] = !!x.gap_important; });
+          setGaps(function (L) { return (L || []).map(function (g) { return Object.assign({}, g, { gap_important: !!imp[g.id] }); }); });
+        }, function () { });
       }, function () { if (aliveR.current) setGaps([]); });
     }
     function analyze() {
@@ -1201,6 +1211,20 @@
       if (nt === (g.gap_type || 'knowledge')) return;
       setGaps(function (L) { return (L || []).map(function (x) { return x.id === g.id ? Object.assign({}, x, { gap_type: nt }) : x; }); });   // optimistic
       sb.from('research_ideas').update({ gap_type: nt }).eq('id', g.id).then(function (r) { if (aliveR.current && r && r.error) { window.PRUI.toast('Típus mentése sikertelen: ' + r.error.message, { kind: 'error' }); loadGaps(); } });
+    }
+    // P5.4a — supervisor/editor "important" flag via the SECURITY DEFINER RPC (a read-only supervisor can approve);
+    // pre-migration-84 the RPC is absent → an editor falls back to a direct column update (mirrors research_step_signoff).
+    function toggleImportant(g) {
+      var nv = !g.gap_important;
+      setGaps(function (L) { return (L || []).map(function (x) { return x.id === g.id ? Object.assign({}, x, { gap_important: nv }) : x; }); });   // optimistic
+      sb.rpc('research_gap_set_important', { gap_id: g.id, val: nv }).then(function (r) {
+        if (!aliveR.current) return;
+        if (r && r.error) {
+          if (props.canEdit) { sb.from('research_ideas').update({ gap_important: nv }).eq('id', g.id).then(function (u) { if (aliveR.current && u && u.error) { window.PRUI.toast('Jelölés mentése sikertelen: ' + u.error.message, { kind: 'error' }); loadGaps(); } }); return; }
+          window.PRUI.toast('Jelölés nem engedélyezett: ' + r.error.message, { kind: 'error' }); loadGaps(); return;
+        }
+        if (props.onChanged) props.onChanged();
+      }, function () { if (aliveR.current && props.canEdit) sb.from('research_ideas').update({ gap_important: nv }).eq('id', g.id); });
     }
     // P5.3 — export the ranked gaps (+ the matrix if loaded) as Markdown for the dissertation
     function exportMd() {
@@ -1265,13 +1289,21 @@
     function createGapFromCell(row, col) {
       if (!props.canEdit || cellBusyRef.current) return;
       cellBusyRef.current = true;
-      var q = String(row) + ' × ' + String(col) + ' — feltáratlan terület: a szakirodalom nem fedi le ezt a metszetet.';
-      sb.from('research_ideas').insert({ project_id: props.projectId, source: 'gap', status: 'candidate', question: q, gap_type: 'population', evidence: [] }).select('id').maybeSingle().then(function (r) {
-        cellBusyRef.current = false; if (!aliveR.current) return;
-        if (r && r.error) { window.PRUI.toast('Nem sikerült: ' + r.error.message, { kind: 'error' }); return; }
-        window.PRUI.toast('✓ Rés létrehozva a(z) „' + String(row) + ' × ' + String(col) + '" cellából', { kind: 'success' });
-        setView('lista'); loadGaps(); if (props.onChanged) props.onChanged();
-      }, function () { cellBusyRef.current = false; if (aliveR.current) window.PRUI.toast('Hálózati hiba', { kind: 'error' }); });
+      function done() { cellBusyRef.current = false; if (!aliveR.current) return; window.PRUI.toast('✓ Rés létrehozva a(z) „' + String(row) + ' × ' + String(col) + '" cellából', { kind: 'success' }); setView('lista'); loadGaps(); if (props.onChanged) props.onChanged(); }
+      function template() {   // P4.1 fallback: a plain templated gap (used when the gap_cell edge action is unavailable)
+        var q = String(row) + ' × ' + String(col) + ' — feltáratlan terület: a szakirodalom nem fedi le ezt a metszetet.';
+        sb.from('research_ideas').insert({ project_id: props.projectId, source: 'gap', status: 'candidate', question: q, gap_type: 'population', evidence: [] }).select('id').maybeSingle().then(function (r) {
+          if (r && r.error) { cellBusyRef.current = false; if (aliveR.current) window.PRUI.toast('Nem sikerült: ' + r.error.message, { kind: 'error' }); return; }
+          done();
+        }, function () { cellBusyRef.current = false; if (aliveR.current) window.PRUI.toast('Hálózati hiba', { kind: 'error' }); });
+      }
+      // P5.2b — prefer an AI-generated typed gap for the cell; on any failure (old edge → 400 unknown action) fall back to the template
+      sb.functions.invoke('research-ai', { body: { action: 'gap_cell', project_id: props.projectId, row: String(row), col: String(col) } }).then(function (res) {
+        if (!aliveR.current) { cellBusyRef.current = false; return; }
+        var d = res && res.data;
+        if ((res && res.error) || !d || d.error || !(d.ideas && d.ideas.length)) { template(); return; }
+        done();
+      }, function () { template(); });
     }
 
     function gapMatrixEl() {
@@ -1304,7 +1336,7 @@
           props.canEdit ? h('button', { className: 'gp-bigbtn', disabled: busy, onClick: analyze }, busy ? ('✨ AI elemez… ' + prog + '%') : '✨ Elemezd a kutatási réseket') : h('div', { className: 'muted', style: { fontSize: 13 } }, 'Még nincs feltárt kutatási rés.')));
     }
     var present = {}; gaps.forEach(function (g) { present[g.gap_type || 'knowledge'] = 1; });
-    var list = gaps.filter(function (g) { return !off[g.gap_type || 'knowledge']; });
+    var list = gaps.filter(function (g) { return !off[g.gap_type || 'knowledge']; }).slice().sort(function (a, b) { return (b.gap_important ? 1 : 0) - (a.gap_important ? 1 : 0); });   // important gaps first (stable → keeps novelty order otherwise)
     // P5.4b — flag likely-duplicate gaps (conservative word-overlap heuristic; badge only, non-destructive)
     var dupOf = {}, _seen = [];
     gaps.forEach(function (g, gi) {
@@ -1333,10 +1365,12 @@
       })),
       h('div', { className: 'gp-list' }, list.map(function (g) {
         var t = gapType(g.gap_type || 'knowledge'), ev = Array.isArray(g.evidence) ? g.evidence : [], promoted = !!g.addressed_by_idea_id;
-        return h('div', { className: 'gcard', key: g.id, style: { borderLeftColor: t.c } },
+        var canFlag = impCap && (props.canEdit || isSupervisor);
+        return h('div', { className: 'gcard' + (g.gap_important ? ' important' : ''), key: g.id, style: { borderLeftColor: t.c } },
           h('div', { className: 'gcard-top' },
             props.canEdit ? h('select', { className: 'gbadge-sel', style: { background: t.c }, value: g.gap_type || 'knowledge', title: 'Rés-típus módosítása', onChange: function (e) { updateGapType(g, e.target.value); } }, GAP_TYPES.map(function (tt) { return h('option', { key: tt.slug, value: tt.slug }, tt.lab); })) : h('span', { className: 'gbadge', style: { background: t.c } }, t.lab),
             dupOf[g.id] ? h('span', { className: 'gdup', title: 'Tartalmilag hasonló a(z) #' + dupOf[g.id] + ' réshez — lehet duplikátum' }, '⚠ hasonló #' + dupOf[g.id]) : null,
+            canFlag ? h('button', { className: 'gstar' + (g.gap_important ? ' on' : ''), title: g.gap_important ? 'Fontos jelölés levétele' : 'Fontosnak jelöl (konzulens/szerkesztő)', onClick: function () { toggleImportant(g); } }, g.gap_important ? '⭐' : '☆') : (g.gap_important ? h('span', { className: 'gstar on', title: 'Fontos (konzulens jelölte)' }, '⭐') : null),
             g.novelty != null ? h('span', { className: 'gnov' }, 'Újdonság ', h('span', { className: 'gnov-bar' }, h('i', { style: { width: g.novelty + '%' } })), ' ' + g.novelty) : null),
           h('div', { className: 'gstmt' }, g.question),
           g.rationale ? h('div', { className: 'gwhy' }, h('b', null, 'Miért rés? '), g.rationale) : null,

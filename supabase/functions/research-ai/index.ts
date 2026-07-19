@@ -33,7 +33,7 @@ Deno.serve(async (req) => {
       Deno.env.get('SUPABASE_ANON_KEY')!,
       { global: { headers: { Authorization: auth } } },
     );
-    const { action = 'gap', project_id, canvas, text } = await req.json().catch(() => ({}));
+    const { action = 'gap', project_id, canvas, text, row, col } = await req.json().catch(() => ({}));
     if (!project_id) return json({ error: 'project_id required' }, 400);
     if (!ANTHROPIC_KEY) return json({ error: 'ANTHROPIC_API_KEY not set on the function' }, 503);
 
@@ -128,6 +128,27 @@ Deno.serve(async (req) => {
       if (lib.length < 3) return json({ ok: true, matrix: null, reason: 'too_few' });
       const matrix = await askClaudeMatrix(proj, lib, userModel, _lang);
       return json({ ok: true, matrix: matrix, count: lib.length });
+    }
+    // P5.2b — generate ONE typed gap for a specific matrix cell (method×domain). Read-only inputs; inserts one gap.
+    if (action === 'gap_cell') {
+      const rlab = String(row || '').slice(0, 100), clab = String(col || '').slice(0, 100);
+      if (!rlab || !clab) return json({ error: 'row and col required' }, 400);
+      const { data: csrc } = await sb.from('research_sources')
+        .select('title,year,abstract').eq('project_id', project_id).order('cited_by', { ascending: false, nullsFirst: false }).limit(40);
+      const TYPES = ['evidence', 'knowledge', 'methodological', 'population', 'theoretical', 'practical', 'contradictory'];
+      const one = await askClaudeCell(proj, csrc || [], rlab, clab, userModel, _lang);
+      const gt = (one && TYPES.indexOf(String(one.gap_type || '').toLowerCase().trim()) >= 0) ? String(one.gap_type).toLowerCase().trim() : 'population';
+      const rowIns: any = {
+        project_id, source: 'gap', status: 'candidate', gap_type: gt, evidence: [],
+        question: String((one && one.statement) || (rlab + ' × ' + clab + ' — feltáratlan terület: a szakirodalom nem fedi le ezt a metszetet.')).slice(0, 600),
+        rationale: (one && one.rationale) ? String(one.rationale).slice(0, 1000) : null,
+        hypothesis: (one && one.suggested_question) ? String(one.suggested_question).slice(0, 800) : null,
+        novelty: (one && Number.isFinite(one.novelty)) ? Math.max(0, Math.min(100, Math.round(one.novelty))) : null,
+      };
+      let res = await sb.from('research_ideas').insert(rowIns).select('id,question,source,novelty,status,gap_type,evidence,created_at');
+      if (res.error && /gap_type|evidence|column/i.test(res.error.message)) { const { gap_type, evidence, ...bare } = rowIns; res = await sb.from('research_ideas').insert(bare).select('id,question,source,novelty,status,created_at'); }
+      if (res.error) return json({ error: 'insert failed: ' + res.error.message }, 403);
+      return json({ ok: true, ideas: res.data || [] });
     }
 
     // allow-list the generic (writing) gap path — only 'gap' (default) and 'ideas' reach it. Any unrecognized action
@@ -324,4 +345,32 @@ Return ONLY JSON, no prose: {"rows":["..."],"cols":["..."],"cells":[[<int>, ...]
     if (o && Array.isArray(o.rows) && Array.isArray(o.cols) && Array.isArray(o.cells)) return o;
   } catch { /* fall through */ }
   return null;
+}
+
+// P5.2b — one typed gap for a single method×domain matrix cell (action='gap_cell').
+async function askClaudeCell(proj: any, sources: any[], row: string, col: string, model: string, lang: 'en' | 'hu'): Promise<any> {
+  const lib = sources.map((s, i) => `[${i + 1}] ${s.title} (${s.year ?? 'n.d.'})`).join('\n');
+  const prompt =
+`You articulate ONE precise research gap for a specific cell of an evidence-gap map.
+
+PROJECT: ${proj.title}${proj.goal ? ' — ' + proj.goal : ''}
+Field: ${proj.field ?? '—'}
+
+The evidence-gap-map cell is EMPTY (no literature covers it): method/approach = "${row}", domain/context = "${col}".
+
+LITERATURE (titles):
+${lib || '(none)'}
+
+State the single, concrete research gap this empty cell represents — why applying "${row}" in the "${col}" context is unexplored, and what closing it would require. Classify it by ONE slug: evidence|knowledge|methodological|population|theoretical|practical|contradictory (usually methodological or population for an empty method×domain cell).
+
+Return ONLY JSON: {"gap_type":"<slug>","statement":"the gap in one sentence","rationale":"why this cell is a gap","novelty":0-100,"suggested_question":"a concrete research question that would close it"}` + langDirective(lang);
+  const r = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'x-api-key': ANTHROPIC_KEY!, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+    body: JSON.stringify({ model, max_tokens: 700, messages: [{ role: 'user', content: prompt }] }),
+  });
+  const j = await r.json();
+  const text = (j?.content?.[0]?.text) || '';
+  const m = text.match(/\{[\s\S]*\}/);
+  try { return m ? JSON.parse(m[0]) : null; } catch { return null; }
 }

@@ -224,9 +224,14 @@
   **P5.2a** szerkeszthető rés-típus (legördülő a 7 típusból a kártyán; optimista + hibánál visszaáll); **P5.3** Markdown
   **export** (rangsorolt rés-lista + mátrix; pipe/újsor escapelve, `cells`-guard); **P5.4b** dedup-jelzés („⚠ hasonló #N"
   konzervatív Jaccard-heurisztika, nem destruktív). Review: 1 minor javítva (export `cells`-guard + escape).
-- [ ] ⏳ **P5 Tier 2 — deploy/migráció-igényes** — **P5.2b** AI-cellagap (új edge `action='gap_cell'` → egy tipizált rés a
-  cellához, a sablon helyett; **edge-deploy**); **P5.4a** konzulensi rés-jóváhagyás („⭐ Fontos", **migration-84** + SECURITY
-  DEFINER RPC a lépés-sign-off mintájára, hogy a témavezető írás-jog nélkül is jelölhessen).
+- [x] ✅ **P5 Tier 2 — AI-cellagap + konzulensi jóváhagyás** (deploy/migráció-igényes, gracefully degradál):
+  **P5.2b** — új edge `action='gap_cell'` (`askClaudeCell` → egy tipizált rés a cellához) + a `createGapFromCell` **előbb az
+  edge-et** hívja, hiba/nem-támogatott esetben a **sablonra** esik vissza (a jelenlegi allow-listás edge-en `gap_cell`→400→sablon,
+  nincs write-on-view). **P5.4a** — **migration-84** (`research_ideas.gap_important` + `research_gap_set_important` SECURITY
+  DEFINER RPC, admin/writer/**supervisor**) + GapPanel: `isSupervisor` (RPC-ből), `impCap` (gated `gap_important` fetch), a
+  kártyán **⭐/☆** kapcsoló (szerkesztő VAGY konzulens; RPC + editor-fallback), a fontos rések **elöl** + „important" kiemelés.
+  Adversariális review után. **⚠️ Aktiváláshoz: `supabase functions deploy research-ai` (gap_cell) + `migration-84` (⭐).**
+  Addig graceful: cellagap = sablon, ⭐ rejtve.
 
 ## Hátralévő (jövő) — Phase 6+
 - [ ] 🔴 **Teljes karakter-szintű CRDT/Yjs** — egyidejű azonos-szekció gépelés valós idejű merge-dzsel.
