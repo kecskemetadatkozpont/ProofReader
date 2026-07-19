@@ -4734,6 +4734,7 @@
     var datS = useState([]), dAttach = datS[0], setDAttach = datS[1];   // dock-chat pending attachments (uploaded files / library sources) for the next message
     var ddzS = useState(false), dDrop = ddzS[0], setDDrop = ddzS[1];   // drag files over the dock → show the dropzone overlay
     var dpkS = useState(false), dPick = dpkS[0], setDPick = dpkS[1];   // the attach picker (AttachModal) is open
+    var dtbS = useState('chat'), dkTab = dtbS[0], setDkTab = dtbS[1];   // dock body tab: 'chat' | 'files' (in-dock SessionFileBrowser — P1)
     // safety: any aborted drag anywhere clears the dock dropzone so it can't stay stuck over the chat
     useEffect(function () { if (!dDrop) return; function reset() { setDDrop(false); } window.addEventListener('dragend', reset); window.addEventListener('drop', reset); return function () { window.removeEventListener('dragend', reset); window.removeEventListener('drop', reset); }; }, [dDrop]);
     var dockRef = useRef(null);   // the open dock element (for edge-drag resize geometry)
@@ -6975,11 +6976,15 @@
           h('div', { className: 'rmap-dock-rz rmap-dock-rz-l', title: 'Átméretezés', onMouseDown: function (e) { startDockResize(e, 'w'); } }),
           h('div', { className: 'rmap-dock-rz rmap-dock-rz-t', title: 'Átméretezés', onMouseDown: function (e) { startDockResize(e, 'h'); } }),
           h('div', { className: 'rmap-dock-rz rmap-dock-rz-tl', title: 'Átméretezés', onMouseDown: function (e) { startDockResize(e, 'wh'); } }),
-          h('div', { className: 'rmap-dock-h' }, h('span', null, '🤖 Asszisztens'),
+          h('div', { className: 'rmap-dock-h' },
+            h('div', { className: 'rmap-dock-tabs' },
+              h('button', { className: 'rmap-dock-tab' + (dkTab === 'chat' ? ' on' : ''), title: 'Beszélgetés', onClick: function () { setDkTab('chat'); } }, '💬 Chat'),
+              h('button', { className: 'rmap-dock-tab' + (dkTab === 'files' ? ' on' : ''), title: 'Projekt-fájlok — böngészés, előnézet, letöltés, csatolás', onClick: function () { setDkTab('files'); } }, '🗂 Fájlok')),
             boundFrame ? h('button', { className: 'rmap-dock-framepill', title: 'Keret leválasztása a chatről', onClick: function () { setBoundFrame(null); } }, '🖼️ ' + String(boundFrame.title || 'Keret').slice(0, 18), h('span', { className: 'x' }, '✕')) : null,
             h('div', { style: { display: 'flex', gap: 2, marginLeft: 'auto' } },
             h('button', { className: 'rmap-dock-x', title: dkFull ? 'Eredeti magasság' : 'Teljes magasság', onClick: toggleDockFull }, dkFull ? '⤡' : '⤢'),
             h('button', { className: 'rmap-dock-x', title: 'Összecsukás', onClick: function () { setDkOpen(false); try { localStorage.setItem('pr-rmap-dock', '0'); } catch (e) { } } }, '▾'))),
+          (dkTab !== 'files') ? h(React.Fragment, null,
           h('div', { className: 'rmap-dock-msgs', ref: dScroll }, dMsgs.map(function (mm, i) {
             return [
               h('div', { key: 'm' + i, className: 'rmap-dock-msg ' + (mm.role === 'user' ? 'u' : 'a') }, mm.text),
@@ -7015,6 +7020,7 @@
             h('textarea', { rows: 1, value: dInput, placeholder: boundFrame ? ('„' + String(boundFrame.title || 'Keret').slice(0, 20) + '" keretbe — pl. hozz létre kutatási réseket…') : (dkMode === 'action' && sn && sn.t === 'step') ? 'Mit tegyek e lépés után? (pl. „tegyél be egy validációs lépést")' : sn ? 'Kérdezz vagy adj utasítást a becsatolt kártyáról…' : 'Írj utasítást vagy kérdést… (jelölj ki egy kártyát a becsatoláshoz)', disabled: dBusy, onChange: function (e) { setDInput(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); dkPrimary(); } } }),
             h('button', { className: 'btn' + (recOn ? ' rmap-mic-on' : ''), style: { fontSize: 14, padding: '0 9px', flex: 'none' }, disabled: dBusy, title: recOn ? 'Felvétel leállítása' : 'Hangbevitel — diktálás (magyar)', onClick: toggleMic }, recOn ? '⏺' : '🎤'),
             h('button', { className: 'btn pri', style: { fontSize: 14, padding: '0 12px', flex: 'none' }, disabled: dBusy || !dInput.trim() || (dkMode === 'action' && !(sn && sn.t === 'step')), onClick: dkPrimary }, dkMode === 'action' ? '⚡' : '➤')))
+          : h('div', { className: 'rmap-dock-files' }, h(SessionFileBrowser, { projectId: props.projectId, version: bump, canEdit: props.canEdit, authorId: props.authorId, onAttach: function (a) { setDAttach(function (p) { return p.concat([a]); }); if (window.PRUI) window.PRUI.toast('📎 Csatolva: ' + String(a.label || a.name || 'fájl').slice(0, 40), { kind: 'ok' }); } })))
           : h('button', { className: 'rmap-dock-fab', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function () { setDkOpen(true); try { localStorage.setItem('pr-rmap-dock', '1'); } catch (e) { } } }, '🤖 Asszisztens')) : null),
       // dock attach picker (library source / publication file / LaTeX / upload) — the same reusable modal the Idea chat uses
       (props.canEdit && dPick) ? h(AttachModal, { projectId: props.projectId, sources: props.sources, fileOwnerId: props.fileOwnerId, authorId: props.authorId, onPick: function (a) { setDAttach(function (p) { return p.concat([a]); }); }, onClose: function () { setDPick(false); } }) : null,

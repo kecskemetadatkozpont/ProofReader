@@ -269,7 +269,14 @@
     turn viszi, boundFrame/override nem). A `PipelineCanvas` mount most `sources` + `fileOwnerId` propot is kap.
   - **Hook-biztos:** 3 új useState (`dAttach`/`dDrop`/`dPick`) + a reset-effect **a guardok előtt**.
   - **Adversariális review: 0 találat** (2 reviewer × Read+Bash, hooks/upload-parity/materializáció mind tiszta). **NINCS migráció/edge.**
-- [ ] ⏳ **P1** — mini **fájl-böngésző/vizualizáció** a dockból (a `FileManager` újrahasznosítása, előnézet/letöltés). **P1+** — a picker „Feltöltés" ága is hozzon létre `research_files` sort (most attach-only, mint az Idea-chatnél) · dock-transzkript hidratálás + streaming · ✨enhance/ötlet-javaslat.
+- [x] ✅ **P1 (fül-váltás)** — a dock fejlécében **💬 Chat / 🗂 Fájlok** fül (`dkTab` state a guardok előtt); a Fájlok fülön a
+  meglévő **`SessionFileBrowser`** (704) nyílik a dock-törzsben (a chat-törzs `React.Fragment`-be csomagolva, `(dkTab!=='files')?…:filesDiv`).
+  Fa + típus-érzékeny **előnézet** (md renderelve, CSV-tábla, kép, PDF signed-URL, kód) + saját feltöltés/letöltés/átnevezés/törlés/**csatolás**.
+  `version=bump` → a P0-feltöltés (`setBump`) után a lista frissül; `onAttach`→`dAttach` (+toast) → a fából választott fájl a chat csatolmánya;
+  `onAddIdea` szándékosan kihagyva (a FileIntake/selection-popup gracefully rejtve). CSS: `.rmap-dock-files` + `.filebrowser` felülírás
+  (`flex:1; width:auto !important` — legyőzi a `256px/flex:none` bázist + az inline width-et), az `nd().fbx` fa+viewer flex-oszlop kitölt.
+  A böngésző a dock **⤢ teljes-magasságával** kinyújtható. **Adversariális review: 0 találat** (2 reviewer × Read+Bash, hooks/wrap/integráció tiszta). **NINCS migráció/edge.**
+- [ ] ⏳ **P1+/P2** — a picker „Feltöltés" ága is hozzon létre `research_files` sort (most attach-only) · dock-transzkript hidratálás a `research_messages`-ből + streaming · ✨enhance/ötlet-javaslat · böngésző-törlés/átnevezés is bumpolja a térképet.
 
 ## ✅ macOS-Dock nagyítás — kártya-toolbar + Map-menüsor (egy közös réteg) — 2026-07-19
 > 2 jóváhagyott mockup (`dock-toolbar-mockup` V1 kártya · `map-dock-mockup` középre-igazított menüsor), egyben implementálva.
