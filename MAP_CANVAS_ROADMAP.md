@@ -233,6 +233,23 @@
   Adversariális review után. **⚠️ Aktiváláshoz: `supabase functions deploy research-ai` (gap_cell) + `migration-84` (⭐).**
   Addig graceful: cellagap = sablon, ⭐ rejtve.
 
+## 🚧 Keretbe csoportosítás (frame-as-group) — 2026-07-19
+> Feltárás: 2-ágú (csoportosítás-UX · keret-mint-konténer) + kód-megalapozás design-workflow → szintézis → interaktív
+> mockup (`group-frame-mockup`, favicon ▢). **A kérés:** több kártya kijelölése → egy gomb keretet húz köréjük, és a
+> keretet fogva az egész csoport mozog. **Kulcs-döntés: tartalmazás (center-inside), NINCS séma/migráció** — a keret marad
+> tiszta `research_map_frames` téglalap.
+- [x] ✅ **P0 — csoportosítás** — **`▢+`** gomb a meglévő multi-select group-toolbaron (`.rmap-groupbar`, csak >1 kijelöltnél;
+  `framesCap && canEdit`-gated) + **⌘/Ctrl+G** (saját useEffect, `[msel,framesCap,focus,tour]` deps, typing-guard + preventDefault,
+  a guardok ELŐTT). `groupIntoFrame()`: méret-tudatos befoglaló doboz (`nodeW/nodeH`, pad 24 / fejléc 44), `FRAME_COLORS` rotáció,
+  `research_map_frames` insert + `setFrames` dedup + toast, `setMsel({})`. A 🗑 tooltip: „Keret törlése (a kártyák maradnak)" —
+  a szétbontás ingyen (nincs tagság).
+- [x] ✅ **P1 — keret-mint-konténer mozgatás** — a `startFrameDrag` move-ága most a benne lévő kártyákat is viszi: mousedownkor
+  **tag-snapshot** (`inFrame` = center-inside, `!mapHidden`) + base-pozíciók a `frdrag` refre; a mozgásban a **meglévő `gLive`**
+  élő-renderre kötve (`setGLive({dx,dy,base})` → a `graph()` 5184-es sora tolja a kártyákat, nulla új render-kód); droppoláskor
+  `framePatch` + `setLayout` batch + `persistPos` tagonként (a `setGLive(null)` ELŐTT — nincs snap-back), + realtime echo-guard a
+  vitt kártyákra. **A resize semmit sem mozgat.** A rés-fészek + fázis-lane keretek **öröklik** a konténer-mozgatást. Adversariális review után.
+- [ ] ⏳ **P1.5** — shift = kitűzött kártya kihagyása · fejléc-hover → a mozgó kártyák pulzálnak (előnézet) · dedup-guard (ha már van keret e köré).
+
 ## Hátralévő (jövő) — Phase 6+
 - [ ] 🔴 **Teljes karakter-szintű CRDT/Yjs** — egyidejű azonos-szekció gépelés valós idejű merge-dzsel.
   A jelenlegi soft-lock + LWW ennek a könnyűsúlyú, függőség-mentes alternatívája; a teljes CRDT nagy

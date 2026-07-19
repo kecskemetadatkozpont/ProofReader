@@ -4895,6 +4895,7 @@
           var nw = p.new; if (!nw || !nw.node_id) return;
           if (ndrag.current && ndrag.current.id === nw.node_id) return;   // ignore the echo of my own in-flight drag
           if (nrzRef.current && nrzRef.current.id === nw.node_id) return;   // ignore the echo of my own in-flight card resize
+          if (frdrag.current && frdrag.current.cids && frdrag.current.cids.indexOf(nw.node_id) >= 0) return;   // ignore echo of cards being carried by my in-flight frame drag
           setLayout(function (L) { var m = Object.assign({}, L); m[nw.node_id] = { x: nw.x, y: nw.y, hidden: !!nw.hidden, pinned: !!nw.pinned, card_w: nw.card_w, card_h: nw.card_h }; return m; });
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'research_map_edges', filter: 'project_id=eq.' + pid }, function (p) {
@@ -4981,6 +4982,19 @@
       window.addEventListener('keydown', onKey);
       return function () { window.removeEventListener('keydown', onKey); };
     }, [focus, tour]);
+    // ⌘/Ctrl+G — group the current multi-selection into a frame (own effect so `msel` isn't a stale closure). Guards typing + framesCap.
+    useEffect(function () {
+      function onGkey(e) {
+        if ((e.metaKey || e.ctrlKey) && (e.key === 'g' || e.key === 'G')) {
+          var el = document.activeElement, tg = (el && el.tagName) || '';
+          if (tg === 'INPUT' || tg === 'TEXTAREA' || tg === 'SELECT' || (el && el.isContentEditable)) return;
+          if (!(props.canEdit && framesCap) || Object.keys(msel).length < 2) return;
+          e.preventDefault(); groupIntoFrame();
+        }
+      }
+      window.addEventListener('keydown', onGkey);
+      return function () { window.removeEventListener('keydown', onGkey); };
+    }, [msel, framesCap, focus, tour]);
     useEffect(function () { return function () { cancelFly(); if (tourT.current) clearTimeout(tourT.current); }; }, []);   // stop the tween/tour timer on unmount
     useEffect(function () {   // invite user-search (debounced), only while the Share modal is open
       if (!shareOpen || !invQ.trim()) { setInvRes([]); return; }
@@ -5532,6 +5546,25 @@
     function groupPin() { Object.keys(msel).forEach(function (id) { var n = g.by[id]; if (n) nodeSetFlag(n, 'pinned', true); }); }
     // ---- Map frames (named regions / phase lanes) — migration-71. Frames live in WORLD coords (pan/zoom with the canvas). ----
     var FRAME_COLORS = ['slate', 'violet', 'cyan', 'amber', 'green', 'rose'];
+    // a card "belongs" to a frame if its CENTER is inside the frame rectangle (world coords) — pure geometry, no schema.
+    function inFrame(n, f) { var cx = n.x + nodeW(n) / 2, cy = n.y + nodeH(n) / 2; return cx >= f.x && cx <= f.x + f.w && cy >= f.y && cy <= f.y + f.h; }
+    // group the current multi-selection into a frame around their real bounding box (a draggable group container)
+    function groupIntoFrame() {
+      if (!props.canEdit || !framesCap) return;
+      var ids = Object.keys(msel).filter(function (id) { return g.by[id] && !g.by[id].mapHidden; });
+      if (ids.length < 2) { window.PRUI.toast('Legalább két látható kártyát jelölj ki', { kind: 'info' }); return; }
+      var pad = 24, hdr = 44, minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      ids.forEach(function (id) { var n = g.by[id]; if (n.x < minX) minX = n.x; if (n.y < minY) minY = n.y; if (n.x + nodeW(n) > maxX) maxX = n.x + nodeW(n); if (n.y + nodeH(n) > maxY) maxY = n.y + nodeH(n); });
+      var fx = Math.round(minX - pad), fy = Math.round(minY - pad - hdr);
+      var fw = Math.max(140, Math.round((maxX - minX) + 2 * pad)), fh = Math.max(90, Math.round((maxY - minY) + 2 * pad + hdr));
+      var color = FRAME_COLORS[frames.length % FRAME_COLORS.length];
+      sb.from('research_map_frames').insert({ project_id: props.projectId, title: 'Csoport', x: fx, y: fy, w: fw, h: fh, color: color }).select('id,title,x,y,w,h,color').single().then(function (r) {
+        if (!alive.current) return;
+        if (r && r.error) { window.PRUI.toast('Keret létrehozása sikertelen: ' + r.error.message, { kind: 'error' }); return; }
+        if (r && r.data) { setFrames(function (F) { return F.some(function (f) { return f.id === r.data.id; }) ? F : F.concat([r.data]); }); window.PRUI.toast('Keret létrehozva — húzd a fejlécét a csoport mozgatásához', { kind: 'success' }); }
+      });
+      setMsel({});
+    }
     // frameCreate(wx,wy): CENTER a new frame on the given world point (radial add-menu); with no args → the viewport centre (▦ button).
     function frameCreate(wx, wy) {
       if (!props.canEdit || !framesCap) return;
@@ -5871,7 +5904,11 @@
     function startFrameDrag(e, f, mode) {   // mode: 'move' (titlebar) | 'resize' (corner handle)
       if (e.button !== 0 || !props.canEdit) return; e.stopPropagation();
       var sx = e.clientX, sy = e.clientY, k = view.k || 1, ox = f.x, oy = f.y, ow = f.w, oh = f.h;
-      frdrag.current = { id: f.id, moved: false, geo: null };
+      // move-mode = drag the whole group: snapshot the contained cards (center-inside) + their base positions ONCE at
+      // mousedown, then carry them via the SAME gLive live-render seam the selected-card group-drag uses. resize carries nothing.
+      var carry = (mode === 'move') ? g.N.filter(function (n) { return !n.mapHidden && inFrame(n, f); }) : [];
+      var cbase = {}; carry.forEach(function (n) { cbase[n.id] = { x: n.x, y: n.y }; });
+      frdrag.current = { id: f.id, moved: false, geo: null, mode: mode, cids: carry.map(function (n) { return n.id; }), cbase: cbase, ddx: 0, ddy: 0 };
       var fmv = function (ev) {
         if (!frdrag.current) return; if (ev.buttons === 0) { ffin(); return; }
         if (Math.abs(ev.clientX - sx) > 2 || Math.abs(ev.clientY - sy) > 2) {
@@ -5879,13 +5916,18 @@
           frdrag.current.moved = true;
           frdrag.current.geo = (mode === 'move') ? { id: f.id, x: ox + ddx, y: oy + ddy, w: ow, h: oh } : { id: f.id, x: ox, y: oy, w: Math.max(140, ow + ddx), h: Math.max(90, oh + ddy) };
           setFrLive(frdrag.current.geo);
+          if (mode === 'move') { frdrag.current.ddx = ddx; frdrag.current.ddy = ddy; if (frdrag.current.cids.length) setGLive({ dx: ddx, dy: ddy, base: cbase }); }   // the contained cards follow (graph() applies gLive)
         }
       };
       var ffin = function () {
         var d = frdrag.current; if (!d) return; frdrag.current = null;
         window.removeEventListener('mousemove', fmv); window.removeEventListener('mouseup', fup); window.removeEventListener('blur', ffin);
-        setFrLive(null);
         if (d.moved && d.geo) framePatch(d.id, { x: d.geo.x, y: d.geo.y, w: d.geo.w, h: d.geo.h });
+        if (d.moved && d.mode === 'move' && d.cids.length) {   // commit the carried cards BEFORE clearing gLive (else a 1-frame snap-back)
+          setLayout(function (L) { var m = Object.assign({}, L); d.cids.forEach(function (id) { m[id] = Object.assign({}, m[id], { x: d.cbase[id].x + d.ddx, y: d.cbase[id].y + d.ddy }); }); return m; });
+          d.cids.forEach(function (id) { persistPos(id, d.cbase[id].x + d.ddx, d.cbase[id].y + d.ddy); });
+        }
+        setGLive(null); setFrLive(null);
       };
       var fup = function () { ffin(); };
       window.addEventListener('mousemove', fmv); window.addEventListener('mouseup', fup); window.addEventListener('blur', ffin);
@@ -6585,7 +6627,7 @@
                   h('button', { className: (boundFrame && boundFrame.id === f.id) ? 'on' : '', title: 'Chat a kerethez kötése — a dockba írt parancs ide hoz létre objektumokat', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); if (boundFrame && boundFrame.id === f.id) { setBoundFrame(null); } else { setBoundFrame(f); setSel(null); setMsel({}); setSelEdge(null); setDkOpen(true); } } }, '💬'),
                   h('button', { title: 'Átszínezés', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); frameRecolor(f); } }, '🎨'),
                   h('button', { title: 'Átnevezés', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); frameRename(f); } }, '✎'),
-                  h('button', { title: 'Törlés', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); frameDelete(f.id); } }, '🗑')) : null),
+                  h('button', { title: 'Keret törlése (a kártyák maradnak)', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); frameDelete(f.id); } }, '🗑')) : null),
               (props.canEdit && frGenOpen[f.id]) ? h('div', { className: 'rmap-frame-gen', onMouseDown: function (e) { e.stopPropagation(); } },
                 h('input', { className: 'rmap-frame-geni', autoFocus: true, value: frGen[f.id] || '', placeholder: '✨ Generálj ide…', disabled: dBusy, onChange: function (e) { var v = e.target.value; setFrGen(function (M) { var m = Object.assign({}, M); m[f.id] = v; return m; }); }, onKeyDown: function (e) { if (e.key === 'Enter') { e.preventDefault(); frameGenerate(f, frGen[f.id]); } if (e.key === 'Escape') { setFrGenOpen(function (M) { var m = Object.assign({}, M); delete m[f.id]; return m; }); } } }),
                 h('button', { title: 'Generálás', disabled: dBusy || !String(frGen[f.id] || '').trim(), onClick: function () { frameGenerate(f, frGen[f.id]); } }, '➤')) : null,
@@ -6655,6 +6697,7 @@
           (mapFlags && props.canEdit) ? h('button', { title: 'A kijelöltek kitűzése', onClick: groupPin }, '📌') : null,
           (mapFlags && props.canEdit) ? h('button', { title: 'A kijelöltek elrejtése a térképről', onClick: groupHide }, '🙈') : null,
           h('button', { title: 'A kijelölés exportálása PNG-be', onClick: exportSelection }, '⤓'),
+          (framesCap && props.canEdit) ? h('button', { title: 'Kijelöltek keretbe csoportosítása (⌘/Ctrl+G)', onClick: groupIntoFrame }, '▢+') : null,
           h('button', { title: 'Kijelölés törlése', onClick: function () { setMsel({}); } }, '✕')) : null,
         run && runActive ? h('div', { className: 'rmap-runbar' + (run.status === 'awaiting_approval' ? ' gate' : '') },
           h('span', { className: 'rmap-rb-dot' }), h('b', null, '⚡ Autopilot'),
