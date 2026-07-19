@@ -248,7 +248,10 @@
   élő-renderre kötve (`setGLive({dx,dy,base})` → a `graph()` 5184-es sora tolja a kártyákat, nulla új render-kód); droppoláskor
   `framePatch` + `setLayout` batch + `persistPos` tagonként (a `setGLive(null)` ELŐTT — nincs snap-back), + realtime echo-guard a
   vitt kártyákra. **A resize semmit sem mozgat.** A rés-fészek + fázis-lane keretek **öröklik** a konténer-mozgatást. Adversariális review után.
-- [ ] ⏳ **P1.5** — shift = kitűzött kártya kihagyása · fejléc-hover → a mozgó kártyák pulzálnak (előnézet) · dedup-guard (ha már van keret e köré).
+- [x] ✅ **P1.5** — **shift = kitűzött kihagyása** (`!(e.shiftKey && n.mapPinned)` a carry-szűrőben) · **fejléc-hover előnézet**
+  (`hovFrame` useState + a header onMouseEnter/Leave → a mozgó kártyák `.rmap-carry-preview` szaggatott pulzus, reduced-motion-guard;
+  a húzás alatt elnyomva) · **dedup-guard** (ha már van keret e bbox köré [±10px] → `framePatch` frissítés + toast, nem új keret).
+  Adversariális review után.
 
 ## Hátralévő (jövő) — Phase 6+
 - [ ] 🔴 **Teljes karakter-szintű CRDT/Yjs** — egyidejű azonos-szekció gépelés valós idejű merge-dzsel.
