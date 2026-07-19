@@ -1310,6 +1310,19 @@
     .gstatus { margin-left: auto; font-size: 11px; font-weight: 700; color: var(--muted); display: inline-flex; align-items: center; gap: 6px; }
     .gdot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok, #17a34a); }
     .gstatus.promoted { color: var(--accent); } .gstatus.promoted .gdot { background: var(--accent); }
+    /* P3 — Lista|Mátrix toggle + evidence-gap matrix (EGM) */
+    .gp-viewtog { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; margin-left: 6px; }
+    .gp-viewtog button { border: none; background: var(--surface); color: var(--muted); font-family: inherit; font-size: 11.5px; font-weight: 650; padding: 4px 12px; cursor: pointer; }
+    .gp-viewtog button.on { background: var(--accent); color: #fff; }
+    .gp-egm { padding: 16px; overflow-x: auto; }
+    .gp-egm .egm { border-collapse: separate; border-spacing: 7px; margin: 0 auto; }
+    .gp-egm .egm th { font-size: 11px; font-weight: 700; color: var(--muted); padding: 4px 8px; text-align: center; max-width: 130px; }
+    .gp-egm .egm th.rowh { text-align: right; white-space: nowrap; }
+    .egm-cell { min-width: 74px; height: 48px; border-radius: 9px; display: grid; place-items: center; font-family: ui-monospace, monospace; font-size: 15px; font-weight: 800; border: 1px solid var(--line); color: var(--ink); }
+    .egm-cell.gapcell { border: 2px dashed #d6455f; background: color-mix(in srgb, #d6455f 10%, transparent); color: #d6455f; }
+    .egm-note { margin-top: 12px; font-size: 11.5px; color: var(--muted); text-align: center; }
+    /* P1.5 — novelty ring on a gap node */
+    .rmap-gap-ring { position: absolute; top: 3px; right: 3px; z-index: 3; line-height: 0; filter: drop-shadow(0 1px 2px rgba(0,0,0,.22)); }
     .rmap-dock-mode { display: flex; gap: 6px; padding: 9px 12px 0; }
     .rmap-dock-modebtn { border: 1px solid var(--line); background: var(--surface); color: var(--muted); font-family: inherit; font-size: 11.5px; font-weight: 700; padding: 4px 11px; border-radius: 999px; cursor: pointer; }
     .rmap-dock-modebtn.on { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
@@ -1413,7 +1426,7 @@
   <script type="text/babel" src="canvas.jsx?v=1783137934"></script>
   <script type="text/babel" src="notes.jsx?v=1783137934"></script>
   <script src="autopilot-core.js?v=1784160000"></script>
-  <script type="text/babel" src="research.jsx?v=1785732000"></script>
+  <script type="text/babel" src="research.jsx?v=1785740000"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>

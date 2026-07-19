@@ -206,8 +206,13 @@
   a dockba írt parancs a `dkSend`-ben **átirányítva** → `frameGenerate(boundFrame, txt)` → döntés-csipek → `placeInFrame`
   (a MÁR kész chat-action gépezetet használja: undo/pulzus/toast változatlan). A törölt-keret eset unbind + normál chatre
   esik vissza; az override-hívók (chat-fallback) nem irányítódnak át (nincs rekurzió). Placeholder-csere kötött állapotban.
-- [ ] ⏳ **P3 — evidence-gap Mátrix** — intervenció×kimenet rács a GapPanelben (üres cella = rés); a tengelyeket az
-  edge-nek kell visszaadnia (`matrix_row/col`) vagy kliens-klaszterezés — külön edge-kör kell hozzá. + rose rés-fészek keret (P1.5).
+- [x] ✅ **P3 — evidence-gap Mátrix + P1.5** — **Mátrix**: a GapPanel `Lista|Mátrix` váltója; új edge `action='gap_matrix'`
+  (`askClaudeMatrix` → `{rows,cols,cells}`, method×domén rács) igény szerint lekérve; üres (0) cella = rés (szaggatott rose).
+  Graceful: túl kevés forrás → „none"; edge nélkül → „error" + ↻. **P1.5**: **újdonság-gyűrű** a gap node-on (SVG ív,
+  `n.ref.novelty`) + **rose „rés-fészek" keret** minden elemzési futásból (`placeGapsInNewFrame` → `research_map_frames`
+  + `research_map_layout` upsert; frames+layout realtime → élőben megjelenik; csak az edge-redeploy utáni futásoktól, mert
+  a keret a visszaadott id-kből épül). ⚠️ **Deploy-sorrend:** a P3 frontend push CSAK az edge-redeploy UTÁN — különben
+  a Mátrix megnyitása a régi edge-en mellékhatásként gap-ötleteket írna (write-on-view). Adversariális review után.
 
 ## Hátralévő (jövő) — Phase 6+
 - [ ] 🔴 **Teljes karakter-szintű CRDT/Yjs** — egyidejű azonos-szekció gépelés valós idejű merge-dzsel.

@@ -118,7 +118,21 @@ Deno.serve(async (req) => {
       if (res.error) return json({ error: 'insert failed: ' + res.error.message }, 403);
       return json({ ok: true, count: (res.data || rows).length, ideas: res.data || [] });
     }
+    // evidence-gap MATRIX (EGM): derive method×domain axes from the library and count coverage per cell (empty cells = gaps).
+    if (action === 'gap_matrix') {
+      const { data: msrc } = await sb.from('research_sources')
+        .select('title,year,venue,abstract,screening').eq('project_id', project_id).order('cited_by', { ascending: false, nullsFirst: false }).limit(60);
+      const all = msrc || [];
+      const inc = all.filter((s: any) => s.screening === 'include' || s.screening === 'included');
+      const lib = (inc.length >= 4 ? inc : all);
+      if (lib.length < 3) return json({ ok: true, matrix: null, reason: 'too_few' });
+      const matrix = await askClaudeMatrix(proj, lib, userModel, _lang);
+      return json({ ok: true, matrix: matrix, count: lib.length });
+    }
 
+    // allow-list the generic (writing) gap path — only 'gap' (default) and 'ideas' reach it. Any unrecognized action
+    // (e.g. a client calling a NEW read-only action against an OLD build) must NOT silently insert gap ideas.
+    if (action !== 'gap' && action !== 'ideas') return json({ error: 'unknown action: ' + action }, 400);
     const { data: sources } = await sb.from('research_sources')
       .select('title,year,venue,abstract').eq('project_id', project_id).limit(40);
 
@@ -277,4 +291,37 @@ Return ONLY a JSON array, no prose. Each item:
   const text = (j?.content?.[0]?.text) || '';
   const mm = text.match(/\[[\s\S]*\]/);
   try { return mm ? JSON.parse(mm[0]) : []; } catch { return []; }
+}
+
+// Evidence-gap MATRIX (action='gap_matrix') → {rows:[...], cols:[...], cells:[[int,...],...]} where cells[r][c] = #library items covering rows[r]×cols[c]. Empty cells are the gaps.
+async function askClaudeMatrix(proj: any, sources: any[], model: string, lang: 'en' | 'hu'): Promise<any> {
+  const lib = sources.map((s, i) => `[${i + 1}] ${s.title} (${s.year ?? 'n.d.'})\n${(s.abstract ?? '').slice(0, 300)}`).join('\n\n');
+  const prompt =
+`You build an EVIDENCE-GAP MAP (EGM) for a research project — a matrix whose EMPTY cells reveal research gaps.
+
+PROJECT: ${proj.title}${proj.goal ? ' — ' + proj.goal : ''}
+Field: ${proj.field ?? '—'}; Keywords: ${(proj.keywords ?? []).join(', ') || '—'}
+
+LITERATURE (${sources.length} items, numbered):
+${lib || '(none)'}
+
+Derive TWO axes that best organise THIS literature into a gap map:
+- rows = the main METHODS / interventions / approaches (3 to 5)
+- cols = the main DOMAINS / datasets / outcomes / contexts (3 to 5)
+Then for every (row,col) cell count how many of the numbered library items above genuinely cover that combination. Cells with 0 are the research gaps. Keep every label short (<= 22 chars) and in the project language.
+
+Return ONLY JSON, no prose: {"rows":["..."],"cols":["..."],"cells":[[<int>, ...], ...]} where cells has one array per row (same order as rows) and one int per col (same order as cols).` + langDirective(lang);
+  const r = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'x-api-key': ANTHROPIC_KEY!, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+    body: JSON.stringify({ model, max_tokens: 1400, messages: [{ role: 'user', content: prompt }] }),
+  });
+  const j = await r.json();
+  const text = (j?.content?.[0]?.text) || '';
+  const m = text.match(/\{[\s\S]*\}/);
+  try {
+    const o = m ? JSON.parse(m[0]) : null;
+    if (o && Array.isArray(o.rows) && Array.isArray(o.cols) && Array.isArray(o.cells)) return o;
+  } catch { /* fall through */ }
+  return null;
 }

@@ -1132,6 +1132,9 @@
     var pgS = useState(0), prog = pgS[0], setProg = pgS[1];
     var msgS = useState(''), msg = msgS[0], setMsg = msgS[1];
     var ofS = useState({}), off = ofS[0], setOff = ofS[1];   // legend type-filter
+    var gvS = useState('lista'), view = gvS[0], setView = gvS[1];   // P3: Lista | Mátrix (evidence-gap map)
+    var mxS = useState(null), matrix = mxS[0], setMatrix = mxS[1];   // null=not loaded; {rows,cols,cells}; 'error'; 'none' (too few sources)
+    var mbS = useState(false), mxBusy = mbS[0], setMxBusy = mbS[1];
     var aliveR = useRef(true);
     var promotingRef = useRef({});   // synchronous in-flight guard (gap id → 1) so a same-tick double-click can't double-insert
     useEffect(function () { aliveR.current = true; return function () { aliveR.current = false; }; }, []);
@@ -1161,6 +1164,8 @@
         clearInterval(iv); if (!aliveR.current) return; setBusy(false); setProg(100);
         var d = res && res.data;
         if ((res && res.error) || (d && d.error)) { setMsg('A rés-elemzéshez telepítsd a research-ai edge-et (gap_analyze) és futtasd a migration-83-at. Addig a lista a meglévő gap-ötleteket mutatja.'); loadGaps(); return; }
+        setMatrix(null);   // a fresh run invalidates the cached evidence-gap matrix
+        if (d && d.ideas && d.ideas.length) placeGapsInNewFrame(d.ideas);   // group this run into a rose "rés-fészek" frame on the Map (P1.5)
         loadGaps(); if (props.onChanged) props.onChanged();
       }, function () { clearInterval(iv); if (!aliveR.current) return; setBusy(false); setMsg('Hálózati hiba — próbáld újra.'); });
     }
@@ -1190,6 +1195,50 @@
       }, function () { if (aliveR.current) window.PRUI.toast('Hálózati hiba', { kind: 'error' }); });
     }
     function toggleType(slug) { setOff(function (o) { var n = Object.assign({}, o); if (n[slug]) delete n[slug]; else n[slug] = 1; return n; }); }
+    // P3 — evidence-gap matrix (EGM): fetched on demand from the edge; empty cells = gaps. Graceful if the edge lacks gap_matrix.
+    function fetchMatrix() {
+      if (mxBusy) return;
+      setMxBusy(true);
+      sb.functions.invoke('research-ai', { body: { action: 'gap_matrix', project_id: props.projectId } }).then(function (res) {
+        if (!aliveR.current) return; setMxBusy(false);
+        var d = res && res.data;
+        if ((res && res.error) || !d || d.error) { setMatrix('error'); return; }
+        if (!d.matrix || !Array.isArray(d.matrix.rows) || !Array.isArray(d.matrix.cols)) { setMatrix(d.reason === 'too_few' ? 'none' : 'error'); return; }
+        setMatrix(d.matrix);
+      }, function () { if (aliveR.current) { setMxBusy(false); setMatrix('error'); } });
+    }
+    function showMatrix() { setView('matrix'); if (matrix === null && !mxBusy) fetchMatrix(); }
+    // P1.5 — group a gap-analysis run into a rose "rés-fészek" frame on the Map (frames + layout have realtime → appears live).
+    function placeGapsInNewFrame(gaps) {
+      if (!gaps || !gaps.length) return;
+      var NW = 204, NH = 74, pad = 16, hdr = 44, gp = 16;
+      var cols = Math.min(3, gaps.length), rws = Math.ceil(gaps.length / cols);
+      var fw = 2 * pad + cols * NW + (cols - 1) * gp, fh = hdr + 2 * pad + rws * NH + (rws - 1) * gp;
+      var _t = Date.now(), ox = 40 + Math.floor(_t / 512) % 480, oy = 40 + Math.floor(_t / 128) % 300;   // spread successive runs (arithmetic, not bitwise — Date.now() overflows Int32 → negative coords)
+      var dt = new Date().toISOString().slice(0, 10);
+      sb.from('research_map_frames').insert({ project_id: props.projectId, title: '🕳️ Rés-elemzés · ' + dt, x: ox, y: oy, w: Math.round(fw), h: Math.round(fh), color: 'rose' });
+      var rows = gaps.map(function (g, i) { return { project_id: props.projectId, node_id: 'i' + g.id, x: Math.round(ox + pad + (i % cols) * (NW + gp)), y: Math.round(oy + hdr + Math.floor(i / cols) * (NH + gp)), updated_at: new Date().toISOString() }; });
+      sb.from('research_map_layout').upsert(rows, { onConflict: 'project_id,node_id' });
+    }
+
+    function gapMatrixEl() {
+      if (mxBusy || matrix === null) return h('div', { className: 'gp-empty' }, '⏳ Bizonyíték-rés-mátrix számítása…');
+      if (matrix === 'none') return h('div', { className: 'gp-empty', style: { fontSize: 13 } }, 'Túl kevés forrás a megbízható rés-térképhez — bővítsd a Könyvtárat.');
+      if (matrix === 'error') return h('div', { className: 'gp-empty' }, h('div', { style: { fontSize: 13, marginBottom: 10 } }, 'A mátrix nem érhető el — telepítsd a research-ai edge-et (gap_matrix támogatás).'), h('button', { className: 'gp-rebtn', onClick: fetchMatrix }, '↻ Újra'));
+      var mcols = matrix.cols || [], mrows = matrix.rows || [], cells = matrix.cells || [], maxN = 1;
+      cells.forEach(function (row) { (row || []).forEach(function (n) { if (n > maxN) maxN = n; }); });
+      return h('div', { className: 'gp-egm' },
+        h('table', { className: 'egm' }, h('tbody', null,
+          h('tr', null, h('th', null, ''), mcols.map(function (c, ci) { return h('th', { key: ci }, String(c)); })),
+          mrows.map(function (rlab, ri) {
+            return h('tr', { key: ri }, h('th', { className: 'rowh' }, String(rlab)),
+              mcols.map(function (c, ci) {
+                var n = (cells[ri] && cells[ri][ci] != null) ? cells[ri][ci] : 0, isGap = !n;
+                return h('td', { key: ci }, h('div', { className: 'egm-cell' + (isGap ? ' gapcell' : ''), style: isGap ? null : { background: 'color-mix(in srgb, var(--accent) ' + Math.round((0.12 + (n / maxN) * 0.5) * 100) + '%, transparent)', color: (n / maxN > 0.6 ? '#fff' : 'var(--ink)') }, title: isGap ? 'RÉS — 0 forrás fedi le' : (n + ' forrás') }, String(n)));
+              }));
+          }))),
+        h('div', { className: 'egm-note' }, 'Az üres (0) cellák a kutatási rések — ahol a szakirodalom nem fed le egy módszer×domén kombinációt.'));
+    }
 
     if (gaps === null) return h('div', { className: 'panel gappanel' }, h('div', { className: 'gp-empty' }, '⏳ Rések betöltése…'));
     if (!gaps.length) {
@@ -1206,9 +1255,13 @@
     return h('div', { className: 'panel gappanel' },
       h('div', { className: 'gp-head' },
         h('h3', null, '🕳️ Kutatási rések ', h('span', { className: 'gp-cnt' }, '· ' + gaps.length)),
+        h('span', { className: 'gp-viewtog' },
+          h('button', { className: view === 'lista' ? 'on' : '', onClick: function () { setView('lista'); } }, 'Lista'),
+          h('button', { className: view === 'matrix' ? 'on' : '', onClick: showMatrix }, 'Mátrix')),
         props.canEdit ? h('button', { className: 'gp-rebtn', disabled: busy, onClick: analyze }, busy ? ('AI elemez… ' + prog + '%') : '↻ Újraelemzés') : null),
       (typedOk === false) ? h('div', { className: 'gp-degrade' }, 'Degradált mód: futtasd a migration-83-at + deploy-old a research-ai edge-et a tipizált résekhez (típus, bizonyíték). Most a meglévő gap-ötletek jelennek meg.') : null,
       msg ? h('div', { className: 'gp-degrade' }, msg) : null,
+      view === 'matrix' ? gapMatrixEl() : h('div', { className: 'gp-listwrap' },
       h('div', { className: 'gp-legend' }, GAP_TYPES.filter(function (t) { return present[t.slug]; }).map(function (t) {
         return h('button', { key: t.slug, className: 'gp-lchip' + (off[t.slug] ? ' off' : ''), style: { borderColor: t.c, color: t.c }, onClick: function () { toggleType(t.slug); } }, t.lab);
       })),
@@ -1227,7 +1280,7 @@
             props.canEdit ? h('button', { className: 'gact', title: 'Ugrás a Tanulmányok fülre', onClick: function () { if (props.onGoStudy) props.onGoStudy(); } }, '🔍 Study indítása') : null,
             props.canEdit ? h('button', { className: 'gact', onClick: function () { dismiss(g); } }, '✕ Elvetés') : null,
             h('span', { className: 'gstatus' + (promoted ? ' promoted' : '') }, h('span', { className: 'gdot' }), promoted ? 'Előléptetve' : 'Nyitott')));
-      })));
+      }))));
   }
 
   function IdeasPanel(props) {
@@ -6339,6 +6392,16 @@
           h('div', { className: 'fld' }, h('div', { className: 'rmap-einsp-l' }, 'Címke (az élre írva)'), h('input', { key: 'lbl' + selEdge, className: 'rmap-einsp-txt', type: 'text', defaultValue: st.label, placeholder: 'Írj ide feliratot…', disabled: !ed, maxLength: 40, onMouseDown: function (ev) { ev.stopPropagation(); }, onKeyDown: function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); ev.target.blur(); } ev.stopPropagation(); }, onBlur: function (ev) { var v = ev.target.value.trim(); if (v !== (st.label || '')) persistEdge(e, { label: v || null }); } }))),
         ed ? h('div', { className: 'rmap-einsp-foot' }, h('button', { style: st.manual ? { color: 'var(--danger, #d6323a)' } : null, onClick: function () { resetEdge(e); } }, st.manual ? '🗑 Kapcsolat törlése' : '↺ Alaphelyzet')) : null);
     }
+    // P1.5 — a small novelty ring on a gap node (top-right); the meta (Típus/Bizonyíték) still shows in the body
+    function gapNovRing(n) {
+      var nov = n.ref && n.ref.novelty; if (nov == null) return null;
+      var rr = 8.5, cc = 2 * Math.PI * rr, dof = cc * (1 - Math.max(0, Math.min(100, nov)) / 100);
+      return h('span', { className: 'rmap-gap-ring', title: 'Újdonság: ' + nov },
+        h('svg', { viewBox: '0 0 24 24', width: 22, height: 22 },
+          h('circle', { cx: 12, cy: 12, r: rr, fill: 'none', stroke: 'var(--line)', strokeWidth: 3 }),
+          h('circle', { cx: 12, cy: 12, r: rr, fill: 'none', stroke: '#d6455f', strokeWidth: 3, strokeLinecap: 'round', strokeDasharray: cc.toFixed(1), strokeDashoffset: dof.toFixed(1), transform: 'rotate(-90 12 12)' }),
+          h('text', { x: 12, y: 15, textAnchor: 'middle', fontSize: 8, fontWeight: 800, fill: 'var(--ink)' }, String(nov))));
+    }
     function body(n) {
       var k = [h('div', { className: 'rmap-nh', key: 'h' }, h('span', { className: 'rmap-ni' }, RMAP_TYPE[n.t].ic), h('span', { className: 'rmap-nt' }, n.title))];
       if (n.t === 'study') k.push(h('div', { className: 'rmap-nm', key: 'm' }, h('b', null, n.m.Források), ' forrás → ', h('b', null, n.m.Included), ' incl', n.pcount ? h('span', { className: 'rmap-exp' }, (litOpen ? '▾ ' : '▸ ') + n.pcount + ' cikk') : null));
@@ -6434,7 +6497,7 @@
               h('marker', { id: 'rmap-ar', viewBox: '0 0 8 8', refX: 6.5, refY: 4, markerWidth: 6.5, markerHeight: 6.5, orient: 'auto-start-reverse', markerUnits: 'userSpaceOnUse' }, h('path', { d: 'M0.5,0.5 L7.5,4 L0.5,7.5 Z', fill: 'context-stroke' })),
               h('marker', { id: 'rmap-bl', viewBox: '0 0 8 8', refX: 5.5, refY: 4, markerWidth: 8, markerHeight: 8, orient: 'auto-start-reverse', markerUnits: 'userSpaceOnUse' }, h('path', { d: 'M5,1 L5,7', stroke: 'context-stroke', strokeWidth: 1.6 }))),
             edgeEls, linkRubber),
-          g.N.map(function (n) { if (!nodeVisible(n)) return null; var _sized = !!((nrzLive && nrzLive.id === n.id) || (layout[n.id] && layout[n.id].card_h)); var _kk = view.k, _cw = Math.min((n._w || NW), (cardVP.w - 16) / _kk); var _st = { left: n.x + 'px', top: n.y + 'px', width: _cw + 'px' }; if (_sized) _st.height = Math.min((n._h || NH), (cardVP.h - 16) / _kk) + 'px'; return h('div', { key: n.id, 'data-nid': n.id, className: 'rmap-node t-' + n.t + (_sized ? ' rmap-sized' : '') + (sel === n.id ? ' sel' : '') + (msel[n.id] ? ' rmap-mselected' : '') + (n.mapPinned ? ' rmap-pinned' : '') + (activeKey && n.ph === RMAP_PHASE_IDX[activeKey] ? ' inphase' : '') + (props.canEdit ? ' editable' : '') + (dlive && dlive.id === n.id ? ' dragging' : '') + ((nrzLive && nrzLive.id === n.id) ? ' rmap-resizing' : '') + (linkDrag && linkDrag.over === n.id ? ' rmap-linktarget' : '') + (linkDrag && linkDrag.from === n.id ? ' rmap-linksource' : '') + (justPlaced && justPlaced.indexOf(n.id) >= 0 ? ' rmap-justplaced' : ''), style: _st, onMouseDown: function (e) { e.stopPropagation(); startNodeDrag(e, n); }, onDoubleClick: function (e) { e.stopPropagation(); if (canEnter(n)) enterNode(n); }, onContextMenu: function (e) { e.preventDefault(); e.stopPropagation(); if (props.canEdit && (genActions(n).length || regenActions(n).length || (cardSizeCap && layout[n.id] && layout[n.id].card_h))) setMenu({ node: n, x: e.clientX, y: e.clientY }); } }, n.mapPinned ? h('span', { className: 'rmap-pin-badge', title: 'Kitűzött' }, '📌') : null, nodeCmCount(n.id) ? h('span', { className: 'rmap-cm-badge', title: nodeCmCount(n.id) + ' nyitott komment', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); setOpenThread(n.id); } }, '💬' + nodeCmCount(n.id)) : null, (n.t === 'step' && n.ref && (n.ref.assignee_id || n.ref.signed_off_by)) ? h('span', { className: 'rmap-step-badges' }, n.ref.assignee_id ? h('span', { className: 'rmap-assignee', title: 'Felelős: ' + nameOf(n.ref.assignee_id), style: { background: userColor(n.ref.assignee_id) } }, String(nameOf(n.ref.assignee_id) || '?').trim().charAt(0).toUpperCase()) : null, n.ref.signed_off_by ? h('span', { className: 'rmap-signoff', title: 'Jóváhagyta: ' + nameOf(n.ref.signed_off_by) }, '✅') : null) : null, h('div', { className: 'rmap-nb' }, body(n), richTier(n)),
+          g.N.map(function (n) { if (!nodeVisible(n)) return null; var _sized = !!((nrzLive && nrzLive.id === n.id) || (layout[n.id] && layout[n.id].card_h)); var _kk = view.k, _cw = Math.min((n._w || NW), (cardVP.w - 16) / _kk); var _st = { left: n.x + 'px', top: n.y + 'px', width: _cw + 'px' }; if (_sized) _st.height = Math.min((n._h || NH), (cardVP.h - 16) / _kk) + 'px'; return h('div', { key: n.id, 'data-nid': n.id, className: 'rmap-node t-' + n.t + (_sized ? ' rmap-sized' : '') + (sel === n.id ? ' sel' : '') + (msel[n.id] ? ' rmap-mselected' : '') + (n.mapPinned ? ' rmap-pinned' : '') + (activeKey && n.ph === RMAP_PHASE_IDX[activeKey] ? ' inphase' : '') + (props.canEdit ? ' editable' : '') + (dlive && dlive.id === n.id ? ' dragging' : '') + ((nrzLive && nrzLive.id === n.id) ? ' rmap-resizing' : '') + (linkDrag && linkDrag.over === n.id ? ' rmap-linktarget' : '') + (linkDrag && linkDrag.from === n.id ? ' rmap-linksource' : '') + (justPlaced && justPlaced.indexOf(n.id) >= 0 ? ' rmap-justplaced' : ''), style: _st, onMouseDown: function (e) { e.stopPropagation(); startNodeDrag(e, n); }, onDoubleClick: function (e) { e.stopPropagation(); if (canEnter(n)) enterNode(n); }, onContextMenu: function (e) { e.preventDefault(); e.stopPropagation(); if (props.canEdit && (genActions(n).length || regenActions(n).length || (cardSizeCap && layout[n.id] && layout[n.id].card_h))) setMenu({ node: n, x: e.clientX, y: e.clientY }); } }, n.mapPinned ? h('span', { className: 'rmap-pin-badge', title: 'Kitűzött' }, '📌') : null, nodeCmCount(n.id) ? h('span', { className: 'rmap-cm-badge', title: nodeCmCount(n.id) + ' nyitott komment', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); setOpenThread(n.id); } }, '💬' + nodeCmCount(n.id)) : null, (n.t === 'step' && n.ref && (n.ref.assignee_id || n.ref.signed_off_by)) ? h('span', { className: 'rmap-step-badges' }, n.ref.assignee_id ? h('span', { className: 'rmap-assignee', title: 'Felelős: ' + nameOf(n.ref.assignee_id), style: { background: userColor(n.ref.assignee_id) } }, String(nameOf(n.ref.assignee_id) || '?').trim().charAt(0).toUpperCase()) : null, n.ref.signed_off_by ? h('span', { className: 'rmap-signoff', title: 'Jóváhagyta: ' + nameOf(n.ref.signed_off_by) }, '✅') : null) : null, n.t === 'gap' ? gapNovRing(n) : null, h('div', { className: 'rmap-nb' }, body(n), richTier(n)),
             (props.canEdit && edgesCap) ? ['n', 'e', 's', 'w'].map(function (dir) { return h('span', { key: 'port' + dir, className: 'rmap-port rmap-port-' + dir, title: 'Húzz kapcsolatot egy másik kártyához', onMouseDown: function (e) { e.stopPropagation(); startLinkDrag(e, n.id); } }); }) : null,
             (props.canEdit && cardSizeCap) ? h('span', { className: 'rmap-node-rz', title: 'Átméretezés (húzd)', onMouseDown: function (e) { e.stopPropagation(); startNodeResize(e, n); } }) : null); })),
         // page bar (saved views) — top-left tabs; the active page can be curated (only pinned) / re-captured / renamed / deleted
