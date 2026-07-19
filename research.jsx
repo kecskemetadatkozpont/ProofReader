@@ -1133,6 +1133,7 @@
     var msgS = useState(''), msg = msgS[0], setMsg = msgS[1];
     var ofS = useState({}), off = ofS[0], setOff = ofS[1];   // legend type-filter
     var aliveR = useRef(true);
+    var promotingRef = useRef({});   // synchronous in-flight guard (gap id → 1) so a same-tick double-click can't double-insert
     useEffect(function () { aliveR.current = true; return function () { aliveR.current = false; }; }, []);
     useEffect(function () { loadGaps(); }, [props.projectId]);
     function loadGaps() {
@@ -1163,14 +1164,22 @@
         loadGaps(); if (props.onChanged) props.onChanged();
       }, function () { clearInterval(iv); if (!aliveR.current) return; setBusy(false); setMsg('Hálózati hiba — próbáld újra.'); });
     }
-    function toIdea(g) {   // promote: the gap becomes a normal idea (moves to the Ideas list). Gap→idea link is a P1/Map concern.
-      sb.from('research_ideas').update({ source: 'own', status: 'candidate' }).eq('id', g.id).then(function (r) {
-        if (!aliveR.current) return;
-        if (r && r.error) { window.PRUI.toast('Nem sikerült: ' + r.error.message, { kind: 'error' }); return; }
-        setGaps(function (L) { return (L || []).filter(function (x) { return x.id !== g.id; }); });
-        window.PRUI.toast('✓ Ötletté alakítva — megjelenik az Ötletek fülön', { kind: 'success' });
-        if (props.onChanged) props.onChanged();
-      }, function () { if (aliveR.current) window.PRUI.toast('Hálózati hiba', { kind: 'error' }); });
+    function toIdea(g) {   // promote: create a NEW idea from the gap + link it (addressed_by_idea_id) → keep the gap as "Előléptetve" (feeds the Map gap→idea edge)
+      if (g.addressed_by_idea_id || promotingRef.current[g.id]) return;   // already promoted OR a promote is in flight (blocks same-tick double-click)
+      promotingRef.current[g.id] = 1;
+      function clearFlag() { delete promotingRef.current[g.id]; }
+      sb.from('research_ideas').insert({ project_id: props.projectId, source: 'own', status: 'candidate', question: g.hypothesis || g.question, rationale: g.rationale || null, created_by: props.authorId }).select('id').maybeSingle().then(function (r) {
+        if (!aliveR.current) { clearFlag(); return; }
+        if ((r && r.error) || !(r && r.data)) { clearFlag(); window.PRUI.toast('Nem sikerült: ' + ((r && r.error && r.error.message) || 'ismeretlen hiba'), { kind: 'error' }); return; }
+        var newId = r.data.id;
+        sb.from('research_ideas').update({ addressed_by_idea_id: newId }).eq('id', g.id).then(function (u) {
+          clearFlag(); if (!aliveR.current) return;
+          if (u && u.error) { setGaps(function (L) { return (L || []).filter(function (x) { return x.id !== g.id; }); }); }   // addressed_by column missing → can't persist the link; just move on
+          else { setGaps(function (L) { return (L || []).map(function (x) { return x.id === g.id ? Object.assign({}, x, { addressed_by_idea_id: newId }) : x; }); }); }   // mark promoted, keep in list
+          window.PRUI.toast('✓ Ötlet létrehozva a résből — az Ötletek fülön', { kind: 'success' });
+          if (props.onChanged) props.onChanged();
+        }, function () { clearFlag(); if (aliveR.current) { window.PRUI.toast('Az ötlet létrejött, a link mentése nem sikerült', { kind: 'error' }); if (props.onChanged) props.onChanged(); } });
+      }, function () { clearFlag(); if (aliveR.current) window.PRUI.toast('Hálózati hiba', { kind: 'error' }); });
     }
     function dismiss(g) {
       sb.from('research_ideas').update({ status: 'rejected' }).eq('id', g.id).then(function (r) {
@@ -1204,7 +1213,7 @@
         return h('button', { key: t.slug, className: 'gp-lchip' + (off[t.slug] ? ' off' : ''), style: { borderColor: t.c, color: t.c }, onClick: function () { toggleType(t.slug); } }, t.lab);
       })),
       h('div', { className: 'gp-list' }, list.map(function (g) {
-        var t = gapType(g.gap_type || 'knowledge'), ev = Array.isArray(g.evidence) ? g.evidence : [];
+        var t = gapType(g.gap_type || 'knowledge'), ev = Array.isArray(g.evidence) ? g.evidence : [], promoted = !!g.addressed_by_idea_id;
         return h('div', { className: 'gcard', key: g.id, style: { borderLeftColor: t.c } },
           h('div', { className: 'gcard-top' },
             h('span', { className: 'gbadge', style: { background: t.c } }, t.lab),
@@ -1214,10 +1223,10 @@
           ev.length ? h('div', { className: 'gev' }, h('b', null, 'Bizonyíték: '), ev.map(function (e, i) { return h('span', { className: 'gsrc', key: i, title: e.coverage || '' }, String(e.title || 'forrás').slice(0, 44)); })) : null,
           g.hypothesis ? h('div', { className: 'gev' }, h('b', null, 'Következő lépés: '), g.hypothesis) : null,
           h('div', { className: 'gacts' },
-            props.canEdit ? h('button', { className: 'gact pri', onClick: function () { toIdea(g); } }, '→ Ötletté alakítás') : null,
+            props.canEdit ? h('button', { className: 'gact pri', disabled: promoted, onClick: function () { toIdea(g); } }, promoted ? '✓ Ötlet létrehozva' : '→ Ötletté alakítás') : null,
             props.canEdit ? h('button', { className: 'gact', title: 'Ugrás a Tanulmányok fülre', onClick: function () { if (props.onGoStudy) props.onGoStudy(); } }, '🔍 Study indítása') : null,
             props.canEdit ? h('button', { className: 'gact', onClick: function () { dismiss(g); } }, '✕ Elvetés') : null,
-            h('span', { className: 'gstatus' }, h('span', { className: 'gdot' }), 'Nyitott')));
+            h('span', { className: 'gstatus' + (promoted ? ' promoted' : '') }, h('span', { className: 'gdot' }), promoted ? 'Előléptetve' : 'Nyitott')));
       })));
   }
 
@@ -4476,7 +4485,7 @@
   // Read-only view for now (P2 = inline edit + phase actions replacing modals). New-design flag only.
   var RMAP_PHASES = [['ideas', 'Ideas', '💡'], ['literature', 'Literature', '📚'], ['sr', 'Systematic review', '🔬'], ['protocol', 'Protocol', '🧪'], ['journal', 'Journal', '🎯'], ['writing', 'Writing', '✍️']];
   var RMAP_PHASE_IDX = {}; RMAP_PHASES.forEach(function (p, i) { RMAP_PHASE_IDX[p[0]] = i; });
-  var RMAP_TYPE = { idea: { ic: '💡', lab: 'Ötlet', tab: 'ideas' }, paper: { ic: '📄', lab: 'Cikk', tab: 'literature' }, study: { ic: '🔎', lab: 'Irodalom', tab: 'literature' }, review: { ic: '📝', lab: 'Áttekintés', tab: 'study' }, step: { ic: '🧪', lab: 'Protokoll-lépés', tab: 'protocol' }, venue: { ic: '🎯', lab: 'Folyóirat', tab: 'journal' }, section: { ic: '✍️', lab: 'Draft-szekció', tab: 'writing' }, dataset: { ic: '🗂️', lab: 'Adathalmaz', tab: 'data' }, file: { ic: '📎', lab: 'Fájl', tab: 'ideas' }, chat: { ic: '💬', lab: 'Beszélgetés', tab: 'ideas' }, figure: { ic: '🖼️', lab: 'Ábra', tab: 'literature' }, srq: { ic: '❓', lab: 'Review-kérdés', tab: 'study' }, sreview: { ic: '🔬', lab: 'Szisztematikus áttekintés', tab: 'study' } };
+  var RMAP_TYPE = { idea: { ic: '💡', lab: 'Ötlet', tab: 'ideas' }, gap: { ic: '🕳️', lab: 'Kutatási rés', tab: 'gap' }, paper: { ic: '📄', lab: 'Cikk', tab: 'literature' }, study: { ic: '🔎', lab: 'Irodalom', tab: 'literature' }, review: { ic: '📝', lab: 'Áttekintés', tab: 'study' }, step: { ic: '🧪', lab: 'Protokoll-lépés', tab: 'protocol' }, venue: { ic: '🎯', lab: 'Folyóirat', tab: 'journal' }, section: { ic: '✍️', lab: 'Draft-szekció', tab: 'writing' }, dataset: { ic: '🗂️', lab: 'Adathalmaz', tab: 'data' }, file: { ic: '📎', lab: 'Fájl', tab: 'ideas' }, chat: { ic: '💬', lab: 'Beszélgetés', tab: 'ideas' }, figure: { ic: '🖼️', lab: 'Ábra', tab: 'literature' }, srq: { ic: '❓', lab: 'Review-kérdés', tab: 'study' }, sreview: { ic: '🔬', lab: 'Szisztematikus áttekintés', tab: 'study' } };
   // interactive-edge relation presets (migration-81). Each type is a full look-preset: color + line-style + arrow + default animation.
   // The two structural derived kinds (flow/cite) map to erd/idz and keep today's exact stroke for backward-compat.
   var EDGE_TYPES = {
@@ -4827,7 +4836,7 @@
     useEffect(function () {
       var pid = props.projectId;
       Promise.all([
-        sb.from('research_ideas').select('id,question,hypothesis,rationale,novelty,status,source').eq('project_id', pid).neq('status', 'rejected').order('created_at', { ascending: true }).limit(24),
+        sb.from('research_ideas').select('id,question,hypothesis,rationale,novelty,status,source,gap_type,evidence,addressed_by_idea_id').eq('project_id', pid).neq('status', 'rejected').order('created_at', { ascending: true }).limit(24).then(function (r) { return (r && r.error) ? sb.from('research_ideas').select('id,question,hypothesis,rationale,novelty,status,source').eq('project_id', pid).neq('status', 'rejected').order('created_at', { ascending: true }).limit(24) : r; }),   // self-gate: on a missing-gap-column error, resolve to the base-column select so ideas never vanish pre-migration
         sb.from('research_studies').select('id,idea_id,title,question,status').eq('project_id', pid).order('created_at', { ascending: true }),
         sb.from('research_sources').select('id,title,venue,cited_by,year,screening,url').eq('project_id', pid).order('cited_by', { ascending: false, nullsFirst: false }).limit(10),
         sb.from('research_sources').select('id', { count: 'exact', head: true }).eq('project_id', pid),
@@ -4919,7 +4928,16 @@
     }
     function graph() {
       var d = data, N = [], E = [];
-      (d.ideas || []).forEach(function (x) { N.push({ id: 'i' + x.id, t: 'idea', ph: 0, title: x.question || 'Ötlet', m: { Novelty: (x.novelty != null ? x.novelty + ' / 100' : '—'), Hipotézis: x.hypothesis || '—' }, ref: x }); });
+      (d.ideas || []).forEach(function (x) {
+        if (x.source === 'gap') {   // research-gap node (migration-83): distinct 🕳️ type, wedged between literature and ideas
+          var gt = gapType(x.gap_type || 'knowledge');
+          N.push({ id: 'i' + x.id, t: 'gap', ph: 0, title: x.question || 'Kutatási rés', m: { Típus: gt.lab, Újdonság: (x.novelty != null ? x.novelty + ' / 100' : '—'), Bizonyíték: (Array.isArray(x.evidence) ? x.evidence.length : 0) + ' forrás' }, ref: x });
+          if (x.addressed_by_idea_id && (d.ideas || []).some(function (y) { return y.id === x.addressed_by_idea_id; })) E.push(['i' + x.id, 'i' + x.addressed_by_idea_id]);   // gap → the idea it spawned
+          if (litOpen && Array.isArray(x.evidence)) x.evidence.forEach(function (ev) { var sid = ev && ev.source_id; if (sid && (d.topSrc || []).some(function (s) { return s.id === sid; })) E.push(['p' + sid, 'i' + x.id]); });   // sources that reveal the gap
+        } else {
+          N.push({ id: 'i' + x.id, t: 'idea', ph: 0, title: x.question || 'Ötlet', m: { Novelty: (x.novelty != null ? x.novelty + ' / 100' : '—'), Hipotézis: x.hypothesis || '—' }, ref: x });
+        }
+      });
       var hasLit = d.srcTotal > 0 || d.studies.length;
       if (hasLit) {
         N.push({ id: 'lit', t: 'study', ph: 1, title: (d.studies[0] && d.studies[0].title) || 'Irodalom', m: { Források: String(d.srcTotal), Included: String(d.inclTotal) }, ref: d.studies[0] || null, pcount: d.topSrc.length });
@@ -5093,14 +5111,14 @@
     // deep-link prop bag for a node type (panels ignore what they do not use — graceful)
     function focusPropsFor(n) {
       var id = n.ref && n.ref.id, m = {};
-      if (n.t === 'chat') m.focusChatId = id; else if (n.t === 'idea') m.focusIdeaId = id; else if (n.t === 'file') m.focusFileId = id;
+      if (n.t === 'chat') m.focusChatId = id; else if (n.t === 'idea') m.focusIdeaId = id; else if (n.t === 'gap') m.focusGapId = id; else if (n.t === 'file') m.focusFileId = id;
       else if (n.t === 'paper') m.focusSourceId = id; else if (n.t === 'figure') m.focusFigureId = id;
       else if (n.t === 'review') m.focusReviewId = id; else if (n.t === 'srq') m.focusQuestionId = id; else if (n.t === 'sreview') m.focusJobId = id;
       else if (n.t === 'step') m.focusStepId = id; else if (n.t === 'dataset') m.focusDatasetId = id;
       else if (n.t === 'section') m.focusSection = n.ref && n.ref.path; else if (n.t === 'venue') m.focusVenueId = id;
       return m;
     }
-    var EMBEDDABLE = { ideas: 1, literature: 1, study: 1, protocol: 1, data: 1, writing: 1, journal: 1 };
+    var EMBEDDABLE = { ideas: 1, gap: 1, literature: 1, study: 1, protocol: 1, data: 1, writing: 1, journal: 1 };
     function canEnter(n) { var tab = RMAP_TYPE[n.t] && RMAP_TYPE[n.t].tab; return !!(tab && EMBEDDABLE[tab] && props.renderPanel); }
     // ENTER: fly the camera into the card, then mount its real workflow panel in-place (screen-space overlay)
     function enterNode(n) {

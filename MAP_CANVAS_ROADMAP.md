@@ -192,10 +192,15 @@
   ötlet lesz, az Ötletek közé], 🔍 Study, ✕ Elvetés), üres/degradált állapot. Bekötve: nd stageNav + klasszikus Stepper
   gap-sub (`i===2`), `panelForTab` + content-switch, a régi IdeasPanel gap-gomb **átirányítva** a fülre (`onGoGap`).
   **migration-83 + `research-ai` deploy manuális; a kliens addig gracefully degradál.**
-- [ ] ⏳ **P1 — Térkép-objektumok** — `RMAP_TYPE.gap` (🕳️) + `.t-gap` (szaggatott, típus-badge, újdonság-gyűrű);
-  `graph()` `source==='gap'` → gap node (id marad `i+id`); forrás→rés + rés→ötlet (`addressed_by_idea_id`) élek;
-  rose **rés-fészek** keret futásonként; a klasszikus-fül futás → toast → Térkép. Ekkor a főbetöltők (4706/7271)
-  kapnak graceful oszlop-gatinget + `EMBEDDABLE.gap` a deep-linkhez.
+- [x] ✅ **P1 — Térkép-objektumok** — `RMAP_TYPE.gap` (🕳️ „Kutatási rés") + `.t-gap` CSS (szaggatott rose bal-szegély);
+  `graph()` a `source==='gap'` ötleteket **külön gap node**-ként materializálja (id marad `i+id` → layout/élek/komment
+  változatlan), m = {Típus, Újdonság, Bizonyíték: N forrás}; **élek** (node-létezésre kapuzva, nincs lógó él):
+  **forrás→rés** (az `evidence[].source_id`-ből, ha a cikk a `topSrc`-ben van + `litOpen`) és **rés→ötlet**
+  (`addressed_by_idea_id`-ből). A Map-betöltő idea-selectje graceful oszlop-fallbackkel bővült; `EMBEDDABLE.gap` +
+  `focusPropsFor` → `focusGapId` (a gap node-ba belépve a GapPanel nyílik). A **GapPanel „→ Ötletté alakítás"** most
+  ÚJ ötletet hoz létre + **linkeli** (`addressed_by_idea_id`) → a rés „Előléptetve" marad (feeds a rés→ötlet él). Az edge
+  `gap_analyze` most `source_id`-t is tesz az `evidence`-be (a forrás→rés élhez) — **edge-redeploy kell hozzá**. Adversariális
+  review után. *(Elhalasztva P1.5-re: rose rés-fészek keret futásonként + újdonság-gyűrű a node-on.)*
 - [ ] ⏳ **P2 — keret-scoped dock (#2)** — `boundFrame` useState (guard-ok előtt); `💬` gomb a keret-fejlécen → dock a
   kerethez kötve + scope-pill; `dkSend` → `classifyFrameIntent` → `runFrameGap`/`frameGenerate` → `placeInFrame`.
   (+ evidence-gap **Mátrix** nézet a GapPanelben.)

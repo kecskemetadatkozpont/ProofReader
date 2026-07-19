@@ -85,7 +85,7 @@ Deno.serve(async (req) => {
     // action='gap' (untyped questions) which stays byte-identical. Returns the SAME {ok,count,ideas} shape.
     if (action === 'gap_analyze') {
       const { data: gsrc } = await sb.from('research_sources')
-        .select('title,year,venue,abstract,screening').eq('project_id', project_id).order('cited_by', { ascending: false, nullsFirst: false }).limit(60);
+        .select('id,title,year,venue,abstract,screening').eq('project_id', project_id).order('cited_by', { ascending: false, nullsFirst: false }).limit(60);
       const all = gsrc || [];
       const inc = all.filter((s: any) => s.screening === 'include' || s.screening === 'included');
       const lib = (inc.length >= 4 ? inc : all);   // prefer the screened-in library; fall back to everything
@@ -97,7 +97,7 @@ Deno.serve(async (req) => {
         const ev = Array.isArray(g.evidence) ? g.evidence.map((e: any) => {
           const ref = Number(e && e.source_ref);
           const src = (Number.isFinite(ref) && ref >= 1 && ref <= N) ? lib[ref - 1] : null;
-          return src ? { title: String(src.title || '').slice(0, 200), coverage: String((e && e.coverage) || '').slice(0, 200) } : null;
+          return src ? { source_id: src.id, title: String(src.title || '').slice(0, 200), coverage: String((e && e.coverage) || '').slice(0, 200) } : null;
         }).filter(Boolean).slice(0, 6) : [];
         const gt = TYPES.indexOf(String(g.gap_type || '').toLowerCase().trim()) >= 0 ? String(g.gap_type).toLowerCase().trim() : 'knowledge';
         return {
