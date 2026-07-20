@@ -865,6 +865,24 @@
 
     /* Pipeline Canvas (Map) — P1a swimlane materializer */
     .rmap-wrap { display: flex; gap: 14px; align-items: stretch; position: relative; }
+    /* stage column: wraps the canvas + its card-relative floating overlays so they anchor to the STAGE, not the wrap
+       (otherwise, with the File Explorer taking flex space on the left, the toolbar/inspector/edge floats shift) */
+    .rmap-stage-col { flex: 1; min-width: 0; position: relative; display: flex; align-items: stretch; min-height: 0; }
+    /* left File Explorer panel (collapsible) — a flex sibling of the stage; the stage shrinks to fit */
+    .rmap-explorer { flex: none; width: 300px; max-width: 42%; display: flex; flex-direction: column; min-height: 0; align-self: stretch; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; box-shadow: 0 2px 10px -6px rgba(20,26,40,.3); }
+    .rmap-exp-head { display: flex; align-items: center; gap: 7px; padding: 9px 8px 9px 13px; border-bottom: 1px solid var(--line); background: var(--surface-2); }
+    .rmap-exp-t { font-size: 12.5px; font-weight: 800; }
+    .rmap-exp-x { flex: none; border: none; background: none; color: var(--muted); cursor: pointer; font-size: 18px; line-height: 1; padding: 2px 8px; border-radius: 7px; }
+    .rmap-exp-x:hover { background: var(--surface-3, var(--surface)); color: var(--accent); }
+    .rmap-exp-body { flex: 1; min-height: 0; display: flex; overflow: hidden; }
+    .rmap-exp-body .filebrowser { flex: 1; width: auto !important; align-self: stretch; border: 0; border-radius: 0; padding: 6px; max-height: none; min-height: 0; }
+    .rmap-exp-body .filebrowser.fbx { display: flex; flex-direction: column; min-height: 0; }
+    @media (max-width: 900px) { .rmap-explorer { width: auto; max-width: none; max-height: 300px; } }
+    /* on-map dot + located highlight in the file tree (explorer + dock) */
+    .fbx-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; margin-right: 1px; }
+    .fbx-dot.on { background: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent); }
+    .fbx-dot.off { background: none; border: 1.5px solid var(--faint); box-sizing: border-box; }
+    .fbx-row.located { background: color-mix(in srgb, var(--accent) 14%, transparent); box-shadow: inset 2px 0 0 var(--accent); }
     /* floating on-canvas card modal: anchored next to the selected node, in front of the canvas (not a side panel) */
     .rmap-insp-float { box-shadow: 0 14px 44px rgba(0,0,0,.30), 0 2px 8px rgba(0,0,0,.14); animation: rmap-insp-pop .13s ease-out; overflow-y: auto; }
     @keyframes rmap-insp-pop { from { opacity: 0; transform: scale(.97); } to { opacity: 1; transform: scale(1); } }
@@ -1476,7 +1494,7 @@
   <script type="text/babel" src="canvas.jsx?v=1783137934"></script>
   <script type="text/babel" src="notes.jsx?v=1783137934"></script>
   <script src="autopilot-core.js?v=1784160000"></script>
-  <script type="text/babel" src="research.jsx?v=1785961000"></script>
+  <script type="text/babel" src="research.jsx?v=1785980000"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>

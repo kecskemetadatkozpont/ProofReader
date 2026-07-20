@@ -709,6 +709,7 @@
     var adS = useState(false), added = adS[0], setAdded = adS[1];   // #8: brief "added to ideas" feedback
     var spS = useState(null), selPop = spS[0], setSelPop = spS[1];   // #1: text selection in the MD preview → "add to idea" popup
     var upRef = useRef(null);
+    var fbRootRef = useRef(null);   // the browser root (scopes the P2 "scroll the located file into view" query to THIS instance)
     var opS = useState({}), openF = opS[0], setOpenF = opS[1];       // VS-Code-Light (nd()): expanded folders {folderKey: bool}
     var edS2 = useState(null), edit = edS2[0], setEdit = edS2[1];    // inline text/MD editor { id, path, text }
     var dragF = useRef(null);                                        // the file currently being dragged onto a folder
@@ -731,6 +732,13 @@
     }
     function load() { sb.from('research_files').select('id,path,content,storage_path,mime,size,source,updated_at').eq('project_id', props.projectId).order('updated_at', { ascending: false }).then(function (r) { var data = (r && r.data) || []; setFiles(data); setPreview(function (p) { return p ? (data.filter(function (x) { return x.id === p.id; })[0] || null) : null; }); }); }
     useEffect(load, [props.projectId, props.version]);
+    // P2 (bidirectional): when the Map selects a file's card, scroll+highlight that file in THIS browser instance
+    useEffect(function () {
+      if (props.locatedFileId == null) return;
+      var root = fbRootRef.current; if (!root) return;
+      var row = root.querySelector('[data-fid="' + props.locatedFileId + '"]');
+      if (row && row.scrollIntoView) { try { row.scrollIntoView({ block: 'nearest' }); } catch (e) { } }
+    }, [props.locatedFileId, files]);
     function newFile() {
       var name = (window.prompt('New file name:', 'note.md') || '').trim(); if (!name) return;
       sb.from('research_files').upsert({ project_id: props.projectId, path: name, content: '', storage_path: null, mime: 'text/markdown', source: 'manual', created_by: props.authorId, updated_by: props.authorId, updated_at: new Date().toISOString() }, { onConflict: 'project_id,path' }).then(function (r) { if (r && r.error) { window.PRUI.toast(r.error.message, { kind: 'error' }); return; } load(); });
@@ -793,8 +801,10 @@
     }
     function fkind(f) { var p = (f.path || '').toLowerCase(); if (f.content != null) { if (/\.(md|markdown|txt)$/.test(p)) return 'md'; if (/\.csv$/.test(p)) return 'csv'; return 'code'; } return /\.(png|jpe?g|gif|webp|svg|pdf)$/.test(p) ? 'bin' : 'bin'; }
     function fileRow(f, depth) {
-      return h('div', { key: 'f' + f.id, className: 'fbx-row fbx-file' + (preview && preview.id === f.id ? ' sel' : ''), style: { paddingLeft: (6 + depth * 13 + 13) + 'px' }, draggable: props.canEdit,
-        onDragStart: function () { dragF.current = f; }, onDragEnd: function () { dragF.current = null; }, onClick: function () { setPreview(f); setEdit(null); } },
+      var _mnid = props.mapNodeId ? props.mapNodeId(f) : null, _loc = (props.locatedFileId != null && String(f.id) === String(props.locatedFileId));
+      return h('div', { key: 'f' + f.id, 'data-fid': f.id, className: 'fbx-row fbx-file' + (preview && preview.id === f.id ? ' sel' : '') + (_loc ? ' located' : ''), style: { paddingLeft: (6 + depth * 13 + 13) + 'px' }, draggable: props.canEdit,
+        onDragStart: function () { dragF.current = f; }, onDragEnd: function () { dragF.current = null; }, onClick: function () { setPreview(f); setEdit(null); if (props.onLocate) props.onLocate(f); } },
+        props.mapNodeId ? h('span', { className: 'fbx-dot ' + (_mnid ? 'on' : 'off'), title: _mnid ? 'A térképen — kattints a kártya kiemeléséhez' : 'Nincs a térképen' }) : null,
         h('span', { className: 'fbx-ic' }, icon(f)), h('span', { className: 'fbx-nm', title: f.path }, baseName(f.path)), f.source === 'ai' ? h('span', { className: 'fbx-badge' }, 'AI') : null,
         h('span', { className: 'fbx-acts' },
           props.canEdit ? h('button', { className: 'fb-mini', title: 'Átnevezés / áthelyezés', onClick: function (e) { e.stopPropagation(); renameFile(f); } }, '✎') : null,
@@ -840,7 +850,7 @@
           h('button', { className: 'fb-mini', title: 'Bezárás', onClick: function () { setPreview(null); setEdit(null); } }, '×')),
         h('div', { className: 'fbx-vbody' }, body));
     }
-    if (nd()) return h('div', { className: 'filebrowser fbx', style: { width: (props.width || 300) } },
+    if (nd()) return h('div', { className: 'filebrowser fbx', ref: fbRootRef, style: { width: (props.width || 300) } },
       h('div', { className: 'fb-head' }, h('b', null, '🗂 Files'), h('span', { style: { flex: 1 } }),
         props.canEdit ? h('button', { className: 'fb-mini', title: 'Új fájl (mappához: „mappa/név.md")', onClick: newFile }, '✚') : null,
         props.canEdit ? h('button', { className: 'fb-mini', title: 'Feltöltés', onClick: function () { if (upRef.current) upRef.current.click(); } }, '⤒') : null,
@@ -4701,6 +4711,7 @@
     var fuS = useState({}), figUrls = fuS[0], setFigUrls = fuS[1];   // storage_path → signed URL (figure previews)
     var roS = useState(false), restoreOpen = roS[0], setRestoreOpen = roS[1];   // the "hidden figures" restore panel
     var nrS = useState(false), nodeRestoreOpen = nrS[0], setNodeRestoreOpen = nrS[1];   // the "hidden nodes" restore panel (migration-70)
+    var fbS = useState(function () { try { return localStorage.getItem('pr-rmap-fb') === '1'; } catch (e) { return false; } }), fbOpen = fbS[0], setFbOpen = fbS[1];   // left File Explorer panel — collapsible, persisted
     var figLoading = useRef({});
     // lazily sign the storage URLs for a set of figures (idempotent; in-flight guarded)
     function ensureFigUrls(figs) {
@@ -6794,7 +6805,18 @@
     var cmPosRoots = Object.keys(cmPosGroups).map(function (gk) { return cmPosGroups[gk].slice().sort(function (a, b) { return String(a.created_at || '').localeCompare(String(b.created_at || '')); })[0]; });
     function nodeCmCount(id) { var a = cmByNode[id]; return a ? a.filter(function (c) { return !c.resolved; }).length : 0; }
     var cmUnresolved = commentsCap ? comments.filter(function (c) { return !c.resolved; }).length : 0;
+    // File Explorer ↔ Map linking: a file's Map-node id from its path (writing//studies/ → "w"+id section/review, else "f"+id file),
+    // present only if that node actually exists on the map. locateFile → select + fly the card into view. fbLocatedId (P2) = the
+    // research_files id of the currently-selected file card → the browser scroll-highlights that file.
+    function fileNodeId(f) { if (!f || f.id == null) return null; var nid = /^(writing|studies)\//.test(f.path || '') ? ('w' + f.id) : ('f' + f.id); return g.by[nid] ? nid : null; }
+    function locateFile(f) { var nid = fileNodeId(f); if (!nid) return; setSelEdge(null); setMsel({}); setSel(nid); var n = g.by[nid]; if (n) cardIntoView(n); }
+    var _fbSelNode = (sel && g.by) ? g.by[sel] : null;
+    var fbLocatedId = (_fbSelNode && (_fbSelNode.t === 'file' || _fbSelNode.t === 'section' || _fbSelNode.t === 'review') && _fbSelNode.ref) ? _fbSelNode.ref.id : null;
     return h('div', { className: 'rmap-wrap' },
+      fbOpen ? h('div', { className: 'rmap-explorer' },
+        h('div', { className: 'rmap-exp-head' }, h('span', { className: 'rmap-exp-t' }, '🗂 Fájlok'), h('span', { style: { flex: 1 } }), h('button', { className: 'rmap-exp-x', title: 'Panel összecsukása', onClick: function () { setFbOpen(false); try { localStorage.setItem('pr-rmap-fb', '0'); } catch (e) { } } }, '‹')),
+        h('div', { className: 'rmap-exp-body' }, h(SessionFileBrowser, { projectId: props.projectId, version: bump, canEdit: props.canEdit, authorId: props.authorId, onChanged: function () { setBump(function (x) { return x + 1; }); }, onAttach: function (a) { setDAttach(function (p) { return p.concat([a]); }); if (window.PRUI) window.PRUI.toast('📎 Csatolva: ' + String(a.label || a.name || 'fájl').slice(0, 40), { kind: 'ok' }); }, mapNodeId: fileNodeId, onLocate: locateFile, locatedFileId: fbLocatedId }))) : null,
+      h('div', { className: 'rmap-stage-col' },
       h('div', { className: 'rmap-stage', ref: stageRef, onMouseDown: onDown, onWheel: onWheel, onMouseMove: broadcastCursor, onDoubleClick: onStageDbl },
         // empty project: a small non-blocking welcome overlay so work can start from the Map (canvas + dock render normally underneath)
         (!g.N.length) ? h('div', { className: 'rmap-empty-hint', onMouseDown: function (e) { e.stopPropagation(); } },
@@ -6904,6 +6926,7 @@
             h('button', { key: 'tf', className: 'rmap-dbtn' + (Object.keys(hiddenTypes).length ? ' on' : ''), title: 'Típusok ki/be kapcsolása a térképen (pl. Ábrák)', onClick: function () { setTypeFilterOpen(function (v) { return !v; }); } }, '👁' + (Object.keys(hiddenTypes).length ? Object.keys(hiddenTypes).length : ''), L('Típus-szűrő')),
             h('button', { key: 'refresh', className: 'rmap-dbtn', title: 'Térkép újratöltése a legfrissebb adatokkal (a módosítások érvényesítése)', disabled: refreshing, onClick: refreshMap }, refreshing ? '⏳' : '🔄', L('Frissítés')),
             h('button', { key: 'exp', className: 'rmap-dbtn', title: 'Térkép exportálása PNG-be', onClick: exportMap }, '⤓', L('Export (PNG)')),
+            h('button', { key: 'files', className: 'rmap-dbtn' + (fbOpen ? ' on' : ''), title: 'Fájl-böngésző (bal panel) — a projekt fájljai + kártya-kiemelés', onClick: function () { setFbOpen(function (v) { var nv = !v; try { localStorage.setItem('pr-rmap-fb', nv ? '1' : '0'); } catch (e) { } return nv; }); } }, '🗂', L('Fájlok')),
             (pagesCap && pages.length > 1) ? h('button', { key: 'tour', className: 'rmap-dbtn', title: 'Gyors túra: végigzoomol a mentett Lapokon', onClick: tourStart }, '▶', L('Lap-túra')) : null,
             pathsCap ? h('button', { key: 'pres', className: 'rmap-dbtn' + (presMgrOpen ? ' on' : ''), title: 'Bemutatók (Prezi-story): jelenetekből álló, vezetett túra', onClick: function () { setPresMgrOpen(function (v) { return !v; }); } }, '🎬', L('Bemutató')) : null
           ].filter(Boolean);
@@ -7136,7 +7159,7 @@
             h('textarea', { rows: 1, value: dInput, placeholder: boundFrame ? ('„' + String(boundFrame.title || 'Keret').slice(0, 20) + '" keretbe — pl. hozz létre kutatási réseket…') : (dkMode === 'action' && sn && sn.t === 'step') ? 'Mit tegyek e lépés után? (pl. „tegyél be egy validációs lépést")' : sn ? 'Kérdezz vagy adj utasítást a becsatolt kártyáról…' : 'Írj utasítást vagy kérdést… (jelölj ki egy kártyát a becsatoláshoz)', disabled: dBusy, onChange: function (e) { setDInput(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); dkPrimary(); } } }),
             h('button', { className: 'btn' + (recOn ? ' rmap-mic-on' : ''), style: { fontSize: 14, padding: '0 9px', flex: 'none' }, disabled: dBusy, title: recOn ? 'Felvétel leállítása' : 'Hangbevitel — diktálás (magyar)', onClick: toggleMic }, recOn ? '⏺' : '🎤'),
             h('button', { className: 'btn pri', style: { fontSize: 14, padding: '0 12px', flex: 'none' }, disabled: dBusy || !dInput.trim() || (dkMode === 'action' && !(sn && sn.t === 'step')), onClick: dkPrimary }, dkMode === 'action' ? '⚡' : '➤')))
-          : h('div', { className: 'rmap-dock-files' }, h(SessionFileBrowser, { projectId: props.projectId, version: bump, canEdit: props.canEdit, authorId: props.authorId, onChanged: function () { setBump(function (x) { return x + 1; }); }, onAttach: function (a) { setDAttach(function (p) { return p.concat([a]); }); if (window.PRUI) window.PRUI.toast('📎 Csatolva: ' + String(a.label || a.name || 'fájl').slice(0, 40), { kind: 'ok' }); } })))
+          : h('div', { className: 'rmap-dock-files' }, h(SessionFileBrowser, { projectId: props.projectId, version: bump, canEdit: props.canEdit, authorId: props.authorId, onChanged: function () { setBump(function (x) { return x + 1; }); }, mapNodeId: fileNodeId, onLocate: locateFile, locatedFileId: fbLocatedId, onAttach: function (a) { setDAttach(function (p) { return p.concat([a]); }); if (window.PRUI) window.PRUI.toast('📎 Csatolva: ' + String(a.label || a.name || 'fájl').slice(0, 40), { kind: 'ok' }); } })))
           : h('button', { className: 'rmap-dock-fab', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function () { setDkOpen(true); try { localStorage.setItem('pr-rmap-dock', '1'); } catch (e) { } } }, '🤖 Asszisztens')) : null),
       // dock attach picker (library source / publication file / LaTeX / upload) — the same reusable modal the Idea chat uses
       (props.canEdit && dPick) ? h(AttachModal, { projectId: props.projectId, sources: props.sources, fileOwnerId: props.fileOwnerId, authorId: props.authorId, onUploadFile: dkUpload, onPick: function (a) { setDAttach(function (p) { return p.concat([a]); }); }, onClose: function () { setDPick(false); } }) : null,
@@ -7194,7 +7217,7 @@
             rcMsgs.length ? h('div', { className: 'rmap-chat-msgs' }, rcMsgs.map(function (mm, i) { return h('div', { key: i, className: 'rmap-chat-msg ' + (mm.role === 'user' ? 'u' : 'a') }, mm.text); })) : null,
             h('div', { className: 'rmap-chat-in' },
               h('textarea', { rows: 2, value: rcInput, placeholder: 'pl. „Adj hozzá 5-fold cross-validation-t”', disabled: rcBusy, onChange: function (e) { var v = e.target.value; setRcInput(v); }, onKeyDown: function (e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); refineChat(sn); } } }),
-              h('button', { className: 'btn pri', style: { fontSize: 12, alignSelf: 'flex-end' }, disabled: rcBusy || !rcInput.trim(), onClick: function () { refineChat(sn); } }, rcBusy ? '…' : 'Küldés'))) : null)) : null,
+              h('button', { className: 'btn pri', style: { fontSize: 12, alignSelf: 'flex-end' }, disabled: rcBusy || !rcInput.trim(), onClick: function () { refineChat(sn); } }, rcBusy ? '…' : 'Küldés'))) : null)) : null),
       editing ? h('div', { className: 'scrim', onClick: function () { setEditing(null); } },
         h('div', { className: 'modal', style: { width: editing.fields.some(function (f) { return f.ty === 'bigtext'; }) ? 680 : 460 }, onClick: function (e) { e.stopPropagation(); } },
           h('div', { className: 'modal-h' }, h('b', null, editing.title), h('button', { className: 'x', 'aria-label': 'Close', onClick: function () { setEditing(null); } }, '×')),

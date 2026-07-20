@@ -253,6 +253,20 @@
   a húzás alatt elnyomva) · **dedup-guard** (ha már van keret e bbox köré [±10px] → `framePatch` frissítés + toast, nem új keret).
   Adversariális review után.
 
+## ✅ Térkép-integrált bal File Explorer (fájl ↔ kártya) — 2026-07-20
+> User: „a Térképről is elérhető File Browser, ahol látszik mi jött létre / mi lett feltöltve / hova, és fájlra kattintva highlight-olja a kártyát" + összecsukható. Design: `map-filebrowser-mockup` (📂, 3 elrendezés → ① bal explorer + P2 jóváhagyva).
+- [x] ✅ **Bal Explorer + fájl↔kártya + P2 + összecsukhatóság** — a `.rmap-wrap` (már flex) első flex-gyermeke egy **összecsukható**
+  `.rmap-explorer` panel (🗂 Fájlok fejléc + **‹** összecsuk; `fbOpen` state localStorage-perzisztens, default zárt; toolbar **🗂**
+  gomb is toggle) — a stage magától szűkül. A panel a meglévő **`SessionFileBrowser`** (704) újrahasznosítása, kibővítve:
+  **on-map pötty** (`mapNodeId(f)`: `writing/·studies/`→`w`+id, egyébként `f`+id, csak ha `g.by[nid]` létezik → tömör ●/üres ○),
+  **kattintás→highlight** (`onLocate`→`setSel`+`cardIntoView`), **P2 kétirányú** (`locatedFileId`: a kijelölt fájl-kártya `ref.id`-ja
+  → a böngésző az adott `[data-fid]` sorra görget+kiemel, `fbRootRef`-fel THIS-instance-scope-olva). A dock Files-fül is megkapta.
+- [x] ✅ **Review-fix (MAJOR):** az explorer jobbra tolta a stage-et, de a kártya-relatív overlay-ek (seltool, él-címkék, él-inspector,
+  node-inspector) a `.rmap-wrap`-hez horgonyzottak stage-lokális koordinátákkal → nyitott panelnél elcsúsztak. **Fix:** új
+  `.rmap-stage-col` (position:relative, flex:1) wrapper a [stage…insp-float] köré (az explorer testvére) → minden a stage origójához
+  igazodik. Verifikáció paren-mélység-trace-szel: a col pontosan a stage+overlay-eket öleli, az `editing`/`windows`/`focus`/`menu`
+  kívül marad, 0 regresszió. **NINCS migráció/edge.**
+
 ## ✅ Kártya-törlés + P2-polish — 2026-07-20
 > User: „lehessen törölni kártyákat amiket a User úgy dönt" + dock kijelölés→ötlet + böngésző-törlés/átnevezés frissítse a térképet.
 - [x] ✅ **Kártya-törlés (destruktív, confirm-gated)** — `nodeDelete`/`nodesDelete`/`delOneNode`/`nodeDeletable` (guardok előtt, plain fv-ek):
