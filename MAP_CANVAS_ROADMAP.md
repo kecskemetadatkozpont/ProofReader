@@ -253,6 +253,15 @@
   a húzás alatt elnyomva) · **dedup-guard** (ha már van keret e bbox köré [±10px] → `framePatch` frissítés + toast, nem új keret).
   Adversariális review után.
 
+## ✅ MD-részlet → chat-kontextus — 2026-07-20
+> User: „ha az md-olvasóban kijelölök egy szövegrészletet, a chat-asszisztens érzékelje és kontextusként emelje be — hogy az adott fájlon belül az adott részlettel dolgozzon".
+- [x] ✅ **Kijelölés → chat-kontextus (review 0 találat)** — a fájl-előnézet (`.rmap-t-pv`, csak md/text/csv) `onMouseUp`-ja → `pvSelUp(n)`
+  (1ms után `getSelection`, >3 karakter → lebegő gomb a kijelölésnél); a **„✚ Chat-kontextus"** gomb (`pvAddSnippet`) a részletet
+  (`{text,file,fileId}`) a `dSnips` listába teszi + megnyitja a dockot. A dock **snippet-chipeket** mutat (`✂ fájl: „részlet…"`, ×-eltávolítható,
+  a `rmap-dock-att` újrahasznosítva). A `dkSend` a promptba emeli: `[KIJELÖLT SZÖVEGRÉSZLET(EK) — a felhasználó ezeken a részleteken akar
+  dolgozni…]` (a kártya-kontextus mintája), csak normál gépelt turn-nél (isOv/boundFrame nem), küldéskor törli. Bounded (capture 4000 / prompt 2000 kar).
+  2 új useState (`dSnips`/`pvSel`) a guardok előtt; a meglévő selection-popup + attach-chip minták újrahasznosítása. **NINCS migráció/edge, nincs CSS-változás.**
+
 ## ✅ Fájl-előnézet a kártyákon (P0+P1) — 2026-07-20
 > User: „a fájlok preview-jai a kártyákon, ha elég nagy a kártya — md/pdf/szöveg/kép/videó, amit a fájl igényel". Design: `card-file-preview-mockup` (🖼️, ① előnézet a kártya alján + P0/P1 jóváhagyva).
 - [x] ✅ **Méret-alapú, típus-illő előnézet + lusta betöltés** — a `richTier(n)` új `.rmap-t-pv` blokkja (`t:file/section/review`, `@container min-width:240 & min-height:150`,

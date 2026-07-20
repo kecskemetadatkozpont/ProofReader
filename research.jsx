@@ -4766,6 +4766,8 @@
     var denS = useState(false), dEnhancing = denS[0], setDEnhancing = denS[1];   // ✨ dock prompt-enhance in flight
     var dstS = useState(null), dStream = dstS[0], setDStream = dstS[1];   // live streaming reply bubble {text} while a dock turn streams in
     var dspS = useState(null), dSelPop = dspS[0], setDSelPop = dspS[1];   // dock: text selection in the messages → floating "add to idea" button {text,x,y}
+    var dsnS = useState([]), dSnips = dsnS[0], setDSnips = dsnS[1];   // pending md/text-preview snippets that ride the next dock turn as chat context {text,file,fileId}
+    var pvsS = useState(null), pvSel = pvsS[0], setPvSel = pvsS[1];   // text selected in a card md/text preview → floating "add to chat context" button {text,x,y,file,fileId}
     // safety: any aborted drag anywhere clears the dock dropzone so it can't stay stuck over the chat
     useEffect(function () { if (!dDrop) return; function reset() { setDDrop(false); } window.addEventListener('dragend', reset); window.addEventListener('drop', reset); return function () { window.removeEventListener('dragend', reset); window.removeEventListener('drop', reset); }; }, [dDrop]);
     var dockRef = useRef(null);   // the open dock element (for edge-drag resize geometry)
@@ -6524,6 +6526,20 @@
         try { window.getSelection().removeAllRanges(); } catch (e) { }
       }, function () { if (alive.current) window.PRUI.toast('Mentés sikertelen.', { kind: 'error' }); });
     }
+    function pvSelUp(n) {   // text selected inside a file card's md/text preview → offer to add it to the chat as context
+      setTimeout(function () {
+        var s = window.getSelection ? window.getSelection() : null, t = s ? String(s).trim() : '';
+        if (t && t.length > 3) { try { var rr = s.getRangeAt(0).getBoundingClientRect(); setPvSel({ text: t.slice(0, 4000), x: rr.left + rr.width / 2, y: rr.top, file: (n && (n.title || (n.ref && n.ref.path))) || 'fájl', fileId: n && n.ref && n.ref.id }); } catch (e) { setPvSel(null); } }
+        else setPvSel(null);
+      }, 1);
+    }
+    function pvAddSnippet() {   // add the selected preview snippet as a pending chat-context chip + open the dock chat
+      if (!pvSel) return;
+      setDSnips(function (p) { return p.concat([{ text: pvSel.text, file: pvSel.file, fileId: pvSel.fileId }]); });
+      setDkOpen(true); try { localStorage.setItem('pr-rmap-dock', '1'); } catch (e) { }
+      setDkTab('chat'); setPvSel(null);
+      try { window.getSelection().removeAllRanges(); } catch (e) { }
+    }
     function dkSuggest() {   // 💡 idea candidates FROM the current dock conversation (research-ai suggest) → new idea nodes on the map; mirrors ChatPanel.suggestIdeas
       if (dBusy) return;
       var convo = dMsgs.filter(function (m) { return m.text; }).slice(-16).map(function (m) { return (m.role === 'ai' ? 'AI: ' : 'User: ') + String(m.text || ''); }).join('\n\n').slice(0, 12000);
@@ -6551,6 +6567,7 @@
       // (an explicit override — e.g. a frame's inline "generate here" — carries its own context and attaches no card.)
       var an = (!isOv && !boundFrame && sel && g && g.by) ? g.by[sel] : null;
       var atts = (!isOv) ? dAttach : [];   // pending file/source attachments ride the normal typed turn (not overrides/frame-gen)
+      var snips = (!isOv) ? dSnips : [];   // pending md/text-preview snippets ride as chat context on a normal typed turn
       var full = txt;
       if (an) {
         var lab = (RMAP_TYPE[an.t] && RMAP_TYPE[an.t].lab) || an.t;
@@ -6558,8 +6575,10 @@
         var idp = (an.ref && an.ref.id) ? (' [id: ' + an.ref.id + ']') : '';
         full = '[BECSATOLT KÁRTYA a térképről — erre a kártyára fókuszálj: ' + lab + ' — "' + String(an.title || '').slice(0, 160) + '"' + idp + (mbits.length ? ' — ' + mbits.slice(0, 6).join(', ') : '') + ']\n\n' + txt;
       }
+      if (snips.length) full = '[KIJELÖLT SZÖVEGRÉSZLET(EK) — a felhasználó ezeken a részleteken akar dolgozni, a megadott fájlon belül:\n' + snips.map(function (s) { return '• (' + String(s.file || 'fájl') + ') „' + String(s.text).slice(0, 2000) + '"'; }).join('\n') + ']\n\n' + full;
       var attEcho = atts.length ? atts.map(function (a) { return '📎 ' + String(a.label || a.name || a.title || 'csatolmány').slice(0, 44); }).join('\n') + '\n' : '';
-      if (!skipEcho) dkSay('user', attEcho + (an ? '📎 ' + String(an.title || 'kártya').slice(0, 44) + '\n' : '') + txt); if (!isOv) { setDInput(''); setDAttach([]); } setDBusy(true);
+      var snipEcho = snips.length ? snips.map(function (s) { return '✂ „' + String(s.text).slice(0, 40) + (s.text.length > 40 ? '…' : '') + '"'; }).join('\n') + '\n' : '';
+      if (!skipEcho) dkSay('user', snipEcho + attEcho + (an ? '📎 ' + String(an.title || 'kártya').slice(0, 44) + '\n' : '') + txt); if (!isOv) { setDInput(''); setDAttach([]); setDSnips([]); } setDBusy(true);
       var CFG = window.PR_CONFIG || {}, CORE = window.PRAutopilotCore, pid = props.projectId;
       function fail(msg) { if (alive.current) { setDBusy(false); setDStream(null); dkSay('ai', msg || 'Hiba történt.'); } }   // single failure path → dBusy/dStream never strand
       dkEnsureChat().then(function (cid) {
@@ -6815,7 +6834,7 @@
           if (big) ensureFigUrls([r]); var pu = figUrls[r.storage_path];
           pv = pu ? h('iframe', { className: 'rmap-pv-pdf', src: pu, title: r.path, onMouseDown: function (e) { e.stopPropagation(); } }) : h('div', { className: 'rmap-pv-load' }, big ? '⏳ PDF…' : '');
         } else { pv = h('div', { className: 'rmap-pv-icon2' }, '📎'); }
-        out.push(h('div', { key: 'fpv', className: 'rmap-t rmap-t-pv', onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); if (sel !== n.id) { setSelEdge(null); setMsel({}); setSel(n.id); } } }, pv));   // clicking the preview still SELECTS the card (→ attached to the dock chat); mousedown-stop keeps scroll/text-select/media controls working
+        out.push(h('div', { key: 'fpv', className: 'rmap-t rmap-t-pv', onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); }, onMouseUp: (kind === 'md' || kind === 'text' || kind === 'csv') ? function (e) { pvSelUp(n); } : null, onClick: function (e) { e.stopPropagation(); if (sel !== n.id) { setSelEdge(null); setMsel({}); setSel(n.id); } } }, pv));   // clicking the preview still SELECTS the card (→ attached to the dock chat); mousedown-stop keeps scroll/text-select/media controls working
       }
       return out.length ? out : null;
     }
@@ -7190,6 +7209,10 @@
           h('div', { className: 'rmap-dock-mode' },
             h('button', { className: 'rmap-dock-modebtn' + (dkMode === 'chat' ? ' on' : ''), disabled: dBusy, title: 'Beszélgetés / kérdés az asszisztenssel', onClick: function () { setDkMode('chat'); } }, '💬 Chat'),
             h('button', { className: 'rmap-dock-modebtn' + (dkMode === 'action' ? ' on' : ''), disabled: dBusy || !(sn && sn.t === 'step'), title: (sn && sn.t === 'step') ? 'Az utasításból protokoll-lépést szúr be a kijelölt lépés után' : 'Jelölj ki egy protokoll-lépést az Akció módhoz', onClick: function () { setDkMode('action'); } }, '⚡ Akció')),
+          dSnips.length ? h('div', { className: 'rmap-dock-atts' }, dSnips.map(function (s, i) {
+            return h('span', { className: 'rmap-dock-att', key: 'ds' + i, title: s.text }, '✂ ' + String(s.file || 'fájl').slice(0, 14) + ': „' + String(s.text).slice(0, 20) + (s.text.length > 20 ? '…' : '') + '"',
+              h('button', { title: 'Eltávolítás', onClick: function () { setDSnips(dSnips.filter(function (_, j) { return j !== i; })); } }, '×'));
+          })) : null,
           dAttach.length ? h('div', { className: 'rmap-dock-atts' }, dAttach.map(function (a, i) {
             return h('span', { className: 'rmap-dock-att', key: 'da' + i }, (a.kind === 'source' ? '📄 ' : '📎 ') + String(a.label || a.name || a.title || 'csatolmány').slice(0, 30),
               h('button', { title: 'Eltávolítás', onClick: function () { setDAttach(dAttach.filter(function (_, j) { return j !== i; })); } }, '×'));
@@ -7205,6 +7228,7 @@
       // dock attach picker (library source / publication file / LaTeX / upload) — the same reusable modal the Idea chat uses
       (props.canEdit && dPick) ? h(AttachModal, { projectId: props.projectId, sources: props.sources, fileOwnerId: props.fileOwnerId, authorId: props.authorId, onUploadFile: dkUpload, onPick: function (a) { setDAttach(function (p) { return p.concat([a]); }); }, onClose: function () { setDPick(false); } }) : null,
       (props.canEdit && dSelPop && dkOpen && dkTab !== 'files') ? h('button', { className: 'sel-idea-btn', style: { position: 'fixed', left: dSelPop.x, top: dSelPop.y - 40, transform: 'translateX(-50%)', zIndex: 60 }, onMouseDown: function (e) { e.preventDefault(); }, onClick: function () { dkSelToIdea(dSelPop.text); } }, '✚ Ötletnek') : null,
+      (props.canEdit && pvSel) ? h('button', { className: 'sel-idea-btn', style: { position: 'fixed', left: pvSel.x, top: pvSel.y - 40, transform: 'translateX(-50%)', zIndex: 61 }, onMouseDown: function (e) { e.preventDefault(); }, onClick: pvAddSnippet }, '✚ Chat-kontextus') : null,
       // floating selection toolbar — compact quick-actions above the selected card (pin / hide / generate / export)
       (sn && props.canEdit) ? h('div', { className: 'rmap-seltool', style: selToolStyle(sn), onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); }, onMouseMove: function (e) { dockMagnify(e.currentTarget, e.clientX, 78, 26); }, onMouseLeave: function (e) { dockReset(e.currentTarget); } },
         mapFlags ? h('button', { className: 'rmap-dbtn' + ((layout[sn.id] && layout[sn.id].pinned) ? ' on' : ''), title: (layout[sn.id] && layout[sn.id].pinned) ? 'Kitűzés levétele' : 'Kitűzés (fontos)', onClick: function () { nodeTogglePinned(sn); } }, '📌', h('span', { className: 'rmap-dlab' }, (layout[sn.id] && layout[sn.id].pinned) ? 'Kitűzés levétele' : 'Kitűzés')) : null,
