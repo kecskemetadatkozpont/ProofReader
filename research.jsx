@@ -4712,6 +4712,8 @@
     var roS = useState(false), restoreOpen = roS[0], setRestoreOpen = roS[1];   // the "hidden figures" restore panel
     var nrS = useState(false), nodeRestoreOpen = nrS[0], setNodeRestoreOpen = nrS[1];   // the "hidden nodes" restore panel (migration-70)
     var fbS = useState(function () { try { return localStorage.getItem('pr-rmap-fb') === '1'; } catch (e) { return false; } }), fbOpen = fbS[0], setFbOpen = fbS[1];   // left File Explorer panel — collapsible, persisted
+    var ioS = useState(false), inspOpen = ioS[0], setInspOpen = ioS[1];   // the details modal (metadata/figure/step/refine) is opt-in via the ⓘ toolbar icon — NOT auto-shown on select
+    useEffect(function () { setInspOpen(false); }, [sel]);   // a new selection starts collapsed → only the toolbar shows; ⓘ opens the details on demand
     var figLoading = useRef({});
     // lazily sign the storage URLs for a set of figures (idempotent; in-flight guarded)
     function ensureFigUrls(figs) {
@@ -7168,16 +7170,21 @@
       (sn && props.canEdit) ? h('div', { className: 'rmap-seltool', style: selToolStyle(sn), onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); }, onMouseMove: function (e) { dockMagnify(e.currentTarget, e.clientX, 78, 26); }, onMouseLeave: function (e) { dockReset(e.currentTarget); } },
         mapFlags ? h('button', { className: 'rmap-dbtn' + ((layout[sn.id] && layout[sn.id].pinned) ? ' on' : ''), title: (layout[sn.id] && layout[sn.id].pinned) ? 'Kitűzés levétele' : 'Kitűzés (fontos)', onClick: function () { nodeTogglePinned(sn); } }, '📌', h('span', { className: 'rmap-dlab' }, (layout[sn.id] && layout[sn.id].pinned) ? 'Kitűzés levétele' : 'Kitűzés')) : null,
         mapFlags ? h('button', { className: 'rmap-dbtn', title: 'Elrejtés a térképről', onClick: function () { nodeToggleHidden(sn); } }, '🙈', h('span', { className: 'rmap-dlab' }, 'Elrejtés')) : null,
+        canEnter(sn) ? h('button', { className: 'rmap-dbtn', title: 'Belépés a kártyába — a panel a helyén nyílik meg (Prezi-zoom)', onClick: function () { enterNode(sn); } }, '◇', h('span', { className: 'rmap-dlab' }, 'Belépés')) : null,
+        (props.canEdit && editSpec(sn)) ? h('button', { className: 'rmap-dbtn', title: 'Metaadat szerkesztése', onClick: function () { openEdit(sn); } }, '✎', h('span', { className: 'rmap-dlab' }, 'Szerkesztés')) : null,
         (genActions(sn).length || regenActions(sn).length) ? h('button', { className: 'rmap-dbtn', title: 'Generálás innen', onClick: function (e) { e.stopPropagation(); setMenu({ node: sn, x: e.clientX, y: e.clientY }); } }, '⚡', h('span', { className: 'rmap-dlab' }, 'Generálás')) : null,
         canEnter(sn) ? h('button', { className: 'rmap-dbtn', title: 'Panel megnyitása ablakként (nem-modal, több is lehet)', onClick: function () { openWindow(sn); } }, '⊞', h('span', { className: 'rmap-dlab' }, 'Ablak')) : null,
         (props.canEdit && edgesCap) ? h('button', { className: 'rmap-dbtn' + (linkFrom === sn.id ? ' on' : ''), title: 'Kapcsolat húzása egy másik kártyához (kézi él)', onClick: function () { setLinkFrom(linkFrom === sn.id ? null : sn.id); } }, '🔗', h('span', { className: 'rmap-dlab' }, 'Kapcsolat')) : null,
+        h('button', { className: 'rmap-dbtn', title: 'Megnyitás a ' + ((RMAP_TYPE[sn.t] && RMAP_TYPE[sn.t].lab) || '') + ' fülön', onClick: function () { if (props.onGoTab) props.onGoTab(RMAP_TYPE[sn.t].tab); } }, '⧉', h('span', { className: 'rmap-dlab' }, 'Fülön')),
+        (sn.ref && sn.ref.url) ? h('button', { className: 'rmap-dbtn', title: 'Forrás megnyitása új lapon', onClick: function () { try { window.open(sn.ref.url, '_blank', 'noopener'); } catch (e) { } } }, '🌐', h('span', { className: 'rmap-dlab' }, 'Forrás')) : null,
         h('button', { className: 'rmap-dbtn', title: 'Kártya a nézetbe (a képernyőre igazítja)', onClick: function () { cardIntoView(sn); } }, '⤢', h('span', { className: 'rmap-dlab' }, 'Nézetbe')),
         h('button', { className: 'rmap-dbtn', title: 'Kártya exportálása (PNG)', onClick: function () { exportNode(sn); } }, '⤓', h('span', { className: 'rmap-dlab' }, 'Export')),
+        h('button', { className: 'rmap-dbtn' + (inspOpen ? ' on' : ''), title: inspOpen ? 'Részletek elrejtése' : 'Részletek — metaadat, ábra, felelős/sign-off, finomítás', onClick: function () { setInspOpen(function (v) { return !v; }); } }, 'ⓘ', h('span', { className: 'rmap-dlab' }, 'Részletek')),
         nodeDeletable(sn) ? h('button', { className: 'rmap-dbtn rmap-dbtn-danger', title: 'Kártya törlése (véglegesen)', onClick: function () { nodeDelete(sn); } }, '🗑', h('span', { className: 'rmap-dlab' }, 'Törlés')) : null) : null,
       edgeLabelEls,
       edgeInspEl(),
-      sn ? h('div', { className: 'rmap-insp rmap-insp-float', style: inspStyle(sn), onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
-        h('div', { className: 'rmap-insp-h' }, h('span', { className: 'rmap-ni' }, RMAP_TYPE[sn.t].ic), h('div', { style: { minWidth: 0 } }, h('b', null, sn.title), h('div', { className: 'rmap-insp-ty' }, RMAP_TYPE[sn.t].lab)), h('button', { className: 'rmap-insp-x', onClick: function () { setSel(null); } }, '×')),
+      (sn && inspOpen) ? h('div', { className: 'rmap-insp rmap-insp-float', style: inspStyle(sn), onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
+        h('div', { className: 'rmap-insp-h' }, h('span', { className: 'rmap-ni' }, RMAP_TYPE[sn.t].ic), h('div', { style: { minWidth: 0 } }, h('b', null, sn.title), h('div', { className: 'rmap-insp-ty' }, RMAP_TYPE[sn.t].lab)), h('button', { className: 'rmap-insp-x', title: 'Részletek bezárása', onClick: function () { setInspOpen(false); } }, '×')),
         h('div', { className: 'rmap-insp-b' },
           h('div', { className: 'rmap-kv' }, Object.keys(sn.m).map(function (kk) { return [h('span', { className: 'k', key: 'k' + kk }, kk), h('span', { className: 'v', key: 'v' + kk }, sn.m[kk])]; })),
           // figure node: expand → show the extracted image preview + "remove from the Map" (on_map=false)
@@ -7199,19 +7206,7 @@
                 signed ? h('span', { style: { fontSize: 11.5, flex: 1, minWidth: 0 } }, nameOf(st.signed_off_by) + (st.signed_off_at ? ' · ' + String(st.signed_off_at).slice(0, 10) : '')) : h('span', { style: { fontSize: 11.5, color: 'var(--muted)', flex: 1 } }, 'nincs'),
                 signed ? h('button', { className: 'btn', style: { fontSize: 11, padding: '3px 8px', flex: 'none' }, onClick: function () { stepUnsignOff(st); } }, 'Visszavonás') : h('button', { className: 'btn pri', style: { fontSize: 11, padding: '3px 8px', flex: 'none' }, title: props.canEdit ? 'Jóváhagyás' : 'Konzulensi jóváhagyás', onClick: function () { stepSignOff(st); } }, 'Jóváhagyom')));
           })() : null,
-          h('div', { className: 'rmap-insp-acts' },
-            canEnter(sn) ? h('button', { className: 'btn pri', style: { fontSize: 12 }, title: 'Zoomolj a kártyába — a ' + RMAP_TYPE[sn.t].lab + ' panel a helyén nyílik meg', onClick: function () { enterNode(sn); } }, '◇ Belépés (a helyén)') : null,
-            (props.canEdit && editSpec(sn)) ? h('button', { className: 'btn pri', style: { fontSize: 12 }, onClick: function () { openEdit(sn); } }, '✎ Metaadat szerkesztése') : null,
-            (props.canEdit && regenActions(sn).length) ? h('button', { className: 'btn', style: { fontSize: 12 }, disabled: genBusy, onClick: function () { runGen(sn, regenActions(sn)[0][0]); } }, regenActions(sn)[0][1]) : null,
-            h('button', { className: 'btn', style: { fontSize: 12 }, onClick: function () { if (props.onGoTab) props.onGoTab(RMAP_TYPE[sn.t].tab); } }, 'Megnyitás a ' + RMAP_TYPE[sn.t].lab + ' fülön →'),
-            (sn.ref && sn.ref.url) ? h('a', { className: 'btn', style: { fontSize: 12, textDecoration: 'none' }, href: sn.ref.url, target: '_blank', rel: 'noopener' }, 'Forrás ↗') : null,
-            nodeDeletable(sn) ? h('button', { className: 'btn', style: { fontSize: 12, color: 'var(--danger, #b42318)' }, title: 'A kártya és adatai végleges törlése', onClick: function () { nodeDelete(sn); } }, '🗑 Törlés') : null),
-          // "Mit tehetsz innen?" — the node's one-click generations (idea→study, study→review, review→protocol/draft, …),
-          // surfaced inline so every card advertises how to move the research forward from here (not only via the menu).
-          (props.canEdit && genActions(sn).length) ? h('div', { style: { marginTop: 8, borderTop: '1px solid var(--line)', paddingTop: 8 } },
-            h('div', { style: { fontSize: 10, fontWeight: 800, color: 'var(--faint)', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 5 } }, '✦ Mit tehetsz innen'),
-            h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 6 } }, genActions(sn).map(function (a) { return h('button', { key: a[0], className: 'btn', style: { fontSize: 12 }, disabled: genBusy, onClick: function () { runGen(sn, a[0]); } }, a[1]); }))) : null,
-          h('p', { className: 'rmap-insp-note' }, 'A metaadat itt közvetlenül szerkeszthető — ugyanazok az adatok, mint a fázis-paneleken. A canvason maradsz, modal helyett.'),
+          h('p', { className: 'rmap-insp-note' }, 'Részletek. Az akciók a kártya fölötti eszköztárban: ◇ Belépés · ✎ Szerkesztés · ⚡ Generálás · ⧉ Fülön · 🌐 Forrás · 🗑 Törlés.'),
           (props.canEdit && sn.t === 'step') ? h('div', { className: 'rmap-chat' },
             h('div', { className: 'rmap-chat-h' }, '🔧 Finomítás — írd le, mit változtassak ezen a lépésen'),
             rcMsgs.length ? h('div', { className: 'rmap-chat-msgs' }, rcMsgs.map(function (mm, i) { return h('div', { key: i, className: 'rmap-chat-msg ' + (mm.role === 'user' ? 'u' : 'a') }, mm.text); })) : null,

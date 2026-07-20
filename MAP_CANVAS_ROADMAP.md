@@ -253,6 +253,16 @@
   a húzás alatt elnyomva) · **dedup-guard** (ha már van keret e bbox köré [±10px] → `framePatch` frissítés + toast, nem új keret).
   Adversariális review után.
 
+## ✅ Kártya-akciók a toolbarba — a lebegő inspector opt-in-né — 2026-07-20
+> User: „a kártyára kattintva felugró lebegő modal gombjait inkább a toolbarba, ikonként, a kártyák felett". Design: `card-toolbar-actions-mockup` (🧰, 3 verzió → ① csak toolbar + ⓘ igény szerint jóváhagyva).
+- [x] ✅ **Akciók → toolbar-ikonok + opt-in modal** — a `.rmap-seltool` (magnify-dock) új ikonjai: **◇ Belépés** (`enterNode`, `canEnter`-gated),
+  **✎ Szerkesztés** (`openEdit`, `editSpec`-gated), **⧉ Fülön** (`onGoTab`), **🌐 Forrás** (`window.open`, ha `sn.ref.url`), **ⓘ Részletek**
+  (togglel `inspOpen`). A ⚡ továbbra is a generálás-menüt (genActions+regen), a 🗑 a törlést. A lebegő `.rmap-insp-float` mostantól
+  csak **`sn && inspOpen`**-re jelenik meg (nem magától); a `rmap-insp-acts` gomb-blokk + a „Mit tehetsz innen" genActions-szekció
+  **törölve** (redundáns a toolbarral/⚡-menüvel); a modal már **csak részletek** (metaadat/ábra/step-felelős+sign-off/finomító-chat).
+  `inspOpen` useState + `useEffect([sel])` reset (a guardok előtt) → új kijelölés = csak toolbar. A modal **×** most `setInspOpen(false)`
+  (a kártya kijelölve marad). **Adversariális review: 0 találat.** **NINCS migráció/edge.**
+
 ## ✅ Térkép-integrált bal File Explorer (fájl ↔ kártya) — 2026-07-20
 > User: „a Térképről is elérhető File Browser, ahol látszik mi jött létre / mi lett feltöltve / hova, és fájlra kattintva highlight-olja a kártyát" + összecsukható. Design: `map-filebrowser-mockup` (📂, 3 elrendezés → ① bal explorer + P2 jóváhagyva).
 - [x] ✅ **Bal Explorer + fájl↔kártya + P2 + összecsukhatóság** — a `.rmap-wrap` (már flex) első flex-gyermeke egy **összecsukható**
