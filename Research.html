@@ -1262,8 +1262,9 @@
     .rmap-pv-load { height: 100%; display: grid; place-items: center; color: var(--faint); font-size: 10.5px; }
     .rmap-pv-icon2 { height: 100%; display: grid; place-items: center; font-size: 24px; color: var(--faint); }
     .rmap-pv-csv { height: 100%; overflow: auto; } .rmap-pv-csv table { border-collapse: collapse; font-family: var(--mono); font-size: 9.5px; width: 100%; } .rmap-pv-csv th, .rmap-pv-csv td { border: 1px solid var(--line); padding: 2px 6px; text-align: left; white-space: nowrap; } .rmap-pv-csv th { background: var(--surface-3, var(--surface-2)); position: sticky; top: 0; }
-    /* far-zoom cap: never render the heavy tiers when the whole map is zoomed way out (readability + paint budget) */
-    .rmap-lod-0 .rmap-t-l, .rmap-lod-0 .rmap-t-xl, .rmap-lod-0 .rmap-t-fig, .rmap-lod-0 .rmap-t-pv { display: none !important; }
+    /* far-zoom cap: never render the heavy meta tiers when the whole map is zoomed way out (readability + paint budget).
+       NOTE: .rmap-t-pv (file preview) is deliberately EXCLUDED — the user wants previews to stay visible at any zoom. */
+    .rmap-lod-0 .rmap-t-l, .rmap-lod-0 .rmap-t-xl, .rmap-lod-0 .rmap-t-fig { display: none !important; }
     .rmap-node::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; border-radius: 12px 0 0 12px; background: var(--nc, var(--accent)); }
     .rmap-node:hover { border-color: var(--nc, var(--accent)); }
     .rmap-node.sel { border-color: var(--nc, var(--accent)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--nc, var(--accent)) 22%, transparent); }
@@ -1506,7 +1507,7 @@
   <script type="text/babel" src="canvas.jsx?v=1783137934"></script>
   <script type="text/babel" src="notes.jsx?v=1783137934"></script>
   <script src="autopilot-core.js?v=1784160000"></script>
-  <script type="text/babel" src="research.jsx?v=1786020000"></script>
+  <script type="text/babel" src="research.jsx?v=1786120000"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>

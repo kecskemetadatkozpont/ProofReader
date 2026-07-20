@@ -13,7 +13,9 @@
 
   function saveFile(pid, path, content, source) {
     var u = uid();
-    return sb.from('research_files').upsert({ project_id: pid, path: path, content: content || '', mime: /\.tex$/.test(path) ? 'text/x-tex' : 'text/markdown', size: (content || '').length, source: source || 'ai', created_by: u, updated_by: u, updated_at: nowIso() }, { onConflict: 'project_id,path' });
+    // .select('id').maybeSingle() → the result carries the row id so a caller (e.g. the Map) can compute the file's
+    // graph-node id and link/pin it. Still exposes .error/.data, so existing `.then(sf => sf.error…)` callers are unaffected.
+    return sb.from('research_files').upsert({ project_id: pid, path: path, content: content || '', mime: /\.tex$/.test(path) ? 'text/x-tex' : 'text/markdown', size: (content || '').length, source: source || 'ai', created_by: u, updated_by: u, updated_at: nowIso() }, { onConflict: 'project_id,path' }).select('id').maybeSingle();
   }
   // every research-* edge REQUIRES the caller's user JWT (auth.uid() gates entitlement) — a service role cannot
   // stand in, so the orchestrator runs in the browser under the user's session and forwards the access token.

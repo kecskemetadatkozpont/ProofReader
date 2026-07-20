@@ -684,9 +684,29 @@
     if (!text) return text;
     return text.replace(/```file:([^\n`]+)\n[\s\S]*?```/g, function (_, p) { return '\n📄 **' + p.trim() + '** _(saved to files)_\n'; });
   }
-  function extractFiles(text) {
-    var out = [], re = /```file:([^\n`]+)\n([\s\S]*?)```/g, m;
-    while ((m = re.exec(text || ''))) { out.push({ path: m[1].trim(), content: m[2].replace(/\n+$/, '') }); }
+  function extractFiles(text) {   // fence-AWARE: read a ```file:PATH block to its MATCHING close, skipping BOTH tagged (```lang) AND bare (```) nested code blocks. The old non-greedy regex truncated at the first inner fence → data loss.
+    var out = [], lines = String(text || '').split('\n'), n = lines.length, i = 0;
+    // A bare ``` at the file's outer level is ambiguous: it either OPENS an untagged code block or CLOSES the file. We
+    // disambiguate by lookahead — if another bare ``` appears before the next ```file: header / EOF, this one opens a
+    // block (its pair will close it); otherwise it closes the file. Handles README/shell snippets with untagged fences.
+    function bareLater(from) { for (var j = from; j < n; j++) { if (/^\s*```file:/.test(lines[j])) return false; if (/^\s*```\s*$/.test(lines[j])) return true; } return false; }
+    while (i < n) {
+      var head = /^\s*```file:(.+)$/.exec(lines[i]);
+      if (!head) { i++; continue; }
+      var path = head[1].trim(), body = [], depth = 0, bareInner = false, closed = false;
+      i++;
+      for (; i < n; i++) {
+        var line = lines[i], fm = /^\s*```(.*)$/.exec(line);
+        if (!fm) { body.push(line); continue; }
+        if ((fm[1] || '').trim()) { depth++; body.push(line); continue; }         // ```lang → OPEN a tagged nested block
+        if (depth > 0) { depth--; body.push(line); continue; }                    // bare ``` → CLOSE the innermost tagged block
+        if (bareInner) { bareInner = false; body.push(line); continue; }          // bare ``` → CLOSE a bare-opened nested block
+        if (bareLater(i + 1)) { bareInner = true; body.push(line); continue; }    // bare ``` with a pair ahead → OPENS a bare nested block
+        closed = true; i++; break;                                                 // bare ``` at outer level, no pair ahead → CLOSE the file block
+      }
+      out.push({ path: path, content: body.join('\n').replace(/\n+$/, '') });
+      if (!closed) break;   // unterminated (truncated reply) → we already captured to EOF; nothing is silently lost
+    }
     return out;
   }
 
@@ -5584,6 +5604,22 @@
         if (r && r.error && alive.current) window.PRUI.toast('Kapcsolat mentése sikertelen: ' + r.error.message, { kind: 'error' });
       });
     }
+    // Batch B — PROVENANCE link: when a generated result (file / idea / gap) is clearly derived from a KNOWN source card,
+    // pin the new node(s) just to the RIGHT of the source (research_map_layout) and draw a manual provenance edge to each
+    // (research_map_edges). Best-effort + silent on failure; only with edit rights. newIds = graph node ids ('f'/'w'/'i'+id).
+    function linkToSource(srcNode, newIds) {
+      if (!srcNode || !props.canEdit) return Promise.resolve();
+      var ids = (newIds || []).filter(Boolean); if (!ids.length) return Promise.resolve();
+      var cur = layout[srcNode.id] || {};
+      var sx = (cur.x != null ? cur.x : srcNode.x) || 0, sy = (cur.y != null ? cur.y : srcNode.y) || 0;
+      var lrows = ids.map(function (nid, i) { return { project_id: props.projectId, node_id: nid, x: Math.round(sx + 320), y: Math.round(sy + i * 96), updated_at: new Date().toISOString() }; });
+      var jobs = [sb.from('research_map_layout').upsert(lrows, { onConflict: 'project_id,node_id' })];
+      if (edgesCap) {
+        var erows = ids.map(function (nid) { return { project_id: props.projectId, edge_key: srcNode.id + '|' + nid + '|manual', from_id: srcNode.id, to_id: nid, kind: 'kap', manual: true, updated_at: new Date().toISOString() }; });
+        jobs.push(sb.from('research_map_edges').upsert(erows, { onConflict: 'project_id,edge_key' }));
+      }
+      return Promise.all(jobs).catch(function () { });
+    }
     // P2 drag-to-connect: pull an edge straight out of a card port and drop it on another card (the natural graph gesture).
     function startLinkDrag(e, nodeId) {
       if (e.button !== 0 || !props.canEdit || !edgesCap) return;
@@ -6432,12 +6468,18 @@
     }
     function dkCmd(act) {   // one-click pipeline command → runs the project-level generation and re-materializes the map
       if (dBusy) return;
+      var pid = props.projectId, proj = props.project, LAB = { ideas: '✦ Ötletek generálása', gaps: '🕳 Rések generálása', study: '📚 Irodalom-study indítása', protocol: '🧪 Protokoll generálása', writing: '✍️ Draft-vázlat készítése' };
+      if (act === 'ideas') {   // REAL ideas (research-ai suggest), grounded in the project + any selected card / pending snippet. dkGenIdeas owns its echo/busy → no CORE needed.
+        var ig = String(proj.goal || proj.title || 'kutatási projekt');
+        if (dSnips && dSnips.length) ig += '\n\n[Kijelölt részletek]\n' + dSnips.map(function (s) { return String(s.text || '').slice(0, 1500); }).join('\n\n');
+        var ian = (sel && g && g.by) ? g.by[sel] : null; if (ian) ig += '\n\n[Fókusz kártya] ' + String(ian.title || '');
+        dkGenIdeas(ig, LAB.ideas, ian); return;
+      }
       var CORE = window.PRAutopilotCore; if (!CORE || !CORE.callEdge) { dkSay('ai', 'A generátor nem elérhető (autopilot-core).'); return; }
-      var pid = props.projectId, proj = props.project, LAB = { ideas: '✦ Ötletek generálása', study: '📚 Irodalom-study indítása', protocol: '🧪 Protokoll generálása', writing: '✍️ Draft-vázlat készítése' };
       dkSay('user', LAB[act] || act); setDBusy(true);
       function ok(msg) { if (!alive.current) return; setDBusy(false); dkSay('ai', '✓ ' + msg); setBump(function (x) { return x + 1; }); }
       function bad(e) { if (!alive.current) return; setDBusy(false); dkSay('ai', '⚠️ ' + e); }
-      if (act === 'ideas') CORE.callEdge('research-ai', { action: 'gap', project_id: pid }).then(function (d) { (d && d.error) ? bad(d.error) : ok(((d && d.count) || 0) + ' ötlet-jelölt a térképen'); }, function () { bad('hálózat'); });
+      if (act === 'gaps') CORE.callEdge('research-ai', { action: 'gap', project_id: pid }).then(function (d) { (d && d.error) ? bad(d.error) : ok(((d && d.count) || 0) + ' kutatási rés a térképen'); }, function () { bad('hálózat'); });
       else if (act === 'protocol') CORE.callEdge('research-protocol', { action: 'generate', project_id: pid, goal: String(proj.goal || proj.title || '') }).then(function (d) { (d && d.error) ? bad(d.error) : ok(((d && d.steps) || 0) + ' protokoll-lépés'); }, function () { bad('hálózat'); });
       else if (act === 'writing') CORE.callEdge('research-writing', { action: 'outline', project_id: pid }).then(function (d) {
         if (d && d.error) { bad(d.error); return; }
@@ -6553,6 +6595,23 @@
         else dkSay('ai', 'Nem találtam új ötletet ebből a beszélgetésből.');
       }, function () { if (alive.current) { setDBusy(false); dkSay('ai', '⚠️ Hálózati hiba.'); } });
     }
+    function dkGenIdeas(ground, echo, srcNode) {   // shared REAL-idea generator (research-ai suggest → research_ideas rows → idea nodes); used by the ✦ Ötletek chip AND free-text idea-intent. srcNode: the source card (Batch B pins/links the results near it).
+      if (dBusy) return;
+      dkSay('user', echo); setDBusy(true);
+      sb.functions.invoke('research-ai', { body: { action: 'suggest', project_id: props.projectId, text: String(ground || '').slice(0, 12000) } }).then(function (res) {
+        if (!alive.current) return; setDBusy(false);
+        if (res && res.error) { dkSay('ai', '⚠️ Az AI nem elérhető (research-ai / ANTHROPIC_API_KEY).'); return; }
+        var d = res && res.data;
+        if (d && d.count) {
+          dkSay('ai', '✓ ' + d.count + ' ötlet a térképen.');
+          // Batch B: if these ideas came from a known source card, pin them next to it + draw provenance edges.
+          var nids = srcNode ? ((d.ideas) || []).map(function (it) { return (it && it.id != null) ? ('i' + it.id) : null; }).filter(Boolean) : [];
+          var after = function () { if (alive.current) setBump(function (x) { return x + 1; }); };
+          if (srcNode && nids.length) linkToSource(srcNode, nids).then(after, after); else after();
+        }
+        else dkSay('ai', 'Nem találtam új ötletet — próbáld konkrétabban megfogalmazni.');
+      }, function () { if (alive.current) { setDBusy(false); dkSay('ai', '⚠️ Hálózati hiba.'); } });
+    }
     function dkSend(overrideTxt, skipEcho) {   // free-text turn → research-chat (streaming); the reply may save files (→ file nodes). skipEcho: caller already echoed the user turn (frame-generation chat fallback)
       var isOv = (overrideTxt != null);
       var txt = String(isOv ? overrideTxt : (dInput || '')).trim(); if (!txt || dBusy) return;
@@ -6568,6 +6627,17 @@
       var an = (!isOv && !boundFrame && sel && g && g.by) ? g.by[sel] : null;
       var atts = (!isOv) ? dAttach : [];   // pending file/source attachments ride the normal typed turn (not overrides/frame-gen)
       var snips = (!isOv) ? dSnips : [];   // pending md/text-preview snippets ride as chat context on a normal typed turn
+      // free-text IDEA-INTENT → generate a REAL idea (research-ai suggest), NOT a chat reply / truncated md file.
+      // Keyword heuristic; only on a normal typed turn. The message + snippet + attached card become the grounding.
+      if (!isOv && /ötlet/i.test(txt) && /(generál|javasol|\badj(?:on|ál|atok|unk|uk)?\b|készíts|hozz\s+létre|gyárts|kérek|dobj|ajánl)/i.test(txt)) {
+        var iground = txt
+          + (snips.length ? ('\n\n[Kijelölt részletek]\n' + snips.map(function (s) { return String(s.text || '').slice(0, 1500); }).join('\n\n')) : '')
+          + (an ? ('\n\n[Fókusz kártya] ' + String(an.title || '')) : '');
+        var iecho = (snips.length ? snips.map(function (s) { return '✂ „' + String(s.text).slice(0, 40) + (s.text.length > 40 ? '…' : '') + '"'; }).join('\n') + '\n' : '') + '💡 ' + txt;
+        setDInput(''); setDAttach([]); setDSnips([]);
+        dkGenIdeas(iground, iecho, an);
+        return;
+      }
       var full = txt;
       if (an) {
         var lab = (RMAP_TYPE[an.t] && RMAP_TYPE[an.t].lab) || an.t;
@@ -6601,7 +6671,16 @@
                       setDStream(null); setDBusy(false);
                       dkSay('ai', acc || '(üres válasz)');
                       var files = (typeof extractFiles === 'function') ? extractFiles(acc) : [];   // persist any ```file:…``` blocks → they appear as file nodes
-                      if (files.length && CORE && CORE.saveFile) Promise.all(files.map(function (f) { return CORE.saveFile(pid, f.path, f.content, 'ai'); })).then(function () { if (alive.current) setBump(function (x) { return x + 1; }); });
+                      if (files.length && CORE && CORE.saveFile) Promise.all(files.map(function (f) {
+                        // Batch B: capture the saved file's id → its graph-node id ('w' for writing//studies/, else 'f'), so a file
+                        // derived from the attached card (an) can be pinned next to it + linked. Falls back to null (no link) on any error.
+                        return CORE.saveFile(pid, f.path, f.content, 'ai').then(function (sf) { var fid = sf && sf.data && sf.data.id; return (fid != null) ? (/^(writing|studies)\//.test(f.path) ? ('w' + fid) : ('f' + fid)) : null; }, function () { return null; });
+                      })).then(function (nids) {
+                        if (!alive.current) return;
+                        var valid = (nids || []).filter(Boolean);
+                        var after = function () { if (alive.current) setBump(function (x) { return x + 1; }); };
+                        if (an && valid.length) linkToSource(an, valid).then(after, after); else after();
+                      });
                       return;
                     }
                     acc += dec.decode(rd.value, { stream: true });
@@ -7193,7 +7272,7 @@
               ) : null
             ];
           }), dStream ? h('div', { className: 'rmap-dock-msg a', key: 'dstream' }, dStream.text || '', h('span', { className: 'rmap-dock-cursor' }, '▌')) : (dBusy ? h('div', { className: 'rmap-dock-msg a busy' }, '⏳ dolgozom…') : null)),
-          h('div', { className: 'rmap-dock-cmds' }, [['ideas', '✦ Ötletek'], ['study', '📚 Irodalom'], ['protocol', '🧪 Protokoll'], ['writing', '✍️ Draft']].map(function (c) { return h('button', { key: c[0], className: 'rmap-dock-chip', disabled: dBusy, onClick: function () { dkCmd(c[0]); } }, c[1]); }).concat([h('button', { key: 'suggest', className: 'rmap-dock-chip', disabled: dBusy, title: 'Ötlet-jelöltek a mostani beszélgetésből (AI) — új kártyák a térképen', onClick: dkSuggest }, '💡 A beszélgetésből')])),
+          h('div', { className: 'rmap-dock-cmds' }, [['ideas', '✦ Ötletek'], ['gaps', '🕳 Rések'], ['study', '📚 Irodalom'], ['protocol', '🧪 Protokoll'], ['writing', '✍️ Draft']].map(function (c) { return h('button', { key: c[0], className: 'rmap-dock-chip', disabled: dBusy, title: c[0] === 'ideas' ? 'Új kutatási ÖTLETEK generálása (AI) — a projektből és a kijelölt kártyából/részletből' : (c[0] === 'gaps' ? 'Kutatási RÉSEK feltárása (AI) — hiányzó irányok a projektben' : null), onClick: function () { dkCmd(c[0]); } }, c[1]); }).concat([h('button', { key: 'suggest', className: 'rmap-dock-chip', disabled: dBusy, title: 'Ötlet-jelöltek a mostani beszélgetésből (AI) — új kártyák a térképen', onClick: dkSuggest }, '💡 A beszélgetésből')])),
           // the selected card is "attached" to the next prompt — shown here like an attachment chip (× to detach)
           sn ? h('div', { style: { display: 'flex', alignItems: 'center', gap: 6, margin: '2px 12px 6px', padding: '4px 8px', borderRadius: 8, background: 'var(--accent-tint)', border: '1px solid var(--accent)' } },
             h('span', { style: { flex: 'none', fontSize: 13 } }, (RMAP_TYPE[sn.t] && RMAP_TYPE[sn.t].ic) || '📎'),

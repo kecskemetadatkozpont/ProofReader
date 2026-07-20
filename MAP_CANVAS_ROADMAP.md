@@ -381,6 +381,32 @@
   Simple/Pro) elérhetők maradnak; a CitationOptimizer topbar-ja tisztán chrome → teljes rejtés OK.
 - [ ] ⏳ **P1** — mindkét iframe mountolva marad (`display` váltás, nincs újratöltés tabváltáskor) · in-frame dark-toggle rejtve · a keret-magasság flex-oszloppal. **P2** — natív `window.PRFigureBoard`/`PRCitationOptimizer` (mint PRCanvas/PRNotes), csak ha az iframe kevés.
 
+## 🚧 Generálás-hibák: chat→file csonkolás · ötlet/rés-routing · provenance-link · preview-zoom — 2026-07-20
+> Élő projektből („Healthcare OOD only on MAP") jelentett 4 hiba. Vizsgálat live-DB olvasással megerősítve
+> (`map-generation-investigation` workflow); két batchben építve + adversariális review mindkettőre.
+- [x] ✅ **Batch A / #1 (blokkoló, data-integrity) — `extractFiles` fence-tudatos parser** — a régi non-greedy
+  `/```file:…([\s\S]*?)```/` a body ELSŐ belső ``` kerítésénél csonkolt (minden kód-blokkot tartalmazó chat-írt fájl
+  adatvesztett). Új: soronkénti parser, ```lang (címkés) → mélység++, csupasz ``` → mélység-- vagy fájl-zárás, a
+  **csupasz belső** kerítést lookahead-párosítás oldja fel (`bareLater`); csonkolt válasznál EOF-ig ment (nincs veszteség).
+  **Live-DB bizonyíték:** a valódi 18025-karakteres válaszon a régi regex 904 karaktert, az új parser **16492**-t hoz ki
+  (18×). 7/7 unit-teszt zöld (címkés/csupasz/multi/csonka/none). Review 1 major (csupasz kerítés) → javítva.
+- [x] ✅ **Batch A / #3 (major) — ötlet↔rés routing** — a `✦ Ötletek` chip eddig a `gap` generátort hívta. Most:
+  `dkGenIdeas` közös motor → `research-ai action:'suggest'` (VALÓDI ötletek, projekt+kijelölt kártya/részlet grounddal);
+  külön **🕳 Rések** chip → `action:'gap'`. **Szabad-szöveges ötlet-intent** (`/ötlet/i` + ige) a chatben szintén
+  ötletet generál (nem csonka fájlt). Review 1 minor (`adj` horgony) → javítva; + felfedezett latens bug: a `\bötlet`
+  ASCII-`\b` miatt SOHA nem illeszkedett (a szabad-szöveges ág halott volt) → `/ötlet/i`-re javítva, 9/9 routing-teszt zöld.
+- [x] ✅ **Batch A / #4 (minor) — preview far-zoom** — a `.rmap-t-pv` kikerült a LOD-0 sapkából (`.rmap-t-l/-xl/-fig`
+  marad), a fájl-preview minden zoom-szinten látszik („semmi ne tűnjön el").
+- [x] ✅ **Batch B / #2 (major) — provenance-link** — `autopilot-core.js saveFile` most `.select('id').maybeSingle()`
+  (a régi `sf.error`-callerek változatlanok); új `linkToSource(srcNode, ids)` a generált node(oka)t a forrás-kártya
+  mellé pinneli (`research_map_layout`, +320px, i*96 lépcső) + `manual` provenance-élt húz (`research_map_edges`,
+  edge_key `src|nid|manual`, kind `kap` — mint `createManualEdge`). Bekötve az ötlet-gen (idea `'i'+id`) és a chat
+  fájl-mentés (`'w'/'f'+id`, a becsatolt `an` kártyához) útba. Review 0 confirmed. **Ismert korlát (elfogadott):**
+  `graph()` az ötleteket `created_at ASC limit(24)` tölti → ≥24 ötletnél egy frissen generált ötlet node-ja (és így a
+  pin/él) inert lehet; a 24-sapka feloldása külön, map-szintű döntés (nem ebben a batchben).
+- [ ] ⏳ **Utókövetés** — a már csonkolt `otlet_1_ct_mri_fusion_refinement.md` (904 kar.) NEM gyógyul magától; a teljes
+  16492 kar. a chat-üzenetben megvan → kérésre újra-kinyerhető (megosztott-DB írás, user-jóváhagyással).
+
 ## Hátralévő (jövő) — Phase 6+
 - [ ] 🔴 **Teljes karakter-szintű CRDT/Yjs** — egyidejű azonos-szekció gépelés valós idejű merge-dzsel.
   A jelenlegi soft-lock + LWW ennek a könnyűsúlyú, függőség-mentes alternatívája; a teljes CRDT nagy
