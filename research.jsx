@@ -6815,7 +6815,7 @@
           if (big) ensureFigUrls([r]); var pu = figUrls[r.storage_path];
           pv = pu ? h('iframe', { className: 'rmap-pv-pdf', src: pu, title: r.path, onMouseDown: function (e) { e.stopPropagation(); } }) : h('div', { className: 'rmap-pv-load' }, big ? '⏳ PDF…' : '');
         } else { pv = h('div', { className: 'rmap-pv-icon2' }, '📎'); }
-        out.push(h('div', { key: 'fpv', className: 'rmap-t rmap-t-pv', onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } }, pv));
+        out.push(h('div', { key: 'fpv', className: 'rmap-t rmap-t-pv', onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); if (sel !== n.id) { setSelEdge(null); setMsel({}); setSel(n.id); } } }, pv));   // clicking the preview still SELECTS the card (→ attached to the dock chat); mousedown-stop keeps scroll/text-select/media controls working
       }
       return out.length ? out : null;
     }

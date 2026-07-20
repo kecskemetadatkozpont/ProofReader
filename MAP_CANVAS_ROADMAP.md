@@ -263,6 +263,8 @@
 - [x] ✅ **Review-fixek** (a verify session-limitbe futott → a verifikálatlan találatok saját elbírálással): **#4** a preview-blokk `onMouseDown`-t is elnyeli
   (scroll/szövegkijelölés/media-vezérlők a kártya-drag helyett; a kártya a fejlécből mozgatható); **#5** `.tsv`→tab-delimiter. Elfogadott/CONFIRM: ensureFigUrls
   hibás-URL redundancia (figure-tier paritás), hook-safe, tier-gate egyezés. PDF-iframe: inline signed-URL-nél működik (nem crashel). **NINCS migráció/edge.**
+- [x] ✅ **Utólagos bug-fix (a #4 regressziója):** a nagy md-kártya előnézetére kattintva NEM jelölődött ki a kártya (a mousedown-stop miatt), így nem
+  csatolódott be a dock-chatbe. **Fix:** a preview-blokkra `onClick` → `setSel(n.id)` (a mousedown/wheel-stop marad a scroll/kijelölés/media-vezérlőkhöz).
 
 ## ✅ Kártya-akciók a toolbarba — a lebegő inspector opt-in-né — 2026-07-20
 > User: „a kártyára kattintva felugró lebegő modal gombjait inkább a toolbarba, ikonként, a kártyák felett". Design: `card-toolbar-actions-mockup` (🧰, 3 verzió → ① csak toolbar + ⓘ igény szerint jóváhagyva).
