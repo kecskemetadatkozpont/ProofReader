@@ -4715,6 +4715,20 @@
     var ioS = useState(false), inspOpen = ioS[0], setInspOpen = ioS[1];   // the details modal (metadata/figure/step/refine) is opt-in via the ⓘ toolbar icon — NOT auto-shown on select
     useEffect(function () { setInspOpen(false); }, [sel]);   // a new selection starts collapsed → only the toolbar shows; ⓘ opens the details on demand
     var figLoading = useRef({});
+    var ftS = useState({}), fileText = ftS[0], setFileText = ftS[1];   // file id → fetched text (md/csv/text card previews), lazy-loaded only for big cards
+    var fileTextLoading = useRef({});
+    // file-type from the path extension → which preview renderer to use on a large-enough card
+    function fileKind(p) { p = String(p || '').toLowerCase(); if (/\.(md|markdown)$/.test(p)) return 'md'; if (/\.(png|jpe?g|gif|webp|svg|bmp|avif)$/.test(p)) return 'image'; if (/\.(mp4|webm|mov|m4v|ogv)$/.test(p)) return 'video'; if (/\.(mp3|wav|ogg|m4a|aac|flac)$/.test(p)) return 'audio'; if (/\.pdf$/.test(p)) return 'pdf'; if (/\.(csv|tsv)$/.test(p)) return 'csv'; if (/\.(txt|json|ya?ml|tex|py|js|ts|c|cpp|h|java|r|sh|log|ini|cfg|toml|xml|html?)$/.test(p)) return 'text'; return 'other'; }
+    function ensureFileText(f) {   // lazy-load a md/csv/text file card's text — from the DB content (storage_path null) or via a signed URL (uploaded blob)
+      var id = f && f.id; if (id == null || fileText[id] != null || fileTextLoading.current[id]) return;
+      fileTextLoading.current[id] = 1;
+      function done(txt) { delete fileTextLoading.current[id]; if (!alive.current) return; setFileText(function (prev) { var n = Object.assign({}, prev); n[id] = String(txt == null ? '' : txt).slice(0, 20000); return n; }); }
+      if (f.storage_path) {
+        sb.storage.from('research-data').createSignedUrl(f.storage_path, 3600).then(function (r) { var u = r && r.data && r.data.signedUrl; if (!u) { done(''); return; } fetch(u).then(function (resp) { return resp.text(); }).then(done, function () { done(''); }); }, function () { done(''); });
+      } else {
+        sb.from('research_files').select('content').eq('id', id).maybeSingle().then(function (r) { done((r && r.data && r.data.content) || ''); }, function () { done(''); });
+      }
+    }
     // lazily sign the storage URLs for a set of figures (idempotent; in-flight guarded)
     function ensureFigUrls(figs) {
       var paths = (figs || []).map(function (f) { return f && f.storage_path; }).filter(function (pp) { return pp && !figUrls[pp] && !figLoading.current[pp]; });
@@ -6778,6 +6792,31 @@
         }))));
       }
       if (canEnter(n)) out.push(h('div', { key: 'xl', className: 'rmap-t rmap-t-xl' }, h('button', { className: 'rmap-pv-btn pri', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); enterNode(n); } }, '◇ Belépés — teljes panel ↗')));
+      // FILE preview: a big-enough file/section/review card renders its content by type (md/csv/text → lazy content; image/video/audio/pdf → signed URL).
+      if ((t === 'file' || t === 'section' || t === 'review') && r.id) {
+        var kind = fileKind(r.path), big = (n._h || 0) >= 150 && (n._w || 0) >= 240, pv;   // fetch only when the card is genuinely large (matches the @container reveal)
+        if (kind === 'md' || kind === 'csv' || kind === 'text') {
+          if (big) ensureFileText(r);
+          var txt = fileText[r.id];
+          if (txt == null) pv = h('div', { className: 'rmap-pv-load' }, big ? '⏳ betöltés…' : '');
+          else if (kind === 'md') pv = h('div', { className: 'rmap-pv-md md', dangerouslySetInnerHTML: { __html: mdHtml(stripFiles(txt)) } });
+          else if (kind === 'csv') { var delim = /\.tsv$/i.test(r.path || '') ? '\t' : ','; var rows = String(txt).trim().split(/\r?\n/).slice(0, 40).map(function (rr) { return rr.split(delim); }); pv = h('div', { className: 'rmap-pv-csv' }, h('table', null, h('thead', null, h('tr', null, (rows[0] || []).map(function (c, ci) { return h('th', { key: ci }, c); }))), h('tbody', null, rows.slice(1).map(function (rr, ri) { return h('tr', { key: ri }, rr.map(function (c, cj) { return h('td', { key: cj }, c); })); })))); }
+          else pv = h('pre', { className: 'rmap-pv-txt' }, txt.slice(0, 6000));
+        } else if (kind === 'image' && r.storage_path) {
+          if (big) ensureFigUrls([r]); var iu = figUrls[r.storage_path];
+          pv = iu ? h('img', { className: 'rmap-pv-media', src: iu, alt: '', loading: 'lazy' }) : h('div', { className: 'rmap-pv-load' }, big ? '⏳ kép…' : '');
+        } else if (kind === 'video' && r.storage_path) {
+          if (big) ensureFigUrls([r]); var vu = figUrls[r.storage_path];
+          pv = vu ? h('video', { className: 'rmap-pv-media', src: vu, controls: true, preload: 'metadata', onMouseDown: function (e) { e.stopPropagation(); } }) : h('div', { className: 'rmap-pv-load' }, big ? '⏳ videó…' : '');
+        } else if (kind === 'audio' && r.storage_path) {
+          if (big) ensureFigUrls([r]); var uu = figUrls[r.storage_path];
+          pv = uu ? h('audio', { className: 'rmap-pv-audio', src: uu, controls: true, preload: 'metadata', onMouseDown: function (e) { e.stopPropagation(); } }) : h('div', { className: 'rmap-pv-load' }, big ? '⏳ audió…' : '');
+        } else if (kind === 'pdf' && r.storage_path) {
+          if (big) ensureFigUrls([r]); var pu = figUrls[r.storage_path];
+          pv = pu ? h('iframe', { className: 'rmap-pv-pdf', src: pu, title: r.path, onMouseDown: function (e) { e.stopPropagation(); } }) : h('div', { className: 'rmap-pv-load' }, big ? '⏳ PDF…' : '');
+        } else { pv = h('div', { className: 'rmap-pv-icon2' }, '📎'); }
+        out.push(h('div', { key: 'fpv', className: 'rmap-t rmap-t-pv', onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } }, pv));
+      }
       return out.length ? out : null;
     }
     // P1b: the active run's phase drives the node .inphase highlight (activeKey) + the run bar

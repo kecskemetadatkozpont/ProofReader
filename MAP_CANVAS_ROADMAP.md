@@ -253,6 +253,17 @@
   a húzás alatt elnyomva) · **dedup-guard** (ha már van keret e bbox köré [±10px] → `framePatch` frissítés + toast, nem új keret).
   Adversariális review után.
 
+## ✅ Fájl-előnézet a kártyákon (P0+P1) — 2026-07-20
+> User: „a fájlok preview-jai a kártyákon, ha elég nagy a kártya — md/pdf/szöveg/kép/videó, amit a fájl igényel". Design: `card-file-preview-mockup` (🖼️, ① előnézet a kártya alján + P0/P1 jóváhagyva).
+- [x] ✅ **Méret-alapú, típus-illő előnézet + lusta betöltés** — a `richTier(n)` új `.rmap-t-pv` blokkja (`t:file/section/review`, `@container min-width:240 & min-height:150`,
+  a figure-tier mintája): **md**→`mdHtml(stripFiles(txt))` · **CSV/TSV**→tábla (delimiter a kiterjesztésből) · **szöveg/kód**→`<pre>` · **kép**→`<img loading=lazy>` ·
+  **videó**→`<video controls preload=metadata>` · **audió**→`<audio controls>` · **PDF**→`<iframe>`. **Lusta betöltés** (csak ha `n._h≥150 & _w≥240`, egyezik a
+  `@container`-rel): `fileKind(path)` típus; `ensureFileText(f)` (DB `content` vagy uploaded-blob signed-URL→fetch.text, cache `fileText` state, 20k cap); a
+  bináris a meglévő `ensureFigUrls`/`figUrls`-t használja (createSignedUrls, cache). A pán/zoom nem tölt újra (cache-guard); LOD-0 far-zoom cap rejti.
+- [x] ✅ **Review-fixek** (a verify session-limitbe futott → a verifikálatlan találatok saját elbírálással): **#4** a preview-blokk `onMouseDown`-t is elnyeli
+  (scroll/szövegkijelölés/media-vezérlők a kártya-drag helyett; a kártya a fejlécből mozgatható); **#5** `.tsv`→tab-delimiter. Elfogadott/CONFIRM: ensureFigUrls
+  hibás-URL redundancia (figure-tier paritás), hook-safe, tier-gate egyezés. PDF-iframe: inline signed-URL-nél működik (nem crashel). **NINCS migráció/edge.**
+
 ## ✅ Kártya-akciók a toolbarba — a lebegő inspector opt-in-né — 2026-07-20
 > User: „a kártyára kattintva felugró lebegő modal gombjait inkább a toolbarba, ikonként, a kártyák felett". Design: `card-toolbar-actions-mockup` (🧰, 3 verzió → ① csak toolbar + ⓘ igény szerint jóváhagyva).
 - [x] ✅ **Akciók → toolbar-ikonok + opt-in modal** — a `.rmap-seltool` (magnify-dock) új ikonjai: **◇ Belépés** (`enterNode`, `canEnter`-gated),
