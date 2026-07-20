@@ -5604,15 +5604,42 @@
         if (r && r.error && alive.current) window.PRUI.toast('Kapcsolat mentése sikertelen: ' + r.error.message, { kind: 'error' });
       });
     }
+    // Find `count` NON-overlapping positions for new cards near (sx,sy), avoiding every EXISTING card's real footprint
+    // (g.N resolved positions + per-node sizes) AND the spots already chosen this batch. Scans a grid to the right of the
+    // source, columns rightward / rows downward. This is what keeps auto-placed results from stacking ON another card —
+    // separateNodes() deliberately leaves both-PINNED overlaps alone, so the placement itself must be collision-free.
+    function freeSpotsNear(sx, sy, count, srcNode) {
+      var W = 204, H = 120, PX = 24, PY = 18, stepX = W + 46, stepY = H + 34;   // H is a CONSERVATIVE new-card estimate (a long title can reach ~140px) so stacked results never kiss
+      var occ = ((g && g.N) ? g.N : []).filter(function (n) { return n && !n.mapHidden && n.id !== (srcNode && srcNode.id); })
+        .map(function (n) { return { x: n.x || 0, y: n.y || 0, w: nodeW(n), h: nodeH(n) }; });
+      function hits(x, y, arr) {
+        for (var k = 0; k < arr.length; k++) {
+          var r = arr[k];
+          if (Math.abs((x + W / 2) - (r.x + r.w / 2)) < (W / 2 + r.w / 2 + PX) &&
+              Math.abs((y + H / 2) - (r.y + r.h / 2)) < (H / 2 + r.h / 2 + PY)) return true;
+        }
+        return false;
+      }
+      var chosen = [], baseX = sx + 320, maxCols = Math.min(Math.max(1, count), 3);   // a compact ≤3-wide grid to the right of the source
+      for (var row = 0; chosen.length < count && row < 96; row++) {
+        for (var col = 0; chosen.length < count && col < maxCols; col++) {
+          var x = baseX + col * stepX, y = sy + row * stepY;
+          if (!hits(x, y, occ) && !hits(x, y, chosen)) chosen.push({ x: x, y: y, w: W, h: H });
+        }
+      }
+      while (chosen.length < count) { var i = chosen.length; chosen.push({ x: baseX + (i % maxCols) * stepX, y: sy + (96 + Math.floor(i / maxCols)) * stepY, w: W, h: H }); }   // pathological fallback: never lose a card
+      return chosen.map(function (c) { return { x: Math.round(c.x), y: Math.round(c.y) }; });
+    }
     // Batch B — PROVENANCE link: when a generated result (file / idea / gap) is clearly derived from a KNOWN source card,
-    // pin the new node(s) just to the RIGHT of the source (research_map_layout) and draw a manual provenance edge to each
-    // (research_map_edges). Best-effort + silent on failure; only with edit rights. newIds = graph node ids ('f'/'w'/'i'+id).
+    // pin the new node(s) in FREE space near the source (research_map_layout, collision-avoided) and draw a manual
+    // provenance edge to each (research_map_edges). Best-effort + silent on failure; only with edit rights. newIds = 'f'/'w'/'i'+id.
     function linkToSource(srcNode, newIds) {
       if (!srcNode || !props.canEdit) return Promise.resolve();
       var ids = (newIds || []).filter(Boolean); if (!ids.length) return Promise.resolve();
       var cur = layout[srcNode.id] || {};
       var sx = (cur.x != null ? cur.x : srcNode.x) || 0, sy = (cur.y != null ? cur.y : srcNode.y) || 0;
-      var lrows = ids.map(function (nid, i) { return { project_id: props.projectId, node_id: nid, x: Math.round(sx + 320), y: Math.round(sy + i * 96), updated_at: new Date().toISOString() }; });
+      var pts = freeSpotsNear(sx, sy, ids.length, srcNode);
+      var lrows = ids.map(function (nid, i) { return { project_id: props.projectId, node_id: nid, x: pts[i].x, y: pts[i].y, updated_at: new Date().toISOString() }; });
       var jobs = [sb.from('research_map_layout').upsert(lrows, { onConflict: 'project_id,node_id' })];
       if (edgesCap) {
         var erows = ids.map(function (nid) { return { project_id: props.projectId, edge_key: srcNode.id + '|' + nid + '|manual', from_id: srcNode.id, to_id: nid, kind: 'kap', manual: true, updated_at: new Date().toISOString() }; });

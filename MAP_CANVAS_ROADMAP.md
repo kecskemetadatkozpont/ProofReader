@@ -406,6 +406,14 @@
   pin/él) inert lehet; a 24-sapka feloldása külön, map-szintű döntés (nem ebben a batchben).
 - [ ] ⏳ **Utókövetés** — a már csonkolt `otlet_1_ct_mri_fusion_refinement.md` (904 kar.) NEM gyógyul magától; a teljes
   16492 kar. a chat-üzenetben megvan → kérésre újra-kinyerhető (megosztott-DB írás, user-jóváhagyással).
+- [x] ✅ **Backfill (2026-07-21):** a live projektben a `otlet_1_...md` (904→16492 kar. tartalom is helyreállítva) + a 6
+  régi gap a forrás `szabo_lorant_healthcare_ood_extension.md` mellé helyezve + 7 `manual` provenance-él a forrásból.
+- [x] ✅ **Ütközés-elkerülő placement (2026-07-21):** a `linkToSource` fix offszet helyett a **`freeSpotsNear`** segéddel
+  keres szabad helyet a forrás mellett — minden meglévő kártya valós lábnyomát (g.N + nodeW/nodeH) kikerülve, ≤3-oszlopos
+  sor-major rácsban (AABB-teszt, konzervatív 204×120 új-kártya becslés). Így az AUTOMATIKUS elrendezés sosem rak kártyát
+  másikra (a `separateNodes` szándékosan békén hagyja a két-pinned átfedést). Review CLEAN + 4 unit-teszt zöld. **NYITOTT
+  (éjszakai munka):** az ütközés-elkerülés kiterjesztése a `placeInFrame`-re (keretben meglévő kártyák) + `ideaAtPos`-ra +
+  egy globális „Rendezd el" auto-tidy parancs.
 
 ## Hátralévő (jövő) — Phase 6+
 - [ ] 🔴 **Teljes karakter-szintű CRDT/Yjs** — egyidejű azonos-szekció gépelés valós idejű merge-dzsel.
