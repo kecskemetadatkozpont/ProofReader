@@ -571,6 +571,22 @@
   **LOD chip-tömörítés: kihagyva** — a meglévő LOD amúgy is kompakttá teszi a kártyákat timeline-ban. Migráció NEM kell
   (a Mentés a migration-79 `research_map_paths`-t használja, graceful ha nincs). Version `?v=1787480000`.
 
+## 🚫 FEDÉS-TILALOM minden elrendezésben + Markdown-kártya tartalom-méretezés — 2026-07-21
+> User-kérés: „Fontos, hogy a kártyák SOSE kerüljenek fedésbe egymással az elrendezések során. Pl. a Markdown-kártyákat
+> méretezzük a tartalmuknak megfelelően, hogy jól olvashatóak legyenek." Review: a fedés-garancia PROVABLY tartja (verify pass).
+- [x] ✅ **Fedés-tilalom (`<tbd>`, review: garancia PROVABLY tartja, 1 LOW residual zárva):** két elrendező FIX sormagasságot
+  használt → magasabb (méretezett md/ábra) kártya átfedte az alatta lévőt. **Idővonal** — a fix 132px helyett MAGASSÁG-TUDATOS
+  alsáv-pakolás: minden alsáv annyi magas, amilyen a legmagasabb kártyája (`rowH[placed]`), a sor-tetők kumulatívak
+  (`rowTop += rowH + RGAP`), vízszintesen 18px hézag-ellenőrzés → se függőleges, se vízszintes átfedés (konstrukció szerint).
+  **Fázisokba (`autoLayoutStages`)** — a fix 74px/300px helyett a sáv a LEGSZÉLESEBB kártyához méreteződik (`laneW=max(300,
+  maxW+48)`, középre), a `y` a VALÓS `nodeH(n)`-nel lép → se sávon belüli, se sávok közti átfedés; a keret-magasság a stack-hez
+  igazodik. **Okos elrendezés** — már magasság-tudatos (méretezett kártya fix magasságú = pontos); GAPY 26→30 (kompakt-drift
+  ráhagyás). **A gyökér-residuum zárva:** a `graph()` magasság-BECSLÉS cap-je 4→7 sor (egy hosszú-című, még nem mért kompakt
+  kártya nem alul-becsül → az első-frame elrendezés sem fed; a túl-becslés csak ártalmatlan térközt ad). **Markdown-méretezés:**
+  az `idealSize` eddig a `n.ref.content`-re támaszkodott, ami NINCS betöltve → minden md a 172px alapot kapta; most a BETÖLTÖTT
+  `n.ref.size` (bájt) a proxy → md/szöveg 320×[210..470], csv 344×[214..480] a fájlmérettel arányosan; áténi a @container
+  reveal + a richTier fetch küszöböt (nincs üres doboz), a Markdown ténylegesen renderel, olvashatóan. Version `?v=1787540000`.
+
 ## Hátralévő (jövő) — Phase 6+
 - [ ] 🔴 **Teljes karakter-szintű CRDT/Yjs** — egyidejű azonos-szekció gépelés valós idejű merge-dzsel.
   A jelenlegi soft-lock + LWW ennek a könnyűsúlyú, függőség-mentes alternatívája; a teljes CRDT nagy

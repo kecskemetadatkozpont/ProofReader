@@ -5312,7 +5312,7 @@
       N.forEach(function (n) {
         var ly = layout[n.id];
         n._w = (ly && ly.card_w) || 204;   // manual width (migration-80) or the default (NW)
-        n._h = (ly && ly.card_h) || hgt[n.id] || (72 + Math.min(4, Math.ceil(String(n.title || '').length / 22)) * 17);   // manual height or measured or estimated
+        n._h = (ly && ly.card_h) || hgt[n.id] || (72 + Math.min(7, Math.ceil(String(n.title || '').length / 22)) * 17);   // manual height or measured or estimated (cap 7 lines: a long-title compact card must not be UNDER-estimated → the pre-measure layout would overlap; over-estimating only adds harmless spacing)
         if (nrzLive && nrzLive.id === n.id) { n._w = nrzLive.w; n._h = nrzLive.h; }   // follow the in-flight resize 1:1
       });
       // build the node index + fold user-drawn MANUAL edges into E EARLY (before ts-stamping + the timeline layout) so the ts-fill AND the Származás/depth topology see the full graph incl. the very links the user drew to express derivation
@@ -6482,12 +6482,13 @@
         var path = (n.ref && (n.ref.path || n.ref.file_path)) || '';
         var k = fileKind(path);
         if (t === 'file' && k === 'other') return null;      // csupasz, nem-previewölhető fájl → compact
-        if (k === 'csv') return cl(324, 214);                // táblák → szélesebb
+        // tartalom-hossz proxy: research_files.size (BÁJT) — ez BE VAN töltve (a content nincs); ezzel nő a kártya, hogy a szöveg olvasható legyen
+        var kb = (n.ref && typeof n.ref.size === 'number' && n.ref.size > 0) ? n.ref.size / 1024 : (n.ref && typeof n.ref.content === 'string' ? n.ref.content.length / 1024 : 0);
+        if (k === 'csv') return cl(344, Math.round(Math.min(480, 214 + kb * 26)));   // táblák → szélesebb + a soroktól nő
         if (k === 'image') return cl(264, 224);
-        if (k === 'pdf' || k === 'video') return cl(304, 234);
-        // md / tex / szöveg / (kiterjesztés nélküli szekció): t-pv (240×150) + kissé nő a tartalomhosszal, ha már megvan
-        var len = (n.ref && typeof n.ref.content === 'string') ? n.ref.content.length : 0;
-        return cl(284, 172 + Math.min(140, Math.floor(len / 900) * 20));
+        if (k === 'pdf' || k === 'video') return cl(320, 248);
+        // md / tex / szöveg / (kiterjesztés nélküli szekció): elég SZÉLES egy sornyi prózához + elég MAGAS több sor olvasásához, a fájlmérettel nő (limitálva 470-ig; a többi görgethető)
+        return cl(320, Math.round(Math.min(470, 210 + kb * 30)));
       }
       return null;   // idea, gap, venue, srq, chat, dataset, submission, revision → compact
     }
@@ -6524,7 +6525,7 @@
         });
       }
       // 3. COORDINATES — disjoint x-bands (colW ≥ widest card + pad) → no cross-column overlap; stack in order → no vertical overlap.
-      var LANE_W = 236, GAPX = 60, GAPY = 26, PADX = 18, X0 = 60, Y0 = 60, colX = X0;
+      var LANE_W = 236, GAPX = 60, GAPY = 30, PADX = 18, X0 = 60, Y0 = 60, colX = X0;   // GAPY margin absorbs any compact-card measured-height drift → no overlap
       phList.forEach(function (ph) {
         var arr = cols[ph]; arr.sort(function (a, b) { return a._ord - b._ord; });
         var maxW = arr.reduce(function (m, w) { return Math.max(m, w.w); }, 0);
@@ -6571,7 +6572,7 @@
     function tlLaneOf(n, laneBy) { if (laneBy === 'type') { var l = TL_TYPE_LANE[n.t]; return l != null ? l : (TL_TYPE_LABELS.length - 1); } return (n.ph != null ? n.ph : 0); }
     // timelineLayout(N,E,{xMode,laneBy}) → {pos, tMin, tMax, ticks, bands, laneTop, height, gut, ruler, contentW, laneLabels}. Pure; N carries n.ts/n._w/n._h.
     function timelineLayout(N, E, opts) {
-      var xMode = opts.xMode || 'squished', laneBy = opts.laneBy || 'phase', CW = 210, GUT = 150, PAD = 90, DAYMS = 86400000, RULER = 46, ROWH = 132;
+      var xMode = opts.xMode || 'squished', laneBy = opts.laneBy || 'phase', CW = 210, GUT = 150, PAD = 90, DAYMS = 86400000, RULER = 46;
       var dated = N.filter(function (n) { return n.ts != null; }).slice().sort(function (a, b) { return a.ts - b.ts; });
       var undated = N.filter(function (n) { return n.ts == null; });
       var xs = {}, ticks = [], tMin = 0, tMax = 1;
@@ -6607,15 +6608,24 @@
       var laneCount = laneBy === 'type' ? TL_TYPE_LABELS.length : 7, lanes = [];
       for (var li = 0; li < laneCount; li++) lanes.push([]);
       N.forEach(function (n) { var l = tlLaneOf(n, laneBy); if (l >= laneCount) l = laneCount - 1; lanes[l].push(n); });
-      var laneTop = [], bands = [], acc = RULER + 14;
+      // HEIGHT-AWARE sub-row packing: a card joins a sub-row only if its left edge clears the sub-row's last right edge (no horizontal overlap);
+      // each sub-row's vertical band is as tall as its TALLEST card (+gap), so a tall md/figure card never overlaps the row below (no vertical overlap).
+      var laneTop = [], laneRowTops = [], bands = [], acc = RULER + 14, RGAP = 26;
       lanes.forEach(function (arr, li2) {
         arr.sort(function (a, b) { return (xs[a.id] || 0) - (xs[b.id] || 0); });
-        var rows = [];
-        arr.forEach(function (n) { var lx = (xs[n.id] || GUT / 2) - (n._w || CW) / 2, placed = -1; for (var r = 0; r < rows.length; r++) { if (lx > rows[r] + 14) { placed = r; break; } } if (placed < 0) { placed = rows.length; rows.push(0); } rows[placed] = lx + (n._w || CW); n._trow = placed; });
-        var hh = Math.max(1, rows.length) * ROWH + 16; laneTop[li2] = acc; bands.push({ top: acc, h: hh, li: li2 }); acc += hh;
+        var rowRight = [], rowH = [];
+        arr.forEach(function (n) {
+          var w = (n._w || CW), hc = (n._h || 100), lx = (xs[n.id] || GUT / 2) - w / 2, placed = -1;
+          for (var r = 0; r < rowRight.length; r++) { if (lx > rowRight[r] + 18) { placed = r; break; } }
+          if (placed < 0) { placed = rowRight.length; rowRight.push(0); rowH.push(0); }
+          rowRight[placed] = lx + w; if (hc > rowH[placed]) rowH[placed] = hc; n._trow = placed;
+        });
+        var rowTop = [], yy = 0;
+        for (var r2 = 0; r2 < rowH.length; r2++) { rowTop[r2] = yy; yy += rowH[r2] + RGAP; }
+        var hh = (rowH.length ? yy : 40) + 12; laneTop[li2] = acc; laneRowTops[li2] = rowTop; bands.push({ top: acc, h: hh, li: li2 }); acc += hh;
       });
       var pos = {}, contentW = 0;
-      N.forEach(function (n) { var l = tlLaneOf(n, laneBy); if (l >= laneCount) l = laneCount - 1; var x = Math.round((xs[n.id] || GUT / 2) - (n._w || CW) / 2), y = Math.round(laneTop[l] + 10 + (n._trow || 0) * ROWH); pos[n.id] = { x: x, y: y }; contentW = Math.max(contentW, x + (n._w || CW)); });
+      N.forEach(function (n) { var l = tlLaneOf(n, laneBy); if (l >= laneCount) l = laneCount - 1; var x = Math.round((xs[n.id] || GUT / 2) - (n._w || CW) / 2), y = Math.round(laneTop[l] + 10 + ((laneRowTops[l] && laneRowTops[l][n._trow]) || 0)); pos[n.id] = { x: x, y: y }; contentW = Math.max(contentW, x + (n._w || CW)); });
       return { pos: pos, tMin: tMin, tMax: tMax, ticks: ticks, bands: bands, laneTop: laneTop, height: acc, gut: GUT, ruler: RULER, contentW: contentW + PAD, xMode: xMode, laneLabels: (laneBy === 'type' ? TL_TYPE_LABELS : TL_PHASE_LABELS) };
     }
     // timeline replay + mode control
@@ -6691,15 +6701,16 @@
       stagesBusy.current = true;   // guard from the moment ⌗ is clicked until the arrange settles (no duplicate frames on double-click)
       window.PRUI.confirm({ title: 'Rendezés fázisokba?', body: 'A kártyák a munkafolyamat-fázisok (Ötlet → Irodalom → Áttekintés → Protokoll → Folyóirat → Írás) szerint sávokba rendeződnek, és minden fázishoz keret készül. Ez FELÜLÍRJA a kézi elrendezést (a ↺ gombbal visszaállítható).', confirmLabel: 'Rendezés' }).then(function (ok) {
         if (!ok || !alive.current) { stagesBusy.current = false; return; }
-        var LANE_W = 300, CW = 204, CH = 74, gapY = 22, padX = (LANE_W - CW) / 2, topY = 56, laneGap = 40;
+        var CW = 204, gapY = 22, topY = 56, laneGap = 40, MINLANE = 300;
         var byPhase = {}; g.N.forEach(function (n) { if (n.mapHidden) return; var ph = (n.ph != null ? n.ph : 0); (byPhase[ph] = byPhase[ph] || []).push(n); });
         var phases = Object.keys(byPhase).map(Number).sort(function (a, b) { return a - b; });
         var laneX = 0, updates = [], frameOps = [];
         phases.forEach(function (ph) {
-          var list = byPhase[ph], y = topY;
-          list.forEach(function (n) { updates.push({ id: n.id, x: Math.round(laneX + padX), y: Math.round(y) }); y += CH + gapY; });
-          frameOps.push({ ph: ph, x: laneX, y: 0, w: LANE_W, h: topY + list.length * (CH + gapY) + 14 });
-          laneX += LANE_W + laneGap;
+          // lane wide enough for the WIDEST card + step y by each card's REAL height → no card overflows its lane or overlaps the one below (sized md/figure cards included)
+          var list = byPhase[ph], maxW = list.reduce(function (m, n) { return Math.max(m, nodeW(n)); }, CW), laneW = Math.max(MINLANE, maxW + 48), y = topY;
+          list.forEach(function (n) { var w = nodeW(n); updates.push({ id: n.id, x: Math.round(laneX + (laneW - w) / 2), y: Math.round(y) }); y += nodeH(n) + gapY; });
+          frameOps.push({ ph: ph, x: laneX, y: 0, w: laneW, h: Math.round(y) + 14 });
+          laneX += laneW + laneGap;
         });
         setLayout(function (L) { var m = Object.assign({}, L); updates.forEach(function (u) { m[u.id] = Object.assign({}, m[u.id], { x: u.x, y: u.y }); }); return m; });
         updates.forEach(function (u) { persistPos(u.id, u.x, u.y); });
