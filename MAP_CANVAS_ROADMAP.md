@@ -520,6 +520,27 @@
   (3) **idea SR-jelöltek** — `research_sr_candidates` CASCADE → szintén deep-snapshot. **Vállalt caveat:** protokoll-jegyzetek
   (INSERT-RLS `author_id=auth.uid()` → más felhasználó jegyzete nem visszaállítható) és a SET NULL back-linkek. Version `?v=1787330000`.
 
+## ✨ Okos elrendezés — tartalom-tudatos réteges layout — 2026-07-21
+> User-kérés: „egy összetett kártya-elrendező, ami figyelembe veszi a kártyák kontextusát, eredményét, méretét, tartalmát,
+> hogy hogyan és mekkora méretben érdemes preview-ban látni". 4-ügynökös kutatás (graph-algo + content-sizing + UX) →
+> szintézis: from-scratch réteges (Sugiyama-lite) layout, ~250-350 sor tiszta JS, dagre/elk kizárva (no-build/CSP).
+- [x] ✅ **Okos elrendezés (`<tbd>`, review: 1 LOW fix, 8 check CLEAN):** ÚJ `✨` menüsor-gomb a 🧹/⌗ mellett (a másik
+  kettő MARAD — más szándék: tidy = finom igazítás, Fázisokba = merev sávok, Okos = teljes tartalom-tudatos újrarendezés).
+  **5 menet tiszta JS** (`smartLayout`): (1) MÉRET — `idealSize(n)` olcsó metaadatból (típus + `fileKind` + tartalomhossz)
+  a @container küszöb FÖLÉ kerekítve, hogy a preview/vezérlő tényleg látszódjon (step 212×122, paper 212×118, figure
+  244×204, csv 324×214, image 264×224, pdf/video 304×234, md/szekció ≥284×172; kompakt típus → null = auto-magasság);
+  (2) RANG — oszlop = fázis (megőrzi a bal→jobb idővonalat); (3) SORREND — barycenter keresztezés-minimalizálás (6 söprés);
+  (4) KOORDINÁTA — diszjunkt x-sávok (colW ≥ legszélesebb kártya) + magasság-fogyasztó y-verem → **ütközésmentes
+  konstrukció szerint**; (5) ŐR — `separateNodes` a kitűzött kártyákra (fix akadály). **A kitűzött kártyákat békén hagyja**
+  (pozíció+méret), a kézzel méretezetteket repozicionálja de a méretüket tartja. **EGY batch-upsert + EGY undo-egység**
+  (pozíció ÉS méret): kibővített `hRestoreLayout` föltételesen viszi a `card_w/card_h`-t (a régi move-undo érintetlen — a
+  `'card_w' in r` false rájuk). `.rmap-anim` átmeneti CSS-osztály animálja a méret-átrendezést (nem globálisan — a
+  width/height minden zoom-lépésnél rángana), reduced-motion-guarddal. **Review-fix (LOW):** a `pushHist` az async upsert
+  UTÁN futott → gyors ⌘Z rossz opot vont vissza + persist-hibánál árva optimista állapot; javítva: undo-egység
+  **szinkron** push (mint histPushMove) + `rollback()` hibánál (visszaállít + kipattintja a saját bejegyzést). Migráció/edge
+  NEM kell (a card_w/card_h a migration-80 óta megvan). Version `?v=1787360000`. **Elhalasztva (v2):** valódi ábra-aspect
+  (research_figures width/height a select-be), md-magasság a valós renderelt tartalomból, medián-igazítás az él-egyenesítéshez.
+
 ## Hátralévő (jövő) — Phase 6+
 - [ ] 🔴 **Teljes karakter-szintű CRDT/Yjs** — egyidejű azonos-szekció gépelés valós idejű merge-dzsel.
   A jelenlegi soft-lock + LWW ennek a könnyűsúlyú, függőség-mentes alternatívája; a teljes CRDT nagy

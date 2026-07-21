@@ -4803,6 +4803,9 @@
     var cszS = useState(false), cardSizeCap = cszS[0], setCardSizeCap = cszS[1];   // migration-80 capability: card_w/card_h columns present → resizable cards
     var nrzS = useState(null), nrzLive = nrzS[0], setNrzLive = nrzS[1];   // in-flight card resize {id,w,h}
     var nrzRef = useRef(null);   // card-resize lifecycle guard
+    var smbS = useState(false), smartBusy = smbS[0], setSmartBusy = smbS[1];   // ✨ Okos elrendezés in-flight (button spinner)
+    var smaS = useState(false), smartAnim = smaS[0], setSmartAnim = smaS[1];   // transient: animate left/top/width/height during the smart-layout settle
+    var smartBusyRef = useRef(false);   // re-entry guard for smartLayout
     var sizeGenS = useState(0), sizeGen = sizeGenS[0], setSizeGen = sizeGenS[1];   // bump to re-run no-overlap after a resize settles
     var dlS = useState(null), dlive = dlS[0], setDlive = dlS[1];   // the node currently being dragged {id,x,y} — follows the cursor 1:1
     var msS = useState({}), msel = msS[0], setMsel = msS[1];   // multi-selection: {node_id: true} (shift-click / marquee)
@@ -5676,10 +5679,10 @@
       if (pref === 'g') return { table: 'research_figures', id: rest, dataKey: 'figures' };
       return null;
     }
-    function hRestoreLayout(rows) {
+    function hRestoreLayout(rows) {   // undo/redo positions AND (when present) card_w/card_h. A row WITHOUT a card_w key leaves the size untouched (plain move); a row WITH card_w:null reverts the card to auto-size (smart-layout undo).
       if (!rows || !rows.length) return Promise.resolve();
-      setLayout(function (L) { var m = Object.assign({}, L); rows.forEach(function (r) { m[r.node_id] = Object.assign({}, m[r.node_id], { x: r.x, y: r.y }); }); return m; });
-      return sb.from('research_map_layout').upsert(rows.map(function (r) { return { project_id: props.projectId, node_id: r.node_id, x: r.x, y: r.y, updated_at: new Date().toISOString() }; }), { onConflict: 'project_id,node_id' });
+      setLayout(function (L) { var m = Object.assign({}, L); rows.forEach(function (r) { var patch = { x: r.x, y: r.y }; if ('card_w' in r) patch.card_w = r.card_w; if ('card_h' in r) patch.card_h = r.card_h; m[r.node_id] = Object.assign({}, m[r.node_id], patch); }); return m; });
+      return sb.from('research_map_layout').upsert(rows.map(function (r) { var row = { project_id: props.projectId, node_id: r.node_id, x: r.x, y: r.y, updated_at: new Date().toISOString() }; if ('card_w' in r) row.card_w = r.card_w; if ('card_h' in r) row.card_h = r.card_h; return row; }), { onConflict: 'project_id,node_id' });
     }
     function hDeleteLayout(nids) {
       if (!nids || !nids.length) return Promise.resolve();
@@ -6426,6 +6429,105 @@
         if (r && r.error) window.PRUI.toast('Elrendezés mentése: ' + r.error.message, { kind: 'error' });
         else window.PRUI.toast(rows.length + ' kártya elrendezve — nincs több átfedés.', { kind: 'success' });
       });
+    }
+    // ── ✨ Okos elrendezés — tartalom-tudatos réteges (Sugiyama-lite) elrendezés ─────────────────────────────
+    // idealSize(n): a kártya tartalom-ideális mérete CSAK olcsó metaadatból (típus + fájltípus + esetleg tartalomhossz),
+    // a @container megjelenítési küszöb FÖLÉ kerekítve, hogy a preview/vezérlő-kártya tényleg mutassa a tartalmát. COMPACT
+    // típusoknál null (a csupasz cím-kártya auto-magassággal jól néz ki). A kézi-átméretezés kapjaira klippel [204..760]×[64..600].
+    function idealSize(n) {
+      function cl(w, h) { return { w: Math.max(204, Math.min(760, Math.round(w))), h: Math.max(64, Math.min(600, Math.round(h))) }; }
+      var t = n.t;
+      if (t === 'step') return cl(212, 122);                 // t-l (184×104) → státusz/haladás/felelős tier
+      if (t === 'paper') return cl(212, 118);                // t-l → beveszem/talán/kizárom szűrő-szegmens
+      if (t === 'figure') return cl(244, 204);               // t-fig (≥118h) + richTier nagy-fetch (≥150h/240w)
+      if (t === 'section' || t === 'review' || t === 'file') {
+        var path = (n.ref && (n.ref.path || n.ref.file_path)) || '';
+        var k = fileKind(path);
+        if (t === 'file' && k === 'other') return null;      // csupasz, nem-previewölhető fájl → compact
+        if (k === 'csv') return cl(324, 214);                // táblák → szélesebb
+        if (k === 'image') return cl(264, 224);
+        if (k === 'pdf' || k === 'video') return cl(304, 234);
+        // md / tex / szöveg / (kiterjesztés nélküli szekció): t-pv (240×150) + kissé nő a tartalomhosszal, ha már megvan
+        var len = (n.ref && typeof n.ref.content === 'string') ? n.ref.content.length : 0;
+        return cl(284, 172 + Math.min(140, Math.floor(len / 900) * 20));
+      }
+      return null;   // idea, gap, venue, srq, chat, dataset, submission, revision → compact
+    }
+    // ✨ smartLayout: from-scratch layered layout — phase = column, barycenter within-column ordering (mincross), disjoint
+    // x-bands + height-consuming y-stack (overlap-free by construction), content-aware sizing. Pinned/hand-sized cards keep
+    // their size; pinned stay put (fixed obstacles for a final separateNodes nudge). ONE batch upsert + ONE undo entry.
+    function smartLayout() {
+      if (!props.canEdit || !cardSizeCap || smartBusyRef.current) return;
+      var vis = (g && g.N ? g.N : []).filter(function (n) { return !n.mapHidden; });
+      if (vis.length < 2) { window.PRUI.toast('Nincs mit elrendezni.', { kind: 'info' }); return; }
+      smartBusyRef.current = true; setSmartBusy(true);
+      function done() { smartBusyRef.current = false; if (alive.current) setSmartBusy(false); }
+      // 1. SIZE — target size per card; pinned/hand-sized keep theirs. Pinned are excluded from the flow (fixed obstacles).
+      var W = vis.map(function (n) {
+        var pinned = !!n.mapPinned, handSized = !pinned && !!(layout[n.id] && layout[n.id].card_h != null);
+        var isz = (pinned || handSized) ? null : idealSize(n);
+        var w = (pinned || handSized) ? nodeW(n) : (isz ? isz.w : NW);
+        var hh = (pinned || handSized) ? nodeH(n) : (isz ? isz.h : nodeH(n));
+        return { id: n.id, n: n, ph: (n.ph != null ? n.ph : 0), pinned: pinned, handSized: handSized, compact: (!pinned && !handSized && !isz), w: w, h: hh };
+      });
+      var flow = W.filter(function (w) { return !w.pinned; });
+      // 2. RANK — column = phase; within-column order via barycenter of adjacent neighbours (crossing-minimization).
+      var idx = {}; flow.forEach(function (w, i) { idx[w.id] = i; });
+      var adj = {}; flow.forEach(function (w) { adj[w.id] = []; });
+      (g.E || []).forEach(function (e) { var a = e[0], b = e[1]; if (idx[a] != null && idx[b] != null && a !== b) { adj[a].push(b); adj[b].push(a); } });
+      var cols = {}; flow.forEach(function (w) { (cols[w.ph] = cols[w.ph] || []).push(w); });
+      var phList = Object.keys(cols).map(Number).sort(function (a, b) { return a - b; });
+      phList.forEach(function (ph) { cols[ph].sort(function (a, b) { return (a.n.y - b.n.y) || (a.id < b.id ? -1 : 1); }); cols[ph].forEach(function (w, i) { w._ord = i; }); });
+      for (var pass = 0; pass < 6; pass++) {
+        phList.forEach(function (ph) {
+          cols[ph].forEach(function (w) { var nb = adj[w.id]; if (!nb.length) { w._bc = 1e6 + w._ord; return; } var s = 0; nb.forEach(function (id) { s += flow[idx[id]]._ord; }); w._bc = s / nb.length; });
+          cols[ph].sort(function (a, b) { return (a._bc - b._bc) || (a._ord - b._ord); });
+          cols[ph].forEach(function (w, i) { w._ord = i; });
+        });
+      }
+      // 3. COORDINATES — disjoint x-bands (colW ≥ widest card + pad) → no cross-column overlap; stack in order → no vertical overlap.
+      var LANE_W = 236, GAPX = 60, GAPY = 26, PADX = 18, X0 = 60, Y0 = 60, colX = X0;
+      phList.forEach(function (ph) {
+        var arr = cols[ph]; arr.sort(function (a, b) { return a._ord - b._ord; });
+        var maxW = arr.reduce(function (m, w) { return Math.max(m, w.w); }, 0);
+        var colW = Math.max(LANE_W, maxW + 2 * PADX), y = Y0;
+        arr.forEach(function (w) { w.x = Math.round(colX + (colW - w.w) / 2); w.y = Math.round(y); y += w.h + GAPY; });
+        colX += colW + GAPX;
+      });
+      // 4. GUARD — pinned cards as fixed obstacles; separateNodes nudges the flow off them (self-limited).
+      var pinnedMap = {}, all = flow.map(function (w) { return { id: w.id, x: w.x, y: w.y, _w: w.w, _h: w.h }; });
+      W.filter(function (w) { return w.pinned; }).forEach(function (w) { pinnedMap[w.id] = true; all.push({ id: w.id, x: w.n.x, y: w.n.y, _w: nodeW(w.n), _h: nodeH(w.n) }); });
+      separateNodes(all, pinnedMap);
+      var pos = {}; all.forEach(function (a) { if (!pinnedMap[a.id]) pos[a.id] = { x: Math.round(a.x), y: Math.round(a.y) }; });
+      // 5. DIFF → optimistic setLayout + ONE batch upsert + ONE undo entry (position AND size).
+      var before = [], after = [];
+      flow.forEach(function (w) {
+        var p = pos[w.id] || { x: w.x, y: w.y }, cur = layout[w.id] || {};
+        var nW = (w.pinned || w.handSized) ? (cur.card_w != null ? cur.card_w : null) : (w.compact ? null : w.w);
+        var nH = (w.pinned || w.handSized) ? (cur.card_h != null ? cur.card_h : null) : (w.compact ? null : w.h);
+        var bx = (cur.x != null ? cur.x : w.n.x), by = (cur.y != null ? cur.y : w.n.y);
+        var bW = (cur.card_w != null ? cur.card_w : null), bH = (cur.card_h != null ? cur.card_h : null);
+        if (Math.abs(bx - p.x) < 1 && Math.abs(by - p.y) < 1 && bW === nW && bH === nH) return;
+        before.push({ node_id: w.id, x: Math.round(bx), y: Math.round(by), card_w: bW, card_h: bH });
+        after.push({ node_id: w.id, x: p.x, y: p.y, card_w: nW, card_h: nH });
+      });
+      if (!after.length) { window.PRUI.toast('A térkép már rendezett.', { kind: 'success' }); done(); return; }
+      // optimistic layout + undo entry SYNCHRONOUSLY (like histPushMove) so a ⌘Z during the settle targets THIS arrange, not a stale op.
+      setLayout(function (L) { var m = Object.assign({}, L); after.forEach(function (r) { m[r.node_id] = Object.assign({}, m[r.node_id], { x: r.x, y: r.y, card_w: r.card_w, card_h: r.card_h }); }); return m; });
+      pushHist({ label: 'Okos elrendezés', kind: 'smartlayout', undo: [{ k: 'restoreLayout', rows: before }], redo: [{ k: 'restoreLayout', rows: after }] });
+      setSmartAnim(true);
+      function rollback(msg) {   // persist failed: revert the optimistic layout + pop our (top) undo entry so nothing un-persisted lingers
+        if (!alive.current) { done(); return; }
+        var H = histRef.current; if (H.undo.length && H.undo[H.undo.length - 1].kind === 'smartlayout') { H.undo.pop(); setHistGen(function (x) { return x + 1; }); }
+        setLayout(function (L) { var m = Object.assign({}, L); before.forEach(function (r) { m[r.node_id] = Object.assign({}, m[r.node_id], { x: r.x, y: r.y, card_w: r.card_w, card_h: r.card_h }); }); return m; });
+        window.PRUI.toast(msg, { kind: 'error' }); setSmartAnim(false); done();
+      }
+      var payload = after.map(function (r) { return { project_id: props.projectId, node_id: r.node_id, x: r.x, y: r.y, card_w: r.card_w, card_h: r.card_h, updated_at: new Date().toISOString() }; });
+      sb.from('research_map_layout').upsert(payload, { onConflict: 'project_id,node_id' }).then(function (rr) {
+        if (rr && rr.error) { rollback('Elrendezés mentése: ' + rr.error.message); return; }
+        if (alive.current) window.PRUI.toast(after.length + ' kártya elrendezve · ⌘Z a visszavonáshoz', { kind: 'success' });
+        setTimeout(function () { if (alive.current) { fitView(); setSmartAnim(false); } done(); }, 520);
+      }, function () { rollback('Elrendezés mentése sikertelen (hálózat).'); });
     }
     // Fázis 2.5 (opt-in, Prezi-B): arrange the cards into per-phase lanes + a named frame each. Overwrites manual
     // positions → behind a confirm; matches frames by title so re-running updates instead of duplicating.
@@ -7469,7 +7571,7 @@
             h('button', { className: 'btn pri', style: { fontSize: 12.5 }, onClick: function () { var vp = stageVP(); ideaAtPos((vp.w / 2 - view.tx) / view.k - NW / 2, (vp.h / 2 - view.ty) / view.k - NH / 2); } }, '✦ Első ötlet'),
             h('button', { className: 'btn', style: { fontSize: 12.5 }, onClick: function () { setDkOpen(true); try { localStorage.setItem('pr-rmap-dock', '1'); } catch (e) { } setDkTab('files'); } }, '📎 Adat feltöltése'),
             h('button', { className: 'btn', style: { fontSize: 12.5 }, onClick: function () { setDkOpen(true); try { localStorage.setItem('pr-rmap-dock', '1'); } catch (e) { } setDkTab('chat'); } }, '💬 Asszisztens')) : null) : null,
-        h('div', { className: 'rmap-world rmap-lod-' + lod, style: { transform: 'translate(' + view.tx + 'px,' + view.ty + 'px) scale(' + view.k + ')' } },
+        h('div', { className: 'rmap-world rmap-lod-' + lod + (smartAnim ? ' rmap-anim' : ''), style: { transform: 'translate(' + view.tx + 'px,' + view.ty + 'px) scale(' + view.k + ')' } },
           // frames (named regions) render BEHIND everything; the body is pointer-events:none so cards stay interactive
           frames.map(function (f) {
             var gg = (frLive && frLive.id === f.id) ? frLive : f;
@@ -7580,6 +7682,7 @@
             props.canEdit ? h('button', { key: 'redo', className: 'rmap-dbtn', disabled: !histRef.current.redo.length, style: { opacity: histRef.current.redo.length ? 1 : 0.38 }, title: 'Újra (⌘⇧Z)', onClick: doRedo }, '↷', L('Újra')) : null,
             props.canEdit ? h('button', { key: 'hist', className: 'rmap-dbtn' + (histPanelOpen ? ' on' : ''), title: 'Előzmények — mi történt a térképen', onClick: function () { setHistPanelOpen(function (v) { return !v; }); } }, '🕘', L('Előzmények')) : null,
             (props.canEdit && g.N.length > 1) ? h('button', { key: 'tidy', className: 'rmap-dbtn', title: 'Rendezd el — csak az egymásra csúszott kártyákat húzza szét, a többi a helyén marad', onClick: tidyLayout }, '🧹', L('Rendezd el')) : null,
+            (props.canEdit && cardSizeCap && g.N.length > 1) ? h('button', { key: 'smart', className: 'rmap-dbtn', disabled: smartBusy, title: 'Okos elrendezés — tartalom-tudatos: fázis-oszlopokba rendezi ÉS a tartalmuk szerint átméretezi a kártyákat (⌘Z-vel visszavonható; a kitűzött kártyákat békén hagyja)', onClick: smartLayout }, smartBusy ? '⏳' : '✨', L('Okos elrendezés')) : null,
             commentsCap ? h('button', { key: 'cm', className: 'rmap-dbtn' + (commentMode ? ' on' : ''), title: commentMode ? 'Komment-mód kikapcsolása' : 'Komment-mód: kattints a vászonra vagy egy kártyára', onClick: function () { setCommentMode(function (v) { return !v; }); setComposer(null); } }, '💬', L('Komment-mód')) : null,
             (commentsCap && comments.length) ? h('button', { key: 'cmp', className: 'rmap-dbtn', title: 'Összes komment', onClick: function () { setCmPanelOpen(function (v) { return !v; }); } }, '📋' + (cmUnresolved || ''), L('Kommentek')) : null,
             (data && data.hiddenFigs && data.hiddenFigs.length) ? h('button', { key: 'hf', className: 'rmap-dbtn', title: 'Térképről levett ábrák visszahozása', onClick: function () { setRestoreOpen(true); } }, '🖼' + data.hiddenFigs.length, L('Rejtett ábrák')) : null,

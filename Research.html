@@ -1439,6 +1439,9 @@
     /* P1b — live Autopilot overlay: node grow-in, active-phase highlight, lane status, run bar */
     @keyframes rmap-in { from { opacity: 0; transform: scale(.85); } to { opacity: 1; transform: none; } }
     .rmap-node { animation: rmap-in .4s ease; transition: left .38s cubic-bezier(.4,0,.2,1), top .38s cubic-bezier(.4,0,.2,1), border-color .12s, box-shadow .16s; }
+    /* ✨ Okos elrendezés settle: animate size too (NOT globally — width/height would jank on every zoom step) */
+    .rmap-world.rmap-anim .rmap-node { transition: left .44s cubic-bezier(.4,0,.2,1), top .44s cubic-bezier(.4,0,.2,1), width .44s cubic-bezier(.4,0,.2,1), height .44s cubic-bezier(.4,0,.2,1); }
+    @media (prefers-reduced-motion: reduce) { .rmap-world.rmap-anim .rmap-node { transition: none; } }
     .rmap-node.editable { cursor: grab; }
     .rmap-node.dragging { cursor: grabbing; z-index: 30; transition: none; box-shadow: 0 3px 8px rgba(20,26,40,.14), 0 22px 44px -16px rgba(20,26,40,.6); }
     .rmap-node.inphase { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 20%, transparent), 0 10px 26px -20px rgba(20,26,40,.5); }
@@ -1542,7 +1545,7 @@
   <script type="text/babel" src="canvas.jsx?v=1783137934"></script>
   <script type="text/babel" src="notes.jsx?v=1783137934"></script>
   <script src="autopilot-core.js?v=1784160000"></script>
-  <script type="text/babel" src="research.jsx?v=1787330000"></script>
+  <script type="text/babel" src="research.jsx?v=1787360000"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>
