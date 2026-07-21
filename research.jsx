@@ -4699,7 +4699,7 @@
   // Read-only view for now (P2 = inline edit + phase actions replacing modals). New-design flag only.
   var RMAP_PHASES = [['ideas', 'Ideas', '💡'], ['literature', 'Literature', '📚'], ['sr', 'Systematic review', '🔬'], ['protocol', 'Protocol', '🧪'], ['journal', 'Journal', '🎯'], ['writing', 'Writing', '✍️']];
   var RMAP_PHASE_IDX = {}; RMAP_PHASES.forEach(function (p, i) { RMAP_PHASE_IDX[p[0]] = i; });
-  var RMAP_TYPE = { idea: { ic: '💡', lab: 'Ötlet', tab: 'ideas' }, gap: { ic: '🕳️', lab: 'Kutatási rés', tab: 'gap' }, paper: { ic: '📄', lab: 'Cikk', tab: 'literature' }, study: { ic: '🔎', lab: 'Irodalom', tab: 'literature' }, review: { ic: '📝', lab: 'Áttekintés', tab: 'study' }, step: { ic: '🧪', lab: 'Protokoll-lépés', tab: 'protocol' }, venue: { ic: '🎯', lab: 'Folyóirat', tab: 'journal' }, section: { ic: '✍️', lab: 'Draft-szekció', tab: 'writing' }, dataset: { ic: '🗂️', lab: 'Adathalmaz', tab: 'data' }, file: { ic: '📎', lab: 'Fájl', tab: 'ideas' }, chat: { ic: '💬', lab: 'Beszélgetés', tab: 'ideas' }, figure: { ic: '🖼️', lab: 'Ábra', tab: 'literature' }, srq: { ic: '❓', lab: 'Review-kérdés', tab: 'study' }, sreview: { ic: '🔬', lab: 'Szisztematikus áttekintés', tab: 'study' }, submission: { ic: '📤', lab: 'Beküldés', tab: 'submission' } };
+  var RMAP_TYPE = { idea: { ic: '💡', lab: 'Ötlet', tab: 'ideas' }, gap: { ic: '🕳️', lab: 'Kutatási rés', tab: 'gap' }, paper: { ic: '📄', lab: 'Cikk', tab: 'literature' }, study: { ic: '🔎', lab: 'Irodalom', tab: 'literature' }, review: { ic: '📝', lab: 'Áttekintés', tab: 'study' }, step: { ic: '🧪', lab: 'Protokoll-lépés', tab: 'protocol' }, venue: { ic: '🎯', lab: 'Folyóirat', tab: 'journal' }, section: { ic: '✍️', lab: 'Draft-szekció', tab: 'writing' }, dataset: { ic: '🗂️', lab: 'Adathalmaz', tab: 'data' }, file: { ic: '📎', lab: 'Fájl', tab: 'ideas' }, chat: { ic: '💬', lab: 'Beszélgetés', tab: 'ideas' }, figure: { ic: '🖼️', lab: 'Ábra', tab: 'literature' }, srq: { ic: '❓', lab: 'Review-kérdés', tab: 'study' }, sreview: { ic: '🔬', lab: 'Szisztematikus áttekintés', tab: 'study' }, submission: { ic: '📤', lab: 'Beküldés', tab: 'submission' }, revision: { ic: '🔁', lab: 'Revízió / bírálati válasz', tab: 'submission' } };
   // interactive-edge relation presets (migration-81). Each type is a full look-preset: color + line-style + arrow + default animation.
   // The two structural derived kinds (flow/cite) map to erd/idz and keep today's exact stroke for backward-compat.
   var EDGE_TYPES = {
@@ -5235,10 +5235,12 @@
       d.journals.forEach(function (j) { N.push({ id: 'v' + j.id, t: 'venue', ph: 4, title: j.title || 'Folyóirat', m: { NPI: j.npi_level || '—', Státusz: j.status || '—' }, ref: j }); if (venueUp) E.push([venueUp, 'v' + j.id]); });
       var writeUp = lastStep || srId || litId || firstIdea;
       d.wfiles.forEach(function (f) {
-        if (/^submission\//.test(f.path)) {   // the submission dossier → a first-class 📤 submission node (ph 6, downstream of writing)
+        if (/^submission\//.test(f.path)) {   // submission/ → 📤 submission dossier; submission/revision-* → 🔁 revision node (ph 6, resubmission loop)
+          var isRev = /^submission\/revision-/.test(f.path);
           var snm = String(f.path).replace(/^submission\//, '').replace(/\.(md|tex)$/, '');
-          N.push({ id: 'w' + f.id, t: 'submission', ph: 6, title: snm || 'beküldés', m: { Fájl: f.path, Méret: (f.size || 0) + ' B' }, ref: f });
-          if (writeUp) E.push([writeUp, 'w' + f.id]);
+          N.push({ id: 'w' + f.id, t: isRev ? 'revision' : 'submission', ph: 6, title: snm || (isRev ? 'revízió' : 'beküldés'), m: { Fájl: f.path, Méret: (f.size || 0) + ' B' }, ref: f });
+          var subUp = isRev ? (((N.filter(function (x) { return x.t === 'submission'; })[0]) || {}).id || writeUp) : writeUp;   // a revision hangs off the dossier (if already built), else the writing phase
+          if (subUp) E.push([subUp, 'w' + f.id]);
         } else if (/^studies\//.test(f.path)) {   // a generated systematic-review document → a node in the SR lane
           var rnm = String(f.path).replace(/^studies\//, '').replace(/\.(md|tex)$/, '');
           N.push({ id: 'w' + f.id, t: 'review', ph: 2, title: rnm || 'áttekintés', m: { Fájl: f.path, Méret: (f.size || 0) + ' B' }, ref: f });
@@ -5696,7 +5698,7 @@
     // ── DELETE a card = delete its underlying row (per node type) + the map layout + any storage blob. Confirm-gated,
     // FK-graceful. Scoped to the user's OWN artifacts; shared/pipeline data (paper library, SR jobs) is NOT deletable here
     // (those have their own management + FK dependents) → they can only be 🙈 hidden. Aggregate nodes (lit/sr) excluded.
-    var DEL_BY_TYPE = { idea: 'research_ideas', gap: 'research_ideas', step: 'research_protocol_steps', venue: 'research_journal_picks', section: 'research_files', review: 'research_files', dataset: 'research_datasets', file: 'research_files', chat: 'research_chats', figure: 'research_figures', submission: 'research_files' };
+    var DEL_BY_TYPE = { idea: 'research_ideas', gap: 'research_ideas', step: 'research_protocol_steps', venue: 'research_journal_picks', section: 'research_files', review: 'research_files', dataset: 'research_datasets', file: 'research_files', chat: 'research_chats', figure: 'research_figures', submission: 'research_files', revision: 'research_files' };
     function nodeDeletable(n) { return !!(props.canEdit && n && n.ref && n.ref.id && DEL_BY_TYPE[n.t] && n.id !== 'lit' && n.id !== 'sr'); }
     function delOneNode(n) {   // no confirm — deletes the row (+ storage blob + map layout); resolves {ok}|{error}|{skipped}
       if (!nodeDeletable(n)) return Promise.resolve({ skipped: true });
@@ -6428,6 +6430,7 @@
       if (n.t === 'step') parts.push('KIVÁLASZTOTT PROTOKOLL-LÉPÉS: ' + String(n.title || ''));
       if (n.t === 'venue') parts.push('CÉL-FOLYÓIRAT: ' + String(n.title || ''));
       if (n.t === 'section') parts.push('DRAFT-SZEKCIÓ: ' + String(n.title || ''));
+      if (n.t === 'revision') parts.push('BÍRÁLATI VÁLASZ / REVÍZIÓ: ' + String(n.title || ''));
       if (n.t === 'dataset') parts.push('ADATHALMAZ: ' + String((n.ref && n.ref.name) || n.title || '') + ((n.ref && n.ref.notes) ? ' — ' + String(n.ref.notes).slice(0, 200) : ''));
       return { ideaId: idea ? idea.id : null, text: parts.join('\n') };
     }
@@ -6522,13 +6525,16 @@
         //           literature nodes (study/review), NOT at a file; *→section uses the card-grounded section edge, not the project outline.
         file: [{ act: 'ideas_grounded', ic: '💡', lab: 'Ötlet a tartalomból', det: '+' }],
         chat: [{ act: 'ideas_grounded', ic: '💡', lab: 'Ötlet a beszélgetésből', det: '1' }],
-        idea: [{ act: 'ideas', ic: '✦', lab: 'Kapcsolódó ötlet', det: '1' }, { act: 'study', ic: '🔎', lab: 'Irodalom-study / SR', det: '1' }, { act: 'protocol', ic: '🧪', lab: 'Protokoll', det: '1' }],
-        gap: [{ act: 'gap_to_idea', ic: '💡', lab: 'Ötletté alakít', det: '1' }, { act: 'study', ic: '🔎', lab: 'Irodalom-study', det: '1' }, { act: 'protocol', ic: '🧪', lab: 'Protokoll (a résből)', det: '1' }],
+        idea: [{ act: 'ideas', ic: '✦', lab: 'Kapcsolódó ötlet', det: '1' }, { act: 'srq', ic: '❓', lab: 'Review-kérdés (PICO)', det: '1' }, { act: 'study', ic: '🔎', lab: 'Irodalom-study / SR', det: '1' }, { act: 'protocol', ic: '🧪', lab: 'Protokoll', det: '1' }],
+        gap: [{ act: 'gap_to_idea', ic: '💡', lab: 'Ötletté alakít', det: '1' }, { act: 'srq', ic: '❓', lab: 'Review-kérdés (PICO)', det: '1' }, { act: 'study', ic: '🔎', lab: 'Irodalom-study', det: '1' }, { act: 'protocol', ic: '🧪', lab: 'Protokoll (a résből)', det: '1' }],
+        srq: [{ act: 'study', ic: '🔎', lab: 'Irodalom-study a kérdésből', det: '1' }],
         paper: [{ act: 'ideas', ic: '💡', lab: 'Ötlet a cikkből', det: '1' }, { act: 'study', ic: '🔎', lab: 'Irodalom-study', det: '1' }, { act: 'protocol', ic: '🧪', lab: 'Protokoll', det: '1' }],
         study: [{ act: 'review', ic: '📝', lab: 'Áttekintés', det: '+' }, { act: 'gaps', ic: '🕳️', lab: 'Kutatási rés(ek)', det: '1' }, { act: 'protocol', ic: '🧪', lab: 'Protokoll', det: '1' }, { act: 'ideas', ic: '💡', lab: 'Ötlet', det: '1' }],
         review: [{ act: 'gaps', ic: '🕳️', lab: 'Kutatási rés(ek)', det: '1' }, { act: 'protocol', ic: '🧪', lab: 'Protokoll', det: '1' }, { act: 'section', ic: '✍️', lab: 'Draft-szekció', det: '1' }],
         step: [],
         venue: [{ act: 'submission', ic: '📤', lab: 'Beküldési dosszié', det: '+' }],
+        submission: [{ act: 'revision', ic: '🔁', lab: 'Bírálati válasz (revízió)', det: '+' }],
+        revision: [{ act: 'section', ic: '✍️', lab: 'Javított szekció', det: '1' }],
         section: [{ act: 'section', ic: '✍️', lab: 'További szekció', det: '1' }, { act: 'venue', ic: '🎯', lab: 'Folyóirat-ajánlás (projekt)', det: '1' }],
         dataset: [{ act: 'protocol', ic: '🧪', lab: 'Protokoll', det: '1' }]
       };
@@ -6569,6 +6575,17 @@
         else if (act === 'gaps') {
           CORE.callEdge('research-ai', { action: 'gap_analyze', project_id: pid }).then(function (d) { (d && d.error) ? fail(d.error) : finish(((d && d.ideas) || []).map(function (x) { return 'i' + x.id; }), ((d && d.count) || 0) + ' kutatási rés'); }, function () { fail('hálózat'); });
         }
+        else if (act === 'srq') {   // idea/gap → a formalized PICO systematic-review question (research-study sr_suggest) → a 'q'+id srq node
+          var iid = n.ref && n.ref.id;
+          CORE.callEdge('research-study', { action: 'sr_suggest', project_id: pid, idea_id: iid || null }).then(function (d) {   // idea_id is honoured post-redeploy; the current build ignores it and batches (the SR panel does the same) — either way the source's candidate exists
+            if (d && d.error) { fail(d.error); return; }
+            sb.from('research_sr_candidates').select('id').eq('project_id', pid).eq('idea_id', iid).eq('dismissed', false).order('created_at', { ascending: false }).limit(1).maybeSingle().then(function (r) {
+              var qid = r && r.data && r.data.id;
+              if (!qid) { if (alive.current) { setGenBusy(false); window.PRUI.toast('Nem készült review-kérdés ehhez — a formalizáló a legrégebbi ~12 nyitott ötletet dolgozza fel. Próbáld közvetlenül a 🔎 Study utat.', { kind: 'info' }); } return; }   // no false success
+              finish(['q' + qid], 'Review-kérdés (PICO) kész');
+            }, function () { if (alive.current) { setGenBusy(false); window.PRUI.toast('Nem sikerült a review-kérdés lekérése.', { kind: 'error' }); } });
+          }, function () { fail('hálózat'); });
+        }
         else if (act === 'gap_to_idea') {
           var g0 = n.ref || {};
           sb.from('research_ideas').insert({ project_id: pid, source: 'own', status: 'candidate', question: g0.hypothesis || g0.question || 'Ötlet', rationale: g0.rationale || null, created_by: props.authorId }).select('id').maybeSingle().then(function (r) {
@@ -6579,10 +6596,10 @@
           }, function () { fail('hálózat'); });
         }
         else if (act === 'study') {
-          var seed = (n.t === 'idea' || n.t === 'gap') ? n.ref : null, pp = (n.t === 'paper') ? (n.ref || {}) : null;
-          var stitle = pp ? String(pp.title || 'Study').slice(0, 80) : String((seed && seed.question) || proj.title || 'Study').slice(0, 80);
-          var squestion = pp ? String(pp.abstract || pp.title || proj.goal || '').slice(0, 4000) : String((seed && seed.question) || proj.goal || proj.title || '').slice(0, 4000);
-          sb.from('research_studies').insert({ project_id: pid, idea_id: seed ? seed.id : null, title: stitle, question: squestion, created_by: props.authorId }).select('id').maybeSingle().then(function (r) {
+          var seed = (n.t === 'idea' || n.t === 'gap') ? n.ref : null, pp = (n.t === 'paper') ? (n.ref || {}) : null, sq = (n.t === 'srq') ? (n.ref || {}) : null;
+          var stitle = pp ? String(pp.title || 'Study').slice(0, 80) : sq ? String(sq.question || 'Study').slice(0, 80) : String((seed && seed.question) || proj.title || 'Study').slice(0, 80);
+          var squestion = pp ? String(pp.abstract || pp.title || proj.goal || '').slice(0, 4000) : sq ? String(sq.question || proj.goal || '').slice(0, 4000) : String((seed && seed.question) || proj.goal || proj.title || '').slice(0, 4000);
+          sb.from('research_studies').insert({ project_id: pid, idea_id: seed ? seed.id : (sq ? (sq.idea_id || null) : null), title: stitle, question: squestion, created_by: props.authorId }).select('id').maybeSingle().then(function (r) {
             if (r && r.error) { fail('study: ' + r.error.message); return; }
             var sid = r && r.data && r.data.id; if (!sid) { fail('a study nem jött létre'); return; }
             var rows = LS_STEPS.map(function (s) { return { study_id: sid, step: s.step, kind: s.kind, config: lsDefaultConfig(s.step, proj, seed) }; });
@@ -6650,6 +6667,20 @@
             var ai = (d && d.ai) || {};
             var md = '# Beküldési dosszié — ' + String(n.title || 'folyóirat') + '\n\n' + Object.keys(ai).map(function (k) { return '- **' + k + '**: ' + String(ai[k]); }).join('\n') + '\n';
             CORE.saveFile(pid, 'submission/dossier.md', md, 'ai').then(function (sf) { if (sf && sf.error) { fail(sf.error.message || 'mentés'); return; } var id = sf && sf.data && sf.data.id; finish(id != null ? ['w' + id] : [], 'Beküldési dosszié kész'); }, function () { fail('hálózat'); });
+          }, function () { fail('hálózat'); });
+        }
+        else if (act === 'revision') {   // submission → a reviewer-response / revision artifact (submission/revision-<n>.md). AI point-by-point via research-writing:'revision' if deployed, else a client scaffold.
+          var comments = ''; try { comments = String(window.prompt('Illeszd be a bírálói megjegyzéseket (opcionális — üresen vázlatot kapsz):', '') || '').slice(0, 8000); } catch (e) { }
+          sb.from('research_files').select('id').eq('project_id', pid).like('path', 'submission/revision-%').then(function (rc) {
+            var round = (((rc && rc.data) || []).length) + 1;
+            var writeRev = function (bodyMd, msg) { CORE.saveFile(pid, 'submission/revision-' + round + '.md', bodyMd, 'ai').then(function (sf) { if (sf && sf.error) { fail(sf.error.message || 'mentés'); return; } var id = sf && sf.data && sf.data.id; finish(id != null ? ['w' + id] : [], msg); }, function () { fail('hálózat'); }); };
+            var scaffold = '# Bírálati válasz — revízió ' + round + '\n\n## Bírálói megjegyzések\n' + (comments || '[TODO: illeszd be a bírálói megjegyzéseket]') + '\n\n## Pontról pontra válasz\n[TODO: válasz a megjegyzésekre]\n\n## Változtatások a kéziratban\n[TODO: a végzett módosítások]\n';
+            CORE.callEdge('research-writing', { action: 'revision', project_id: pid, reviewer_comments: comments, round: round }).then(function (d) {
+              if (!d || d.error) { writeRev(scaffold, 'Revízió-vázlat (' + round + '.)'); return; }   // edge not deployed / failed → client scaffold
+              var pbp = (d.point_by_point) || [];
+              var md = pbp.length ? ('# Bírálati válasz — revízió ' + round + '\n\n' + (d.summary ? d.summary + '\n\n' : '') + pbp.map(function (p, i) { return '### ' + (i + 1) + '. ' + String(p.comment || '') + '\n**Válasz:** ' + String(p.response || '') + '\n**Változtatás:** ' + String(p.change || ''); }).join('\n\n') + '\n') : scaffold;
+              writeRev(md, 'Bírálati válasz kész (' + round + '.)');
+            }, function () { writeRev(scaffold, 'Revízió-vázlat (' + round + '.)'); });
           }, function () { fail('hálózat'); });
         }
         else setGenBusy(false);
@@ -7462,8 +7493,8 @@
           var west = (r.x + r.w + 210) > vp.w;   // flip WEST when the card hugs the right edge so the fan (icon + right-label, capped at 150px) never renders off-screen
           var ax = west ? r.x : (r.x + r.w), ay = r.y + r.h / 2;
           var c = prod.length, R = 62, spreadDeg = Math.min(52, 26 * (c - 1));
-          var TCOL = { idea: '#d1810b', gap: '#d6455f', study: '#0891b2', review: '#7c3aed', step: '#b45309', section: '#059669', venue: '#c026d3', submission: '#dc2626' };
-          var ACT_T = { ideas: 'idea', ideas_grounded: 'idea', gaps: 'gap', gap_to_idea: 'idea', study: 'study', review: 'review', protocol: 'step', writing: 'section', venue: 'venue', submission: 'submission' };
+          var TCOL = { idea: '#d1810b', gap: '#d6455f', study: '#0891b2', review: '#7c3aed', step: '#b45309', section: '#059669', venue: '#c026d3', submission: '#dc2626', srq: '#4f46e5', sreview: '#4f46e5', revision: '#dc2626' };
+          var ACT_T = { ideas: 'idea', ideas_grounded: 'idea', gaps: 'gap', gap_to_idea: 'idea', study: 'study', review: 'review', protocol: 'step', writing: 'section', section: 'section', venue: 'venue', submission: 'submission', srq: 'srq', sreview: 'sreview', revision: 'revision' };
           return h('div', { className: 'rmap-arc-layer' },
             h('div', { className: 'rmap-arc-scrim', onMouseDown: function (e) { e.stopPropagation(); setArcOpen(null); }, onWheel: function (e) { e.stopPropagation(); }, onContextMenu: function (e) { e.preventDefault(); setArcOpen(null); } }),
             h('div', { className: 'rmap-arc' + (west ? ' w' : ''), style: { left: ax + 'px', top: ay + 'px' }, onMouseDown: function (e) { e.stopPropagation(); } },

@@ -471,6 +471,17 @@
   (5) 📄cikk→🔎study hozzáadva + a topSrc-select **abstract**-tal bővítve (különben a cikk-grounding dead code). (6) review→🎯
   törölve (korai), szekció→🎯 marad `hint`-tel. (7) `lineageOf` cikk-ág abstract-tal. Version `?v=1786480000`. **B folyam:**
   a 3 hiányzó szakasz (🖼️ elemzés/ábra · ❓ SR-kérdés/hipotézis · 📤 beküldés→revízió) tervezés alatt — új edge-ek kellenek.
+- [x] ✅ **B folyam — Stage 2 (❓ SR-kérdés) + Stage 3 (📤→🔁 revízió) (2026-07-21, review CLEAN+1 fix, PUSHED):** 4-ügynökös
+  design → mindhárom szakasz KLIENS-oldali MVP (deployolt edge + graceful fallback, NULL migráció). **Stage 2:** 💡ötlet/🕳rés
+  → PICO **review-kérdés** (`research-study sr_suggest` + re-query → `'q'+id` srq-node); srq → **irodalom-study a kérdésből**
+  (a mindig elérhető út; a study-branch kiterjesztve srq-forrásra: idea_id=srq.idea_id). Review-fix: ha a `sr_suggest` (a
+  legrégebbi ~12 ötletet batcheli) nem készít kandidátust a kattintott ötlethez → **info-toast, nincs hamis siker**. Elhalasztva:
+  `srq→sreview` (Elicit, entitlement + válasz-alak élteszt). **Stage 3:** új **🔁 revision** node-típus (`submission/revision-<n>.md`
+  fájl-alapú, graph() `submission/revision-*`→t:revision); 📤 → **bírálati válasz** (kliens-vázlat; AI pontról-pontra a
+  `research-writing:'revision'` edge-gel HA deployolod — graceful), 🔁 → **javított szekció** a kártya-alapú section-edge-en.
+  Version `?v=1786600000`. **Hátra:** Stage 1 (🖼️ elemzés/ábra — a valós adat→eredmény az autopilot dolga a dedikált gépen;
+  a becsületes rész: `fig_from_step` a lépés valós ábráit + eredmény-vázlat szekciók). **OPCIONÁLIS user-deploy:** `research-study`
+  sr_suggest idea_id-kiterjesztés (sebészi single-idea), `research-writing:'revision'` (AI bírálati válasz).
 
 ## Hátralévő (jövő) — Phase 6+
 - [ ] 🔴 **Teljes karakter-szintű CRDT/Yjs** — egyidejű azonos-szekció gépelés valós idejű merge-dzsel.
