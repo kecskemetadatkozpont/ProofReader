@@ -4813,6 +4813,8 @@
     var frS = useState([]), frames = frS[0], setFrames = frS[1];   // Map frames (named regions / phase lanes) — migration-71
     var jpS = useState(null), justPlaced = jpS[0], setJustPlaced = jpS[1];   // node-ids just materialized into a frame (pulse cue); cleared after ~1.6s
     var aoS = useState(null), arcOpen = aoS[0], setArcOpen = aoS[1];   // node id whose "Generálj ebből ▸" generation arc is open (screen-space bloom)
+    var hgS = useState(0), histGen = hgS[0], setHistGen = hgS[1];   // undo/redo: bumped to re-enable the ↶/↷ buttons + the history panel
+    var hpS = useState(false), histPanelOpen = hpS[0], setHistPanelOpen = hpS[1];
     var bfS = useState(null), boundFrame = bfS[0], setBoundFrame = bfS[1];   // #2: the dock chat is bound to this frame → typed commands create objects INSIDE it
     var frcS = useState(false), framesCap = frcS[0], setFramesCap = frcS[1];   // migration-71 capability
     var flS = useState(null), frLive = flS[0], setFrLive = flS[1];   // in-flight frame move/resize live geometry {id,x,y,w,h}
@@ -4878,6 +4880,7 @@
     var invrS = useState([]), invRes = invrS[0], setInvRes = invrS[1];   // invite: search results
     var invrolS = useState('viewer'), invRole = invrolS[0], setInvRole = invrolS[1];   // invite: role to grant
     var drag = useRef(null), stageRef = useRef(null), alive = useRef(true), bumpT = useRef(null), driving = useRef(false), mapDriver = useRef(null), ndrag = useRef(null), selRef = useRef(null), refBusy = useRef({}), dcRef = useRef(null), dScroll = useRef(null);
+    var histRef = useRef({ undo: [], redo: [] }), histBusy = useRef(false), layoutRef = useRef({});   // undo/redo: per-session data-based stack + a serialize lock + a live-layout mirror for the collaborative guard
     if (!mapDriver.current) mapDriver.current = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : ('00000000-0000-4000-8000-' + String(Date.now()).slice(-12));
     useEffect(function () { return function () { alive.current = false; driving.current = false; if (bumpT.current) clearTimeout(bumpT.current); }; }, []);
     // debounced re-materialize: as the orchestrator writes rows, coalesce rapid events into one reload so nodes grow live
@@ -5068,6 +5071,8 @@
         if (e.key === 'Escape') { setRadial(null); setArcOpen(null); if (tour) tourStop(); else if (focus) exitFocus(); else { setLinkFrom(null); setSelEdge(null); } }   // Esc closes the radial add-menu + the generation arc + cancels link-mode/edge selection
         else if (tour && tour.beats && !typing(e.target)) { if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); tourNext(); } else if (e.key === 'ArrowLeft') { e.preventDefault(); tourPrev(); } }
         else if (e.key === 'Enter' && !focus && !tour && armedRef.current && !typing(e.target)) { e.preventDefault(); enterNode(armedRef.current); }   // armedRef is null while a modal is open (guarded at compute)
+        else if ((e.metaKey || e.ctrlKey) && (e.key === 'z' || e.key === 'Z') && !typing(e.target) && props.canEdit) { e.preventDefault(); if (e.shiftKey) doRedo(); else doUndo(); }   // ⌘Z undo · ⌘⇧Z redo
+        else if ((e.metaKey || e.ctrlKey) && (e.key === 'y' || e.key === 'Y') && !typing(e.target) && props.canEdit) { e.preventDefault(); doRedo(); }   // ⌘Y redo (Windows)
       }
       window.addEventListener('keydown', onKey);
       return function () { window.removeEventListener('keydown', onKey); };
@@ -5654,6 +5659,104 @@
       }
       return Promise.all(jobs).catch(function () { });
     }
+    // ══ UNDO / REDO ══ per-session, DATA-based inverse ops replayed through the same guarded write paths (so undo inherits
+    //    optimistic-write + realtime-echo behavior). Reverses only MY recent gestures; a collaborative GUARD skips a reverse
+    //    whose target a teammate changed since. MOVE = full undo+redo; CREATE = undo-only (re-generate to get it back).
+    useEffect(function () { layoutRef.current = layout; }, [layout]);   // mirror layout so the undo guard reads the LIVE value (incl. collaborators' realtime moves)
+    useEffect(function () { histRef.current = { undo: [], redo: [] }; histBusy.current = false; if (alive.current) setHistGen(function (x) { return x + 1; }); }, [props.projectId]);   // a fresh project → a fresh undo stack (node ids are only unique within a project)
+    function nodeToRow(nid) {   // graph node id → its deletable domain row {table,id,dataKey}; null = FK-heavy/shared/aggregate → placement-only
+      var pref = String(nid).charAt(0), rest = String(nid).slice(1);
+      if (pref === 'i') return { table: 'research_ideas', id: rest, dataKey: 'ideas' };
+      if (pref === 'v') return { table: 'research_journal_picks', id: rest, dataKey: 'journals' };
+      if (pref === 'd') return { table: 'research_datasets', id: rest, dataKey: 'datasets' };
+      if (pref === 'w') return { table: 'research_files', id: rest, dataKey: 'wfiles' };
+      if (pref === 'f') return { table: 'research_files', id: rest, dataKey: 'mfiles' };
+      if (pref === 'q') return { table: 'research_sr_candidates', id: rest, dataKey: 'srcands' };
+      if (pref === 'g') return { table: 'research_figures', id: rest, dataKey: 'figures' };
+      return null;
+    }
+    function hRestoreLayout(rows) {
+      if (!rows || !rows.length) return Promise.resolve();
+      setLayout(function (L) { var m = Object.assign({}, L); rows.forEach(function (r) { m[r.node_id] = Object.assign({}, m[r.node_id], { x: r.x, y: r.y }); }); return m; });
+      return sb.from('research_map_layout').upsert(rows.map(function (r) { return { project_id: props.projectId, node_id: r.node_id, x: r.x, y: r.y, updated_at: new Date().toISOString() }; }), { onConflict: 'project_id,node_id' });
+    }
+    function hDeleteLayout(nids) {
+      if (!nids || !nids.length) return Promise.resolve();
+      setLayout(function (L) { var m = Object.assign({}, L); nids.forEach(function (n) { delete m[n]; }); return m; });
+      return sb.from('research_map_layout').delete().eq('project_id', props.projectId).in('node_id', nids);
+    }
+    function hRemoveEdges(keys) {
+      if (!keys || !keys.length) return Promise.resolve();
+      setEdgeOv(function (O) { var m = Object.assign({}, O); keys.forEach(function (k) { delete m[k]; }); return m; });
+      return sb.from('research_map_edges').delete().eq('project_id', props.projectId).in('edge_key', keys);
+    }
+    function hDeleteRows(specs) {
+      if (!specs || !specs.length) return Promise.resolve();
+      setData(function (D) { if (!D) return D; var d = Object.assign({}, D); specs.forEach(function (s) { if (s.dataKey && Array.isArray(d[s.dataKey])) d[s.dataKey] = d[s.dataKey].filter(function (x) { return String(x.id) !== String(s.id); }); }); return d; });
+      var byTable = {}; specs.forEach(function (s) { (byTable[s.table] = byTable[s.table] || []).push(s.id); });
+      return Promise.all(Object.keys(byTable).map(function (t) { return sb.from(t).delete().eq('project_id', props.projectId).in('id', byTable[t]); }));
+    }
+    function runHOp(op) {
+      if (!op) return Promise.resolve();
+      if (op.k === 'restoreLayout') return hRestoreLayout(op.rows);
+      if (op.k === 'deleteLayout') return hDeleteLayout(op.nids);
+      if (op.k === 'deleteRows') return hDeleteRows(op.specs);
+      if (op.k === 'removeEdges') return hRemoveEdges(op.keys);
+      return Promise.resolve();
+    }
+    function applyHOps(ops) {
+      return (ops || []).reduce(function (p, op) { return p.then(function () { return runHOp(op); }); }, Promise.resolve())
+        .then(function () { return true; }, function () { setBump(function (x) { return x + 1; }); return false; });
+    }
+    function pushHist(entry) {
+      if (!props.canEdit) return;
+      var H = histRef.current; H.undo.push(Object.assign({ ts: Date.now() }, entry)); if (H.undo.length > 40) H.undo.shift(); H.redo = [];
+      if (alive.current) setHistGen(function (x) { return x + 1; });
+    }
+    function reverseHist(dir) {
+      if (histBusy.current || !props.canEdit) return; var H = histRef.current, src = dir === 'undo' ? H.undo : H.redo;
+      if (!src.length) return;
+      var entry = src[src.length - 1];
+      if (dir === 'undo' && entry.guard && !entry.guard()) { src.pop(); setHistGen(function (x) { return x + 1; }); return; }   // guard already toasted + discards
+      histBusy.current = true;
+      applyHOps(dir === 'undo' ? entry.undo : entry.redo).then(function (ok) {
+        histBusy.current = false;
+        if (!ok) { if (alive.current) { setHistGen(function (x) { return x + 1; }); window.PRUI.toast('A visszavonás nem sikerült (hálózat) — próbáld újra.', { kind: 'error' }); } return; }   // keep the entry (retryable); a resync already fired
+        src.pop();
+        if (dir === 'undo') { if (entry.redo && entry.redo.length) H.redo.push(entry); } else H.undo.push(entry);
+        if (alive.current) { setHistGen(function (x) { return x + 1; }); window.PRUI.toast((dir === 'undo' ? '↩ Visszavonva: ' : '↪ Újra: ') + (entry.label || 'művelet'), { kind: 'info' }); }
+      });
+    }
+    function doUndo() { reverseHist('undo'); }
+    function doRedo() { reverseHist('redo'); }
+    function histPushCreate(label, nids, srcNodeId) {   // undo-only: remove the freshly-created card(s) + pins + provenance edges. Returns whether the CONTENT is deletable (else placement-only — FK-heavy protocol steps / lit stay, only the pins+edges revert).
+      if (!props.canEdit || !nids || !nids.length) return false;
+      var specs = [], edgeKeys = [];
+      nids.forEach(function (nid) { var row = nodeToRow(nid); if (row) specs.push({ table: row.table, id: row.id, nid: nid, dataKey: row.dataKey }); if (srcNodeId && edgesCap) edgeKeys.push(srcNodeId + '|' + nid + '|manual'); });
+      var deletable = specs.length > 0;
+      var undo = [];
+      if (edgeKeys.length) undo.push({ k: 'removeEdges', keys: edgeKeys });
+      if (specs.length) undo.push({ k: 'deleteRows', specs: specs });
+      undo.push({ k: 'deleteLayout', nids: nids });
+      pushHist({ label: deletable ? label : (label + ' — elrendezés'), kind: 'create', undo: undo, redo: null });
+      return deletable;
+    }
+    function histPushMove(beforeRows, afterRows) {   // rows: [{node_id,x,y}] — full undo+redo (single or group), collaborative-guarded
+      if (!props.canEdit || !beforeRows || !beforeRows.length) return;
+      var moved = beforeRows.some(function (b, i) { var a = afterRows[i]; return a && (Math.abs(b.x - a.x) > 0.5 || Math.abs(b.y - a.y) > 0.5); });
+      if (!moved) return;
+      var mk = function (rows) { return rows.map(function (r) { return { node_id: r.node_id, x: Math.round(r.x), y: Math.round(r.y) }; }); };
+      pushHist({
+        label: beforeRows.length > 1 ? (beforeRows.length + ' kártya mozgatása') : 'Kártya mozgatása', kind: 'move',
+        undo: [{ k: 'restoreLayout', rows: mk(beforeRows) }], redo: [{ k: 'restoreLayout', rows: mk(afterRows) }],
+        guard: function () {   // skip if a teammate re-moved / deleted the (first) node since — don't clobber their change
+          var a0 = afterRows[0], cur = layoutRef.current[a0.node_id];
+          if (!cur) { window.PRUI.toast('A kártyát időközben törölték — visszavonás kihagyva.', { kind: 'info' }); return false; }
+          if (Math.abs((cur.x || 0) - a0.x) > 1.5 || Math.abs((cur.y || 0) - a0.y) > 1.5) { window.PRUI.toast('Valaki átmozgatta a kártyát — visszavonás kihagyva.', { kind: 'info' }); return false; }
+          return true;
+        }
+      });
+    }
     // P2 drag-to-connect: pull an edge straight out of a card port and drop it on another card (the natural graph gesture).
     function startLinkDrag(e, nodeId) {
       if (e.button !== 0 || !props.canEdit || !edgesCap) return;
@@ -5777,12 +5880,13 @@
     // shared genesis TAIL: pin the new node at the cursor, materialize it (optimistic append when given — mandatory for
     // the limit-capped fetches so a brand-new row isn't dropped by the reload — else setBump), and select it. Every
     // "create X on the Map" verb resolves an id then calls this, so all paths are identical below the create step.
-    function placeNode(nid, wx, wy, applyOptimistic) {
+    function placeNode(nid, wx, wy, applyOptimistic, histLabel) {
       var X = Math.round(wx), Y = Math.round(wy);
       setLayout(function (L) { var m = Object.assign({}, L); m[nid] = Object.assign({ x: X, y: Y }, m[nid]); return m; });
       sb.from('research_map_layout').upsert({ project_id: props.projectId, node_id: nid, x: X, y: Y, updated_at: new Date().toISOString() }, { onConflict: 'project_id,node_id' });
       if (applyOptimistic) setData(applyOptimistic); else setBump(function (x) { return x + 1; });
       setSel(nid);
+      if (histLabel) { histPushCreate(histLabel + ' létrehozása', [nid], null); window.PRUI.toast('Létrehozva: ' + histLabel + ' · ⌘Z a visszavonáshoz', { kind: 'ok' }); }   // pain-killer: name it + tell them undo works
     }
     function ideaAtPos(wx, wy) {
       if (!props.canEdit) return;
@@ -5790,7 +5894,7 @@
         if (!alive.current) return;
         if (r && r.error) { window.PRUI.toast('Ötlet létrehozása sikertelen: ' + r.error.message, { kind: 'error' }); return; }
         if (!r || !r.data) return;
-        placeNode('i' + r.data.id, wx, wy, function (D) { return D ? Object.assign({}, D, { ideas: (D.ideas || []).concat([{ id: r.data.id, question: 'Új ötlet', hypothesis: null, rationale: null, novelty: null, status: 'candidate', source: 'own' }]) }) : D; });
+        placeNode('i' + r.data.id, wx, wy, function (D) { return D ? Object.assign({}, D, { ideas: (D.ideas || []).concat([{ id: r.data.id, question: 'Új ötlet', hypothesis: null, rationale: null, novelty: null, status: 'candidate', source: 'own' }]) }) : D; }, 'Ötlet');
       });
     }
     // Map-native DATASET genesis — a research_datasets row + a pinned 'd'+id node. source:'other'/status:'registered'
@@ -5801,7 +5905,7 @@
         if (!alive.current) return;
         if (r && r.error) { window.PRUI.toast('Adathalmaz létrehozása sikertelen: ' + r.error.message, { kind: 'error' }); return; }
         if (!r || !r.data) return;
-        placeNode('d' + r.data.id, wx, wy, function (D) { return D ? Object.assign({}, D, { datasets: (D.datasets || []).concat([{ id: r.data.id, name: 'Új adathalmaz', source: 'other', status: 'registered', size_bytes: null, notes: null }]) }) : D; });   // optimistic: beats the datasets limit(16) reload cap
+        placeNode('d' + r.data.id, wx, wy, function (D) { return D ? Object.assign({}, D, { datasets: (D.datasets || []).concat([{ id: r.data.id, name: 'Új adathalmaz', source: 'other', status: 'registered', size_bytes: null, notes: null }]) }) : D; }, 'Adathalmaz');   // optimistic: beats the datasets limit(16) reload cap
       });
     }
     // Map-native VENUE genesis — a research_journal_picks candidate + a pinned 'v'+id node (journal_id null; the user attaches a real journal / edits status inline later).
@@ -5811,7 +5915,7 @@
         if (!alive.current) return;
         if (r && r.error) { window.PRUI.toast('Folyóirat létrehozása sikertelen: ' + r.error.message, { kind: 'error' }); return; }
         if (!r || !r.data) return;
-        placeNode('v' + r.data.id, wx, wy, function (D) { return D ? Object.assign({}, D, { journals: (D.journals || []).concat([{ id: r.data.id, title: 'Új folyóirat', status: 'candidate', npi_level: null }]) }) : D; });
+        placeNode('v' + r.data.id, wx, wy, function (D) { return D ? Object.assign({}, D, { journals: (D.journals || []).concat([{ id: r.data.id, title: 'Új folyóirat', status: 'candidate', npi_level: null }]) }) : D; }, 'Folyóirat');
       });
     }
     // Map-native writing SECTION genesis — a blank writing/*.md file (UNIQUE path so the upsert never clobbers an existing
@@ -5824,7 +5928,7 @@
         if (!alive.current) return;
         if (sf && sf.error) { window.PRUI.toast('Szekció létrehozása sikertelen: ' + (sf.error.message || ''), { kind: 'error' }); return; }
         var id = sf && sf.data && sf.data.id; if (id == null) { setBump(function (x) { return x + 1; }); return; }   // no id back → fall back to a reload (wfiles is unlimited, so it appears)
-        placeNode('w' + id, wx, wy, function (D) { return D ? Object.assign({}, D, { wfiles: (D.wfiles || []).concat([{ id: id, path: path, size: body.length, storage_path: null }]) }) : D; });
+        placeNode('w' + id, wx, wy, function (D) { return D ? Object.assign({}, D, { wfiles: (D.wfiles || []).concat([{ id: id, path: path, size: body.length, storage_path: null }]) }) : D; }, 'Szekció');
       }, function () { if (alive.current) window.PRUI.toast('Hálózati hiba a szekció mentésekor.', { kind: 'error' }); });
     }
     // Map-native SUBMISSION genesis — a file-backed 📤 node at the FIXED path submission/dossier.md. IDEMPOTENT: if a
@@ -5839,7 +5943,7 @@
         if (!alive.current) return;
         if (sf && sf.error) { window.PRUI.toast('Beküldés létrehozása sikertelen: ' + (sf.error.message || ''), { kind: 'error' }); return; }
         var id = sf && sf.data && sf.data.id; if (id == null) { setBump(function (x) { return x + 1; }); return; }
-        placeNode('w' + id, wx, wy, function (D) { return D ? Object.assign({}, D, { wfiles: (D.wfiles || []).concat([{ id: id, path: 'submission/dossier.md', size: body.length, storage_path: null }]) }) : D; });
+        placeNode('w' + id, wx, wy, function (D) { return D ? Object.assign({}, D, { wfiles: (D.wfiles || []).concat([{ id: id, path: 'submission/dossier.md', size: body.length, storage_path: null }]) }) : D; }, 'Beküldés');
       }, function () { if (alive.current) window.PRUI.toast('Hálózati hiba a beküldés mentésekor.', { kind: 'error' }); });
     }
     // the frame SVG icon for the radial segment (a dashed rounded region + a small title tab) — currentColor = the segment color
@@ -6316,6 +6420,7 @@
           if (d.moved) {
             setLayout(function (L) { var m = Object.assign({}, L); d.ids.forEach(function (id) { m[id] = Object.assign({}, m[id], { x: d.base[id].x + d.dx, y: d.base[id].y + d.dy }); }); return m; });
             d.ids.forEach(function (id) { persistPos(id, d.base[id].x + d.dx, d.base[id].y + d.dy); });
+            histPushMove(d.ids.map(function (id) { return { node_id: id, x: d.base[id].x, y: d.base[id].y }; }), d.ids.map(function (id) { return { node_id: id, x: d.base[id].x + d.dx, y: d.base[id].y + d.dy }; }));
           }
         };
         var gup = function () { gfin(); };
@@ -6331,7 +6436,7 @@
         var d = ndrag.current; if (!d) return; ndrag.current = null;
         window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); window.removeEventListener('blur', finish);
         setDlive(null);
-        if (d.moved) { setLayout(function (L) { var m = Object.assign({}, L); m[n.id] = Object.assign({}, m[n.id], { x: d.lx, y: d.ly }); return m; }); persistPos(n.id, d.lx, d.ly); }
+        if (d.moved) { setLayout(function (L) { var m = Object.assign({}, L); m[n.id] = Object.assign({}, m[n.id], { x: d.lx, y: d.ly }); return m; }); persistPos(n.id, d.lx, d.ly); histPushMove([{ node_id: n.id, x: ox, y: oy }], [{ node_id: n.id, x: d.lx, y: d.ly }]); }
         else if (linkFrom) { createManualEdge(linkFrom, n.id); }   // P2 link-mode: this card is the target of a manual edge
         else { setSel(n.id); setMsel({}); setSelEdge(null); if (n.id === 'lit') setLitOpen(function (v) { return !v; }); }
       }
@@ -6568,7 +6673,7 @@
       function finish(newIds, msg) {   // place + link the result next to the source, then pulse + reload (graceful if no ids)
         if (!alive.current) return; setGenBusy(false);
         var ids = (newIds || []).filter(Boolean);
-        var after = function () { if (!alive.current) return; window.PRUI.toast('✓ ' + (msg || 'Kész'), { kind: 'ok' }); if (ids.length) { setJustPlaced(ids); setTimeout(function () { if (alive.current) setJustPlaced(null); }, 1600); } setBump(function (x) { return x + 1; }); };
+        var after = function () { if (!alive.current) return; var undoable = false; if (ids.length) { setJustPlaced(ids); setTimeout(function () { if (alive.current) setJustPlaced(null); }, 1600); undoable = histPushCreate((entry && entry.lab) || 'Generálás', ids, n.id); } window.PRUI.toast('✓ ' + (msg || 'Kész') + (ids.length ? (undoable ? ' · ⌘Z: vissza' : ' · ⌘Z: elrendezés vissza') : ''), { kind: 'ok' }); setBump(function (x) { return x + 1; }); };
         if (ids.length) linkToSource(n, ids).then(after, after); else after();
       }
       function go() {
@@ -7411,6 +7516,8 @@
           var g2 = [
             (props.canEdit && framesCap) ? h('button', { key: 'frame', className: 'rmap-dbtn', title: 'Új keret (nevesített régió) — vagy dupla-katt a vászonra', onClick: function () { frameCreate(); } }, '▦', L('Új keret')) : null,
             (props.canEdit && framesCap) ? h('button', { key: 'auto', className: 'rmap-dbtn', title: 'Rendezés fázisokba (sávok + keretek) — felülírja a kézi elrendezést', onClick: autoLayoutStages }, '⌗', L('Fázisokba')) : null,
+            props.canEdit ? h('button', { key: 'undo', className: 'rmap-dbtn', disabled: !histRef.current.undo.length, style: { opacity: histRef.current.undo.length ? 1 : 0.38 }, title: 'Visszavonás (⌘Z)' + (histRef.current.undo.length ? ' — ' + (histRef.current.undo[histRef.current.undo.length - 1].label || '') : ''), onClick: doUndo }, '↶', L('Vissza' + (histRef.current.undo.length ? ' · ' + histRef.current.undo.length : ''))) : null,
+            props.canEdit ? h('button', { key: 'redo', className: 'rmap-dbtn', disabled: !histRef.current.redo.length, style: { opacity: histRef.current.redo.length ? 1 : 0.38 }, title: 'Újra (⌘⇧Z)', onClick: doRedo }, '↷', L('Újra')) : null,
             (props.canEdit && g.N.length > 1) ? h('button', { key: 'tidy', className: 'rmap-dbtn', title: 'Rendezd el — csak az egymásra csúszott kártyákat húzza szét, a többi a helyén marad', onClick: tidyLayout }, '🧹', L('Rendezd el')) : null,
             commentsCap ? h('button', { key: 'cm', className: 'rmap-dbtn' + (commentMode ? ' on' : ''), title: commentMode ? 'Komment-mód kikapcsolása' : 'Komment-mód: kattints a vászonra vagy egy kártyára', onClick: function () { setCommentMode(function (v) { return !v; }); setComposer(null); } }, '💬', L('Komment-mód')) : null,
             (commentsCap && comments.length) ? h('button', { key: 'cmp', className: 'rmap-dbtn', title: 'Összes komment', onClick: function () { setCmPanelOpen(function (v) { return !v; }); } }, '📋' + (cmUnresolved || ''), L('Kommentek')) : null,
