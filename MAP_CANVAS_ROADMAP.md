@@ -574,7 +574,7 @@
 ## 🚫 FEDÉS-TILALOM minden elrendezésben + Markdown-kártya tartalom-méretezés — 2026-07-21
 > User-kérés: „Fontos, hogy a kártyák SOSE kerüljenek fedésbe egymással az elrendezések során. Pl. a Markdown-kártyákat
 > méretezzük a tartalmuknak megfelelően, hogy jól olvashatóak legyenek." Review: a fedés-garancia PROVABLY tartja (verify pass).
-- [x] ✅ **Fedés-tilalom (`<tbd>`, review: garancia PROVABLY tartja, 1 LOW residual zárva):** két elrendező FIX sormagasságot
+- [x] ✅ **Fedés-tilalom (`373f721`, review: garancia PROVABLY tartja, 1 LOW residual zárva):** két elrendező FIX sormagasságot
   használt → magasabb (méretezett md/ábra) kártya átfedte az alatta lévőt. **Idővonal** — a fix 132px helyett MAGASSÁG-TUDATOS
   alsáv-pakolás: minden alsáv annyi magas, amilyen a legmagasabb kártyája (`rowH[placed]`), a sor-tetők kumulatívak
   (`rowTop += rowH + RGAP`), vízszintesen 18px hézag-ellenőrzés → se függőleges, se vízszintes átfedés (konstrukció szerint).
