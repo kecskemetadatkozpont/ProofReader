@@ -411,9 +411,13 @@
 - [x] ✅ **Ütközés-elkerülő placement (2026-07-21):** a `linkToSource` fix offszet helyett a **`freeSpotsNear`** segéddel
   keres szabad helyet a forrás mellett — minden meglévő kártya valós lábnyomát (g.N + nodeW/nodeH) kikerülve, ≤3-oszlopos
   sor-major rácsban (AABB-teszt, konzervatív 204×120 új-kártya becslés). Így az AUTOMATIKUS elrendezés sosem rak kártyát
-  másikra (a `separateNodes` szándékosan békén hagyja a két-pinned átfedést). Review CLEAN + 4 unit-teszt zöld. **NYITOTT
-  (éjszakai munka):** az ütközés-elkerülés kiterjesztése a `placeInFrame`-re (keretben meglévő kártyák) + `ideaAtPos`-ra +
-  egy globális „Rendezd el" auto-tidy parancs.
+  másikra (a `separateNodes` szándékosan békén hagyja a két-pinned átfedést). Review CLEAN + 4 unit-teszt zöld.
+- [x] ✅ **Layout-robusztusság teljessé (2026-07-21, éjszakai):** (1) **🧹 „Rendezd el"** parancs a menüsorban
+  (`tidyLayout` → `separateNodes(arr,{})` minden kártya mozdítható → csak az egymásra csúszottakat húzza szét, a többi
+  marad; csak a ténylegesen elmozdult kártyákat írja vissza; render-időbeli PX/PY-nal azonos → stabil). (2)
+  **`placeInFrame`** kiszámolja a keretben MÁR bent lévő (batch-en kívüli, center-inside) kártyák celláit és kihagyja
+  őket (slot-léptetés, `guard<500` teli-keret fallback), a keret a ténylegesen használt utolsó sorig nő; üres occ esetén
+  bájtazonos a régivel. Review CLEAN + unit-teszt zöld. (Marad: `ideaAtPos` radial-nudge — minor, a radial csak üres vászonra nyílik.)
 
 ## Hátralévő (jövő) — Phase 6+
 - [ ] 🔴 **Teljes karakter-szintű CRDT/Yjs** — egyidejű azonos-szekció gépelés valós idejű merge-dzsel.

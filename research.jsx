@@ -5833,21 +5833,33 @@
     function placeInFrame(f, rows, selOne) {
       var CW = 204, CH = 74, pad = 16, hdr = 44, gap = 16;
       var cols = Math.max(1, Math.floor((f.w - 2 * pad + gap) / (CW + gap)));
-      var needH = hdr + pad + Math.ceil(rows.length / cols) * (CH + gap);
-      var H = Math.max(f.h, needH);   // auto-grow the frame so the cards fit inside instead of overlapping at the bottom edge
-      if (H > f.h) framePatch(f.id, { h: H });
-      var placed = [], append = [];
-      rows.forEach(function (row, i) {
-        var nid = 'i' + row.id;
-        var cx = Math.round(f.x + pad + (i % cols) * (CW + gap));
-        var cy = Math.round(f.y + hdr + Math.floor(i / cols) * (CH + gap));
-        cx = Math.max(f.x, Math.min(cx, f.x + f.w - CW));
-        cy = Math.max(f.y + hdr, Math.min(cy, f.y + H - CH));
+      // cards ALREADY inside this frame (not part of the batch) occupy cells the new cards must SKIP — otherwise a
+      // generated card lands on a pre-existing one. Center-inside test mirrors the frame-containment rule elsewhere.
+      var batch = {}; rows.forEach(function (r) { batch['i' + r.id] = 1; });
+      var occ = (g && g.N ? g.N : []).filter(function (n) {
+        if (n.mapHidden || batch[n.id]) return false;
+        var mx = (n.x || 0) + nodeW(n) / 2, my = (n.y || 0) + nodeH(n) / 2;
+        return mx > f.x && mx < f.x + f.w && my > f.y && my < f.y + f.h;
+      }).map(function (n) { return { x: n.x || 0, y: n.y || 0, w: nodeW(n), h: nodeH(n) }; });
+      function cellFree(cx, cy) {
+        for (var k = 0; k < occ.length; k++) { var b = occ[k];
+          if (Math.abs((cx + CW / 2) - (b.x + b.w / 2)) < (CW / 2 + b.w / 2 + 8) && Math.abs((cy + CH / 2) - (b.y + b.h / 2)) < (CH / 2 + b.h / 2 + 8)) return false; }
+        return true;
+      }
+      var placed = [], append = [], slot = 0, maxRow = 0;
+      rows.forEach(function (row) {
+        var nid = 'i' + row.id, cx, cy, r, c, guard = 0;
+        do { c = slot % cols; r = Math.floor(slot / cols); cx = Math.round(f.x + pad + c * (CW + gap)); cy = Math.round(f.y + hdr + r * (CH + gap)); slot++; guard++; }
+        while (!cellFree(cx, cy) && guard < 500);   // skip cells taken by pre-existing cards; guard = full-frame fallback
+        maxRow = Math.max(maxRow, r);
+        cx = Math.max(f.x, cx); cy = Math.max(f.y + hdr, cy);
         setLayout(function (L) { var m = Object.assign({}, L); m[nid] = Object.assign({ x: cx, y: cy }, m[nid]); return m; });
         sb.from('research_map_layout').upsert({ project_id: props.projectId, node_id: nid, x: cx, y: cy, updated_at: new Date().toISOString() }, { onConflict: 'project_id,node_id' });
         placed.push({ nid: nid, id: row.id });
         append.push({ id: row.id, question: row.question || 'Új ötlet', hypothesis: null, rationale: null, novelty: row.novelty != null ? row.novelty : null, status: row.status || 'candidate', source: row.source || 'gap' });
       });
+      var needH = hdr + pad + (maxRow + 1) * (CH + gap);   // grow the frame to the LAST row actually used (after skips)
+      if (needH > f.h) framePatch(f.id, { h: needH });
       setData(function (D) { if (!D) return D; var have = {}; (D.ideas || []).forEach(function (x) { have[x.id] = 1; }); return Object.assign({}, D, { ideas: (D.ideas || []).concat(append.filter(function (x) { return !have[x.id]; })) }); });
       if (selOne && placed.length === 1) setSel(placed[0].nid);
       setJustPlaced(placed.map(function (x) { return x.nid; }));
@@ -6164,6 +6176,26 @@
       if (!props.canEdit) return;
       setLayout({}); setDlive(null);
       sb.from('research_map_layout').delete().eq('project_id', props.projectId).then(function (r) { if (r && r.error && alive.current) window.PRUI.toast('Elrendezés visszaállítása: ' + r.error.message, { kind: 'error' }); });
+    }
+    // "🧹 Rendezd el" — one-shot de-overlap of the CURRENT layout: keep every card near where it is, only push apart the
+    // ones that actually overlap (separateNodes with NO pins → all movable), then persist only the cards that moved.
+    // Unlike resetLayout it does NOT throw away the arrangement; unlike separateNodes-in-render it also frees pinned pairs.
+    function tidyLayout() {
+      if (!props.canEdit) return;
+      var src = (g && g.N ? g.N : []).filter(function (n) { return !n.mapHidden; });
+      if (src.length < 2) { window.PRUI.toast('Nincs mit elrendezni.', { kind: 'info' }); return; }
+      var arr = src.map(function (n) { return { id: n.id, x: n.x || 0, y: n.y || 0, _w: nodeW(n), _h: nodeH(n) }; });
+      var orig = {}; arr.forEach(function (n) { orig[n.id] = { x: n.x, y: n.y }; });
+      separateNodes(arr, {});   // {} = nothing pinned → every overlapping pair is split apart; untouched cards stay put
+      var rows = arr.filter(function (n) { return Math.abs(n.x - orig[n.id].x) > 0.5 || Math.abs(n.y - orig[n.id].y) > 0.5; })
+        .map(function (n) { return { project_id: props.projectId, node_id: n.id, x: Math.round(n.x), y: Math.round(n.y), updated_at: new Date().toISOString() }; });
+      if (!rows.length) { window.PRUI.toast('Nincs átfedés — minden kártya a helyén.', { kind: 'success' }); return; }
+      setLayout(function (L) { var m = Object.assign({}, L); rows.forEach(function (r) { m[r.node_id] = Object.assign({}, m[r.node_id], { x: r.x, y: r.y }); }); return m; });
+      sb.from('research_map_layout').upsert(rows, { onConflict: 'project_id,node_id' }).then(function (r) {
+        if (!alive.current) return;
+        if (r && r.error) window.PRUI.toast('Elrendezés mentése: ' + r.error.message, { kind: 'error' });
+        else window.PRUI.toast(rows.length + ' kártya elrendezve — nincs több átfedés.', { kind: 'success' });
+      });
     }
     // Fázis 2.5 (opt-in, Prezi-B): arrange the cards into per-phase lanes + a named frame each. Overwrites manual
     // positions → behind a confirm; matches frames by title so re-running updates instead of duplicating.
@@ -7099,6 +7131,7 @@
           var g2 = [
             (props.canEdit && framesCap) ? h('button', { key: 'frame', className: 'rmap-dbtn', title: 'Új keret (nevesített régió) — vagy dupla-katt a vászonra', onClick: function () { frameCreate(); } }, '▦', L('Új keret')) : null,
             (props.canEdit && framesCap) ? h('button', { key: 'auto', className: 'rmap-dbtn', title: 'Rendezés fázisokba (sávok + keretek) — felülírja a kézi elrendezést', onClick: autoLayoutStages }, '⌗', L('Fázisokba')) : null,
+            (props.canEdit && g.N.length > 1) ? h('button', { key: 'tidy', className: 'rmap-dbtn', title: 'Rendezd el — csak az egymásra csúszott kártyákat húzza szét, a többi a helyén marad', onClick: tidyLayout }, '🧹', L('Rendezd el')) : null,
             commentsCap ? h('button', { key: 'cm', className: 'rmap-dbtn' + (commentMode ? ' on' : ''), title: commentMode ? 'Komment-mód kikapcsolása' : 'Komment-mód: kattints a vászonra vagy egy kártyára', onClick: function () { setCommentMode(function (v) { return !v; }); setComposer(null); } }, '💬', L('Komment-mód')) : null,
             (commentsCap && comments.length) ? h('button', { key: 'cmp', className: 'rmap-dbtn', title: 'Összes komment', onClick: function () { setCmPanelOpen(function (v) { return !v; }); } }, '📋' + (cmUnresolved || ''), L('Kommentek')) : null,
             (data && data.hiddenFigs && data.hiddenFigs.length) ? h('button', { key: 'hf', className: 'rmap-dbtn', title: 'Térképről levett ábrák visszahozása', onClick: function () { setRestoreOpen(true); } }, '🖼' + data.hiddenFigs.length, L('Rejtett ábrák')) : null,
