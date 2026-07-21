@@ -479,9 +479,18 @@
   `srq→sreview` (Elicit, entitlement + válasz-alak élteszt). **Stage 3:** új **🔁 revision** node-típus (`submission/revision-<n>.md`
   fájl-alapú, graph() `submission/revision-*`→t:revision); 📤 → **bírálati válasz** (kliens-vázlat; AI pontról-pontra a
   `research-writing:'revision'` edge-gel HA deployolod — graceful), 🔁 → **javított szekció** a kártya-alapú section-edge-en.
-  Version `?v=1786600000`. **Hátra:** Stage 1 (🖼️ elemzés/ábra — a valós adat→eredmény az autopilot dolga a dedikált gépen;
-  a becsületes rész: `fig_from_step` a lépés valós ábráit + eredmény-vázlat szekciók). **OPCIONÁLIS user-deploy:** `research-study`
-  sr_suggest idea_id-kiterjesztés (sebészi single-idea), `research-writing:'revision'` (AI bírálati válasz).
+  Version `?v=1786600000`. **OPCIONÁLIS user-deploy:** `research-study` sr_suggest idea_id-kiterjesztés (sebészi single-idea),
+  `research-writing:'revision'` (AI bírálati válasz).
+- [x] ✅ **B folyam — Stage 1 (🖼️ elemzés/ábra) (2026-07-21, review 2 fix, PUSHED):** a BECSÜLETES MVP — a valós adat→eredmény
+  számítás az autopilot dolga a dedikált gépen, nem a kliensé. **`fig_from_step`** (analysis/eval/figure lépésekre): a lépés
+  végrehajtott `result.figures[].img` VALÓS (autopilot-renderelt) ábráit feltölti a research-data bucketbe + szintetikus
+  `research_figures` sorokat (source_id NULL) → `'g'+id` figure-node-ok. **dataset/lépés→results:** eredmény/elemzés
+  szekció-VÁZLAT a kártya-alapú section-edge-en (őszintén „-vázlat"-nak jelölve). **ábra→szekció.** `uploadDataUrlToFigure`
+  segéd (dataURL→Blob→bucket→figure-sor). Review-fixek: (1) a figure-fetch `ascending`→`descending` (különben egy frissen
+  generált ábra ~16 ábra fölött nem jelenne meg — csendes hamis siker); (2) `fig_from_step` idempotens (előbb törli a lépés
+  korábbi szintetikus ábráit — a NULL source_id kijátssza az `unique(source_id,ord)`-t → duplikáció). Version `?v=1786720000`.
+  **A teljes kutatási ív mostantól a Térképről vezethető: ötlet→irodalom→rés→SR-kérdés→study→protokoll→adat→eredmény/ábra→
+  szekció→folyóirat→beküldés→revízió.** (Sematikus ábra valós grafikonhoz: PAPERBANANA edge — opcionális.)
 
 ## Hátralévő (jövő) — Phase 6+
 - [ ] 🔴 **Teljes karakter-szintű CRDT/Yjs** — egyidejű azonos-szekció gépelés valós idejű merge-dzsel.

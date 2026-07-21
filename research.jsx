@@ -5107,7 +5107,7 @@
         sb.from('research_datasets').select('id,name,source,status,size_bytes,notes').eq('project_id', pid).order('created_at', { ascending: true }).limit(16),
         sb.from('research_files').select('id,path,size,source,storage_path').eq('project_id', pid).not('path', 'like', 'writing/%').not('path', 'like', 'studies/%').not('path', 'like', 'submission/%').order('updated_at', { ascending: false }).limit(16),
         sb.from('research_chats').select('id,title,updated_at').eq('project_id', pid).order('updated_at', { ascending: false }).limit(8),
-        sb.from('research_figures').select('id,source_id,fig_label,caption,storage_path').eq('project_id', pid).eq('hidden', false).order('created_at', { ascending: true }).limit(16),
+        sb.from('research_figures').select('id,source_id,fig_label,caption,storage_path').eq('project_id', pid).eq('hidden', false).order('created_at', { ascending: false }).limit(16),   // newest-first so a freshly-generated figure always survives the 16-cap
         // SR/Elicit provenance: the "Study basis" review-question candidates (linked to their idea) + the launched Elicit reviews
         sb.from('research_sr_candidates').select('id,idea_id,question,launched_job_id').eq('project_id', pid).eq('dismissed', false).order('created_at', { ascending: true }).limit(16),
         sb.from('elicit_jobs').select('id,research_question,status,result_title').eq('project_id', pid).eq('kind', 'sysreview').order('created_at', { ascending: true }).limit(16),
@@ -6536,9 +6536,11 @@
         submission: [{ act: 'revision', ic: '🔁', lab: 'Bírálati válasz (revízió)', det: '+' }],
         revision: [{ act: 'section', ic: '✍️', lab: 'Javított szekció', det: '1' }],
         section: [{ act: 'section', ic: '✍️', lab: 'További szekció', det: '1' }, { act: 'venue', ic: '🎯', lab: 'Folyóirat-ajánlás (projekt)', det: '1' }],
-        dataset: [{ act: 'protocol', ic: '🧪', lab: 'Protokoll', det: '1' }]
+        dataset: [{ act: 'protocol', ic: '🧪', lab: 'Protokoll', det: '1' }, { act: 'results', ic: '📊', lab: 'Eredmény-vázlat szekció', det: '1' }],
+        figure: [{ act: 'section', ic: '✍️', lab: 'Ábra-hivatkozó szekció', det: '1' }]
       };
       var list = (M[n.t] || []).slice();
+      if (n.t === 'step') { var sk = String((n.ref && n.ref.kind) || ''); if (/analysis|eval|figure/i.test(sk)) list = [{ act: 'results', ic: '📊', lab: 'Eredmény/Elemzés szekció', det: '1' }, { act: 'fig_from_step', ic: '🖼️', lab: 'Ábrák a lépés eredményéből', det: '1' }]; }   // only analysis/eval/figure steps produce results/figures
       if (n.t === 'file') { var p = String((n.ref && n.ref.path) || ''); if (!/\.(md|markdown|txt|tex|csv|json)$/i.test(p)) return []; }   // grounding needs text → a binary/PDF file offers nothing
       if (n.t === 'venue' && !(n.ref && n.ref.journal_id)) list = list.filter(function (e) { return e.act !== 'submission'; });   // a blank Map venue has no journal → no dossier yet
       return list;
@@ -6547,6 +6549,15 @@
       if (n.t === 'file' && n.ref && n.ref.id) return sb.from('research_files').select('content').eq('id', n.ref.id).maybeSingle().then(function (r) { return (r && r.data && r.data.content) || ''; }, function () { return ''; });
       if (n.t === 'chat' && n.ref && n.ref.id) return sb.from('research_messages').select('role,content').eq('chat_id', n.ref.id).order('created_at', { ascending: true }).limit(40).then(function (r) { return ((r && r.data) || []).map(function (m) { return (m.role === 'assistant' ? 'AI: ' : 'User: ') + String(m.content || ''); }).join('\n\n'); }, function () { return ''; });
       return Promise.resolve('');
+    }
+    function dataUrlToBlob(u) { try { var p = String(u).split(','), mime = (p[0].match(/:(.*?);/) || [])[1] || 'image/png', bin = atob(p[1]), k = bin.length, arr = new Uint8Array(k); while (k--) arr[k] = bin.charCodeAt(k); return new Blob([arr], { type: mime }); } catch (e) { return null; } }
+    function uploadDataUrlToFigure(pid, dataUrl, caption, label, keyPrefix, ord) {   // a rendered data-URL → research-data bucket → a SYNTHETIC research_figures row (source_id NULL) → 'g'+id
+      var blob = dataUrlToBlob(dataUrl); if (!blob) return Promise.resolve(null);
+      var path = pid + '/figures/' + keyPrefix + '/' + ord + '.png';   // bucket RLS keys on the first path segment = project id
+      return sb.storage.from('research-data').upload(path, blob, { upsert: true, contentType: 'image/png' }).then(function (up) {
+        if (up && up.error) return null;
+        return sb.from('research_figures').insert({ project_id: pid, source_id: null, ord: ord, fig_label: label || null, caption: caption || null, storage_path: path }).select('id').maybeSingle().then(function (r) { return (r && r.data && r.data.id) ? ('g' + r.data.id) : null; }, function () { return null; });
+      }, function () { return null; });
     }
     function runArcGen(n, entry) {
       if (genBusy || !n || !entry) return;
@@ -6681,6 +6692,31 @@
               var md = pbp.length ? ('# Bírálati válasz — revízió ' + round + '\n\n' + (d.summary ? d.summary + '\n\n' : '') + pbp.map(function (p, i) { return '### ' + (i + 1) + '. ' + String(p.comment || '') + '\n**Válasz:** ' + String(p.response || '') + '\n**Változtatás:** ' + String(p.change || ''); }).join('\n\n') + '\n') : scaffold;
               writeRev(md, 'Bírálati válasz kész (' + round + '.)');
             }, function () { writeRev(scaffold, 'Revízió-vázlat (' + round + '.)'); });
+          }, function () { fail('hálózat'); });
+        }
+        else if (act === 'results') {   // dataset/step → a RESULTS/ANALYSIS section OUTLINE (the real data→results computation is the autopilot's job on the dedicated machine); labeled as a vázlat
+          var linR = lineageOf(n), heading = (n.t === 'dataset') ? 'Eredmények' : 'Elemzés';
+          var slugR = (n.t === 'dataset' ? 'eredmenyek' : 'elemzes') + '-' + Date.now();
+          CORE.callEdge('research-writing', { action: 'section', project_id: pid, section: { key: slugR, heading: heading }, context: { research: String(proj.goal || proj.title || '') + (linR.text ? '\n\n' + linR.text : '') } }).then(function (d) {
+            if (d && d.error) { fail(d.error); return; }
+            var latex = (d && d.latex) || ('\\section{' + heading + '}\n');
+            CORE.saveFile(pid, 'writing/sections/' + slugR + '.tex', latex, 'ai').then(function (sf) { if (sf && sf.error) { fail(sf.error.message || 'mentés'); return; } var id = sf && sf.data && sf.data.id; finish(id != null ? ['w' + id] : [], heading + '-vázlat kész'); }, function () { fail('hálózat'); });
+          }, function () { fail('hálózat'); });
+        }
+        else if (act === 'fig_from_step') {   // surface the step's ALREADY-RENDERED result figures (real, produced by the autopilot) as 'g'+id figure nodes
+          var stepId = n && n.ref && n.ref.id; if (!stepId) { fail('nincs lépés-azonosító'); return; }
+          sb.from('research_protocol_steps').select('result').eq('id', stepId).maybeSingle().then(function (sr) {
+            var figs = ((sr && sr.data && sr.data.result && sr.data.result.figures) || []).filter(function (f) { return f && f.img; });
+            if (!figs.length) { if (alive.current) { setGenBusy(false); window.PRUI.toast('Ennek a lépésnek nincs ábrája a végrehajtott eredményében (futtasd az autopilottal).', { kind: 'info' }); } return; }
+            var doUpload = function () {
+              Promise.all(figs.map(function (f, i) { return uploadDataUrlToFigure(pid, f.img, f.title || ('Ábra ' + (i + 1)), f.title || null, 'step-' + stepId, i); })).then(function (ids) {
+                var valid = (ids || []).filter(Boolean);
+                if (!valid.length) { fail('az ábrák feltöltése nem sikerült'); return; }
+                finish(valid, valid.length + ' ábra a lépésből');
+              });
+            };
+            // idempotent: drop this step's prior synthetic figures first (null source_id defeats the unique(source_id,ord) constraint → re-runs would otherwise duplicate)
+            sb.from('research_figures').delete().eq('project_id', pid).like('storage_path', pid + '/figures/step-' + stepId + '/%').then(doUpload, doUpload);
           }, function () { fail('hálózat'); });
         }
         else setGenBusy(false);
@@ -7493,8 +7529,8 @@
           var west = (r.x + r.w + 210) > vp.w;   // flip WEST when the card hugs the right edge so the fan (icon + right-label, capped at 150px) never renders off-screen
           var ax = west ? r.x : (r.x + r.w), ay = r.y + r.h / 2;
           var c = prod.length, R = 62, spreadDeg = Math.min(52, 26 * (c - 1));
-          var TCOL = { idea: '#d1810b', gap: '#d6455f', study: '#0891b2', review: '#7c3aed', step: '#b45309', section: '#059669', venue: '#c026d3', submission: '#dc2626', srq: '#4f46e5', sreview: '#4f46e5', revision: '#dc2626' };
-          var ACT_T = { ideas: 'idea', ideas_grounded: 'idea', gaps: 'gap', gap_to_idea: 'idea', study: 'study', review: 'review', protocol: 'step', writing: 'section', section: 'section', venue: 'venue', submission: 'submission', srq: 'srq', sreview: 'sreview', revision: 'revision' };
+          var TCOL = { idea: '#d1810b', gap: '#d6455f', study: '#0891b2', review: '#7c3aed', step: '#b45309', section: '#059669', venue: '#c026d3', submission: '#dc2626', srq: '#4f46e5', sreview: '#4f46e5', revision: '#dc2626', figure: '#d97706' };
+          var ACT_T = { ideas: 'idea', ideas_grounded: 'idea', gaps: 'gap', gap_to_idea: 'idea', study: 'study', review: 'review', protocol: 'step', writing: 'section', section: 'section', venue: 'venue', submission: 'submission', srq: 'srq', sreview: 'sreview', revision: 'revision', results: 'section', fig_from_step: 'figure' };
           return h('div', { className: 'rmap-arc-layer' },
             h('div', { className: 'rmap-arc-scrim', onMouseDown: function (e) { e.stopPropagation(); setArcOpen(null); }, onWheel: function (e) { e.stopPropagation(); }, onContextMenu: function (e) { e.preventDefault(); setArcOpen(null); } }),
             h('div', { className: 'rmap-arc' + (west ? ' w' : ''), style: { left: ax + 'px', top: ay + 'px' }, onMouseDown: function (e) { e.stopPropagation(); } },
