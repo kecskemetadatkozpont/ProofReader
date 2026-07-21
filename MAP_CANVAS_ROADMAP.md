@@ -492,6 +492,23 @@
   **A teljes kutatási ív mostantól a Térképről vezethető: ötlet→irodalom→rés→SR-kérdés→study→protokoll→adat→eredmény/ábra→
   szekció→folyóirat→beküldés→revízió.** (Sematikus ábra valós grafikonhoz: PAPERBANANA edge — opcionális.)
 
+## 🚧 Undo / Redo — a Térkép biztonsági hálója — 2026-07-21
+> User-kérés: „új kártya nem a megfelelő helyre kerül, könnyű elveszíteni a folyamatot mi történt". 4-ügynökös tervezés →
+> per-session, DATA-alapú inverz-op verem egy `useRef`-ben (túléli a graph() re-rendert), a MEGLÉVŐ guarded író-utakon
+> visszajátszva; csak a SAJÁT gesztusokat vonja vissza; megosztott-guard kihagyja, ha közben más módosított.
+- [x] ✅ **Tier 1 (`0f3eeb0`, review 2 fix):** **CREATE** (genesis + generáló-ív) → a friss kártya + pin + provenance-él
+  EGY visszavonás-egység (törölhető sorok törlődnek; FK-nehéz protokoll-lépés/lit csak elrendezés-szinten, tartalom marad —
+  a toast is ezt mondja); create = csak-undo (AI-tartalmat újragenerálsz). **MOVE** (egyedi+csoport) → teljes undo+redo,
+  `layoutRef`-alapú megosztott-guarddal. **Nyomkövető toast** minden létrehozásnál. ⌘Z/⌘⇧Z/⌘Y + ↶/↷ menüsor-gombok
+  (mélység-számmal); serialize-lock; projekt-váltáskor verem-null.
+- [x] ✅ **Tier 2 + előzmény-panel (`<tbd>`, review 1 fix):** kézi ÉL létrehozás (undo=removeEdges, redo=setEdges);
+  KERET create/group/delete (reinsert explicit id-vel — a schema+RLS engedi); PIN/REJTÉS (nodeSetFlag, undo=előző flag;
+  a fix: ha közben resetLayout törölte a pint, a live pozícióra esik vissza, nem 0,0-ra). **🕘 Előzmény-panel**: a menüsorból
+  nyíló lebegő lista (utolsó 12 művelet, legfrissebb felül, a következő-visszavonandó kiemelve) + ↶/↷ fejléc + redo-számláló
+  — „jól látszik mi történt". Primitívek: hSetEdges/hFramePatch/hDeleteFrame/hReinsertFrame/hSetFlag. Version `?v=1787020000`.
+  **Elhalasztva (T3 + finomítás):** törlés-visszaállítás (eredeti id-vel), keret-mozgatás/átnevezés (a közös framePatch-út
+  zajos), él-restyle, átméretezés, undo-to-index a panelben. Migráció/edge NEM kell.
+
 ## Hátralévő (jövő) — Phase 6+
 - [ ] 🔴 **Teljes karakter-szintű CRDT/Yjs** — egyidejű azonos-szekció gépelés valós idejű merge-dzsel.
   A jelenlegi soft-lock + LWW ennek a könnyűsúlyú, függőség-mentes alternatívája; a teljes CRDT nagy

@@ -5615,6 +5615,7 @@
         setTimeout(function () { if (eovRef.current === key) eovRef.current = null; }, 400);
         if (r && r.error && alive.current) window.PRUI.toast('Kapcsolat mentése sikertelen: ' + r.error.message, { kind: 'error' });
       });
+      pushHist({ label: 'Kapcsolat', kind: 'edge', undo: [{ k: 'removeEdges', keys: [key] }], redo: [{ k: 'setEdges', rows: [{ edge_key: key, from_id: fromId, to_id: toId, kind: 'kap', manual: true }] }] });
     }
     // Find `count` NON-overlapping positions for new cards near (sx,sy), avoiding every EXISTING card's real footprint
     // (g.N resolved positions + per-node sizes) AND the spots already chosen this batch. Scans a grid to the right of the
@@ -5696,12 +5697,40 @@
       var byTable = {}; specs.forEach(function (s) { (byTable[s.table] = byTable[s.table] || []).push(s.id); });
       return Promise.all(Object.keys(byTable).map(function (t) { return sb.from(t).delete().eq('project_id', props.projectId).in('id', byTable[t]); }));
     }
+    function hSetEdges(rows) {   // upsert edge override/manual rows (redo of an edge create; undo of an edge delete)
+      if (!rows || !rows.length) return Promise.resolve();
+      setEdgeOv(function (O) { var m = Object.assign({}, O); rows.forEach(function (r) { m[r.edge_key] = r; }); return m; });
+      return sb.from('research_map_edges').upsert(rows.map(function (r) { return Object.assign({ project_id: props.projectId, updated_at: new Date().toISOString() }, r); }), { onConflict: 'project_id,edge_key' });
+    }
+    function hFramePatch(id, patch) {
+      setFrames(function (F) { return F.map(function (f) { return f.id === id ? Object.assign({}, f, patch) : f; }); });
+      return sb.from('research_map_frames').update(Object.assign({}, patch, { updated_at: new Date().toISOString() })).eq('id', id);
+    }
+    function hDeleteFrame(id) {
+      setFrames(function (F) { return F.filter(function (f) { return f.id !== id; }); });
+      return sb.from('research_map_frames').delete().eq('id', id);
+    }
+    function hReinsertFrame(frame) {
+      setFrames(function (F) { return F.some(function (f) { return f.id === frame.id; }) ? F : F.concat([frame]); });
+      return sb.from('research_map_frames').insert({ id: frame.id, project_id: props.projectId, title: frame.title, x: frame.x, y: frame.y, w: frame.w, h: frame.h, color: frame.color });
+    }
+    function hSetFlag(nid, patch) {   // pin/hide flag on research_map_layout — keep x/y; if the pin was wiped (resetLayout) since, fall back to the node's LIVE position, never (0,0)
+      setLayout(function (L) { var m = Object.assign({}, L); m[nid] = Object.assign({}, m[nid], patch); return m; });
+      var cur = layoutRef.current[nid] || {}, gn = (g && g.by && g.by[nid]) || {};
+      var px = (cur.x != null ? cur.x : (gn.x != null ? gn.x : 0)), py = (cur.y != null ? cur.y : (gn.y != null ? gn.y : 0));
+      return sb.from('research_map_layout').upsert(Object.assign({ project_id: props.projectId, node_id: nid, x: px, y: py, updated_at: new Date().toISOString() }, patch), { onConflict: 'project_id,node_id' });
+    }
     function runHOp(op) {
       if (!op) return Promise.resolve();
       if (op.k === 'restoreLayout') return hRestoreLayout(op.rows);
       if (op.k === 'deleteLayout') return hDeleteLayout(op.nids);
       if (op.k === 'deleteRows') return hDeleteRows(op.specs);
       if (op.k === 'removeEdges') return hRemoveEdges(op.keys);
+      if (op.k === 'setEdges') return hSetEdges(op.rows);
+      if (op.k === 'framePatch') return hFramePatch(op.id, op.patch);
+      if (op.k === 'deleteFrame') return hDeleteFrame(op.id);
+      if (op.k === 'reinsertFrame') return hReinsertFrame(op.frame);
+      if (op.k === 'setFlag') return hSetFlag(op.nid, op.patch);
       return Promise.resolve();
     }
     function applyHOps(ops) {
@@ -5729,6 +5758,7 @@
     }
     function doUndo() { reverseHist('undo'); }
     function doRedo() { reverseHist('redo'); }
+    function histRelTime(ts) { var s = Math.round((Date.now() - ts) / 1000); return s < 45 ? 'most' : (s < 3600 ? (Math.round(s / 60) + ' perce') : (Math.round(s / 3600) + ' órája')); }
     function histPushCreate(label, nids, srcNodeId) {   // undo-only: remove the freshly-created card(s) + pins + provenance edges. Returns whether the CONTENT is deletable (else placement-only — FK-heavy protocol steps / lit stay, only the pins+edges revert).
       if (!props.canEdit || !nids || !nids.length) return false;
       var specs = [], edgeKeys = [];
@@ -5787,6 +5817,7 @@
         if (!alive.current) return;
         if (r && r.error) { window.PRUI.toast('Mentés sikertelen (fut a migration-70?): ' + r.error.message, { kind: 'error' }); setLayout(function (L) { var m = Object.assign({}, L); if (m[n.id]) { var c2 = Object.assign({}, m[n.id]); if (prev) c2[key] = true; else delete c2[key]; m[n.id] = c2; } return m; }); }
       });
+      pushHist({ label: key === 'hidden' ? (val ? 'Kártya elrejtése' : 'Megjelenítés') : (val ? 'Kitűzés' : 'Kitűzés levétele'), kind: 'flag', undo: [{ k: 'setFlag', nid: n.id, patch: (function () { var p = {}; p[key] = prev; return p; })() }], redo: [{ k: 'setFlag', nid: n.id, patch: patch }] });
     }
     // temporary per-TYPE visibility (client-only; persisted to localStorage per project so it is convenient but reversible)
     function typeStoreKey() { return 'pr-rmap-types:' + props.projectId; }
@@ -5859,7 +5890,7 @@
       sb.from('research_map_frames').insert({ project_id: props.projectId, title: 'Csoport', x: fx, y: fy, w: fw, h: fh, color: color }).select('id,title,x,y,w,h,color').single().then(function (r) {
         if (!alive.current) return;
         if (r && r.error) { window.PRUI.toast('Keret létrehozása sikertelen: ' + r.error.message, { kind: 'error' }); return; }
-        if (r && r.data) { setFrames(function (F) { return F.some(function (f) { return f.id === r.data.id; }) ? F : F.concat([r.data]); }); window.PRUI.toast('Keret létrehozva — húzd a fejlécét a csoport mozgatásához', { kind: 'success' }); }
+        if (r && r.data) { setFrames(function (F) { return F.some(function (f) { return f.id === r.data.id; }) ? F : F.concat([r.data]); }); window.PRUI.toast('Keret létrehozva — húzd a fejlécét a csoport mozgatásához', { kind: 'success' }); pushHist({ label: 'Csoport keret', kind: 'frame', undo: [{ k: 'deleteFrame', id: r.data.id }], redo: [{ k: 'reinsertFrame', frame: r.data }] }); }
       });
       setMsel({});
     }
@@ -5872,7 +5903,7 @@
       sb.from('research_map_frames').insert({ project_id: props.projectId, title: 'Új keret', x: fx, y: fy, w: 420, h: 300, color: 'slate' }).select('id,title,x,y,w,h,color').single().then(function (r) {
         if (!alive.current) return;
         if (r && r.error) { window.PRUI.toast('Keret létrehozása sikertelen: ' + r.error.message, { kind: 'error' }); return; }
-        if (r && r.data) setFrames(function (F) { return F.some(function (f) { return f.id === r.data.id; }) ? F : F.concat([r.data]); });
+        if (r && r.data) { setFrames(function (F) { return F.some(function (f) { return f.id === r.data.id; }) ? F : F.concat([r.data]); }); pushHist({ label: 'Keret', kind: 'frame', undo: [{ k: 'deleteFrame', id: r.data.id }], redo: [{ k: 'reinsertFrame', frame: r.data }] }); }
       });
     }
     // radial add-menu: create an IDEA node at the world point — insert the idea, then pin its Map position to the cursor
@@ -5966,6 +5997,7 @@
       var removed = null; for (var i = 0; i < frames.length; i++) { if (frames[i].id === id) { removed = frames[i]; break; } }
       setFrames(function (F) { return F.filter(function (f) { return f.id !== id; }); });
       sb.from('research_map_frames').delete().eq('id', id).then(function (r) { if (r && r.error && alive.current) { window.PRUI.toast('Keret törlése sikertelen: ' + r.error.message, { kind: 'error' }); if (removed) setFrames(function (F) { return F.some(function (f) { return f.id === removed.id; }) ? F : F.concat([removed]); }); } });   // re-add on failed delete (some()-guard so a realtime echo doesn't duplicate)
+      if (removed) pushHist({ label: 'Keret törlése', kind: 'frame', undo: [{ k: 'reinsertFrame', frame: removed }], redo: [{ k: 'deleteFrame', id: id }] });
     }
     function frameRename(f) { var v = window.prompt('Keret neve:', f.title); if (v != null && String(v).trim()) framePatch(f.id, { title: String(v).trim() }); }
     function frameRecolor(f) { var i = FRAME_COLORS.indexOf(f.color); framePatch(f.id, { color: FRAME_COLORS[(i + 1) % FRAME_COLORS.length] }); }
@@ -7518,6 +7550,7 @@
             (props.canEdit && framesCap) ? h('button', { key: 'auto', className: 'rmap-dbtn', title: 'Rendezés fázisokba (sávok + keretek) — felülírja a kézi elrendezést', onClick: autoLayoutStages }, '⌗', L('Fázisokba')) : null,
             props.canEdit ? h('button', { key: 'undo', className: 'rmap-dbtn', disabled: !histRef.current.undo.length, style: { opacity: histRef.current.undo.length ? 1 : 0.38 }, title: 'Visszavonás (⌘Z)' + (histRef.current.undo.length ? ' — ' + (histRef.current.undo[histRef.current.undo.length - 1].label || '') : ''), onClick: doUndo }, '↶', L('Vissza' + (histRef.current.undo.length ? ' · ' + histRef.current.undo.length : ''))) : null,
             props.canEdit ? h('button', { key: 'redo', className: 'rmap-dbtn', disabled: !histRef.current.redo.length, style: { opacity: histRef.current.redo.length ? 1 : 0.38 }, title: 'Újra (⌘⇧Z)', onClick: doRedo }, '↷', L('Újra')) : null,
+            props.canEdit ? h('button', { key: 'hist', className: 'rmap-dbtn' + (histPanelOpen ? ' on' : ''), title: 'Előzmények — mi történt a térképen', onClick: function () { setHistPanelOpen(function (v) { return !v; }); } }, '🕘', L('Előzmények')) : null,
             (props.canEdit && g.N.length > 1) ? h('button', { key: 'tidy', className: 'rmap-dbtn', title: 'Rendezd el — csak az egymásra csúszott kártyákat húzza szét, a többi a helyén marad', onClick: tidyLayout }, '🧹', L('Rendezd el')) : null,
             commentsCap ? h('button', { key: 'cm', className: 'rmap-dbtn' + (commentMode ? ' on' : ''), title: commentMode ? 'Komment-mód kikapcsolása' : 'Komment-mód: kattints a vászonra vagy egy kártyára', onClick: function () { setCommentMode(function (v) { return !v; }); setComposer(null); } }, '💬', L('Komment-mód')) : null,
             (commentsCap && comments.length) ? h('button', { key: 'cmp', className: 'rmap-dbtn', title: 'Összes komment', onClick: function () { setCmPanelOpen(function (v) { return !v; }); } }, '📋' + (cmUnresolved || ''), L('Kommentek')) : null,
@@ -7629,6 +7662,20 @@
               h('div', { className: 'rr-hub' }, h('span', null, 'Mit hozzunk létre?'), h('span', { className: 'x', title: 'Mégse (Esc)', onClick: function (e) { e.stopPropagation(); setRadial(null); } }, '✕'))));
         })() : null,
         drop ? h('div', { className: 'rmap-drop', style: { left: drop.sx + 'px', top: drop.sy + 'px' } }) : null,
+        (histPanelOpen && props.canEdit) ? h('div', { className: 'rmap-histpanel', onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
+          h('div', { className: 'rmap-hp-head' },
+            h('span', { className: 'rmap-hp-title' }, '🕘 Előzmények'),
+            h('button', { className: 'rmap-hp-b', disabled: !histRef.current.undo.length, title: 'Visszavonás (⌘Z)', onClick: doUndo }, '↶'),
+            h('button', { className: 'rmap-hp-b', disabled: !histRef.current.redo.length, title: 'Újra (⌘⇧Z)', onClick: doRedo }, '↷'),
+            h('span', { className: 'rmap-hp-x', title: 'Bezárás', onClick: function () { setHistPanelOpen(false); } }, '✕')),
+          h('div', { className: 'rmap-hp-list' },
+            histRef.current.undo.length ? histRef.current.undo.slice(-12).reverse().map(function (en, i) {
+              return h('div', { key: en.ts + '_' + i, className: 'rmap-hp-row' + (i === 0 ? ' top' : '') },
+                h('span', { className: 'rmap-hp-ic' }, i === 0 ? '↩' : '·'),
+                h('span', { className: 'rmap-hp-lab' }, en.label || 'művelet'),
+                h('span', { className: 'rmap-hp-t' }, histRelTime(en.ts)));
+            }) : h('div', { className: 'rmap-hp-empty' }, 'Még nincs visszavonható művelet — hozz létre vagy mozgass egy kártyát.')),
+          histRef.current.redo.length ? h('div', { className: 'rmap-hp-foot' }, '↷ ' + histRef.current.redo.length + ' visszaállítható (⌘⇧Z)') : null) : null,
         // "Generálj ebből ▸" — the card-anchored generation arc: a screen-space (zoom-invariant) half-fan of the types this
         // card can deterministically produce, blooming from its E (or W near the right edge) side anchor. Click → runArcGen.
         (arcOpen && g.by[arcOpen] && nodeVisible(g.by[arcOpen]) && producibleTypes(g.by[arcOpen]).length) ? (function () {
