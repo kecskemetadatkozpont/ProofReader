@@ -443,6 +443,26 @@
   reggeli migráció tehetné varratmentessé ('f'→'w' layout/komment átnevezés). **A Térkép-only folyamat mind a 4 hiányzó
   genesis-útja kész (dataset/section/venue/submission) — ~55%→~90%.**
 
+## 🚧 „Generálj ebből ▸" — kártya-horgonyzott determinisztikus generálás — 2026-07-21
+> User-kérés: a kártya oldalán (az él-portoknál) hover-ívben jelenjenek meg a belőle DETERMINISZTIKUSAN előállítható
+> objektum-típusok, kattintásra generálva. 3-ügynökös design-workflow (mátrix + UX + szintézis) → interaktív mockup
+> (`gen-arc-mockup`, favicon ✦, url ede66761); user-választás: **A geometria (félkör-ív), címke JOBBRA az ikontól, teljes hatókör**.
+- [x] ✅ **Megépítve (2026-07-21, review: 5 megerősített hiba javítva):** **`producibleTypes(n)`** = a determinisztikus
+  forward-generálási mátrix (a `genActions` kiterjesztése content-node-okra is): 📎fájl→💡/🕳, 💬chat→💡, 💡ötlet→✦/🔎/🧪,
+  🕳rés→💡/🔎/🧪, 📄cikk→💡/🧪, 🔎study→📝/🧪/💡, 📝review→🧪/✍️/🎯, 🧪lépés→✍️, 🎯venue→✍️/💡/📤, ✍️szekció→✍️/💡/🎯, 🗂adat→🧪
+  (`det:'1'` 1-katt · `det:'+'` PRUI.confirm-mal). Kapuk: fájl csak szöveges kiterjesztésnél kínál ötletet, venue csak
+  valós journal_id-nál 📤-t. **`runArcGen`** 10 ág, mind DEPLOY-olt edge-re (`research-ai`/`study`/`protocol`/`writing`/
+  `journals`) + node-id visszanyerés a placementhez (ötlet `d.ideas`→'i', review `file_path`→'w', protokoll id-diff a
+  **protocol_id**-re szűrve, writing/submission saveFile-id→'w', venue pick-insert→'v'). Minden a végén `linkToSource` +
+  pulzus + `setBump` (graceful, ha nincs id). **UI:** ✦ `.rmap-arcpip` a kártya E-oldalán (portoknál, +24px kijjebb,
+  `pointer-events` a portokként kapuzva), kattintásra **screen-space** (zoom-invariáns, `cardScreenRect`) félkör-ív per-típus
+  színnel, **címke jobbra az ikontól** (150px-nél ellipszis + full `title`), jobb-szélnél NYUGATRA fordul (210px küszöb),
+  scrim + Esc zár, `genBusy` alatt tiltva. **A jobb-katt menüt + portokat + dupla-katt radiálist KIEGÉSZÍTI.** Review-javítások:
+  (1major) protokoll id-diff a nemlétező `project_id` helyett `protocol_id`-re (a link eddig MINDIG elveszett); (2major)
+  arc-overlay `nodeVisible`-guard (rejtett kártyán nem lebeg árva ív); (3minor) study nem mozgatja a `lit` aggregátumot
+  (`finish([])`, az idea→lit élt a graph() rajzolja); (4minor) arcpip `pointer-events:none` rejtett állapotban; (5nit)
+  west-flip küszöb + címke-ellipszis. Version `research.jsx?v=1786360000`. Migráció/edge NEM kell. **Elhalasztva:** step→append_steps.
+
 ## Hátralévő (jövő) — Phase 6+
 - [ ] 🔴 **Teljes karakter-szintű CRDT/Yjs** — egyidejű azonos-szekció gépelés valós idejű merge-dzsel.
   A jelenlegi soft-lock + LWW ennek a könnyűsúlyú, függőség-mentes alternatívája; a teljes CRDT nagy

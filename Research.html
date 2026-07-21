@@ -1216,6 +1216,10 @@
     .rmap-port-s { bottom: -6px; left: 50%; margin-left: -6px; }
     .rmap-port-e { right: -6px; top: 50%; margin-top: -6px; }
     .rmap-port-w { left: -6px; top: 50%; margin-top: -6px; }
+    /* ✦ "Generálj ebből ▸" arc-pip — hover-reveal like the ports, but pushed ~24px further out (E side) so hit-areas never overlap */
+    .rmap-arcpip { position: absolute; right: -30px; top: 50%; margin-top: -11px; width: 22px; height: 22px; border-radius: 50%; background: var(--accent); color: #fff; display: grid; place-items: center; font-size: 12.5px; opacity: 0; pointer-events: none; transform: scale(.6); transition: opacity .13s, transform .13s; cursor: pointer; z-index: 6; box-shadow: 0 2px 7px color-mix(in srgb, var(--accent) 55%, transparent); }
+    .rmap-node:hover .rmap-arcpip, .rmap-arcpip.on { opacity: 1; pointer-events: auto; transform: scale(1); }
+    .rmap-arcpip:hover { transform: scale(1.15); }
     .rmap-node.rmap-linktarget { outline: 2.5px solid var(--accent); outline-offset: 2px; }
     .rmap-e-rubber { fill: none; stroke: var(--accent); stroke-width: 2.4; stroke-dasharray: 6 5; pointer-events: none; }
     .rmap-lane { position: absolute; top: 0; border-right: 1px dashed var(--line-2); }
@@ -1470,6 +1474,19 @@
     .rmap-drop { position: absolute; z-index: 17; transform: translate(-50%, -50%); width: 22px; height: 22px; border-radius: 50%; border: 2.5px solid var(--accent); pointer-events: none; animation: rmap-drop .43s ease-out forwards; }
     @keyframes rmap-drop { from { opacity: .9; transform: translate(-50%,-50%) scale(.5); } to { opacity: 0; transform: translate(-50%,-50%) scale(2.6); } }
     @media (prefers-reduced-motion: reduce) { .rmap-radial-seg { animation: none; opacity: 1; transform: translate(var(--dx), var(--dy)); } .rr-hub { animation: none; } .rmap-drop { display: none; } }
+    /* "Generálj ebből ▸" generation arc — screen-space half-fan of producible types; per-chip label sits to the RIGHT of the icon */
+    .rmap-arc-layer { position: absolute; inset: 0; z-index: 20; }
+    .rmap-arc-scrim { position: absolute; inset: 0; }
+    .rmap-arc { position: absolute; }
+    .rmap-arc-hub { position: absolute; left: 0; top: 0; width: 24px; height: 24px; margin: -12px 0 0 -12px; border-radius: 50%; background: var(--accent); color: #fff; display: grid; place-items: center; font-size: 12px; cursor: pointer; box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 55%, transparent); animation: rmap-radial-hub .14s cubic-bezier(.34,1.56,.64,1) backwards; }
+    .rmap-arc-chip { position: absolute; left: 0; top: 0; width: 0; height: 0; border: none; background: none; padding: 0; cursor: pointer; transform: translate(var(--dx), var(--dy)); animation: rmap-arc-bloom .28s cubic-bezier(.34,1.56,.64,1) backwards; animation-delay: calc(var(--i) * 42ms); }
+    @keyframes rmap-arc-bloom { from { opacity: 0; transform: translate(0,0) scale(.2); } to { opacity: 1; transform: translate(var(--dx), var(--dy)) scale(1); } }
+    .rmap-arc-ic { position: absolute; left: 0; top: 0; width: 36px; height: 36px; border-radius: 50%; background: var(--surface); border: 1.5px solid var(--cc); box-shadow: 0 6px 16px -8px rgba(0,0,0,.45); display: grid; place-items: center; font-size: 17px; transform: translate(-50%, -50%); transition: transform .15s cubic-bezier(.34,1.56,.64,1), box-shadow .15s; }
+    .rmap-arc-chip:hover .rmap-arc-ic { transform: translate(-50%, -50%) scale(1.14); box-shadow: 0 0 0 3px color-mix(in srgb, var(--cc) 28%, transparent), 0 8px 20px -8px rgba(0,0,0,.4); }
+    .rmap-arc-lab { position: absolute; left: 22px; top: 0; transform: translateY(-50%); font-size: 11px; font-weight: 700; color: var(--cc); background: var(--surface); border: 1px solid color-mix(in srgb, var(--cc) 40%, var(--line)); border-radius: 999px; padding: 2px 9px; white-space: nowrap; max-width: 150px; overflow: hidden; text-overflow: ellipsis; box-shadow: 0 2px 6px -3px rgba(0,0,0,.3); }
+    .rmap-arc-chip.w .rmap-arc-lab { left: auto; right: 22px; }
+    .rmap-arc-chip[disabled] { opacity: .5; cursor: default; pointer-events: none; }
+    @media (prefers-reduced-motion: reduce) { .rmap-arc-chip, .rmap-arc-hub { animation: none; opacity: 1; } .rmap-arc-chip { transform: translate(var(--dx), var(--dy)); } }
     .rmap-menu-h { font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; color: var(--faint); padding: 5px 9px 7px; }
     .rmap-menu-b { display: block; width: 100%; text-align: left; border: 0; background: transparent; color: var(--ink); font-family: inherit; font-size: 13px; font-weight: 600; padding: 8px 10px; border-radius: 8px; cursor: pointer; }
     .rmap-menu-b:hover { background: var(--accent-tint); color: var(--accent); }
@@ -1507,7 +1524,7 @@
   <script type="text/babel" src="canvas.jsx?v=1783137934"></script>
   <script type="text/babel" src="notes.jsx?v=1783137934"></script>
   <script src="autopilot-core.js?v=1784160000"></script>
-  <script type="text/babel" src="research.jsx?v=1786240000"></script>
+  <script type="text/babel" src="research.jsx?v=1786360000"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>

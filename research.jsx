@@ -4812,6 +4812,7 @@
     var mqRef = useRef(null);   // in-flight marquee start point (stage coords)
     var frS = useState([]), frames = frS[0], setFrames = frS[1];   // Map frames (named regions / phase lanes) — migration-71
     var jpS = useState(null), justPlaced = jpS[0], setJustPlaced = jpS[1];   // node-ids just materialized into a frame (pulse cue); cleared after ~1.6s
+    var aoS = useState(null), arcOpen = aoS[0], setArcOpen = aoS[1];   // node id whose "Generálj ebből ▸" generation arc is open (screen-space bloom)
     var bfS = useState(null), boundFrame = bfS[0], setBoundFrame = bfS[1];   // #2: the dock chat is bound to this frame → typed commands create objects INSIDE it
     var frcS = useState(false), framesCap = frcS[0], setFramesCap = frcS[1];   // migration-71 capability
     var flS = useState(null), frLive = flS[0], setFrLive = flS[1];   // in-flight frame move/resize live geometry {id,x,y,w,h}
@@ -5064,7 +5065,7 @@
     useEffect(function () {
       function typing(el) { if (!el) return false; var tg = el.tagName || ''; return tg === 'INPUT' || tg === 'TEXTAREA' || tg === 'SELECT' || el.isContentEditable; }
       function onKey(e) {
-        if (e.key === 'Escape') { setRadial(null); if (tour) tourStop(); else if (focus) exitFocus(); else { setLinkFrom(null); setSelEdge(null); } }   // Esc closes the radial add-menu + cancels link-mode/edge selection
+        if (e.key === 'Escape') { setRadial(null); setArcOpen(null); if (tour) tourStop(); else if (focus) exitFocus(); else { setLinkFrom(null); setSelEdge(null); } }   // Esc closes the radial add-menu + the generation arc + cancels link-mode/edge selection
         else if (tour && tour.beats && !typing(e.target)) { if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); tourNext(); } else if (e.key === 'ArrowLeft') { e.preventDefault(); tourPrev(); } }
         else if (e.key === 'Enter' && !focus && !tour && armedRef.current && !typing(e.target)) { e.preventDefault(); enterNode(armedRef.current); }   // armedRef is null while a modal is open (guarded at compute)
       }
@@ -6509,6 +6510,140 @@
       }
     }
 
+    // ── "Generálj ebből ▸" — the card-anchored generation ARC. producibleTypes(n) is the DETERMINISTIC forward-generation
+    //    map (a superset of genActions that also lights up content nodes file/chat + idea→protocol etc.); runArcGen fires the
+    //    already-deployed edge, then places the result next to the source via linkToSource/freeSpotsNear + a provenance edge.
+    //    Distinct from the right-click genActions menu (exhaustive + in-place regenerate) and the double-click radial (blank genesis).
+    function producibleTypes(n) {
+      if (!n) return [];
+      var M = {
+        file: [{ act: 'ideas_grounded', ic: '💡', lab: 'Ötlet a tartalomból', det: '+' }, { act: 'gaps', ic: '🕳️', lab: 'Kutatási rés', det: '1' }],
+        chat: [{ act: 'ideas_grounded', ic: '💡', lab: 'Ötlet a beszélgetésből', det: '1' }],
+        idea: [{ act: 'ideas', ic: '✦', lab: 'Kapcsolódó ötlet', det: '1' }, { act: 'study', ic: '🔎', lab: 'Irodalom-study / SR', det: '1' }, { act: 'protocol', ic: '🧪', lab: 'Protokoll', det: '1' }],
+        gap: [{ act: 'gap_to_idea', ic: '💡', lab: 'Ötletté alakít', det: '1' }, { act: 'study', ic: '🔎', lab: 'Irodalom-study', det: '1' }, { act: 'protocol', ic: '🧪', lab: 'Protokoll', det: '1' }],
+        paper: [{ act: 'ideas', ic: '💡', lab: 'Ötlet a cikkből', det: '1' }, { act: 'protocol', ic: '🧪', lab: 'Protokoll', det: '1' }],
+        study: [{ act: 'review', ic: '📝', lab: 'Áttekintés', det: '+' }, { act: 'protocol', ic: '🧪', lab: 'Protokoll', det: '1' }, { act: 'ideas', ic: '💡', lab: 'Ötlet', det: '1' }],
+        review: [{ act: 'protocol', ic: '🧪', lab: 'Protokoll', det: '1' }, { act: 'writing', ic: '✍️', lab: 'Szekció (draft)', det: '1' }, { act: 'venue', ic: '🎯', lab: 'Folyóirat-ajánlás', det: '1' }],
+        step: [{ act: 'writing', ic: '✍️', lab: 'Szekció (draft)', det: '1' }],
+        venue: [{ act: 'writing', ic: '✍️', lab: 'Szekció', det: '1' }, { act: 'ideas', ic: '💡', lab: 'Ötlet', det: '1' }, { act: 'submission', ic: '📤', lab: 'Beküldési dosszié', det: '+' }],
+        section: [{ act: 'writing', ic: '✍️', lab: 'További szekció', det: '1' }, { act: 'ideas', ic: '💡', lab: 'Ötlet', det: '1' }, { act: 'venue', ic: '🎯', lab: 'Folyóirat-ajánlás', det: '1' }],
+        dataset: [{ act: 'protocol', ic: '🧪', lab: 'Protokoll', det: '1' }]
+      };
+      var list = (M[n.t] || []).slice();
+      if (n.t === 'file') { var p = String((n.ref && n.ref.path) || ''); if (!/\.(md|markdown|txt|tex|csv|json)$/i.test(p)) list = list.filter(function (e) { return e.act === 'gaps'; }); }   // grounding needs text; a binary/PDF only offers project-level gaps
+      if (n.t === 'venue' && !(n.ref && n.ref.journal_id)) list = list.filter(function (e) { return e.act !== 'submission'; });   // a blank Map venue has no journal → no dossier yet
+      return list;
+    }
+    function resolveSourceText(n) {   // fetch the grounding text for a file/chat generation
+      if (n.t === 'file' && n.ref && n.ref.id) return sb.from('research_files').select('content').eq('id', n.ref.id).maybeSingle().then(function (r) { return (r && r.data && r.data.content) || ''; }, function () { return ''; });
+      if (n.t === 'chat' && n.ref && n.ref.id) return sb.from('research_messages').select('role,content').eq('chat_id', n.ref.id).order('created_at', { ascending: true }).limit(40).then(function (r) { return ((r && r.data) || []).map(function (m) { return (m.role === 'assistant' ? 'AI: ' : 'User: ') + String(m.content || ''); }).join('\n\n'); }, function () { return ''; });
+      return Promise.resolve('');
+    }
+    function runArcGen(n, entry) {
+      if (genBusy || !n || !entry) return;
+      var act = entry.act, CORE = window.PRAutopilotCore;
+      if (!CORE || !CORE.callEdge) { window.PRUI.toast('A generátor nem elérhető (autopilot-core).', { kind: 'error' }); return; }
+      var pid = props.projectId, proj = props.project;
+      function fail(e) { if (!alive.current) return; setGenBusy(false); window.PRUI.toast('Hiba: ' + e, { kind: 'error' }); }
+      function finish(newIds, msg) {   // place + link the result next to the source, then pulse + reload (graceful if no ids)
+        if (!alive.current) return; setGenBusy(false);
+        var ids = (newIds || []).filter(Boolean);
+        var after = function () { if (!alive.current) return; window.PRUI.toast('✓ ' + (msg || 'Kész'), { kind: 'ok' }); if (ids.length) { setJustPlaced(ids); setTimeout(function () { if (alive.current) setJustPlaced(null); }, 1600); } setBump(function (x) { return x + 1; }); };
+        if (ids.length) linkToSource(n, ids).then(after, after); else after();
+      }
+      function go() {
+        setArcOpen(null); setGenBusy(true);
+        if (act === 'ideas') {
+          var lin = lineageOf(n), text = lin.text ? ('Javasolj ÚJ, kapcsolódó kutatási ötleteket a következő leszármazás alapján:\n' + lin.text) : ('Javasolj kutatási ötleteket ehhez: ' + String(n.title || proj.goal || proj.title || ''));
+          CORE.callEdge('research-ai', { action: 'suggest', project_id: pid, text: text }).then(function (d) { (d && d.error) ? fail(d.error) : finish(((d && d.ideas) || []).map(function (x) { return 'i' + x.id; }), ((d && d.count) || 0) + ' ötlet'); }, function () { fail('hálózat'); });
+        }
+        else if (act === 'ideas_grounded') {
+          resolveSourceText(n).then(function (txt) {
+            if (!txt || !txt.trim()) { fail('nincs szöveges tartalom a forráshoz'); return; }
+            CORE.callEdge('research-ai', { action: 'suggest', project_id: pid, text: 'A következő forrás alapján javasolj kutatási ötleteket:\n\n' + txt.slice(0, 8000) }).then(function (d) { (d && d.error) ? fail(d.error) : finish(((d && d.ideas) || []).map(function (x) { return 'i' + x.id; }), ((d && d.count) || 0) + ' ötlet'); }, function () { fail('hálózat'); });
+          }, function () { fail('tartalom betöltése'); });
+        }
+        else if (act === 'gaps') {
+          CORE.callEdge('research-ai', { action: 'gap_analyze', project_id: pid }).then(function (d) { (d && d.error) ? fail(d.error) : finish(((d && d.ideas) || []).map(function (x) { return 'i' + x.id; }), ((d && d.count) || 0) + ' kutatási rés'); }, function () { fail('hálózat'); });
+        }
+        else if (act === 'gap_to_idea') {
+          var g0 = n.ref || {};
+          sb.from('research_ideas').insert({ project_id: pid, source: 'own', status: 'candidate', question: g0.hypothesis || g0.question || 'Ötlet', rationale: g0.rationale || null, created_by: props.authorId }).select('id').maybeSingle().then(function (r) {
+            if (r && r.error) { fail(r.error.message); return; }
+            var nid = r && r.data && r.data.id;
+            if (nid && g0.id) sb.from('research_ideas').update({ addressed_by_idea_id: nid }).eq('id', g0.id);   // keep the gap, mark it addressed (feeds the gap→idea edge)
+            finish(nid ? ['i' + nid] : [], 'Ötlet a résből');
+          }, function () { fail('hálózat'); });
+        }
+        else if (act === 'study') {
+          var idea = (n.t === 'idea' || n.t === 'gap') ? n.ref : null;
+          sb.from('research_studies').insert({ project_id: pid, idea_id: idea ? idea.id : null, title: String((idea && idea.question) || proj.title || 'Study').slice(0, 80), question: String((idea && idea.question) || proj.goal || proj.title || '').slice(0, 4000), created_by: props.authorId }).select('id').maybeSingle().then(function (r) {
+            if (r && r.error) { fail('study: ' + r.error.message); return; }
+            var sid = r && r.data && r.data.id; if (!sid) { fail('a study nem jött létre'); return; }
+            var rows = LS_STEPS.map(function (s) { return { study_id: sid, step: s.step, kind: s.kind, config: lsDefaultConfig(s.step, proj, idea) }; });
+            sb.from('research_study_steps').insert(rows).then(function () { CORE.callEdge('research-study', { action: 'plan', study_id: sid }).then(function () { finish([], 'Irodalom-study létrehozva'); }, function () { finish([], 'Irodalom-study létrehozva'); }); }, function () { fail('study-lépések'); });
+          }, function () { fail('study insert'); });
+        }
+        else if (act === 'review') {
+          var sid2 = n && n.ref && n.ref.id; if (!sid2) { fail('nincs study ehhez'); return; }
+          CORE.callEdge('research-study', { action: 'generate_review', study_id: sid2 }).then(function (d) {
+            if (!d || d.error) { fail((d && d.error) || 'hálózat'); return; }
+            var np = d.file_path; if (!np) { finish([], 'Áttekintés kész'); return; }
+            sb.from('research_files').select('id').eq('project_id', pid).eq('path', np).maybeSingle().then(function (fr) { finish((fr && fr.data && fr.data.id) ? ['w' + fr.data.id] : [], 'Áttekintés kész'); }, function () { finish([], 'Áttekintés kész'); });
+          }, function () { fail('hálózat'); });
+        }
+        else if (act === 'protocol') {
+          var linP = lineageOf(n), baseGoal = String(proj.goal || proj.title || '');
+          var goalP = linP.text ? (baseGoal ? baseGoal + '\n\nA KIVÁLASZTOTT CSOMÓPONT LESZÁRMAZÁSA:\n' + linP.text : linP.text) : baseGoal;
+          // steps have NO project_id (they join through the protocol) → scope the id-diff by the project's active protocol.
+          var activeProt = function () { return sb.from('research_protocols').select('id').eq('project_id', pid).not('status', 'in', '(archived,done)').order('created_at', { ascending: false }).limit(1).maybeSingle().then(function (r) { return (r && r.data && r.data.id) || null; }, function () { return null; }); };
+          var stepsOf = function (protId) { return protId ? sb.from('research_protocol_steps').select('id').eq('protocol_id', protId).then(function (r) { return ((r && r.data) || []).map(function (x) { return x.id; }); }, function () { return []; }) : Promise.resolve([]); };
+          activeProt().then(function (protId0) {
+            stepsOf(protId0).then(function (pre) {
+              var preSet = {}; pre.forEach(function (id) { preSet[id] = 1; });
+              CORE.callEdge('research-protocol', Object.assign({ action: 'generate', project_id: pid, goal: goalP }, linP.ideaId ? { idea_id: linP.ideaId } : {})).then(function (d) {
+                if (d && d.error) { fail(d.error); return; }
+                activeProt().then(function (protId1) {   // re-resolve: 'generate' may have created a fresh protocol
+                  stepsOf(protId1).then(function (post) {
+                    var ids = post.filter(function (id) { return protId1 !== protId0 || !preSet[id]; }).map(function (id) { return 'r' + id; });
+                    finish(ids, ((d && d.steps) || ids.length) + ' protokoll-lépés');
+                  });
+                });
+              }, function () { fail('hálózat'); });
+            });
+          });
+        }
+        else if (act === 'writing') {
+          CORE.callEdge('research-writing', { action: 'outline', project_id: pid }).then(function (d) {
+            if (d && d.error) { fail(d.error); return; }
+            var o = d && d.outline; if (!o || !o.sections) { fail('üres vázlat'); return; }
+            var md = '# ' + (o.title || proj.title) + '\n\n' + (o.abstract || '') + '\n\n## Szekciók\n' + o.sections.map(function (s) { return '- ' + (s.heading || s.key); }).join('\n');
+            CORE.saveFile(pid, 'writing/outline.md', md, 'ai').then(function (sf) { if (sf && sf.error) { fail(sf.error.message || 'mentés'); return; } var id = sf && sf.data && sf.data.id; finish(id != null ? ['w' + id] : [], 'Vázlat kész (' + o.sections.length + ' szekció)'); }, function () { fail('hálózat'); });
+          }, function () { fail('hálózat'); });
+        }
+        else if (act === 'venue') {
+          CORE.callEdge('research-journals', { action: 'recommend', project_id: pid }).then(function (d) {
+            if (d && d.error) { fail(d.error); return; }
+            var js = (d && d.journals) || []; if (!js.length) { fail('nincs folyóirat-ajánlás'); return; }
+            var j = js[0];
+            sb.from('research_journal_picks').insert({ project_id: pid, journal_id: j.id, title: j.title, field: j.field, npi_level: j.npi_level, sjr_quartile: j.sjr_quartile, url: j.url, fit_score: j.fit_score, fit_reason: j.fit_reason, status: 'candidate', created_by: props.authorId }).select('id').maybeSingle().then(function (r) { if (r && r.error) { fail(r.error.message); return; } var vid = r && r.data && r.data.id; finish(vid ? ['v' + vid] : [], 'Folyóirat-ajánlás: ' + String(j.title || '').slice(0, 40)); }, function () { fail('hálózat'); });
+          }, function () { fail('hálózat'); });
+        }
+        else if (act === 'submission') {
+          var jid = n && n.ref && n.ref.journal_id;
+          CORE.callEdge('research-journals', Object.assign({ action: 'dossier', project_id: pid }, jid ? { journal_id: jid } : {})).then(function (d) {
+            if (d && d.error) { fail(d.error); return; }
+            var ai = (d && d.ai) || {};
+            var md = '# Beküldési dosszié — ' + String(n.title || 'folyóirat') + '\n\n' + Object.keys(ai).map(function (k) { return '- **' + k + '**: ' + String(ai[k]); }).join('\n') + '\n';
+            CORE.saveFile(pid, 'submission/dossier.md', md, 'ai').then(function (sf) { if (sf && sf.error) { fail(sf.error.message || 'mentés'); return; } var id = sf && sf.data && sf.data.id; finish(id != null ? ['w' + id] : [], 'Beküldési dosszié kész'); }, function () { fail('hálózat'); });
+          }, function () { fail('hálózat'); });
+        }
+        else setGenBusy(false);
+      }
+      // "+bemenet" paths (a heavier generation) get a light confirm first; everything else fires immediately.
+      if (entry.det === '+' && window.PRUI && window.PRUI.confirm) window.PRUI.confirm({ title: entry.lab, body: 'Ez egy nagyobb AI-generálás. Folytatod?', confirmLabel: 'Generálás' }).then(function (ok) { if (ok) go(); });
+      else go();
+    }
     // F7: refine-chat send — each message is a hint to refine_step; the returned step is applied in place (same row → position kept).
     // The DB update + re-materialize always run; the chat UI is only touched if the user is STILL on this node when the call returns.
     function refineChat(node) {
@@ -7115,6 +7250,7 @@
             edgeEls, linkRubber),
           g.N.map(function (n) { if (!nodeVisible(n)) return null; var _sized = !!((nrzLive && nrzLive.id === n.id) || (layout[n.id] && layout[n.id].card_h)); var _kk = view.k, _cw = Math.min((n._w || NW), (cardVP.w - 16) / _kk); var _st = { left: n.x + 'px', top: n.y + 'px', width: _cw + 'px' }; if (_sized) _st.height = Math.min((n._h || NH), (cardVP.h - 16) / _kk) + 'px'; return h('div', { key: n.id, 'data-nid': n.id, className: 'rmap-node t-' + n.t + (_sized ? ' rmap-sized' : '') + (sel === n.id ? ' sel' : '') + (msel[n.id] ? ' rmap-mselected' : '') + (n.mapPinned ? ' rmap-pinned' : '') + (activeKey && n.ph === RMAP_PHASE_IDX[activeKey] ? ' inphase' : '') + (props.canEdit ? ' editable' : '') + (dlive && dlive.id === n.id ? ' dragging' : '') + ((nrzLive && nrzLive.id === n.id) ? ' rmap-resizing' : '') + (linkDrag && linkDrag.over === n.id ? ' rmap-linktarget' : '') + (linkDrag && linkDrag.from === n.id ? ' rmap-linksource' : '') + (justPlaced && justPlaced.indexOf(n.id) >= 0 ? ' rmap-justplaced' : '') + (hovCarry[n.id] ? ' rmap-carry-preview' : ''), style: _st, onMouseDown: function (e) { e.stopPropagation(); startNodeDrag(e, n); }, onDoubleClick: function (e) { e.stopPropagation(); if (canEnter(n)) enterNode(n); }, onContextMenu: function (e) { e.preventDefault(); e.stopPropagation(); if (props.canEdit && (genActions(n).length || regenActions(n).length || (cardSizeCap && layout[n.id] && layout[n.id].card_h))) setMenu({ node: n, x: e.clientX, y: e.clientY }); } }, n.mapPinned ? h('span', { className: 'rmap-pin-badge', title: 'Kitűzött' }, '📌') : null, nodeCmCount(n.id) ? h('span', { className: 'rmap-cm-badge', title: nodeCmCount(n.id) + ' nyitott komment', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); setOpenThread(n.id); } }, '💬' + nodeCmCount(n.id)) : null, (n.t === 'step' && n.ref && (n.ref.assignee_id || n.ref.signed_off_by)) ? h('span', { className: 'rmap-step-badges' }, n.ref.assignee_id ? h('span', { className: 'rmap-assignee', title: 'Felelős: ' + nameOf(n.ref.assignee_id), style: { background: userColor(n.ref.assignee_id) } }, String(nameOf(n.ref.assignee_id) || '?').trim().charAt(0).toUpperCase()) : null, n.ref.signed_off_by ? h('span', { className: 'rmap-signoff', title: 'Jóváhagyta: ' + nameOf(n.ref.signed_off_by) }, '✅') : null) : null, n.t === 'gap' ? gapNovRing(n) : null, h('div', { className: 'rmap-nb' }, body(n), richTier(n)),
             (props.canEdit && edgesCap) ? ['n', 'e', 's', 'w'].map(function (dir) { return h('span', { key: 'port' + dir, className: 'rmap-port rmap-port-' + dir, title: 'Húzz kapcsolatot egy másik kártyához', onMouseDown: function (e) { e.stopPropagation(); startLinkDrag(e, n.id); } }); }) : null,
+            (props.canEdit && producibleTypes(n).length) ? h('span', { key: 'arcpip', className: 'rmap-arcpip' + (arcOpen === n.id ? ' on' : ''), title: 'Generálj ebből ▸', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); if (sel !== n.id) { setSelEdge(null); setMsel({}); setSel(n.id); } setArcOpen(arcOpen === n.id ? null : n.id); } }, '✦') : null,
             (props.canEdit && cardSizeCap) ? h('span', { className: 'rmap-node-rz', title: 'Átméretezés (húzd)', onMouseDown: function (e) { e.stopPropagation(); startNodeResize(e, n); } }) : null); })),
         // page bar (saved views) — top-left tabs; the active page can be curated (only pinned) / re-captured / renamed / deleted
         pagesCap ? h('div', { className: 'rmap-pagebar', onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
@@ -7305,6 +7441,27 @@
               h('div', { className: 'rr-hub' }, h('span', null, 'Mit hozzunk létre?'), h('span', { className: 'x', title: 'Mégse (Esc)', onClick: function (e) { e.stopPropagation(); setRadial(null); } }, '✕'))));
         })() : null,
         drop ? h('div', { className: 'rmap-drop', style: { left: drop.sx + 'px', top: drop.sy + 'px' } }) : null,
+        // "Generálj ebből ▸" — the card-anchored generation arc: a screen-space (zoom-invariant) half-fan of the types this
+        // card can deterministically produce, blooming from its E (or W near the right edge) side anchor. Click → runArcGen.
+        (arcOpen && g.by[arcOpen] && nodeVisible(g.by[arcOpen]) && producibleTypes(g.by[arcOpen]).length) ? (function () {
+          var an = g.by[arcOpen], prod = producibleTypes(an), r = cardScreenRect(an), vp = stageVP();
+          var west = (r.x + r.w + 210) > vp.w;   // flip WEST when the card hugs the right edge so the fan (icon + right-label, capped at 150px) never renders off-screen
+          var ax = west ? r.x : (r.x + r.w), ay = r.y + r.h / 2;
+          var c = prod.length, R = 62, spreadDeg = Math.min(52, 26 * (c - 1));
+          var TCOL = { idea: '#d1810b', gap: '#d6455f', study: '#0891b2', review: '#7c3aed', step: '#b45309', section: '#059669', venue: '#c026d3', submission: '#dc2626' };
+          var ACT_T = { ideas: 'idea', ideas_grounded: 'idea', gaps: 'gap', gap_to_idea: 'idea', study: 'study', review: 'review', protocol: 'step', writing: 'section', venue: 'venue', submission: 'submission' };
+          return h('div', { className: 'rmap-arc-layer' },
+            h('div', { className: 'rmap-arc-scrim', onMouseDown: function (e) { e.stopPropagation(); setArcOpen(null); }, onWheel: function (e) { e.stopPropagation(); }, onContextMenu: function (e) { e.preventDefault(); setArcOpen(null); } }),
+            h('div', { className: 'rmap-arc' + (west ? ' w' : ''), style: { left: ax + 'px', top: ay + 'px' }, onMouseDown: function (e) { e.stopPropagation(); } },
+              h('div', { className: 'rmap-arc-hub', title: 'Generálj ebből ▸ — bezárás', onClick: function (e) { e.stopPropagation(); setArcOpen(null); } }, '✦'),
+              prod.map(function (entry, i) {
+                var frac = c === 1 ? 0 : (i / (c - 1)) - 0.5, deg = frac * spreadDeg * 2, rad = deg * Math.PI / 180;
+                var dx = (west ? -1 : 1) * R * Math.cos(rad), dy = R * Math.sin(rad);
+                return h('button', { key: entry.act, className: 'rmap-arc-chip' + (west ? ' w' : ''), disabled: genBusy, title: entry.lab + (entry.det === '+' ? ' · +bemenet' : ''), style: { '--dx': dx + 'px', '--dy': dy + 'px', '--i': i, '--cc': (TCOL[ACT_T[entry.act]] || 'var(--accent)') }, onClick: function (e) { e.stopPropagation(); runArcGen(an, entry); } },
+                  h('span', { className: 'rmap-arc-ic' }, entry.ic),
+                  h('span', { className: 'rmap-arc-lab' }, entry.lab + (entry.det === '+' ? ' · +bemenet' : '')));
+              })));
+        })() : null,
         // comment composer popover (new comment on a card or a free position)
         composer ? (function () {
           var kk = view.k, cx, cy;
