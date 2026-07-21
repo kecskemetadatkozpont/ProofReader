@@ -4699,7 +4699,7 @@
   // Read-only view for now (P2 = inline edit + phase actions replacing modals). New-design flag only.
   var RMAP_PHASES = [['ideas', 'Ideas', '💡'], ['literature', 'Literature', '📚'], ['sr', 'Systematic review', '🔬'], ['protocol', 'Protocol', '🧪'], ['journal', 'Journal', '🎯'], ['writing', 'Writing', '✍️']];
   var RMAP_PHASE_IDX = {}; RMAP_PHASES.forEach(function (p, i) { RMAP_PHASE_IDX[p[0]] = i; });
-  var RMAP_TYPE = { idea: { ic: '💡', lab: 'Ötlet', tab: 'ideas' }, gap: { ic: '🕳️', lab: 'Kutatási rés', tab: 'gap' }, paper: { ic: '📄', lab: 'Cikk', tab: 'literature' }, study: { ic: '🔎', lab: 'Irodalom', tab: 'literature' }, review: { ic: '📝', lab: 'Áttekintés', tab: 'study' }, step: { ic: '🧪', lab: 'Protokoll-lépés', tab: 'protocol' }, venue: { ic: '🎯', lab: 'Folyóirat', tab: 'journal' }, section: { ic: '✍️', lab: 'Draft-szekció', tab: 'writing' }, dataset: { ic: '🗂️', lab: 'Adathalmaz', tab: 'data' }, file: { ic: '📎', lab: 'Fájl', tab: 'ideas' }, chat: { ic: '💬', lab: 'Beszélgetés', tab: 'ideas' }, figure: { ic: '🖼️', lab: 'Ábra', tab: 'literature' }, srq: { ic: '❓', lab: 'Review-kérdés', tab: 'study' }, sreview: { ic: '🔬', lab: 'Szisztematikus áttekintés', tab: 'study' } };
+  var RMAP_TYPE = { idea: { ic: '💡', lab: 'Ötlet', tab: 'ideas' }, gap: { ic: '🕳️', lab: 'Kutatási rés', tab: 'gap' }, paper: { ic: '📄', lab: 'Cikk', tab: 'literature' }, study: { ic: '🔎', lab: 'Irodalom', tab: 'literature' }, review: { ic: '📝', lab: 'Áttekintés', tab: 'study' }, step: { ic: '🧪', lab: 'Protokoll-lépés', tab: 'protocol' }, venue: { ic: '🎯', lab: 'Folyóirat', tab: 'journal' }, section: { ic: '✍️', lab: 'Draft-szekció', tab: 'writing' }, dataset: { ic: '🗂️', lab: 'Adathalmaz', tab: 'data' }, file: { ic: '📎', lab: 'Fájl', tab: 'ideas' }, chat: { ic: '💬', lab: 'Beszélgetés', tab: 'ideas' }, figure: { ic: '🖼️', lab: 'Ábra', tab: 'literature' }, srq: { ic: '❓', lab: 'Review-kérdés', tab: 'study' }, sreview: { ic: '🔬', lab: 'Szisztematikus áttekintés', tab: 'study' }, submission: { ic: '📤', lab: 'Beküldés', tab: 'submission' } };
   // interactive-edge relation presets (migration-81). Each type is a full look-preset: color + line-style + arrow + default animation.
   // The two structural derived kinds (flow/cite) map to erd/idz and keep today's exact stroke for backward-compat.
   var EDGE_TYPES = {
@@ -5101,10 +5101,10 @@
         sb.from('research_sources').select('id', { count: 'exact', head: true }).eq('project_id', pid).eq('screening', 'include'),
         sb.from('research_protocols').select('id,title,status,idea_id').eq('project_id', pid).neq('status', 'archived').order('created_at', { ascending: false }).limit(1),
         sb.from('research_journal_picks').select('id,title,status,npi_level').eq('project_id', pid),
-        sb.from('research_files').select('id,path,size,storage_path').eq('project_id', pid).or('path.like.writing/%,path.like.studies/%'),
+        sb.from('research_files').select('id,path,size,storage_path').eq('project_id', pid).or('path.like.writing/%,path.like.studies/%,path.like.submission/%'),
         // F5 — multi-modal nodes: datasets, uploaded/material files (NOT writing/studies), chat threads, paper figures
         sb.from('research_datasets').select('id,name,source,status,size_bytes,notes').eq('project_id', pid).order('created_at', { ascending: true }).limit(16),
-        sb.from('research_files').select('id,path,size,source,storage_path').eq('project_id', pid).not('path', 'like', 'writing/%').not('path', 'like', 'studies/%').order('updated_at', { ascending: false }).limit(16),
+        sb.from('research_files').select('id,path,size,source,storage_path').eq('project_id', pid).not('path', 'like', 'writing/%').not('path', 'like', 'studies/%').not('path', 'like', 'submission/%').order('updated_at', { ascending: false }).limit(16),
         sb.from('research_chats').select('id,title,updated_at').eq('project_id', pid).order('updated_at', { ascending: false }).limit(8),
         sb.from('research_figures').select('id,source_id,fig_label,caption,storage_path').eq('project_id', pid).eq('hidden', false).order('created_at', { ascending: true }).limit(16),
         // SR/Elicit provenance: the "Study basis" review-question candidates (linked to their idea) + the launched Elicit reviews
@@ -5234,7 +5234,11 @@
       d.journals.forEach(function (j) { N.push({ id: 'v' + j.id, t: 'venue', ph: 4, title: j.title || 'Folyóirat', m: { NPI: j.npi_level || '—', Státusz: j.status || '—' }, ref: j }); if (venueUp) E.push([venueUp, 'v' + j.id]); });
       var writeUp = lastStep || srId || litId || firstIdea;
       d.wfiles.forEach(function (f) {
-        if (/^studies\//.test(f.path)) {   // a generated systematic-review document → a node in the SR lane
+        if (/^submission\//.test(f.path)) {   // the submission dossier → a first-class 📤 submission node (ph 6, downstream of writing)
+          var snm = String(f.path).replace(/^submission\//, '').replace(/\.(md|tex)$/, '');
+          N.push({ id: 'w' + f.id, t: 'submission', ph: 6, title: snm || 'beküldés', m: { Fájl: f.path, Méret: (f.size || 0) + ' B' }, ref: f });
+          if (writeUp) E.push([writeUp, 'w' + f.id]);
+        } else if (/^studies\//.test(f.path)) {   // a generated systematic-review document → a node in the SR lane
           var rnm = String(f.path).replace(/^studies\//, '').replace(/\.(md|tex)$/, '');
           N.push({ id: 'w' + f.id, t: 'review', ph: 2, title: rnm || 'áttekintés', m: { Fájl: f.path, Méret: (f.size || 0) + ' B' }, ref: f });
           var rUp = srId || litId || firstIdea; if (rUp) E.push([rUp, 'w' + f.id]);
@@ -5289,7 +5293,7 @@
       });
       // column-less TIMELINE layout: phases seed left→right (ideas → literature → SR → protocol → journal → writing) so
       // derivation reads as a timeline; cards stack within a phase. Free-drag takes over from here.
-      var cnt = {}, CEN = [{ x: 30, y: 90 }, { x: 350, y: 40 }, { x: 670, y: 150 }, { x: 990, y: 60 }, { x: 1310, y: 170 }, { x: 1630, y: 90 }];
+      var cnt = {}, CEN = [{ x: 30, y: 90 }, { x: 350, y: 40 }, { x: 670, y: 150 }, { x: 990, y: 60 }, { x: 1310, y: 170 }, { x: 1630, y: 90 }, { x: 1950, y: 60 }];   // CEN[6] = submission lane (ph 6)
       N.forEach(function (n) { var o = (cnt[n.ph] = (cnt[n.ph] || 0)); var c = CEN[n.ph] || { x: n.ph * 290, y: 80 }; n.x = c.x + (o % 2) * 234; n.y = c.y + Math.floor(o / 2) * 132; cnt[n.ph] = o + 1; });
       // free-drag: a saved position overrides the auto-layout and PINS the card; only never-placed cards separate
       var pinned = {};
@@ -5390,7 +5394,7 @@
       else if (n.t === 'section') m.focusSection = n.ref && n.ref.path; else if (n.t === 'venue') m.focusVenueId = id;
       return m;
     }
-    var EMBEDDABLE = { ideas: 1, gap: 1, literature: 1, study: 1, protocol: 1, data: 1, writing: 1, journal: 1 };
+    var EMBEDDABLE = { ideas: 1, gap: 1, literature: 1, study: 1, protocol: 1, data: 1, writing: 1, journal: 1, submission: 1 };
     function canEnter(n) { var tab = RMAP_TYPE[n.t] && RMAP_TYPE[n.t].tab; return !!(tab && EMBEDDABLE[tab] && props.renderPanel); }
     // ENTER: fly the camera into the card, then mount its real workflow panel in-place (screen-space overlay)
     function enterNode(n) {
@@ -5691,7 +5695,7 @@
     // ── DELETE a card = delete its underlying row (per node type) + the map layout + any storage blob. Confirm-gated,
     // FK-graceful. Scoped to the user's OWN artifacts; shared/pipeline data (paper library, SR jobs) is NOT deletable here
     // (those have their own management + FK dependents) → they can only be 🙈 hidden. Aggregate nodes (lit/sr) excluded.
-    var DEL_BY_TYPE = { idea: 'research_ideas', gap: 'research_ideas', step: 'research_protocol_steps', venue: 'research_journal_picks', section: 'research_files', review: 'research_files', dataset: 'research_datasets', file: 'research_files', chat: 'research_chats', figure: 'research_figures' };
+    var DEL_BY_TYPE = { idea: 'research_ideas', gap: 'research_ideas', step: 'research_protocol_steps', venue: 'research_journal_picks', section: 'research_files', review: 'research_files', dataset: 'research_datasets', file: 'research_files', chat: 'research_chats', figure: 'research_figures', submission: 'research_files' };
     function nodeDeletable(n) { return !!(props.canEdit && n && n.ref && n.ref.id && DEL_BY_TYPE[n.t] && n.id !== 'lit' && n.id !== 'sr'); }
     function delOneNode(n) {   // no confirm — deletes the row (+ storage blob + map layout); resolves {ok}|{error}|{skipped}
       if (!nodeDeletable(n)) return Promise.resolve({ skipped: true });
@@ -5819,6 +5823,21 @@
         var id = sf && sf.data && sf.data.id; if (id == null) { setBump(function (x) { return x + 1; }); return; }   // no id back → fall back to a reload (wfiles is unlimited, so it appears)
         placeNode('w' + id, wx, wy, function (D) { return D ? Object.assign({}, D, { wfiles: (D.wfiles || []).concat([{ id: id, path: path, size: body.length, storage_path: null }]) }) : D; });
       }, function () { if (alive.current) window.PRUI.toast('Hálózati hiba a szekció mentésekor.', { kind: 'error' }); });
+    }
+    // Map-native SUBMISSION genesis — a file-backed 📤 node at the FIXED path submission/dossier.md. IDEMPOTENT: if a
+    // submission node already exists, just select it (one dossier per project — a blind re-save would blank its content).
+    function submissionAtPos(wx, wy) {
+      if (!props.canEdit) return;
+      var existing = (g && g.N) ? g.N.filter(function (n) { return n.t === 'submission'; })[0] : null;
+      if (existing) { setSel(existing.id); window.PRUI.toast('Már van beküldési dosszié — kiválasztva.', { kind: 'info' }); return; }
+      var CORE = window.PRAutopilotCore; if (!CORE || !CORE.saveFile) { window.PRUI.toast('A fájl-mentés nem elérhető (autopilot-core).', { kind: 'error' }); return; }
+      var body = '# Beküldési dosszié\n\n_A kézirat beküldésének nyomon követése._\n';
+      CORE.saveFile(props.projectId, 'submission/dossier.md', body, 'manual').then(function (sf) {
+        if (!alive.current) return;
+        if (sf && sf.error) { window.PRUI.toast('Beküldés létrehozása sikertelen: ' + (sf.error.message || ''), { kind: 'error' }); return; }
+        var id = sf && sf.data && sf.data.id; if (id == null) { setBump(function (x) { return x + 1; }); return; }
+        placeNode('w' + id, wx, wy, function (D) { return D ? Object.assign({}, D, { wfiles: (D.wfiles || []).concat([{ id: id, path: 'submission/dossier.md', size: body.length, storage_path: null }]) }) : D; });
+      }, function () { if (alive.current) window.PRUI.toast('Hálózati hiba a beküldés mentésekor.', { kind: 'error' }); });
     }
     // the frame SVG icon for the radial segment (a dashed rounded region + a small title tab) — currentColor = the segment color
     function keretIcon() { return h('svg', { viewBox: '0 0 24 20', width: 20, height: 17, fill: 'none', style: { display: 'block' } }, h('rect', { x: 2, y: 3.6, width: 20, height: 14.4, rx: 3, stroke: 'currentColor', strokeWidth: 2, strokeDasharray: '3 2.4' }), h('rect', { x: 3.4, y: 1.4, width: 9.6, height: 4.7, rx: 1.6, fill: 'currentColor' })); }
@@ -6243,8 +6262,8 @@
     }
     // Fázis 2.5 (opt-in, Prezi-B): arrange the cards into per-phase lanes + a named frame each. Overwrites manual
     // positions → behind a confirm; matches frames by title so re-running updates instead of duplicating.
-    var PHASE_HU = ['💡 Ötlet', '📚 Irodalom', '🔬 Áttekintés', '🧪 Protokoll', '🎯 Folyóirat', '✍️ Írás'];
-    var PHASE_COL = ['violet', 'cyan', 'slate', 'amber', 'rose', 'green'];
+    var PHASE_HU = ['💡 Ötlet', '📚 Irodalom', '🔬 Áttekintés', '🧪 Protokoll', '🎯 Folyóirat', '✍️ Írás', '📤 Beküldés'];
+    var PHASE_COL = ['violet', 'cyan', 'slate', 'amber', 'rose', 'green', 'rose'];
     function autoLayoutStages() {
       if (!props.canEdit || !framesCap || stagesBusy.current) return;
       stagesBusy.current = true;   // guard from the moment ⌗ is clicked until the arrange settles (no duplicate frames on double-click)
@@ -7270,9 +7289,10 @@
             { key: 'szekcio', label: 'Szekció', col: '#059669', icon: '✍️', on: props.canEdit, run: function (wx, wy) { sectionAtPos(wx, wy); } },
             { key: 'adat', label: 'Adat', col: '#0d9488', icon: '🗂️', on: props.canEdit, run: function (wx, wy) { datasetAtPos(wx, wy); } },
             { key: 'folyoirat', label: 'Folyóirat', col: '#c026d3', icon: '🎯', on: props.canEdit, run: function (wx, wy) { venueAtPos(wx, wy); } },
+            { key: 'bekuldes', label: 'Beküldés', col: '#dc2626', icon: '📤', on: props.canEdit, run: function (wx, wy) { submissionAtPos(wx, wy); } },
             { key: 'komment', label: 'Komment', col: '#17a34a', icon: '💬', on: commentsCap, run: function (wx, wy) { setComposer({ x: wx, y: wy }); setCmText(''); } }
           ].filter(function (s) { return s.on; });
-          var vp = stageVP(), n = segs.length || 1, R = n > 4 ? 118 : 100, pad = R + 44;   // wider ring when the menu has many segments
+          var vp = stageVP(), n = segs.length || 1, R = n > 6 ? 134 : (n > 4 ? 118 : 100), pad = R + 44;   // wider ring as the menu grows (up to 7 segments)
           var cx = Math.max(pad, Math.min(radial.sx, vp.w - pad)), cy = Math.max(pad, Math.min(radial.sy, vp.h - pad));
           return h('div', { className: 'rmap-radial-scrim', onMouseDown: function (e) { e.stopPropagation(); setRadial(null); }, onWheel: function (e) { e.stopPropagation(); }, onContextMenu: function (e) { e.preventDefault(); setRadial(null); } },
             h('div', { className: 'rmap-radial', style: { left: cx + 'px', top: cy + 'px' }, onMouseDown: function (e) { e.stopPropagation(); } },
@@ -7654,7 +7674,11 @@
       if (t === 'data') return h(DataPanel, { projectId: p.id, datasets: props.datasets, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, focusDatasetId: focus.focusDatasetId });
       if (t === 'writing') return h(WritingPanel, { project: p, sources: props.sources, ideas: props.ideas, jobs: props.jobs, canEdit: props.canEdit, authorId: props.authorId, viewer: props.me, focusSection: focus.focusSection });
       if (t === 'journal') return h(JournalPanel, { projectId: p.id, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, focusVenueId: focus.focusVenueId });
-      return null;   // compute/submission/map/canvas/notes/log/tasks are not embeddable
+      if (t === 'submission') return h('div', { className: 'panel' },
+        h('h3', { style: { marginTop: 0 } }, '📤 Beküldés'),
+        h('p', { style: { fontSize: 13.5, color: 'var(--muted)', lineHeight: 1.55 } }, 'Ha a kézirat kész, a beküldést és nyomon követését az Érkeztető (submission) folyamatban intézd — desk-check, bírálók, döntések, camera-ready.'),
+        h('a', { className: 'btn pri', href: 'Submissions.html' + (/[?&]adminView=1/.test(location.search) ? '?adminView=1' : ''), style: { textDecoration: 'none', display: 'inline-block' } }, 'Beküldési folyamat megnyitása →'));
+      return null;   // compute/map/canvas/notes/log/tasks are not embeddable
     }
     var content;
     if (tab === 'ideas') content = h('div', { className: nd() ? 'ideas2' : null }, h(ChatPanel, { projectId: p.id, supervised: !!p.student_id, canEdit: props.canEdit, authorId: props.authorId, fileOwnerId: props.fileOwnerId, sources: props.sources, onChanged: props.onChanged }), h(IdeasPanel, { projectId: p.id, ideas: props.ideas, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, onStartStudyMulti: function (ideas) { setAutoSR(function (x) { return x + 1; }); setTab('study'); }, onGoStudy: function () { setTab('study'); }, onGoGap: function () { setTab('gap'); } }));

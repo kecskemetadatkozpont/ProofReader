@@ -431,8 +431,17 @@
   szekció-node. (3) **`venueAtPos`** → `research_journal_picks` candidate (journal_id null) → `'v'+id`. (0b) A radial-menü
   deklaratív regiszterré alakítva (`{key,label,col,icon,on,run}`, ikon `s.icon`-ból); 3 új szegmens (✍️ Szekció · 🗂️ Adat
   · 🎯 Folyóirat) a Keret/Ötlet/Komment mellé, a gyűrű sugara n>4-nél 118px. Insert-oszlopok + node-id prefixek +
-  optimista-alakok mind ellenőrizve a graph() ellen. **NYITOTT:** submission (📤) — külön, óvatosabb lépés (a graph()
-  átsorolja a meglévő submission/ fájl-node-okat submission-típusúra).
+  optimista-alakok mind ellenőrizve a graph() ellen.
+- [x] ✅ **Submission node-típus (2026-07-21, review CLEAN correctness):** a beküldési dosszié első osztályú 📤 node.
+  `RMAP_TYPE.submission` + `EMBEDDABLE.submission` + `DEL_BY_TYPE.submission='research_files'`; a graph() a `submission/%`
+  fájlokat a wfiles-be húzza (mfiles-ből kizárva) → `t:'submission'`, ph 6, `CEN[6]`+`PHASE_HU[6]` új sáv; `panelForTab`
+  statikus indító-panel (Submissions.html link); **`submissionAtPos`** IDEMPOTENS (fix `submission/dossier.md` út — ha már
+  van, csak kijelöli, nem írja felül) + 📤 radial-szegmens (a gyűrű 7-nél R=134). **Átsorolási hatás (graceful, egyszeri):**
+  autopilot-projekteknél a meglévő dossier 'f'+id fájl-node → 'w'+id submission-node lesz; a TARTALOM megmarad, nem tűnik el,
+  de a régi node-hoz kötött Map-állapot (kézi pozíció/pin, REJTETT-flag, kézi élek, node-komment-badge) elárvul → a node
+  frissen elhelyezve, ph-6 sávban jelenik meg (egy korábban elrejtett dossier újra láthatóvá válik). Nem blokkoló; opcionális
+  reggeli migráció tehetné varratmentessé ('f'→'w' layout/komment átnevezés). **A Térkép-only folyamat mind a 4 hiányzó
+  genesis-útja kész (dataset/section/venue/submission) — ~55%→~90%.**
 
 ## Hátralévő (jövő) — Phase 6+
 - [ ] 🔴 **Teljes karakter-szintű CRDT/Yjs** — egyidejű azonos-szekció gépelés valós idejű merge-dzsel.
