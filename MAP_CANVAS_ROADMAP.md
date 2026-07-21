@@ -575,7 +575,7 @@
 > User: „az idővonal olyan, mint egy középre dobott különálló widget — épüljön be SZERVESEN a teljes Canvas-ba, az opciók
 > TOGGLE-ök legyenek, az egész vászonra hassanak." 3-szög design-workflow → interaktív mockup (artifact 17d71fb0, 🕰, 3 variáns)
 > → user-választás: **V3 „Szabad|Fázis|Idő" fő-kapcsoló, aktivitás-hisztogrammal.**
-- [x] ✅ **V3 canvas-integráció (`<tbd>`, 4-dim review-workflow: 5 fix + fix-verify):** a „középen widget" érzés a KÉT lebegő
+- [x] ✅ **V3 canvas-integráció (`0fe40a6`, 4-dim review-workflow: 5 fix + fix-verify pass: +2 write-path):** a „középen widget" érzés a KÉT lebegő
   központi dobozból jött (felső picker + alsó scrubber). Feloldva a vászon peremein: **(1) Dokk-elrendezés-pill** — a `🕰 Idővonal`
   gomb helyén `Elrendezés: ⤫ Szabad · ⌗ Fázis · 🕰 Idő` (a többi vászon-vezérlő mellett). **(2) ÚJ efemer „Fázis" elrendezés**
   (`phaseArrangeLayout` — fázis-oszlopok, magasság-tudatos, NEM persistál, NEM a romboló ⌗ Fázisokba; a `phaseArr` state a `tlOn`
@@ -589,6 +589,10 @@
   tükrözve — különben a transzient koordinátákat perzisztálnák → a „Szabad" veszteséges lenne): early-return guard + a 4 gomb
   csak `!tlOn && !phaseArr`-ban renderel; (MED) a `.rmap-dock-fab` a sín mögé került → lift; (LOW) a pill szélesíti a dokkot →
   `flex-wrap:wrap`; (LOW) a keretek Fázis-módban is rejtve (`tlOn || phaseArr ? []`). Fázis-módban a húzás is tiltva.
+  **Fix-verify pass +2 kihagyott write-path** (ugyanaz a defect-osztály): `startNodeResize` (a méret-mentés perzisztálta az
+  efemer x/y-t) + `nodeSetFlag` (pin/rejt egy soha-nem-elhelyezett kártyánál az efemer koordot írta) → guard + gomb-gate;
+  `groupIntoFrame`/`frameCreate` szintén guardolva. **A veszteségmentes „Szabad" szerződés MINDEN pozíció-író úton zárva**
+  (a genesis `placeNode` az ÚJ node saját pozícióját írja = legit; `resetCardSize`/undo a MENTETT `cur.x`-et, nem az efemert).
   Kliens-oldali, NINCS migráció. Version `?v=1787620000`.
 
 ## 🚫 FEDÉS-TILALOM minden elrendezésben + Markdown-kártya tartalom-méretezés — 2026-07-21
