@@ -5577,7 +5577,7 @@
       var key = edgeKey(e), cur = edgeOv[key] || {}, next = Object.assign({ edge_key: key, from_id: e[0], to_id: e[1] }, cur, patch);
       eovRef.current = key;
       setEdgeOv(function (O) { var m = Object.assign({}, O); m[key] = next; return m; });
-      var row = { project_id: props.projectId, edge_key: key, from_id: e[0], to_id: e[1], kind: next.kind || null, color: next.color || null, anim: next.anim || null, line_style: next.line_style || null, arrow: (next.arrow != null ? next.arrow : null), width: next.width || null, label: next.label || null, manual: false, updated_at: new Date().toISOString() };
+      var row = { project_id: props.projectId, edge_key: key, from_id: e[0], to_id: e[1], kind: next.kind || null, color: next.color || null, anim: next.anim || null, line_style: next.line_style || null, arrow: (next.arrow != null ? next.arrow : null), width: next.width || null, label: next.label || null, manual: !!next.manual, updated_at: new Date().toISOString() };   // PRESERVE manual: a style patch on a user-drawn/provenance edge must NOT flip manual→false (graph() only folds manual rows → the edge would vanish on reload)
       if (edgeSpeedCap) row.speed = (next.speed != null ? next.speed : null);   // only write speed once migration-82 added the column
       sb.from('research_map_edges').upsert(row, { onConflict: 'project_id,edge_key' }).then(function (r) {
         setTimeout(function () { if (eovRef.current === key) eovRef.current = null; }, 400);
@@ -5794,10 +5794,15 @@
       setRadial({ sx: p.x, sy: p.y, wx: Math.round((p.x - view.tx) / view.k), wy: Math.round((p.y - view.ty) / view.k) });
     }
     function framePatch(id, patch) {
+      var prev = null; for (var i = 0; i < frames.length; i++) { if (frames[i].id === id) { var f0 = frames[i]; prev = {}; Object.keys(patch).forEach(function (k) { prev[k] = f0[k]; }); break; } }   // snapshot only the patched keys, for a rollback on error
       setFrames(function (F) { return F.map(function (f) { return f.id === id ? Object.assign({}, f, patch) : f; }); });
-      sb.from('research_map_frames').update(Object.assign({}, patch, { updated_at: new Date().toISOString() })).eq('id', id).then(function (r) { if (r && r.error && alive.current) window.PRUI.toast('Keret mentése sikertelen: ' + r.error.message, { kind: 'error' }); });
+      sb.from('research_map_frames').update(Object.assign({}, patch, { updated_at: new Date().toISOString() })).eq('id', id).then(function (r) { if (r && r.error && alive.current) { window.PRUI.toast('Keret mentése sikertelen: ' + r.error.message, { kind: 'error' }); if (prev) setFrames(function (F) { return F.map(function (f) { return f.id === id ? Object.assign({}, f, prev) : f; }); }); } });   // revert: a failed UPDATE fires no realtime echo → without this the map stays desynced until reload
     }
-    function frameDelete(id) { setFrames(function (F) { return F.filter(function (f) { return f.id !== id; }); }); sb.from('research_map_frames').delete().eq('id', id).then(function (r) { if (r && r.error && alive.current) window.PRUI.toast('Keret törlése sikertelen: ' + r.error.message, { kind: 'error' }); }); }
+    function frameDelete(id) {
+      var removed = null; for (var i = 0; i < frames.length; i++) { if (frames[i].id === id) { removed = frames[i]; break; } }
+      setFrames(function (F) { return F.filter(function (f) { return f.id !== id; }); });
+      sb.from('research_map_frames').delete().eq('id', id).then(function (r) { if (r && r.error && alive.current) { window.PRUI.toast('Keret törlése sikertelen: ' + r.error.message, { kind: 'error' }); if (removed) setFrames(function (F) { return F.some(function (f) { return f.id === removed.id; }) ? F : F.concat([removed]); }); } });   // re-add on failed delete (some()-guard so a realtime echo doesn't duplicate)
+    }
     function frameRename(f) { var v = window.prompt('Keret neve:', f.title); if (v != null && String(v).trim()) framePatch(f.id, { title: String(v).trim() }); }
     function frameRecolor(f) { var i = FRAME_COLORS.indexOf(f.color); framePatch(f.id, { color: FRAME_COLORS[(i + 1) % FRAME_COLORS.length] }); }
     // inline "generate here" (Luma): the frame ✨-input no longer funnels silently into the chat edge (→ text only).
@@ -5950,17 +5955,18 @@
       // width-only drag while maximized must NOT capture the full height as the restore height — keep the prior stored h (or none)
       var baseH = (mode === 'w' && dkFull) ? ((dkDim && dkDim.h) || null) : sh;
       function mv(ev) {
+        if (ev.buttons === 0) { up(); return; }   // mouseup happened off-window → recover (matches every other Map drag handler; else the dock sticks to the bare cursor)
         var nw = sw, nh = baseH;
         if (mode === 'w' || mode === 'wh') nw = Math.max(DOCK_MIN_W, Math.min(maxW, sw + (sx - ev.clientX)));   // anchored bottom-right → grows leftward
         if (mode === 'h' || mode === 'wh') nh = Math.max(DOCK_MIN_H, Math.min(maxH, sh + (sy - ev.clientY)));   // grows upward
         setDkDim({ w: Math.round(nw), h: (nh == null ? undefined : Math.round(nh)) });
       }
       function up() {
-        document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up);
+        document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up); window.removeEventListener('blur', up);
         if (mode !== 'w' && dkFull) { setDkFull(false); try { localStorage.setItem('pr-rmap-dock-full', '0'); } catch (er) { } }   // a manual height drag exits full mode
         try { localStorage.setItem('pr-rmap-dock-dim', JSON.stringify(dkDimRef.current)); } catch (er) { }
       }
-      document.addEventListener('mousemove', mv); document.addEventListener('mouseup', up);
+      document.addEventListener('mousemove', mv); document.addEventListener('mouseup', up); window.addEventListener('blur', up);   // blur on window (document has no blur) → release when the tab loses focus mid-drag
     }
     function toggleDockFull() { var nv = !dkFull; setDkFull(nv); try { localStorage.setItem('pr-rmap-dock-full', nv ? '1' : '0'); } catch (e) { } }
     function dockStyle() {
