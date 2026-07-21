@@ -5691,11 +5691,13 @@
       setEdgeOv(function (O) { var m = Object.assign({}, O); keys.forEach(function (k) { delete m[k]; }); return m; });
       return sb.from('research_map_edges').delete().eq('project_id', props.projectId).in('edge_key', keys);
     }
+    // tables reachable from a Map node that have NO project_id column (RLS gates them via a parent join instead) — reinsert/delete must not touch project_id. research_protocol_steps→protocol_id; research_messages/evidence→chat_id.
+    var NO_PROJECT_TBL = { research_protocol_steps: 1, research_messages: 1, research_evidence: 1 };
     function hDeleteRows(specs) {
       if (!specs || !specs.length) return Promise.resolve();
       setData(function (D) { if (!D) return D; var d = Object.assign({}, D); specs.forEach(function (s) { if (s.dataKey && Array.isArray(d[s.dataKey])) d[s.dataKey] = d[s.dataKey].filter(function (x) { return String(x.id) !== String(s.id); }); }); return d; });
       var byTable = {}; specs.forEach(function (s) { (byTable[s.table] = byTable[s.table] || []).push(s.id); });
-      return Promise.all(Object.keys(byTable).map(function (t) { return sb.from(t).delete().eq('project_id', props.projectId).in('id', byTable[t]); }));
+      return Promise.all(Object.keys(byTable).map(function (t) { var q = sb.from(t).delete().in('id', byTable[t]); if (!NO_PROJECT_TBL[t]) q = q.eq('project_id', props.projectId); return q; }));
     }
     function hSetEdges(rows) {   // upsert edge override/manual rows (redo of an edge create; undo of an edge delete)
       if (!rows || !rows.length) return Promise.resolve();
@@ -5720,11 +5722,22 @@
       var px = (cur.x != null ? cur.x : (gn.x != null ? gn.x : 0)), py = (cur.y != null ? cur.y : (gn.y != null ? gn.y : 0));
       return sb.from('research_map_layout').upsert(Object.assign({ project_id: props.projectId, node_id: nid, x: px, y: py, updated_at: new Date().toISOString() }, patch), { onConflict: 'project_id,node_id' });
     }
+    function hReinsertRows(inserts) {   // T3 delete-restore: explicit-id INSERT the snapshotted full row(s) + cascade children + restore the layout pin (blob was kept on delete). optimistic setData append.
+      if (!inserts || !inserts.length) return Promise.resolve();
+      setData(function (D) { if (!D) return D; var d = Object.assign({}, D); inserts.forEach(function (s) { if (s.dataKey && Array.isArray(d[s.dataKey]) && !d[s.dataKey].some(function (x) { return String(x.id) === String(s.row.id); })) d[s.dataKey] = d[s.dataKey].concat([s.row]); }); return d; });
+      // INSERT sequentially in array order so a parent row lands before its cascade children (FKs, e.g. chat→messages→evidence, idea→sr_candidates). project_id is injected only for tables that own the column (NO_PROJECT_TBL rows carry their own parent key).
+      var chain = inserts.reduce(function (p, s) { return p.then(function () { return sb.from(s.table).insert(NO_PROJECT_TBL[s.table] ? s.row : Object.assign({ project_id: props.projectId }, s.row)); }); }, Promise.resolve());
+      return chain.then(function () {
+        var pins = inserts.filter(function (s) { return s.pin; }).map(function (s) { return Object.assign({ project_id: props.projectId, updated_at: new Date().toISOString() }, s.pin); });
+        if (pins.length) return sb.from('research_map_layout').upsert(pins, { onConflict: 'project_id,node_id' });
+      }).then(function () { setBump(function (x) { return x + 1; }); });
+    }
     function runHOp(op) {
       if (!op) return Promise.resolve();
       if (op.k === 'restoreLayout') return hRestoreLayout(op.rows);
       if (op.k === 'deleteLayout') return hDeleteLayout(op.nids);
       if (op.k === 'deleteRows') return hDeleteRows(op.specs);
+      if (op.k === 'reinsertRows') return hReinsertRows(op.inserts);
       if (op.k === 'removeEdges') return hRemoveEdges(op.keys);
       if (op.k === 'setEdges') return hSetEdges(op.rows);
       if (op.k === 'framePatch') return hFramePatch(op.id, op.patch);
@@ -5833,38 +5846,53 @@
     // FK-graceful. Scoped to the user's OWN artifacts; shared/pipeline data (paper library, SR jobs) is NOT deletable here
     // (those have their own management + FK dependents) → they can only be 🙈 hidden. Aggregate nodes (lit/sr) excluded.
     var DEL_BY_TYPE = { idea: 'research_ideas', gap: 'research_ideas', step: 'research_protocol_steps', venue: 'research_journal_picks', section: 'research_files', review: 'research_files', dataset: 'research_datasets', file: 'research_files', chat: 'research_chats', figure: 'research_figures', submission: 'research_files', revision: 'research_files' };
+    // cascade children whose rows are ON DELETE CASCADE from the deleted parent — snapshot them BEFORE the delete so undo can faithfully restore them (else e.g. a restored chat comes back with an empty conversation). Ordered so each parent's children reinsert after it. research_protocol_notes is intentionally excluded: its INSERT RLS requires author_id = auth.uid(), so another user's notes can't be restored (documented caveat).
+    var CASCADE_CHILDREN = { chat: [{ table: 'research_messages', fk: 'chat_id' }, { table: 'research_evidence', fk: 'chat_id' }], idea: [{ table: 'research_sr_candidates', fk: 'idea_id' }], gap: [{ table: 'research_sr_candidates', fk: 'idea_id' }] };
     function nodeDeletable(n) { return !!(props.canEdit && n && n.ref && n.ref.id && DEL_BY_TYPE[n.t] && n.id !== 'lit' && n.id !== 'sr'); }
-    function delOneNode(n) {   // no confirm — deletes the row (+ storage blob + map layout); resolves {ok}|{error}|{skipped}
+    function delOneNode(n) {   // snapshots the FULL row + cascade children + pin (for undo), deletes the row + map pin, and KEEPS the storage blob so a restore is faithful (deleted-and-never-undone blobs orphan — a minor cost for undoability). resolves {ok,snap}|{error}|{skipped}
       if (!nodeDeletable(n)) return Promise.resolve({ skipped: true });
-      var table = DEL_BY_TYPE[n.t], blob = ((n.t === 'figure' || n.t === 'file' || n.t === 'review' || n.t === 'section') && n.ref.storage_path) ? n.ref.storage_path : null;
-      return sb.from(table).delete().eq('id', n.ref.id).then(function (r) {
-        if (r && r.error) return { error: r.error };
-        if (blob) { try { sb.storage.from('research-data').remove([blob]); } catch (e) { } }
-        sb.from('research_map_layout').delete().eq('project_id', props.projectId).eq('node_id', n.id);
-        return { ok: true };
-      }, function () { return { error: { message: 'hálózat' } }; });
+      var table = DEL_BY_TYPE[n.t], dataKey = (nodeToRow(n.id) || {}).dataKey || null, kids = CASCADE_CHILDREN[n.t] || [];
+      var pin = layoutRef.current[n.id] ? Object.assign({ node_id: n.id }, layoutRef.current[n.id]) : null;
+      function doDelete(full, childInserts) {
+        return sb.from(table).delete().eq('id', n.ref.id).then(function (r) {
+          if (r && r.error) return { error: r.error };
+          sb.from('research_map_layout').delete().eq('project_id', props.projectId).eq('node_id', n.id);
+          var inserts = [{ table: table, row: full, nid: n.id, dataKey: dataKey, pin: pin }].concat(childInserts || []);
+          return { ok: true, snap: { table: table, row: full, nid: n.id, dataKey: dataKey, inserts: inserts } };
+        }, function () { return { error: { message: 'hálózat' } }; });
+      }
+      // fetch parent full row + all cascade children BEFORE deleting (the delete cascades the children away)
+      var fetches = [sb.from(table).select('*').eq('id', n.ref.id).maybeSingle()].concat(kids.map(function (c) { return sb.from(c.table).select('*').eq(c.fk, n.ref.id); }));
+      return Promise.all(fetches).then(function (res) {
+        var full = (res[0] && res[0].data) || n.ref, childInserts = [];
+        kids.forEach(function (c, i) { ((res[i + 1] && res[i + 1].data) || []).forEach(function (rw) { childInserts.push({ table: c.table, row: rw }); }); });
+        return doDelete(full, childInserts);
+      }, function () { return doDelete(n.ref, []); });
     }
     function nodeDelete(n) {   // single-card delete (selection toolbar / inspector) — confirm then delete
       if (!nodeDeletable(n)) { window.PRUI.toast('Ez a kártya nem törölhető közvetlenül (összesítő vagy megosztott adat — használd a 🙈 rejtést).', { kind: 'error' }); return; }
-      window.PRUI.confirm({ title: ((RMAP_TYPE[n.t] && RMAP_TYPE[n.t].lab) || 'Kártya') + ' törlése?', body: '„' + String(n.title || '').slice(0, 80) + '" — véglegesen törlődik a projektből. Ez nem vonható vissza.', confirmLabel: 'Törlés', danger: true }).then(function (ok) {
+      window.PRUI.confirm({ title: ((RMAP_TYPE[n.t] && RMAP_TYPE[n.t].lab) || 'Kártya') + ' törlése?', body: '„' + String(n.title || '').slice(0, 80) + '" törlődik a projektből. (⌘Z-vel visszaállítható.)', confirmLabel: 'Törlés', danger: true }).then(function (ok) {
         if (!ok || !alive.current) return;
         delOneNode(n).then(function (r) {
           if (!alive.current) return;
           if (r && r.error) { window.PRUI.toast('Törlés sikertelen: ' + (/(foreign key|violates|constraint)/i.test(String(r.error.message || '')) ? 'kapcsolódó elemek hivatkoznak rá — előbb töröld azokat, vagy rejtsd el a kártyát (🙈).' : (r.error.message || 'hiba')), { kind: 'error' }); return; }
-          setSel(null); setMsel(function (M) { var m = Object.assign({}, M); delete m[n.id]; return m; }); setBump(function (x) { return x + 1; }); window.PRUI.toast('Törölve', { kind: 'ok' });
+          if (r && r.snap) pushHist({ label: ((RMAP_TYPE[n.t] && RMAP_TYPE[n.t].lab) || 'Kártya') + ' törlése', kind: 'delete', undo: [{ k: 'reinsertRows', inserts: r.snap.inserts }], redo: [{ k: 'deleteRows', specs: [{ table: r.snap.table, id: r.snap.row.id, nid: r.snap.nid, dataKey: r.snap.dataKey }] }, { k: 'deleteLayout', nids: [r.snap.nid] }] });
+          setSel(null); setMsel(function (M) { var m = Object.assign({}, M); delete m[n.id]; return m; }); setBump(function (x) { return x + 1; }); window.PRUI.toast('Törölve · ⌘Z a visszaállításhoz', { kind: 'ok' });
         });
       });
     }
     function nodesDelete(nodes) {   // group delete (multi-select) — one confirm, then delete each deletable node
       var dels = (nodes || []).filter(nodeDeletable);
       if (!dels.length) { window.PRUI.toast('A kijelöltek nem törölhetők közvetlenül (megosztott/összesítő adat).', { kind: 'error' }); return; }
-      window.PRUI.confirm({ title: dels.length + ' kártya törlése?', body: 'A kijelölt törölhető kártyák véglegesen törlődnek. Ez nem vonható vissza.', confirmLabel: 'Törlés', danger: true }).then(function (ok) {
+      window.PRUI.confirm({ title: dels.length + ' kártya törlése?', body: 'A kijelölt törölhető kártyák törlődnek. (⌘Z-vel visszaállíthatók.)', confirmLabel: 'Törlés', danger: true }).then(function (ok) {
         if (!ok || !alive.current) return;
         Promise.all(dels.map(delOneNode)).then(function (rs) {
           if (!alive.current) return;
           var errs = rs.filter(function (r) { return r && r.error; }).length;
+          var snaps = rs.filter(function (r) { return r && r.snap; }).map(function (r) { return r.snap; });
+          if (snaps.length) pushHist({ label: snaps.length + ' kártya törlése', kind: 'delete', undo: [{ k: 'reinsertRows', inserts: snaps.reduce(function (a, s) { return a.concat(s.inserts); }, []) }], redo: [{ k: 'deleteRows', specs: snaps.map(function (s) { return { table: s.table, id: s.row.id, nid: s.nid, dataKey: s.dataKey }; }) }, { k: 'deleteLayout', nids: snaps.map(function (s) { return s.nid; }) }] });
           setMsel({}); setSel(null); setBump(function (x) { return x + 1; });
-          window.PRUI.toast(errs ? ((dels.length - errs) + ' törölve · ' + errs + ' sikertelen (hivatkozott)') : (dels.length + ' kártya törölve'), { kind: errs ? 'error' : 'ok' });
+          window.PRUI.toast(errs ? ((dels.length - errs) + ' törölve · ' + errs + ' sikertelen (hivatkozott)') : (dels.length + ' kártya törölve · ⌘Z a visszaállításhoz'), { kind: errs ? 'error' : 'ok' });
         });
       });
     }

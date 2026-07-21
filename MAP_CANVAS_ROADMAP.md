@@ -506,8 +506,19 @@
   a fix: ha közben resetLayout törölte a pint, a live pozícióra esik vissza, nem 0,0-ra). **🕘 Előzmény-panel**: a menüsorból
   nyíló lebegő lista (utolsó 12 művelet, legfrissebb felül, a következő-visszavonandó kiemelve) + ↶/↷ fejléc + redo-számláló
   — „jól látszik mi történt". Primitívek: hSetEdges/hFramePatch/hDeleteFrame/hReinsertFrame/hSetFlag. Version `?v=1787020000`.
-  **Elhalasztva (T3 + finomítás):** törlés-visszaállítás (eredeti id-vel), keret-mozgatás/átnevezés (a közös framePatch-út
-  zajos), él-restyle, átméretezés, undo-to-index a panelben. Migráció/edge NEM kell.
+  **Elhalasztva (finomítás):** keret-mozgatás/átnevezés (a közös framePatch-út zajos), él-restyle, átméretezés,
+  undo-to-index a panelben. Migráció/edge NEM kell.
+- [x] ✅ **T3 — TÖRLÉS-visszaállítás (`<tbd>`, review 1 fix — 3 defect):** a törölt kártya visszahozható ⌘Z-vel az
+  **eredeti id-vel** — `delOneNode` `select('*')` teljes-sor pillanatképet vesz (nem a hiányos `n.ref`-et), törli a sort+pint,
+  de **megtartja a storage-blobot** a hű visszaállításhoz (a soha-vissza-nem-vont törlés blob-ja árválkodik — vállalt csere).
+  `hReinsertRows` explicit-id `insert` + pin-upsert; redo = `deleteRows`+`deleteLayout`. **Review-javítások:** (1) **step
+  hard-fail** — `research_protocol_steps`-nek nincs `project_id` oszlopa (protocol_id-vel kulcsolt) → a `project_id`
+  ráerőltetése 42703-mal elhasalt, a törölt lépés **véglegesen elveszett** a „visszaállítható" ígéret ellenére; fix:
+  `NO_PROJECT_TBL` → e táblákra nem nyúlunk project_id-hez (insert ÉS delete). (2) **chat üres visszaállítás** — a
+  `research_messages`/`research_evidence` CASCADE volt → az undo üres beszélgetést hozott vissza; fix: `CASCADE_CHILDREN`
+  a törlés ELŐTT pillanatképezi a gyerekeket, `hReinsertRows` **sorrendben** szúrja be (szülő→gyerek, FK-helyes).
+  (3) **idea SR-jelöltek** — `research_sr_candidates` CASCADE → szintén deep-snapshot. **Vállalt caveat:** protokoll-jegyzetek
+  (INSERT-RLS `author_id=auth.uid()` → más felhasználó jegyzete nem visszaállítható) és a SET NULL back-linkek. Version `?v=1787330000`.
 
 ## Hátralévő (jövő) — Phase 6+
 - [ ] 🔴 **Teljes karakter-szintű CRDT/Yjs** — egyidejű azonos-szekció gépelés valós idejű merge-dzsel.
