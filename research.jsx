@@ -4703,6 +4703,8 @@
   var TL_PHASE_LABELS = ['💡 Ötlet & Rés', '📚 Irodalom', '🔬 Áttekintés', '🧪 Protokoll', '🎯 Folyóirat', '✍️ Írás', '📤 Beküldés'];
   var TL_TYPE_LABELS = ['💡 Ötletek', '📚 Irodalom', '🧪 Kísérlet', '✍️ Írás', '📤 Beküldés', '💬 Egyéb'];
   var TL_TYPE_LANE = { idea: 0, gap: 0, paper: 1, lit: 1, sr: 1, srq: 1, sreview: 1, study: 1, dataset: 2, step: 2, figure: 2, section: 3, review: 3, venue: 4, submission: 4, revision: 4, chat: 5, file: 5 };
+  var TL_PHASE_COLORS = ['#ffcf5c', '#5b9dff', '#7fc8b0', '#57c98a', '#b98bff', '#f0a868', '#9fb0c8'];   // per-phase lane chip
+  var TL_TYPE_COLORS = ['#ffcf5c', '#5b9dff', '#57c98a', '#f0a868', '#9fb0c8', '#8fa0ff'];   // per type-group lane chip (matches TL_TYPE_LABELS)
   function tlFmtDay(ts) { var d = new Date(ts); return (d.getMonth() + 1) + '.' + d.getDate(); }
   var RMAP_TYPE = { idea: { ic: '💡', lab: 'Ötlet', tab: 'ideas' }, gap: { ic: '🕳️', lab: 'Kutatási rés', tab: 'gap' }, paper: { ic: '📄', lab: 'Cikk', tab: 'literature' }, study: { ic: '🔎', lab: 'Irodalom', tab: 'literature' }, review: { ic: '📝', lab: 'Áttekintés', tab: 'study' }, step: { ic: '🧪', lab: 'Protokoll-lépés', tab: 'protocol' }, venue: { ic: '🎯', lab: 'Folyóirat', tab: 'journal' }, section: { ic: '✍️', lab: 'Draft-szekció', tab: 'writing' }, dataset: { ic: '🗂️', lab: 'Adathalmaz', tab: 'data' }, file: { ic: '📎', lab: 'Fájl', tab: 'ideas' }, chat: { ic: '💬', lab: 'Beszélgetés', tab: 'ideas' }, figure: { ic: '🖼️', lab: 'Ábra', tab: 'literature' }, srq: { ic: '❓', lab: 'Review-kérdés', tab: 'study' }, sreview: { ic: '🔬', lab: 'Szisztematikus áttekintés', tab: 'study' }, submission: { ic: '📤', lab: 'Beküldés', tab: 'submission' }, revision: { ic: '🔁', lab: 'Revízió / bírálati válasz', tab: 'submission' } };
   // interactive-edge relation presets (migration-81). Each type is a full look-preset: color + line-style + arrow + default animation.
@@ -4818,6 +4820,7 @@
     var mqS = useState(null), marquee = mqS[0], setMarquee = mqS[1];   // marquee rect in stage coords {x0,y0,x1,y1} while shift-dragging the background
     // 🕰 Idővonal (timeline) mode — EPHEMERAL layout (like gLive/story): x = created_at, y = phase-lane; never persists to research_map_layout.
     var tlS = useState(false), tlOn = tlS[0], setTlOn = tlS[1];
+    var paS = useState(false), phaseArr = paS[0], setPhaseArr = paS[1];   // ephemeral "Fázis" arrangement (peer of tlOn 'Idő' — NOT the destructive ⌗ autoLayoutStages)
     var txS = useState('squished'), tlX = txS[0], setTlX = txS[1];   // 'squished' | 'linear' | 'ordinal'
     var tlnS = useState('phase'), tlLane = tlnS[0], setTlLane = tlnS[1];   // 'phase' | 'type'
     var tcS = useState(1), tlCur = tcS[0], setTlCur = tcS[1];   // scrubber cursor 0..1 (1 = whole project shown)
@@ -5084,7 +5087,7 @@
     useEffect(function () {
       function typing(el) { if (!el) return false; var tg = el.tagName || ''; return tg === 'INPUT' || tg === 'TEXTAREA' || tg === 'SELECT' || el.isContentEditable; }
       function onKey(e) {
-        if (e.key === 'Escape') { setRadial(null); setArcOpen(null); if (tour) tourStop(); else if (focus) exitFocus(); else if (tlOn) tlExit(); else { setLinkFrom(null); setSelEdge(null); } }   // Esc closes the radial add-menu + the generation arc + exits timeline + cancels link-mode/edge selection
+        if (e.key === 'Escape') { setRadial(null); setArcOpen(null); if (tour) tourStop(); else if (focus) exitFocus(); else if (tlOn || phaseArr) tlExit(); else { setLinkFrom(null); setSelEdge(null); } }   // Esc closes the radial add-menu + the generation arc + exits timeline/phase arrange + cancels link-mode/edge selection
         else if (tour && tour.beats && !typing(e.target)) { if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); tourNext(); } else if (e.key === 'ArrowLeft') { e.preventDefault(); tourPrev(); } }
         else if (e.key === 'Enter' && !focus && !tour && armedRef.current && !typing(e.target)) { e.preventDefault(); enterNode(armedRef.current); }   // armedRef is null while a modal is open (guarded at compute)
         else if ((e.metaKey || e.ctrlKey) && (e.key === 'z' || e.key === 'Z') && !typing(e.target) && props.canEdit) { e.preventDefault(); if (e.shiftKey) doRedo(); else doUndo(); }   // ⌘Z undo · ⌘⇧Z redo
@@ -5351,6 +5354,7 @@
       // 🕰 Idővonal override — replace positions with a computed timeline layout (ephemeral, like gLive; NEVER persisted). The FINAL positioning say, so maxY below recompute for free (by + the manual-edge fold are built ABOVE, before ts-stamping). Toggling tlOn off falls through the normal path → saved positions/pins reappear untouched.
       var tlMeta = null;
       if (tlOn) { tlMeta = timelineLayout(N, E, { xMode: tlX, laneBy: tlLane }); N.forEach(function (n) { var p = tlMeta.pos[n.id]; if (p) { n.x = p.x; n.y = p.y; } }); }
+      else if (phaseArr) { var pm = phaseArrangeLayout(N); N.forEach(function (n) { var pp = pm.pos[n.id]; if (pp) { n.x = pp.x; n.y = pp.y; } }); }   // ephemeral Fázis peer
       var maxY = 400; N.forEach(function (n) { maxY = Math.max(maxY, n.y + (n._h || 78) + 44); });
       return { N: N, E: E, height: maxY, by: by, tl: tlMeta };
     }
@@ -5574,6 +5578,7 @@
     }
     function startNodeResize(e, n) {
       if (e.button !== 0 || !props.canEdit || !cardSizeCap) return; e.stopPropagation();
+      if (tlOn || phaseArr) { window.PRUI.toast('Elrendezés-mód aktív — előbb lépj vissza „Szabad"-ra.', { kind: 'info' }); return; }   // resize persists x/y → would write ephemeral coords over the saved layout
       var sx = e.clientX, sy = e.clientY, k = view.k || 1, ow = n._w || NW, oh = n._h || NH, ox = n.x, oy = n.y;
       var _rvp = stageVP(), capW = Math.max(NW, (_rvp.w - 16) / k), capH = Math.max(64, (_rvp.h - 16) / k);   // viewport-fit: can't resize a card bigger than the screen at this zoom
       nrzRef.current = { id: n.id, moved: false, w: ow, h: oh };
@@ -5705,7 +5710,7 @@
     useEffect(function () { layoutRef.current = layout; }, [layout]);   // mirror layout so the undo guard reads the LIVE value (incl. collaborators' realtime moves)
     useEffect(function () { histRef.current = { undo: [], redo: [] }; histBusy.current = false; if (alive.current) setHistGen(function (x) { return x + 1; }); }, [props.projectId]);   // a fresh project → a fresh undo stack (node ids are only unique within a project)
     // 🕰 timeline: on project switch (incl. in-place, no remount) stop the replay AND exit the mode + reset the cursor (else project B loads in A's stale timeline, dimming ~70% of B's cards); also clean up the rAF on unmount
-    useEffect(function () { tlPlayRef.current = false; if (tlRaf.current) { cancelAnimationFrame(tlRaf.current); tlRaf.current = 0; } setTlPlay(false); setTlOn(false); setTlCur(1); tlCurRef.current = 1; return function () { tlPlayRef.current = false; if (tlRaf.current) { cancelAnimationFrame(tlRaf.current); tlRaf.current = 0; } }; }, [props.projectId]);
+    useEffect(function () { tlPlayRef.current = false; if (tlRaf.current) { cancelAnimationFrame(tlRaf.current); tlRaf.current = 0; } setTlPlay(false); setTlOn(false); setPhaseArr(false); setTlCur(1); tlCurRef.current = 1; return function () { tlPlayRef.current = false; if (tlRaf.current) { cancelAnimationFrame(tlRaf.current); tlRaf.current = 0; } }; }, [props.projectId]);
     function nodeToRow(nid) {   // graph node id → its deletable domain row {table,id,dataKey}; null = FK-heavy/shared/aggregate → placement-only
       var pref = String(nid).charAt(0), rest = String(nid).slice(1);
       if (pref === 'i') return { table: 'research_ideas', id: rest, dataKey: 'ideas' };
@@ -5861,6 +5866,7 @@
     // Optimistic; on error revert + toast. Guarded by mapFlags so the UI only appears once the columns exist.
     function nodeSetFlag(n, key, val) {
       if (!props.canEdit || !n) return;
+      if (tlOn || phaseArr) return;   // pin/hide upserts x/y; a never-placed card would get the ephemeral coord → silent defense (the 📌/🙈 buttons are also gated out of ephemeral mode)
       var cur = layout[n.id] || {}, x = (cur.x != null ? cur.x : n.x), y = (cur.y != null ? cur.y : n.y);
       var prev = !!cur[key];   // capture the PRIOR value so an error reverts to it (not blindly to the default)
       var patch = {}; patch[key] = val;
@@ -5946,6 +5952,7 @@
     // group the current multi-selection into a frame around their real bounding box (a draggable group container)
     function groupIntoFrame() {
       if (!props.canEdit || !framesCap) return;
+      if (tlOn || phaseArr) { window.PRUI.toast('Elrendezés-mód aktív — előbb lépj vissza „Szabad"-ra.', { kind: 'info' }); return; }   // frame bbox would be computed from ephemeral coords
       var ids = Object.keys(msel).filter(function (id) { return g.by[id] && !g.by[id].mapHidden; });
       if (ids.length < 2) { window.PRUI.toast('Legalább két látható kártyát jelölj ki', { kind: 'info' }); return; }
       var pad = 24, hdr = 44, minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -5966,6 +5973,7 @@
     // frameCreate(wx,wy): CENTER a new frame on the given world point (radial add-menu); with no args → the viewport centre (▦ button).
     function frameCreate(wx, wy) {
       if (!props.canEdit || !framesCap) return;
+      if (tlOn || phaseArr) { window.PRUI.toast('Elrendezés-mód aktív — előbb lépj vissza „Szabad"-ra.', { kind: 'info' }); return; }   // a frame placed now would sit at an ephemeral position (and is hidden until exit)
       var fx, fy;
       if (typeof wx === 'number' && typeof wy === 'number') { fx = Math.round(wx) - 210; fy = Math.round(wy) - 150; }
       else { var st = stageRef.current, cx = st ? st.clientWidth / 2 : 300, cy = st ? st.clientHeight / 2 : 200; fx = Math.round((cx - view.tx) / view.k) - 210; fy = Math.round((cy - view.ty) / view.k) - 150; }
@@ -6453,6 +6461,7 @@
     // Unlike resetLayout it does NOT throw away the arrangement; unlike separateNodes-in-render it also frees pinned pairs.
     function tidyLayout() {
       if (!props.canEdit) return;
+      if (tlOn || phaseArr) { window.PRUI.toast('Elrendezés-mód aktív — előbb lépj vissza „Szabad"-ra.', { kind: 'info' }); return; }   // an ephemeral mode's transient coords must NOT be persisted (would break the lossless Szabad restore)
       var src = (g && g.N ? g.N : []).filter(function (n) { return !n.mapHidden; });
       if (src.length < 2) { window.PRUI.toast('Nincs mit elrendezni.', { kind: 'info' }); return; }
       var arr = src.map(function (n) { return { id: n.id, x: n.x || 0, y: n.y || 0, _w: nodeW(n), _h: nodeH(n) }; });
@@ -6497,6 +6506,7 @@
     // their size; pinned stay put (fixed obstacles for a final separateNodes nudge). ONE batch upsert + ONE undo entry.
     function smartLayout() {
       if (!props.canEdit || !cardSizeCap || smartBusyRef.current) return;
+      if (tlOn || phaseArr) { window.PRUI.toast('Elrendezés-mód aktív — előbb lépj vissza „Szabad"-ra.', { kind: 'info' }); return; }   // don't persist ephemeral coords over the saved layout
       var vis = (g && g.N ? g.N : []).filter(function (n) { return !n.mapHidden; });
       if (vis.length < 2) { window.PRUI.toast('Nincs mit elrendezni.', { kind: 'info' }); return; }
       smartBusyRef.current = true; setSmartBusy(true);
@@ -6570,6 +6580,20 @@
     }
     // ── 🕰 Idővonal (timeline) — EPHEMERAL computed layout (never persisted), a peer of gLive/story mode ─────────
     function tlLaneOf(n, laneBy) { if (laneBy === 'type') { var l = TL_TYPE_LANE[n.t]; return l != null ? l : (TL_TYPE_LABELS.length - 1); } return (n.ph != null ? n.ph : 0); }
+    // ephemeral "Fázis" arrangement (arrMode peer of the timeline) — phase columns, HEIGHT-AWARE stack, NO frames, NO persist (unlike ⌗ autoLayoutStages). Pure → {pos}.
+    function phaseArrangeLayout(N) {
+      var vis = N.filter(function (n) { return !n.mapHidden; });
+      var cols = {}; vis.forEach(function (n) { var p = (n.ph != null ? n.ph : 0); (cols[p] = cols[p] || []).push(n); });
+      var phs = Object.keys(cols).map(Number).sort(function (a, b) { return a - b; });
+      var LANE_W = 240, GAPX = 56, GAPY = 22, X0 = 60, Y0 = 60, colX = X0, pos = {};
+      phs.forEach(function (p) {
+        var arr = cols[p], maxW = arr.reduce(function (m, n) { return Math.max(m, n._w || 204); }, 204), colW = Math.max(LANE_W, maxW + 36), y = Y0;
+        arr.sort(function (a, b) { return (a.ts || 0) - (b.ts || 0); });   // within-phase by creation order
+        arr.forEach(function (n) { var w = n._w || 204; pos[n.id] = { x: Math.round(colX + (colW - w) / 2), y: Math.round(y) }; y += (n._h || 100) + GAPY; });
+        colX += colW + GAPX;
+      });
+      return { pos: pos };
+    }
     // timelineLayout(N,E,{xMode,laneBy}) → {pos, tMin, tMax, ticks, bands, laneTop, height, gut, ruler, contentW, laneLabels}. Pure; N carries n.ts/n._w/n._h.
     function timelineLayout(N, E, opts) {
       var xMode = opts.xMode || 'squished', laneBy = opts.laneBy || 'phase', CW = 210, GUT = 150, PAD = 90, DAYMS = 86400000, RULER = 46;
@@ -6650,7 +6674,13 @@
     function tlStopPlay() { tlPlayRef.current = false; if (alive.current) setTlPlay(false); if (tlRaf.current) { cancelAnimationFrame(tlRaf.current); tlRaf.current = 0; } }
     function tlPause() { if (tlPlayRef.current) tlStopPlay(); }   // pan/zoom pauses the replay — does NOT exit the mode
     function tlToggle() { if (tlOn) tlExit(); else { setTlOn(true); tlCurRef.current = 1; setTlCur(1); setSel(null); setMsel({}); setSelEdge(null); setTimeout(function () { if (alive.current) fitView(); }, 70); } }
-    function tlExit() { tlStopPlay(); setTlOn(false); tlCurRef.current = 1; setTlCur(1); setTimeout(function () { if (alive.current) fitView(); }, 70); }
+    function tlExit() { tlStopPlay(); setTlOn(false); setPhaseArr(false); tlCurRef.current = 1; setTlCur(1); setTimeout(function () { if (alive.current) fitView(); }, 70); }
+    // "Elrendezés" master switch (V3): Szabad ⇄ Fázis ⇄ Idő — all EPHEMERAL (never persisted); Szabad restores the saved hand layout losslessly.
+    function arrSet(mode) {
+      if (mode === 'time') { setPhaseArr(false); if (!tlOn) { setTlOn(true); tlCurRef.current = 1; setTlCur(1); setSel(null); setMsel({}); setSelEdge(null); setTimeout(function () { if (alive.current) fitView(); }, 70); } }
+      else if (mode === 'phase') { tlStopPlay(); setTlOn(false); setPhaseArr(true); setSel(null); setMsel({}); setSelEdge(null); setTimeout(function () { if (alive.current) fitView(); }, 70); }
+      else { tlStopPlay(); setTlOn(false); setPhaseArr(false); setTimeout(function () { if (alive.current) fitView(); }, 70); }
+    }
     function tlSetCur(v) { v = Math.max(0, Math.min(1, v)); tlCurRef.current = v; setTlCur(v); }
     function tlCursorT() { var m = g && g.tl; return m ? m.tMin + tlCur * (m.tMax - m.tMin) : 0; }
     function tlXForT(t) {   // playhead world-x for a cursor time — interpolate over real-dated nodes' (ts → center-x)
@@ -6665,12 +6695,30 @@
     }
     // ephemeral world-space chrome for timeline mode: lane bands + labels + date ruler + undated gutter + playhead (NOT research_map_frames)
     function renderTlChrome() {
-      var m = g.tl; if (!m) return null; var lane = m.laneLabels || [], els = [];
-      m.bands.forEach(function (b) { els.push(h('div', { key: 'tlb' + b.li, className: 'rmap-tl-band' + (b.li % 2 ? ' alt' : ''), style: { top: b.top + 'px', height: b.h + 'px', width: m.contentW + 'px' } }, h('span', { className: 'rmap-tl-lanelbl' }, lane[b.li] || ('Sáv ' + b.li)))); });
-      els.push(h('div', { key: 'tlgut', className: 'rmap-tl-gutter', style: { top: m.ruler + 'px', height: (m.height - m.ruler) + 'px', width: m.gut + 'px' } }, h('span', null, 'Dátlan / becsült')));
+      var m = g.tl; if (!m) return null; var els = [];
+      // lane bands (tint only — the labels live in the FIXED screen-space gutter, renderTlGutter)
+      m.bands.forEach(function (b) { els.push(h('div', { key: 'tlb' + b.li, className: 'rmap-tl-band' + (b.li % 2 ? ' alt' : ''), style: { top: b.top + 'px', height: b.h + 'px', width: m.contentW + 'px' } })); });
       els.push(h('div', { key: 'tlruler', className: 'rmap-tl-ruler', style: { width: m.contentW + 'px', height: m.ruler + 'px' } }, (m.ticks || []).map(function (t, i) { return h('div', { key: 'tk' + i, className: 'rmap-tl-tick', style: { left: t.x + 'px' } }, h('span', null, t.lab)); })));
-      if (tlX !== 'depth') { var px = tlXForT(tlCursorT()); els.push(h('div', { key: 'tlph', className: 'rmap-tl-playhead', style: { left: px + 'px', top: m.ruler + 'px', height: (m.height - m.ruler) + 'px' } })); }   // depth mode: x is DAG-generation, not time → no time-playhead
+      if (tlX !== 'depth') { var px = tlXForT(tlCursorT()); els.push(h('div', { key: 'tlph', className: 'rmap-tl-playhead', style: { left: px + 'px', top: 0, height: m.height + 'px' } })); }   // full-height amber spine; depth mode: x is DAG-generation, not time → no time-playhead
       return h('div', { key: 'tlchrome', className: 'rmap-tl-chrome' }, els);
+    }
+    // FIXED left lane-label gutter (screen-space, viewport-pinned) — projects the world bands via `view` each render so headers glide with vertical pan/zoom but never scroll off horizontally. A frozen column, like a spreadsheet.
+    function renderTlGutter() {
+      var m = g.tl; if (!m) return null; var cols = (tlLane === 'type' ? TL_TYPE_COLORS : TL_PHASE_COLORS);
+      return h('div', { className: 'rmap-tl-gutf', onMouseDown: function (e) { e.stopPropagation(); } },
+        h('div', { className: 'rmap-tl-gutf-h' }, 'SÁV'),
+        m.bands.map(function (b) {
+          var top = view.ty + b.top * view.k, hh = b.h * view.k;
+          return h('div', { key: 'gl' + b.li, className: 'rmap-tl-gutf-row', style: { top: top + 'px', height: hh + 'px' } },
+            h('span', { className: 'rmap-tl-gutf-sw', style: { background: cols[b.li] || 'var(--muted)' } }),
+            h('span', { className: 'rmap-tl-gutf-t' }, (m.laneLabels[b.li] || ('Sáv ' + b.li))));
+        }));
+    }
+    // v2/V3 activity histogram bars for the rail scrub track — bucket the dated nodes across [tMin,tMax] into ~44 bins
+    function tlHistoBars() {
+      var m = g && g.tl; if (!m) return []; var BINS = 44, bins = new Array(BINS).fill(0), span = (m.tMax - m.tMin) || 1, mx = 1;
+      g.N.forEach(function (n) { if (n.ts == null) return; var bi = Math.max(0, Math.min(BINS - 1, Math.floor((n.ts - m.tMin) / span * BINS))); bins[bi]++; if (bins[bi] > mx) mx = bins[bi]; });
+      return bins.map(function (c) { return c / mx; });
     }
     function tlStepCard(dir) {   // ⏮/⏭ — jump the cursor to the prev/next card in creation order
       tlPause(); var m = g && g.tl; if (!m) return; var arr = g.N.filter(function (n) { return n.ts != null; }).map(function (n) { return n.ts; }).sort(function (a, b) { return a - b; });
@@ -6698,6 +6746,7 @@
     var PHASE_COL = ['violet', 'cyan', 'slate', 'amber', 'rose', 'green', 'rose'];
     function autoLayoutStages() {
       if (!props.canEdit || !framesCap || stagesBusy.current) return;
+      if (tlOn || phaseArr) { window.PRUI.toast('Elrendezés-mód aktív — előbb lépj vissza „Szabad"-ra.', { kind: 'info' }); return; }   // don't persist ephemeral coords / stamp frames from transient positions
       stagesBusy.current = true;   // guard from the moment ⌗ is clicked until the arrange settles (no duplicate frames on double-click)
       window.PRUI.confirm({ title: 'Rendezés fázisokba?', body: 'A kártyák a munkafolyamat-fázisok (Ötlet → Irodalom → Áttekintés → Protokoll → Folyóirat → Írás) szerint sávokba rendeződnek, és minden fázishoz keret készül. Ez FELÜLÍRJA a kézi elrendezést (a ↺ gombbal visszaállítható).', confirmLabel: 'Rendezés' }).then(function (ok) {
         if (!ok || !alive.current) { stagesBusy.current = false; return; }
@@ -6725,7 +6774,7 @@
     function toggleMsel(id) { setSelEdge(null); setMsel(function (M) { var m = Object.assign({}, M); if (m[id]) delete m[id]; else m[id] = true; return m; }); }   // node multi-select clears any edge selection (mutual exclusion)
     function startNodeDrag(e, n) {
       if (e.button !== 0) return;   // left button only — right-click opens the generate menu
-      if (tlOn) { setSel(n.id); return; }   // 🕰 timeline: positions are derived (read-only) — select but don't drag
+      if (tlOn || phaseArr) { setSel(n.id); return; }   // 🕰 timeline / ⌗ ephemeral phase arrange: positions are derived (read-only) — select but don't drag (a drag would snap back + write a spurious layout row)
       if (commentMode) { e.stopPropagation(); setComposer({ node_id: n.id }); setCmText(''); return; }   // comment mode: attach a comment to this card
       if (e.shiftKey) { toggleMsel(n.id); return; }   // shift-click toggles multi-selection (no drag)
       var startX = e.clientX, startY = e.clientY, k = view.k || 1, ox = n.x, oy = n.y, can = props.canEdit;
@@ -7730,7 +7779,7 @@
       fbOpen ? h('div', { className: 'rmap-explorer' },
         h('div', { className: 'rmap-exp-head' }, h('span', { className: 'rmap-exp-t' }, '🗂 Fájlok'), h('span', { style: { flex: 1 } }), h('button', { className: 'rmap-exp-x', title: 'Panel összecsukása', onClick: function () { setFbOpen(false); try { localStorage.setItem('pr-rmap-fb', '0'); } catch (e) { } } }, '‹')),
         h('div', { className: 'rmap-exp-body' }, h(SessionFileBrowser, { projectId: props.projectId, version: bump, canEdit: props.canEdit, authorId: props.authorId, onChanged: function () { setBump(function (x) { return x + 1; }); }, onAttach: function (a) { setDAttach(function (p) { return p.concat([a]); }); if (window.PRUI) window.PRUI.toast('📎 Csatolva: ' + String(a.label || a.name || 'fájl').slice(0, 40), { kind: 'ok' }); }, mapNodeId: fileNodeId, onLocate: locateFile, locatedFileId: fbLocatedId }))) : null,
-      h('div', { className: 'rmap-stage-col' },
+      h('div', { className: 'rmap-stage-col' + (tlOn ? ' rmap-tl-active' : '') },
       h('div', { className: 'rmap-stage', ref: stageRef, onMouseDown: onDown, onWheel: onWheel, onMouseMove: broadcastCursor, onDoubleClick: onStageDbl },
         // empty project: a small non-blocking welcome overlay so work can start from the Map (canvas + dock render normally underneath)
         (!g.N.length) ? h('div', { className: 'rmap-empty-hint', onMouseDown: function (e) { e.stopPropagation(); } },
@@ -7745,7 +7794,7 @@
           // 🕰 timeline chrome (ephemeral, behind everything) — lane bands + ruler + gutter + playhead
           g.tl ? renderTlChrome() : null,
           // frames (named regions) render BEHIND everything; the body is pointer-events:none so cards stay interactive
-          (tlOn ? [] : frames).map(function (f) {
+          (tlOn || phaseArr ? [] : frames).map(function (f) {
             var gg = (frLive && frLive.id === f.id) ? frLive : f;
             return h('div', { key: 'fr' + f.id, className: 'rmap-frame rmap-fc-' + (f.color || 'slate'), style: { position: 'absolute', left: gg.x + 'px', top: gg.y + 'px', width: gg.w + 'px', height: gg.h + 'px' } },
               h('div', { className: 'rmap-frame-h', onMouseEnter: props.canEdit ? function () { setHovFrame(f.id); } : null, onMouseLeave: props.canEdit ? function () { setHovFrame(null); } : null, onMouseDown: props.canEdit ? function (e) { startFrameDrag(e, f, 'move'); } : null },
@@ -7771,7 +7820,7 @@
           g.N.map(function (n) { if (!nodeVisible(n)) return null; var _sized = !!((nrzLive && nrzLive.id === n.id) || (layout[n.id] && layout[n.id].card_h)); var _kk = view.k, _cw = Math.min((n._w || NW), (cardVP.w - 16) / _kk); var _st = { left: n.x + 'px', top: n.y + 'px', width: _cw + 'px' }; if (_sized) _st.height = Math.min((n._h || NH), (cardVP.h - 16) / _kk) + 'px'; return h('div', { key: n.id, 'data-nid': n.id, className: 'rmap-node t-' + n.t + (_sized ? ' rmap-sized' : '') + (sel === n.id ? ' sel' : '') + (msel[n.id] ? ' rmap-mselected' : '') + (n.mapPinned ? ' rmap-pinned' : '') + (activeKey && n.ph === RMAP_PHASE_IDX[activeKey] ? ' inphase' : '') + (props.canEdit ? ' editable' : '') + (dlive && dlive.id === n.id ? ' dragging' : '') + ((nrzLive && nrzLive.id === n.id) ? ' rmap-resizing' : '') + (linkDrag && linkDrag.over === n.id ? ' rmap-linktarget' : '') + (linkDrag && linkDrag.from === n.id ? ' rmap-linksource' : '') + (justPlaced && justPlaced.indexOf(n.id) >= 0 ? ' rmap-justplaced' : '') + (hovCarry[n.id] ? ' rmap-carry-preview' : '') + (tlCurT != null && n.ts != null && n.ts > tlCurT ? ' rmap-tl-future' : '') + (tlOn && n.tsEst ? ' rmap-tl-est' : ''), style: _st, onMouseDown: function (e) { e.stopPropagation(); startNodeDrag(e, n); }, onDoubleClick: function (e) { e.stopPropagation(); if (canEnter(n)) enterNode(n); }, onContextMenu: function (e) { e.preventDefault(); e.stopPropagation(); if (props.canEdit && (genActions(n).length || regenActions(n).length || (cardSizeCap && layout[n.id] && layout[n.id].card_h))) setMenu({ node: n, x: e.clientX, y: e.clientY }); } }, n.mapPinned ? h('span', { className: 'rmap-pin-badge', title: 'Kitűzött' }, '📌') : null, nodeCmCount(n.id) ? h('span', { className: 'rmap-cm-badge', title: nodeCmCount(n.id) + ' nyitott komment', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); setOpenThread(n.id); } }, '💬' + nodeCmCount(n.id)) : null, (n.t === 'step' && n.ref && (n.ref.assignee_id || n.ref.signed_off_by)) ? h('span', { className: 'rmap-step-badges' }, n.ref.assignee_id ? h('span', { className: 'rmap-assignee', title: 'Felelős: ' + nameOf(n.ref.assignee_id), style: { background: userColor(n.ref.assignee_id) } }, String(nameOf(n.ref.assignee_id) || '?').trim().charAt(0).toUpperCase()) : null, n.ref.signed_off_by ? h('span', { className: 'rmap-signoff', title: 'Jóváhagyta: ' + nameOf(n.ref.signed_off_by) }, '✅') : null) : null, n.t === 'gap' ? gapNovRing(n) : null, h('div', { className: 'rmap-nb' }, body(n), richTier(n)),
             (props.canEdit && edgesCap) ? ['n', 'e', 's', 'w'].map(function (dir) { return h('span', { key: 'port' + dir, className: 'rmap-port rmap-port-' + dir, title: 'Húzz kapcsolatot egy másik kártyához', onMouseDown: function (e) { e.stopPropagation(); startLinkDrag(e, n.id); } }); }) : null,
             (props.canEdit && producibleTypes(n).length) ? h('span', { key: 'arcpip', className: 'rmap-arcpip' + (arcOpen === n.id ? ' on' : ''), title: 'Generálj ebből ▸', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); if (sel !== n.id) { setSelEdge(null); setMsel({}); setSel(n.id); } setArcOpen(arcOpen === n.id ? null : n.id); } }, '✦') : null,
-            (props.canEdit && cardSizeCap) ? h('span', { className: 'rmap-node-rz', title: 'Átméretezés (húzd)', onMouseDown: function (e) { e.stopPropagation(); startNodeResize(e, n); } }) : null); })),
+            (props.canEdit && cardSizeCap && !tlOn && !phaseArr) ? h('span', { className: 'rmap-node-rz', title: 'Átméretezés (húzd)', onMouseDown: function (e) { e.stopPropagation(); startNodeResize(e, n); } }) : null); })),
         // page bar (saved views) — top-left tabs; the active page can be curated (only pinned) / re-captured / renamed / deleted
         pagesCap ? h('div', { className: 'rmap-pagebar', onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
           h('div', { className: 'rmap-pagetabs' },
@@ -7823,8 +7872,8 @@
         // group action bar — appears when 2+ cards are multi-selected
         (Object.keys(msel).length > 1) ? h('div', { className: 'rmap-groupbar', onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
           h('b', null, Object.keys(msel).length + ' kijelölve'),
-          (mapFlags && props.canEdit) ? h('button', { title: 'A kijelöltek kitűzése', onClick: groupPin }, '📌') : null,
-          (mapFlags && props.canEdit) ? h('button', { title: 'A kijelöltek elrejtése a térképről', onClick: groupHide }, '🙈') : null,
+          (mapFlags && props.canEdit && !tlOn && !phaseArr) ? h('button', { title: 'A kijelöltek kitűzése', onClick: groupPin }, '📌') : null,
+          (mapFlags && props.canEdit && !tlOn && !phaseArr) ? h('button', { title: 'A kijelöltek elrejtése a térképről', onClick: groupHide }, '🙈') : null,
           h('button', { title: 'A kijelölés exportálása PNG-be', onClick: exportSelection }, '⤓'),
           (framesCap && props.canEdit) ? h('button', { title: 'Kijelöltek keretbe csoportosítása (⌘/Ctrl+G)', onClick: groupIntoFrame }, '▢+') : null,
           props.canEdit ? h('button', { title: 'A kijelölt kártyák végleges törlése', style: { color: 'var(--danger, #b42318)' }, onClick: function () { nodesDelete(Object.keys(msel).map(function (id) { return g.by[id]; })); } }, '🗑') : null,
@@ -7846,21 +7895,27 @@
             h('button', { key: 'files', className: 'rmap-dbtn' + (fbOpen ? ' on' : ''), title: 'Fájl-böngésző (bal panel) — a projekt fájljai + kártya-kiemelés', onClick: function () { setFbOpen(function (v) { var nv = !v; try { localStorage.setItem('pr-rmap-fb', nv ? '1' : '0'); } catch (e) { } return nv; }); } }, '🗂', L('Fájlok')),
             (pagesCap && pages.length > 1) ? h('button', { key: 'tour', className: 'rmap-dbtn', title: 'Gyors túra: végigzoomol a mentett Lapokon', onClick: tourStart }, '▶', L('Lap-túra')) : null,
             pathsCap ? h('button', { key: 'pres', className: 'rmap-dbtn' + (presMgrOpen ? ' on' : ''), title: 'Bemutatók (Prezi-story): jelenetekből álló, vezetett túra', onClick: function () { setPresMgrOpen(function (v) { return !v; }); } }, '🎬', L('Bemutató')) : null,
-            (g.N.length > 1) ? h('button', { key: 'tl', className: 'rmap-dbtn' + (tlOn ? ' on' : ''), title: tlOn ? 'Idővonal-nézet bezárása (Esc) — vissza a kézi elrendezéshez' : 'Idővonal: mikor mi jött létre — a kártyák a keletkezési idejük szerint (efemer, nem írja felül az elrendezést)', onClick: tlToggle }, '🕰', L('Idővonal')) : null
+            (g.N.length > 1) ? h('div', { key: 'arr', className: 'rmap-arrpill' },
+              h('span', { className: 'rmap-arrpill-l' }, 'Elrendezés'),
+              h('div', { className: 'rmap-arrpill-seg' }, [['free', '⤫', 'Szabad'], ['phase', '⌗', 'Fázis'], ['time', '🕰', 'Idő']].map(function (o) {
+                var on = (o[0] === 'time' && tlOn) || (o[0] === 'phase' && phaseArr) || (o[0] === 'free' && !tlOn && !phaseArr);
+                var tt = o[0] === 'free' ? 'Szabad — a kézi (mentett) elrendezés' : (o[0] === 'phase' ? 'Fázis — efemer fázis-oszlopok (nem írja felül a mentett elrendezést; ez NEM a ⌗ Fázisokba)' : 'Idő — idővonal: keletkezési idő szerint (efemer)');
+                return h('button', { key: o[0], className: (on ? 'on' : ''), title: tt, onClick: function () { arrSet(o[0]); } }, o[1], ' ', o[2]);
+              }))) : null
           ].filter(Boolean);
           var g2 = [
-            (props.canEdit && framesCap) ? h('button', { key: 'frame', className: 'rmap-dbtn', title: 'Új keret (nevesített régió) — vagy dupla-katt a vászonra', onClick: function () { frameCreate(); } }, '▦', L('Új keret')) : null,
-            (props.canEdit && framesCap) ? h('button', { key: 'auto', className: 'rmap-dbtn', title: 'Rendezés fázisokba (sávok + keretek) — felülírja a kézi elrendezést', onClick: autoLayoutStages }, '⌗', L('Fázisokba')) : null,
+            (props.canEdit && framesCap && !tlOn && !phaseArr) ? h('button', { key: 'frame', className: 'rmap-dbtn', title: 'Új keret (nevesített régió) — vagy dupla-katt a vászonra', onClick: function () { frameCreate(); } }, '▦', L('Új keret')) : null,
+            (props.canEdit && framesCap && !tlOn && !phaseArr) ? h('button', { key: 'auto', className: 'rmap-dbtn', title: 'Rendezés fázisokba (sávok + keretek) — felülírja a kézi elrendezést', onClick: autoLayoutStages }, '⌗', L('Fázisokba')) : null,
             props.canEdit ? h('button', { key: 'undo', className: 'rmap-dbtn', disabled: !histRef.current.undo.length, style: { opacity: histRef.current.undo.length ? 1 : 0.38 }, title: 'Visszavonás (⌘Z)' + (histRef.current.undo.length ? ' — ' + (histRef.current.undo[histRef.current.undo.length - 1].label || '') : ''), onClick: doUndo }, '↶', L('Vissza' + (histRef.current.undo.length ? ' · ' + histRef.current.undo.length : ''))) : null,
             props.canEdit ? h('button', { key: 'redo', className: 'rmap-dbtn', disabled: !histRef.current.redo.length, style: { opacity: histRef.current.redo.length ? 1 : 0.38 }, title: 'Újra (⌘⇧Z)', onClick: doRedo }, '↷', L('Újra')) : null,
             props.canEdit ? h('button', { key: 'hist', className: 'rmap-dbtn' + (histPanelOpen ? ' on' : ''), title: 'Előzmények — mi történt a térképen', onClick: function () { setHistPanelOpen(function (v) { return !v; }); } }, '🕘', L('Előzmények')) : null,
-            (props.canEdit && g.N.length > 1) ? h('button', { key: 'tidy', className: 'rmap-dbtn', title: 'Rendezd el — csak az egymásra csúszott kártyákat húzza szét, a többi a helyén marad', onClick: tidyLayout }, '🧹', L('Rendezd el')) : null,
-            (props.canEdit && cardSizeCap && g.N.length > 1) ? h('button', { key: 'smart', className: 'rmap-dbtn', disabled: smartBusy, title: 'Okos elrendezés — tartalom-tudatos: fázis-oszlopokba rendezi ÉS a tartalmuk szerint átméretezi a kártyákat (⌘Z-vel visszavonható; a kitűzött kártyákat békén hagyja)', onClick: smartLayout }, smartBusy ? '⏳' : '✨', L('Okos elrendezés')) : null,
+            (props.canEdit && g.N.length > 1 && !tlOn && !phaseArr) ? h('button', { key: 'tidy', className: 'rmap-dbtn', title: 'Rendezd el — csak az egymásra csúszott kártyákat húzza szét, a többi a helyén marad', onClick: tidyLayout }, '🧹', L('Rendezd el')) : null,
+            (props.canEdit && cardSizeCap && g.N.length > 1 && !tlOn && !phaseArr) ? h('button', { key: 'smart', className: 'rmap-dbtn', disabled: smartBusy, title: 'Okos elrendezés — tartalom-tudatos: fázis-oszlopokba rendezi ÉS a tartalmuk szerint átméretezi a kártyákat (⌘Z-vel visszavonható; a kitűzött kártyákat békén hagyja)', onClick: smartLayout }, smartBusy ? '⏳' : '✨', L('Okos elrendezés')) : null,
             commentsCap ? h('button', { key: 'cm', className: 'rmap-dbtn' + (commentMode ? ' on' : ''), title: commentMode ? 'Komment-mód kikapcsolása' : 'Komment-mód: kattints a vászonra vagy egy kártyára', onClick: function () { setCommentMode(function (v) { return !v; }); setComposer(null); } }, '💬', L('Komment-mód')) : null,
             (commentsCap && comments.length) ? h('button', { key: 'cmp', className: 'rmap-dbtn', title: 'Összes komment', onClick: function () { setCmPanelOpen(function (v) { return !v; }); } }, '📋' + (cmUnresolved || ''), L('Kommentek')) : null,
             (data && data.hiddenFigs && data.hiddenFigs.length) ? h('button', { key: 'hf', className: 'rmap-dbtn', title: 'Térképről levett ábrák visszahozása', onClick: function () { setRestoreOpen(true); } }, '🖼' + data.hiddenFigs.length, L('Rejtett ábrák')) : null,
             (mapFlags && g.N.filter(function (n) { return n.mapHidden; }).length) ? h('button', { key: 'hn', className: 'rmap-dbtn', title: 'Rejtett kártyák visszahozása', onClick: function () { setNodeRestoreOpen(true); } }, '🫥' + g.N.filter(function (n) { return n.mapHidden; }).length, L('Rejtett kártyák')) : null,
-            (props.canEdit && Object.keys(layout).length) ? h('button', { key: 'reset', className: 'rmap-dbtn', title: 'Automatikus elrendezés (a saját pozíciók törlése)', onClick: resetLayout }, '↺', L('Auto-elrendezés')) : null
+            (props.canEdit && Object.keys(layout).length && !tlOn && !phaseArr) ? h('button', { key: 'reset', className: 'rmap-dbtn', title: 'Automatikus elrendezés (a saját pozíciók törlése)', onClick: resetLayout }, '↺', L('Auto-elrendezés')) : null
           ].filter(Boolean);
           var g3 = [
             h('button', { key: 'fit', className: 'rmap-dbtn', title: 'Illeszd a nézetbe (a teljes gráf látszódjon)', onClick: fitView }, '⤢', L('Nézetbe')),
@@ -7873,26 +7928,34 @@
           return h.apply(null, ['div', { className: 'rmap-zoom', onMouseMove: function (e) { dockMagnify(e.currentTarget, e.clientX, 82, 30); }, onMouseLeave: function (e) { dockReset(e.currentTarget); } }].concat(kids));
         })(),
         // 🕰 Idővonal UI — top-center pickers (idő-leképezés + sáv) + a bottom scrubber/replay transport (screen-space, only in timeline mode)
-        (tlOn && g.tl) ? h('div', { className: 'rmap-tl-ui', onMouseDown: function (e) { e.stopPropagation(); } },
-          h('div', { className: 'rmap-tl-pickers' },
-            h('span', { className: 'rmap-tl-plbl' }, '🕰 Idővonal'),
-            h('div', { className: 'rmap-tl-seg' }, [['squished', 'Sűrített'], ['linear', 'Lineáris'], ['ordinal', 'Sorrend'], ['depth', 'Származás']].map(function (o) { return h('button', { key: o[0], className: (tlX === o[0] ? 'on' : ''), title: o[0] === 'depth' ? 'Származás: x = DAG-mélység (miből mi), az órától függetlenül' : o[1], onClick: function () { setTlX(o[0]); setTimeout(function () { if (alive.current) fitView(); }, 70); } }, o[1]); })),
-            h('div', { className: 'rmap-tl-seg' }, [['phase', 'Fázis'], ['type', 'Típus']].map(function (o) { return h('button', { key: o[0], className: (tlLane === o[0] ? 'on' : ''), onClick: function () { setTlLane(o[0]); setTimeout(function () { if (alive.current) fitView(); }, 70); } }, o[1]); })),
-            (props.canEdit && pathsCap) ? h('button', { className: 'rmap-tl-close', title: 'A kronológiai bejárás mentése Prezi-bemutatóként (🎬 Bemutatók közé)', onClick: tlSavePresentation }, '🎬 Mentés bemutatóként') : null,
-            h('button', { className: 'rmap-tl-close', title: 'Kilépés (Esc)', onClick: tlExit }, '✕ Kilépés')),
-          (tlX === 'depth') ? null : (function () {   // depth = generation-x, not time → the time-scrubber/replay is meaningless; only the pickers show
-            var m = g.tl, curT = m.tMin + tlCur * (m.tMax - m.tMin), shown = g.N.filter(function (n) { return n.ts == null || n.ts <= curT; }).length;
-            var dl = tlCur >= 1 ? 'Teljes projekt' : (isFinite(curT) ? new Date(curT).toLocaleDateString('hu-HU', { year: 'numeric', month: '2-digit', day: '2-digit' }) : '—');
-            return h('div', { className: 'rmap-tl-scrub' },
-              h('button', { className: 'rmap-tl-tb', title: 'Előző kártya', onClick: function () { tlStepCard(-1); } }, '⏮'),
-              h('button', { className: 'rmap-tl-tb play', title: 'Lejátszás / szünet', onClick: function () { tlPlay ? tlStopPlay() : tlStartPlay(); } }, tlPlay ? '⏸' : '▶'),
-              h('button', { className: 'rmap-tl-tb', title: 'Következő kártya', onClick: function () { tlStepCard(1); } }, '⏭'),
-              h('button', { className: 'rmap-tl-tb' + (tlFollow ? ' on' : ''), title: tlFollow ? 'Követő-kamera BE — lejátszáskor a nézet a lejátszófejet követi' : 'Követő-kamera KI', onClick: function () { setTlFollow(function (v) { var nv = !v; tlFollowRef.current = nv; return nv; }); } }, '📷'),
-              h('div', { className: 'rmap-tl-track', onMouseDown: function (e) { e.stopPropagation(); tlPause(); var r = e.currentTarget.getBoundingClientRect(); function stt(ev) { tlSetCur((ev.clientX - r.left) / r.width); } stt(e); function mv(ev) { stt(ev); } function up() { window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); } window.addEventListener('mousemove', mv); window.addEventListener('mouseup', up); } },
-                h('div', { className: 'rmap-tl-fill', style: { width: (tlCur * 100) + '%' } }),
-                h('div', { className: 'rmap-tl-knob', style: { left: (tlCur * 100) + '%' } })),
-              h('div', { className: 'rmap-tl-readout' }, dl, h('small', null, shown + ' / ' + g.N.length + ' kártya')));
-          })()) : null,
+        // 🕰 Idővonal — canvas-wide integration (V3): a fixed left lane-gutter + a full-width bottom RAIL (toggles · transport+scrub+histogram · readout+save+exit). NO central floating box.
+        (tlOn && g.tl) ? h(React.Fragment, null,
+          renderTlGutter(),
+          h('div', { className: 'rmap-tl-rail' + (tlX === 'depth' ? ' depth' : ''), onMouseDown: function (e) { e.stopPropagation(); } },
+            h('div', { className: 'rmap-tl-rleft' },
+              h('span', { className: 'rmap-tl-rlbl' }, 'Idő'),
+              h('div', { className: 'rmap-tl-seg' }, [['squished', 'Sűrített'], ['linear', 'Lineáris'], ['ordinal', 'Sorrend'], ['depth', 'Származás']].map(function (o) { return h('button', { key: o[0], className: (tlX === o[0] ? 'on' : ''), title: o[0] === 'depth' ? 'Származás: x = DAG-mélység (miből mi), az órától függetlenül' : o[1], onClick: function () { setTlX(o[0]); setTimeout(function () { if (alive.current) fitView(); }, 70); } }, o[1]); })),
+              h('span', { className: 'rmap-tl-rlbl' }, 'Sáv'),
+              h('div', { className: 'rmap-tl-seg' }, [['phase', 'Fázis'], ['type', 'Típus']].map(function (o) { return h('button', { key: o[0], className: (tlLane === o[0] ? 'on' : ''), onClick: function () { setTlLane(o[0]); setTimeout(function () { if (alive.current) fitView(); }, 70); } }, o[1]); }))),
+            (tlX === 'depth')
+              ? h('div', { className: 'rmap-tl-rcenter rmap-tl-depthnote' }, '⌗ Származás-nézet — a kártyák DAG-mélység szerint; az idő-lejátszás nem alkalmazható')
+              : h('div', { className: 'rmap-tl-rcenter' },
+                h('button', { className: 'rmap-tl-tb', title: 'Előző kártya', onClick: function () { tlStepCard(-1); } }, '⏮'),
+                h('button', { className: 'rmap-tl-tb play', title: 'Lejátszás / szünet', onClick: function () { tlPlay ? tlStopPlay() : tlStartPlay(); } }, tlPlay ? '⏸' : '▶'),
+                h('button', { className: 'rmap-tl-tb', title: 'Következő kártya', onClick: function () { tlStepCard(1); } }, '⏭'),
+                h('button', { className: 'rmap-tl-tb' + (tlFollow ? ' on' : ''), title: tlFollow ? 'Követő-kamera BE — lejátszáskor a nézet a lejátszófejet követi' : 'Követő-kamera KI', onClick: function () { setTlFollow(function (v) { var nv = !v; tlFollowRef.current = nv; return nv; }); } }, '📷'),
+                h('div', { className: 'rmap-tl-track', onMouseDown: function (e) { e.stopPropagation(); tlPause(); var r = e.currentTarget.getBoundingClientRect(); function stt(ev) { tlSetCur((ev.clientX - r.left) / r.width); } stt(e); function mv(ev) { stt(ev); } function up() { window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); } window.addEventListener('mousemove', mv); window.addEventListener('mouseup', up); } },
+                  h('div', { className: 'rmap-tl-histo' }, tlHistoBars().map(function (v, i) { return h('i', { key: i, style: { height: (4 + v * 96) + '%' } }); })),
+                  h('div', { className: 'rmap-tl-fill', style: { width: (tlCur * 100) + '%' } }),
+                  h('div', { className: 'rmap-tl-knob', style: { left: (tlCur * 100) + '%' } }))),
+            (function () {
+              var m = g.tl, curT = m.tMin + tlCur * (m.tMax - m.tMin), shown = g.N.filter(function (n) { return n.ts == null || n.ts <= curT; }).length;
+              var dl = (tlX === 'depth') ? (g.N.length + ' kártya') : (tlCur >= 1 ? 'Teljes projekt' : (isFinite(curT) ? new Date(curT).toLocaleDateString('hu-HU', { year: 'numeric', month: '2-digit', day: '2-digit' }) : '—'));
+              return h('div', { className: 'rmap-tl-rright' },
+                h('div', { className: 'rmap-tl-readout' }, dl, (tlX !== 'depth') ? h('small', null, shown + ' / ' + g.N.length + ' kártya') : null),
+                (props.canEdit && pathsCap) ? h('button', { className: 'rmap-tl-rbtn', title: 'A kronológiai bejárás mentése Prezi-bemutatóként (🎬 Bemutatók közé)', onClick: tlSavePresentation }, '🎬 Mentés') : null,
+                h('button', { className: 'rmap-tl-rbtn exit', title: 'Vissza a szabad elrendezéshez (Esc)', onClick: tlExit }, '✕ Kilépés'));
+            })())) : null,
         // "hidden figures" restore panel — bring Map-removed figures (on_map=false) back onto the Map
         (restoreOpen && data && data.hiddenFigs) ? h('div', { style: { position: 'absolute', left: '50%', bottom: 74, transform: 'translateX(-50%)', zIndex: 14, width: 264, maxHeight: '58%', overflowY: 'auto', background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 12, boxShadow: '0 18px 50px -20px rgba(20,26,40,.55)', padding: 12 }, onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
           (function () { ensureFigUrls(data.hiddenFigs); return null; })(),
@@ -8154,8 +8217,8 @@
       (props.canEdit && pvSel) ? h('button', { className: 'sel-idea-btn', style: { position: 'fixed', left: pvSel.x, top: pvSel.y - 40, transform: 'translateX(-50%)', zIndex: 61 }, onMouseDown: function (e) { e.preventDefault(); }, onClick: pvAddSnippet }, '✚ Chat-kontextus') : null,
       // floating selection toolbar — compact quick-actions above the selected card (pin / hide / generate / export)
       (sn && props.canEdit) ? h('div', { className: 'rmap-seltool', style: selToolStyle(sn), onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); }, onMouseMove: function (e) { dockMagnify(e.currentTarget, e.clientX, 78, 26); }, onMouseLeave: function (e) { dockReset(e.currentTarget); } },
-        mapFlags ? h('button', { className: 'rmap-dbtn' + ((layout[sn.id] && layout[sn.id].pinned) ? ' on' : ''), title: (layout[sn.id] && layout[sn.id].pinned) ? 'Kitűzés levétele' : 'Kitűzés (fontos)', onClick: function () { nodeTogglePinned(sn); } }, '📌', h('span', { className: 'rmap-dlab' }, (layout[sn.id] && layout[sn.id].pinned) ? 'Kitűzés levétele' : 'Kitűzés')) : null,
-        mapFlags ? h('button', { className: 'rmap-dbtn', title: 'Elrejtés a térképről', onClick: function () { nodeToggleHidden(sn); } }, '🙈', h('span', { className: 'rmap-dlab' }, 'Elrejtés')) : null,
+        (mapFlags && !tlOn && !phaseArr) ? h('button', { className: 'rmap-dbtn' + ((layout[sn.id] && layout[sn.id].pinned) ? ' on' : ''), title: (layout[sn.id] && layout[sn.id].pinned) ? 'Kitűzés levétele' : 'Kitűzés (fontos)', onClick: function () { nodeTogglePinned(sn); } }, '📌', h('span', { className: 'rmap-dlab' }, (layout[sn.id] && layout[sn.id].pinned) ? 'Kitűzés levétele' : 'Kitűzés')) : null,
+        (mapFlags && !tlOn && !phaseArr) ? h('button', { className: 'rmap-dbtn', title: 'Elrejtés a térképről', onClick: function () { nodeToggleHidden(sn); } }, '🙈', h('span', { className: 'rmap-dlab' }, 'Elrejtés')) : null,
         canEnter(sn) ? h('button', { className: 'rmap-dbtn', title: 'Belépés a kártyába — a panel a helyén nyílik meg (Prezi-zoom)', onClick: function () { enterNode(sn); } }, '◇', h('span', { className: 'rmap-dlab' }, 'Belépés')) : null,
         (props.canEdit && editSpec(sn)) ? h('button', { className: 'rmap-dbtn', title: 'Metaadat szerkesztése', onClick: function () { openEdit(sn); } }, '✎', h('span', { className: 'rmap-dlab' }, 'Szerkesztés')) : null,
         (genActions(sn).length || regenActions(sn).length) ? h('button', { className: 'rmap-dbtn', title: 'Generálás innen', onClick: function (e) { e.stopPropagation(); setMenu({ node: sn, x: e.clientX, y: e.clientY }); } }, '⚡', h('span', { className: 'rmap-dlab' }, 'Generálás')) : null,

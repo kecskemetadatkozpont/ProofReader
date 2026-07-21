@@ -1482,6 +1482,47 @@
     .rmap-e-base.rmap-e-tlflow { stroke: #f59e0b !important; stroke-width: 3px !important; stroke-dasharray: 6 7; animation: rmap-tlflow .7s linear infinite; filter: drop-shadow(0 0 3px rgba(245,158,11,.55)); }
     @keyframes rmap-tlflow { to { stroke-dashoffset: -26; } }
     @media (prefers-reduced-motion: reduce) { .rmap-e-base.rmap-e-tlflow { animation: none; } }
+    /* 🕰 Idővonal V3 — canvas-wide: dock arrangement pill + dock-lift + full-width bottom RAIL + fixed left lane-gutter + amber spine */
+    .rmap-tl-active .rmap-zoom { bottom: calc(16px + 60px); transition: bottom .26s cubic-bezier(.4,0,.2,1); }
+    .rmap-tl-active .rmap-dock, .rmap-tl-active .rmap-dock-fab { bottom: calc(14px + 60px); transition: bottom .26s cubic-bezier(.4,0,.2,1); }
+    .rmap-zoom { flex-wrap: wrap; row-gap: 4px; }   /* the arrangement pill widens the dock — wrap instead of clipping the zoom controls off-screen on a narrow canvas */
+    .rmap-arrpill { display: inline-flex; align-items: center; gap: 6px; padding: 0 4px; }
+    .rmap-arrpill-l { font-size: 10px; color: var(--muted); font-weight: 600; }
+    .rmap-arrpill-seg { display: inline-flex; background: var(--surface-2); border: 1px solid var(--line); border-radius: 9px; padding: 2px; gap: 2px; }
+    .rmap-arrpill-seg button { font: inherit; font-size: 11.5px; color: var(--muted); background: none; border: 0; border-radius: 7px; padding: 4px 10px; cursor: pointer; white-space: nowrap; transition: .12s; }
+    .rmap-arrpill-seg button:hover { color: var(--ink); }
+    .rmap-arrpill-seg button.on { background: #f59e0b; color: #241a08; font-weight: 600; }
+    .rmap-tl-ruler { border-bottom-color: color-mix(in srgb, #f59e0b 45%, var(--line)); }
+    .rmap-tl-rail { position: absolute; left: 0; right: 0; bottom: 0; height: 58px; display: flex; align-items: center; gap: 14px; padding: 0 14px; z-index: 15;
+      background: linear-gradient(180deg, color-mix(in srgb, var(--surface) 90%, transparent), color-mix(in srgb, var(--surface) 97%, transparent));
+      backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-top: 2px solid #f59e0b; box-shadow: 0 -10px 30px -18px rgba(20,26,40,.5); animation: rmap-tl-railin .26s cubic-bezier(.4,0,.2,1); }
+    @keyframes rmap-tl-railin { from { transform: translateY(100%); } to { transform: translateY(0); } }
+    .rmap-tl-rleft { display: flex; align-items: center; gap: 9px; flex: none; }
+    .rmap-tl-rlbl { font-size: 11px; color: var(--muted); font-weight: 600; }
+    .rmap-tl-rcenter { flex: 1; display: flex; align-items: center; gap: 9px; min-width: 60px; }
+    .rmap-tl-rright { display: flex; align-items: center; gap: 9px; flex: none; }
+    .rmap-tl-depthnote { justify-content: center; color: var(--muted); font-size: 12px; font-style: italic; }
+    .rmap-tl-tb { width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink); font-size: 12px; cursor: pointer; display: grid; place-items: center; flex: none; }
+    .rmap-tl-tb:hover { border-color: #f59e0b; }
+    .rmap-tl-tb.play { background: #f59e0b; border-color: #f59e0b; color: #241a08; width: 34px; height: 34px; font-size: 14px; }
+    .rmap-tl-tb.on { background: #f59e0b; border-color: #f59e0b; color: #241a08; }
+    .rmap-tl-track { position: relative; flex: 1; height: 34px; display: flex; align-items: center; cursor: pointer; min-width: 80px; }
+    .rmap-tl-track::before { content: ""; position: absolute; left: 0; right: 0; height: 4px; border-radius: 3px; background: var(--surface-2); border: 1px solid var(--line); }
+    .rmap-tl-histo { position: absolute; left: 0; right: 0; bottom: 15px; height: 16px; display: flex; align-items: flex-end; gap: 1.5px; opacity: .5; pointer-events: none; }
+    .rmap-tl-histo i { flex: 1; background: linear-gradient(180deg, #fbbf24, transparent); border-radius: 1px 1px 0 0; min-height: 1px; }
+    .rmap-tl-fill { position: absolute; left: 0; height: 4px; border-radius: 3px; background: linear-gradient(90deg, #fbbf24, #f59e0b); pointer-events: none; }
+    .rmap-tl-knob { position: absolute; width: 15px; height: 15px; border-radius: 50%; background: #fff; border: 3px solid #f59e0b; top: 50%; transform: translate(-50%,-50%); box-shadow: 0 2px 6px rgba(20,26,40,.4); pointer-events: none; z-index: 2; }
+    .rmap-tl-readout { font-size: 11.5px; color: var(--ink); text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; min-width: 92px; }
+    .rmap-tl-readout small { display: block; color: var(--muted); font-weight: 400; font-size: 10px; }
+    .rmap-tl-rbtn { font-size: 11.5px; color: var(--muted); background: none; border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; cursor: pointer; white-space: nowrap; }
+    .rmap-tl-rbtn:hover { color: var(--ink); border-color: var(--muted); }
+    .rmap-tl-rbtn.exit:hover { color: var(--danger, #d6323a); border-color: var(--danger, #d6323a); }
+    .rmap-tl-gutf { position: absolute; left: 0; top: 0; bottom: 0; width: 132px; z-index: 6; pointer-events: none; overflow: hidden;
+      background: linear-gradient(90deg, color-mix(in srgb, var(--surface) 92%, transparent), color-mix(in srgb, var(--surface) 72%, transparent)); border-right: 1px solid var(--line); }
+    .rmap-tl-gutf-h { position: absolute; top: 0; left: 0; right: 0; height: 46px; display: flex; align-items: center; justify-content: center; font-family: ui-monospace, Menlo, monospace; font-size: 9px; letter-spacing: .12em; color: var(--muted); border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--surface) 88%, transparent); }
+    .rmap-tl-gutf-row { position: absolute; left: 8px; right: 8px; display: flex; align-items: flex-start; gap: 6px; padding-top: 8px; overflow: hidden; }
+    .rmap-tl-gutf-sw { width: 8px; height: 8px; border-radius: 3px; flex: none; margin-top: 2px; }
+    .rmap-tl-gutf-t { font-size: 11px; font-weight: 650; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.25; }
     .rmap-node.editable { cursor: grab; }
     .rmap-node.dragging { cursor: grabbing; z-index: 30; transition: none; box-shadow: 0 3px 8px rgba(20,26,40,.14), 0 22px 44px -16px rgba(20,26,40,.6); }
     .rmap-node.inphase { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 20%, transparent), 0 10px 26px -20px rgba(20,26,40,.5); }
@@ -1585,7 +1626,7 @@
   <script type="text/babel" src="canvas.jsx?v=1783137934"></script>
   <script type="text/babel" src="notes.jsx?v=1783137934"></script>
   <script src="autopilot-core.js?v=1784160000"></script>
-  <script type="text/babel" src="research.jsx?v=1787540000"></script>
+  <script type="text/babel" src="research.jsx?v=1787620000"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>

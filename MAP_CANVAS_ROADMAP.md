@@ -571,6 +571,26 @@
   **LOD chip-tömörítés: kihagyva** — a meglévő LOD amúgy is kompakttá teszi a kártyákat timeline-ban. Migráció NEM kell
   (a Mentés a migration-79 `research_map_paths`-t használja, graceful ha nincs). Version `?v=1787480000`.
 
+## 🕰 Idővonal V3 — szerves Canvas-integráció („A vászon MAGA az idővonal") — 2026-07-21
+> User: „az idővonal olyan, mint egy középre dobott különálló widget — épüljön be SZERVESEN a teljes Canvas-ba, az opciók
+> TOGGLE-ök legyenek, az egész vászonra hassanak." 3-szög design-workflow → interaktív mockup (artifact 17d71fb0, 🕰, 3 variáns)
+> → user-választás: **V3 „Szabad|Fázis|Idő" fő-kapcsoló, aktivitás-hisztogrammal.**
+- [x] ✅ **V3 canvas-integráció (`<tbd>`, 4-dim review-workflow: 5 fix + fix-verify):** a „középen widget" érzés a KÉT lebegő
+  központi dobozból jött (felső picker + alsó scrubber). Feloldva a vászon peremein: **(1) Dokk-elrendezés-pill** — a `🕰 Idővonal`
+  gomb helyén `Elrendezés: ⤫ Szabad · ⌗ Fázis · 🕰 Idő` (a többi vászon-vezérlő mellett). **(2) ÚJ efemer „Fázis" elrendezés**
+  (`phaseArrangeLayout` — fázis-oszlopok, magasság-tudatos, NEM persistál, NEM a romboló ⌗ Fázisokba; a `phaseArr` state a `tlOn`
+  párja, mindkettő a `graph()` override-ban). **(3) Teljes szélességű alsó SÍN** (csak Idő-ben): bal=Idő/Sáv toggle-ök ·
+  közép=lejátszó+scrub+**aktivitás-hisztogram** (`tlHistoBars`) · jobb=dátum+🎬 Mentés+✕ Kilépés. **(4) Fix bal sáv-GUTTER**
+  (`renderTlGutter`) — screen-space, a világ-sávokra vetítve (`view.ty + band.top·view.k`), a címkék mindig látszanak, típus/fázis-
+  színnel (`TL_PHASE_COLORS`/`TL_TYPE_COLORS`). **(5) Teljes-magasságú borostyán lejátszófej** (`top:0`) + a sín felső éle =
+  közös **idő-gerinc**; a dokkok megemelkednek a sín fölé (`.rmap-tl-active`). Minden meglévő logika (`tlX/tlLane/timelineLayout/
+  renderTlChrome/tlStartPlay/tlFollow`) VÁLTOZATLANUL újrahasznosul; csak a két lebegő doboz cserélve + a címkék a fix gutterbe.
+  **Review-fixek (5):** (HIGH) a `🧹/✨/⌗` elrendezők + a `↺` NEM futhatnak efemer módban (a `startNodeDrag` read-only szerződését
+  tükrözve — különben a transzient koordinátákat perzisztálnák → a „Szabad" veszteséges lenne): early-return guard + a 4 gomb
+  csak `!tlOn && !phaseArr`-ban renderel; (MED) a `.rmap-dock-fab` a sín mögé került → lift; (LOW) a pill szélesíti a dokkot →
+  `flex-wrap:wrap`; (LOW) a keretek Fázis-módban is rejtve (`tlOn || phaseArr ? []`). Fázis-módban a húzás is tiltva.
+  Kliens-oldali, NINCS migráció. Version `?v=1787620000`.
+
 ## 🚫 FEDÉS-TILALOM minden elrendezésben + Markdown-kártya tartalom-méretezés — 2026-07-21
 > User-kérés: „Fontos, hogy a kártyák SOSE kerüljenek fedésbe egymással az elrendezések során. Pl. a Markdown-kártyákat
 > méretezzük a tartalmuknak megfelelően, hogy jól olvashatóak legyenek." Review: a fedés-garancia PROVABLY tartja (verify pass).
