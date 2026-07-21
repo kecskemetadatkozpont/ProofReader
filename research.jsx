@@ -4822,7 +4822,8 @@
     var tlnS = useState('phase'), tlLane = tlnS[0], setTlLane = tlnS[1];   // 'phase' | 'type'
     var tcS = useState(1), tlCur = tcS[0], setTlCur = tcS[1];   // scrubber cursor 0..1 (1 = whole project shown)
     var tpS = useState(false), tlPlay = tpS[0], setTlPlay = tpS[1];   // replay playing
-    var tlRaf = useRef(0), tlLast = useRef(0), tlCurRef = useRef(1), tlPlayRef = useRef(false);   // rAF handle + last-frame ts + live cursor mirror + playing flag (for the pan-pause + play loop)
+    var tfS = useState(true), tlFollow = tfS[0], setTlFollow = tfS[1];   // v2 follow-cam: pan the camera to keep the playhead centered during replay
+    var tlRaf = useRef(0), tlLast = useRef(0), tlCurRef = useRef(1), tlPlayRef = useRef(false), tlFollowRef = useRef(true);   // rAF handle + last-frame ts + live cursor mirror + playing flag + follow-cam flag (for the pan-pause + play loop)
     var gdrag = useRef(null);   // in-flight group-drag lifecycle guard
     var mqRef = useRef(null);   // in-flight marquee start point (stage coords)
     var frS = useState([]), frames = frS[0], setFrames = frS[1];   // Map frames (named regions / phase lanes) — migration-71
@@ -5314,6 +5315,9 @@
         n._h = (ly && ly.card_h) || hgt[n.id] || (72 + Math.min(4, Math.ceil(String(n.title || '').length / 22)) * 17);   // manual height or measured or estimated
         if (nrzLive && nrzLive.id === n.id) { n._w = nrzLive.w; n._h = nrzLive.h; }   // follow the in-flight resize 1:1
       });
+      // build the node index + fold user-drawn MANUAL edges into E EARLY (before ts-stamping + the timeline layout) so the ts-fill AND the Származás/depth topology see the full graph incl. the very links the user drew to express derivation
+      var by = {}; N.forEach(function (n) { by[n.id] = n; });
+      if (edgesCap) Object.keys(edgeOv).forEach(function (k) { var ov = edgeOv[k]; if (ov && ov.manual && ov.from_id && ov.to_id && by[ov.from_id] && by[ov.to_id]) E.push([ov.from_id, ov.to_id, 'manual']); });
       // 🕰 timeline timestamps: n.ts (epoch ms) from the source row's created_at (chat = updated_at); aggregates/derived get an estimate.
       N.forEach(function (n) { var r = n.ref, s = r ? (n.t === 'chat' ? (r.updated_at || r.created_at) : (r.created_at || r.updated_at)) : null; var t = s ? Date.parse(s) : NaN; n.ts = isNaN(t) ? null : t; });
       (function () {   // fill null-ts nodes (lit/sr aggregates, undated) from the DAG: min(children)-eps else max(parents)+eps; iterate to a fixpoint
@@ -5344,13 +5348,10 @@
       if (dlive && dlive.id) { for (var q = 0; q < N.length; q++) { if (N[q].id === dlive.id) { N[q].x = dlive.x; N[q].y = dlive.y; break; } } }
       // group drag: every multi-selected card moves together by the same delta from its captured base position
       if (gLive && gLive.base) { for (var gq = 0; gq < N.length; gq++) { var gb = gLive.base[N[gq].id]; if (gb) { N[gq].x = gb.x + gLive.dx; N[gq].y = gb.y + gLive.dy; } } }
-      // 🕰 Idővonal override — replace positions with a computed timeline layout (ephemeral, like gLive; NEVER persisted). The FINAL say, so maxY/by/manual-edge fold below recompute for free. Toggling tlOn off falls through the normal path → saved positions/pins reappear untouched.
+      // 🕰 Idővonal override — replace positions with a computed timeline layout (ephemeral, like gLive; NEVER persisted). The FINAL positioning say, so maxY below recompute for free (by + the manual-edge fold are built ABOVE, before ts-stamping). Toggling tlOn off falls through the normal path → saved positions/pins reappear untouched.
       var tlMeta = null;
       if (tlOn) { tlMeta = timelineLayout(N, E, { xMode: tlX, laneBy: tlLane }); N.forEach(function (n) { var p = tlMeta.pos[n.id]; if (p) { n.x = p.x; n.y = p.y; } }); }
       var maxY = 400; N.forEach(function (n) { maxY = Math.max(maxY, n.y + (n._h || 78) + 44); });
-      var by = {}; N.forEach(function (n) { by[n.id] = n; });
-      // P2 manual edges: fold user-drawn links (manual override rows, edge_key = from|to|manual) into E when both ends exist
-      if (edgesCap) Object.keys(edgeOv).forEach(function (k) { var ov = edgeOv[k]; if (ov && ov.manual && ov.from_id && ov.to_id && by[ov.from_id] && by[ov.to_id]) E.push([ov.from_id, ov.to_id, 'manual']); });
       return { N: N, E: E, height: maxY, by: by, tl: tlMeta };
     }
 
@@ -5395,9 +5396,10 @@
       stopFollow(); cancelFly(); tourStop(); drag.current = { sx: e.clientX, sy: e.clientY, tx: view.tx, ty: view.ty }; window.addEventListener('mousemove', onMove); window.addEventListener('mouseup', onUp);
     }
     function onWheel(e) { e.preventDefault(); tlPause(); stopFollow(); cancelFly(); tourStop(); var st = stageRef.current; if (!st) return; var r = st.getBoundingClientRect(); var mx = e.clientX - r.left, my = e.clientY - r.top; setView(function (v) { var nk = Math.min(2.2, Math.max(.3, v.k * (e.deltaY < 0 ? 1.12 : 0.89))); return { tx: mx - (mx - v.tx) * (nk / v.k), ty: my - (my - v.ty) * (nk / v.k), k: nk }; }); }
-    function zoom(f) { stopFollow(); cancelFly(); tourStop(); setView(function (v) { var nk = Math.min(2.2, Math.max(.3, v.k * f)); return { tx: v.tx, ty: v.ty, k: nk }; }); }
+    function zoom(f) { tlPause(); stopFollow(); cancelFly(); tourStop(); setView(function (v) { var nk = Math.min(2.2, Math.max(.3, v.k * f)); return { tx: v.tx, ty: v.ty, k: nk }; }); }
     // fit the whole graph into the viewport (Luma "illeszd a nézetbe"). Uses card size 204x74.
     function fitView() {
+      tlPause();   // a manual fit (Nézetbe) must not be clobbered by the next follow-cam frame
       var st = stageRef.current; if (!st || !g.N || !g.N.length) return;
       var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
       g.N.forEach(function (n) { if (!nodeVisible(n)) return; if (n.x < minX) minX = n.x; if (n.y < minY) minY = n.y; if (n.x + nodeW(n) > maxX) maxX = n.x + nodeW(n); if (n.y + nodeH(n) > maxY) maxY = n.y + nodeH(n); });
@@ -6585,6 +6587,12 @@
           dated.forEach(function (n, i) { xs[n.id] = GUT + PAD + (dated.length < 2 ? 0 : i / (dated.length - 1)) * SP2; });
           var so = Math.max(1, Math.round(dated.length / 9));
           for (var io = 0; io < dated.length; io += so) ticks.push({ x: xs[dated[io].id], lab: '#' + (io + 1) });
+        } else if (xMode === 'depth') {   // v2 Származás: x = DAG-generation from the roots (NOT the clock) — pure "what came from what"; longest-path via iterative relaxation (order-independent + cycle-clamped, so a manual cycle can't hang or give order-dependent columns)
+          var gmemo = {}, cap = N.length; N.forEach(function (n) { gmemo[n.id] = 0; });
+          for (var pass = 0; pass < cap; pass++) { var chg = false; E.forEach(function (e) { if (gmemo[e[0]] != null && gmemo[e[1]] != null) { var cand = gmemo[e[0]] + 1; if (cand > gmemo[e[1]] && cand <= cap) { gmemo[e[1]] = cand; chg = true; } } }); if (!chg) break; }
+          var maxg = 0; N.forEach(function (n) { if (gmemo[n.id] > maxg) maxg = gmemo[n.id]; });
+          var COLW = 250; N.forEach(function (n) { xs[n.id] = GUT + PAD + gmemo[n.id] * COLW; });
+          for (var gd = 0; gd <= maxg; gd++) ticks.push({ x: GUT + PAD + gd * COLW, lab: 'Gen ' + gd });
         } else {   // squished: bucket by day, width ∝ count, fixed gap, fan within a bucket
           var byDay = {}; dated.forEach(function (n) { var dd = Math.floor((n.ts - tMin) / DAYMS); (byDay[dd] = byDay[dd] || []).push(n); });
           var keys = Object.keys(byDay).map(Number).sort(function (a, b) { return a - b; }), cx = GUT + PAD;
@@ -6595,7 +6603,7 @@
           });
         }
       }
-      undated.forEach(function (n) { xs[n.id] = GUT / 2; });   // undated → far-left gutter column
+      if (xMode !== 'depth') undated.forEach(function (n) { xs[n.id] = GUT / 2; });   // undated → far-left gutter column (in depth mode they keep their DAG generation)
       var laneCount = laneBy === 'type' ? TL_TYPE_LABELS.length : 7, lanes = [];
       for (var li = 0; li < laneCount; li++) lanes.push([]);
       N.forEach(function (n) { var l = tlLaneOf(n, laneBy); if (l >= laneCount) l = laneCount - 1; lanes[l].push(n); });
@@ -6608,7 +6616,7 @@
       });
       var pos = {}, contentW = 0;
       N.forEach(function (n) { var l = tlLaneOf(n, laneBy); if (l >= laneCount) l = laneCount - 1; var x = Math.round((xs[n.id] || GUT / 2) - (n._w || CW) / 2), y = Math.round(laneTop[l] + 10 + (n._trow || 0) * ROWH); pos[n.id] = { x: x, y: y }; contentW = Math.max(contentW, x + (n._w || CW)); });
-      return { pos: pos, tMin: tMin, tMax: tMax, ticks: ticks, bands: bands, laneTop: laneTop, height: acc, gut: GUT, ruler: RULER, contentW: contentW + PAD, laneLabels: (laneBy === 'type' ? TL_TYPE_LABELS : TL_PHASE_LABELS) };
+      return { pos: pos, tMin: tMin, tMax: tMax, ticks: ticks, bands: bands, laneTop: laneTop, height: acc, gut: GUT, ruler: RULER, contentW: contentW + PAD, xMode: xMode, laneLabels: (laneBy === 'type' ? TL_TYPE_LABELS : TL_PHASE_LABELS) };
     }
     // timeline replay + mode control
     function tlPlayLoop(ts) {
@@ -6616,8 +6624,17 @@
       if (!tlLast.current) tlLast.current = ts;
       var dt = ts - tlLast.current; tlLast.current = ts;
       var nc = tlCurRef.current + dt / 9000;   // ~9s full sweep at 1×
-      if (nc >= 1) { tlCurRef.current = 1; if (alive.current) setTlCur(1); tlStopPlay(); return; }
-      tlCurRef.current = nc; if (alive.current) setTlCur(nc); tlRaf.current = requestAnimationFrame(tlPlayLoop);
+      if (nc >= 1) { tlCurRef.current = 1; if (alive.current) setTlCur(1); tlStopPlay(); if (tlFollowRef.current && alive.current) tlFollowCam(1); return; }
+      tlCurRef.current = nc; if (alive.current) setTlCur(nc);
+      if (tlFollowRef.current && alive.current) tlFollowCam(nc);   // v2 follow-cam: keep the playhead centered
+      tlRaf.current = requestAnimationFrame(tlPlayLoop);
+    }
+    function tlFollowCam(nc) {   // ease the camera so the playhead world-x sits ~42% from the left of the stage
+      var m = g && g.tl, st = stageRef.current; if (!m || !st) return;
+      if (m.xMode === 'depth') return;   // depth = generation-x, not time → no time-playhead to follow (would lurch over non-monotonic columns)
+      var px = tlXForT(m.tMin + nc * (m.tMax - m.tMin)), sw = st.clientWidth || 900, v = viewRef.current;
+      var targetTx = sw * 0.42 - px * v.k, ntx = v.tx + (targetTx - v.tx) * 0.12;
+      if (Math.abs(ntx - v.tx) > 0.4) setView(function (vv) { return { tx: ntx, ty: vv.ty, k: vv.k }; });
     }
     function tlStartPlay() { if (!g || !g.tl) return; if (tlCurRef.current >= 1) { tlCurRef.current = 0; setTlCur(0); } tlPlayRef.current = true; setTlPlay(true); tlLast.current = 0; tlRaf.current = requestAnimationFrame(tlPlayLoop); }
     function tlStopPlay() { tlPlayRef.current = false; if (alive.current) setTlPlay(false); if (tlRaf.current) { cancelAnimationFrame(tlRaf.current); tlRaf.current = 0; } }
@@ -6642,7 +6659,7 @@
       m.bands.forEach(function (b) { els.push(h('div', { key: 'tlb' + b.li, className: 'rmap-tl-band' + (b.li % 2 ? ' alt' : ''), style: { top: b.top + 'px', height: b.h + 'px', width: m.contentW + 'px' } }, h('span', { className: 'rmap-tl-lanelbl' }, lane[b.li] || ('Sáv ' + b.li)))); });
       els.push(h('div', { key: 'tlgut', className: 'rmap-tl-gutter', style: { top: m.ruler + 'px', height: (m.height - m.ruler) + 'px', width: m.gut + 'px' } }, h('span', null, 'Dátlan / becsült')));
       els.push(h('div', { key: 'tlruler', className: 'rmap-tl-ruler', style: { width: m.contentW + 'px', height: m.ruler + 'px' } }, (m.ticks || []).map(function (t, i) { return h('div', { key: 'tk' + i, className: 'rmap-tl-tick', style: { left: t.x + 'px' } }, h('span', null, t.lab)); })));
-      var px = tlXForT(tlCursorT()); els.push(h('div', { key: 'tlph', className: 'rmap-tl-playhead', style: { left: px + 'px', top: m.ruler + 'px', height: (m.height - m.ruler) + 'px' } }));
+      if (tlX !== 'depth') { var px = tlXForT(tlCursorT()); els.push(h('div', { key: 'tlph', className: 'rmap-tl-playhead', style: { left: px + 'px', top: m.ruler + 'px', height: (m.height - m.ruler) + 'px' } })); }   // depth mode: x is DAG-generation, not time → no time-playhead
       return h('div', { key: 'tlchrome', className: 'rmap-tl-chrome' }, els);
     }
     function tlStepCard(dir) {   // ⏮/⏭ — jump the cursor to the prev/next card in creation order
@@ -6651,6 +6668,19 @@
       if (dir > 0) { idx = arr.findIndex(function (v) { return v > t + 1; }); if (idx < 0) idx = arr.length - 1; }
       else { for (idx = arr.length - 1; idx >= 0 && arr[idx] >= t - 1; idx--) { } if (idx < 0) idx = 0; }
       tlSetCur((m.tMax - m.tMin) ? (arr[idx] - m.tMin) / (m.tMax - m.tMin) : 1);
+    }
+    // v2 — snapshot the chronological walk into a saved Prezi story (research_map_paths). Node beats re-resolve to each card's
+    // LIVE position at play time (resolveBeat → nodeTarget), so the saved story walks the cards in creation order regardless of layout.
+    function tlSavePresentation() {
+      if (!props.canEdit || !pathsCap || !g || !g.tl) return;
+      var ordered = g.N.filter(function (n) { return n.ts != null && nodeVisible(n); }).sort(function (a, b) { return a.ts - b.ts; });
+      if (!ordered.length) { window.PRUI.toast('Nincs időbélyeges kártya a bemutatóhoz.', { kind: 'info' }); return; }
+      var steps = ordered.map(function (n) { var tab = RMAP_TYPE[n.t] && RMAP_TYPE[n.t].tab, v = nodeTarget(n, 1.4); return { kind: 'node', ref_id: n.id, tx: v.tx, ty: v.ty, k: v.k, caption: (n.title || (RMAP_TYPE[n.t] && RMAP_TYPE[n.t].lab) || ''), notes: (n.ts ? new Date(n.ts).toLocaleDateString('hu-HU') : '') + (n.tsEst ? ' (becsült)' : ''), enter_panel: false, panel_tab: tab, dwell_ms: 2600 }; });
+      sb.from('research_map_paths').insert({ project_id: props.projectId, name: 'Idővonal — ' + new Date().toLocaleDateString('hu-HU'), ord: paths.length, steps: steps }).select('id,name,ord,steps').single().then(function (r) {
+        if (!alive.current) return;
+        if (r && r.error) { window.PRUI.toast('Mentés sikertelen: ' + r.error.message, { kind: 'error' }); return; }
+        if (r && r.data) { setPaths(function (P) { return P.some(function (x) { return x.id === r.data.id; }) ? P : P.concat([r.data]); }); window.PRUI.toast(ordered.length + ' jelenetes bemutató mentve · nyisd meg a 🎬 Bemutatók közül', { kind: 'success' }); }
+      });
     }
     // Fázis 2.5 (opt-in, Prezi-B): arrange the cards into per-phase lanes + a named frame each. Overwrites manual
     // positions → behind a confirm; matches frames by title so re-running updates instead of duplicating.
@@ -7490,6 +7520,9 @@
     // narrative path). Derived from the live tour state — no extra state. Page/viewport beats (no nodeId) yield no thread.
     var storyPair = null;
     if (tour && tour.beats && tour.i > 0) { var _pbe = tour.beats[tour.i - 1], _cbe = tour.beats[tour.i]; if (_pbe && _cbe && _pbe.nodeId && _cbe.nodeId) storyPair = { a: _pbe.nodeId, b: _cbe.nodeId }; }
+    // 🕰 timeline cursor time (once per render) — drives the future-dim on nodes + the v2 edge-flow when a card crosses the playhead. Null in depth mode (x = generation, not time → no playhead → no time-keyed reveal/flow).
+    var tlCurT = (tlOn && g.tl && tlX !== 'depth') ? (g.tl.tMin + tlCur * (g.tl.tMax - g.tl.tMin)) : null;
+    var tlFlowWin = (tlCurT != null) ? (g.tl.tMax - g.tl.tMin) * 0.03 : 0;
     var edgeEls = g.E.map(function (e, i) {
       var a = g.by[e[0]], b = g.by[e[1]]; if (!a || !b) return null; if (!nodeVisible(a) || !nodeVisible(b)) return null;
       var pa = bpt(a, b), pb = bpt(b, a); var dx = (pb.x - pa.x) * 0.5;
@@ -7499,12 +7532,14 @@
       var ek = edgeKey(e), st = edgeStyle(e), on = selEdge === ek;
       var isStory = !!(storyPair && ((e[0] === storyPair.a && e[1] === storyPair.b) || (e[0] === storyPair.b && e[1] === storyPair.a)));
       if (hiddenEdgeTypes[st.kind] && !isStory) return null;   // P1: filtered off in the legend (the story thread always shows)
+      // v2 timeline edge-flow: while replaying, the edge whose EFFECT (target) node just crossed the playhead marches in amber (causality flowing)
+      var tlFlow = !!(tlOn && tlPlay && tlCurT != null && b.ts != null && Math.abs(b.ts - tlCurT) < tlFlowWin && b.ts >= a.ts);
       var animCls = st.anim === 'flow' ? ' rmap-ea-flow' : st.anim === 'pulse' ? ' rmap-ea-pulse' : st.anim === 'pingpong' ? ' rmap-ea-pingpong' : '';
       var extraW = isStory ? 1.5 : (on ? 1 : 0);
       // --esp = per-edge animation duration (type default unless the speed slider overrode it); comet/draw/pulse/calm keep the chosen line-style dash
       var bstyle = { stroke: st.col, strokeWidth: (st.width + extraW) + 'px', '--esp': st.sp + 's' };
       if (st.anim !== 'flow' && st.anim !== 'pingpong') bstyle.strokeDasharray = edgeDash(st.line);
-      var base = h('path', { key: 'b', className: 'rmap-e-base' + animCls + (on ? ' rmap-e-sel' : '') + (isStory ? ' rmap-e-story' : ''), d: d, style: bstyle, markerEnd: st.arrow ? ('url(#rmap-' + st.arrow + ')') : null });
+      var base = h('path', { key: 'b', className: 'rmap-e-base' + animCls + (on ? ' rmap-e-sel' : '') + (isStory ? ' rmap-e-story' : '') + (tlFlow ? ' rmap-e-tlflow' : ''), d: d, style: bstyle, markerEnd: st.arrow ? ('url(#rmap-' + st.arrow + ')') : null });
       var bead = (isStory || st.anim === 'comet' || st.anim === 'draw') ? h('path', { key: 'd', className: 'rmap-e-bead ' + (isStory || st.anim === 'comet' ? 'rmap-eb-comet' : 'rmap-eb-draw'), d: d, pathLength: 200, style: { stroke: st.col, strokeWidth: (st.width + 1.5) + 'px', '--esp': (isStory ? 1.2 : st.sp) + 's' } }) : null;
       var ring = on ? [h('circle', { key: 'r1', className: 'rmap-e-ring', cx: pa.x, cy: pa.y, r: 7 }), h('circle', { key: 'r2', className: 'rmap-e-ring', cx: pb.x, cy: pb.y, r: 7 })] : null;
       var hit = h('path', { key: 'h', className: 'rmap-e-hit', d: d, onClick: function (ev) { ev.stopPropagation(); selectEdge(ek); } });
@@ -7722,7 +7757,7 @@
               h('marker', { id: 'rmap-ar', viewBox: '0 0 8 8', refX: 6.5, refY: 4, markerWidth: 6.5, markerHeight: 6.5, orient: 'auto-start-reverse', markerUnits: 'userSpaceOnUse' }, h('path', { d: 'M0.5,0.5 L7.5,4 L0.5,7.5 Z', fill: 'context-stroke' })),
               h('marker', { id: 'rmap-bl', viewBox: '0 0 8 8', refX: 5.5, refY: 4, markerWidth: 8, markerHeight: 8, orient: 'auto-start-reverse', markerUnits: 'userSpaceOnUse' }, h('path', { d: 'M5,1 L5,7', stroke: 'context-stroke', strokeWidth: 1.6 }))),
             edgeEls, linkRubber),
-          g.N.map(function (n) { if (!nodeVisible(n)) return null; var _sized = !!((nrzLive && nrzLive.id === n.id) || (layout[n.id] && layout[n.id].card_h)); var _kk = view.k, _cw = Math.min((n._w || NW), (cardVP.w - 16) / _kk); var _st = { left: n.x + 'px', top: n.y + 'px', width: _cw + 'px' }; if (_sized) _st.height = Math.min((n._h || NH), (cardVP.h - 16) / _kk) + 'px'; return h('div', { key: n.id, 'data-nid': n.id, className: 'rmap-node t-' + n.t + (_sized ? ' rmap-sized' : '') + (sel === n.id ? ' sel' : '') + (msel[n.id] ? ' rmap-mselected' : '') + (n.mapPinned ? ' rmap-pinned' : '') + (activeKey && n.ph === RMAP_PHASE_IDX[activeKey] ? ' inphase' : '') + (props.canEdit ? ' editable' : '') + (dlive && dlive.id === n.id ? ' dragging' : '') + ((nrzLive && nrzLive.id === n.id) ? ' rmap-resizing' : '') + (linkDrag && linkDrag.over === n.id ? ' rmap-linktarget' : '') + (linkDrag && linkDrag.from === n.id ? ' rmap-linksource' : '') + (justPlaced && justPlaced.indexOf(n.id) >= 0 ? ' rmap-justplaced' : '') + (hovCarry[n.id] ? ' rmap-carry-preview' : '') + (tlOn && n.ts != null && g.tl && n.ts > (g.tl.tMin + tlCur * (g.tl.tMax - g.tl.tMin)) ? ' rmap-tl-future' : '') + (tlOn && n.tsEst ? ' rmap-tl-est' : ''), style: _st, onMouseDown: function (e) { e.stopPropagation(); startNodeDrag(e, n); }, onDoubleClick: function (e) { e.stopPropagation(); if (canEnter(n)) enterNode(n); }, onContextMenu: function (e) { e.preventDefault(); e.stopPropagation(); if (props.canEdit && (genActions(n).length || regenActions(n).length || (cardSizeCap && layout[n.id] && layout[n.id].card_h))) setMenu({ node: n, x: e.clientX, y: e.clientY }); } }, n.mapPinned ? h('span', { className: 'rmap-pin-badge', title: 'Kitűzött' }, '📌') : null, nodeCmCount(n.id) ? h('span', { className: 'rmap-cm-badge', title: nodeCmCount(n.id) + ' nyitott komment', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); setOpenThread(n.id); } }, '💬' + nodeCmCount(n.id)) : null, (n.t === 'step' && n.ref && (n.ref.assignee_id || n.ref.signed_off_by)) ? h('span', { className: 'rmap-step-badges' }, n.ref.assignee_id ? h('span', { className: 'rmap-assignee', title: 'Felelős: ' + nameOf(n.ref.assignee_id), style: { background: userColor(n.ref.assignee_id) } }, String(nameOf(n.ref.assignee_id) || '?').trim().charAt(0).toUpperCase()) : null, n.ref.signed_off_by ? h('span', { className: 'rmap-signoff', title: 'Jóváhagyta: ' + nameOf(n.ref.signed_off_by) }, '✅') : null) : null, n.t === 'gap' ? gapNovRing(n) : null, h('div', { className: 'rmap-nb' }, body(n), richTier(n)),
+          g.N.map(function (n) { if (!nodeVisible(n)) return null; var _sized = !!((nrzLive && nrzLive.id === n.id) || (layout[n.id] && layout[n.id].card_h)); var _kk = view.k, _cw = Math.min((n._w || NW), (cardVP.w - 16) / _kk); var _st = { left: n.x + 'px', top: n.y + 'px', width: _cw + 'px' }; if (_sized) _st.height = Math.min((n._h || NH), (cardVP.h - 16) / _kk) + 'px'; return h('div', { key: n.id, 'data-nid': n.id, className: 'rmap-node t-' + n.t + (_sized ? ' rmap-sized' : '') + (sel === n.id ? ' sel' : '') + (msel[n.id] ? ' rmap-mselected' : '') + (n.mapPinned ? ' rmap-pinned' : '') + (activeKey && n.ph === RMAP_PHASE_IDX[activeKey] ? ' inphase' : '') + (props.canEdit ? ' editable' : '') + (dlive && dlive.id === n.id ? ' dragging' : '') + ((nrzLive && nrzLive.id === n.id) ? ' rmap-resizing' : '') + (linkDrag && linkDrag.over === n.id ? ' rmap-linktarget' : '') + (linkDrag && linkDrag.from === n.id ? ' rmap-linksource' : '') + (justPlaced && justPlaced.indexOf(n.id) >= 0 ? ' rmap-justplaced' : '') + (hovCarry[n.id] ? ' rmap-carry-preview' : '') + (tlCurT != null && n.ts != null && n.ts > tlCurT ? ' rmap-tl-future' : '') + (tlOn && n.tsEst ? ' rmap-tl-est' : ''), style: _st, onMouseDown: function (e) { e.stopPropagation(); startNodeDrag(e, n); }, onDoubleClick: function (e) { e.stopPropagation(); if (canEnter(n)) enterNode(n); }, onContextMenu: function (e) { e.preventDefault(); e.stopPropagation(); if (props.canEdit && (genActions(n).length || regenActions(n).length || (cardSizeCap && layout[n.id] && layout[n.id].card_h))) setMenu({ node: n, x: e.clientX, y: e.clientY }); } }, n.mapPinned ? h('span', { className: 'rmap-pin-badge', title: 'Kitűzött' }, '📌') : null, nodeCmCount(n.id) ? h('span', { className: 'rmap-cm-badge', title: nodeCmCount(n.id) + ' nyitott komment', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); setOpenThread(n.id); } }, '💬' + nodeCmCount(n.id)) : null, (n.t === 'step' && n.ref && (n.ref.assignee_id || n.ref.signed_off_by)) ? h('span', { className: 'rmap-step-badges' }, n.ref.assignee_id ? h('span', { className: 'rmap-assignee', title: 'Felelős: ' + nameOf(n.ref.assignee_id), style: { background: userColor(n.ref.assignee_id) } }, String(nameOf(n.ref.assignee_id) || '?').trim().charAt(0).toUpperCase()) : null, n.ref.signed_off_by ? h('span', { className: 'rmap-signoff', title: 'Jóváhagyta: ' + nameOf(n.ref.signed_off_by) }, '✅') : null) : null, n.t === 'gap' ? gapNovRing(n) : null, h('div', { className: 'rmap-nb' }, body(n), richTier(n)),
             (props.canEdit && edgesCap) ? ['n', 'e', 's', 'w'].map(function (dir) { return h('span', { key: 'port' + dir, className: 'rmap-port rmap-port-' + dir, title: 'Húzz kapcsolatot egy másik kártyához', onMouseDown: function (e) { e.stopPropagation(); startLinkDrag(e, n.id); } }); }) : null,
             (props.canEdit && producibleTypes(n).length) ? h('span', { key: 'arcpip', className: 'rmap-arcpip' + (arcOpen === n.id ? ' on' : ''), title: 'Generálj ebből ▸', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); if (sel !== n.id) { setSelEdge(null); setMsel({}); setSel(n.id); } setArcOpen(arcOpen === n.id ? null : n.id); } }, '✦') : null,
             (props.canEdit && cardSizeCap) ? h('span', { className: 'rmap-node-rz', title: 'Átméretezés (húzd)', onMouseDown: function (e) { e.stopPropagation(); startNodeResize(e, n); } }) : null); })),
@@ -7819,7 +7854,7 @@
           var g3 = [
             h('button', { key: 'fit', className: 'rmap-dbtn', title: 'Illeszd a nézetbe (a teljes gráf látszódjon)', onClick: fitView }, '⤢', L('Nézetbe')),
             h('button', { key: 'zin', className: 'rmap-dbtn', title: 'Nagyítás', onClick: function () { zoom(1.18); } }, '+', L('Nagyítás')),
-            h('button', { key: 'pct', className: 'rmap-dbtn rmap-zoompct' + (Math.abs(view.k - 1) > 0.01 ? ' off' : ''), title: 'Vissza 100%-ra (1:1)', onClick: function () { setView(function (v) { return { tx: v.tx, ty: v.ty, k: 1 }; }); } }, (Math.abs(view.k - 1) > 0.01 ? '⟲ ' : '') + Math.round(view.k * 100) + '%', L('Vissza 100%-ra')),
+            h('button', { key: 'pct', className: 'rmap-dbtn rmap-zoompct' + (Math.abs(view.k - 1) > 0.01 ? ' off' : ''), title: 'Vissza 100%-ra (1:1)', onClick: function () { tlPause(); setView(function (v) { return { tx: v.tx, ty: v.ty, k: 1 }; }); } }, (Math.abs(view.k - 1) > 0.01 ? '⟲ ' : '') + Math.round(view.k * 100) + '%', L('Vissza 100%-ra')),
             h('button', { key: 'zout', className: 'rmap-dbtn', title: 'Kicsinyítés', onClick: function () { zoom(0.85); } }, '−', L('Kicsinyítés'))
           ];
           var kids = [];
@@ -7830,16 +7865,18 @@
         (tlOn && g.tl) ? h('div', { className: 'rmap-tl-ui', onMouseDown: function (e) { e.stopPropagation(); } },
           h('div', { className: 'rmap-tl-pickers' },
             h('span', { className: 'rmap-tl-plbl' }, '🕰 Idővonal'),
-            h('div', { className: 'rmap-tl-seg' }, [['squished', 'Sűrített'], ['linear', 'Lineáris'], ['ordinal', 'Sorrend']].map(function (o) { return h('button', { key: o[0], className: (tlX === o[0] ? 'on' : ''), title: o[1], onClick: function () { setTlX(o[0]); setTimeout(function () { if (alive.current) fitView(); }, 70); } }, o[1]); })),
+            h('div', { className: 'rmap-tl-seg' }, [['squished', 'Sűrített'], ['linear', 'Lineáris'], ['ordinal', 'Sorrend'], ['depth', 'Származás']].map(function (o) { return h('button', { key: o[0], className: (tlX === o[0] ? 'on' : ''), title: o[0] === 'depth' ? 'Származás: x = DAG-mélység (miből mi), az órától függetlenül' : o[1], onClick: function () { setTlX(o[0]); setTimeout(function () { if (alive.current) fitView(); }, 70); } }, o[1]); })),
             h('div', { className: 'rmap-tl-seg' }, [['phase', 'Fázis'], ['type', 'Típus']].map(function (o) { return h('button', { key: o[0], className: (tlLane === o[0] ? 'on' : ''), onClick: function () { setTlLane(o[0]); setTimeout(function () { if (alive.current) fitView(); }, 70); } }, o[1]); })),
+            (props.canEdit && pathsCap) ? h('button', { className: 'rmap-tl-close', title: 'A kronológiai bejárás mentése Prezi-bemutatóként (🎬 Bemutatók közé)', onClick: tlSavePresentation }, '🎬 Mentés bemutatóként') : null,
             h('button', { className: 'rmap-tl-close', title: 'Kilépés (Esc)', onClick: tlExit }, '✕ Kilépés')),
-          (function () {
+          (tlX === 'depth') ? null : (function () {   // depth = generation-x, not time → the time-scrubber/replay is meaningless; only the pickers show
             var m = g.tl, curT = m.tMin + tlCur * (m.tMax - m.tMin), shown = g.N.filter(function (n) { return n.ts == null || n.ts <= curT; }).length;
             var dl = tlCur >= 1 ? 'Teljes projekt' : (isFinite(curT) ? new Date(curT).toLocaleDateString('hu-HU', { year: 'numeric', month: '2-digit', day: '2-digit' }) : '—');
             return h('div', { className: 'rmap-tl-scrub' },
               h('button', { className: 'rmap-tl-tb', title: 'Előző kártya', onClick: function () { tlStepCard(-1); } }, '⏮'),
               h('button', { className: 'rmap-tl-tb play', title: 'Lejátszás / szünet', onClick: function () { tlPlay ? tlStopPlay() : tlStartPlay(); } }, tlPlay ? '⏸' : '▶'),
               h('button', { className: 'rmap-tl-tb', title: 'Következő kártya', onClick: function () { tlStepCard(1); } }, '⏭'),
+              h('button', { className: 'rmap-tl-tb' + (tlFollow ? ' on' : ''), title: tlFollow ? 'Követő-kamera BE — lejátszáskor a nézet a lejátszófejet követi' : 'Követő-kamera KI', onClick: function () { setTlFollow(function (v) { var nv = !v; tlFollowRef.current = nv; return nv; }); } }, '📷'),
               h('div', { className: 'rmap-tl-track', onMouseDown: function (e) { e.stopPropagation(); tlPause(); var r = e.currentTarget.getBoundingClientRect(); function stt(ev) { tlSetCur((ev.clientX - r.left) / r.width); } stt(e); function mv(ev) { stt(ev); } function up() { window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); } window.addEventListener('mousemove', mv); window.addEventListener('mouseup', up); } },
                 h('div', { className: 'rmap-tl-fill', style: { width: (tlCur * 100) + '%' } }),
                 h('div', { className: 'rmap-tl-knob', style: { left: (tlCur * 100) + '%' } })),

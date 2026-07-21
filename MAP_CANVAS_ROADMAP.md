@@ -558,6 +558,18 @@
   timeline-ban a húzás tiltva (csak kijelöl), pan/zoom `tlPause()` (szünet, NEM kilépés), `Esc`→`tlExit`, projekt-váltáskor/
   unmountkor a rAF leáll + a mód resetel (LOW-fix). Migráció/edge NEM kell. Version `?v=1787420000`. **Elhalasztva (v2):**
   „Mentés Bemutatóként" (a story-rendszerbe), követő-kamera, él-flow marsoló animáció, Származás (DAG-mélység) nézet, LOD chip-tömörítés.
+- [x] ✅ **Idővonal v2 (`<tbd>`, 5-dimenziós review-workflow: 7 találat → 5 dedup, mind javítva; regression-safe + hook-order-safe):**
+  **(1) Származás (DAG-mélység) x-tengely** — 4. leképezés: `x = generáció a gyökértől` (miből mi, az órától függetlenül);
+  longest-path **iteratív relaxációval** (rendezés-független + ciklus-klippelt); a lejátszófej + idő-alapú reveal/flow ebben
+  a módban KIKAPCSOL (a `tlCurT` null depth-ben). **(2) 📷 Követő-kamera** — lejátszáskor a nézet finoman a lejátszófejet
+  követi (`tlFollowCam` a rAF-loopban, view.tx easing; depth-ben no-op); a scrubberben kapcsolható (`tlFollowRef`). **(3) Él-flow**
+  — lejátszáskor az az él, aminek az *okozat*-kártyája áthaladt a lejátszófejen, borostyánsárgán marsol (`rmap-e-tlflow`,
+  `|b.ts-kurzor| < 3%`, `b.ts>=a.ts`). **(4) 🎬 Mentés Bemutatóként** — a kronológiai bejárás `research_map_paths` Prezi-story-ba
+  (ts-sorrend, `kind:node` beat-ek); a `resolveBeat` élőben újra-feloldja a kártya VALÓS pozícióját → elrendezés-független.
+  **Review-fixek:** a manuális éleket a `graph()` most a ts-bélyegzés ELŐTT folytja E-be (a depth-topológia + ts-fill lássa
+  a user-húzta linkeket); a zoom-sáv gombjai (Nézetbe/±/100%) `tlPause()`-olnak (a follow-cam ne írja felül a kézi fitet).
+  **LOD chip-tömörítés: kihagyva** — a meglévő LOD amúgy is kompakttá teszi a kártyákat timeline-ban. Migráció NEM kell
+  (a Mentés a migration-79 `research_map_paths`-t használja, graceful ha nincs). Version `?v=1787480000`.
 
 ## Hátralévő (jövő) — Phase 6+
 - [ ] 🔴 **Teljes karakter-szintű CRDT/Yjs** — egyidejű azonos-szekció gépelés valós idejű merge-dzsel.
