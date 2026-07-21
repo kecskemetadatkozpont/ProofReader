@@ -558,7 +558,7 @@
   timeline-ban a húzás tiltva (csak kijelöl), pan/zoom `tlPause()` (szünet, NEM kilépés), `Esc`→`tlExit`, projekt-váltáskor/
   unmountkor a rAF leáll + a mód resetel (LOW-fix). Migráció/edge NEM kell. Version `?v=1787420000`. **Elhalasztva (v2):**
   „Mentés Bemutatóként" (a story-rendszerbe), követő-kamera, él-flow marsoló animáció, Származás (DAG-mélység) nézet, LOD chip-tömörítés.
-- [x] ✅ **Idővonal v2 (`<tbd>`, 5-dimenziós review-workflow: 7 találat → 5 dedup, mind javítva; regression-safe + hook-order-safe):**
+- [x] ✅ **Idővonal v2 (`b9fb66a`, 5-dimenziós review-workflow: 7 találat → 5 dedup, mind javítva + fix-verify pass tiszta; regression-safe + hook-order-safe):**
   **(1) Származás (DAG-mélység) x-tengely** — 4. leképezés: `x = generáció a gyökértől` (miből mi, az órától függetlenül);
   longest-path **iteratív relaxációval** (rendezés-független + ciklus-klippelt); a lejátszófej + idő-alapú reveal/flow ebben
   a módban KIKAPCSOL (a `tlCurT` null depth-ben). **(2) 📷 Követő-kamera** — lejátszáskor a nézet finoman a lejátszófejet
