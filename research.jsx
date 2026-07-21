@@ -5097,7 +5097,7 @@
       Promise.all([
         sb.from('research_ideas').select('id,question,hypothesis,rationale,novelty,status,source,gap_type,evidence,addressed_by_idea_id').eq('project_id', pid).neq('status', 'rejected').order('created_at', { ascending: true }).limit(24).then(function (r) { return (r && r.error) ? sb.from('research_ideas').select('id,question,hypothesis,rationale,novelty,status,source').eq('project_id', pid).neq('status', 'rejected').order('created_at', { ascending: true }).limit(24) : r; }),   // self-gate: on a missing-gap-column error, resolve to the base-column select so ideas never vanish pre-migration
         sb.from('research_studies').select('id,idea_id,title,question,status').eq('project_id', pid).order('created_at', { ascending: true }),
-        sb.from('research_sources').select('id,title,venue,cited_by,year,screening,url').eq('project_id', pid).order('cited_by', { ascending: false, nullsFirst: false }).limit(10),
+        sb.from('research_sources').select('id,title,venue,cited_by,year,screening,url,abstract').eq('project_id', pid).order('cited_by', { ascending: false, nullsFirst: false }).limit(10),
         sb.from('research_sources').select('id', { count: 'exact', head: true }).eq('project_id', pid),
         sb.from('research_sources').select('id', { count: 'exact', head: true }).eq('project_id', pid).eq('screening', 'include'),
         sb.from('research_protocols').select('id,title,status,idea_id').eq('project_id', pid).neq('status', 'archived').order('created_at', { ascending: false }).limit(1),
@@ -6412,6 +6412,7 @@
         return null;
       }
       if (n.t === 'idea') idea = n.ref;
+      else if (n.t === 'gap') { var gg0 = n.ref || {}; if (gg0.addressed_by_idea_id) idea = ideas.filter(function (x) { return x.id === gg0.addressed_by_idea_id; })[0] || null; }   // a gap grounds on ITSELF (+ its addressed idea if any), not the project's selected idea
       else study = studyFor(n);
       if (!study && (n.t === 'step' || n.t === 'venue' || n.t === 'section')) study = studies[0] || null;
       if (!idea) {
@@ -6420,8 +6421,9 @@
         if (!idea && (n.t === 'step' || n.t === 'venue' || n.t === 'section' || n.t === 'review')) idea = ideas.filter(function (x) { return x.status === 'selected'; })[0] || ideas[0] || null;
       }
       if (idea) parts.push('KIINDULÓ ÖTLET: ' + String(idea.question || '') + (idea.hypothesis ? ' | Hipotézis: ' + idea.hypothesis : ''));
+      if (n.t === 'gap') { var gp = n.ref || {}; parts.push('KUTATÁSI RÉS: ' + String(gp.question || gp.hypothesis || n.title || '') + (gp.hypothesis && gp.question ? ' | Hipotézis: ' + gp.hypothesis : '')); }
       if (study) parts.push('IRODALOM-STUDY: ' + String(study.title || study.question || ''));
-      if (n.t === 'paper') parts.push('KAPCSOLÓDÓ CIKK: ' + String(n.title || '') + (n.ref && n.ref.venue ? ' (' + n.ref.venue + ')' : ''));
+      if (n.t === 'paper') parts.push('KAPCSOLÓDÓ CIKK: ' + String(n.title || '') + (n.ref && n.ref.venue ? ' (' + n.ref.venue + ')' : '') + (n.ref && n.ref.abstract ? ' — ' + String(n.ref.abstract).slice(0, 500) : ''));
       if (n.t === 'review') parts.push('ÁTTEKINTÉS: ' + String(n.title || ''));
       if (n.t === 'step') parts.push('KIVÁLASZTOTT PROTOKOLL-LÉPÉS: ' + String(n.title || ''));
       if (n.t === 'venue') parts.push('CÉL-FOLYÓIRAT: ' + String(n.title || ''));
@@ -6516,21 +6518,22 @@
     //    Distinct from the right-click genActions menu (exhaustive + in-place regenerate) and the double-click radial (blank genesis).
     function producibleTypes(n) {
       if (!n) return [];
-      var M = {
-        file: [{ act: 'ideas_grounded', ic: '💡', lab: 'Ötlet a tartalomból', det: '+' }, { act: 'gaps', ic: '🕳️', lab: 'Kutatási rés', det: '1' }],
+      var M = {   // only FORWARD, source-GROUNDED generations (see the grounding-fidelity audit). Gap generation lives at the
+        //           literature nodes (study/review), NOT at a file; *→section uses the card-grounded section edge, not the project outline.
+        file: [{ act: 'ideas_grounded', ic: '💡', lab: 'Ötlet a tartalomból', det: '+' }],
         chat: [{ act: 'ideas_grounded', ic: '💡', lab: 'Ötlet a beszélgetésből', det: '1' }],
         idea: [{ act: 'ideas', ic: '✦', lab: 'Kapcsolódó ötlet', det: '1' }, { act: 'study', ic: '🔎', lab: 'Irodalom-study / SR', det: '1' }, { act: 'protocol', ic: '🧪', lab: 'Protokoll', det: '1' }],
-        gap: [{ act: 'gap_to_idea', ic: '💡', lab: 'Ötletté alakít', det: '1' }, { act: 'study', ic: '🔎', lab: 'Irodalom-study', det: '1' }, { act: 'protocol', ic: '🧪', lab: 'Protokoll', det: '1' }],
-        paper: [{ act: 'ideas', ic: '💡', lab: 'Ötlet a cikkből', det: '1' }, { act: 'protocol', ic: '🧪', lab: 'Protokoll', det: '1' }],
-        study: [{ act: 'review', ic: '📝', lab: 'Áttekintés', det: '+' }, { act: 'protocol', ic: '🧪', lab: 'Protokoll', det: '1' }, { act: 'ideas', ic: '💡', lab: 'Ötlet', det: '1' }],
-        review: [{ act: 'protocol', ic: '🧪', lab: 'Protokoll', det: '1' }, { act: 'writing', ic: '✍️', lab: 'Szekció (draft)', det: '1' }, { act: 'venue', ic: '🎯', lab: 'Folyóirat-ajánlás', det: '1' }],
-        step: [{ act: 'writing', ic: '✍️', lab: 'Szekció (draft)', det: '1' }],
-        venue: [{ act: 'writing', ic: '✍️', lab: 'Szekció', det: '1' }, { act: 'ideas', ic: '💡', lab: 'Ötlet', det: '1' }, { act: 'submission', ic: '📤', lab: 'Beküldési dosszié', det: '+' }],
-        section: [{ act: 'writing', ic: '✍️', lab: 'További szekció', det: '1' }, { act: 'ideas', ic: '💡', lab: 'Ötlet', det: '1' }, { act: 'venue', ic: '🎯', lab: 'Folyóirat-ajánlás', det: '1' }],
+        gap: [{ act: 'gap_to_idea', ic: '💡', lab: 'Ötletté alakít', det: '1' }, { act: 'study', ic: '🔎', lab: 'Irodalom-study', det: '1' }, { act: 'protocol', ic: '🧪', lab: 'Protokoll (a résből)', det: '1' }],
+        paper: [{ act: 'ideas', ic: '💡', lab: 'Ötlet a cikkből', det: '1' }, { act: 'study', ic: '🔎', lab: 'Irodalom-study', det: '1' }, { act: 'protocol', ic: '🧪', lab: 'Protokoll', det: '1' }],
+        study: [{ act: 'review', ic: '📝', lab: 'Áttekintés', det: '+' }, { act: 'gaps', ic: '🕳️', lab: 'Kutatási rés(ek)', det: '1' }, { act: 'protocol', ic: '🧪', lab: 'Protokoll', det: '1' }, { act: 'ideas', ic: '💡', lab: 'Ötlet', det: '1' }],
+        review: [{ act: 'gaps', ic: '🕳️', lab: 'Kutatási rés(ek)', det: '1' }, { act: 'protocol', ic: '🧪', lab: 'Protokoll', det: '1' }, { act: 'section', ic: '✍️', lab: 'Draft-szekció', det: '1' }],
+        step: [],
+        venue: [{ act: 'submission', ic: '📤', lab: 'Beküldési dosszié', det: '+' }],
+        section: [{ act: 'section', ic: '✍️', lab: 'További szekció', det: '1' }, { act: 'venue', ic: '🎯', lab: 'Folyóirat-ajánlás (projekt)', det: '1' }],
         dataset: [{ act: 'protocol', ic: '🧪', lab: 'Protokoll', det: '1' }]
       };
       var list = (M[n.t] || []).slice();
-      if (n.t === 'file') { var p = String((n.ref && n.ref.path) || ''); if (!/\.(md|markdown|txt|tex|csv|json)$/i.test(p)) list = list.filter(function (e) { return e.act === 'gaps'; }); }   // grounding needs text; a binary/PDF only offers project-level gaps
+      if (n.t === 'file') { var p = String((n.ref && n.ref.path) || ''); if (!/\.(md|markdown|txt|tex|csv|json)$/i.test(p)) return []; }   // grounding needs text → a binary/PDF file offers nothing
       if (n.t === 'venue' && !(n.ref && n.ref.journal_id)) list = list.filter(function (e) { return e.act !== 'submission'; });   // a blank Map venue has no journal → no dossier yet
       return list;
     }
@@ -6576,11 +6579,13 @@
           }, function () { fail('hálózat'); });
         }
         else if (act === 'study') {
-          var idea = (n.t === 'idea' || n.t === 'gap') ? n.ref : null;
-          sb.from('research_studies').insert({ project_id: pid, idea_id: idea ? idea.id : null, title: String((idea && idea.question) || proj.title || 'Study').slice(0, 80), question: String((idea && idea.question) || proj.goal || proj.title || '').slice(0, 4000), created_by: props.authorId }).select('id').maybeSingle().then(function (r) {
+          var seed = (n.t === 'idea' || n.t === 'gap') ? n.ref : null, pp = (n.t === 'paper') ? (n.ref || {}) : null;
+          var stitle = pp ? String(pp.title || 'Study').slice(0, 80) : String((seed && seed.question) || proj.title || 'Study').slice(0, 80);
+          var squestion = pp ? String(pp.abstract || pp.title || proj.goal || '').slice(0, 4000) : String((seed && seed.question) || proj.goal || proj.title || '').slice(0, 4000);
+          sb.from('research_studies').insert({ project_id: pid, idea_id: seed ? seed.id : null, title: stitle, question: squestion, created_by: props.authorId }).select('id').maybeSingle().then(function (r) {
             if (r && r.error) { fail('study: ' + r.error.message); return; }
             var sid = r && r.data && r.data.id; if (!sid) { fail('a study nem jött létre'); return; }
-            var rows = LS_STEPS.map(function (s) { return { study_id: sid, step: s.step, kind: s.kind, config: lsDefaultConfig(s.step, proj, idea) }; });
+            var rows = LS_STEPS.map(function (s) { return { study_id: sid, step: s.step, kind: s.kind, config: lsDefaultConfig(s.step, proj, seed) }; });
             sb.from('research_study_steps').insert(rows).then(function () { CORE.callEdge('research-study', { action: 'plan', study_id: sid }).then(function () { finish([], 'Irodalom-study létrehozva'); }, function () { finish([], 'Irodalom-study létrehozva'); }); }, function () { fail('study-lépések'); });
           }, function () { fail('study insert'); });
         }
@@ -6621,8 +6626,17 @@
             CORE.saveFile(pid, 'writing/outline.md', md, 'ai').then(function (sf) { if (sf && sf.error) { fail(sf.error.message || 'mentés'); return; } var id = sf && sf.data && sf.data.id; finish(id != null ? ['w' + id] : [], 'Vázlat kész (' + o.sections.length + ' szekció)'); }, function () { fail('hálózat'); });
           }, function () { fail('hálózat'); });
         }
+        else if (act === 'section') {   // card-GROUNDED draft section via research-writing action:'section' → its OWN file (never clobbers the shared outline)
+          var linS = lineageOf(n), heading = String(n.title || 'Szekció').slice(0, 120);
+          var slug = (heading.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40)) || 'szekcio';
+          CORE.callEdge('research-writing', { action: 'section', project_id: pid, section: { key: slug, heading: heading }, context: { research: String(proj.goal || proj.title || '') + (linS.text ? '\n\n' + linS.text : '') } }).then(function (d) {   // the section edge grounds ONLY on context.research → feed it the lineage
+            if (d && d.error) { fail(d.error); return; }
+            var latex = (d && d.latex) || ('\\section{' + heading + '}\n');
+            CORE.saveFile(pid, 'writing/sections/' + slug + '-' + Date.now() + '.tex', latex, 'ai').then(function (sf) { if (sf && sf.error) { fail(sf.error.message || 'mentés'); return; } var id = sf && sf.data && sf.data.id; finish(id != null ? ['w' + id] : [], 'Szekció: ' + heading.slice(0, 40)); }, function () { fail('hálózat'); });
+          }, function () { fail('hálózat'); });
+        }
         else if (act === 'venue') {
-          CORE.callEdge('research-journals', { action: 'recommend', project_id: pid }).then(function (d) {
+          CORE.callEdge('research-journals', Object.assign({ action: 'recommend', project_id: pid }, (n.t === 'section' && n.title) ? { hint: String(n.title).slice(0, 200) } : {})).then(function (d) {
             if (d && d.error) { fail(d.error); return; }
             var js = (d && d.journals) || []; if (!js.length) { fail('nincs folyóirat-ajánlás'); return; }
             var j = js[0];

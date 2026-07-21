@@ -462,6 +462,15 @@
   arc-overlay `nodeVisible`-guard (rejtett kártyán nem lebeg árva ív); (3minor) study nem mozgatja a `lit` aggregátumot
   (`finish([])`, az idea→lit élt a graph() rajzolja); (4minor) arcpip `pointer-events:none` rejtett állapotban; (5nit)
   west-flip küszöb + címke-ellipszis. Version `research.jsx?v=1786360000`. Migráció/edge NEM kell. **Elhalasztva:** step→append_steps.
+- [x] ✅ **Grounding-hűség revízió (2026-07-21, 3-ügynökös kutatás + review 2 fix):** a `producibleTypes` mátrix kritikai
+  átvizsgálása (25 élből ~8 „ebből a kártyából" ígért, de projekt-szintű generátort futtatott). **7 átkötés:** (1) `*→szekció`
+  a projekt-szintű `outline` helyett a kártya-alapú `research-writing action:'section'`-re (per-fájl `writing/sections/…tex`,
+  **`context.research`-be** a `lineageOf` — a review kritikus fogása: az edge CSAK a `context.research`-öt olvassa);
+  lépés→szekció + venue→szekció törölve. (2) 📎fájl→🕳rés (hamis, projekt-szintű) kivéve; 🔎study→🕳 + 📝review→🕳 hozzáadva
+  (a rés a szintézis-node-okhoz). (3) `lineageOf` gap-ág → 🕳rés→🧪 a résből ground-ol. (4) visszafelé 🎯→💡, ✍️→💡 törölve.
+  (5) 📄cikk→🔎study hozzáadva + a topSrc-select **abstract**-tal bővítve (különben a cikk-grounding dead code). (6) review→🎯
+  törölve (korai), szekció→🎯 marad `hint`-tel. (7) `lineageOf` cikk-ág abstract-tal. Version `?v=1786480000`. **B folyam:**
+  a 3 hiányzó szakasz (🖼️ elemzés/ábra · ❓ SR-kérdés/hipotézis · 📤 beküldés→revízió) tervezés alatt — új edge-ek kellenek.
 
 ## Hátralévő (jövő) — Phase 6+
 - [ ] 🔴 **Teljes karakter-szintű CRDT/Yjs** — egyidejű azonos-szekció gépelés valós idejű merge-dzsel.
