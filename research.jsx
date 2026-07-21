@@ -4699,6 +4699,11 @@
   // Read-only view for now (P2 = inline edit + phase actions replacing modals). New-design flag only.
   var RMAP_PHASES = [['ideas', 'Ideas', '💡'], ['literature', 'Literature', '📚'], ['sr', 'Systematic review', '🔬'], ['protocol', 'Protocol', '🧪'], ['journal', 'Journal', '🎯'], ['writing', 'Writing', '✍️']];
   var RMAP_PHASE_IDX = {}; RMAP_PHASES.forEach(function (p, i) { RMAP_PHASE_IDX[p[0]] = i; });
+  // 🕰 Idővonal (timeline) mode lane labels + the by-Type lane grouping + a short date formatter
+  var TL_PHASE_LABELS = ['💡 Ötlet & Rés', '📚 Irodalom', '🔬 Áttekintés', '🧪 Protokoll', '🎯 Folyóirat', '✍️ Írás', '📤 Beküldés'];
+  var TL_TYPE_LABELS = ['💡 Ötletek', '📚 Irodalom', '🧪 Kísérlet', '✍️ Írás', '📤 Beküldés', '💬 Egyéb'];
+  var TL_TYPE_LANE = { idea: 0, gap: 0, paper: 1, lit: 1, sr: 1, srq: 1, sreview: 1, study: 1, dataset: 2, step: 2, figure: 2, section: 3, review: 3, venue: 4, submission: 4, revision: 4, chat: 5, file: 5 };
+  function tlFmtDay(ts) { var d = new Date(ts); return (d.getMonth() + 1) + '.' + d.getDate(); }
   var RMAP_TYPE = { idea: { ic: '💡', lab: 'Ötlet', tab: 'ideas' }, gap: { ic: '🕳️', lab: 'Kutatási rés', tab: 'gap' }, paper: { ic: '📄', lab: 'Cikk', tab: 'literature' }, study: { ic: '🔎', lab: 'Irodalom', tab: 'literature' }, review: { ic: '📝', lab: 'Áttekintés', tab: 'study' }, step: { ic: '🧪', lab: 'Protokoll-lépés', tab: 'protocol' }, venue: { ic: '🎯', lab: 'Folyóirat', tab: 'journal' }, section: { ic: '✍️', lab: 'Draft-szekció', tab: 'writing' }, dataset: { ic: '🗂️', lab: 'Adathalmaz', tab: 'data' }, file: { ic: '📎', lab: 'Fájl', tab: 'ideas' }, chat: { ic: '💬', lab: 'Beszélgetés', tab: 'ideas' }, figure: { ic: '🖼️', lab: 'Ábra', tab: 'literature' }, srq: { ic: '❓', lab: 'Review-kérdés', tab: 'study' }, sreview: { ic: '🔬', lab: 'Szisztematikus áttekintés', tab: 'study' }, submission: { ic: '📤', lab: 'Beküldés', tab: 'submission' }, revision: { ic: '🔁', lab: 'Revízió / bírálati válasz', tab: 'submission' } };
   // interactive-edge relation presets (migration-81). Each type is a full look-preset: color + line-style + arrow + default animation.
   // The two structural derived kinds (flow/cite) map to erd/idz and keep today's exact stroke for backward-compat.
@@ -4811,6 +4816,13 @@
     var msS = useState({}), msel = msS[0], setMsel = msS[1];   // multi-selection: {node_id: true} (shift-click / marquee)
     var glS = useState(null), gLive = glS[0], setGLive = glS[1];   // group drag {dx,dy,base:{id:{x,y}},ids} — moves all msel together
     var mqS = useState(null), marquee = mqS[0], setMarquee = mqS[1];   // marquee rect in stage coords {x0,y0,x1,y1} while shift-dragging the background
+    // 🕰 Idővonal (timeline) mode — EPHEMERAL layout (like gLive/story): x = created_at, y = phase-lane; never persists to research_map_layout.
+    var tlS = useState(false), tlOn = tlS[0], setTlOn = tlS[1];
+    var txS = useState('squished'), tlX = txS[0], setTlX = txS[1];   // 'squished' | 'linear' | 'ordinal'
+    var tlnS = useState('phase'), tlLane = tlnS[0], setTlLane = tlnS[1];   // 'phase' | 'type'
+    var tcS = useState(1), tlCur = tcS[0], setTlCur = tcS[1];   // scrubber cursor 0..1 (1 = whole project shown)
+    var tpS = useState(false), tlPlay = tpS[0], setTlPlay = tpS[1];   // replay playing
+    var tlRaf = useRef(0), tlLast = useRef(0), tlCurRef = useRef(1), tlPlayRef = useRef(false);   // rAF handle + last-frame ts + live cursor mirror + playing flag (for the pan-pause + play loop)
     var gdrag = useRef(null);   // in-flight group-drag lifecycle guard
     var mqRef = useRef(null);   // in-flight marquee start point (stage coords)
     var frS = useState([]), frames = frS[0], setFrames = frS[1];   // Map frames (named regions / phase lanes) — migration-71
@@ -5071,7 +5083,7 @@
     useEffect(function () {
       function typing(el) { if (!el) return false; var tg = el.tagName || ''; return tg === 'INPUT' || tg === 'TEXTAREA' || tg === 'SELECT' || el.isContentEditable; }
       function onKey(e) {
-        if (e.key === 'Escape') { setRadial(null); setArcOpen(null); if (tour) tourStop(); else if (focus) exitFocus(); else { setLinkFrom(null); setSelEdge(null); } }   // Esc closes the radial add-menu + the generation arc + cancels link-mode/edge selection
+        if (e.key === 'Escape') { setRadial(null); setArcOpen(null); if (tour) tourStop(); else if (focus) exitFocus(); else if (tlOn) tlExit(); else { setLinkFrom(null); setSelEdge(null); } }   // Esc closes the radial add-menu + the generation arc + exits timeline + cancels link-mode/edge selection
         else if (tour && tour.beats && !typing(e.target)) { if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); tourNext(); } else if (e.key === 'ArrowLeft') { e.preventDefault(); tourPrev(); } }
         else if (e.key === 'Enter' && !focus && !tour && armedRef.current && !typing(e.target)) { e.preventDefault(); enterNode(armedRef.current); }   // armedRef is null while a modal is open (guarded at compute)
         else if ((e.metaKey || e.ctrlKey) && (e.key === 'z' || e.key === 'Z') && !typing(e.target) && props.canEdit) { e.preventDefault(); if (e.shiftKey) doRedo(); else doUndo(); }   // ⌘Z undo · ⌘⇧Z redo
@@ -5103,22 +5115,22 @@
     useEffect(function () {
       var pid = props.projectId;
       Promise.all([
-        sb.from('research_ideas').select('id,question,hypothesis,rationale,novelty,status,source,gap_type,evidence,addressed_by_idea_id').eq('project_id', pid).neq('status', 'rejected').order('created_at', { ascending: true }).limit(24).then(function (r) { return (r && r.error) ? sb.from('research_ideas').select('id,question,hypothesis,rationale,novelty,status,source').eq('project_id', pid).neq('status', 'rejected').order('created_at', { ascending: true }).limit(24) : r; }),   // self-gate: on a missing-gap-column error, resolve to the base-column select so ideas never vanish pre-migration
-        sb.from('research_studies').select('id,idea_id,title,question,status').eq('project_id', pid).order('created_at', { ascending: true }),
-        sb.from('research_sources').select('id,title,venue,cited_by,year,screening,url,abstract').eq('project_id', pid).order('cited_by', { ascending: false, nullsFirst: false }).limit(10),
+        sb.from('research_ideas').select('id,question,hypothesis,rationale,novelty,status,source,gap_type,evidence,addressed_by_idea_id,created_at').eq('project_id', pid).neq('status', 'rejected').order('created_at', { ascending: true }).limit(24).then(function (r) { return (r && r.error) ? sb.from('research_ideas').select('id,question,hypothesis,rationale,novelty,status,source,created_at').eq('project_id', pid).neq('status', 'rejected').order('created_at', { ascending: true }).limit(24) : r; }),   // self-gate: on a missing-gap-column error, resolve to the base-column select so ideas never vanish pre-migration
+        sb.from('research_studies').select('id,idea_id,title,question,status,created_at').eq('project_id', pid).order('created_at', { ascending: true }),
+        sb.from('research_sources').select('id,title,venue,cited_by,year,screening,url,abstract,created_at').eq('project_id', pid).order('cited_by', { ascending: false, nullsFirst: false }).limit(10),
         sb.from('research_sources').select('id', { count: 'exact', head: true }).eq('project_id', pid),
         sb.from('research_sources').select('id', { count: 'exact', head: true }).eq('project_id', pid).eq('screening', 'include'),
         sb.from('research_protocols').select('id,title,status,idea_id').eq('project_id', pid).neq('status', 'archived').order('created_at', { ascending: false }).limit(1),
-        sb.from('research_journal_picks').select('id,title,status,npi_level').eq('project_id', pid),
-        sb.from('research_files').select('id,path,size,storage_path').eq('project_id', pid).or('path.like.writing/%,path.like.studies/%,path.like.submission/%'),
+        sb.from('research_journal_picks').select('id,title,status,npi_level,created_at').eq('project_id', pid),
+        sb.from('research_files').select('id,path,size,storage_path,created_at,updated_at').eq('project_id', pid).or('path.like.writing/%,path.like.studies/%,path.like.submission/%'),
         // F5 — multi-modal nodes: datasets, uploaded/material files (NOT writing/studies), chat threads, paper figures
-        sb.from('research_datasets').select('id,name,source,status,size_bytes,notes').eq('project_id', pid).order('created_at', { ascending: true }).limit(16),
-        sb.from('research_files').select('id,path,size,source,storage_path').eq('project_id', pid).not('path', 'like', 'writing/%').not('path', 'like', 'studies/%').not('path', 'like', 'submission/%').order('updated_at', { ascending: false }).limit(16),
-        sb.from('research_chats').select('id,title,updated_at').eq('project_id', pid).order('updated_at', { ascending: false }).limit(8),
-        sb.from('research_figures').select('id,source_id,fig_label,caption,storage_path').eq('project_id', pid).eq('hidden', false).order('created_at', { ascending: false }).limit(16),   // newest-first so a freshly-generated figure always survives the 16-cap
+        sb.from('research_datasets').select('id,name,source,status,size_bytes,notes,created_at').eq('project_id', pid).order('created_at', { ascending: true }).limit(16),
+        sb.from('research_files').select('id,path,size,source,storage_path,created_at,updated_at').eq('project_id', pid).not('path', 'like', 'writing/%').not('path', 'like', 'studies/%').not('path', 'like', 'submission/%').order('updated_at', { ascending: false }).limit(16),
+        sb.from('research_chats').select('id,title,updated_at,created_at').eq('project_id', pid).order('updated_at', { ascending: false }).limit(8),
+        sb.from('research_figures').select('id,source_id,fig_label,caption,storage_path,created_at').eq('project_id', pid).eq('hidden', false).order('created_at', { ascending: false }).limit(16),   // newest-first so a freshly-generated figure always survives the 16-cap
         // SR/Elicit provenance: the "Study basis" review-question candidates (linked to their idea) + the launched Elicit reviews
-        sb.from('research_sr_candidates').select('id,idea_id,question,launched_job_id').eq('project_id', pid).eq('dismissed', false).order('created_at', { ascending: true }).limit(16),
-        sb.from('elicit_jobs').select('id,research_question,status,result_title').eq('project_id', pid).eq('kind', 'sysreview').order('created_at', { ascending: true }).limit(16),
+        sb.from('research_sr_candidates').select('id,idea_id,question,launched_job_id,created_at').eq('project_id', pid).eq('dismissed', false).order('created_at', { ascending: true }).limit(16),
+        sb.from('elicit_jobs').select('id,research_question,status,result_title,created_at').eq('project_id', pid).eq('kind', 'sysreview').order('created_at', { ascending: true }).limit(16),
         // figures the user REMOVED from the Map (on_map=false) — for the restore panel. Graceful: pre-migration-69 the
         // column is absent → this query errors → [] → no filtering, no panel (the Map shows all figures as before).
         sb.from('research_figures').select('id,source_id,fig_label,caption,storage_path').eq('project_id', pid).eq('hidden', false).eq('on_map', false).order('created_at', { ascending: true }).limit(30)
@@ -5130,9 +5142,9 @@
         base.figures = base.figures.filter(function (f) { return !hidSet[f.id]; }); base.hiddenFigs = hiddenFigs;
         if (base.protocol) {
           // probe the migration-75 columns (assignee/sign-off); on error fall back to the basic select
-          sb.from('research_protocol_steps').select('id,ord,title,kind,status,needs_approval,assignee_id,signed_off_by,signed_off_at').eq('protocol_id', base.protocol.id).order('ord', { ascending: true }).then(function (sr) {
+          sb.from('research_protocol_steps').select('id,ord,title,kind,status,needs_approval,assignee_id,signed_off_by,signed_off_at,created_at').eq('protocol_id', base.protocol.id).order('ord', { ascending: true }).then(function (sr) {
             if (!alive.current) return;
-            if (sr && sr.error) { sb.from('research_protocol_steps').select('id,ord,title,kind,status,needs_approval').eq('protocol_id', base.protocol.id).order('ord', { ascending: true }).then(function (sr2) { if (alive.current) setData(Object.assign(base, { steps: (sr2.data) || [] })); }); return; }
+            if (sr && sr.error) { sb.from('research_protocol_steps').select('id,ord,title,kind,status,needs_approval,created_at').eq('protocol_id', base.protocol.id).order('ord', { ascending: true }).then(function (sr2) { if (alive.current) setData(Object.assign(base, { steps: (sr2.data) || [] })); }); return; }
             setStepFlagsCap(true); setData(Object.assign(base, { steps: (sr.data) || [] }));
           });
         }
@@ -5302,6 +5314,24 @@
         n._h = (ly && ly.card_h) || hgt[n.id] || (72 + Math.min(4, Math.ceil(String(n.title || '').length / 22)) * 17);   // manual height or measured or estimated
         if (nrzLive && nrzLive.id === n.id) { n._w = nrzLive.w; n._h = nrzLive.h; }   // follow the in-flight resize 1:1
       });
+      // 🕰 timeline timestamps: n.ts (epoch ms) from the source row's created_at (chat = updated_at); aggregates/derived get an estimate.
+      N.forEach(function (n) { var r = n.ref, s = r ? (n.t === 'chat' ? (r.updated_at || r.created_at) : (r.created_at || r.updated_at)) : null; var t = s ? Date.parse(s) : NaN; n.ts = isNaN(t) ? null : t; });
+      (function () {   // fill null-ts nodes (lit/sr aggregates, undated) from the DAG: min(children)-eps else max(parents)+eps; iterate to a fixpoint
+        var par = {}, kid = {}, byId = {}; N.forEach(function (n) { par[n.id] = []; kid[n.id] = []; byId[n.id] = n; });
+        E.forEach(function (e) { if (par[e[1]] && kid[e[0]]) { par[e[1]].push(e[0]); kid[e[0]].push(e[1]); } });
+        var HR = 3600000;
+        for (var it = 0; it < 6; it++) {
+          var ch = false;
+          N.forEach(function (n) {
+            if (n.ts != null) return;
+            var ks = kid[n.id].map(function (id) { return byId[id] && byId[id].ts; }).filter(function (t) { return t != null; });
+            var ps = par[n.id].map(function (id) { return byId[id] && byId[id].ts; }).filter(function (t) { return t != null; });
+            var nt = ks.length ? Math.min.apply(null, ks) - HR : (ps.length ? Math.max.apply(null, ps) + HR : null);
+            if (nt != null) { n.ts = nt; n.tsEst = true; ch = true; }
+          });
+          if (!ch) break;
+        }
+      })();
       // column-less TIMELINE layout: phases seed left→right (ideas → literature → SR → protocol → journal → writing) so
       // derivation reads as a timeline; cards stack within a phase. Free-drag takes over from here.
       var cnt = {}, CEN = [{ x: 30, y: 90 }, { x: 350, y: 40 }, { x: 670, y: 150 }, { x: 990, y: 60 }, { x: 1310, y: 170 }, { x: 1630, y: 90 }, { x: 1950, y: 60 }];   // CEN[6] = submission lane (ph 6)
@@ -5314,11 +5344,14 @@
       if (dlive && dlive.id) { for (var q = 0; q < N.length; q++) { if (N[q].id === dlive.id) { N[q].x = dlive.x; N[q].y = dlive.y; break; } } }
       // group drag: every multi-selected card moves together by the same delta from its captured base position
       if (gLive && gLive.base) { for (var gq = 0; gq < N.length; gq++) { var gb = gLive.base[N[gq].id]; if (gb) { N[gq].x = gb.x + gLive.dx; N[gq].y = gb.y + gLive.dy; } } }
+      // 🕰 Idővonal override — replace positions with a computed timeline layout (ephemeral, like gLive; NEVER persisted). The FINAL say, so maxY/by/manual-edge fold below recompute for free. Toggling tlOn off falls through the normal path → saved positions/pins reappear untouched.
+      var tlMeta = null;
+      if (tlOn) { tlMeta = timelineLayout(N, E, { xMode: tlX, laneBy: tlLane }); N.forEach(function (n) { var p = tlMeta.pos[n.id]; if (p) { n.x = p.x; n.y = p.y; } }); }
       var maxY = 400; N.forEach(function (n) { maxY = Math.max(maxY, n.y + (n._h || 78) + 44); });
       var by = {}; N.forEach(function (n) { by[n.id] = n; });
       // P2 manual edges: fold user-drawn links (manual override rows, edge_key = from|to|manual) into E when both ends exist
       if (edgesCap) Object.keys(edgeOv).forEach(function (k) { var ov = edgeOv[k]; if (ov && ov.manual && ov.from_id && ov.to_id && by[ov.from_id] && by[ov.to_id]) E.push([ov.from_id, ov.to_id, 'manual']); });
-      return { N: N, E: E, height: maxY, by: by };
+      return { N: N, E: E, height: maxY, by: by, tl: tlMeta };
     }
 
     function onMove(e) { var dd = drag.current; if (!dd) return; setView(function (v) { return { tx: dd.tx + (e.clientX - dd.sx), ty: dd.ty + (e.clientY - dd.sy), k: v.k }; }); }
@@ -5349,6 +5382,7 @@
       setMsel(function (M) { return Object.assign({}, M, add); });
     }
     function onDown(e) {
+      tlPause();   // 🕰 panning pauses the timeline replay (does NOT exit the mode)
       if (e.target.closest && e.target.closest('.rmap-node')) return;
       if (!e.shiftKey && e.target.closest && e.target.closest('.rmap-e-hit')) return;   // a plain edge click selects (its own onClick) — don't start a pan; shift still falls through to marquee
       if (e.detail > 1) return;   // the 2nd mousedown of a double-click → let onStageDbl open the radial add-menu; don't re-clear/re-pan
@@ -5360,7 +5394,7 @@
       if (Object.keys(msel).length) setMsel({});
       stopFollow(); cancelFly(); tourStop(); drag.current = { sx: e.clientX, sy: e.clientY, tx: view.tx, ty: view.ty }; window.addEventListener('mousemove', onMove); window.addEventListener('mouseup', onUp);
     }
-    function onWheel(e) { e.preventDefault(); stopFollow(); cancelFly(); tourStop(); var st = stageRef.current; if (!st) return; var r = st.getBoundingClientRect(); var mx = e.clientX - r.left, my = e.clientY - r.top; setView(function (v) { var nk = Math.min(2.2, Math.max(.3, v.k * (e.deltaY < 0 ? 1.12 : 0.89))); return { tx: mx - (mx - v.tx) * (nk / v.k), ty: my - (my - v.ty) * (nk / v.k), k: nk }; }); }
+    function onWheel(e) { e.preventDefault(); tlPause(); stopFollow(); cancelFly(); tourStop(); var st = stageRef.current; if (!st) return; var r = st.getBoundingClientRect(); var mx = e.clientX - r.left, my = e.clientY - r.top; setView(function (v) { var nk = Math.min(2.2, Math.max(.3, v.k * (e.deltaY < 0 ? 1.12 : 0.89))); return { tx: mx - (mx - v.tx) * (nk / v.k), ty: my - (my - v.ty) * (nk / v.k), k: nk }; }); }
     function zoom(f) { stopFollow(); cancelFly(); tourStop(); setView(function (v) { var nk = Math.min(2.2, Math.max(.3, v.k * f)); return { tx: v.tx, ty: v.ty, k: nk }; }); }
     // fit the whole graph into the viewport (Luma "illeszd a nézetbe"). Uses card size 204x74.
     function fitView() {
@@ -5668,6 +5702,8 @@
     //    whose target a teammate changed since. MOVE = full undo+redo; CREATE = undo-only (re-generate to get it back).
     useEffect(function () { layoutRef.current = layout; }, [layout]);   // mirror layout so the undo guard reads the LIVE value (incl. collaborators' realtime moves)
     useEffect(function () { histRef.current = { undo: [], redo: [] }; histBusy.current = false; if (alive.current) setHistGen(function (x) { return x + 1; }); }, [props.projectId]);   // a fresh project → a fresh undo stack (node ids are only unique within a project)
+    // 🕰 timeline: on project switch (incl. in-place, no remount) stop the replay AND exit the mode + reset the cursor (else project B loads in A's stale timeline, dimming ~70% of B's cards); also clean up the rAF on unmount
+    useEffect(function () { tlPlayRef.current = false; if (tlRaf.current) { cancelAnimationFrame(tlRaf.current); tlRaf.current = 0; } setTlPlay(false); setTlOn(false); setTlCur(1); tlCurRef.current = 1; return function () { tlPlayRef.current = false; if (tlRaf.current) { cancelAnimationFrame(tlRaf.current); tlRaf.current = 0; } }; }, [props.projectId]);
     function nodeToRow(nid) {   // graph node id → its deletable domain row {table,id,dataKey}; null = FK-heavy/shared/aggregate → placement-only
       var pref = String(nid).charAt(0), rest = String(nid).slice(1);
       if (pref === 'i') return { table: 'research_ideas', id: rest, dataKey: 'ideas' };
@@ -6529,6 +6565,93 @@
         setTimeout(function () { if (alive.current) { fitView(); setSmartAnim(false); } done(); }, 520);
       }, function () { rollback('Elrendezés mentése sikertelen (hálózat).'); });
     }
+    // ── 🕰 Idővonal (timeline) — EPHEMERAL computed layout (never persisted), a peer of gLive/story mode ─────────
+    function tlLaneOf(n, laneBy) { if (laneBy === 'type') { var l = TL_TYPE_LANE[n.t]; return l != null ? l : (TL_TYPE_LABELS.length - 1); } return (n.ph != null ? n.ph : 0); }
+    // timelineLayout(N,E,{xMode,laneBy}) → {pos, tMin, tMax, ticks, bands, laneTop, height, gut, ruler, contentW, laneLabels}. Pure; N carries n.ts/n._w/n._h.
+    function timelineLayout(N, E, opts) {
+      var xMode = opts.xMode || 'squished', laneBy = opts.laneBy || 'phase', CW = 210, GUT = 150, PAD = 90, DAYMS = 86400000, RULER = 46, ROWH = 132;
+      var dated = N.filter(function (n) { return n.ts != null; }).slice().sort(function (a, b) { return a.ts - b.ts; });
+      var undated = N.filter(function (n) { return n.ts == null; });
+      var xs = {}, ticks = [], tMin = 0, tMax = 1;
+      if (dated.length) {
+        tMin = dated[0].ts; tMax = dated[dated.length - 1].ts; if (tMax <= tMin) tMax = tMin + DAYMS;
+        if (xMode === 'linear') {
+          var SPAN = Math.max(900, dated.length * 150);
+          dated.forEach(function (n) { xs[n.id] = GUT + PAD + (n.ts - tMin) / (tMax - tMin) * SPAN; });
+          var days = Math.max(1, Math.round((tMax - tMin) / DAYMS)), sd = Math.max(1, Math.round(days / 8));
+          for (var kd = 0; kd <= days; kd += sd) ticks.push({ x: GUT + PAD + kd * DAYMS / (tMax - tMin) * SPAN, lab: '+' + kd + 'n' });
+        } else if (xMode === 'ordinal') {
+          var SP2 = Math.max(900, dated.length * 150);
+          dated.forEach(function (n, i) { xs[n.id] = GUT + PAD + (dated.length < 2 ? 0 : i / (dated.length - 1)) * SP2; });
+          var so = Math.max(1, Math.round(dated.length / 9));
+          for (var io = 0; io < dated.length; io += so) ticks.push({ x: xs[dated[io].id], lab: '#' + (io + 1) });
+        } else {   // squished: bucket by day, width ∝ count, fixed gap, fan within a bucket
+          var byDay = {}; dated.forEach(function (n) { var dd = Math.floor((n.ts - tMin) / DAYMS); (byDay[dd] = byDay[dd] || []).push(n); });
+          var keys = Object.keys(byDay).map(Number).sort(function (a, b) { return a - b; }), cx = GUT + PAD;
+          keys.forEach(function (dd) {
+            var grp = byDay[dd].sort(function (a, b) { return a.ts - b.ts; }), bw = Math.max(160, grp.length * 110);
+            grp.forEach(function (n, i) { xs[n.id] = cx + (grp.length < 2 ? bw / 2 : (i + 0.5) / grp.length * bw); });
+            ticks.push({ x: cx, lab: tlFmtDay(tMin + dd * DAYMS) }); cx += bw + 30;
+          });
+        }
+      }
+      undated.forEach(function (n) { xs[n.id] = GUT / 2; });   // undated → far-left gutter column
+      var laneCount = laneBy === 'type' ? TL_TYPE_LABELS.length : 7, lanes = [];
+      for (var li = 0; li < laneCount; li++) lanes.push([]);
+      N.forEach(function (n) { var l = tlLaneOf(n, laneBy); if (l >= laneCount) l = laneCount - 1; lanes[l].push(n); });
+      var laneTop = [], bands = [], acc = RULER + 14;
+      lanes.forEach(function (arr, li2) {
+        arr.sort(function (a, b) { return (xs[a.id] || 0) - (xs[b.id] || 0); });
+        var rows = [];
+        arr.forEach(function (n) { var lx = (xs[n.id] || GUT / 2) - (n._w || CW) / 2, placed = -1; for (var r = 0; r < rows.length; r++) { if (lx > rows[r] + 14) { placed = r; break; } } if (placed < 0) { placed = rows.length; rows.push(0); } rows[placed] = lx + (n._w || CW); n._trow = placed; });
+        var hh = Math.max(1, rows.length) * ROWH + 16; laneTop[li2] = acc; bands.push({ top: acc, h: hh, li: li2 }); acc += hh;
+      });
+      var pos = {}, contentW = 0;
+      N.forEach(function (n) { var l = tlLaneOf(n, laneBy); if (l >= laneCount) l = laneCount - 1; var x = Math.round((xs[n.id] || GUT / 2) - (n._w || CW) / 2), y = Math.round(laneTop[l] + 10 + (n._trow || 0) * ROWH); pos[n.id] = { x: x, y: y }; contentW = Math.max(contentW, x + (n._w || CW)); });
+      return { pos: pos, tMin: tMin, tMax: tMax, ticks: ticks, bands: bands, laneTop: laneTop, height: acc, gut: GUT, ruler: RULER, contentW: contentW + PAD, laneLabels: (laneBy === 'type' ? TL_TYPE_LABELS : TL_PHASE_LABELS) };
+    }
+    // timeline replay + mode control
+    function tlPlayLoop(ts) {
+      if (!tlPlayRef.current) return;
+      if (!tlLast.current) tlLast.current = ts;
+      var dt = ts - tlLast.current; tlLast.current = ts;
+      var nc = tlCurRef.current + dt / 9000;   // ~9s full sweep at 1×
+      if (nc >= 1) { tlCurRef.current = 1; if (alive.current) setTlCur(1); tlStopPlay(); return; }
+      tlCurRef.current = nc; if (alive.current) setTlCur(nc); tlRaf.current = requestAnimationFrame(tlPlayLoop);
+    }
+    function tlStartPlay() { if (!g || !g.tl) return; if (tlCurRef.current >= 1) { tlCurRef.current = 0; setTlCur(0); } tlPlayRef.current = true; setTlPlay(true); tlLast.current = 0; tlRaf.current = requestAnimationFrame(tlPlayLoop); }
+    function tlStopPlay() { tlPlayRef.current = false; if (alive.current) setTlPlay(false); if (tlRaf.current) { cancelAnimationFrame(tlRaf.current); tlRaf.current = 0; } }
+    function tlPause() { if (tlPlayRef.current) tlStopPlay(); }   // pan/zoom pauses the replay — does NOT exit the mode
+    function tlToggle() { if (tlOn) tlExit(); else { setTlOn(true); tlCurRef.current = 1; setTlCur(1); setSel(null); setMsel({}); setSelEdge(null); setTimeout(function () { if (alive.current) fitView(); }, 70); } }
+    function tlExit() { tlStopPlay(); setTlOn(false); tlCurRef.current = 1; setTlCur(1); setTimeout(function () { if (alive.current) fitView(); }, 70); }
+    function tlSetCur(v) { v = Math.max(0, Math.min(1, v)); tlCurRef.current = v; setTlCur(v); }
+    function tlCursorT() { var m = g && g.tl; return m ? m.tMin + tlCur * (m.tMax - m.tMin) : 0; }
+    function tlXForT(t) {   // playhead world-x for a cursor time — interpolate over real-dated nodes' (ts → center-x)
+      var m = g && g.tl; if (!m) return 0;
+      var ds = g.N.filter(function (n) { return n.ts != null && !n.tsEst; }).sort(function (a, b) { return a.ts - b.ts; });
+      if (!ds.length) return m.gut + 90;
+      function cx(n) { return n.x + (n._w || 210) / 2; }
+      if (t <= ds[0].ts) return cx(ds[0]);
+      if (t >= ds[ds.length - 1].ts) return cx(ds[ds.length - 1]);
+      for (var i = 0; i < ds.length - 1; i++) { if (t >= ds[i].ts && t < ds[i + 1].ts) { var f = (t - ds[i].ts) / ((ds[i + 1].ts - ds[i].ts) || 1); return cx(ds[i]) + (cx(ds[i + 1]) - cx(ds[i])) * f; } }
+      return cx(ds[ds.length - 1]);
+    }
+    // ephemeral world-space chrome for timeline mode: lane bands + labels + date ruler + undated gutter + playhead (NOT research_map_frames)
+    function renderTlChrome() {
+      var m = g.tl; if (!m) return null; var lane = m.laneLabels || [], els = [];
+      m.bands.forEach(function (b) { els.push(h('div', { key: 'tlb' + b.li, className: 'rmap-tl-band' + (b.li % 2 ? ' alt' : ''), style: { top: b.top + 'px', height: b.h + 'px', width: m.contentW + 'px' } }, h('span', { className: 'rmap-tl-lanelbl' }, lane[b.li] || ('Sáv ' + b.li)))); });
+      els.push(h('div', { key: 'tlgut', className: 'rmap-tl-gutter', style: { top: m.ruler + 'px', height: (m.height - m.ruler) + 'px', width: m.gut + 'px' } }, h('span', null, 'Dátlan / becsült')));
+      els.push(h('div', { key: 'tlruler', className: 'rmap-tl-ruler', style: { width: m.contentW + 'px', height: m.ruler + 'px' } }, (m.ticks || []).map(function (t, i) { return h('div', { key: 'tk' + i, className: 'rmap-tl-tick', style: { left: t.x + 'px' } }, h('span', null, t.lab)); })));
+      var px = tlXForT(tlCursorT()); els.push(h('div', { key: 'tlph', className: 'rmap-tl-playhead', style: { left: px + 'px', top: m.ruler + 'px', height: (m.height - m.ruler) + 'px' } }));
+      return h('div', { key: 'tlchrome', className: 'rmap-tl-chrome' }, els);
+    }
+    function tlStepCard(dir) {   // ⏮/⏭ — jump the cursor to the prev/next card in creation order
+      tlPause(); var m = g && g.tl; if (!m) return; var arr = g.N.filter(function (n) { return n.ts != null; }).map(function (n) { return n.ts; }).sort(function (a, b) { return a - b; });
+      if (!arr.length) return; var t = tlCursorT(), idx;
+      if (dir > 0) { idx = arr.findIndex(function (v) { return v > t + 1; }); if (idx < 0) idx = arr.length - 1; }
+      else { for (idx = arr.length - 1; idx >= 0 && arr[idx] >= t - 1; idx--) { } if (idx < 0) idx = 0; }
+      tlSetCur((m.tMax - m.tMin) ? (arr[idx] - m.tMin) / (m.tMax - m.tMin) : 1);
+    }
     // Fázis 2.5 (opt-in, Prezi-B): arrange the cards into per-phase lanes + a named frame each. Overwrites manual
     // positions → behind a confirm; matches frames by title so re-running updates instead of duplicating.
     var PHASE_HU = ['💡 Ötlet', '📚 Irodalom', '🔬 Áttekintés', '🧪 Protokoll', '🎯 Folyóirat', '✍️ Írás', '📤 Beküldés'];
@@ -6561,6 +6684,7 @@
     function toggleMsel(id) { setSelEdge(null); setMsel(function (M) { var m = Object.assign({}, M); if (m[id]) delete m[id]; else m[id] = true; return m; }); }   // node multi-select clears any edge selection (mutual exclusion)
     function startNodeDrag(e, n) {
       if (e.button !== 0) return;   // left button only — right-click opens the generate menu
+      if (tlOn) { setSel(n.id); return; }   // 🕰 timeline: positions are derived (read-only) — select but don't drag
       if (commentMode) { e.stopPropagation(); setComposer({ node_id: n.id }); setCmText(''); return; }   // comment mode: attach a comment to this card
       if (e.shiftKey) { toggleMsel(n.id); return; }   // shift-click toggles multi-selection (no drag)
       var startX = e.clientX, startY = e.clientY, k = view.k || 1, ox = n.x, oy = n.y, can = props.canEdit;
@@ -7571,9 +7695,11 @@
             h('button', { className: 'btn pri', style: { fontSize: 12.5 }, onClick: function () { var vp = stageVP(); ideaAtPos((vp.w / 2 - view.tx) / view.k - NW / 2, (vp.h / 2 - view.ty) / view.k - NH / 2); } }, '✦ Első ötlet'),
             h('button', { className: 'btn', style: { fontSize: 12.5 }, onClick: function () { setDkOpen(true); try { localStorage.setItem('pr-rmap-dock', '1'); } catch (e) { } setDkTab('files'); } }, '📎 Adat feltöltése'),
             h('button', { className: 'btn', style: { fontSize: 12.5 }, onClick: function () { setDkOpen(true); try { localStorage.setItem('pr-rmap-dock', '1'); } catch (e) { } setDkTab('chat'); } }, '💬 Asszisztens')) : null) : null,
-        h('div', { className: 'rmap-world rmap-lod-' + lod + (smartAnim ? ' rmap-anim' : ''), style: { transform: 'translate(' + view.tx + 'px,' + view.ty + 'px) scale(' + view.k + ')' } },
+        h('div', { className: 'rmap-world rmap-lod-' + lod + (smartAnim ? ' rmap-anim' : '') + (tlOn ? ' rmap-tl-on' : ''), style: { transform: 'translate(' + view.tx + 'px,' + view.ty + 'px) scale(' + view.k + ')' } },
+          // 🕰 timeline chrome (ephemeral, behind everything) — lane bands + ruler + gutter + playhead
+          g.tl ? renderTlChrome() : null,
           // frames (named regions) render BEHIND everything; the body is pointer-events:none so cards stay interactive
-          frames.map(function (f) {
+          (tlOn ? [] : frames).map(function (f) {
             var gg = (frLive && frLive.id === f.id) ? frLive : f;
             return h('div', { key: 'fr' + f.id, className: 'rmap-frame rmap-fc-' + (f.color || 'slate'), style: { position: 'absolute', left: gg.x + 'px', top: gg.y + 'px', width: gg.w + 'px', height: gg.h + 'px' } },
               h('div', { className: 'rmap-frame-h', onMouseEnter: props.canEdit ? function () { setHovFrame(f.id); } : null, onMouseLeave: props.canEdit ? function () { setHovFrame(null); } : null, onMouseDown: props.canEdit ? function (e) { startFrameDrag(e, f, 'move'); } : null },
@@ -7596,7 +7722,7 @@
               h('marker', { id: 'rmap-ar', viewBox: '0 0 8 8', refX: 6.5, refY: 4, markerWidth: 6.5, markerHeight: 6.5, orient: 'auto-start-reverse', markerUnits: 'userSpaceOnUse' }, h('path', { d: 'M0.5,0.5 L7.5,4 L0.5,7.5 Z', fill: 'context-stroke' })),
               h('marker', { id: 'rmap-bl', viewBox: '0 0 8 8', refX: 5.5, refY: 4, markerWidth: 8, markerHeight: 8, orient: 'auto-start-reverse', markerUnits: 'userSpaceOnUse' }, h('path', { d: 'M5,1 L5,7', stroke: 'context-stroke', strokeWidth: 1.6 }))),
             edgeEls, linkRubber),
-          g.N.map(function (n) { if (!nodeVisible(n)) return null; var _sized = !!((nrzLive && nrzLive.id === n.id) || (layout[n.id] && layout[n.id].card_h)); var _kk = view.k, _cw = Math.min((n._w || NW), (cardVP.w - 16) / _kk); var _st = { left: n.x + 'px', top: n.y + 'px', width: _cw + 'px' }; if (_sized) _st.height = Math.min((n._h || NH), (cardVP.h - 16) / _kk) + 'px'; return h('div', { key: n.id, 'data-nid': n.id, className: 'rmap-node t-' + n.t + (_sized ? ' rmap-sized' : '') + (sel === n.id ? ' sel' : '') + (msel[n.id] ? ' rmap-mselected' : '') + (n.mapPinned ? ' rmap-pinned' : '') + (activeKey && n.ph === RMAP_PHASE_IDX[activeKey] ? ' inphase' : '') + (props.canEdit ? ' editable' : '') + (dlive && dlive.id === n.id ? ' dragging' : '') + ((nrzLive && nrzLive.id === n.id) ? ' rmap-resizing' : '') + (linkDrag && linkDrag.over === n.id ? ' rmap-linktarget' : '') + (linkDrag && linkDrag.from === n.id ? ' rmap-linksource' : '') + (justPlaced && justPlaced.indexOf(n.id) >= 0 ? ' rmap-justplaced' : '') + (hovCarry[n.id] ? ' rmap-carry-preview' : ''), style: _st, onMouseDown: function (e) { e.stopPropagation(); startNodeDrag(e, n); }, onDoubleClick: function (e) { e.stopPropagation(); if (canEnter(n)) enterNode(n); }, onContextMenu: function (e) { e.preventDefault(); e.stopPropagation(); if (props.canEdit && (genActions(n).length || regenActions(n).length || (cardSizeCap && layout[n.id] && layout[n.id].card_h))) setMenu({ node: n, x: e.clientX, y: e.clientY }); } }, n.mapPinned ? h('span', { className: 'rmap-pin-badge', title: 'Kitűzött' }, '📌') : null, nodeCmCount(n.id) ? h('span', { className: 'rmap-cm-badge', title: nodeCmCount(n.id) + ' nyitott komment', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); setOpenThread(n.id); } }, '💬' + nodeCmCount(n.id)) : null, (n.t === 'step' && n.ref && (n.ref.assignee_id || n.ref.signed_off_by)) ? h('span', { className: 'rmap-step-badges' }, n.ref.assignee_id ? h('span', { className: 'rmap-assignee', title: 'Felelős: ' + nameOf(n.ref.assignee_id), style: { background: userColor(n.ref.assignee_id) } }, String(nameOf(n.ref.assignee_id) || '?').trim().charAt(0).toUpperCase()) : null, n.ref.signed_off_by ? h('span', { className: 'rmap-signoff', title: 'Jóváhagyta: ' + nameOf(n.ref.signed_off_by) }, '✅') : null) : null, n.t === 'gap' ? gapNovRing(n) : null, h('div', { className: 'rmap-nb' }, body(n), richTier(n)),
+          g.N.map(function (n) { if (!nodeVisible(n)) return null; var _sized = !!((nrzLive && nrzLive.id === n.id) || (layout[n.id] && layout[n.id].card_h)); var _kk = view.k, _cw = Math.min((n._w || NW), (cardVP.w - 16) / _kk); var _st = { left: n.x + 'px', top: n.y + 'px', width: _cw + 'px' }; if (_sized) _st.height = Math.min((n._h || NH), (cardVP.h - 16) / _kk) + 'px'; return h('div', { key: n.id, 'data-nid': n.id, className: 'rmap-node t-' + n.t + (_sized ? ' rmap-sized' : '') + (sel === n.id ? ' sel' : '') + (msel[n.id] ? ' rmap-mselected' : '') + (n.mapPinned ? ' rmap-pinned' : '') + (activeKey && n.ph === RMAP_PHASE_IDX[activeKey] ? ' inphase' : '') + (props.canEdit ? ' editable' : '') + (dlive && dlive.id === n.id ? ' dragging' : '') + ((nrzLive && nrzLive.id === n.id) ? ' rmap-resizing' : '') + (linkDrag && linkDrag.over === n.id ? ' rmap-linktarget' : '') + (linkDrag && linkDrag.from === n.id ? ' rmap-linksource' : '') + (justPlaced && justPlaced.indexOf(n.id) >= 0 ? ' rmap-justplaced' : '') + (hovCarry[n.id] ? ' rmap-carry-preview' : '') + (tlOn && n.ts != null && g.tl && n.ts > (g.tl.tMin + tlCur * (g.tl.tMax - g.tl.tMin)) ? ' rmap-tl-future' : '') + (tlOn && n.tsEst ? ' rmap-tl-est' : ''), style: _st, onMouseDown: function (e) { e.stopPropagation(); startNodeDrag(e, n); }, onDoubleClick: function (e) { e.stopPropagation(); if (canEnter(n)) enterNode(n); }, onContextMenu: function (e) { e.preventDefault(); e.stopPropagation(); if (props.canEdit && (genActions(n).length || regenActions(n).length || (cardSizeCap && layout[n.id] && layout[n.id].card_h))) setMenu({ node: n, x: e.clientX, y: e.clientY }); } }, n.mapPinned ? h('span', { className: 'rmap-pin-badge', title: 'Kitűzött' }, '📌') : null, nodeCmCount(n.id) ? h('span', { className: 'rmap-cm-badge', title: nodeCmCount(n.id) + ' nyitott komment', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); setOpenThread(n.id); } }, '💬' + nodeCmCount(n.id)) : null, (n.t === 'step' && n.ref && (n.ref.assignee_id || n.ref.signed_off_by)) ? h('span', { className: 'rmap-step-badges' }, n.ref.assignee_id ? h('span', { className: 'rmap-assignee', title: 'Felelős: ' + nameOf(n.ref.assignee_id), style: { background: userColor(n.ref.assignee_id) } }, String(nameOf(n.ref.assignee_id) || '?').trim().charAt(0).toUpperCase()) : null, n.ref.signed_off_by ? h('span', { className: 'rmap-signoff', title: 'Jóváhagyta: ' + nameOf(n.ref.signed_off_by) }, '✅') : null) : null, n.t === 'gap' ? gapNovRing(n) : null, h('div', { className: 'rmap-nb' }, body(n), richTier(n)),
             (props.canEdit && edgesCap) ? ['n', 'e', 's', 'w'].map(function (dir) { return h('span', { key: 'port' + dir, className: 'rmap-port rmap-port-' + dir, title: 'Húzz kapcsolatot egy másik kártyához', onMouseDown: function (e) { e.stopPropagation(); startLinkDrag(e, n.id); } }); }) : null,
             (props.canEdit && producibleTypes(n).length) ? h('span', { key: 'arcpip', className: 'rmap-arcpip' + (arcOpen === n.id ? ' on' : ''), title: 'Generálj ebből ▸', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); if (sel !== n.id) { setSelEdge(null); setMsel({}); setSel(n.id); } setArcOpen(arcOpen === n.id ? null : n.id); } }, '✦') : null,
             (props.canEdit && cardSizeCap) ? h('span', { className: 'rmap-node-rz', title: 'Átméretezés (húzd)', onMouseDown: function (e) { e.stopPropagation(); startNodeResize(e, n); } }) : null); })),
@@ -7673,7 +7799,8 @@
             h('button', { key: 'exp', className: 'rmap-dbtn', title: 'Térkép exportálása PNG-be', onClick: exportMap }, '⤓', L('Export (PNG)')),
             h('button', { key: 'files', className: 'rmap-dbtn' + (fbOpen ? ' on' : ''), title: 'Fájl-böngésző (bal panel) — a projekt fájljai + kártya-kiemelés', onClick: function () { setFbOpen(function (v) { var nv = !v; try { localStorage.setItem('pr-rmap-fb', nv ? '1' : '0'); } catch (e) { } return nv; }); } }, '🗂', L('Fájlok')),
             (pagesCap && pages.length > 1) ? h('button', { key: 'tour', className: 'rmap-dbtn', title: 'Gyors túra: végigzoomol a mentett Lapokon', onClick: tourStart }, '▶', L('Lap-túra')) : null,
-            pathsCap ? h('button', { key: 'pres', className: 'rmap-dbtn' + (presMgrOpen ? ' on' : ''), title: 'Bemutatók (Prezi-story): jelenetekből álló, vezetett túra', onClick: function () { setPresMgrOpen(function (v) { return !v; }); } }, '🎬', L('Bemutató')) : null
+            pathsCap ? h('button', { key: 'pres', className: 'rmap-dbtn' + (presMgrOpen ? ' on' : ''), title: 'Bemutatók (Prezi-story): jelenetekből álló, vezetett túra', onClick: function () { setPresMgrOpen(function (v) { return !v; }); } }, '🎬', L('Bemutató')) : null,
+            (g.N.length > 1) ? h('button', { key: 'tl', className: 'rmap-dbtn' + (tlOn ? ' on' : ''), title: tlOn ? 'Idővonal-nézet bezárása (Esc) — vissza a kézi elrendezéshez' : 'Idővonal: mikor mi jött létre — a kártyák a keletkezési idejük szerint (efemer, nem írja felül az elrendezést)', onClick: tlToggle }, '🕰', L('Idővonal')) : null
           ].filter(Boolean);
           var g2 = [
             (props.canEdit && framesCap) ? h('button', { key: 'frame', className: 'rmap-dbtn', title: 'Új keret (nevesített régió) — vagy dupla-katt a vászonra', onClick: function () { frameCreate(); } }, '▦', L('Új keret')) : null,
@@ -7699,6 +7826,25 @@
           [g1, g2, g3].forEach(function (grp, gi) { if (!grp.length) return; if (kids.length) kids.push(h('span', { className: 'rmap-dsep', key: 'dsep' + gi })); grp.forEach(function (el) { kids.push(el); }); });
           return h.apply(null, ['div', { className: 'rmap-zoom', onMouseMove: function (e) { dockMagnify(e.currentTarget, e.clientX, 82, 30); }, onMouseLeave: function (e) { dockReset(e.currentTarget); } }].concat(kids));
         })(),
+        // 🕰 Idővonal UI — top-center pickers (idő-leképezés + sáv) + a bottom scrubber/replay transport (screen-space, only in timeline mode)
+        (tlOn && g.tl) ? h('div', { className: 'rmap-tl-ui', onMouseDown: function (e) { e.stopPropagation(); } },
+          h('div', { className: 'rmap-tl-pickers' },
+            h('span', { className: 'rmap-tl-plbl' }, '🕰 Idővonal'),
+            h('div', { className: 'rmap-tl-seg' }, [['squished', 'Sűrített'], ['linear', 'Lineáris'], ['ordinal', 'Sorrend']].map(function (o) { return h('button', { key: o[0], className: (tlX === o[0] ? 'on' : ''), title: o[1], onClick: function () { setTlX(o[0]); setTimeout(function () { if (alive.current) fitView(); }, 70); } }, o[1]); })),
+            h('div', { className: 'rmap-tl-seg' }, [['phase', 'Fázis'], ['type', 'Típus']].map(function (o) { return h('button', { key: o[0], className: (tlLane === o[0] ? 'on' : ''), onClick: function () { setTlLane(o[0]); setTimeout(function () { if (alive.current) fitView(); }, 70); } }, o[1]); })),
+            h('button', { className: 'rmap-tl-close', title: 'Kilépés (Esc)', onClick: tlExit }, '✕ Kilépés')),
+          (function () {
+            var m = g.tl, curT = m.tMin + tlCur * (m.tMax - m.tMin), shown = g.N.filter(function (n) { return n.ts == null || n.ts <= curT; }).length;
+            var dl = tlCur >= 1 ? 'Teljes projekt' : (isFinite(curT) ? new Date(curT).toLocaleDateString('hu-HU', { year: 'numeric', month: '2-digit', day: '2-digit' }) : '—');
+            return h('div', { className: 'rmap-tl-scrub' },
+              h('button', { className: 'rmap-tl-tb', title: 'Előző kártya', onClick: function () { tlStepCard(-1); } }, '⏮'),
+              h('button', { className: 'rmap-tl-tb play', title: 'Lejátszás / szünet', onClick: function () { tlPlay ? tlStopPlay() : tlStartPlay(); } }, tlPlay ? '⏸' : '▶'),
+              h('button', { className: 'rmap-tl-tb', title: 'Következő kártya', onClick: function () { tlStepCard(1); } }, '⏭'),
+              h('div', { className: 'rmap-tl-track', onMouseDown: function (e) { e.stopPropagation(); tlPause(); var r = e.currentTarget.getBoundingClientRect(); function stt(ev) { tlSetCur((ev.clientX - r.left) / r.width); } stt(e); function mv(ev) { stt(ev); } function up() { window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); } window.addEventListener('mousemove', mv); window.addEventListener('mouseup', up); } },
+                h('div', { className: 'rmap-tl-fill', style: { width: (tlCur * 100) + '%' } }),
+                h('div', { className: 'rmap-tl-knob', style: { left: (tlCur * 100) + '%' } })),
+              h('div', { className: 'rmap-tl-readout' }, dl, h('small', null, shown + ' / ' + g.N.length + ' kártya')));
+          })()) : null,
         // "hidden figures" restore panel — bring Map-removed figures (on_map=false) back onto the Map
         (restoreOpen && data && data.hiddenFigs) ? h('div', { style: { position: 'absolute', left: '50%', bottom: 74, transform: 'translateX(-50%)', zIndex: 14, width: 264, maxHeight: '58%', overflowY: 'auto', background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 12, boxShadow: '0 18px 50px -20px rgba(20,26,40,.55)', padding: 12 }, onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
           (function () { ensureFigUrls(data.hiddenFigs); return null; })(),

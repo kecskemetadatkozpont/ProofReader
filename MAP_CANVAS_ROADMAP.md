@@ -541,6 +541,24 @@
   NEM kell (a card_w/card_h a migration-80 óta megvan). Version `?v=1787360000`. **Elhalasztva (v2):** valódi ábra-aspect
   (research_figures width/height a select-be), md-magasság a valós renderelt tartalomból, medián-igazítás az él-egyenesítéshez.
 
+## 🕰 Idővonal-nézet — „mikor mi jött létre" — 2026-07-21
+> User-kérés: „valamiféle timeline szerű elrendezés, hogy lehessen látni, mikor mi jött létre". 4-ügynökös tervezés →
+> interaktív mockup (artifact 1024df28, 🕰) → user-jóváhagyás: ÉPÍTSD MEG, alap = Sűrített.
+- [x] ✅ **Idővonal-nézet v1 (`<tbd>`, review: 1 LOW fix / 4 top-priority + seam-ek CLEAN):** ÚJ `🕰 Idővonal` menüsor-gomb →
+  **EFEMER** nézet (mint a gLive/story — SOHA nem ír `research_map_layout`-ba; `Esc`/gomb visszaáll a kézi elrendezéshez).
+  **Seam:** a `graph()`-ban a gLive blokk UTÁN, a maxY ELŐTT egy `if (tlOn)` override-ág (`timelineLayout(N,E)` → n.x/n.y),
+  ez a VÉGSŐ pozíció-szó → maxY/by/manuál-él fold ingyen újraszámol; tlOn=false esetén a `graph()` bittre a régi (a review
+  igazolta a 100%-os semlegességet). **Idő-forrás:** `n.ts` egyetlen post-passban `n.ref.created_at`-ból (chat=updated_at),
+  a `created_at` bekerült a betöltő select-ekbe; aggregátum/dátlan node DAG-becslést kap (min(gyerek)-eps / max(szülő)+eps,
+  fixpont), a becsültek szaggatott kerettel (`rmap-tl-est`). **X-leképezés (3):** Sűrített (nap-bucket, szélesség ∝ darabszám,
+  fix rés — az üresjáratot összehúzza, a tömeges gen-t szétlegyezi; ALAP) · Lineáris (valós idő-arány) · Sorrend (egyenletes).
+  **Y-sáv (2):** Fázis (ph 0-6) · Típus. **Chrome (world-space, együtt zoomol):** fázis-sávok + címkék + dátum-vonalzó +
+  „Dátlan" oszlop + narancs **lejátszófej**. **Scrubber (screen-space):** ⏮ ▶/⏸ ⏭ + húzható csúszka + dátum/„N / összes"
+  kijelző; **lejátszáskor** a jövőbeli (ts > kurzor) kártyák elhalványulnak (`rmap-tl-future`), rAF ~9s-es söprés. **Seam-ek:**
+  timeline-ban a húzás tiltva (csak kijelöl), pan/zoom `tlPause()` (szünet, NEM kilépés), `Esc`→`tlExit`, projekt-váltáskor/
+  unmountkor a rAF leáll + a mód resetel (LOW-fix). Migráció/edge NEM kell. Version `?v=1787420000`. **Elhalasztva (v2):**
+  „Mentés Bemutatóként" (a story-rendszerbe), követő-kamera, él-flow marsoló animáció, Származás (DAG-mélység) nézet, LOD chip-tömörítés.
+
 ## Hátralévő (jövő) — Phase 6+
 - [ ] 🔴 **Teljes karakter-szintű CRDT/Yjs** — egyidejű azonos-szekció gépelés valós idejű merge-dzsel.
   A jelenlegi soft-lock + LWW ennek a könnyűsúlyú, függőség-mentes alternatívája; a teljes CRDT nagy

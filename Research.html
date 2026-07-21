@@ -1442,6 +1442,41 @@
     /* ✨ Okos elrendezés settle: animate size too (NOT globally — width/height would jank on every zoom step) */
     .rmap-world.rmap-anim .rmap-node { transition: left .44s cubic-bezier(.4,0,.2,1), top .44s cubic-bezier(.4,0,.2,1), width .44s cubic-bezier(.4,0,.2,1), height .44s cubic-bezier(.4,0,.2,1); }
     @media (prefers-reduced-motion: reduce) { .rmap-world.rmap-anim .rmap-node { transition: none; } }
+    /* 🕰 Idővonal (timeline) — ephemeral world-space chrome (scales with the canvas) + screen-space transport */
+    .rmap-tl-chrome { position: absolute; inset: 0; pointer-events: none; z-index: 0; }
+    .rmap-tl-band { position: absolute; left: 0; border-top: 1px solid var(--line); }
+    .rmap-tl-band.alt { background: rgba(120,140,170,.05); }
+    .rmap-tl-lanelbl { position: absolute; left: 8px; top: 6px; font-size: 12px; font-weight: 700; color: var(--muted); background: var(--surface); border: 1px solid var(--line); border-radius: 7px; padding: 2px 9px; white-space: nowrap; opacity: .94; }
+    .rmap-tl-gutter { position: absolute; left: 0; background: repeating-linear-gradient(45deg, rgba(120,140,170,.05) 0 8px, transparent 8px 16px); border-right: 1px dashed var(--line); }
+    .rmap-tl-gutter span { position: absolute; top: 10px; left: 8px; writing-mode: vertical-rl; font-size: 10px; letter-spacing: .1em; color: var(--muted); text-transform: uppercase; }
+    .rmap-tl-ruler { position: absolute; top: 0; left: 0; border-bottom: 1px solid var(--line); background: var(--surface); }
+    .rmap-tl-tick { position: absolute; top: 0; height: 46px; border-left: 1px dashed var(--line); }
+    .rmap-tl-tick span { position: absolute; top: 6px; left: 5px; font-size: 11px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .rmap-tl-playhead { position: absolute; width: 2px; background: linear-gradient(180deg, #f59e0b, rgba(245,158,11,0)); z-index: 5; }
+    .rmap-tl-playhead::before { content: ""; position: absolute; top: -5px; left: -5px; width: 12px; height: 12px; border-radius: 50%; background: #f59e0b; box-shadow: 0 0 10px 2px rgba(245,158,11,.6); }
+    .rmap-node.rmap-tl-future { opacity: .18; filter: grayscale(.8); }
+    .rmap-node.rmap-tl-est { border-style: dashed; }
+    .rmap-world.rmap-tl-on .rmap-node { cursor: default; }
+    .rmap-tl-ui { position: absolute; inset: 0; pointer-events: none; z-index: 16; }
+    .rmap-tl-ui > * { pointer-events: auto; }
+    .rmap-tl-pickers { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 7px 12px; box-shadow: 0 10px 30px -14px rgba(20,26,40,.5); max-width: 94%; flex-wrap: wrap; }
+    .rmap-tl-plbl { font-size: 12.5px; font-weight: 700; color: var(--ink); }
+    .rmap-tl-seg { display: inline-flex; background: var(--surface-2); border: 1px solid var(--line); border-radius: 9px; padding: 2px; gap: 2px; }
+    .rmap-tl-seg button { font: inherit; font-size: 12px; color: var(--muted); background: none; border: 0; border-radius: 7px; padding: 4px 10px; cursor: pointer; }
+    .rmap-tl-seg button:hover { color: var(--ink); }
+    .rmap-tl-seg button.on { background: #f59e0b; color: #241a08; font-weight: 600; }
+    .rmap-tl-close { font: inherit; font-size: 12px; color: var(--muted); background: none; border: 1px solid var(--line); border-radius: 8px; padding: 5px 10px; cursor: pointer; }
+    .rmap-tl-close:hover { color: var(--danger, #d6323a); border-color: var(--danger, #d6323a); }
+    .rmap-tl-scrub { position: absolute; bottom: 76px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 12px; width: min(680px, 84%); background: var(--surface); border: 1px solid var(--line); border-radius: 13px; padding: 9px 15px; box-shadow: 0 14px 40px -16px rgba(20,26,40,.55); }
+    .rmap-tl-tb { width: 32px; height: 32px; border-radius: 9px; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink); font-size: 13px; cursor: pointer; display: grid; place-items: center; flex: none; }
+    .rmap-tl-tb:hover { border-color: #f59e0b; }
+    .rmap-tl-tb.play { background: #f59e0b; border-color: #f59e0b; color: #241a08; width: 38px; height: 38px; font-size: 15px; }
+    .rmap-tl-track { position: relative; flex: 1; height: 30px; display: flex; align-items: center; cursor: pointer; }
+    .rmap-tl-track::before { content: ""; position: absolute; left: 0; right: 0; height: 5px; border-radius: 4px; background: var(--surface-2); border: 1px solid var(--line); }
+    .rmap-tl-fill { position: absolute; left: 0; height: 5px; border-radius: 4px; background: linear-gradient(90deg, #fbbf24, #f59e0b); pointer-events: none; }
+    .rmap-tl-knob { position: absolute; width: 16px; height: 16px; border-radius: 50%; background: #fff; border: 3px solid #f59e0b; top: 50%; transform: translate(-50%, -50%); box-shadow: 0 2px 6px rgba(20,26,40,.4); pointer-events: none; }
+    .rmap-tl-readout { font-size: 12px; color: var(--ink); min-width: 118px; text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+    .rmap-tl-readout small { display: block; color: var(--muted); font-weight: 400; font-size: 10.5px; }
     .rmap-node.editable { cursor: grab; }
     .rmap-node.dragging { cursor: grabbing; z-index: 30; transition: none; box-shadow: 0 3px 8px rgba(20,26,40,.14), 0 22px 44px -16px rgba(20,26,40,.6); }
     .rmap-node.inphase { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 20%, transparent), 0 10px 26px -20px rgba(20,26,40,.5); }
@@ -1545,7 +1580,7 @@
   <script type="text/babel" src="canvas.jsx?v=1783137934"></script>
   <script type="text/babel" src="notes.jsx?v=1783137934"></script>
   <script src="autopilot-core.js?v=1784160000"></script>
-  <script type="text/babel" src="research.jsx?v=1787360000"></script>
+  <script type="text/babel" src="research.jsx?v=1787420000"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>
