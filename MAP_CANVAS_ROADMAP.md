@@ -419,6 +419,21 @@
   őket (slot-léptetés, `guard<500` teli-keret fallback), a keret a ténylegesen használt utolsó sorig nő; üres occ esetén
   bájtazonos a régivel. Review CLEAN + unit-teszt zöld. (Marad: `ideaAtPos` radial-nudge — minor, a radial csak üres vászonra nyílik.)
 
+## 🚧 Térkép-teljesség: node-genesis (a teljes folyamat a Térképről) — 2026-07-21 (éjszakai)
+> Az audit ~55%-ot mért Térkép-only elérhetőségre; a hátsó harmad azért tört meg, mert 4 node-típus
+> renderel/embed-el/generál/töröl, de a vászonról nem SZÜLETHET meg. 5-ügynökös design-workflow → egységes minta:
+> create-row → `placeNode` (pin+optimista+select) → deklaratív radial-regiszter. Mind kliens-oldali, migráció/edge nélkül.
+- [x] ✅ **Shared helpers + dataset/section/venue (2026-07-21, review CLEAN):** (0) **`placeNode(nid,wx,wy,applyOptimistic)`**
+  — az `ideaAtPos` közös farka kiemelve (layout-pin + optimista append VAGY setBump + select); az `ideaAtPos` erre
+  refaktorálva (bájt-azonos). (1) **`datasetAtPos`** → `research_datasets` insert (`source:'other'`/`status:'registered'`,
+  a letöltő-worker tétlen) → `'d'+id`, optimista datasets-concat (a limit(16) reload-sapka miatt kötelező). (2)
+  **`sectionAtPos`** → `CORE.saveFile('writing/uj-szekcio-<ts>.md')` (egyedi útvonal → az upsert nem ír felül) → `'w'+id`
+  szekció-node. (3) **`venueAtPos`** → `research_journal_picks` candidate (journal_id null) → `'v'+id`. (0b) A radial-menü
+  deklaratív regiszterré alakítva (`{key,label,col,icon,on,run}`, ikon `s.icon`-ból); 3 új szegmens (✍️ Szekció · 🗂️ Adat
+  · 🎯 Folyóirat) a Keret/Ötlet/Komment mellé, a gyűrű sugara n>4-nél 118px. Insert-oszlopok + node-id prefixek +
+  optimista-alakok mind ellenőrizve a graph() ellen. **NYITOTT:** submission (📤) — külön, óvatosabb lépés (a graph()
+  átsorolja a meglévő submission/ fájl-node-okat submission-típusúra).
+
 ## Hátralévő (jövő) — Phase 6+
 - [ ] 🔴 **Teljes karakter-szintű CRDT/Yjs** — egyidejű azonos-szekció gépelés valós idejű merge-dzsel.
   A jelenlegi soft-lock + LWW ennek a könnyűsúlyú, függőség-mentes alternatívája; a teljes CRDT nagy

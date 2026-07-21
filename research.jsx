@@ -5767,20 +5767,58 @@
     }
     // radial add-menu: create an IDEA node at the world point — insert the idea, then pin its Map position to the cursor
     // (node_id = "i"+id, mirrors graph()), optimistic + reload so it materializes exactly there, and select it.
+    // shared genesis TAIL: pin the new node at the cursor, materialize it (optimistic append when given — mandatory for
+    // the limit-capped fetches so a brand-new row isn't dropped by the reload — else setBump), and select it. Every
+    // "create X on the Map" verb resolves an id then calls this, so all paths are identical below the create step.
+    function placeNode(nid, wx, wy, applyOptimistic) {
+      var X = Math.round(wx), Y = Math.round(wy);
+      setLayout(function (L) { var m = Object.assign({}, L); m[nid] = Object.assign({ x: X, y: Y }, m[nid]); return m; });
+      sb.from('research_map_layout').upsert({ project_id: props.projectId, node_id: nid, x: X, y: Y, updated_at: new Date().toISOString() }, { onConflict: 'project_id,node_id' });
+      if (applyOptimistic) setData(applyOptimistic); else setBump(function (x) { return x + 1; });
+      setSel(nid);
+    }
     function ideaAtPos(wx, wy) {
       if (!props.canEdit) return;
       sb.from('research_ideas').insert({ project_id: props.projectId, source: 'own', question: 'Új ötlet', created_by: props.authorId, status: 'candidate' }).select('id').single().then(function (r) {
         if (!alive.current) return;
         if (r && r.error) { window.PRUI.toast('Ötlet létrehozása sikertelen: ' + r.error.message, { kind: 'error' }); return; }
         if (!r || !r.data) return;
-        var nid = 'i' + r.data.id, X = Math.round(wx), Y = Math.round(wy);
-        setLayout(function (L) { var m = Object.assign({}, L); m[nid] = Object.assign({ x: X, y: Y }, m[nid]); return m; });
-        sb.from('research_map_layout').upsert({ project_id: props.projectId, node_id: nid, x: X, y: Y, updated_at: new Date().toISOString() }, { onConflict: 'project_id,node_id' });
-        // optimistically APPEND the idea to data.ideas so the node materializes at the cursor even past the 24-oldest reload cap
-        // (a setBump reload would drop the newest idea when ≥24 exist); concat keeps d.ideas[0] — the graph anchor — unchanged.
-        setData(function (D) { return D ? Object.assign({}, D, { ideas: (D.ideas || []).concat([{ id: r.data.id, question: 'Új ötlet', hypothesis: null, rationale: null, novelty: null, status: 'candidate', source: 'own' }]) }) : D; });
-        setSel(nid);
+        placeNode('i' + r.data.id, wx, wy, function (D) { return D ? Object.assign({}, D, { ideas: (D.ideas || []).concat([{ id: r.data.id, question: 'Új ötlet', hypothesis: null, rationale: null, novelty: null, status: 'candidate', source: 'own' }]) }) : D; });
       });
+    }
+    // Map-native DATASET genesis — a research_datasets row + a pinned 'd'+id node. source:'other'/status:'registered'
+    // keeps the download worker idle; the user names/sources it in the embedded Data panel, feeds a step via drag-to-connect.
+    function datasetAtPos(wx, wy) {
+      if (!props.canEdit) return;
+      sb.from('research_datasets').insert({ project_id: props.projectId, name: 'Új adathalmaz', source: 'other', status: 'registered', created_by: props.authorId }).select('id').single().then(function (r) {
+        if (!alive.current) return;
+        if (r && r.error) { window.PRUI.toast('Adathalmaz létrehozása sikertelen: ' + r.error.message, { kind: 'error' }); return; }
+        if (!r || !r.data) return;
+        placeNode('d' + r.data.id, wx, wy, function (D) { return D ? Object.assign({}, D, { datasets: (D.datasets || []).concat([{ id: r.data.id, name: 'Új adathalmaz', source: 'other', status: 'registered', size_bytes: null, notes: null }]) }) : D; });   // optimistic: beats the datasets limit(16) reload cap
+      });
+    }
+    // Map-native VENUE genesis — a research_journal_picks candidate + a pinned 'v'+id node (journal_id null; the user attaches a real journal / edits status inline later).
+    function venueAtPos(wx, wy) {
+      if (!props.canEdit) return;
+      sb.from('research_journal_picks').insert({ project_id: props.projectId, title: 'Új folyóirat', status: 'candidate', created_by: props.authorId }).select('id').single().then(function (r) {
+        if (!alive.current) return;
+        if (r && r.error) { window.PRUI.toast('Folyóirat létrehozása sikertelen: ' + r.error.message, { kind: 'error' }); return; }
+        if (!r || !r.data) return;
+        placeNode('v' + r.data.id, wx, wy, function (D) { return D ? Object.assign({}, D, { journals: (D.journals || []).concat([{ id: r.data.id, title: 'Új folyóirat', status: 'candidate', npi_level: null }]) }) : D; });
+      });
+    }
+    // Map-native writing SECTION genesis — a blank writing/*.md file (UNIQUE path so the upsert never clobbers an existing
+    // file) → a 'w'+id section node. Reuses CORE.saveFile (returns the id). Double-click opens the embedded WritingPanel.
+    function sectionAtPos(wx, wy) {
+      if (!props.canEdit) return;
+      var CORE = window.PRAutopilotCore; if (!CORE || !CORE.saveFile) { window.PRUI.toast('A fájl-mentés nem elérhető (autopilot-core).', { kind: 'error' }); return; }
+      var path = 'writing/uj-szekcio-' + Date.now() + '.md', body = '# Új szekció\n\n';
+      CORE.saveFile(props.projectId, path, body, 'manual').then(function (sf) {
+        if (!alive.current) return;
+        if (sf && sf.error) { window.PRUI.toast('Szekció létrehozása sikertelen: ' + (sf.error.message || ''), { kind: 'error' }); return; }
+        var id = sf && sf.data && sf.data.id; if (id == null) { setBump(function (x) { return x + 1; }); return; }   // no id back → fall back to a reload (wfiles is unlimited, so it appears)
+        placeNode('w' + id, wx, wy, function (D) { return D ? Object.assign({}, D, { wfiles: (D.wfiles || []).concat([{ id: id, path: path, size: body.length, storage_path: null }]) }) : D; });
+      }, function () { if (alive.current) window.PRUI.toast('Hálózati hiba a szekció mentésekor.', { kind: 'error' }); });
     }
     // the frame SVG icon for the radial segment (a dashed rounded region + a small title tab) — currentColor = the segment color
     function keretIcon() { return h('svg', { viewBox: '0 0 24 20', width: 20, height: 17, fill: 'none', style: { display: 'block' } }, h('rect', { x: 2, y: 3.6, width: 20, height: 14.4, rx: 3, stroke: 'currentColor', strokeWidth: 2, strokeDasharray: '3 2.4' }), h('rect', { x: 3.4, y: 1.4, width: 9.6, height: 4.7, rx: 1.6, fill: 'currentColor' })); }
@@ -7227,18 +7265,21 @@
         // radial quick-add menu (double-click the empty canvas) — a bloom ring of object types at the cursor
         radial ? (function () {
           var segs = [
-            { key: 'keret', label: 'Keret', col: '#5b63e6', on: props.canEdit && framesCap, run: function (wx, wy) { frameCreate(wx, wy); } },
-            { key: 'otlet', label: 'Ötlet', col: '#d1810b', on: props.canEdit, run: function (wx, wy) { ideaAtPos(wx, wy); } },
-            { key: 'komment', label: 'Komment', col: '#17a34a', on: commentsCap, run: function (wx, wy) { setComposer({ x: wx, y: wy }); setCmText(''); } }
+            { key: 'keret', label: 'Keret', col: '#5b63e6', icon: keretIcon(), on: props.canEdit && framesCap, run: function (wx, wy) { frameCreate(wx, wy); } },
+            { key: 'otlet', label: 'Ötlet', col: '#d1810b', icon: '💡', on: props.canEdit, run: function (wx, wy) { ideaAtPos(wx, wy); } },
+            { key: 'szekcio', label: 'Szekció', col: '#059669', icon: '✍️', on: props.canEdit, run: function (wx, wy) { sectionAtPos(wx, wy); } },
+            { key: 'adat', label: 'Adat', col: '#0d9488', icon: '🗂️', on: props.canEdit, run: function (wx, wy) { datasetAtPos(wx, wy); } },
+            { key: 'folyoirat', label: 'Folyóirat', col: '#c026d3', icon: '🎯', on: props.canEdit, run: function (wx, wy) { venueAtPos(wx, wy); } },
+            { key: 'komment', label: 'Komment', col: '#17a34a', icon: '💬', on: commentsCap, run: function (wx, wy) { setComposer({ x: wx, y: wy }); setCmText(''); } }
           ].filter(function (s) { return s.on; });
-          var vp = stageVP(), R = 100, pad = R + 44, n = segs.length || 1;
+          var vp = stageVP(), n = segs.length || 1, R = n > 4 ? 118 : 100, pad = R + 44;   // wider ring when the menu has many segments
           var cx = Math.max(pad, Math.min(radial.sx, vp.w - pad)), cy = Math.max(pad, Math.min(radial.sy, vp.h - pad));
           return h('div', { className: 'rmap-radial-scrim', onMouseDown: function (e) { e.stopPropagation(); setRadial(null); }, onWheel: function (e) { e.stopPropagation(); }, onContextMenu: function (e) { e.preventDefault(); setRadial(null); } },
             h('div', { className: 'rmap-radial', style: { left: cx + 'px', top: cy + 'px' }, onMouseDown: function (e) { e.stopPropagation(); } },
               segs.map(function (s, i) {
                 var th = -Math.PI / 2 + i * (2 * Math.PI / n);
                 return h('button', { key: s.key, className: 'rmap-radial-seg', style: { '--dx': (R * Math.cos(th)) + 'px', '--dy': (R * Math.sin(th)) + 'px', '--i': i, '--segc': s.col }, onClick: function (e) { e.stopPropagation(); var wx = radial.wx, wy = radial.wy, sx = radial.sx, sy = radial.sy; setRadial(null); s.run(wx, wy); setDrop({ sx: sx, sy: sy }); setTimeout(function () { if (alive.current) setDrop(null); }, 430); } },
-                  h('span', { className: 'rr-ic', style: { color: s.col } }, s.key === 'keret' ? keretIcon() : (s.key === 'otlet' ? '💡' : '💬')),
+                  h('span', { className: 'rr-ic', style: { color: s.col } }, s.icon),
                   h('span', { className: 'rr-lab' }, s.label));
               }),
               h('div', { className: 'rr-hub' }, h('span', null, 'Mit hozzunk létre?'), h('span', { className: 'x', title: 'Mégse (Esc)', onClick: function (e) { e.stopPropagation(); setRadial(null); } }, '✕'))));
