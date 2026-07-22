@@ -575,7 +575,7 @@
 > User: „a rendszer automatikusan írjon az auto-élekre szöveget, hogy a két kártyának mi köze van egymáshoz". 2 design-mockup
 > (artifact 218dfe35 tartalom+megjelenítés; artifact 91063485 él-integrált ANIMÁCIÓK). User-választás: **✨ LLM-only tartalom +
 > „Vonal-rés (gap)" megjelenítés-animáció.** ⚠️ Session-limit miatt a review-workflow most nem futott — manuális ellenőrzés.
-- [x] ✅ **1. fél — Vonal-rés MEGJELENÍTÉS (`<tbd>`, kliens-only, CSS-only, manuális audit):** a `.rmap-elabel` él-címke-pill
+- [x] ✅ **1. fél — Vonal-rés MEGJELENÍTÉS (`25ac5fe`, kliens-only, CSS-only, manuális audit):** a `.rmap-elabel` él-címke-pill
   átalakítva „gap"-re: a `--surface-2` (vászon-szín) háttér **MASZKOLJA az él vonalát** → a reláció-szöveg a vonal RÉSÉBEN ül
   (integrálva, nem lebegő pill), az él színével; nincs pill-keret (hoverre/kijelölve halvány currentColor-keret). **Kinyíló
   animáció** (`rmap-elabel-in`: scaleX .35→1 + letter-spacing, .32s, reduced-motion-guard). A meglévő render (`edgeLabelEls`
