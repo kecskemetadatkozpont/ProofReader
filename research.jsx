@@ -4888,6 +4888,7 @@
     var winsS = useState([]), windows = winsS[0], setWindows = winsS[1];   // 5th LOD: embedded screen-space panel windows [{id,tab,t,title,ref,fp,dx,dy,w,h,z}]
     var winDragRef = useRef(null);   // window move/resize lifecycle guard
     var selEdgeS = useState(null), selEdge = selEdgeS[0], setSelEdge = selEdgeS[1];   // interactive edges (migration-81): selected edge_key — mutually exclusive with node `sel`
+    var hovEdgeS = useState(null), hoverEdge = hovEdgeS[0], setHoverEdge = hovEdgeS[1];   // edge under the cursor → its ✨ auto-label animates in only while hovered (no permanent midpoint clutter)
     var eovS = useState({}), edgeOv = eovS[0], setEdgeOv = eovS[1];   // edge_key → {kind,color,anim,line_style,arrow,width,label} override rows
     var edgeCapS = useState(false), edgesCap = edgeCapS[0], setEdgesCap = edgeCapS[1];   // research_map_edges migration capability
     var espcS = useState(false), edgeSpeedCap = espcS[0], setEdgeSpeedCap = espcS[1];   // migration-82 capability: research_map_edges.speed column present → speed slider
@@ -7714,20 +7715,20 @@
       var d = 'M' + pa.x + ',' + pa.y + ' C' + (pa.x + dx) + ',' + pa.y + ' ' + (pb.x - dx) + ',' + pb.y + ' ' + pb.x + ',' + pb.y;
       // pre-migration-81: keep today's exact look (no override, no hit-path, no selection)
       if (!edgesCap) { var cite0 = e[2] === 'cite'; return h('path', { key: i, className: cite0 ? 'rmap-e-cite' : 'rmap-e-flow', d: d, fill: 'none', stroke: cite0 ? 'var(--accent-tint)' : 'var(--line-2, var(--muted))', strokeWidth: cite0 ? 1.5 : 2, markerEnd: cite0 ? null : 'url(#rmap-arrow)' }); }
-      var ek = edgeKey(e), st = edgeStyle(e), on = selEdge === ek;
+      var ek = edgeKey(e), st = edgeStyle(e), on = selEdge === ek, hov = hoverEdge === ek;
       var isStory = !!(storyPair && ((e[0] === storyPair.a && e[1] === storyPair.b) || (e[0] === storyPair.b && e[1] === storyPair.a)));
       if (hiddenEdgeTypes[st.kind] && !isStory) return null;   // P1: filtered off in the legend (the story thread always shows)
       // v2 timeline edge-flow: while replaying, the edge whose EFFECT (target) node just crossed the playhead marches in amber (causality flowing)
       var tlFlow = !!(tlOn && tlPlay && tlCurT != null && b.ts != null && Math.abs(b.ts - tlCurT) < tlFlowWin && b.ts >= a.ts);
       var animCls = st.anim === 'flow' ? ' rmap-ea-flow' : st.anim === 'pulse' ? ' rmap-ea-pulse' : st.anim === 'pingpong' ? ' rmap-ea-pingpong' : '';
-      var extraW = isStory ? 1.5 : (on ? 1 : 0);
+      var extraW = isStory ? 1.5 : (on ? 1 : (hov ? 0.75 : 0));
       // --esp = per-edge animation duration (type default unless the speed slider overrode it); comet/draw/pulse/calm keep the chosen line-style dash
       var bstyle = { stroke: st.col, strokeWidth: (st.width + extraW) + 'px', '--esp': st.sp + 's' };
       if (st.anim !== 'flow' && st.anim !== 'pingpong') bstyle.strokeDasharray = edgeDash(st.line);
       var base = h('path', { key: 'b', className: 'rmap-e-base' + animCls + (on ? ' rmap-e-sel' : '') + (isStory ? ' rmap-e-story' : '') + (tlFlow ? ' rmap-e-tlflow' : ''), d: d, style: bstyle, markerEnd: st.arrow ? ('url(#rmap-' + st.arrow + ')') : null });
       var bead = (isStory || st.anim === 'comet' || st.anim === 'draw') ? h('path', { key: 'd', className: 'rmap-e-bead ' + (isStory || st.anim === 'comet' ? 'rmap-eb-comet' : 'rmap-eb-draw'), d: d, pathLength: 200, style: { stroke: st.col, strokeWidth: (st.width + 1.5) + 'px', '--esp': (isStory ? 1.2 : st.sp) + 's' } }) : null;
       var ring = on ? [h('circle', { key: 'r1', className: 'rmap-e-ring', cx: pa.x, cy: pa.y, r: 7 }), h('circle', { key: 'r2', className: 'rmap-e-ring', cx: pb.x, cy: pb.y, r: 7 })] : null;
-      var hit = h('path', { key: 'h', className: 'rmap-e-hit', d: d, onClick: function (ev) { ev.stopPropagation(); selectEdge(ek); } });
+      var hit = h('path', { key: 'h', className: 'rmap-e-hit', d: d, onClick: function (ev) { ev.stopPropagation(); selectEdge(ek); }, onMouseEnter: function () { setHoverEdge(ek); }, onMouseLeave: function () { setHoverEdge(function (cur) { return cur === ek ? null : cur; }); } });
       return h('g', { key: ek, style: { color: st.col } }, ring, base, bead, hit);
     });
     // the floating edge inspector (migration-81) — anchored to the selected edge's midpoint, screen-space
@@ -7741,8 +7742,9 @@
     var edgeLabelEls = (edgesCap && view.k >= 0.45) ? g.E.map(function (e) {
       var st = edgeStyle(e); if (!st.label || hiddenEdgeTypes[st.kind]) return null;
       var a = g.by[e[0]], b = g.by[e[1]]; if (!a || !b || !nodeVisible(a) || !nodeVisible(b)) return null;
-      var pa = bpt(a, b), pb = bpt(b, a), ek = edgeKey(e);
-      return h('button', { key: 'el' + ek, className: 'rmap-elabel' + (selEdge === ek ? ' on' : ''), style: { left: (view.tx + (pa.x + pb.x) / 2 * view.k) + 'px', top: (view.ty + (pa.y + pb.y) / 2 * view.k) + 'px', color: st.col }, title: st.label, onMouseDown: function (ev) { ev.stopPropagation(); }, onClick: function (ev) { ev.stopPropagation(); selectEdge(ek); } }, h('span', { className: 'rmap-elabel-sw', style: { background: st.col } }), st.label);
+      var pa = bpt(a, b), pb = bpt(b, a), ek = edgeKey(e), showLab = hoverEdge === ek || selEdge === ek;
+      // pointer-events:none (CSS) so the label never steals hover from the edge underneath (the SVG hit-path drives the reveal); the whole edge line is the click target
+      return h('div', { key: 'el' + ek, className: 'rmap-elabel' + (selEdge === ek ? ' on' : '') + (showLab ? ' show' : ''), style: { left: (view.tx + (pa.x + pb.x) / 2 * view.k) + 'px', top: (view.ty + (pa.y + pb.y) / 2 * view.k) + 'px', color: st.col }, title: st.label }, h('span', { className: 'rmap-elabel-sw', style: { background: st.col } }), st.label);
     }) : null;
     // P1 live legend: which relation types are actually PRESENT (among visible-node edges) + their counts → a filterable legend.
     var edgeKindCounts = {};
