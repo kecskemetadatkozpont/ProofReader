@@ -48,8 +48,19 @@
     .av { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; color: #fff; font-size: 13px; font-weight: 700; background-size: cover; background-position: center; flex: none; }
     .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
     /* ---- Project card, Option A: pipeline-rail (New design) ---- */
-    .pc-a { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 16px 17px 15px; cursor: pointer; box-shadow: 0 1px 2px rgba(20,26,40,.05); transition: box-shadow .18s, transform .18s, border-color .18s; }
+    .pc-a { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 16px 17px 15px; cursor: pointer; box-shadow: 0 1px 2px rgba(20,26,40,.05); transition: box-shadow .18s, transform .18s, border-color .18s; position: relative; }
     .pc-a:hover { box-shadow: 0 18px 44px -22px rgba(20,26,40,.4); transform: translateY(-2px); border-color: var(--line-2, #d7dbe8); }
+    /* owner-only project-card actions (rename / settings / delete) — the whole card opens the project, so these stopPropagation */
+    .card { position: relative; }
+    .pc-actions { position: absolute; top: 10px; right: 10px; z-index: 5; }
+    .pc-actbtn { width: 26px; height: 26px; border-radius: 8px; border: 1px solid transparent; background: none; color: var(--muted); font-size: 16px; line-height: 1; cursor: pointer; display: grid; place-items: center; opacity: .5; transition: opacity .15s, background .15s, color .15s; }
+    .pc-a:hover .pc-actbtn, .card:hover .pc-actbtn, .pc-actbtn:focus-visible { opacity: 1; }
+    .pc-actbtn:hover { background: var(--surface-2); color: var(--ink); opacity: 1; }
+    .pc-actmenu { position: absolute; top: 30px; right: 0; z-index: 25; min-width: 168px; background: var(--surface); border: 1px solid var(--line-2, var(--line)); border-radius: 11px; padding: 5px; box-shadow: 0 18px 44px -18px rgba(20,26,40,.5); display: flex; flex-direction: column; gap: 1px; }
+    .pc-actmenu button { text-align: left; font: inherit; font-size: 12.5px; color: var(--ink); background: none; border: 0; border-radius: 7px; padding: 8px 10px; cursor: pointer; }
+    .pc-actmenu button:hover { background: var(--surface-2); }
+    .pc-actmenu button.danger { color: var(--danger, #d6323a); }
+    .pc-actmenu button.danger:hover { background: color-mix(in srgb, var(--danger, #d6323a) 12%, transparent); }
     .pc-top { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
     .pc-t { font-size: 15.5px; font-weight: 700; line-height: 1.3; letter-spacing: -.01em; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
     .pc-f { font-size: 12px; color: var(--faint); margin-top: 3px; }
@@ -1658,7 +1669,7 @@
   <script type="text/babel" src="canvas.jsx?v=1783137934"></script>
   <script type="text/babel" src="notes.jsx?v=1783137934"></script>
   <script src="autopilot-core.js?v=1784160000"></script>
-  <script type="text/babel" src="research.jsx?v=1787820000"></script>
+  <script type="text/babel" src="research.jsx?v=1787900000"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>

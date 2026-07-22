@@ -256,7 +256,8 @@
       });
     }
     useEffect(function () { function onEsc(e) { if (e.key === 'Escape') props.onClose(); } window.addEventListener('keydown', onEsc); return function () { window.removeEventListener('keydown', onEsc); }; });
-    return h('div', { className: 'scrim', onClick: props.onClose },
+    // portal to <body> so the backdrop is never clipped by an ancestor transform (e.g. a card's hover), and stopPropagation so a backdrop-dismiss can't bubble (React tree) into a click-to-open card
+    return ReactDOM.createPortal(h('div', { className: 'scrim', onClick: function (e) { e.stopPropagation(); props.onClose(); } },
       h('div', { className: 'modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Project settings', onClick: function (e) { e.stopPropagation(); } },
         h('div', { className: 'modal-h' }, h('b', null, tr(lang, 'Project settings')), h('button', { className: 'x', 'aria-label': 'Close', onClick: props.onClose }, '×')),
         h('div', { className: 'modal-b' },
@@ -270,7 +271,7 @@
         ),
         h('div', { className: 'modal-foot' }, h('button', { className: 'btn', onClick: props.onClose }, tr(lang, 'Cancel')), h('button', { className: 'btn pri', disabled: saving, onClick: save }, saving ? tr(lang, 'Saving…') : tr(lang, 'Save')))
       )
-    );
+    ), document.body);
   }
 
   // ---------- Stage stepper ----------
@@ -8734,6 +8735,44 @@
   }
   function ProjectCard(props) {
     var p = props.project;
+    // owner-only card actions: rename / settings / delete (the whole card is click-to-open, so these stopPropagation)
+    var isOwner = !!(props.meId && p.owner_id === props.meId);
+    var pcmS = useState(false), pcMenu = pcmS[0], setPcMenu = pcmS[1];
+    var pceS = useState(false), pcEdit = pceS[0], setPcEdit = pceS[1];
+    useEffect(function () {   // close the card menu on any click/Esc outside it (robust vs the card's hover-transform stacking context)
+      if (!pcMenu) return;
+      function onDoc(e) { if (!(e.target.closest && e.target.closest('.pc-actions'))) setPcMenu(false); }
+      function onEsc(e) { if (e.key === 'Escape') setPcMenu(false); }
+      document.addEventListener('mousedown', onDoc); document.addEventListener('keydown', onEsc);
+      return function () { document.removeEventListener('mousedown', onDoc); document.removeEventListener('keydown', onEsc); };
+    }, [pcMenu]);
+    function pcRename(e) {
+      e.stopPropagation(); setPcMenu(false);
+      var nm = window.prompt('Új projektnév:', p.title || ''); if (nm == null) return;
+      var t = String(nm).trim(); if (!t || t === p.title) return;
+      sb.from('research_projects').update({ title: t }).eq('id', p.id).then(function (r) {
+        if (r && r.error) { window.PRUI.toast('Átnevezés sikertelen: ' + r.error.message, { kind: 'error' }); return; }
+        window.PRUI.toast('Átnevezve', { kind: 'ok' }); if (props.onChanged) props.onChanged();
+      });
+    }
+    function pcDelete(e) {
+      e.stopPropagation(); setPcMenu(false);
+      window.PRUI.confirm({ title: 'Projekt törlése?', body: '„' + (p.title || 'Projekt') + '" és MINDEN hozzá tartozó adat (ötletek, források, study-k, protokollok, fájlok, térkép) VÉGLEGESEN törlődik — ez nem vonható vissza.', danger: true, confirmLabel: 'Végleges törlés' }).then(function (ok) {
+        if (!ok) return;
+        sb.from('research_projects').delete().eq('id', p.id).then(function (r) {
+          if (r && r.error) { window.PRUI.toast('Törlés sikertelen: ' + (/(foreign key|violates|constraint)/i.test(String(r.error.message || '')) ? 'kapcsolódó elemek hivatkoznak rá.' : r.error.message), { kind: 'error' }); return; }
+          window.PRUI.toast('Projekt törölve', { kind: 'ok' }); if (props.onChanged) props.onChanged();
+        });
+      });
+    }
+    var pcOverlays = isOwner ? h(React.Fragment, null,
+      h('div', { className: 'pc-actions', onClick: function (e) { e.stopPropagation(); } },
+        h('button', { className: 'pc-actbtn', title: 'Átnevezés / beállítások / törlés', 'aria-label': 'Projekt műveletek', onClick: function (e) { e.stopPropagation(); setPcMenu(function (v) { return !v; }); } }, '⋯'),
+        pcMenu ? h('div', { className: 'pc-actmenu' },
+          h('button', { onClick: pcRename }, '✎ Átnevezés'),
+          h('button', { onClick: function (e) { e.stopPropagation(); setPcMenu(false); setPcEdit(true); } }, '⚙ Beállítások'),
+          h('button', { className: 'danger', onClick: pcDelete }, '🗑 Törlés')) : null),
+      pcEdit ? h(ProjectSettingsModal, { project: p, onClose: function () { setPcEdit(false); }, onSaved: function () { setPcEdit(false); if (props.onChanged) props.onChanged(); } }) : null) : null;
     // explicit author attribution so a student's (or a test's) project can never read as the viewer's own
     var badge;
     if (props.meId && p.owner_id === props.meId) badge = h('span', { className: 'chip c-grey author-badge' }, 'Mine');
@@ -8758,14 +8797,14 @@
         h('div', { className: 'pc-metrics tabnum' }, ML.map(function (lab, k) { return h('div', { className: 'pc-m', key: k }, h('span', { className: 'pc-mv' }, MV[k] != null ? MV[k] : '–'), h('span', { className: 'pc-ml' }, lab)); })),
         h('div', { className: 'pc-foot' },
           h('div', { className: 'pc-kw' }, kws.map(function (k, i) { return h('span', { className: 'pc-kwc', key: i }, k); }), extraKw ? h('span', { className: 'pc-kwc' }, '+' + extraKw) : null, badge),
-          props.apRun ? apRunBadge(props.apRun) : h('span', { className: 'pc-upd' }, pcAgo(p.updated_at, hu))));
+          props.apRun ? apRunBadge(props.apRun) : h('span', { className: 'pc-upd' }, pcAgo(p.updated_at, hu))), pcOverlays);
     }
-    // ---- classic card (flag OFF) — unchanged ----
+    // ---- classic card (flag OFF) ----
     return h('div', { className: 'card', onClick: function () { props.onOpen(p); } },
       h('div', { className: 'ch' }, h('div', null, h('b', null, p.title), h('span', null, p.field || '—')), badge),
       p.keywords && p.keywords.length ? h('div', { className: 'tags' }, p.keywords.slice(0, 4).map(function (k, i) { return h('span', { className: 'tag', key: i }, k); })) : null,
       h('div', { className: 'meter' }, h('i', { style: { width: Math.round((p.stage / (STAGES.length - 1)) * 100) + '%' } })),
-      h('div', { className: 'kv' }, h('span', null, 'Stage: ' + STAGES[p.stage || 0]), h('span', { className: 'chip ' + (p.status === 'active' ? 'c-ok' : 'c-grey') }, STATUS_LABEL[p.status] || p.status))
+      h('div', { className: 'kv' }, h('span', null, 'Stage: ' + STAGES[p.stage || 0]), h('span', { className: 'chip ' + (p.status === 'active' ? 'c-ok' : 'c-grey') }, STATUS_LABEL[p.status] || p.status)), pcOverlays
     );
   }
 
@@ -9155,7 +9194,7 @@
     } else if (!mineProjects.length) {
       body = h('div', null, seg, h('div', { className: 'soon' }, h('b', null, 'No research projects yet. '), 'Create one to start tracking a study from idea to submission.', h('div', { style: { marginTop: 14 } }, h('button', { className: 'btn pri', onClick: function () { setAdding(true); } }, '+ New project'))));
     } else {
-      body = h('div', null, seg, h('div', { className: 'grid' }, mineProjects.map(function (p) { return h(ProjectCard, { key: p.id, project: p, meId: meId, studentById: studentById, onOpen: props.openProject, apRun: apRuns[p.id], counts: pCounts[p.id] }); })));
+      body = h('div', null, seg, h('div', { className: 'grid' }, mineProjects.map(function (p) { return h(ProjectCard, { key: p.id, project: p, meId: meId, studentById: studentById, onOpen: props.openProject, apRun: apRuns[p.id], counts: pCounts[p.id], onChanged: props.reloadProjects }); })));
     }
 
     return h('div', { className: 'app' + (nd() && sel ? ' rv-hasproj' : '') },
