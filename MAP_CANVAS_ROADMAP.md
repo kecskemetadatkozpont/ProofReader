@@ -580,10 +580,15 @@
   (integrálva, nem lebegő pill), az él színével; nincs pill-keret (hoverre/kijelölve halvány currentColor-keret). **Kinyíló
   animáció** (`rmap-elabel-in`: scaleX .35→1 + letter-spacing, .32s, reduced-motion-guard). A meglévő render (`edgeLabelEls`
   @ view.k≥0.45, `edgeStyle(e).label`, `research_map_edges.label`) VÁLTOZATLAN — csak a stílus. Bármely címkét (kézi/LLM) így renderel.
-- [ ] ⏳ **2. fél — ✨ LLM-GENERÁLÁS (backend, deploy-igényes, PENDING):** edge-fn ami elolvassa MINDKÉT kártya tartalmát +
-  megírja a „miért kapcsolódnak" mondatot a `research_map_edges.label`-be; „Magyarázd meg az éleket" batch-gomb + per-él az
-  inspektorban. LLM-only → a felirat csak generálás után látszik. Edge-deploy = explicit user-jóváhagyás; a session-reset után,
-  rendes review-val.
+- [x] ✅ **2. fél — ✨ LLM-GENERÁLÁS KÓD KÉSZ (`<tbd>`, review: „feature sound" 1 LOW + 1 cosmetic fix; ⚠️ DEPLOY PENDING):**
+  új `research-ai` akció **`explain_edge`** (a kliens átadja mindkét kártya típus+cím+snippetjét + a reláció-kindet → az LLM
+  egy tömör magyar „miért kapcsolódnak" kifejezést ír; **NINCS DB-írás**, a kliens perzisztálja) az allow-list ELŐTT, az
+  entitlement-kapu (`research_chat_ideas`) mögött; `explainEdge()` helper (askClaudeCell-mintára). **Kliens:** `explainOneEdge`
+  (context-építés `edgeCardSnippet`-ből + invoke + `persistEdge(e,{label})` — derived élen manual:false marad → nem duplikál),
+  **✨ Magyarázd meg** gomb az él-inspektorban + **✨ Élek magyarázata** a Nézet-menüben (batch, cap 24, soros, abort-on-first-fail).
+  Review-fix: `explainOneEdge` mindkét hibaalakot (`r.error` ÉS `r.data.error`) nézi (az unpinned supabase-js miatt) → a batch
+  abort-ja megbízhatóan indul; deploy-hint a toastokban. **Graceful:** telepítetlen edge → 400 → toast, nincs kár. **⚠️ AKTIVÁLÁS:
+  `supabase functions deploy research-ai` — EXPLICIT user-jóváhagyás kell** (a deploy bundle-eli a párhuzamos session `_shared/entitlement.ts`-ét, mint a korábbi gap-deployok). Version `?v=1787760000`.
 
 ## 🎛️ Alsó dokk decluttering — ~23 → ~6 vezérlő egy sorban — 2026-07-22
 > User: „az alsó toolbar nagyon hosszú lett, már két sorban vannak a funkciók — tervezz újra, hogy igényes legyen és ne

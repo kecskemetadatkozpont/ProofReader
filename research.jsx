@@ -5663,6 +5663,41 @@
       sb.from('research_map_edges').delete().eq('project_id', props.projectId).eq('edge_key', key).then(function () { setTimeout(function () { if (eovRef.current === key) eovRef.current = null; }, 400); });
     }
     function selectEdge(key) { setSel(null); setMsel({}); setSelEdge(key); }   // edges + nodes are mutually exclusive
+    // ✨ AUTO EDGE-LABELS (LLM): ask the research-ai edge for a concise "why connected" phrase per edge and persist it to
+    // research_map_edges.label (rendered in the "vonal-rés" style). Client supplies each card's type+title+snippet — no server node-fetch.
+    function edgeCardSnippet(n) { var r = n && n.ref; if (!r) return ''; var s = r.question || r.hypothesis || r.abstract || r.notes || r.caption || r.name || r.rationale || ''; return String(s || '').replace(/\s+/g, ' ').slice(0, 300); }
+    function explainOneEdge(e) {   // Promise<bool> — generated + persisted?
+      var a = g.by[e[0]], b = g.by[e[1]]; if (!a || !b) return Promise.resolve(false);
+      var body = { action: 'explain_edge', project_id: props.projectId, kind: edgeStyle(e).kind,
+        from: { type: (RMAP_TYPE[a.t] && RMAP_TYPE[a.t].lab) || a.t, title: a.title || '', snippet: edgeCardSnippet(a) },
+        to: { type: (RMAP_TYPE[b.t] && RMAP_TYPE[b.t].lab) || b.t, title: b.title || '', snippet: edgeCardSnippet(b) } };
+      return sb.functions.invoke('research-ai', { body: body }).then(function (r) {
+        var d = r && r.data;
+        if ((r && r.error) || (d && d.error)) throw ((r && r.error) || new Error(String(d.error)));   // the unpinned supabase-js may surface a non-2xx body as {data:{error}} — guard both shapes (like gap_analyze/matrix/cell) so the batch's abort-on-first-failure fires
+        var label = d && d.label;
+        if (label) { persistEdge(e, { label: String(label).slice(0, 80) }); return true; }
+        return false;
+      });
+    }
+    function explainEdgeInspector(e) {   // per-edge (inspector button)
+      if (!props.canEdit || !edgesCap) return;
+      window.PRUI.toast('✨ Magyarázat generálása…', { kind: 'info' });
+      explainOneEdge(e).then(function (ok) { if (alive.current) window.PRUI.toast(ok ? '✨ Kész — a felirat az élre került' : 'Nem sikerült feliratot generálni', { kind: ok ? 'success' : 'error' }); },
+        function (err) { if (alive.current) window.PRUI.toast('Magyarázat sikertelen — a research-ai él telepítése / AI-jogosultság szükséges lehet.', { kind: 'error' }); });
+    }
+    function explainAllEdges() {   // batch — label every visible auto-edge with no label yet (sequential, capped, abort-on-first-failure)
+      if (!props.canEdit || !edgesCap) { window.PRUI.toast('Élek: nincs jogosultság / kapacitás.', { kind: 'info' }); return; }
+      var todo = (g.E || []).filter(function (e) { var a = g.by[e[0]], b = g.by[e[1]]; return a && b && nodeVisible(a) && nodeVisible(b) && !edgeStyle(e).label; }).slice(0, 24);
+      if (!todo.length) { window.PRUI.toast('Minden látható élnek van már felirata.', { kind: 'info' }); return; }
+      window.PRUI.toast('✨ ' + todo.length + ' él magyarázata folyamatban…', { kind: 'info' });
+      var i = 0, done = 0, failed = 0;
+      function step() {
+        if (i >= todo.length || !alive.current) { if (alive.current) window.PRUI.toast('✨ Kész: ' + done + ' felirat' + (failed ? ' · ' + failed + ' sikertelen' : ''), { kind: done ? 'success' : 'error' }); return; }
+        explainOneEdge(todo[i++]).then(function (ok) { if (ok) done++; else failed++; step(); },
+          function (err) { if (i === 1) { if (alive.current) window.PRUI.toast('Nem elérhető — a research-ai él telepítése / AI-jogosultság szükséges lehet.', { kind: 'error' }); return; } failed++; step(); });   // abort the batch if the very first call fails (edge not deployed / no key / no entitlement)
+      }
+      step();
+    }
     // P2: draw a MANUAL edge between two cards (link-mode). edge_key = from|to|manual; a manual override row that graph() folds into E.
     function createManualEdge(fromId, toId) {
       if (!props.canEdit || !edgesCap || !fromId || !toId || fromId === toId) { setLinkFrom(null); return; }
@@ -6752,6 +6787,7 @@
           item('👁', 'Típus-szűrő', Object.keys(hiddenTypes).length ? Object.keys(hiddenTypes).length + ' rejtve' : '', function () { setTypeFilterOpen(function (v) { return !v; }); }),
           item('🗂', 'Fájl-böngésző', fbOpen ? 'nyitva' : '', function () { setFbOpen(function (v) { var nv = !v; try { localStorage.setItem('pr-rmap-fb', nv ? '1' : '0'); } catch (e) { } return nv; }); }),
           item('⤓', 'Export PNG', '', exportMap),
+          (edgesCap && props.canEdit) ? item('✨', 'Élek magyarázata', 'AI', explainAllEdges) : null,
           sep(1),
           item('🔄', 'Frissítés', '', refreshMap, { disabled: refreshing }),
           (pagesCap && pages.length > 1) ? item('▶', 'Lap-túra', '', tourStart) : null,
@@ -7728,7 +7764,7 @@
             return h('button', { key: imp, className: (Math.abs(st.width - pw) < 0.01 && Math.abs(st.sp - ps) < 0.05 ? 'on' : ''), disabled: !ed, title: 'Fontosság ' + imp, onClick: function () { persistEdge(e, { width: pw, speed: ps }); } }, String(imp));
           }))) : null,
           h('div', { className: 'fld' }, h('div', { className: 'rmap-einsp-l' }, 'Címke (az élre írva)'), h('input', { key: 'lbl' + selEdge, className: 'rmap-einsp-txt', type: 'text', defaultValue: st.label, placeholder: 'Írj ide feliratot…', disabled: !ed, maxLength: 40, onMouseDown: function (ev) { ev.stopPropagation(); }, onKeyDown: function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); ev.target.blur(); } ev.stopPropagation(); }, onBlur: function (ev) { var v = ev.target.value.trim(); if (v !== (st.label || '')) persistEdge(e, { label: v || null }); } }))),
-        ed ? h('div', { className: 'rmap-einsp-foot' }, h('button', { style: st.manual ? { color: 'var(--danger, #d6323a)' } : null, onClick: function () { resetEdge(e); } }, st.manual ? '🗑 Kapcsolat törlése' : '↺ Alaphelyzet')) : null);
+        ed ? h('div', { className: 'rmap-einsp-foot' }, h('button', { title: 'AI-magyarázat: egy tömör mondat, hogy mi köti össze a két kártyát (az élre íródik)', onClick: function () { explainEdgeInspector(e); } }, '✨ Magyarázd meg'), h('button', { style: st.manual ? { color: 'var(--danger, #d6323a)' } : null, onClick: function () { resetEdge(e); } }, st.manual ? '🗑 Kapcsolat törlése' : '↺ Alaphelyzet')) : null);
     }
     // P1.5 — a small novelty ring on a gap node (top-right); the meta (Típus/Bizonyíték) still shows in the body
     function gapNovRing(n) {

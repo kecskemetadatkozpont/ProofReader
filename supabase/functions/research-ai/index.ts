@@ -33,7 +33,7 @@ Deno.serve(async (req) => {
       Deno.env.get('SUPABASE_ANON_KEY')!,
       { global: { headers: { Authorization: auth } } },
     );
-    const { action = 'gap', project_id, canvas, text, row, col } = await req.json().catch(() => ({}));
+    const { action = 'gap', project_id, canvas, text, row, col, from, to, kind } = await req.json().catch(() => ({}));
     if (!project_id) return json({ error: 'project_id required' }, 400);
     if (!ANTHROPIC_KEY) return json({ error: 'ANTHROPIC_API_KEY not set on the function' }, 503);
 
@@ -149,6 +149,16 @@ Deno.serve(async (req) => {
       if (res.error && /gap_type|evidence|column/i.test(res.error.message)) { const { gap_type, evidence, ...bare } = rowIns; res = await sb.from('research_ideas').insert(bare).select('id,question,source,novelty,status,created_at'); }
       if (res.error) return json({ error: 'insert failed: ' + res.error.message }, 403);
       return json({ ok: true, ideas: res.data || [] });
+    }
+
+    // auto EDGE-LABEL: a concise Hungarian phrase for WHY two cards are connected (read-only; NO DB write — the client
+    // persists the returned label to research_map_edges.label, which it owns via RLS). Inputs are supplied by the client
+    // (each card's type + title + a short content snippet), so no per-node-type fetch is needed here.
+    if (action === 'explain_edge') {
+      const f = from || {}, t = to || {};
+      if (!f.title || !t.title) return json({ error: 'from and to required' }, 400);
+      const label = await explainEdge(proj, f, t, String(kind || ''), userModel, _lang);
+      return json({ ok: true, label });
     }
 
     // allow-list the generic (writing) gap path — only 'gap' (default) and 'ideas' reach it. Any unrecognized action
@@ -373,4 +383,31 @@ Return ONLY JSON: {"gap_type":"<slug>","statement":"the gap in one sentence","ra
   const text = (j?.content?.[0]?.text) || '';
   const m = text.match(/\{[\s\S]*\}/);
   try { return m ? JSON.parse(m[0]) : null; } catch { return null; }
+}
+
+// auto edge-label: given the two connected cards (type+title+snippet) and the relation kind, write ONE concise Hungarian
+// phrase for WHY the source card connects to the target (cause → effect), read on the arrow. Returns '' on failure.
+async function explainEdge(proj: any, from: any, to: any, kind: string, model: string, lang: 'en' | 'hu'): Promise<string> {
+  const snip = (c: any) => { const s = String(c.snippet || '').replace(/\s+/g, ' ').slice(0, 400); return s ? ` — „${s}”` : ''; };
+  const KV: Record<string, string> = { erd: 'ered/származik belőle', idz: 'idézi/hivatkozik rá', bem: 'bemenete/táplálja', tam: 'alátámasztja', ell: 'cáfolja/ellentmond', fug: 'előfeltétele/függ tőle', kap: 'kapcsolódik' };
+  const prompt =
+`Egy kutatási-térkép két kártyája közötti NYÍL feliratát írod meg. Mondd meg TÖMÖREN, hogy a FORRÁS-kártyának mi köze a CÉL-kártyához — miért mutat közöttük nyíl (ok → okozat), a forrás→cél irányában olvasva.
+
+PROJEKT: ${proj.title}${proj.goal ? ' — ' + proj.goal : ''}
+FORRÁS (${from.type}): ${from.title}${snip(from)}
+CÉL (${to.type}): ${to.title}${snip(to)}
+Reláció-típus: ${KV[kind] || 'kapcsolódik'}
+
+Írj EGY rövid magyar kifejezést (max 6-7 szó, ige-központú, pl. „adatot ad a lépéshez”, „feltárja a rést”, „az ábra forrás-cikke”, „megvalósítja az ötletet”). NE ismételd meg a kártyacímeket, csak a kapcsolat lényegét. Semmi bevezető.
+
+Return ONLY JSON: {"label":"a rövid kifejezés"}`;
+  const r = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'x-api-key': ANTHROPIC_KEY!, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+    body: JSON.stringify({ model, max_tokens: 120, messages: [{ role: 'user', content: prompt }] }),
+  });
+  const j = await r.json();
+  const text = (j?.content?.[0]?.text) || '';
+  const m = text.match(/\{[\s\S]*\}/);
+  try { const o = m ? JSON.parse(m[0]) : null; return (o && o.label) ? String(o.label).replace(/\s+/g, ' ').trim().slice(0, 80) : ''; } catch { return ''; }
 }
