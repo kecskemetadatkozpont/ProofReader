@@ -580,7 +580,7 @@
   (integrálva, nem lebegő pill), az él színével; nincs pill-keret (hoverre/kijelölve halvány currentColor-keret). **Kinyíló
   animáció** (`rmap-elabel-in`: scaleX .35→1 + letter-spacing, .32s, reduced-motion-guard). A meglévő render (`edgeLabelEls`
   @ view.k≥0.45, `edgeStyle(e).label`, `research_map_edges.label`) VÁLTOZATLAN — csak a stílus. Bármely címkét (kézi/LLM) így renderel.
-- [x] ✅ **2. fél — ✨ LLM-GENERÁLÁS KÓD KÉSZ (`ad5f42f`, review: „feature sound" 1 LOW + 1 cosmetic fix; ⚠️ DEPLOY PENDING):**
+- [x] ✅ **2. fél — ✨ LLM-GENERÁLÁS ÉLESBEN (`ad5f42f`, review „feature sound" 1 LOW+1 cosmetic fix; DEPLOYOLVA 2026-07-22 — user explicit jóváhagyással `supabase functions deploy research-ai --project-ref jokqthwszkweyqmmdesn`, „Deployed Functions"):**
   új `research-ai` akció **`explain_edge`** (a kliens átadja mindkét kártya típus+cím+snippetjét + a reláció-kindet → az LLM
   egy tömör magyar „miért kapcsolódnak" kifejezést ír; **NINCS DB-írás**, a kliens perzisztálja) az allow-list ELŐTT, az
   entitlement-kapu (`research_chat_ideas`) mögött; `explainEdge()` helper (askClaudeCell-mintára). **Kliens:** `explainOneEdge`
