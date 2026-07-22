@@ -589,7 +589,7 @@
   Review-fix: `explainOneEdge` mindkét hibaalakot (`r.error` ÉS `r.data.error`) nézi (az unpinned supabase-js miatt) → a batch
   abort-ja megbízhatóan indul; deploy-hint a toastokban. **Graceful:** telepítetlen edge → 400 → toast, nincs kár.
   Deploy: `supabase functions deploy research-ai` (user explicit jóváhagyással, „Deployed Functions").
-- [x] ✅ **3. fél — AUTOMATIKUS generálás, gombnyomás NÉLKÜL (`<tbd>`, review: „once+cost-safe: IGEN", 1 LOW race-fix):**
+- [x] ✅ **3. fél — AUTOMATIKUS generálás, gombnyomás NÉLKÜL (`0f13acc`, review: „once+cost-safe: IGEN", 1 LOW race-fix):**
   user: „ne kelljen gombot nyomni; egyszer csinálja meg, mentsük az adatokat, csak indokolt esetben frissüljön". Új `useEffect`
   (`AUTO EDGE-LABELS`, deps `[data,bump,edgesCap,litOpen]`, 900ms debounce): a felirat NÉLKÜLI látható auto-éleket magától
   legenerálja + perzisztálja (`research_map_edges.label`). **EGYSZER/él:** a `!edgeStyle(e).label` szűrő (perzisztált) + a
