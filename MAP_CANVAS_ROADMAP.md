@@ -587,8 +587,17 @@
   (context-építés `edgeCardSnippet`-ből + invoke + `persistEdge(e,{label})` — derived élen manual:false marad → nem duplikál),
   **✨ Magyarázd meg** gomb az él-inspektorban + **✨ Élek magyarázata** a Nézet-menüben (batch, cap 24, soros, abort-on-first-fail).
   Review-fix: `explainOneEdge` mindkét hibaalakot (`r.error` ÉS `r.data.error`) nézi (az unpinned supabase-js miatt) → a batch
-  abort-ja megbízhatóan indul; deploy-hint a toastokban. **Graceful:** telepítetlen edge → 400 → toast, nincs kár. **⚠️ AKTIVÁLÁS:
-  `supabase functions deploy research-ai` — EXPLICIT user-jóváhagyás kell** (a deploy bundle-eli a párhuzamos session `_shared/entitlement.ts`-ét, mint a korábbi gap-deployok). Version `?v=1787760000`.
+  abort-ja megbízhatóan indul; deploy-hint a toastokban. **Graceful:** telepítetlen edge → 400 → toast, nincs kár.
+  Deploy: `supabase functions deploy research-ai` (user explicit jóváhagyással, „Deployed Functions").
+- [x] ✅ **3. fél — AUTOMATIKUS generálás, gombnyomás NÉLKÜL (`<tbd>`, review: „once+cost-safe: IGEN", 1 LOW race-fix):**
+  user: „ne kelljen gombot nyomni; egyszer csinálja meg, mentsük az adatokat, csak indokolt esetben frissüljön". Új `useEffect`
+  (`AUTO EDGE-LABELS`, deps `[data,bump,edgesCap,litOpen]`, 900ms debounce): a felirat NÉLKÜLI látható auto-éleket magától
+  legenerálja + perzisztálja (`research_map_edges.label`). **EGYSZER/él:** a `!edgeStyle(e).label` szűrő (perzisztált) + a
+  `st.tried` session-ref → egy feliratozott él SOHA nem generálódik újra; kész projekt újratöltése = 0 LLM-hívás. **Költség-őr:**
+  session-cap 40 (3-szor kapuzva), kill-switch az 1. hibánál (nincs deploy/entitlement → leáll), 550ms throttle, soros, egyszerre
+  egy lánc (`st.running`). **Race-fix:** projektváltáskor `setEdgesCap(false)` újra-élesíti az atomi edgesCap+edgeOv flip-et →
+  nem generál a régi projekt stale edgeOv-jára. A batch-gomb TÖRÖLVE (redundáns az auto-val); a per-él `✨ Magyarázd meg`
+  marad (kézi újragenerálás). Version `?v=1787820000`.
 
 ## 🎛️ Alsó dokk decluttering — ~23 → ~6 vezérlő egy sorban — 2026-07-22
 > User: „az alsó toolbar nagyon hosszú lett, már két sorban vannak a funkciók — tervezz újra, hogy igényes legyen és ne

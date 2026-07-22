@@ -4865,6 +4865,7 @@
     var amS = useState(false), arrMenu = amS[0], setArrMenu = amS[1];         // ⌗ Elrendezés-akciók menu (smart/tidy/stages/reset/frame) — the switch caret
     var zmS = useState(false), zoomMenu = zmS[0], setZoomMenu = zmS[1];       // 100%▾ zoom presets menu
     var dmenuAnchor = useRef({ cx: 0, bottom: 74 });   // last-opened dock-menu trigger anchor (stage-relative), for popover placement
+    var autoLabelRef = useRef({ tried: {}, running: false, disabled: false, count: 0 });   // ✨ auto edge-labels: per-session attempted edge-keys + a kill-switch (first-call failure = not deployed/no entitlement) + a session cap
     var onlS = useState([]), online = onlS[0], setOnline = onlS[1];   // realtime presence: who else is viewing this Map
     var curS = useState({}), cursors = curS[0], setCursors = curS[1];   // live cursors from other users {id:{name,wx,wy,sel,ts,color}}
     var chRef = useRef(null);   // the Map realtime channel (for broadcasting my cursor)
@@ -5169,6 +5170,26 @@
       if (Object.keys(m).length !== Object.keys(hgt).length) changed = true;
       if (changed) setHgt(m);
     }, [data, bump, litOpen, sizeGen]);   // re-measure when the node set/content changes or a card was resized/reset — not on pan/zoom/select
+    // ✨ AUTO EDGE-LABELS: when the edge set is ready/changes, AUTOMATICALLY (no button) generate the LLM "why connected"
+    // phrase for each visible auto-edge that has no label yet. One-time per edge (persisted to research_map_edges.label),
+    // throttled + session-capped; a first-call failure (edge not deployed / no AI entitlement) flips a kill-switch → no storm.
+    useEffect(function () {
+      if (!edgesCap || !props.canEdit || !data || !g || !g.E || !g.E.length) return;
+      var st = autoLabelRef.current; if (st.disabled || st.running || st.count >= 40) return;
+      var t = setTimeout(function () {
+        if (!alive.current || st.running || st.disabled || st.count >= 40) return;
+        var todo = g.E.filter(function (e) { var a = g.by[e[0]], b = g.by[e[1]]; return a && b && nodeVisible(a) && nodeVisible(b) && !edgeStyle(e).label && !st.tried[edgeKey(e)]; });
+        if (!todo.length) return;
+        st.running = true; var i = 0;
+        function step() {
+          if (!alive.current || st.disabled || i >= todo.length || st.count >= 40) { st.running = false; return; }
+          var e = todo[i++]; st.tried[edgeKey(e)] = 1; st.count++;
+          explainOneEdge(e).then(function () { setTimeout(step, 550); }, function () { if (st.count <= 1) { st.disabled = true; st.running = false; return; } setTimeout(step, 550); });   // first attempt failed → likely not deployed / no entitlement → stop
+        }
+        step();
+      }, 900);   // debounce past the initial burst of renders
+      return function () { clearTimeout(t); };
+    }, [data, bump, edgesCap, litOpen]);
     // P2 height-fit: a SHARED ResizeObserver catches ASYNC card-height changes the deps-based measure misses — chiefly a
     // figure thumbnail that loads after the URL resolves (which grows the card) — so the no-overlap rule uses the true
     // height and figure cards do not overlap their neighbours once the image paints. One observer for all cards.
@@ -5758,7 +5779,7 @@
     //    optimistic-write + realtime-echo behavior). Reverses only MY recent gestures; a collaborative GUARD skips a reverse
     //    whose target a teammate changed since. MOVE = full undo+redo; CREATE = undo-only (re-generate to get it back).
     useEffect(function () { layoutRef.current = layout; }, [layout]);   // mirror layout so the undo guard reads the LIVE value (incl. collaborators' realtime moves)
-    useEffect(function () { histRef.current = { undo: [], redo: [] }; histBusy.current = false; if (alive.current) setHistGen(function (x) { return x + 1; }); }, [props.projectId]);   // a fresh project → a fresh undo stack (node ids are only unique within a project)
+    useEffect(function () { histRef.current = { undo: [], redo: [] }; histBusy.current = false; autoLabelRef.current = { tried: {}, running: false, disabled: false, count: 0 }; setEdgesCap(false); if (alive.current) setHistGen(function (x) { return x + 1; }); }, [props.projectId]);   // a fresh project → a fresh undo stack + a fresh auto-edge-label session; setEdgesCap(false) re-arms the atomic edgesCap+edgeOv flip so the auto-label effect can't fire on the OLD project's stale edgeOv (race fix)
     // 🕰 timeline: on project switch (incl. in-place, no remount) stop the replay AND exit the mode + reset the cursor (else project B loads in A's stale timeline, dimming ~70% of B's cards); also clean up the rAF on unmount
     useEffect(function () { tlPlayRef.current = false; if (tlRaf.current) { cancelAnimationFrame(tlRaf.current); tlRaf.current = 0; } setTlPlay(false); setTlOn(false); setPhaseArr(false); setTlCur(1); tlCurRef.current = 1; return function () { tlPlayRef.current = false; if (tlRaf.current) { cancelAnimationFrame(tlRaf.current); tlRaf.current = 0; } }; }, [props.projectId]);
     function nodeToRow(nid) {   // graph node id → its deletable domain row {table,id,dataKey}; null = FK-heavy/shared/aggregate → placement-only
@@ -6787,7 +6808,6 @@
           item('👁', 'Típus-szűrő', Object.keys(hiddenTypes).length ? Object.keys(hiddenTypes).length + ' rejtve' : '', function () { setTypeFilterOpen(function (v) { return !v; }); }),
           item('🗂', 'Fájl-böngésző', fbOpen ? 'nyitva' : '', function () { setFbOpen(function (v) { var nv = !v; try { localStorage.setItem('pr-rmap-fb', nv ? '1' : '0'); } catch (e) { } return nv; }); }),
           item('⤓', 'Export PNG', '', exportMap),
-          (edgesCap && props.canEdit) ? item('✨', 'Élek magyarázata', 'AI', explainAllEdges) : null,
           sep(1),
           item('🔄', 'Frissítés', '', refreshMap, { disabled: refreshing }),
           (pagesCap && pages.length > 1) ? item('▶', 'Lap-túra', '', tourStart) : null,
