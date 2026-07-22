@@ -571,6 +571,21 @@
   **LOD chip-tömörítés: kihagyva** — a meglévő LOD amúgy is kompakttá teszi a kártyákat timeline-ban. Migráció NEM kell
   (a Mentés a migration-79 `research_map_paths`-t használja, graceful ha nincs). Version `?v=1787480000`.
 
+## 🎛️ Alsó dokk decluttering — ~23 → ~6 vezérlő egy sorban — 2026-07-22
+> User: „az alsó toolbar nagyon hosszú lett, már két sorban vannak a funkciók — tervezz újra, hogy igényes legyen és ne
+> legyen feleslegesen sok ikon." Kutatás+design workflow (audit + canvas-toolbar minták + újratervezés) → mockup (artifact
+> e0cdd725, 3 variáns) → user-választás: **V1 — Popover-menük.**
+- [x] ✅ **V1 kompakt dokk (`<tbd>`, review részleges [session-limit: 2/4 dim + 3 fix], manuális audit a többire):** a ~23 gomb →
+  **6 elsődleges egység egy sorban:** `👁 Nézet ▾ · [⤫Szabad·⌗Fázis·🕰Idő ▾] · [↶↷] 🕘 💬 · [− nn%▾ +]`. **3 popover-menü**
+  (a meglévő panel-minta + dock-magnify újrahasznosításával): **Nézet ▾** (Típus-szűrő, Fájlok, Export · Frissítés, Lap-túra,
+  Bemutatók · Összes komment, Rejtett ábrák/kártyák), **Elrendezés-akciók ▾** (a switch caretjén, csak Szabadban: Okos, Rendezd
+  el, ⌗ Fázisokba (végleges)+confirm, Reset, Új keret), **Nagyítás ▾** (a zoom-widget %-án: Nézetbe + 50/100/150/200%). A gyakori
+  akciók (undo/redo, előzmény, komment, ±zoom) egy-kattintás maradnak. A menük a trigger alá horgonyzva (`openDMenu` +
+  `dmenuAnchor` getBoundingClientRect), egyszerre egy, canvas-katt/Esc/mód-váltáskor záródnak. **Latens bug javítva:** a keydown-
+  effekt `[focus,tour]` deps-e elavult closure volt a mód/menü-flagekre → kibővítve. **Review-fixek:** (HIGH) az onDown-closeDMenus
+  visszanyitotta a saját triggerére kattintó menüt → az onDown csak NEM-dokk kattintásnál zár (`!e.target.closest('.rmap-zoom')`);
+  (LOW) „Rejtett kártyák" visszakapta a `mapFlags` kaput; (LOW) Frissítés/Okos visszakapta a busy-disable-t. Version `?v=1787700000`.
+
 ## 🕰 Idővonal V3 — szerves Canvas-integráció („A vászon MAGA az idővonal") — 2026-07-21
 > User: „az idővonal olyan, mint egy középre dobott különálló widget — épüljön be SZERVESEN a teljes Canvas-ba, az opciók
 > TOGGLE-ök legyenek, az egész vászonra hassanak." 3-szög design-workflow → interaktív mockup (artifact 17d71fb0, 🕰, 3 variáns)

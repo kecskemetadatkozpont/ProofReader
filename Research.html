@@ -1492,6 +1492,34 @@
     .rmap-arrpill-seg button { font: inherit; font-size: 11.5px; color: var(--muted); background: none; border: 0; border-radius: 7px; padding: 4px 10px; cursor: pointer; white-space: nowrap; transition: .12s; }
     .rmap-arrpill-seg button:hover { color: var(--ink); }
     .rmap-arrpill-seg button.on { background: #f59e0b; color: #241a08; font-weight: 600; }
+    /* decluttered dock (V1): arrange-switch caret · undo/redo pill · zoom widget · popover menus */
+    .rmap-arrpill-car { height: 30px; border: 0; background: none; color: var(--muted); cursor: pointer; padding: 0 5px; border-radius: 7px; font-size: 10px; align-self: center; }
+    .rmap-arrpill-car:hover, .rmap-arrpill-car.on { background: var(--surface-2); color: var(--ink); }
+    .rmap-ur { display: inline-flex; background: var(--surface-2); border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
+    .rmap-ur-b { border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 14px; width: 30px; height: 30px; display: grid; place-items: center; }
+    .rmap-ur-b:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--ink); }
+    .rmap-ur-b:disabled { opacity: .34; cursor: default; }
+    .rmap-ur-b:first-child { border-right: 1px solid var(--line); }
+    .rmap-zoomw { display: inline-flex; align-items: center; background: var(--surface-2); border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
+    .rmap-zoomw-b { border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 15px; width: 30px; height: 30px; }
+    .rmap-zoomw-b:hover { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--ink); }
+    .rmap-zoomw-pct { border: 0; border-left: 1px solid var(--line); border-right: 1px solid var(--line); background: none; color: var(--ink); cursor: pointer; font-family: ui-monospace, Menlo, monospace; font-size: 11px; height: 30px; padding: 0 8px; display: inline-flex; align-items: center; gap: 3px; }
+    .rmap-zoomw-pct:hover, .rmap-zoomw-pct.on { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+    .rmap-zoomw-car { font-size: 8px; opacity: .7; }
+    .rmap-dmenu { position: absolute; z-index: 16; transform: translateX(-50%); min-width: 180px;
+      background: color-mix(in srgb, var(--surface) 96%, transparent); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+      border: 1px solid var(--line-2, var(--line)); border-radius: 13px; padding: 6px; box-shadow: 0 22px 55px -20px rgba(20,26,40,.6), 0 2px 10px -4px rgba(20,26,40,.3); animation: rmap-dmenu-in .13s ease; }
+    @keyframes rmap-dmenu-in { from { opacity: 0; transform: translateX(-50%) translateY(6px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
+    .rmap-dmi { display: flex; align-items: center; gap: 9px; width: 100%; padding: 8px 9px; border: 0; background: none; border-radius: 8px; cursor: pointer; font: inherit; font-size: 12.5px; color: var(--ink); text-align: left; }
+    .rmap-dmi:hover:not(:disabled) { background: var(--surface-2); }
+    .rmap-dmi:disabled { opacity: .4; cursor: default; }
+    .rmap-dmi-ic { width: 18px; text-align: center; font-size: 14px; flex: none; }
+    .rmap-dmi-t { flex: 1; white-space: nowrap; }
+    .rmap-dmi-s { color: var(--muted); font-size: 10.5px; font-family: ui-monospace, Menlo, monospace; }
+    .rmap-dmi.on .rmap-dmi-s { color: #f59e0b; }
+    .rmap-dmi.danger:hover { background: color-mix(in srgb, var(--danger, #d6323a) 15%, transparent); color: var(--danger, #d6323a); }
+    .rmap-dmi-h { font-size: 9.5px; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); padding: 6px 9px 3px; font-weight: 600; }
+    .rmap-dmi-sep { height: 1px; background: var(--line); margin: 5px 4px; }
     .rmap-tl-ruler { border-bottom-color: color-mix(in srgb, #f59e0b 45%, var(--line)); }
     .rmap-tl-rail { position: absolute; left: 0; right: 0; bottom: 0; height: 58px; display: flex; align-items: center; gap: 14px; padding: 0 14px; z-index: 15;
       background: linear-gradient(180deg, color-mix(in srgb, var(--surface) 90%, transparent), color-mix(in srgb, var(--surface) 97%, transparent));
@@ -1626,7 +1654,7 @@
   <script type="text/babel" src="canvas.jsx?v=1783137934"></script>
   <script type="text/babel" src="notes.jsx?v=1783137934"></script>
   <script src="autopilot-core.js?v=1784160000"></script>
-  <script type="text/babel" src="research.jsx?v=1787620000"></script>
+  <script type="text/babel" src="research.jsx?v=1787700000"></script>
 
   <script src="build.js?v=1783542910"></script>
   <script src="version-badge.js?v=1783538128"></script>
