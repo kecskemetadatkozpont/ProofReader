@@ -571,6 +571,20 @@
   **LOD chip-tömörítés: kihagyva** — a meglévő LOD amúgy is kompakttá teszi a kártyákat timeline-ban. Migráció NEM kell
   (a Mentés a migration-79 `research_map_paths`-t használja, graceful ha nincs). Version `?v=1787480000`.
 
+## 🔗 Automatikus él-feliratok — a magyarázat beleépül az élbe — 2026-07-22
+> User: „a rendszer automatikusan írjon az auto-élekre szöveget, hogy a két kártyának mi köze van egymáshoz". 2 design-mockup
+> (artifact 218dfe35 tartalom+megjelenítés; artifact 91063485 él-integrált ANIMÁCIÓK). User-választás: **✨ LLM-only tartalom +
+> „Vonal-rés (gap)" megjelenítés-animáció.** ⚠️ Session-limit miatt a review-workflow most nem futott — manuális ellenőrzés.
+- [x] ✅ **1. fél — Vonal-rés MEGJELENÍTÉS (`<tbd>`, kliens-only, CSS-only, manuális audit):** a `.rmap-elabel` él-címke-pill
+  átalakítva „gap"-re: a `--surface-2` (vászon-szín) háttér **MASZKOLJA az él vonalát** → a reláció-szöveg a vonal RÉSÉBEN ül
+  (integrálva, nem lebegő pill), az él színével; nincs pill-keret (hoverre/kijelölve halvány currentColor-keret). **Kinyíló
+  animáció** (`rmap-elabel-in`: scaleX .35→1 + letter-spacing, .32s, reduced-motion-guard). A meglévő render (`edgeLabelEls`
+  @ view.k≥0.45, `edgeStyle(e).label`, `research_map_edges.label`) VÁLTOZATLAN — csak a stílus. Bármely címkét (kézi/LLM) így renderel.
+- [ ] ⏳ **2. fél — ✨ LLM-GENERÁLÁS (backend, deploy-igényes, PENDING):** edge-fn ami elolvassa MINDKÉT kártya tartalmát +
+  megírja a „miért kapcsolódnak" mondatot a `research_map_edges.label`-be; „Magyarázd meg az éleket" batch-gomb + per-él az
+  inspektorban. LLM-only → a felirat csak generálás után látszik. Edge-deploy = explicit user-jóváhagyás; a session-reset után,
+  rendes review-val.
+
 ## 🎛️ Alsó dokk decluttering — ~23 → ~6 vezérlő egy sorban — 2026-07-22
 > User: „az alsó toolbar nagyon hosszú lett, már két sorban vannak a funkciók — tervezz újra, hogy igényes legyen és ne
 > legyen feleslegesen sok ikon." Kutatás+design workflow (audit + canvas-toolbar minták + újratervezés) → mockup (artifact
