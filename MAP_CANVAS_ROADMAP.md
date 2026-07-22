@@ -575,7 +575,7 @@
 > User: „az alsó toolbar nagyon hosszú lett, már két sorban vannak a funkciók — tervezz újra, hogy igényes legyen és ne
 > legyen feleslegesen sok ikon." Kutatás+design workflow (audit + canvas-toolbar minták + újratervezés) → mockup (artifact
 > e0cdd725, 3 variáns) → user-választás: **V1 — Popover-menük.**
-- [x] ✅ **V1 kompakt dokk (`<tbd>`, review részleges [session-limit: 2/4 dim + 3 fix], manuális audit a többire):** a ~23 gomb →
+- [x] ✅ **V1 kompakt dokk (`3174ef0`, review részleges [session-limit: 2/4 dim + 3 fix], manuális audit a többire):** a ~23 gomb →
   **6 elsődleges egység egy sorban:** `👁 Nézet ▾ · [⤫Szabad·⌗Fázis·🕰Idő ▾] · [↶↷] 🕘 💬 · [− nn%▾ +]`. **3 popover-menü**
   (a meglévő panel-minta + dock-magnify újrahasznosításával): **Nézet ▾** (Típus-szűrő, Fájlok, Export · Frissítés, Lap-túra,
   Bemutatók · Összes komment, Rejtett ábrák/kártyák), **Elrendezés-akciók ▾** (a switch caretjén, csak Szabadban: Okos, Rendezd
