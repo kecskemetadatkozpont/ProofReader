@@ -6438,8 +6438,11 @@
         return true;
       });
       if (!hit.length) return;
-      var rows = hit.map(function (u) { return { recipient_id: u.id, kind: 'request', payload: { type: 'research_map_mention', project_id: props.projectId, project_title: (props.project && props.project.title) || '', from: (props.viewer && props.viewer.name) || 'Kolléga', excerpt: String(body).slice(0, 140), node_id: (target && target.node_id) || null } }; });
-      sb.from('notifications').insert(rows).then(function () { }, function () { });
+      // direct notif inserts to OTHER users are blocked (migration-31 self-only) → go through the SECURITY DEFINER
+      // mention RPC (migration-85), one call per mentioned member. Best-effort (silent if not yet applied).
+      hit.forEach(function (u) {
+        sb.rpc('pr_notify_research_mention', { p_recipient: u.id, p_project: props.projectId, p_title: (props.project && props.project.title) || '', p_excerpt: String(body).slice(0, 140), p_node: (target && target.node_id) || null }).then(function () { }, function () { });
+      });
     }
     function commentAdd(target, text) {
       var t = String(text || '').trim(); if (!t || !commentsCap) return;
@@ -6496,9 +6499,13 @@
     }
     function memberInvite(u, role) {
       if (!u || !u.id) return;
-      sb.from('research_project_members').insert({ project_id: props.projectId, user_id: u.id, role: role || 'viewer', accepted: false }).then(function (r) {
+      var rl = role || 'viewer';
+      sb.from('research_project_members').insert({ project_id: props.projectId, user_id: u.id, role: rl, accepted: false }).then(function (r) {
         if (!alive.current) return;
         if (r && r.error) { window.PRUI.toast('Meghívás sikertelen: ' + r.error.message, { kind: 'error' }); return; }
+        // deliver a notification to the invitee — direct notif inserts to others are blocked (migration-31), so go through
+        // the SECURITY DEFINER RPC (migration-85). Best-effort: the member row is created regardless of the RPC's presence.
+        sb.rpc('pr_notify_research_share', { p_recipient: u.id, p_project: props.projectId, p_title: (props.project && props.project.title) || 'Projekt', p_role: rl }).then(function () { }, function () { });
         window.PRUI.toast('Meghívó elküldve' + (u.name ? ': ' + u.name : ''), { kind: 'success' }); loadMembers();
       });
     }
@@ -8851,6 +8858,7 @@
     // explicit author attribution so a student's (or a test's) project can never read as the viewer's own
     var badge;
     if (props.meId && p.owner_id === props.meId) badge = h('span', { className: 'chip c-grey author-badge' }, 'Mine');
+    else if (props.memberRole) { var _rl = { owner: 'Tulajdonos', editor: 'Szerkesztő', commenter: 'Kommentelő', viewer: 'Megfigyelő' }; badge = h('span', { className: 'chip c-acc author-badge' }, '👥 ' + (_rl[props.memberRole] || props.memberRole)); }
     else { var st = props.studentById && props.studentById[p.student_id]; badge = h('span', { className: 'chip ' + (st ? 'c-acc' : 'c-warn') + ' author-badge' }, st ? 'Student: ' + st.name : 'Student’s work'); }
     if (nd()) {
       // ---- Option A: pipeline-rail card (New design) ----
@@ -8892,9 +8900,32 @@
     useEffect(function () { load(); var t = setInterval(load, 60000); return function () { clearInterval(t); }; }, []);   // poll so new digests appear without a manual reload
     function markRead(n) { if (n.read_at) return; sb.from('notifications').update({ read_at: new Date().toISOString() }).eq('id', n.id).then(function () { setNotes(function (l) { return l.map(function (x) { return x.id === n.id ? Object.assign({}, x, { read_at: 'now' }) : x; }); }); }); }
     function markAll() { var ids = notes.filter(function (n) { return !n.read_at; }).map(function (n) { return n.id; }); if (!ids.length) return; sb.from('notifications').update({ read_at: new Date().toISOString() }).in('id', ids).then(load); }
+    var SHARE_ROLES = { owner: 'Tulajdonos', editor: 'Szerkesztő', commenter: 'Kommentelő', viewer: 'Megfigyelő' };
+    function shareRoleLabel(r) { return SHARE_ROLES[r] || r || 'Megfigyelő'; }
+    function acceptShare(n) {   // invitee accepts their own pending membership (SECURITY DEFINER RPC, migration-74)
+      var pid = n.payload && n.payload.project_id; if (!pid) return;
+      sb.rpc('research_member_accept', { pid: pid }).then(function (r) {
+        if (!window.PRUI) return;
+        if (r && r.error) { window.PRUI.toast('Nem sikerült elfogadni: ' + r.error.message, { kind: 'error' }); return; }
+        window.PRUI.toast('Meghívó elfogadva — a projekt megjelenik a listádban (frissítsd az oldalt).', { kind: 'success' });
+        markRead(n);
+      });
+    }
     var unread = notes.filter(function (n) { return !n.read_at; }).length;
-    function title(n) { return n.kind === 'digest' ? 'Daily research digest' : ((n.payload && n.payload.title) || n.kind); }
-    function summ(n) { var p = n.payload || {}; if (n.kind === 'digest') return (p.day || '') + ' · ' + (p.students || 0) + ' student' + (p.students === 1 ? '' : 's') + ', ' + (p.entries || 0) + ' update' + (p.entries === 1 ? '' : 's'); return p.body || ''; }
+    function title(n) {
+      if (n.kind === 'digest') return 'Daily research digest';
+      if (n.kind === 'share') return '👥 Meghívó közreműködőnek';
+      var p = n.payload || {};
+      if (p.type === 'research_map_mention') return '💬 Említés a térképen';
+      return p.title || p.project_title || n.kind;
+    }
+    function summ(n) {
+      var p = n.payload || {};
+      if (n.kind === 'digest') return (p.day || '') + ' · ' + (p.students || 0) + ' student' + (p.students === 1 ? '' : 's') + ', ' + (p.entries || 0) + ' update' + (p.entries === 1 ? '' : 's');
+      if (n.kind === 'share') return (p.by || 'Valaki') + ' meghívott a(z) „' + (p.title || 'Projekt') + '" projektbe (' + shareRoleLabel(p.role) + ').';
+      if (p.type === 'research_map_mention') return (p.from || 'Kolléga') + (p.project_title ? ' — „' + p.project_title + '"' : '') + (p.excerpt ? ': ' + p.excerpt : '');
+      return p.body || '';
+    }
     return h('div', { className: 'notif-wrap' },
       h('button', { className: 'bell', 'aria-label': 'Notifications', 'aria-expanded': open, onClick: function () { setOpen(!open); if (!open) load(); } },
         h('svg', { 'aria-hidden': 'true', viewBox: '0 0 16 16', fill: 'none', stroke: 'var(--muted)', strokeWidth: 1.5 }, h('path', { d: 'M8 2a3.5 3.5 0 0 0-3.5 3.5c0 3-1.5 4-1.5 4h10s-1.5-1-1.5-4A3.5 3.5 0 0 0 8 2z', strokeLinejoin: 'round' }), h('path', { d: 'M6.6 12.4a1.5 1.5 0 0 0 2.8 0', strokeLinecap: 'round' })),
@@ -8906,6 +8937,8 @@
           var p = n.payload || {};
           return h('div', { key: n.id, className: 'notif-item' + (n.read_at ? '' : ' unread'), onClick: function () { markRead(n); setExpanded(expanded === n.id ? null : n.id); } },
             h('b', null, title(n)), h('div', { className: 'nx' }, summ(n)),
+            n.kind === 'share' ? h('div', { style: { marginTop: 8 } },
+              h('button', { className: 'btn pri', style: { fontSize: 12, padding: '4px 12px' }, onClick: function (e) { e.stopPropagation(); acceptShare(n); } }, 'Elfogadom')) : null,
             (expanded === n.id && n.kind === 'digest' && p.items && p.items.length) ? h('div', { style: { marginTop: 8 } }, p.items.map(function (it, i) {
               return h('div', { key: i, className: 'nx', style: { paddingTop: 4 } }, h('span', { className: 'chip c-grey', style: { marginRight: 6 } }, it.type), it.student + ' — ' + it.summary);
             })) : null
@@ -9105,6 +9138,7 @@
     var selRef = useRef(null); selRef.current = sel;   // latest selection → guards a late/cross-project loadDetail (e.g. a background study run finishing after a project switch) from clobbering the visible project
     var dS = useState({ log: [], tasks: [], ideas: [], sources: [], datasets: [], jobs: [], studies: [], loading: true }), detail = dS[0], setDetail = dS[1];
     var stuS = useState({ byId: {}, list: [] }), supStudents = stuS[0], setSupStudents = stuS[1];   // this supervisor's students (for the "Diákjaim kutatása" view + author badges)
+    var mmS = useState({}), myMemberships = mmS[0], setMyMemberships = mmS[1];   // {project_id: role} — MY accepted memberships → the "Megosztott velem" section + collab edit rights. Fails soft pre-migration-74.
 
     useEffect(function () { boot(); }, []);
     // Admin "view as": the target is gated on the admin role, which backend.js resolves ASYNCHRONOUSLY
@@ -9127,6 +9161,14 @@
       var p = projects.filter(function (x) { return x.id === pid; })[0];
       if (p) { jumpedRef.current = true; openProject(p); }
     }, [phase, projects.length]);
+    // my accepted collaborations (migration-74) → which projects are "shared with me" + my role (edit rights). Fails soft.
+    useEffect(function () {
+      var uid = me && me.id; if (!uid) return; var ok = true;
+      sb.from('research_project_members').select('project_id,role').eq('user_id', uid).eq('accepted', true).then(function (r) {
+        if (!ok || (r && r.error)) return; var m = {}; ((r && r.data) || []).forEach(function (x) { m[x.project_id] = x.role; }); setMyMemberships(m);
+      }, function () { });
+      return function () { ok = false; };
+    }, [me && me.id, projects.length]);
     function boot() {
       if (!BE || !BE.sb) { setPhase('nobackend'); return; }
       if (BE.mode === 'signin' || BE.mode === 'pending') { setPhase('signin'); return; }
@@ -9197,13 +9239,13 @@
     var preview = !!me._preview;
     var isAdmin = me.role === 'admin';
     var authorId = (BE.user && BE.user.id) || me.id;   // RLS ties a log author to the real session user
-    function canEdit(p) { return !!(p && !preview && (isAdmin || p.owner_id === me.id)); }   // admin-preview is read-only (you are viewing another user's data)
+    function canEdit(p) { return !!(p && !preview && (isAdmin || p.owner_id === me.id || myMemberships[p.id] === 'owner' || myMemberships[p.id] === 'editor')); }   // owner/admin OR an accepted editor collaborator (mirrors research_can_write_project); admin-preview stays read-only
 
     var initStudent = null; try { initStudent = new URLSearchParams(location.search).get('student'); } catch (e) { }
     return h(AppShell, {
       me: me, preview: preview, projects: projects, sel: sel, students: supStudents, initStudent: initStudent,
       openProject: openProject, onBack: function () { setSel(null); },
-      detail: detail, canEdit: canEdit, authorId: authorId, refreshAll: refreshAll, reloadProjects: reloadProjects
+      detail: detail, canEdit: canEdit, authorId: authorId, refreshAll: refreshAll, reloadProjects: reloadProjects, myMemberships: myMemberships
     });
   }
 
@@ -9215,7 +9257,10 @@
     var studentById = (props.students && props.students.byId) || {};
     var studentList = (props.students && props.students.list) || [];
     var mineProjects = props.projects.filter(function (p) { return p.owner_id === meId; });
-    var supProjects = props.projects.filter(function (p) { return p.owner_id !== meId; });
+    var myMemberships = props.myMemberships || {};
+    var supProjects = props.projects.filter(function (p) { return p.owner_id !== meId && !myMemberships[p.id]; });   // supervised-student projects — exclude my OWN collaborations (they go to "Megosztott velem", not "My students' research")
+    var sharedProjects = props.projects.filter(function (p) { return p.owner_id !== meId && myMemberships[p.id]; });   // projects shared WITH me (accepted member, not owner) — distinct from supervised-student projects
+    function sharedGrid() { return h('div', { style: { marginTop: mineProjects.length ? 26 : 0 } }, h('div', { className: 'shared-sec-h' }, '👥 Megosztott velem (' + sharedProjects.length + ')'), h('div', { className: 'grid' }, sharedProjects.map(function (p) { return h(ProjectCard, { key: p.id, project: p, meId: meId, studentById: studentById, onOpen: props.openProject, apRun: apRuns[p.id], counts: pCounts[p.id], onChanged: props.reloadProjects, memberRole: myMemberships[p.id] }); }))); }
     var isSup = studentList.length > 0 || supProjects.length > 0;
     var vw = useState(props.initStudent ? 'supervised' : 'mine'), view = vw[0], setView = vw[1];
     // (B) load my Autopilot runs → project_id → most-recent run, for the ⚡ status badge on project cards (New design only).
@@ -9266,10 +9311,12 @@
       body = h(GlobalBoard, { projects: props.projects, canEditProject: props.canEdit, onOpenProject: props.openProject });
     } else if (view === 'supervised') {
       body = h('div', null, seg, h(SupervisedView, { students: props.students, projects: supProjects, studentById: studentById, onOpen: props.openProject }));
-    } else if (!mineProjects.length) {
+    } else if (!mineProjects.length && !sharedProjects.length) {
       body = h('div', null, seg, h('div', { className: 'soon' }, h('b', null, 'No research projects yet. '), 'Create one to start tracking a study from idea to submission.', h('div', { style: { marginTop: 14 } }, h('button', { className: 'btn pri', onClick: function () { setAdding(true); } }, '+ New project'))));
     } else {
-      body = h('div', null, seg, h('div', { className: 'grid' }, mineProjects.map(function (p) { return h(ProjectCard, { key: p.id, project: p, meId: meId, studentById: studentById, onOpen: props.openProject, apRun: apRuns[p.id], counts: pCounts[p.id], onChanged: props.reloadProjects }); })));
+      body = h('div', null, seg,
+        mineProjects.length ? h('div', { className: 'grid' }, mineProjects.map(function (p) { return h(ProjectCard, { key: p.id, project: p, meId: meId, studentById: studentById, onOpen: props.openProject, apRun: apRuns[p.id], counts: pCounts[p.id], onChanged: props.reloadProjects }); })) : null,
+        sharedProjects.length ? sharedGrid() : null);
     }
 
     return h('div', { className: 'app' + (nd() && sel ? ' rv-hasproj' : '') },
