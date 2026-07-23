@@ -74,7 +74,7 @@ Deno.serve(async (req) => {
       else messages.push({ role, content: m.content });
     }
 
-    const ATTACH_NOTE = ` When the user attaches sources or files, their full content is included directly in this message (as text and document blocks) — read and use that content, and never say you cannot access attachments or files.`;
+    const ATTACH_NOTE = ` When the user attaches sources or files, their full content is included directly in this message (as text and document blocks) — read and use that content, and never say you cannot access attachments or files. When a source or document is attached, ground your claims in it and cite the specific supporting passages.`;
     // the researcher's own persona drives the chat when present; otherwise a sensible default
     const BASE = `You are a research-ideation partner inside a PhD platform. Propose specific, falsifiable research questions with brief rationale, surface gaps, and be concise.`;
     const persona = userPrompt || BASE;
@@ -87,7 +87,10 @@ Deno.serve(async (req) => {
 
     const headers: Record<string, string> = { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' };
     if (useMcp) headers['anthropic-beta'] = 'mcp-client-2025-04-04';
-    const body: Record<string, unknown> = { model: userModel, max_tokens: MAX_TOKENS, system: SYSTEM + ctx + langDirective(_lang), messages };
+    // Prompt caching: the system prompt (persona + notes + project ctx) is identical across a conversation's turns,
+    // so cache that prefix — cache reads cost ~0.1x. Below the model's min cacheable prefix it's silently uncached (no error).
+    const sysText = SYSTEM + ctx + langDirective(_lang);
+    const body: Record<string, unknown> = { model: userModel, max_tokens: MAX_TOKENS, system: [{ type: 'text', text: sysText, cache_control: { type: 'ephemeral' } }], messages };
     if (useMcp) body.mcp_servers = [{ type: 'url', url: CONSENSUS_MCP_URL, name: 'consensus', authorization_token: CONSENSUS_TOKEN }];
     // Optional reasoning controls from the client "válasz-mód": effort (output_config.effort) + adaptive thinking.
     // GATE by model — sending these to a model that doesn't support them 400s the whole reply, so apply only to the
@@ -126,6 +129,7 @@ Deno.serve(async (req) => {
                   const d = ev.delta || {};
                   if (d.type === 'text_delta' && typeof d.text === 'string') { if (!sblocks[ev.index]) sblocks[ev.index] = { type: 'text', text: '' }; sblocks[ev.index].text = (sblocks[ev.index].text || '') + d.text; controller.enqueue(enc.encode(d.text)); }
                   else if (d.type === 'input_json_delta' && typeof d.partial_json === 'string') { if (!sblocks[ev.index]) sblocks[ev.index] = {}; sblocks[ev.index]._pj = (sblocks[ev.index]._pj || '') + d.partial_json; }
+                  else if (d.type === 'citations_delta' && d.citation) { if (!sblocks[ev.index]) sblocks[ev.index] = { type: 'text', text: '' }; (sblocks[ev.index].citations = sblocks[ev.index].citations || []).push(d.citation); }   // grounded-answer citations interleave with text on the same block
                 }
                 else if (ev.type === 'content_block_stop') { const b = sblocks[ev.index]; if (b && b._pj) { try { b.input = JSON.parse(b._pj); } catch { /* keep partial */ } delete b._pj; } }
                 else if (ev.type === 'message_delta') { if (ev.delta && ev.delta.stop_reason) stopReason = ev.delta.stop_reason; }
@@ -142,6 +146,7 @@ Deno.serve(async (req) => {
               for (const b of cleanBlocks) {
                 if (b.type === 'mcp_tool_use') lastQuery = typeof b.input === 'object' ? (b.input.query || b.input.q || JSON.stringify(b.input)) : String(b.input);
                 if (b.type === 'mcp_tool_result') { const c = Array.isArray(b.content) ? b.content : [b.content]; for (const item of c) { const snip = item?.text ?? (typeof item === 'string' ? item : JSON.stringify(item)); if (snip) ev2.push({ chat_id, message_id: saved?.id ?? null, query: lastQuery, snippet: String(snip).slice(0, 4000) }); } }
+                if (b.type === 'text' && Array.isArray(b.citations)) { for (const cit of b.citations) { const snip = cit?.cited_text; if (snip) ev2.push({ chat_id, message_id: saved?.id ?? null, query: cit.document_title || null, snippet: String(snip).slice(0, 4000) }); } }   // uploaded-doc citations → evidence (surfaced by the 📄 badge)
               }
               if (ev2.length) await sb.from('research_evidence').insert(ev2);
             } catch { /* persistence is best-effort here */ }
@@ -175,6 +180,7 @@ Deno.serve(async (req) => {
           if (snip) ev.push({ chat_id, message_id: saved?.id ?? null, query: lastQuery, snippet: String(snip).slice(0, 4000) });
         }
       }
+      if (b.type === 'text' && Array.isArray(b.citations)) { for (const cit of b.citations) { const snip = cit?.cited_text; if (snip) ev.push({ chat_id, message_id: saved?.id ?? null, query: cit.document_title || null, snippet: String(snip).slice(0, 4000) }); } }   // uploaded-doc citations → evidence
     }
     if (ev.length) await sb.from('research_evidence').insert(ev);
 
@@ -206,7 +212,15 @@ function thesisText(data: any): string {
   return out.slice(0, 220000).trim();
 }
 
-// Expand attachments into Claude content blocks (text + PDF document). dbg collects per-item outcomes.
+// A citations-ENABLED plain-text document block (Anthropic auto-chunks into sentences → char-level citations).
+// NOTE: citations must be all-or-none across a request's document blocks — every doc block we build sets enabled:true.
+function docBlock(title: string, text: string, context?: string): any {
+  const d: any = { type: 'document', source: { type: 'text', media_type: 'text/plain', data: String(text) }, title: String(title).slice(0, 200), citations: { enabled: true } };
+  if (context) d.context = String(context).slice(0, 300);
+  return d;
+}
+
+// Expand attachments into Claude content blocks (citable documents + PDF). dbg collects per-item outcomes.
 // Files are read with the SERVICE client but path-guarded to the caller's own scope (their uid for
 // publication-files, the chat's project for research-data) so a crafted path can't reach others' files.
 async function buildBlocks(sb: any, svc: any, atts: any[], content: string, dbg: any, scope: { projectId: string; uid: string }): Promise<any[]> {
@@ -219,7 +233,13 @@ async function buildBlocks(sb: any, svc: any, atts: any[], content: string, dbg:
       if (a.kind === 'source' && a.source_id) {
         const { data: s, error } = await sb.from('research_sources').select('title,abstract,year,venue').eq('id', a.source_id).maybeSingle();
         dbg.items.push({ kind: 'source', ok: !!s, err: error?.message });
-        if (s) { blocks.push({ type: 'text', text: `[Attached source: ${s.title} (${s.year ?? ''}${s.venue ? ', ' + s.venue : ''})]\n${(s.abstract ?? '').slice(0, 6000)}` }); n++; }
+        if (s) {
+          const ab = (s.abstract ?? '').slice(0, 6000);
+          const meta = `${s.year ?? ''}${s.venue ? ', ' + s.venue : ''}`.replace(/^, /, '').trim();
+          if (ab.trim()) blocks.push(docBlock(s.title, ab, meta ? `Bibliographic: ${meta}` : undefined));
+          else blocks.push({ type: 'text', text: `[Attached source: ${s.title}${meta ? ' (' + meta + ')' : ''}]` });   // no abstract → plain note (text blocks are exempt from the all-or-none rule)
+          n++;
+        }
       } else if (a.kind === 'project' && a.project_id) {
         // a LaTeX editor project (thesis) — the projects-table RLS lets the caller read their own/shared
         // row under their JWT, so no service client; we extract the combined .tex/.bib text, not the raw json.
@@ -227,13 +247,13 @@ async function buildBlocks(sb: any, svc: any, atts: any[], content: string, dbg:
         dbg.items.push({ kind: 'project', ok: !!proj, err: error?.message });
         if (proj && proj.data) {
           const txt = thesisText(proj.data);
-          if (txt) { blocks.push({ type: 'text', text: `[Attached LaTeX publication: ${proj.title ?? a.title ?? 'thesis'}]\n\n${txt}` }); n++; }
+          if (txt) { blocks.push(docBlock(proj.title ?? a.title ?? 'thesis', txt, 'Attached LaTeX publication')); n++; }
         }
       } else if (a.kind === 'projectfile' && a.file_id) {
         // a file from the project's file browser (research_files) — RLS lets the caller read their project's rows
         const { data: rf, error } = await sb.from('research_files').select('path,content').eq('id', a.file_id).maybeSingle();
         dbg.items.push({ kind: 'projectfile', ok: !!rf, err: error?.message });
-        if (rf && rf.content != null) { blocks.push({ type: 'text', text: `[Attached project file: ${rf.path}]\n\n${String(rf.content).slice(0, 100000)}` }); n++; }
+        if (rf && rf.content != null) { const c = String(rf.content).slice(0, 100000); if (c.trim()) blocks.push(docBlock(rf.path, c, 'Project file')); else blocks.push({ type: 'text', text: `[Attached project file: ${rf.path}] (empty)` }); n++; }
       } else if (a.kind === 'file' && a.bucket && a.path) {
         const seg0 = String(a.path).split('/')[0];
         const allowed = (a.bucket === 'publication-files' && seg0 === scope.uid) || (a.bucket === 'research-data' && seg0 === scope.projectId);
@@ -244,11 +264,13 @@ async function buildBlocks(sb: any, svc: any, atts: any[], content: string, dbg:
         const buf = await blob.arrayBuffer();
         const mime = a.mime || '';
         if (mime.includes('pdf')) {
-          if (buf.byteLength <= 8_000_000) { blocks.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: toB64(buf) } }); n++; }
+          // citations MUST match the other doc blocks (all-or-none) → enable here too; PDF citations return page numbers
+          if (buf.byteLength <= 8_000_000) { blocks.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: toB64(buf) }, title: a.name || 'PDF', citations: { enabled: true } }); n++; }
           else blocks.push({ type: 'text', text: `[Attached "${a.name}" skipped — PDF over 8 MB]` });
         } else if (mime.startsWith('text') || /\.(csv|txt|md|json)$/i.test(a.name || '')) {
           const txt = new TextDecoder().decode(new Uint8Array(buf));
-          blocks.push({ type: 'text', text: `[Attached file: ${a.name}]\n${txt.slice(0, 20000)}` }); n++;
+          if (txt.trim()) blocks.push(docBlock(a.name || 'file', txt.slice(0, 20000))); else blocks.push({ type: 'text', text: `[Attached file: ${a.name}] (empty)` });
+          n++;
         } else {
           blocks.push({ type: 'text', text: `[Attached "${a.name}" (${mime}) — type not readable inline]` });
         }

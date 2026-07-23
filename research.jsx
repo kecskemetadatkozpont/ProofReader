@@ -939,6 +939,8 @@
     var cS = useState(null), chat = cS[0], setChat = cS[1];
     var mS = useState([]), msgs = mS[0], setMsgs = mS[1];
     var eS = useState({}), evByMsg = eS[0], setEvByMsg = eS[1];
+    var oeS = useState(null), openEv = oeS[0], setOpenEv = oeS[1];        // message_id whose evidence/citation panel is expanded
+    var esS = useState({}), evSnips = esS[0], setEvSnips = esS[1];        // message_id → [{query, snippet}] (lazy-loaded from research_evidence)
     var iS = useState(''), input = iS[0], setInput = iS[1];
     var bS = useState(false), busy = bS[0], setBusy = bS[1];
     var er = useState(''), err = er[0], setErr = er[1];
@@ -1114,6 +1116,17 @@
       }, function () { setEnhancing(false); setErr('Prompt enhancement is unavailable.'); });
     }
     function copy(m) { try { navigator.clipboard.writeText(m.content || ''); } catch (e) { } }
+    // expand the "📄 N forrás" badge → the actual cited passages (Consensus evidence AND uploaded-doc citations both land in research_evidence)
+    function toggleEv(mid) {
+      if (openEv === mid) { setOpenEv(null); return; }
+      setOpenEv(mid);
+      if (evSnips[mid]) return;   // already loaded
+      sb.from('research_evidence').select('query,snippet').eq('message_id', mid).limit(24).then(function (r) {
+        if (!alive.current) return;
+        var rows = (r && r.data) || [];
+        setEvSnips(function (prev) { var n = Object.assign({}, prev); n[mid] = rows; return n; });
+      });
+    }
     function onTaKey(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }
     function onTaInput(e) { setInput(e.target.value); e.target.style.height = 'auto'; e.target.style.height = Math.min(e.target.scrollHeight, 160) + 'px'; }
     function saveIdea(m) { sb.from('research_ideas').insert({ project_id: props.projectId, source: 'consensus', question: (m.content || '').slice(0, 8000), created_by: props.authorId, status: 'candidate' }).then(function (r) { if (r && r.error) { window.PRUI.toast(r.error.message, { kind: 'error' }); return; } props.onChanged(); }); }
@@ -1171,9 +1184,16 @@
                 })));
             })) : null,
             (ai && !isTyping) ? h('div', { className: 'bmeta' },
-              evByMsg[m.id] ? h('span', null, '📄 ' + evByMsg[m.id] + ' sources') : null,
+              evByMsg[m.id] ? h('button', { className: 'evbtn' + (openEv === m.id ? ' on' : ''), title: 'Hivatkozott források / részletek', onClick: function () { toggleEv(m.id); } }, '📄 ' + evByMsg[m.id] + ' forrás ' + (openEv === m.id ? '▲' : '▼')) : null,
               h('button', { className: 'copybtn', onClick: function () { copy(m); } }, 'Copy'),
               props.canEdit ? h('button', { className: 'savebtn', onClick: function () { saveIdea(m); } }, '✚ Save as idea') : null
+            ) : null,
+            (ai && !isTyping && openEv === m.id) ? h('div', { className: 'chat-ev' },
+              (evSnips[m.id] || []).length ? evSnips[m.id].map(function (sn, si) {
+                return h('div', { className: 'chat-ev-item', key: si },
+                  sn.query ? h('div', { className: 'chat-ev-q' }, '🔎 ' + sn.query) : null,
+                  h('div', { className: 'chat-ev-s' }, sn.snippet || ''));
+              }) : h('div', { className: 'chat-ev-empty' }, evSnips[m.id] ? 'Nincs megjeleníthető részlet.' : 'Betöltés…')
             ) : null
           );
         }) : h('div', null,
