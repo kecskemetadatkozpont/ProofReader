@@ -679,11 +679,31 @@
       h('span', { className: 'ai-think-sec' }, sec + 's'));
   }
   var CHAT_SUGGEST = ['What are the open problems in this field?', 'Summarize the key methods used so far.', 'Suggest 3 testable research questions for my goal.', 'What evidence would support or refute my hypothesis?'];
+  // válasz-mód → Claude API effort + thinking. A szerver a modell alapján kapuzza (nem támogatott modell egyszerűen figyelmen kívül hagyja).
+  var CHAT_MODES = { fast: { effort: 'low', think: false }, balanced: { effort: 'medium', think: false }, deep: { effort: 'high', think: true } };
+  var CHAT_MODE_META = [{ id: 'fast', ic: '⚡', lab: 'Gyors' }, { id: 'balanced', ic: '⚖️', lab: 'Alap' }, { id: 'deep', ic: '🧠', lab: 'Mély' }];
   // In a chat reply, the AI saves files via fenced ```file:<path> … ``` blocks. For DISPLAY we collapse
   // those to a compact chip (the full content lives in the file browser, not inline in the chat).
   function stripFiles(text) {
     if (!text) return text;
     return text.replace(/```file:([^\n`]+)\n[\s\S]*?```/g, function (_, p) { return '\n📄 **' + p.trim() + '** _(saved to files)_\n'; });
+  }
+  // Feleletválasztós tisztázó kérdések: the AI may END a reply with a ```publify-questions JSON fence
+  // ([{q, options[]}]). For DISPLAY we strip it (it renders as clickable option pills); extract parses it.
+  // The 2nd replace drops an UNTERMINATED trailing fence so the raw JSON never flashes mid-stream.
+  function stripQuestions(text) {
+    if (!text) return text;
+    return String(text).replace(/^```publify-questions[\s\S]*?```/gim, '').replace(/^```publify-questions[\s\S]*$/im, '').trim();
+  }
+  function extractQuestions(text) {
+    if (!text) return [];
+    var m = /^```publify-questions\s*([\s\S]*?)```/im.exec(String(text));
+    if (!m) return [];
+    var arr; try { arr = JSON.parse(m[1].trim()); } catch (e) { return []; }
+    if (!Array.isArray(arr)) return [];
+    return arr.filter(function (x) { return x && x.q; }).slice(0, 3).map(function (x) {
+      return { q: String(x.q).slice(0, 300), options: (Array.isArray(x.options) ? x.options : []).map(String).map(function (s) { return s.slice(0, 90); }).slice(0, 4) };
+    }).filter(function (x) { return x.options.length; });
   }
   function extractFiles(text) {   // fence-AWARE: read a ```file:PATH block to its MATCHING close, skipping BOTH tagged (```lang) AND bare (```) nested code blocks. The old non-greedy regex truncated at the first inner fence → data loss.
     var out = [], lines = String(text || '').split('\n'), n = lines.length, i = 0;
@@ -935,6 +955,8 @@
     var atBottom = useRef(true);   // only auto-follow the stream while the user is at the bottom; if they scroll up, stay put
     var sgS = useState(''), sgMsg = sgS[0], setSgMsg = sgS[1];
     var sgB = useState(false), sgBusy = sgB[0], setSgBusy = sgB[1];
+    // válasz-mód: mennyit "gondolkodjon" a modell — az effort + thinking API-paraméterek egy intuitív kapcsolóban
+    var cmS = useState(function () { try { return localStorage.getItem('pr-chat-mode') || 'balanced'; } catch (e) { return 'balanced'; } }), chatMode = cmS[0], setChatMode = cmS[1];
     useEffect(function () { return function () { alive.current = false; }; }, []);
     // #3 — AI ideas are generated ON DEMAND (button), not continuously: pull NEW research ideas out of the
     // current conversation into the Ideas list as candidates (deduped + capped server-side; user accepts/rejects).
@@ -981,7 +1003,7 @@
         else {
           var aMsgs = data.filter(function (m) { return m.role === 'assistant'; });
           var last = aMsgs[aMsgs.length - 1];
-          if (last && !animated.current[last.id]) { animated.current[last.id] = true; if (!justStreamed.current) startTyping(last.id, last.content); }  // a streamed reply was already revealed live → no replay
+          if (last && !animated.current[last.id]) { animated.current[last.id] = true; if (!justStreamed.current) startTyping(last.id, stripQuestions(stripFiles(last.content))); }  // a streamed reply was already revealed live → no replay
           justStreamed.current = false;
         }
       });
@@ -1039,12 +1061,13 @@
     function streamReply(cid) {
       var CFG = window.PR_CONFIG || {};
       if (!CFG.supabaseUrl) { setBusy(false); setErr('Missing backend config.'); return; }
+      var mm = CHAT_MODES[chatMode] || CHAT_MODES.balanced;   // → effort + thinking; the server gates them by model, so an unsupported model just ignores them
       sb.auth.getSession().then(function (s) {
         var token = (s && s.data && s.data.session && s.data.session.access_token) || CFG.supabaseAnonKey;
         fetch(CFG.supabaseUrl + '/functions/v1/research-chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'apikey': CFG.supabaseAnonKey, 'Authorization': 'Bearer ' + token },
-          body: JSON.stringify({ chat_id: cid, stream: true })
+          body: JSON.stringify({ chat_id: cid, stream: true, effort: mm.effort, think: mm.think })
         }).then(function (resp) {
           if (!resp.ok || !resp.body || !resp.body.getReader) { setBusy(false); setErr('AI connection pending — deploy the research-chat Edge function and set ANTHROPIC_API_KEY.'); return; }
           var reader = resp.body.getReader(), dec = new TextDecoder(), acc = '';
@@ -1120,6 +1143,8 @@
         h('div', { className: 'cdz-inner' }, h('div', { style: { fontSize: 30 } }, '📎'), h('b', null, 'Engedd el a fájlokat'), h('span', null, 'Feltöltés az uploads/ mappába + csatolás az üzenethez'))) : null,
       h('h3', null, 'Chat with Publify', h('span', { style: { fontWeight: 600, color: 'var(--faint)' } }, 'research assistant')),
       props.canEdit ? h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' } },
+        h('div', { className: 'chat-mode', role: 'group', 'aria-label': 'Válasz-mód', title: 'Válasz-mód — mennyit gondolkodjon a modell egy válaszra (Claude „effort” + „thinking”). Mély: több gondolkodás, jobb, de lassabb/drágább.' },
+          CHAT_MODE_META.map(function (md) { return h('button', { key: md.id, className: chatMode === md.id ? 'on' : '', 'aria-pressed': chatMode === md.id, disabled: busy, onClick: function () { setChatMode(md.id); try { localStorage.setItem('pr-chat-mode', md.id); } catch (e) { } } }, md.ic + ' ' + md.lab); })),
         h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12 }, disabled: sgBusy || !msgs.length, title: 'Suggests ideas for the Ideas list from the current conversation (manually, not continuously)', onClick: suggestIdeas }, sgBusy ? '💡 Generating…' : '💡 Generate ideas from the conversation'),
         sgMsg ? h('span', { style: { fontSize: 12, color: 'var(--muted)' } }, sgMsg) : null
       ) : null,
@@ -1129,13 +1154,22 @@
           var isTyping = typing && typing.id === m.id;
           var ai = m.role === 'assistant';
           var body;
-          if (ai && !isTyping) body = h('div', { className: 'btxt md', dangerouslySetInnerHTML: { __html: foldCode(mdHtml(stripFiles(m.content))) } });
+          if (ai && !isTyping) body = h('div', { className: 'btxt md', dangerouslySetInnerHTML: { __html: foldCode(mdHtml(stripQuestions(stripFiles(m.content)))) } });
           else if (ai && isTyping) {
-            var toks = (m.content || '').split(/(\s+)/), shown = toks.slice(0, typing.n);
+            var toks = (stripQuestions(stripFiles(m.content)) || '').split(/(\s+)/), shown = toks.slice(0, typing.n);
             body = h('div', { className: 'btxt' }, shown.slice(0, -1).join(''), h('span', { key: typing.n, className: 'tw-word' }, shown[shown.length - 1] || ''), h('span', { className: 'tw-cursor' }, '▌'));
           } else body = h('div', { className: 'btxt' }, m.content);
+          // feleletválasztós tisztázó kérdések — csak a LEGUTOLSÓ asszisztens-üzenetnél aktívak (a korábbiak már megválaszoltak)
+          var qs = (ai && !isTyping && props.canEdit && msgs.length && msgs[msgs.length - 1].id === m.id) ? extractQuestions(m.content) : [];
           return h('div', { key: m.id, className: 'bubble ' + (ai ? 'ai' : 'user') },
             body,
+            qs.length ? h('div', { className: 'chat-qs' }, qs.map(function (qq, qi) {
+              return h('div', { className: 'chat-q', key: qi },
+                h('div', { className: 'chat-q-label' }, qq.q),
+                h('div', { className: 'chat-q-opts' }, qq.options.map(function (o, oi) {
+                  return h('button', { className: 'chat-q-pill', key: oi, disabled: busy, title: 'Válasz küldése: ' + o, onClick: function () { sendText(o); } }, o);
+                })));
+            })) : null,
             (ai && !isTyping) ? h('div', { className: 'bmeta' },
               evByMsg[m.id] ? h('span', null, '📄 ' + evByMsg[m.id] + ' sources') : null,
               h('button', { className: 'copybtn', onClick: function () { copy(m); } }, 'Copy'),
@@ -1146,8 +1180,13 @@
           h('div', { className: 'chat-empty' }, 'Ask Publify about your topic — grounded in evidence when Consensus is connected.'),
           props.canEdit ? h('div', { className: 'chat-suggest' }, CHAT_SUGGEST.map(function (s, i) { return h('button', { key: i, onClick: function () { sendText(s); } }, s); })) : null
         ),
-        streaming ? h('div', { className: 'bubble ai', key: 'stream' }, h('div', { className: 'btxt' }, streaming.text || '', h('span', { className: 'tw-cursor' }, '▌')))
-          : busy ? h('div', { className: 'bubble ai' }, h('div', { className: 'btxt', style: { color: 'var(--faint)' } }, 'Publify is thinking…')) : null
+        streaming ? (function () {
+          var live = stripQuestions(streaming.text || '');   // hide the trailing questions fence from the live preview (it renders as pills after)
+          return h('div', { className: 'bubble ai', key: 'stream' }, h('div', { className: 'btxt' },
+            live ? live : h('span', { style: { color: 'var(--faint)' } }, chatMode === 'deep' ? '🧠 gondolkodik…' : 'Publify ír…'),
+            live ? h('span', { className: 'tw-cursor' }, '▌') : null));
+        })()
+          : busy ? h('div', { className: 'bubble ai' }, h('div', { className: 'btxt', style: { color: 'var(--faint)' } }, chatMode === 'deep' ? '🧠 gondolkodik…' : 'Publify is thinking…')) : null
       ),
       err ? h('div', { style: { fontSize: 12.5, color: 'var(--warn)', margin: '6px 0 0' } }, err) : null,
       props.canEdit ? h('div', null,

@@ -37,7 +37,7 @@ Deno.serve(async (req) => {
     const useMcp = !!CONSENSUS_TOKEN;
     const auth = req.headers.get('Authorization') || '';
     const sb = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!, { global: { headers: { Authorization: auth } } });
-    const { chat_id, stream: wantStream } = await req.json().catch(() => ({}));
+    const { chat_id, stream: wantStream, effort: reqEffort, think: reqThink } = await req.json().catch(() => ({}));
     if (!chat_id) return json({ error: 'chat_id required' }, 400);
 
     const { data: chat } = await sb.from('research_chats').select('id,project_id').eq('id', chat_id).maybeSingle();
@@ -80,13 +80,25 @@ Deno.serve(async (req) => {
     const persona = userPrompt || BASE;
     const mcpNote = useMcp ? ` Use the Consensus tools to ground every non-trivial claim in peer-reviewed evidence, and cite the papers.` : '';
     const FILE_NOTE = ` You can save a file into the project's file browser by emitting a fenced block in EXACTLY this form (the opening line is \`\`\`file: followed by a short descriptive relative path, nothing else on that line):\n\`\`\`file:lit-review.md\n<the full file content>\n\`\`\`\nDo this whenever the user asks you to write something to a file, create/save a document, or produce an artifact (a literature summary, a research plan, a draft section, notes). Prefer .md. Keep a short normal reply too, but put the document itself inside the file block — only emit a file block when a saved file is actually wanted.`;
-    const SYSTEM = persona + mcpNote + ATTACH_NOTE + FILE_NOTE;
+    // Clarifying-question fence — the client renders these as clickable answer pills (mirrors the task-assistant pattern).
+    const QUESTIONS_NOTE = ` When you genuinely need the user to clarify something BEFORE you can give a good answer (ambiguous scope, a missing constraint, a fork in the research direction), you MAY END your message with ONE fenced block of up to 3 short clarifying questions, each with 2–4 suggested answer options, in EXACTLY this form (valid JSON array, the block LAST, nothing after it):\n\`\`\`publify-questions\n[{"q":"…","options":["…","…"]}]\n\`\`\`\nGive a brief normal reply above it. Emit it ONLY when clarification truly helps — never when you already have enough to answer, and at most once per short exchange. Match the conversation's language.`;
+    const SYSTEM = persona + mcpNote + ATTACH_NOTE + FILE_NOTE + QUESTIONS_NOTE;
     const _lang = await loadProjectLang(sb, chat.project_id);
 
     const headers: Record<string, string> = { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' };
     if (useMcp) headers['anthropic-beta'] = 'mcp-client-2025-04-04';
     const body: Record<string, unknown> = { model: userModel, max_tokens: MAX_TOKENS, system: SYSTEM + ctx + langDirective(_lang), messages };
     if (useMcp) body.mcp_servers = [{ type: 'url', url: CONSENSUS_MCP_URL, name: 'consensus', authorization_token: CONSENSUS_TOKEN }];
+    // Optional reasoning controls from the client "válasz-mód": effort (output_config.effort) + adaptive thinking.
+    // GATE by model — sending these to a model that doesn't support them 400s the whole reply, so apply only to the
+    // new-gen models that accept them; any other model silently ignores the toggle (graceful).
+    // Only low/medium/high are accepted — these are valid on EVERY effort-capable model. xhigh/max are per-model
+    // (e.g. Sonnet 4.6 has no xhigh) and would 400, and the client never sends them; drop them defensively.
+    const EFFORTS = new Set(['low', 'medium', 'high']);
+    const supportsEffort = /claude-(opus-4-[5678]|sonnet-(5|4-6)|fable-5|mythos-5)/i.test(userModel);
+    const supportsAdaptive = /claude-(opus-4-[78]|sonnet-(5|4-6)|fable-5|mythos-5)/i.test(userModel);   // incl. sonnet-4-6 (the default) — it accepts adaptive with no beta header
+    if (reqEffort && EFFORTS.has(String(reqEffort)) && supportsEffort) body.output_config = { effort: String(reqEffort) };
+    if (reqThink && supportsAdaptive) { body.thinking = { type: 'adaptive' }; body.max_tokens = Math.max(MAX_TOKENS, 6144); }   // give adaptive thinking headroom so the answer isn't crowded out of the token budget
 
     // ---- Streaming path: forward Claude's text deltas to the browser live, rebuild the full block list
     //      from the SSE events, then persist the message + evidence once the stream finishes. ----
