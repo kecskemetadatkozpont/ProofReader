@@ -1413,7 +1413,7 @@
       function done() { cellBusyRef.current = false; if (!aliveR.current) return; window.PRUI.toast('✓ Rés létrehozva a(z) „' + String(row) + ' × ' + String(col) + '" cellából', { kind: 'success' }); setView('lista'); loadGaps(); if (props.onChanged) props.onChanged(); }
       function template() {   // P4.1 fallback: a plain templated gap (used when the gap_cell edge action is unavailable)
         var q = String(row) + ' × ' + String(col) + ' — feltáratlan terület: a szakirodalom nem fedi le ezt a metszetet.';
-        sb.from('research_ideas').insert({ project_id: props.projectId, source: 'gap', status: 'candidate', question: q, gap_type: 'population', evidence: [] }).select('id').maybeSingle().then(function (r) {
+        sb.from('research_ideas').insert({ project_id: props.projectId, source: 'gap', status: 'candidate', question: q, gap_type: 'population', evidence: [], created_by: props.authorId }).select('id').maybeSingle().then(function (r) {
           if (r && r.error) { cellBusyRef.current = false; if (aliveR.current) window.PRUI.toast('Nem sikerült: ' + r.error.message, { kind: 'error' }); return; }
           done();
         }, function () { cellBusyRef.current = false; if (aliveR.current) window.PRUI.toast('Hálózati hiba', { kind: 'error' }); });

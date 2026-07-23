@@ -1,0 +1,22 @@
+-- ============================================================================
+--  Publify — migration 90: attribute AI-generated ideas/gaps to their creator.
+--
+--  BUG: the creator badge on the Map never appeared on idea / research-gap cards,
+--  because research_ideas.created_by was NULL for all of them. Reason: the
+--  research-ai edge function inserts AI-generated ideas (source='chat') and gaps
+--  (source='gap') WITHOUT setting created_by, and the column had no default
+--  (migration-14). (research_sr_candidates set created_by explicitly, so those
+--  attribute fine.)
+--
+--  FIX: give research_ideas.created_by `default auth.uid()`. The edge function
+--  runs under the CALLER's JWT (createClient with the Authorization header), and
+--  every client insert also runs under the user's JWT, so auth.uid() resolves to
+--  the user who TRIGGERED the creation — no edge-function change/deploy needed.
+--  Same pattern as elicit_jobs.user_id (migration-51). Idempotent; SQL editor.
+--
+--  NOTE: this only fixes cards created FROM NOW ON. Existing ideas/gaps keep
+--  created_by=NULL (the creator was never recorded) → still no badge; regenerate
+--  or create a new one to see attribution.
+-- ============================================================================
+
+alter table public.research_ideas alter column created_by set default auth.uid();
