@@ -2798,6 +2798,11 @@
   function elapsedMin(ts) { if (!ts) return 0; var t = new Date(ts).getTime(); if (isNaN(t)) return 0; return Math.floor((Date.now() - t) / 60000); }
   function ElicitSysReview(props) {
     var canUse = !!(window.PREnt && window.PREnt.loaded() && window.PREnt.can('elicit_sysreview'));
+    // an accepted collaborator viewing a SHARED project (they only got here via RLS) should SEE the studio even
+    // without the per-user elicit_sysreview feature; only CREATING a review needs the (server-enforced) feature.
+    var isCollab = !!(props.project && props.authorId && props.project.owner_id && props.project.owner_id !== props.authorId);
+    var canView = canUse || isCollab;
+    var canCreate = canUse && props.canEdit;
     var jsS = useState(null), jobs = jsS[0], setJobs = jsS[1];
     var sjS = useState(null), selJob = sjS[0], setSelJob = sjS[1];   // selected review in the master-detail workspace (New design, direction B)
     var openFormS = useState(false), openForm = openFormS[0], setOpenForm = openFormS[1];
@@ -2846,7 +2851,7 @@
     function picoText(p) { if (!p) return ''; return [['P', p.population], ['I', p.intervention], ['C', p.comparison], ['O', p.outcome]].filter(function (x) { return x[1]; }).map(function (x) { return x[0] + ': ' + x[1]; }).join('\n'); }
     function startFromCand(c) { fromCand.current = c.id; setF({ q: c.question || '', protocol: picoText(c.pico), abs: c.abstract_criteria || [], ft: [], ex: c.extraction_questions || [], exclude: c.exclusion_criteria || [], gen: true, genAbs: true, genEx: true, useFig: false, runFT: true, maxResults: '1000' }); setOpenForm(true); setErr(''); }
     function dismissCand(c) { setCands(function (l) { return (l || []).filter(function (x) { return x.id !== c.id; }); }); sb.from('research_sr_candidates').update({ dismissed: true }).eq('id', c.id); }
-    useEffect(function () { alive.current = true; ensureSrCss(); if (canUse) { load(); loadCands(); loadStudies(); sb.from('research_ideas').select('id,question').eq('project_id', props.projectId).then(function (r) { if (!alive.current) return; var m = {}; ((r && r.data) || []).forEach(function (x) { m[x.id] = x.question; }); setIdeaById(m); }); } return function () { alive.current = false; }; }, [canUse]);
+    useEffect(function () { alive.current = true; ensureSrCss(); if (canView) { load(); loadCands(); loadStudies(); sb.from('research_ideas').select('id,question').eq('project_id', props.projectId).then(function (r) { if (!alive.current) return; var m = {}; ((r && r.data) || []).forEach(function (x) { m[x.id] = x.question; }); setIdeaById(m); }); } return function () { alive.current = false; }; }, [canView]);
     // re-render whenever a background study run changes (the runs live in PRStudyRunner, not in this component's state)
     var loadStudiesRef = useRef(null), pidRefSr = useRef(props.projectId), stSigRef = useRef('');
     loadStudiesRef.current = loadStudies; pidRefSr.current = props.projectId;
@@ -3061,11 +3066,11 @@
           (c.extraction_questions && c.extraction_questions.length) ? h('span', null, '📋 ' + c.extraction_questions.length + ' extraction') : null,
           c.study_type ? h('span', { style: { fontFamily: 'monospace' } }, c.study_type) : null),
         h('div', { style: { display: 'flex', gap: 7, marginTop: 2 } },
-          h('button', { className: 'btn pri', style: { flex: 1, justifyContent: 'center', padding: '6px 10px', fontSize: 12 }, disabled: !props.canEdit, onClick: function () { startFromCand(c); } }, '🔬 Start review'),
+          h('button', { className: 'btn pri', style: { flex: 1, justifyContent: 'center', padding: '6px 10px', fontSize: 12 }, disabled: !canCreate, onClick: function () { startFromCand(c); } }, '🔬 Start review'),
           h('button', { className: 'btn', style: { padding: '6px 10px', fontSize: 12 }, disabled: !props.canEdit, title: 'Dismiss', onClick: function () { dismissCand(c); } }, '×'))
       );
     }
-    if (!canUse) return null;
+    if (!canView) return null;
     // ---- Review Workspace (New design flag, direction B): master-detail — a rail of reviews + candidates on the left, the selected review's full detail on the right. Reuses card()/SR_STAGES/startFromCand/dismissCand. When creating a review (openForm) we fall back to the classic full-width layout that owns the form. ----
     function railRow(j, selId) {
       var isSel = j.id === selId;
@@ -3097,7 +3102,7 @@
         candRunBadge(c),
         candStudiesEls(c),
         h('div', { className: 'sr-rcand-a' },
-          h('button', { className: 'sr-rcstart', disabled: !props.canEdit, onClick: function () { startFromCand(c); } }, '🔬 Start review'),
+          h('button', { className: 'sr-rcstart', disabled: !canCreate, onClick: function () { startFromCand(c); } }, '🔬 Start review'),
           h('button', { className: 'sr-rcx', disabled: !props.canEdit, title: 'Dismiss', onClick: function () { dismissCand(c); } }, '×'))
       );
     }
@@ -3108,8 +3113,8 @@
       return h('div', { className: 'panel sr2-panel', style: { marginTop: 14 } },
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
           h('h3', { style: { margin: 0, flex: 1 } }, '🔬 Systematic Review Studio ', h('span', { style: { fontSize: 11.5, color: 'var(--faint)', fontWeight: 400 } }, '· from your Ideas → PRISMA')),
-          props.canEdit ? h('button', { className: 'btn pri', style: { padding: '5px 11px', fontSize: 12.5 }, disabled: gen, onClick: generate }, gen ? '✨ Generating…' : '✨ Generate from Ideas') : null,
-          props.canEdit ? h('button', { className: 'btn', style: { padding: '5px 11px', fontSize: 12.5 }, onClick: function () { fromCand.current = null; setF({ q: '', protocol: '', abs: [], ft: [], ex: [], exclude: [], gen: true, genAbs: true, genEx: true, useFig: false, runFT: true, maxResults: '1000' }); setOpenForm(true); } }, '+ Manual review') : null),
+          canCreate ? h('button', { className: 'btn pri', style: { padding: '5px 11px', fontSize: 12.5 }, disabled: gen, onClick: generate }, gen ? '✨ Generating…' : '✨ Generate from Ideas') : null,
+          canCreate ? h('button', { className: 'btn', style: { padding: '5px 11px', fontSize: 12.5 }, onClick: function () { fromCand.current = null; setF({ q: '', protocol: '', abs: [], ft: [], ex: [], exclude: [], gen: true, genAbs: true, genEx: true, useFig: false, runFT: true, maxResults: '1000' }); setOpenForm(true); } }, '+ Manual review') : null),
         err ? h('div', { style: { fontSize: 12.5, color: /^✓/.test(err) ? 'var(--ok, #15803d)' : 'var(--danger, #b42318)', margin: '6px 0' } }, err) : null,
         backupEl(),
         // Reviews exist → master-detail (rail + the selected review). No reviews yet → the review-question cards fill the
@@ -3187,15 +3192,15 @@
         h('label', { key: 'gen', style: { display: 'flex', gap: 7, alignItems: 'center', fontSize: 12.5 } }, h('input', { type: 'checkbox', checked: f.gen, onChange: function (e) { upf('gen', e.target.checked); } }), 'Generate a full report at the end'),
         h('div', { key: 'ft2', style: { display: 'flex', gap: 10, justifyContent: 'flex-end', alignItems: 'center', flexWrap: 'wrap' } },
           err ? h('div', { style: { flex: 1, minWidth: 0, fontSize: 12, color: /^✓/.test(err) ? 'var(--ok, #15803d)' : 'var(--danger, #b42318)' } }, err) : null,
-          h('button', { className: 'btn pri', disabled: !props.canEdit || busy || !f.q.trim(), onClick: create }, busy ? 'Starting…' : 'Start review'))
+          h('button', { className: 'btn pri', disabled: !canCreate || busy || !f.q.trim(), onClick: create }, busy ? 'Starting…' : 'Start review'))
       ];
     }
     if (nd()) return srWorkspace();
     return h('div', { className: 'panel', style: { marginTop: 14 } },
       h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
         h('h3', { style: { margin: 0, flex: 1 } }, '🔬 Systematic Review Studio ', h('span', { style: { fontSize: 11.5, color: 'var(--faint)', fontWeight: 400 } }, '· from your Ideas → PRISMA')),
-        props.canEdit ? h('button', { className: 'btn pri', style: { padding: '5px 11px', fontSize: 12.5 }, disabled: gen, onClick: generate }, gen ? '✨ Generating…' : '✨ Generate from Ideas') : null,
-        props.canEdit ? h('button', { className: 'btn', style: { padding: '5px 11px', fontSize: 12.5 }, onClick: function () { fromCand.current = null; if (openForm) { setOpenForm(false); } else { setF({ q: '', protocol: '', abs: [], ft: [], ex: [], exclude: [], gen: true, genAbs: true, genEx: true, useFig: false, runFT: true, maxResults: '1000' }); setOpenForm(true); } } }, openForm ? 'Cancel' : '+ Manual review') : null),
+        canCreate ? h('button', { className: 'btn pri', style: { padding: '5px 11px', fontSize: 12.5 }, disabled: gen, onClick: generate }, gen ? '✨ Generating…' : '✨ Generate from Ideas') : null,
+        canCreate ? h('button', { className: 'btn', style: { padding: '5px 11px', fontSize: 12.5 }, onClick: function () { fromCand.current = null; if (openForm) { setOpenForm(false); } else { setF({ q: '', protocol: '', abs: [], ft: [], ex: [], exclude: [], gen: true, genAbs: true, genEx: true, useFig: false, runFT: true, maxResults: '1000' }); setOpenForm(true); } } }, openForm ? 'Cancel' : '+ Manual review') : null),
       err ? h('div', { style: { fontSize: 12.5, color: /^✓/.test(err) ? 'var(--ok, #15803d)' : 'var(--danger, #b42318)', margin: '6px 0' } }, err) : null,
       backupEl(),
       // review-question cards from Ideas
