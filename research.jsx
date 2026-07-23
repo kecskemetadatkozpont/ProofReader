@@ -4966,6 +4966,7 @@
     var invqS = useState(''), invQ = invqS[0], setInvQ = invqS[1];   // invite: user search query
     var invrS = useState([]), invRes = invrS[0], setInvRes = invrS[1];   // invite: search results
     var invrolS = useState('viewer'), invRole = invrolS[0], setInvRole = invrolS[1];   // invite: role to grant
+    var invSelS = useState(null), invSel = invSelS[0], setInvSel = invSelS[1];   // invite: the PICKED user (invite is sent by an explicit button, not on result-click)
     var drag = useRef(null), stageRef = useRef(null), alive = useRef(true), bumpT = useRef(null), driving = useRef(false), mapDriver = useRef(null), ndrag = useRef(null), selRef = useRef(null), refBusy = useRef({}), dcRef = useRef(null), dScroll = useRef(null);
     var histRef = useRef({ undo: [], redo: [] }), histBusy = useRef(false), layoutRef = useRef({});   // undo/redo: per-session data-based stack + a serialize lock + a live-layout mirror for the collaborative guard
     if (!mapDriver.current) mapDriver.current = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : ('00000000-0000-4000-8000-' + String(Date.now()).slice(-12));
@@ -8500,9 +8501,15 @@
                   }) : h('div', { className: 'rmap-cm-empty' }, 'Még nincs közreműködő.'),
                   isOwner ? h('div', { className: 'rmap-invite' },
                     h('div', { style: { display: 'flex', gap: 6 } },
-                      h('input', { className: 'rmap-invite-in', placeholder: 'Meghívás e-mail alapján…', value: invQ, onChange: function (e) { setInvQ(e.target.value); } }),
+                      h('input', { className: 'rmap-invite-in', placeholder: 'Meghívás e-mail alapján…', value: invQ, onChange: function (e) { setInvQ(e.target.value); setInvSel(null); } }),
                       h('select', { className: 'rmap-mem-role', value: invRole, onChange: function (e) { setInvRole(e.target.value); } }, MEMBER_ROLES.map(function (r) { return h('option', { key: r[0], value: r[0] }, r[1]); }))),
-                    invRes.length ? h('div', { className: 'rmap-invite-res' }, invRes.filter(function (u) { return u.id !== props.viewerId && !(members || []).some(function (mm) { return mm.user_id === u.id; }); }).map(function (u) { return h('button', { key: u.id, className: 'rmap-invite-opt', onClick: function () { memberInvite(u, invRole); setInvQ(''); setInvRes([]); } }, (u.name || u.id) + ' — meghívás ' + roleLabel(invRole).toLowerCase() + 'ként'); })) : null)
+                    // pick a user first (result-click selects, doesn't invite); then set the role and press the explicit "send invite" button
+                    invSel ? h('div', { className: 'rmap-invite-sel' },
+                        h('div', { className: 'rmap-av', style: { width: 26, height: 26, fontSize: 12 } }, String(invSel.name || '?').trim().charAt(0).toUpperCase()),
+                        h('span', { className: 'rmap-invite-selname' }, invSel.name || invSel.id),
+                        h('button', { className: 'btn pri', style: { fontSize: 12, padding: '5px 12px', flex: 'none' }, onClick: function () { memberInvite(invSel, invRole); setInvSel(null); setInvQ(''); setInvRes([]); } }, '✉ Meghívó küldése (' + roleLabel(invRole).toLowerCase() + ')'),
+                        h('button', { className: 'btn', style: { fontSize: 12, padding: '5px 8px', flex: 'none' }, title: 'Mégse', onClick: function () { setInvSel(null); } }, '✕'))
+                      : (invRes.length ? h('div', { className: 'rmap-invite-res' }, invRes.filter(function (u) { return u.id !== props.viewerId && !(members || []).some(function (mm) { return mm.user_id === u.id; }); }).map(function (u) { return h('button', { key: u.id, className: 'rmap-invite-opt', onClick: function () { setInvSel(u); } }, (u.name || u.id) + (u.email ? ' · ' + u.email : '')); })) : null))
                     : h('div', { className: 'rmap-cm-empty' }, 'Csak a projekt tulajdonosa hívhat meg közreműködőket.')))));
       })() : null,
       // 5th LOD: embedded panel windows — screen-space (siblings of the world, so crisp), anchored to the card, non-modal
@@ -8902,13 +8909,14 @@
     function markAll() { var ids = notes.filter(function (n) { return !n.read_at; }).map(function (n) { return n.id; }); if (!ids.length) return; sb.from('notifications').update({ read_at: new Date().toISOString() }).in('id', ids).then(load); }
     var SHARE_ROLES = { owner: 'Tulajdonos', editor: 'Szerkesztő', commenter: 'Kommentelő', viewer: 'Megfigyelő' };
     function shareRoleLabel(r) { return SHARE_ROLES[r] || r || 'Megfigyelő'; }
-    function acceptShare(n) {   // invitee accepts their own pending membership (SECURITY DEFINER RPC, migration-74)
+    function acceptShare(n) {   // invitee accepts their own pending membership (RPC, migration-74) → dismiss the notification + jump to the project
       var pid = n.payload && n.payload.project_id; if (!pid) return;
       sb.rpc('research_member_accept', { pid: pid }).then(function (r) {
-        if (!window.PRUI) return;
-        if (r && r.error) { window.PRUI.toast('Nem sikerült elfogadni: ' + r.error.message, { kind: 'error' }); return; }
-        window.PRUI.toast('Meghívó elfogadva — a projekt megjelenik a listádban (frissítsd az oldalt).', { kind: 'success' });
-        markRead(n);
+        if (r && r.error) { if (window.PRUI) window.PRUI.toast('Nem sikerült elfogadni: ' + r.error.message, { kind: 'error' }); return; }
+        setNotes(function (l) { return l.filter(function (x) { return x.id !== n.id; }); });
+        if (window.PRUI) window.PRUI.toast('Meghívó elfogadva — megnyitom a projektet…', { kind: 'success' });
+        function go() { try { location.href = location.pathname + '?project=' + encodeURIComponent(pid); } catch (e) { location.reload(); } }   // reload → the deep-link (?project=) opens the now-readable project
+        sb.from('notifications').delete().eq('id', n.id).then(go, go);   // navigate only AFTER the delete resolves (else the unload cancels it → the invite reappears)
       });
     }
     var unread = notes.filter(function (n) { return !n.read_at; }).length;
