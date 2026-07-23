@@ -1425,6 +1425,18 @@
     .rmap-dock-modebtn { border: 1px solid var(--line); background: var(--surface); color: var(--muted); font-family: inherit; font-size: 11.5px; font-weight: 700; padding: 4px 11px; border-radius: 999px; cursor: pointer; }
     .rmap-dock-modebtn.on { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
     .rmap-dock-modebtn:disabled { opacity: .45; cursor: default; }
+    /* válasz-mód (effort+thinking) mini-selector in the dock — right-aligned in the mode row */
+    .rmap-dock-vmode { display: inline-flex; gap: 2px; margin-left: auto; background: var(--surface-2, var(--bg)); border: 1px solid var(--line); border-radius: 999px; padding: 2px; }
+    .rmap-dock-vmode button { border: 0; background: none; color: var(--muted); font-family: inherit; font-size: 12px; line-height: 1; padding: 4px 7px; border-radius: 999px; cursor: pointer; }
+    .rmap-dock-vmode button.on { background: var(--surface); color: var(--accent); box-shadow: 0 1px 2px rgba(20,26,40,.13); }
+    .rmap-dock-vmode button:disabled { opacity: .45; cursor: default; }
+    /* feleletválasztós tisztázó kérdések a dock legutolsó AI-válasza alatt */
+    .rmap-dock-qs { display: flex; flex-direction: column; gap: 8px; align-self: flex-start; max-width: 92%; }
+    .rmap-dock-q-label { font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 5px; }
+    .rmap-dock-q-opts { display: flex; flex-wrap: wrap; gap: 6px; }
+    .rmap-dock-qpill { border: 1px solid var(--line); background: var(--surface); color: var(--ink); font-family: inherit; font-size: 12px; font-weight: 600; padding: 5px 11px; border-radius: 999px; cursor: pointer; }
+    .rmap-dock-qpill:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+    .rmap-dock-qpill:disabled { opacity: .5; cursor: default; }
     .rmap-mic-on { border-color: var(--danger, #b42318) !important; color: var(--danger, #b42318) !important; animation: rmap-mic-pulse 1s ease-in-out infinite; }
     @keyframes rmap-mic-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(180,35,24,.4); } 50% { box-shadow: 0 0 0 5px rgba(180,35,24,0); } }
     /* dock-chat file upload + attach (P0): drag-drop dropzone overlay + pending-attachment chips */
@@ -1664,9 +1676,9 @@
     html.dark .rmap-genbusy { background: #4f46e5; }
     @media (max-width: 900px) { .rmap-wrap { flex-direction: column; } .rmap-insp { width: auto; } }
   </style>
-  <script src="theme.js?v=1784804609"></script>
-  <script src="nav.js?v=1784804609"></script>
-  <script src="entitlements.js?v=1784804609"></script>
+  <script src="theme.js?v=1784806028"></script>
+  <script src="nav.js?v=1784806028"></script>
+  <script src="entitlements.js?v=1784806028"></script>
 </head>
 
 <body>
@@ -1678,23 +1690,23 @@
   <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
   <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="backend/config.js?v=1784804609"></script>
-  <script src="auth.js?v=1784804609"></script>
-  <script src="backend.js?v=1784804609"></script>
-  <script src="onboarding.js?v=1784804609"></script>
-  <script src="office.js?v=1784804609"></script>
-  <script src="publications.js?v=1784804609"></script>
+  <script src="backend/config.js?v=1784806028"></script>
+  <script src="auth.js?v=1784806028"></script>
+  <script src="backend.js?v=1784806028"></script>
+  <script src="onboarding.js?v=1784806028"></script>
+  <script src="office.js?v=1784806028"></script>
+  <script src="publications.js?v=1784806028"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/tus-js-client@4.1.0/dist/tus.min.js"></script>
-  <script type="text/babel" src="canvas.jsx?v=1784804609"></script>
-  <script type="text/babel" src="notes.jsx?v=1784804609"></script>
-  <script src="autopilot-core.js?v=1784804609"></script>
-  <script type="text/babel" src="research.jsx?v=1784804609"></script>
+  <script type="text/babel" src="canvas.jsx?v=1784806028"></script>
+  <script type="text/babel" src="notes.jsx?v=1784806028"></script>
+  <script src="autopilot-core.js?v=1784806028"></script>
+  <script type="text/babel" src="research.jsx?v=1784806028"></script>
 
-  <script src="build.js?v=1784804609"></script>
-  <script src="version-badge.js?v=1784804609"></script>
+  <script src="build.js?v=1784806028"></script>
+  <script src="version-badge.js?v=1784806028"></script>
 </body>
 
 </html>

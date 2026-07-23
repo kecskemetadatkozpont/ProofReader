@@ -4846,6 +4846,7 @@
     var diS = useState(''), dInput = diS[0], setDInput = diS[1];
     var dbS = useState(false), dBusy = dbS[0], setDBusy = dbS[1];
     var dmoS = useState('chat'), dkMode = dmoS[0], setDkMode = dmoS[1];   // dock mode: 'chat' | 'action' (protocol step from instruction)
+    var dcmS = useState(function () { try { return localStorage.getItem('pr-chat-mode') || 'balanced'; } catch (e) { return 'balanced'; } }), dChatMode = dcmS[0], setDChatMode = dcmS[1];   // válasz-mód (effort+thinking) — shared with the Chat panel via the pr-chat-mode key
     var datS = useState([]), dAttach = datS[0], setDAttach = datS[1];   // dock-chat pending attachments (uploaded files / library sources) for the next message
     var ddzS = useState(false), dDrop = ddzS[0], setDDrop = ddzS[1];   // drag files over the dock → show the dropzone overlay
     var dpkS = useState(false), dPick = dpkS[0], setDPick = dpkS[1];   // the attach picker (AttachModal) is open
@@ -7662,7 +7663,8 @@
           if (ins && ins.error) { fail('Hiba: ' + ins.error.message); return; }
           sb.auth.getSession().then(function (s) {
             var token = (s && s.data && s.data.session && s.data.session.access_token) || CFG.supabaseAnonKey;
-            fetch(CFG.supabaseUrl + '/functions/v1/research-chat', { method: 'POST', headers: { 'Content-Type': 'application/json', 'apikey': CFG.supabaseAnonKey, 'Authorization': 'Bearer ' + token }, body: JSON.stringify({ chat_id: cid, stream: true }) })
+            var _cm = CHAT_MODES[dChatMode] || CHAT_MODES.balanced;   // válasz-mód → effort + thinking (server gates by model)
+            fetch(CFG.supabaseUrl + '/functions/v1/research-chat', { method: 'POST', headers: { 'Content-Type': 'application/json', 'apikey': CFG.supabaseAnonKey, 'Authorization': 'Bearer ' + token }, body: JSON.stringify({ chat_id: cid, stream: true, effort: _cm.effort, think: _cm.think }) })
               .then(function (resp) {
                 if (!alive.current) return;
                 if (!resp.ok || !resp.body || !resp.body.getReader) { fail('Hiba: nincs válasz — telepítve van a research-chat?'); return; }
@@ -8350,15 +8352,25 @@
             h('button', { className: 'rmap-dock-x', title: 'Összecsukás', onClick: function () { setDkOpen(false); try { localStorage.setItem('pr-rmap-dock', '0'); } catch (e) { } } }, '▾'))),
           (dkTab !== 'files') ? h(React.Fragment, null,
           h('div', { className: 'rmap-dock-msgs', ref: dScroll, onMouseUp: dkSelUp, onScroll: function () { if (dSelPop) setDSelPop(null); } }, dMsgs.map(function (mm, i) {
+            var isAi = mm.role !== 'user';
+            var isLastAi = isAi && !dMsgs.slice(i + 1).some(function (x) { return x.role !== 'user'; });   // only the latest AI reply's questions are actionable
+            var qs = isLastAi ? extractQuestions(mm.text) : [];
             return [
-              h('div', { key: 'm' + i, className: 'rmap-dock-msg ' + (mm.role === 'user' ? 'u' : 'a') }, mm.text),
+              h('div', { key: 'm' + i, className: 'rmap-dock-msg ' + (mm.role === 'user' ? 'u' : 'a') }, isAi ? stripQuestions(stripFiles(mm.text)) : mm.text),
+              qs.length ? h('div', { key: 'q' + i, className: 'rmap-dock-qs' }, qs.map(function (qq, qi) {
+                return h('div', { key: qi, className: 'rmap-dock-q' },
+                  h('div', { className: 'rmap-dock-q-label' }, qq.q),
+                  h('div', { className: 'rmap-dock-q-opts' }, qq.options.map(function (o, oi) {
+                    return h('button', { key: oi, className: 'rmap-dock-qpill', disabled: dBusy, title: 'Válasz küldése: ' + o, onClick: function () { dkSend(o); } }, o);
+                  })));
+              })) : null,
               (mm.actions && mm.actions.length) ? h('div', { key: 'a' + i, className: 'rmap-dock-cmds rmap-dock-acts' + (mm.done ? ' done' : '') },
                 mm.done
                   ? [h('button', { key: 'done', className: 'rmap-dock-chip', disabled: true }, '✓ Kész')]
                   : mm.actions.map(function (a) { return h('button', { key: a.key, className: 'rmap-dock-chip' + (a.pri ? ' pri' : ''), disabled: (dBusy && a.key !== 'undo'), onClick: function () { dkRunAction(i, a); } }, a.label); })
               ) : null
             ];
-          }), dStream ? h('div', { className: 'rmap-dock-msg a', key: 'dstream' }, dStream.text || '', h('span', { className: 'rmap-dock-cursor' }, '▌')) : (dBusy ? h('div', { className: 'rmap-dock-msg a busy' }, '⏳ dolgozom…') : null)),
+          }), dStream ? (function () { var live = stripQuestions(dStream.text || ''); return h('div', { className: 'rmap-dock-msg a', key: 'dstream' }, live ? live : h('span', { style: { color: 'var(--faint)' } }, dChatMode === 'deep' ? '🧠 gondolkodik…' : '✍️ írok…'), live ? h('span', { className: 'rmap-dock-cursor' }, '▌') : null); })() : (dBusy ? h('div', { className: 'rmap-dock-msg a busy' }, '⏳ dolgozom…') : null)),
           h('div', { className: 'rmap-dock-cmds' }, [['ideas', '✦ Ötletek'], ['gaps', '🕳 Rések'], ['study', '📚 Irodalom'], ['protocol', '🧪 Protokoll'], ['writing', '✍️ Draft']].map(function (c) { return h('button', { key: c[0], className: 'rmap-dock-chip', disabled: dBusy, title: c[0] === 'ideas' ? 'Új kutatási ÖTLETEK generálása (AI) — a projektből és a kijelölt kártyából/részletből' : (c[0] === 'gaps' ? 'Kutatási RÉSEK feltárása (AI) — hiányzó irányok a projektben' : null), onClick: function () { dkCmd(c[0]); } }, c[1]); }).concat([h('button', { key: 'suggest', className: 'rmap-dock-chip', disabled: dBusy, title: 'Ötlet-jelöltek a mostani beszélgetésből (AI) — új kártyák a térképen', onClick: dkSuggest }, '💡 A beszélgetésből')])),
           // the selected card is "attached" to the next prompt — shown here like an attachment chip (× to detach)
           sn ? h('div', { style: { display: 'flex', alignItems: 'center', gap: 6, margin: '2px 12px 6px', padding: '4px 8px', borderRadius: 8, background: 'var(--accent-tint)', border: '1px solid var(--accent)' } },
@@ -8374,7 +8386,9 @@
               h('button', { className: 'btn', style: { fontSize: 12, padding: '4px 10px' }, disabled: dBusy, onClick: function () { setProposal(null); } }, 'Mégse'))) : null,
           h('div', { className: 'rmap-dock-mode' },
             h('button', { className: 'rmap-dock-modebtn' + (dkMode === 'chat' ? ' on' : ''), disabled: dBusy, title: 'Beszélgetés / kérdés az asszisztenssel', onClick: function () { setDkMode('chat'); } }, '💬 Chat'),
-            h('button', { className: 'rmap-dock-modebtn' + (dkMode === 'action' ? ' on' : ''), disabled: dBusy || !(sn && sn.t === 'step'), title: (sn && sn.t === 'step') ? 'Az utasításból protokoll-lépést szúr be a kijelölt lépés után' : 'Jelölj ki egy protokoll-lépést az Akció módhoz', onClick: function () { setDkMode('action'); } }, '⚡ Akció')),
+            h('button', { className: 'rmap-dock-modebtn' + (dkMode === 'action' ? ' on' : ''), disabled: dBusy || !(sn && sn.t === 'step'), title: (sn && sn.t === 'step') ? 'Az utasításból protokoll-lépést szúr be a kijelölt lépés után' : 'Jelölj ki egy protokoll-lépést az Akció módhoz', onClick: function () { setDkMode('action'); } }, '⚡ Akció'),
+            h('div', { className: 'rmap-dock-vmode', role: 'group', 'aria-label': 'Válasz-mód', title: 'Válasz-mód — mennyit gondolkodjon a modell (effort + thinking). Közös a Chat füllel.' },
+              CHAT_MODE_META.map(function (md) { return h('button', { key: md.id, className: dChatMode === md.id ? 'on' : '', disabled: dBusy, 'aria-label': md.lab, title: md.lab, onClick: function () { setDChatMode(md.id); try { localStorage.setItem('pr-chat-mode', md.id); } catch (e) { } } }, md.ic); }))),
           dSnips.length ? h('div', { className: 'rmap-dock-atts' }, dSnips.map(function (s, i) {
             return h('span', { className: 'rmap-dock-att', key: 'ds' + i, title: s.text }, '✂ ' + String(s.file || 'fájl').slice(0, 14) + ': „' + String(s.text).slice(0, 20) + (s.text.length > 20 ? '…' : '') + '"',
               h('button', { title: 'Eltávolítás', onClick: function () { setDSnips(dSnips.filter(function (_, j) { return j !== i; })); } }, '×'));
