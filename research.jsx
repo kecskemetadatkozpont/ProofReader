@@ -5199,7 +5199,7 @@
         sb.from('research_sources').select('id,title,venue,cited_by,year,screening,url,abstract,created_at').eq('project_id', pid).order('cited_by', { ascending: false, nullsFirst: false }).limit(10),
         sb.from('research_sources').select('id', { count: 'exact', head: true }).eq('project_id', pid),
         sb.from('research_sources').select('id', { count: 'exact', head: true }).eq('project_id', pid).eq('screening', 'include'),
-        sb.from('research_protocols').select('id,title,status,idea_id').eq('project_id', pid).neq('status', 'archived').order('created_at', { ascending: false }).limit(1),
+        sb.from('research_protocols').select('id,title,status,idea_id,created_by').eq('project_id', pid).neq('status', 'archived').order('created_at', { ascending: false }).limit(1),
         sb.from('research_journal_picks').select('id,title,status,npi_level,created_by,created_at').eq('project_id', pid),
         sb.from('research_files').select('id,path,size,storage_path,created_by,created_at,updated_at').eq('project_id', pid).or('path.like.writing/%,path.like.studies/%,path.like.submission/%'),
         // F5 — multi-modal nodes: datasets, uploaded/material files (NOT writing/studies), chat threads, paper figures
@@ -5347,7 +5347,7 @@
       var protoIdea = (d.protocol && d.protocol.idea_id && ideaHas(d.protocol.idea_id)) ? ('i' + d.protocol.idea_id) : null;
       var lastStep = (d.protocol && d.steps.length) ? ('r' + d.steps[d.steps.length - 1].id) : null;
       if (d.protocol && d.steps.length) {
-        d.steps.forEach(function (s, i) { var sm = { Kind: s.kind || '—', Státusz: s.status || '—', Jóváhagyás: s.needs_approval ? 'szükséges' : '—' }; if (stepFlagsCap) { sm['Felelős'] = s.assignee_id ? nameOf(s.assignee_id) : '—'; sm['Sign-off'] = s.signed_off_by ? (nameOf(s.signed_off_by) + (s.signed_off_at ? ' · ' + String(s.signed_off_at).slice(0, 10) : '')) : '—'; } N.push({ id: 'r' + s.id, t: 'step', ph: 3, title: s.title || ('Lépés ' + (i + 1)), m: sm, st: s.status, gate: !!s.needs_approval, ref: s }); if (i > 0) E.push(['r' + d.steps[i - 1].id, 'r' + s.id]); });
+        d.steps.forEach(function (s, i) { var sm = { Kind: s.kind || '—', Státusz: s.status || '—', Jóváhagyás: s.needs_approval ? 'szükséges' : '—' }; if (stepFlagsCap) { sm['Felelős'] = s.assignee_id ? nameOf(s.assignee_id) : '—'; sm['Sign-off'] = s.signed_off_by ? (nameOf(s.signed_off_by) + (s.signed_off_at ? ' · ' + String(s.signed_off_at).slice(0, 10) : '')) : '—'; } N.push({ id: 'r' + s.id, t: 'step', ph: 3, title: s.title || ('Lépés ' + (i + 1)), m: sm, st: s.status, gate: !!s.needs_approval, ref: s, createdBy: (d.protocol && d.protocol.created_by) || null }); if (i > 0) E.push(['r' + d.steps[i - 1].id, 'r' + s.id]); });
         var protUp = srId || litId || protoIdea || firstIdea; if (protUp) E.push([protUp, 'r' + d.steps[0].id]);
       }
       var venueUp = srId || lastStep || litId || firstIdea;
@@ -6413,7 +6413,7 @@
       var m = (members || []).filter(function (x) { return x.user_id === uid; })[0]; if (m && m.pavatar) return m.pavatar;
       var o = online.filter(function (x) { return x.id === uid; })[0]; return (o && o.avatar) || null;
     }
-    function creatorOf(n) { return (n && n.ref && (n.ref.created_by || n.ref.user_id)) || null; }   // who made this card (only present on tables that track it)
+    function creatorOf(n) { return (n && (n.createdBy || (n.ref && (n.ref.created_by || n.ref.user_id)))) || null; }   // node-level createdBy (e.g. a protocol step → its protocol's creator) OR the ref's own creator
     // protocol-step assignee + sign-off (migration-75). `step` is the node.ref (a research_protocol_steps row).
     function stepPatch(step, patch) {
       if (!step || !step.id || !props.canEdit) return;
