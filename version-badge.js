@@ -8,7 +8,7 @@
   var B = window.PR_BUILD || { build: 0, built: 'dev' };
 
   var css = [
-    '.pr-ver{position:fixed;left:10px;bottom:52px;z-index:55;display:inline-flex;align-items:center;gap:6px;',
+    '.pr-ver{position:fixed;right:12px;bottom:12px;z-index:55;display:inline-flex;align-items:center;gap:6px;',
     'padding:3px 9px;border-radius:20px;font:600 10.5px/1 "IBM Plex Sans",system-ui,sans-serif;',
     'background:rgba(40,44,52,.5);color:#e8eaed;border:1px solid rgba(255,255,255,.1);',
     'cursor:default;opacity:.6;transition:opacity .15s,background .15s;backdrop-filter:blur(3px);user-select:none;}',
@@ -23,7 +23,7 @@
        subtree in the editor and under :root on the dashboard), so it stays readable
        on both the white topbar and the dark "night" topbar. */
     '.pr-ver-slot{display:block;margin-top:3px;}',
-    '.pr-ver-slot .pr-ver{position:static;left:auto;bottom:auto;padding:2px 8px;font-size:9.5px;font-weight:700;letter-spacing:.01em;opacity:1;',
+    '.pr-ver-slot .pr-ver{position:static;left:auto;right:auto;bottom:auto;padding:2px 8px;font-size:9.5px;font-weight:700;letter-spacing:.01em;opacity:1;',
     'color:color-mix(in srgb, var(--ink, #1d2430) 82%, transparent);',
     'background:color-mix(in srgb, var(--ink, #1d2430) 7%, transparent);',
     'border:1px solid color-mix(in srgb, var(--ink, #1d2430) 18%, transparent);}',
