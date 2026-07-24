@@ -971,6 +971,7 @@
     //      read-only + live, into anyone else's thread. Authorship is carried by research_chats.owner_id. ----
     var myId = props.authorId;
     var pkS2 = useState(null), peek = pkS2[0], setPeek = pkS2[1];            // {ownerId, chatId, name, color, avatar, legacy} while peeking; null = my own thread
+    var plS2 = useState(false), peekLoading = plS2[0], setPeekLoading = plS2[1];  // true while a peeked thread's messages are loading
     var rlS = useState([]), rail = rlS[0], setRail = rlS[1];                 // other members' ideas threads
     var lgS = useState(null), legacyChat = lgS[0], setLegacyChat = lgS[1];   // the old shared thread (owner_id NULL) → "Közös (örökölt)"
     var mpS = useState(null), meProfile = mpS[0], setMeProfile = mpS[1];     // my profiles_public row (name/avatar/color) for the rail
@@ -999,7 +1000,7 @@
     }
     function refreshRail() { if (railRefreshT.current) return; railRefreshT.current = setTimeout(function () { railRefreshT.current = null; if (alive.current) loadRail(); }, 400); }   // debounced → colleague threads appear without a manual reload
     function openMine() { setPeek(null); firstLoad.current = true; if (chat) loadMsgs(chat.id); else setMsgs([]); }
-    function openPeek(entry) { setPeek(entry); firstLoad.current = true; setStreaming(null); loadMsgs(entry.chatId); }
+    function openPeek(entry) { setPeek(entry); firstLoad.current = true; setStreaming(null); setMsgs([]); setPeekLoading(true); loadMsgs(entry.chatId); }
     // #3 — AI ideas are generated ON DEMAND (button), not continuously: pull NEW research ideas out of the
     // current conversation into the Ideas list as candidates (deduped + capped server-side; user accepts/rejects).
     function suggestIdeas() {
@@ -1038,6 +1039,8 @@
         sb.from('research_evidence').select('message_id').eq('chat_id', cid)
       ]).then(function (res) {
         var data = (res[0] && res[0].data) || [];
+        if (res[0] && res[0].error) { try { window.PRUI.toast('Nem sikerült betölteni a beszélgetést: ' + res[0].error.message, { kind: 'error' }); } catch (e) { } }
+        setPeekLoading(false);
         setMsgs(data);
         var by = {}; ((res[1] && res[1].data) || []).forEach(function (e) { if (e.message_id) by[e.message_id] = (by[e.message_id] || 0) + 1; });
         setEvByMsg(by);
@@ -1321,10 +1324,10 @@
               }) : h('div', { className: 'chat-ev-empty' }, evSnips[m.id] ? 'Nincs megjeleníthető részlet.' : 'Betöltés…')
             ) : null
           );
-        }) : h('div', null,
+        }) : (peek ? h('div', { className: 'chat-empty' }, peekLoading ? '⏳ Betöltés…' : ('Ez a fonál még üres — ' + (peek.legacy ? 'a közös szálban nincs üzenet.' : (peek.name + ' még nem írt ide.')))) : h('div', null,
           h('div', { className: 'chat-empty' }, 'Ask Publify about your topic — grounded in evidence when Consensus is connected.'),
-          (props.canEdit && !peek) ? h('div', { className: 'chat-suggest' }, CHAT_SUGGEST.map(function (s, i) { return h('button', { key: i, onClick: function () { sendText(s); } }, s); })) : null
-        ),
+          props.canEdit ? h('div', { className: 'chat-suggest' }, CHAT_SUGGEST.map(function (s, i) { return h('button', { key: i, onClick: function () { sendText(s); } }, s); })) : null
+        )),
         (!peek && streaming) ? (function () {
           var live = stripQuestions(streaming.text || '');   // hide the trailing questions fence from the live preview (it renders as pills after)
           return h('div', { className: 'bubble ai', key: 'stream' }, h('div', { className: 'btxt' },
@@ -4993,6 +4996,7 @@
     // F1 Increment 2: per-user dock (canvas) threads + read-only peek into colleagues' dock threads
     var dprS = useState(null), dPeek = dprS[0], setDPeek = dprS[1];               // {ownerId, chatId, name, legacy, canAdopt} while peeking; null = my own dock thread
     var dpmS = useState([]), dPeekMsgs = dpmS[0], setDPeekMsgs = dpmS[1];         // messages of the peeked canvas thread
+    var dplS = useState(false), dPeekLoading = dplS[0], setDPeekLoading = dplS[1]; // true while a peeked dock thread loads
     var dcrlS = useState([]), dCanvasRail = dcrlS[0], setDCanvasRail = dcrlS[1];  // other users' canvas threads: [{owner_id, chat_id}]
     var dlcS = useState(null), dLegacyCanvas = dlcS[0], setDLegacyCanvas = dlcS[1]; // the old shared canvas thread (owner_id NULL)
     var diS = useState(''), dInput = diS[0], setDInput = diS[1];
@@ -7667,8 +7671,8 @@
       });
     }
     function dkMapRows(rows) { return (rows || []).map(function (m) { var t = String(m.content || ''); if (m.role === 'user') t = t.replace(/^\[BECSATOLT KÁRTYA[\s\S]*?\]\n\n/, ''); return { role: m.role === 'assistant' ? 'ai' : 'user', text: t }; }); }
-    function dkLoadPeek(cid) { sb.from('research_messages').select('role,content').eq('chat_id', cid).order('created_at', { ascending: true }).limit(60).then(function (rr) { if (alive.current) setDPeekMsgs(dkMapRows((rr && rr.data) || [])); }); }
-    function dkPeekOwner(entry) { setDPeek(entry); setDPeekMsgs([]); dkLoadPeek(entry.chatId); }
+    function dkLoadPeek(cid) { sb.from('research_messages').select('role,content').eq('chat_id', cid).order('created_at', { ascending: true }).limit(60).then(function (rr) { if (!alive.current) return; if (rr && rr.error) { try { window.PRUI.toast('Nem sikerült betölteni: ' + rr.error.message, { kind: 'error' }); } catch (e) { } } setDPeekLoading(false); setDPeekMsgs(dkMapRows((rr && rr.data) || [])); }); }
+    function dkPeekOwner(entry) { setDPeek(entry); setDPeekMsgs([]); setDPeekLoading(true); dkLoadPeek(entry.chatId); }
     function dkPeekMine() { setDPeek(null); setDPeekMsgs([]); }
     function dkAdoptLegacy() {
       if (!dPeek || !dPeek.legacy || !props.viewerId) return;
@@ -8592,7 +8596,7 @@
                   : mm.actions.map(function (a) { return h('button', { key: a.key, className: 'rmap-dock-chip' + (a.pri ? ' pri' : ''), disabled: (dBusy && a.key !== 'undo'), onClick: function () { dkRunAction(i, a); } }, a.label); })
               ) : null
             ];
-          }), (!dPeek && dStream) ? (function () { var live = stripQuestions(dStream.text || ''); return h('div', { className: 'rmap-dock-msg a', key: 'dstream' }, live ? live : h('span', { style: { color: 'var(--faint)' } }, dChatMode === 'deep' ? '🧠 gondolkodik…' : '✍️ írok…'), live ? h('span', { className: 'rmap-dock-cursor' }, '▌') : null); })() : ((!dPeek && dBusy) ? h('div', { className: 'rmap-dock-msg a busy' }, '⏳ dolgozom…') : null)),
+          }), (dPeek && !dPeekMsgs.length) ? h('div', { className: 'rmap-dock-msg a', style: { color: 'var(--faint)' } }, dPeekLoading ? '⏳ Betöltés…' : ('Ez a fonál még üres — ' + (dPeek.legacy ? 'a közös szálban nincs üzenet.' : 'a kolléga még nem írt ide.'))) : null, (!dPeek && dStream) ? (function () { var live = stripQuestions(dStream.text || ''); return h('div', { className: 'rmap-dock-msg a', key: 'dstream' }, live ? live : h('span', { style: { color: 'var(--faint)' } }, dChatMode === 'deep' ? '🧠 gondolkodik…' : '✍️ írok…'), live ? h('span', { className: 'rmap-dock-cursor' }, '▌') : null); })() : ((!dPeek && dBusy) ? h('div', { className: 'rmap-dock-msg a busy' }, '⏳ dolgozom…') : null)),
           dPeek ? null : h(React.Fragment, null,
           h('div', { className: 'rmap-dock-cmds' }, [['ideas', '✦ Ötletek'], ['gaps', '🕳 Rések'], ['study', '📚 Irodalom'], ['protocol', '🧪 Protokoll'], ['writing', '✍️ Draft']].map(function (c) { return h('button', { key: c[0], className: 'rmap-dock-chip', disabled: dBusy, title: c[0] === 'ideas' ? 'Új kutatási ÖTLETEK generálása (AI) — a projektből és a kijelölt kártyából/részletből' : (c[0] === 'gaps' ? 'Kutatási RÉSEK feltárása (AI) — hiányzó irányok a projektben' : null), onClick: function () { dkCmd(c[0]); } }, c[1]); }).concat([h('button', { key: 'suggest', className: 'rmap-dock-chip', disabled: dBusy, title: 'Ötlet-jelöltek a mostani beszélgetésből (AI) — új kártyák a térképen', onClick: dkSuggest }, '💡 A beszélgetésből')])),
           // the selected card is "attached" to the next prompt — shown here like an attachment chip (× to detach)
