@@ -4990,6 +4990,11 @@
     // Luma-style canvas assistant dock (bottom-right): quick pipeline commands + a free-text chat (research-chat)
     var dkS = useState(function () { try { return localStorage.getItem('pr-rmap-dock') !== '0'; } catch (e) { return true; } }), dkOpen = dkS[0], setDkOpen = dkS[1];
     var dmS = useState([{ role: 'ai', text: '👋 Canvas-asszisztens. Adj utasítást vagy kérdést, vagy használd a gyors-parancsokat lent — az eredmény megjelenik a térképen.' }]), dMsgs = dmS[0], setDMsgs = dmS[1];
+    // F1 Increment 2: per-user dock (canvas) threads + read-only peek into colleagues' dock threads
+    var dprS = useState(null), dPeek = dprS[0], setDPeek = dprS[1];               // {ownerId, chatId, name, legacy, canAdopt} while peeking; null = my own dock thread
+    var dpmS = useState([]), dPeekMsgs = dpmS[0], setDPeekMsgs = dpmS[1];         // messages of the peeked canvas thread
+    var dcrlS = useState([]), dCanvasRail = dcrlS[0], setDCanvasRail = dcrlS[1];  // other users' canvas threads: [{owner_id, chat_id}]
+    var dlcS = useState(null), dLegacyCanvas = dlcS[0], setDLegacyCanvas = dlcS[1]; // the old shared canvas thread (owner_id NULL)
     var diS = useState(''), dInput = diS[0], setDInput = diS[1];
     var dbS = useState(false), dBusy = dbS[0], setDBusy = dbS[1];
     var dmoS = useState('chat'), dkMode = dmoS[0], setDkMode = dmoS[1];   // dock mode: 'chat' | 'action' (protocol step from instruction)
@@ -5115,7 +5120,7 @@
     var invrS = useState([]), invRes = invrS[0], setInvRes = invrS[1];   // invite: search results
     var invrolS = useState('viewer'), invRole = invrolS[0], setInvRole = invrolS[1];   // invite: role to grant
     var invSelS = useState(null), invSel = invSelS[0], setInvSel = invSelS[1];   // invite: the PICKED user (invite is sent by an explicit button, not on result-click)
-    var drag = useRef(null), stageRef = useRef(null), alive = useRef(true), bumpT = useRef(null), driving = useRef(false), mapDriver = useRef(null), ndrag = useRef(null), selRef = useRef(null), refBusy = useRef({}), dcRef = useRef(null), dScroll = useRef(null);
+    var drag = useRef(null), stageRef = useRef(null), alive = useRef(true), bumpT = useRef(null), driving = useRef(false), mapDriver = useRef(null), ndrag = useRef(null), selRef = useRef(null), refBusy = useRef({}), dcRef = useRef(null), dScroll = useRef(null), dPeekChRef = useRef(null);
     var histRef = useRef({ undo: [], redo: [] }), histBusy = useRef(false), layoutRef = useRef({});   // undo/redo: per-session data-based stack + a serialize lock + a live-layout mirror for the collaborative guard
     if (!mapDriver.current) mapDriver.current = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : ('00000000-0000-4000-8000-' + String(Date.now()).slice(-12));
     useEffect(function () { return function () { alive.current = false; driving.current = false; if (bumpT.current) clearTimeout(bumpT.current); }; }, []);
@@ -5215,6 +5220,7 @@
           var st = ch.presenceState(), seen = {}, list = [];
           Object.keys(st).forEach(function (k) { (st[k] || []).forEach(function (m) { var id = m.id || k; if (!seen[id]) { seen[id] = 1; list.push({ id: id, name: m.name, avatar: m.avatar, self: id === props.viewerId }); } }); });
           setOnline(list);
+          loadCanvasRail();   // a colleague joined → their dock thread may now exist; refresh the dock collaborator strip
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'research_autopilot_runs', filter: 'project_id=eq.' + pid }, function (p) { if (alive.current && p.new) { setRun(p.new); ensureDrive(p.new); bumpSoon(); } })
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'research_autopilot_events', filter: 'project_id=eq.' + pid }, function () { if (alive.current) bumpSoon(); })
@@ -5420,10 +5426,12 @@
     // so an in-flight refine callback knows whether the user is still on the node it was started from.
     useEffect(function () { setRcMsgs([]); setRcInput(''); setRcBusy(!!refBusy.current[sel]); selRef.current = sel; }, [sel]);
     useEffect(function () { var el = dScroll.current; if (el) el.scrollTop = el.scrollHeight; }, [dMsgs.length, dBusy, dkOpen, dStream]);   // keep the dock scrolled to the latest message (incl. live during streaming)
-    // hydrate the dock transcript ONCE from the persisted "Canvas asszisztens" thread → the assistant shows real history, not just a greeting
+    // hydrate the dock transcript ONCE from MY OWN canvas thread (surface='canvas', owner_id=me) + load the collaborator strip
     useEffect(function () {
-      var pid = props.projectId, cancelled = false;
-      sb.from('research_chats').select('id').eq('project_id', pid).eq('title', 'Canvas asszisztens').order('created_at', { ascending: true }).limit(1).maybeSingle().then(function (r) {
+      var pid = props.projectId, vid = props.viewerId, cancelled = false;
+      loadCanvasRail();
+      if (!vid) return function () { cancelled = true; };
+      sb.from('research_chats').select('id,owner_id').eq('project_id', pid).eq('surface', 'canvas').eq('owner_id', vid).order('created_at', { ascending: true }).limit(1).maybeSingle().then(function (r) {
         var c = r && r.data; if (!c || !c.id || cancelled || !alive.current) return; dcRef.current = c.id;
         sb.from('research_messages').select('role,content').eq('chat_id', c.id).order('created_at', { ascending: true }).limit(40).then(function (rr) {
           if (cancelled || !alive.current) return;
@@ -5434,6 +5442,15 @@
       });
       return function () { cancelled = true; };
     }, []);
+    // F1: while peeking a colleague's dock thread, live-update it as they chat (message-level via Realtime)
+    useEffect(function () {
+      var cid = dPeek && dPeek.chatId; if (!cid) return;
+      var ch = sb.channel('rdpeek:' + cid)
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'research_messages', filter: 'chat_id=eq.' + cid }, function () { if (alive.current && dPeek && dPeek.chatId === cid) dkLoadPeek(cid); })
+        .subscribe();
+      dPeekChRef.current = ch;
+      return function () { try { sb.removeChannel(ch); } catch (e) { } };
+    }, [dPeek && dPeek.chatId]);
 
     // BUILT-IN RULE (new-card placement only): a freshly materialized card must never spawn on top of an existing one.
     // Iteratively push apart overlapping cards along the least-overlap axis, using each card's measured height (n._h).
@@ -7632,12 +7649,41 @@
         setBump(function (x) { return x + 1; });   // re-materialize the map with the new steps
       }, function () { if (alive.current) { setDBusy(false); dkSay('ai', '⚠️ Beszúrás hálózati hiba.'); } });
     }
-    function dkEnsureChat() {   // a dedicated "Canvas asszisztens" chat thread (separate from the Ideas-tab chat) → research-chat has multi-turn context
+    function dkEnsureChat() {   // MY OWN dock (canvas) thread → per-user; research-chat has multi-turn context
       if (dcRef.current) return Promise.resolve(dcRef.current);
-      return sb.from('research_chats').select('id').eq('project_id', props.projectId).eq('title', 'Canvas asszisztens').order('created_at', { ascending: true }).limit(1).maybeSingle().then(function (r) {
+      var vid = props.viewerId;
+      if (!vid) return sb.from('research_chats').select('id').eq('project_id', props.projectId).eq('title', 'Canvas asszisztens').order('created_at', { ascending: true }).limit(1).maybeSingle().then(function (r) { var c = r && r.data; if (c && c.id) { dcRef.current = c.id; return c.id; } return sb.from('research_chats').insert({ project_id: props.projectId, title: 'Canvas asszisztens' }).select('id').maybeSingle().then(function (ir) { var nc = ir && ir.data; if (nc && nc.id) dcRef.current = nc.id; return nc && nc.id; }); });
+      return sb.from('research_chats').select('id,owner_id').eq('project_id', props.projectId).eq('surface', 'canvas').eq('owner_id', vid).order('created_at', { ascending: true }).limit(1).maybeSingle().then(function (r) {
         var c = r && r.data; if (c && c.id) { dcRef.current = c.id; return c.id; }
-        return sb.from('research_chats').insert({ project_id: props.projectId, title: 'Canvas asszisztens' }).select('id').maybeSingle().then(function (ir) { var nc = ir && ir.data; if (nc && nc.id) dcRef.current = nc.id; return nc && nc.id; });
+        return sb.from('research_chats').insert({ project_id: props.projectId, title: 'Canvas asszisztens', owner_id: vid, surface: 'canvas' }).select('id,owner_id').maybeSingle().then(function (ir) { var nc = ir && ir.data; if (nc && nc.id) { dcRef.current = nc.id; loadCanvasRail(); } return nc && nc.id; });
       });
+    }
+    // ---- dock collaborator strip + read-only peek (Increment 2) ----
+    function loadCanvasRail() {
+      sb.from('research_chats').select('id,owner_id,updated_at').eq('project_id', props.projectId).eq('surface', 'canvas').then(function (r) {
+        if (!alive.current) return; var rows = (r && r.data) || [];
+        setDLegacyCanvas(rows.filter(function (x) { return !x.owner_id; })[0] || null);
+        setDCanvasRail(rows.filter(function (x) { return x.owner_id && x.owner_id !== props.viewerId; }).sort(function (a, b) { return String(b.updated_at || '').localeCompare(String(a.updated_at || '')); }));
+      });
+    }
+    function dkMapRows(rows) { return (rows || []).map(function (m) { var t = String(m.content || ''); if (m.role === 'user') t = t.replace(/^\[BECSATOLT KÁRTYA[\s\S]*?\]\n\n/, ''); return { role: m.role === 'assistant' ? 'ai' : 'user', text: t }; }); }
+    function dkLoadPeek(cid) { sb.from('research_messages').select('role,content').eq('chat_id', cid).order('created_at', { ascending: true }).limit(60).then(function (rr) { if (alive.current) setDPeekMsgs(dkMapRows((rr && rr.data) || [])); }); }
+    function dkPeekOwner(entry) { setDPeek(entry); setDPeekMsgs([]); dkLoadPeek(entry.chatId); }
+    function dkPeekMine() { setDPeek(null); setDPeekMsgs([]); }
+    function dkAdoptLegacy() {
+      if (!dPeek || !dPeek.legacy || !props.viewerId) return;
+      sb.from('research_chats').update({ owner_id: props.viewerId }).eq('id', dPeek.chatId).is('owner_id', null).select('id,owner_id').maybeSingle().then(function (r) {
+        if (!alive.current) return; var c = r && r.data;
+        if (c && c.owner_id === props.viewerId) { dcRef.current = c.id; setDPeek(null); setDPeekMsgs([]); sb.from('research_messages').select('role,content').eq('chat_id', c.id).order('created_at', { ascending: true }).limit(40).then(function (rr) { if (!alive.current) return; var mapped = dkMapRows((rr && rr.data) || []); setDMsgs(mapped.length ? mapped : [{ role: 'ai', text: '👋 Canvas-asszisztens.' }]); }); loadCanvasRail(); }
+        else { try { window.PRUI.toast('Ezt a szálat közben átvette valaki.', { kind: 'error' }); } catch (e) { } loadCanvasRail(); }
+      }, function () { });
+    }
+    function dkAv(uid, size) { var s = size || 24, av = avatarOf(uid), col = colorOf(uid); return av ? h('img', { src: av, alt: '', style: { width: s, height: s, borderRadius: '50%', objectFit: 'cover', display: 'block' } }) : h('span', { style: { width: s, height: s, borderRadius: '50%', display: 'grid', placeItems: 'center', color: '#fff', fontSize: Math.round(s * 0.42), fontWeight: 700, background: col } }, monogram(nameOf(uid))); }
+    function dkRailBtn(o) {
+      var onl = (online || []).some(function (x) { return x.id === o.uid; });
+      return h('button', { key: o.key, title: o.title, onClick: o.onClick, style: { flex: 'none', border: 'none', background: 'none', cursor: 'pointer', padding: 0, position: 'relative', borderRadius: '50%', boxShadow: o.active ? ('0 0 0 2px ' + (o.ring || 'var(--accent)')) : 'none' } },
+        o.legacy ? h('span', { style: { width: 24, height: 24, borderRadius: '50%', display: 'grid', placeItems: 'center', border: '1px solid var(--line)', background: 'var(--surface-2)', color: 'var(--muted)', fontSize: 12 } }, '⌗') : dkAv(o.uid, 24),
+        (onl && !o.legacy) ? h('span', { style: { position: 'absolute', right: -1, bottom: -1, width: 8, height: 8, borderRadius: '50%', background: '#22c55e', border: '1.5px solid var(--surface)' } }) : null);
     }
     function dkCmd(act) {   // one-click pipeline command → runs the project-level generation and re-materializes the map
       if (dBusy) return;
@@ -8519,10 +8565,18 @@
             h('button', { className: 'rmap-dock-x', title: dkFull ? 'Eredeti magasság' : 'Teljes magasság', onClick: toggleDockFull }, dkFull ? '⤡' : '⤢'),
             h('button', { className: 'rmap-dock-x', title: 'Összecsukás', onClick: function () { setDkOpen(false); try { localStorage.setItem('pr-rmap-dock', '0'); } catch (e) { } } }, '▾'))),
           (dkTab !== 'files') ? h(React.Fragment, null,
-          h('div', { className: 'rmap-dock-msgs', ref: dScroll, onMouseUp: dkSelUp, onScroll: function () { if (dSelPop) setDSelPop(null); } }, dMsgs.map(function (mm, i) {
+          (dCanvasRail.length || dLegacyCanvas || dPeek) ? h('div', { className: 'rmap-dock-rail', style: { display: 'flex', alignItems: 'center', gap: 5, padding: '4px 10px', borderBottom: '1px solid var(--line)', overflowX: 'auto' } },
+            dkRailBtn({ key: 'me', uid: props.viewerId, title: 'Én (saját fonál)', active: !dPeek, ring: 'var(--accent)', onClick: dkPeekMine }),
+            dCanvasRail.map(function (e) { return dkRailBtn({ key: e.owner_id, uid: e.owner_id, title: nameOf(e.owner_id) + ' fonala', active: !!(dPeek && dPeek.ownerId === e.owner_id), ring: colorOf(e.owner_id), onClick: function () { dkPeekOwner({ ownerId: e.owner_id, chatId: e.chat_id, name: nameOf(e.owner_id) }); } }); }),
+            dLegacyCanvas ? dkRailBtn({ key: 'legacy', legacy: true, title: 'Közös (örökölt) — régi térkép-beszélgetés', active: !!(dPeek && dPeek.legacy), onClick: function () { dkPeekOwner({ legacy: true, chatId: dLegacyCanvas.id, name: 'Közös (örökölt)', canAdopt: true }); } }) : null,
+            dPeek ? h('button', { className: 'btn', style: { marginLeft: 'auto', fontSize: 11, padding: '2px 8px', flex: 'none' }, onClick: dkPeekMine }, '← Vissza') : null) : null,
+          dPeek ? h('div', { style: { display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px', fontSize: 11, color: 'var(--muted)', borderBottom: '1px solid var(--line)', background: 'var(--surface-2)' } },
+            h('span', { style: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, '👁 ' + dPeek.name + (dPeek.legacy ? ' — közös szál' : ' fonala') + ' · CSAK OLVASHATÓ'),
+            (dPeek.canAdopt && props.canEdit) ? h('button', { className: 'btn pri', style: { marginLeft: 'auto', fontSize: 11, padding: '2px 8px', flex: 'none' }, onClick: dkAdoptLegacy }, '✍️ Folytatom') : null) : null,
+          h('div', { className: 'rmap-dock-msgs', ref: dScroll, onMouseUp: dkSelUp, onScroll: function () { if (dSelPop) setDSelPop(null); } }, (dPeek ? dPeekMsgs : dMsgs).map(function (mm, i) {
             var isAi = mm.role !== 'user';
-            var isLastAi = isAi && !dMsgs.slice(i + 1).some(function (x) { return x.role !== 'user'; });   // only the latest AI reply's questions are actionable
-            var qs = isLastAi ? extractQuestions(mm.text) : [];
+            var isLastAi = isAi && !(dPeek ? dPeekMsgs : dMsgs).slice(i + 1).some(function (x) { return x.role !== 'user'; });   // only the latest AI reply's questions are actionable
+            var qs = (isLastAi && !dPeek) ? extractQuestions(mm.text) : [];
             return [
               h('div', { key: 'm' + i, className: 'rmap-dock-msg ' + (mm.role === 'user' ? 'u' : 'a') }, isAi ? stripQuestions(stripFiles(mm.text)) : mm.text),
               qs.length ? h('div', { key: 'q' + i, className: 'rmap-dock-qs' }, qs.map(function (qq, qi) {
@@ -8538,7 +8592,8 @@
                   : mm.actions.map(function (a) { return h('button', { key: a.key, className: 'rmap-dock-chip' + (a.pri ? ' pri' : ''), disabled: (dBusy && a.key !== 'undo'), onClick: function () { dkRunAction(i, a); } }, a.label); })
               ) : null
             ];
-          }), dStream ? (function () { var live = stripQuestions(dStream.text || ''); return h('div', { className: 'rmap-dock-msg a', key: 'dstream' }, live ? live : h('span', { style: { color: 'var(--faint)' } }, dChatMode === 'deep' ? '🧠 gondolkodik…' : '✍️ írok…'), live ? h('span', { className: 'rmap-dock-cursor' }, '▌') : null); })() : (dBusy ? h('div', { className: 'rmap-dock-msg a busy' }, '⏳ dolgozom…') : null)),
+          }), (!dPeek && dStream) ? (function () { var live = stripQuestions(dStream.text || ''); return h('div', { className: 'rmap-dock-msg a', key: 'dstream' }, live ? live : h('span', { style: { color: 'var(--faint)' } }, dChatMode === 'deep' ? '🧠 gondolkodik…' : '✍️ írok…'), live ? h('span', { className: 'rmap-dock-cursor' }, '▌') : null); })() : ((!dPeek && dBusy) ? h('div', { className: 'rmap-dock-msg a busy' }, '⏳ dolgozom…') : null)),
+          dPeek ? null : h(React.Fragment, null,
           h('div', { className: 'rmap-dock-cmds' }, [['ideas', '✦ Ötletek'], ['gaps', '🕳 Rések'], ['study', '📚 Irodalom'], ['protocol', '🧪 Protokoll'], ['writing', '✍️ Draft']].map(function (c) { return h('button', { key: c[0], className: 'rmap-dock-chip', disabled: dBusy, title: c[0] === 'ideas' ? 'Új kutatási ÖTLETEK generálása (AI) — a projektből és a kijelölt kártyából/részletből' : (c[0] === 'gaps' ? 'Kutatási RÉSEK feltárása (AI) — hiányzó irányok a projektben' : null), onClick: function () { dkCmd(c[0]); } }, c[1]); }).concat([h('button', { key: 'suggest', className: 'rmap-dock-chip', disabled: dBusy, title: 'Ötlet-jelöltek a mostani beszélgetésből (AI) — új kártyák a térképen', onClick: dkSuggest }, '💡 A beszélgetésből')])),
           // the selected card is "attached" to the next prompt — shown here like an attachment chip (× to detach)
           sn ? h('div', { style: { display: 'flex', alignItems: 'center', gap: 6, margin: '2px 12px 6px', padding: '4px 8px', borderRadius: 8, background: 'var(--accent-tint)', border: '1px solid var(--accent)' } },
@@ -8570,7 +8625,7 @@
             h('button', { className: 'btn', style: { fontSize: 14, padding: '0 9px', flex: 'none' }, disabled: dBusy || dEnhancing || !dInput.trim(), title: 'Prompt-javítás (AI) — pontosabbá, konkrétabbá teszi a beírt szöveget', onClick: dkEnhance }, dEnhancing ? '⏳' : '✨'),
             h('textarea', { rows: 1, value: dInput, placeholder: boundFrame ? ('„' + String(boundFrame.title || 'Keret').slice(0, 20) + '" keretbe — pl. hozz létre kutatási réseket…') : (dkMode === 'action' && sn && sn.t === 'step') ? 'Mit tegyek e lépés után? (pl. „tegyél be egy validációs lépést")' : sn ? 'Kérdezz vagy adj utasítást a becsatolt kártyáról…' : 'Írj utasítást vagy kérdést… (jelölj ki egy kártyát a becsatoláshoz)', disabled: dBusy, onChange: function (e) { setDInput(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); dkPrimary(); } } }),
             h('button', { className: 'btn' + (recOn ? ' rmap-mic-on' : ''), style: { fontSize: 14, padding: '0 9px', flex: 'none' }, disabled: dBusy, title: recOn ? 'Felvétel leállítása' : 'Hangbevitel — diktálás (magyar)', onClick: toggleMic }, recOn ? '⏺' : '🎤'),
-            h('button', { className: 'btn pri', style: { fontSize: 14, padding: '0 12px', flex: 'none' }, disabled: dBusy || !dInput.trim() || (dkMode === 'action' && !(sn && sn.t === 'step')), onClick: dkPrimary }, dkMode === 'action' ? '⚡' : '➤')))
+            h('button', { className: 'btn pri', style: { fontSize: 14, padding: '0 12px', flex: 'none' }, disabled: dBusy || !dInput.trim() || (dkMode === 'action' && !(sn && sn.t === 'step')), onClick: dkPrimary }, dkMode === 'action' ? '⚡' : '➤'))))
           : h('div', { className: 'rmap-dock-files' }, h(SessionFileBrowser, { projectId: props.projectId, version: bump, canEdit: props.canEdit, authorId: props.authorId, onChanged: function () { setBump(function (x) { return x + 1; }); }, mapNodeId: fileNodeId, onLocate: locateFile, locatedFileId: fbLocatedId, onAttach: function (a) { setDAttach(function (p) { return p.concat([a]); }); if (window.PRUI) window.PRUI.toast('📎 Csatolva: ' + String(a.label || a.name || 'fájl').slice(0, 40), { kind: 'ok' }); } })))
           : h('button', { className: 'rmap-dock-fab', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function () { setDkOpen(true); try { localStorage.setItem('pr-rmap-dock', '1'); } catch (e) { } } }, '🤖 Asszisztens')) : null),
       // dock attach picker (library source / publication file / LaTeX / upload) — the same reusable modal the Idea chat uses
