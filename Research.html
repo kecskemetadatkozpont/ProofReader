@@ -626,6 +626,12 @@
     html.newdesign .ideas2 .filebrowser { align-self: stretch; overflow-y: auto; }
     html.newdesign .ideas2 .filebrowser.fbx { overflow: hidden; display: flex; flex-direction: column; }
     html.newdesign .ideas2 > :nth-child(2) { overflow-y: auto; }
+    /* collapsible side panels (Munkatársak / Shortlist / Files) — reclaim space for the chat */
+    html.pr-sl-collapsed .ideas2 { grid-template-columns: minmax(0, 1fr) 46px; }
+    .pnl-cbtn { border: 1px solid var(--line); background: var(--surface-2); color: var(--muted); border-radius: 7px; width: 24px; height: 22px; display: inline-grid; place-items: center; cursor: pointer; font-size: 12px; line-height: 1; flex: none; padding: 0; }
+    .pnl-cbtn:hover { color: var(--ink); border-color: var(--faint); }
+    .pnl-strip { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 10px 0; height: 100%; overflow: hidden; }
+    .pnl-vlabel { writing-mode: vertical-rl; transform: rotate(180deg); font-size: 11px; font-weight: 700; letter-spacing: .06em; color: var(--muted); text-transform: uppercase; white-space: nowrap; }
 
     /* VS-Code-Light explorer (New design): folder tree + type-aware viewer/editor */
     html.newdesign .filebrowser.fbx { display: flex; flex-direction: column; min-height: 0; }
@@ -1682,9 +1688,9 @@
     html.dark .rmap-genbusy { background: #4f46e5; }
     @media (max-width: 900px) { .rmap-wrap { flex-direction: column; } .rmap-insp { width: auto; } }
   </style>
-  <script src="theme.js?v=1784873890"></script>
-  <script src="nav.js?v=1784873890"></script>
-  <script src="entitlements.js?v=1784873890"></script>
+  <script src="theme.js?v=1784875013"></script>
+  <script src="nav.js?v=1784875013"></script>
+  <script src="entitlements.js?v=1784875013"></script>
 </head>
 
 <body>
@@ -1696,23 +1702,23 @@
   <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
   <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="backend/config.js?v=1784873890"></script>
-  <script src="auth.js?v=1784873890"></script>
-  <script src="backend.js?v=1784873890"></script>
-  <script src="onboarding.js?v=1784873890"></script>
-  <script src="office.js?v=1784873890"></script>
-  <script src="publications.js?v=1784873890"></script>
+  <script src="backend/config.js?v=1784875013"></script>
+  <script src="auth.js?v=1784875013"></script>
+  <script src="backend.js?v=1784875013"></script>
+  <script src="onboarding.js?v=1784875013"></script>
+  <script src="office.js?v=1784875013"></script>
+  <script src="publications.js?v=1784875013"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/tus-js-client@4.1.0/dist/tus.min.js"></script>
-  <script type="text/babel" src="canvas.jsx?v=1784873890"></script>
-  <script type="text/babel" src="notes.jsx?v=1784873890"></script>
-  <script src="autopilot-core.js?v=1784873890"></script>
-  <script type="text/babel" src="research.jsx?v=1784873890"></script>
+  <script type="text/babel" src="canvas.jsx?v=1784875013"></script>
+  <script type="text/babel" src="notes.jsx?v=1784875013"></script>
+  <script src="autopilot-core.js?v=1784875013"></script>
+  <script type="text/babel" src="research.jsx?v=1784875013"></script>
 
-  <script src="build.js?v=1784873890"></script>
-  <script src="version-badge.js?v=1784873890"></script>
+  <script src="build.js?v=1784875013"></script>
+  <script src="version-badge.js?v=1784875013"></script>
 </body>
 
 </html>

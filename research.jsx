@@ -891,8 +891,14 @@
           h('button', { className: 'fb-mini', title: 'Bezárás', onClick: function () { setPreview(null); setEdit(null); } }, '×')),
         h('div', { className: 'fbx-vbody' }, body));
     }
+    if (props.collapsed) return h('div', { className: 'filebrowser', style: { width: (props.width || 46), flex: 'none' } },
+      h('div', { className: 'pnl-strip' },
+        h('button', { className: 'pnl-cbtn', title: 'Files megnyitása', onClick: props.onToggleCollapse }, '‹'),
+        h('span', { style: { fontSize: 16 } }, '🗂'),
+        h('span', { className: 'pnl-vlabel' }, 'Files')));
     if (nd()) return h('div', { className: 'filebrowser fbx', ref: fbRootRef, style: { width: (props.width || 300) } },
       h('div', { className: 'fb-head' }, h('b', null, '🗂 Files'), h('span', { style: { flex: 1 } }),
+        props.onToggleCollapse ? h('button', { className: 'pnl-cbtn', title: 'Files becsukása', onClick: props.onToggleCollapse }, '›') : null,
         props.canEdit ? h('button', { className: 'fb-mini', title: 'Új fájl (mappához: „mappa/név.md")', onClick: newFile }, '✚') : null,
         props.canEdit ? h('button', { className: 'fb-mini', title: 'Feltöltés', onClick: function () { if (upRef.current) upRef.current.click(); } }, '⤒') : null,
         h('input', { ref: upRef, type: 'file', style: { display: 'none' }, onChange: onUpload })),
@@ -906,6 +912,7 @@
 
     return h('div', { className: 'filebrowser', style: { width: (props.width || 256) } },
       h('div', { className: 'fb-head' }, h('b', null, 'Files'), h('span', { style: { flex: 1 } }),
+        props.onToggleCollapse ? h('button', { className: 'pnl-cbtn', title: 'Files becsukása', onClick: props.onToggleCollapse }, '›') : null,
         props.canEdit ? h('button', { className: 'fb-mini', 'aria-label': 'New file', title: 'New file', onClick: newFile }, '+') : null,
         props.canEdit ? h('button', { className: 'fb-mini', 'aria-label': 'Upload', title: 'Upload', onClick: function () { if (upRef.current) upRef.current.click(); } }, '⤒') : null,
         h('input', { ref: upRef, type: 'file', style: { display: 'none' }, onChange: onUpload })
@@ -969,6 +976,10 @@
     var mpS = useState(null), meProfile = mpS[0], setMeProfile = mpS[1];     // my profiles_public row (name/avatar/color) for the rail
     var onlS2 = useState({}), railOnline = onlS2[0], setRailOnline = onlS2[1];// owner_id → true (presence on rchat:pid)
     var railChRef = useRef(null), peekChRef = useRef(null), railRefreshT = useRef(null);
+    var rcpS = useState(function () { try { return localStorage.getItem('pr-chat-rail-collapsed') === '1'; } catch (e) { return false; } }), railCollapsed = rcpS[0], setRailCollapsed = rcpS[1];
+    var fclS = useState(function () { try { return localStorage.getItem('pr-files-collapsed') === '1'; } catch (e) { return false; } }), filesCollapsed = fclS[0], setFilesCollapsed = fclS[1];
+    function toggleRail() { setRailCollapsed(function (v) { var n = !v; try { localStorage.setItem('pr-chat-rail-collapsed', n ? '1' : '0'); } catch (e) { } return n; }); }
+    function toggleFiles() { setFilesCollapsed(function (v) { var n = !v; try { localStorage.setItem('pr-files-collapsed', n ? '1' : '0'); } catch (e) { } return n; }); }
     var CHAT_PALETTE = ['#e11d48', '#0891b2', '#7c3aed', '#ca8a04', '#059669', '#db2777', '#2563eb', '#ea580c'];
     function pColor(id, canonical) { if (canonical) return canonical; var s = String(id || ''), hh = 0; for (var i = 0; i < s.length; i++) hh = (hh * 31 + s.charCodeAt(i)) >>> 0; return CHAT_PALETTE[hh % CHAT_PALETTE.length]; }
     function pMono(nm) { var p = String(nm || '').trim().split(/\s+/).filter(Boolean); if (!p.length) return '?'; return (p.length === 1 ? p[0].slice(0, 2) : (p[0].charAt(0) + p[p.length - 1].charAt(0))).toUpperCase(); }
@@ -1243,8 +1254,15 @@
     }
     var viewColor = peek ? pColor(peek.ownerId, peek.color) : null;
     return h('div', { className: 'panel chatwrap' },
-      h('div', { className: 'pr-chat-rail', style: { width: 152, flex: 'none', borderRight: '1px solid var(--line)', padding: '10px 8px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 } },
-        h('div', { style: { fontSize: 10, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--faint)', padding: '2px 6px 6px' } }, 'Munkatársak'),
+      railCollapsed ? h('div', { className: 'pr-chat-rail', style: { width: 46, flex: 'none', borderRight: '1px solid var(--line)', padding: '8px 4px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'center' } },
+        h('button', { className: 'pnl-cbtn', title: 'Munkatársak megnyitása', onClick: toggleRail }, '›'),
+        h('button', { title: (meProfile && meProfile.name) || 'Én', onClick: openMine, style: { border: 'none', background: 'none', cursor: 'pointer', padding: 0, borderRadius: '50%', boxShadow: !peek ? '0 0 0 2px var(--accent)' : 'none' } }, railAvatar((meProfile && meProfile.name) || 'Én', pColor(myId, meProfile && meProfile.color), meProfile && meProfile.avatar, 26)),
+        rail.map(function (e) { return h('button', { key: e.owner_id, title: e.name + (railOnline[e.owner_id] ? ' · online' : ''), onClick: function () { openPeek({ ownerId: e.owner_id, chatId: e.chat_id, name: e.name, color: e.color, avatar: e.avatar }); }, style: { border: 'none', background: 'none', cursor: 'pointer', padding: 0, position: 'relative', borderRadius: '50%', boxShadow: (peek && peek.ownerId === e.owner_id) ? ('0 0 0 2px ' + pColor(e.owner_id, e.color)) : 'none' } }, railAvatar(e.name, pColor(e.owner_id, e.color), e.avatar, 26), railOnline[e.owner_id] ? h('span', { style: { position: 'absolute', right: 0, bottom: 0, width: 8, height: 8, borderRadius: '50%', background: '#22c55e', border: '1.5px solid var(--surface)' } }) : null); }),
+        legacyChat ? h('button', { title: 'Közös (örökölt)', onClick: function () { openPeek({ legacy: true, chatId: legacyChat.id, name: 'Közös (örökölt)', color: null }); }, style: { border: '1px solid var(--line)', background: 'var(--surface-2)', cursor: 'pointer', width: 26, height: 26, borderRadius: '50%', fontSize: 13, color: 'var(--muted)' } }, '⌗') : null
+      ) : h('div', { className: 'pr-chat-rail', style: { width: 152, flex: 'none', borderRight: '1px solid var(--line)', padding: '10px 8px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 } },
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 4, padding: '2px 2px 6px' } },
+          h('span', { style: { flex: 1, fontSize: 10, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--faint)' } }, 'Munkatársak'),
+          h('button', { className: 'pnl-cbtn', title: 'Munkatársak becsukása', onClick: toggleRail }, '‹')),
         railBtn({ key: 'me', active: !peek, name: (meProfile && meProfile.name) || 'Én', color: pColor(myId, meProfile && meProfile.color), avatar: meProfile && meProfile.avatar, sub: 'saját fonál · te', online: true, onClick: openMine }),
         rail.map(function (e) { return railBtn({ key: e.owner_id, active: !!(peek && peek.ownerId === e.owner_id), name: e.name, color: pColor(e.owner_id, e.color), avatar: e.avatar, online: !!railOnline[e.owner_id], sub: railOnline[e.owner_id] ? '● online' : 'fonál', onClick: function () { openPeek({ ownerId: e.owner_id, chatId: e.chat_id, name: e.name, color: e.color, avatar: e.avatar }); } }); }),
         legacyChat ? h('div', { style: { height: 1, background: 'var(--line)', margin: '6px 4px' } }) : null,
@@ -1332,8 +1350,8 @@
         )
       ) : null)
       ),
-      h('div', { className: 'fb-resizer', onMouseDown: startResize, title: 'Drag to resize the panels' }),
-      h(SessionFileBrowser, { projectId: props.projectId, authorId: props.authorId, canEdit: props.canEdit, version: filesVersion, width: fbWidth, onAttach: function (a) { setAttach(function (p) { return p.concat([a]); }); }, onAddIdea: function (text) { saveIdeaText(text); } }),
+      filesCollapsed ? null : h('div', { className: 'fb-resizer', onMouseDown: startResize, title: 'Drag to resize the panels' }),
+      h(SessionFileBrowser, { projectId: props.projectId, authorId: props.authorId, canEdit: props.canEdit, version: filesVersion, width: filesCollapsed ? 46 : fbWidth, collapsed: filesCollapsed, onToggleCollapse: toggleFiles, onAttach: function (a) { setAttach(function (p) { return p.concat([a]); }); }, onAddIdea: function (text) { saveIdeaText(text); } }),
       selPop ? h('button', { className: 'sel-idea-btn', style: { position: 'fixed', left: selPop.x, top: selPop.y - 40, transform: 'translateX(-50%)', zIndex: 60 }, onMouseDown: function (e) { e.preventDefault(); }, onClick: function () { saveIdeaText(selPop.text); setSelPop(null); try { window.getSelection().removeAllRanges(); } catch (e) { } } }, '✚ To idea') : null,
       picker ? h(AttachModal, { projectId: props.projectId, authorId: props.authorId, fileOwnerId: props.fileOwnerId, sources: props.sources, onPick: function (a) { setAttach(function (p) { return p.concat([a]); }); }, onClose: function () { setPicker(false); } }) : null
     );
@@ -1625,6 +1643,10 @@
     var rlS = useState(null), runList = rlS[0], setRunList = rlS[1];       // {ideaQ, runs} — a picker when an idea has several runs
     var aliveR = useRef(true);
     useEffect(function () { aliveR.current = true; return function () { aliveR.current = false; }; }, []);
+    // collapsible Shortlist rail — toggles a root class so the .ideas2 grid reclaims the column for the chat
+    var slcS = useState(function () { try { return localStorage.getItem('pr-shortlist-collapsed') === '1'; } catch (e) { return false; } }), slCollapsed = slcS[0], setSlCollapsed = slcS[1];
+    useEffect(function () { try { document.documentElement.classList.toggle('pr-sl-collapsed', slCollapsed); } catch (e) { } return function () { try { document.documentElement.classList.remove('pr-sl-collapsed'); } catch (e) { } }; }, [slCollapsed]);
+    function toggleSl() { setSlCollapsed(function (v) { var n = !v; try { localStorage.setItem('pr-shortlist-collapsed', n ? '1' : '0'); } catch (e) { } return n; }); }
     var rtS = useState(0), setRunTick = rtS[1];   // cheap re-render on every runner progress so the pulse reflects running↔done
     var rkS = useState(''), reloadKey = rkS[0], setReloadKey = rkS[1];   // reload the idea→runs map ONLY when the running-set changes
     var pidRef = useRef(props.projectId); pidRef.current = props.projectId;
@@ -1720,10 +1742,20 @@
     // ---- AI-Native Brainstorm (New design flag, direction B): IdeasPanel becomes the right-hand "Shortlist + Study basis" rail beside the chat. Same data + handlers. ----
     function srcLabel(s) { return s === 'chat' ? '💡 AI (chat)' : s === 'gap' ? '💡 AI (gap)' : s === 'own' ? 'own' : (s || 'own'); }
     function railRender() {
+      if (slCollapsed) return h('div', { className: 'idb-rail' },
+        h('div', { className: 'pnl-strip' },
+          h('button', { className: 'pnl-cbtn', title: 'Shortlist megnyitása', onClick: toggleSl }, '‹'),
+          h('span', { style: { fontSize: 15 } }, '💡'),
+          h('span', { className: 'pnl-vlabel' }, 'Shortlist'),
+          rest.length ? h('span', { className: 'idb-c', title: rest.length + ' ötlet' }, String(rest.length)) : null,
+          selected.length ? h('span', { style: { fontSize: 13, marginTop: 4 } }, '📌') : null,
+          selected.length ? h('span', { className: 'idb-c', title: selected.length + ' study-alap' }, String(selected.length)) : null));
       return h('div', { className: 'idb-rail' },
         h('div', { className: 'idb-card' },
           h('div', { className: 'idb-h' }, h('span', null, 'Shortlist'), h('span', { className: 'idb-c' }, String(rest.length)),
-            props.canEdit ? h('button', { className: 'idb-gap', disabled: busy, onClick: gap, title: 'Kutatási rés-elemzés (Rések fül)' }, '✨ Rés-elemzés →') : null),
+            h('span', { style: { flex: 1 } }),
+            props.canEdit ? h('button', { className: 'idb-gap', disabled: busy, onClick: gap, title: 'Kutatási rés-elemzés (Rések fül)' }, '✨ Rés-elemzés →') : null,
+            h('button', { className: 'pnl-cbtn', title: 'Shortlist becsukása', onClick: toggleSl }, '›')),
           msg ? h('div', { className: 'idb-msg' }, msg) : null,
           props.canEdit ? h('div', { className: 'idb-add' },
             h('textarea', { rows: 2, className: 'idb-in', value: form.question, placeholder: 'A research question…  (⌘/Ctrl+Enter)', onChange: function (e) { setForm(Object.assign({}, form, { question: e.target.value })); }, onKeyDown: onKey }),
