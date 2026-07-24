@@ -968,7 +968,7 @@
     var lgS = useState(null), legacyChat = lgS[0], setLegacyChat = lgS[1];   // the old shared thread (owner_id NULL) → "Közös (örökölt)"
     var mpS = useState(null), meProfile = mpS[0], setMeProfile = mpS[1];     // my profiles_public row (name/avatar/color) for the rail
     var onlS2 = useState({}), railOnline = onlS2[0], setRailOnline = onlS2[1];// owner_id → true (presence on rchat:pid)
-    var railChRef = useRef(null), peekChRef = useRef(null);
+    var railChRef = useRef(null), peekChRef = useRef(null), railRefreshT = useRef(null);
     var CHAT_PALETTE = ['#e11d48', '#0891b2', '#7c3aed', '#ca8a04', '#059669', '#db2777', '#2563eb', '#ea580c'];
     function pColor(id, canonical) { if (canonical) return canonical; var s = String(id || ''), hh = 0; for (var i = 0; i < s.length; i++) hh = (hh * 31 + s.charCodeAt(i)) >>> 0; return CHAT_PALETTE[hh % CHAT_PALETTE.length]; }
     function pMono(nm) { var p = String(nm || '').trim().split(/\s+/).filter(Boolean); if (!p.length) return '?'; return (p.length === 1 ? p[0].slice(0, 2) : (p[0].charAt(0) + p[p.length - 1].charAt(0))).toUpperCase(); }
@@ -986,6 +986,7 @@
         });
       });
     }
+    function refreshRail() { if (railRefreshT.current) return; railRefreshT.current = setTimeout(function () { railRefreshT.current = null; if (alive.current) loadRail(); }, 400); }   // debounced → colleague threads appear without a manual reload
     function openMine() { setPeek(null); firstLoad.current = true; if (chat) loadMsgs(chat.id); else setMsgs([]); }
     function openPeek(entry) { setPeek(entry); firstLoad.current = true; setStreaming(null); loadMsgs(entry.chatId); }
     // #3 — AI ideas are generated ON DEMAND (button), not continuously: pull NEW research ideas out of the
@@ -1064,14 +1065,23 @@
         else { try { window.PRUI.toast('Ezt a szálat közben átvette valaki — a sávból megnyithatod.', { kind: 'error' }); } catch (e) { } loadRail(); }
       }, function () { });
     }
-    // F1: presence on a project-wide chat channel (who's online) — reuses the proven Map channel pattern
+    // F1: presence on a project-wide chat channel (who's online) + a live rail refresh when a colleague's thread
+    //     appears/changes — reuses the proven Map channel pattern.
     useEffect(function () {
       var pid = props.projectId; if (!pid || !myId) return;
       var ch = sb.channel('rchat:' + pid, { config: { presence: { key: myId } } })
-        .on('presence', { event: 'sync' }, function () { var st = ch.presenceState(), on = {}; Object.keys(st).forEach(function (k) { (st[k] || []).forEach(function (m) { if (m && m.id) on[m.id] = true; }); }); if (alive.current) setRailOnline(on); })
+        .on('presence', { event: 'sync' }, function () { var st = ch.presenceState(), on = {}; Object.keys(st).forEach(function (k) { (st[k] || []).forEach(function (m) { if (m && m.id) on[m.id] = true; }); }); if (alive.current) { setRailOnline(on); refreshRail(); } })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'research_chats', filter: 'project_id=eq.' + pid }, function () { if (alive.current) refreshRail(); })   // a colleague started/updated a thread (fires once research_chats is in the realtime publication — migration-93)
         .subscribe(function (status) { if (status === 'SUBSCRIBED') { try { ch.track({ id: myId, surface: 'ideas' }); } catch (e) { } } });
       railChRef.current = ch;
       return function () { railChRef.current = null; try { sb.removeChannel(ch); } catch (e) { } };
+    }, [props.projectId]);
+    // F1: also refresh the rail when the tab regains focus — catches threads created while we were away, no migration needed
+    useEffect(function () {
+      function onFocus() { if (alive.current && !document.hidden) refreshRail(); }
+      window.addEventListener('focus', onFocus);
+      document.addEventListener('visibilitychange', onFocus);
+      return function () { window.removeEventListener('focus', onFocus); document.removeEventListener('visibilitychange', onFocus); };
     }, [props.projectId]);
     // F1: while peeking, live-update the colleague's thread as they chat (message-level via Realtime; migration-92 publishes research_messages)
     useEffect(function () {
