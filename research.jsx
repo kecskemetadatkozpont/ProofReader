@@ -7667,7 +7667,7 @@
       sb.from('research_chats').select('id,owner_id,updated_at').eq('project_id', props.projectId).eq('surface', 'canvas').then(function (r) {
         if (!alive.current) return; var rows = (r && r.data) || [];
         setDLegacyCanvas(rows.filter(function (x) { return !x.owner_id; })[0] || null);
-        setDCanvasRail(rows.filter(function (x) { return x.owner_id && x.owner_id !== props.viewerId; }).sort(function (a, b) { return String(b.updated_at || '').localeCompare(String(a.updated_at || '')); }));
+        setDCanvasRail(rows.filter(function (x) { return x.owner_id && x.owner_id !== props.viewerId; }).map(function (x) { return { owner_id: x.owner_id, chat_id: x.id, updated_at: x.updated_at }; }).sort(function (a, b) { return String(b.updated_at || '').localeCompare(String(a.updated_at || '')); }));
       });
     }
     function dkMapRows(rows) { return (rows || []).map(function (m) { var t = String(m.content || ''); if (m.role === 'user') t = t.replace(/^\[BECSATOLT KÁRTYA[\s\S]*?\]\n\n/, ''); return { role: m.role === 'assistant' ? 'ai' : 'user', text: t }; }); }
