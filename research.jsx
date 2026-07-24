@@ -960,6 +960,34 @@
     // válasz-mód: mennyit "gondolkodjon" a modell — az effort + thinking API-paraméterek egy intuitív kapcsolóban
     var cmS = useState(function () { try { return localStorage.getItem('pr-chat-mode') || 'balanced'; } catch (e) { return 'balanced'; } }), chatMode = cmS[0], setChatMode = cmS[1];
     useEffect(function () { return function () { alive.current = false; }; }, []);
+    // ---- F1 (migration-92): each user works in their OWN ideas thread; a collaborator rail lets you peek,
+    //      read-only + live, into anyone else's thread. Authorship is carried by research_chats.owner_id. ----
+    var myId = props.authorId;
+    var pkS2 = useState(null), peek = pkS2[0], setPeek = pkS2[1];            // {ownerId, chatId, name, color, avatar, legacy} while peeking; null = my own thread
+    var rlS = useState([]), rail = rlS[0], setRail = rlS[1];                 // other members' ideas threads
+    var lgS = useState(null), legacyChat = lgS[0], setLegacyChat = lgS[1];   // the old shared thread (owner_id NULL) → "Közös (örökölt)"
+    var mpS = useState(null), meProfile = mpS[0], setMeProfile = mpS[1];     // my profiles_public row (name/avatar/color) for the rail
+    var onlS2 = useState({}), railOnline = onlS2[0], setRailOnline = onlS2[1];// owner_id → true (presence on rchat:pid)
+    var railChRef = useRef(null), peekChRef = useRef(null);
+    var CHAT_PALETTE = ['#e11d48', '#0891b2', '#7c3aed', '#ca8a04', '#059669', '#db2777', '#2563eb', '#ea580c'];
+    function pColor(id, canonical) { if (canonical) return canonical; var s = String(id || ''), hh = 0; for (var i = 0; i < s.length; i++) hh = (hh * 31 + s.charCodeAt(i)) >>> 0; return CHAT_PALETTE[hh % CHAT_PALETTE.length]; }
+    function pMono(nm) { var p = String(nm || '').trim().split(/\s+/).filter(Boolean); if (!p.length) return '?'; return (p.length === 1 ? p[0].slice(0, 2) : (p[0].charAt(0) + p[p.length - 1].charAt(0))).toUpperCase(); }
+    function loadRail() {
+      sb.from('research_chats').select('id,owner_id,updated_at').eq('project_id', props.projectId).eq('surface', 'ideas').then(function (r) {
+        if (!alive.current) return; var rows = (r && r.data) || [];
+        setLegacyChat(rows.filter(function (x) { return !x.owner_id; })[0] || null);
+        var others = rows.filter(function (x) { return x.owner_id && x.owner_id !== myId; });
+        var ids = others.map(function (x) { return x.owner_id; }); if (myId) ids.push(myId);
+        sb.from('profiles_public').select('id,name,avatar_url,color').in('id', ids.length ? ids : ['00000000-0000-0000-0000-000000000000']).then(function (pr) {
+          if (!alive.current) return; var by = {}; ((pr && pr.data) || []).forEach(function (p) { by[p.id] = { name: p.name, avatar: p.avatar_url, color: p.color }; });
+          if (myId && by[myId]) setMeProfile(by[myId]);
+          setRail(others.map(function (x) { var p = by[x.owner_id] || {}; return { owner_id: x.owner_id, chat_id: x.id, updated_at: x.updated_at, name: p.name || 'Kolléga', avatar: p.avatar || null, color: p.color || null }; })
+            .sort(function (a, b) { return String(b.updated_at || '').localeCompare(String(a.updated_at || '')); }));
+        });
+      });
+    }
+    function openMine() { setPeek(null); firstLoad.current = true; if (chat) loadMsgs(chat.id); else setMsgs([]); }
+    function openPeek(entry) { setPeek(entry); firstLoad.current = true; setStreaming(null); loadMsgs(entry.chatId); }
     // #3 — AI ideas are generated ON DEMAND (button), not continuously: pull NEW research ideas out of the
     // current conversation into the Ideas list as candidates (deduped + capped server-side; user accepts/rejects).
     function suggestIdeas() {
@@ -1011,20 +1039,59 @@
       });
     }
     useEffect(function () {
-      sb.from('research_chats').select('id').eq('project_id', props.projectId).order('created_at', { ascending: true }).limit(1).then(function (r) {
-        var c = (r && r.data && r.data[0]) || null; setChat(c); if (c) loadMsgs(c.id);
+      if (!myId) {   // safety: without an author id, fall back to the first thread (legacy behaviour)
+        sb.from('research_chats').select('id,owner_id').eq('project_id', props.projectId).order('created_at', { ascending: true }).limit(1).then(function (r) { var c = (r && r.data && r.data[0]) || null; setChat(c); if (c) loadMsgs(c.id); });
+        return;
+      }
+      sb.from('research_chats').select('id,owner_id').eq('project_id', props.projectId).eq('surface', 'ideas').then(function (r) {
+        if (!alive.current) return; var rows = (r && r.data) || [];
+        var mine = rows.filter(function (x) { return x.owner_id === myId; })[0] || null;
+        var legacy = rows.filter(function (x) { return !x.owner_id; })[0] || null;
+        setChat(mine);
+        if (mine) { loadMsgs(mine.id); }
+        else if (legacy) {   // no personal thread yet → show the old shared conversation (read-only) with a one-click "continue as mine"
+          firstLoad.current = true; setPeek({ legacy: true, chatId: legacy.id, name: 'Közös (örökölt)', color: null, canAdopt: true }); loadMsgs(legacy.id);
+        }
       });
+      loadRail();
     }, []);
+    // claim the old shared thread as my own (only while still unclaimed) → my history continues seamlessly
+    function adoptLegacy() {
+      if (!peek || !peek.legacy || !myId) return;
+      sb.from('research_chats').update({ owner_id: myId }).eq('id', peek.chatId).is('owner_id', null).select('id,owner_id').maybeSingle().then(function (r) {
+        if (!alive.current) return; var c = r && r.data;
+        if (c && c.owner_id === myId) { setChat(c); setPeek(null); firstLoad.current = true; loadMsgs(c.id); loadRail(); }
+        else { try { window.PRUI.toast('Ezt a szálat közben átvette valaki — a sávból megnyithatod.', { kind: 'error' }); } catch (e) { } loadRail(); }
+      }, function () { });
+    }
+    // F1: presence on a project-wide chat channel (who's online) — reuses the proven Map channel pattern
+    useEffect(function () {
+      var pid = props.projectId; if (!pid || !myId) return;
+      var ch = sb.channel('rchat:' + pid, { config: { presence: { key: myId } } })
+        .on('presence', { event: 'sync' }, function () { var st = ch.presenceState(), on = {}; Object.keys(st).forEach(function (k) { (st[k] || []).forEach(function (m) { if (m && m.id) on[m.id] = true; }); }); if (alive.current) setRailOnline(on); })
+        .subscribe(function (status) { if (status === 'SUBSCRIBED') { try { ch.track({ id: myId, surface: 'ideas' }); } catch (e) { } } });
+      railChRef.current = ch;
+      return function () { railChRef.current = null; try { sb.removeChannel(ch); } catch (e) { } };
+    }, [props.projectId]);
+    // F1: while peeking, live-update the colleague's thread as they chat (message-level via Realtime; migration-92 publishes research_messages)
+    useEffect(function () {
+      var cid = peek && peek.chatId; if (!cid) return;
+      var ch = sb.channel('rpeek:' + cid)
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'research_messages', filter: 'chat_id=eq.' + cid }, function () { if (alive.current && peek && peek.chatId === cid) loadMsgs(cid); })
+        .subscribe();
+      peekChRef.current = ch;
+      return function () { try { sb.removeChannel(ch); } catch (e) { } };
+    }, [peek && peek.chatId]);
     useEffect(function () { var el = scrollRef.current; if (el && atBottom.current) el.scrollTop = el.scrollHeight; }, [msgs.length, typing, streaming]);  // follow the stream ONLY if the user is at the bottom
     function ensureChat() {
       if (chat) return Promise.resolve(chat.id);
-      return sb.from('research_chats').insert({ project_id: props.projectId, title: 'Publify chat' }).select('id').maybeSingle().then(function (r) { var c = r && r.data; setChat(c); return c && c.id; });
+      return sb.from('research_chats').insert({ project_id: props.projectId, title: 'Publify chat', owner_id: myId, surface: 'ideas' }).select('id,owner_id').maybeSingle().then(function (r) { var c = r && r.data; setChat(c); loadRail(); return c && c.id; });
     }
-    // Persist any ```file:…``` blocks the AI emitted into the project's file browser.
-    function saveAiFiles(text) {
+    // Persist any ```file:…``` blocks the AI emitted into the project's file browser, tagged to the thread they came from.
+    function saveAiFiles(text, cid) {
       var fs = extractFiles(text); if (!fs.length) return;
       Promise.all(fs.map(function (f) {
-        return sb.from('research_files').upsert({ project_id: props.projectId, path: f.path, content: f.content, storage_path: null, mime: 'text/markdown', size: (f.content || '').length, source: 'ai', created_by: props.authorId, updated_by: props.authorId, updated_at: new Date().toISOString() }, { onConflict: 'project_id,path' });
+        return sb.from('research_files').upsert({ project_id: props.projectId, path: f.path, content: f.content, storage_path: null, mime: 'text/markdown', size: (f.content || '').length, source: 'ai', chat_id: cid || (chat && chat.id) || null, created_by: props.authorId, updated_by: props.authorId, updated_at: new Date().toISOString() }, { onConflict: 'project_id,path' });
       })).then(function () { setFilesVersion(function (v) { return v + 1; }); });
     }
     // P2: files dropped on the chat → upload to storage + research_files (uploads/), refresh the file manager, attach to the next message.
@@ -1077,7 +1144,7 @@
           (function pump() {
             reader.read().then(function (r) {
               if (!alive.current) return;
-              if (r.done) { setStreaming(null); setBusy(false); justStreamed.current = true; saveAiFiles(acc); loadMsgs(cid); return; }
+              if (r.done) { setStreaming(null); setBusy(false); justStreamed.current = true; saveAiFiles(acc, cid); loadMsgs(cid); loadRail(); return; }
               acc += dec.decode(r.value, { stream: true });
               setStreaming({ text: acc });
               pump();
@@ -1088,7 +1155,7 @@
     }
     function sendText(raw) {
       var txt = (raw || '').trim();
-      if (!txt || busy) return;
+      if (!txt || busy || peek) return;   // peeking is read-only → never write into a colleague's thread
       atBottom.current = true;   // sending → jump back to the live conversation
       var atts = attach;
       setBusy(true); setErr(''); setInput(''); setAttach([]);
@@ -1150,18 +1217,48 @@
         else setSelPop(null);
       }, 1);
     }
+    function railAvatar(name, color, avatar, size) {
+      var s = size || 22;
+      return avatar ? h('img', { src: avatar, alt: '', style: { width: s, height: s, borderRadius: '50%', objectFit: 'cover', flex: 'none' } })
+        : h('span', { style: { width: s, height: s, borderRadius: '50%', flex: 'none', display: 'grid', placeItems: 'center', color: '#fff', fontSize: Math.round(s * 0.42), fontWeight: 700, background: color || 'var(--accent)' } }, pMono(name));
+    }
+    function railBtn(o) {
+      return h('button', { key: o.key, onClick: o.onClick, title: o.name,
+        style: { display: 'flex', gap: 7, alignItems: 'center', width: '100%', textAlign: 'left', border: 'none', cursor: 'pointer', borderRadius: 8, padding: '6px 7px', color: 'inherit', background: o.active ? 'var(--surface-2)' : 'transparent', boxShadow: o.active ? ('inset 2px 0 0 ' + (o.color || 'var(--accent)')) : 'none' } },
+        railAvatar(o.name, o.color, o.avatar, 22),
+        h('span', { style: { minWidth: 0, flex: 1, overflow: 'hidden' } },
+          h('span', { style: { display: 'block', fontSize: 11.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } }, o.name),
+          o.sub ? h('span', { style: { display: 'block', fontSize: 9.5, color: 'var(--faint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } }, o.sub) : null),
+        o.online ? h('span', { style: { width: 7, height: 7, borderRadius: '50%', background: '#22c55e', flex: 'none' } }) : null);
+    }
+    var viewColor = peek ? pColor(peek.ownerId, peek.color) : null;
     return h('div', { className: 'panel chatwrap' },
-      h('div', { className: 'chat-col', onDragOver: function (e) { if (props.canEdit && e.dataTransfer && [].slice.call(e.dataTransfer.types || []).indexOf('Files') >= 0) { e.preventDefault(); if (!dropActive) setDropActive(true); } } },
+      h('div', { className: 'pr-chat-rail', style: { width: 152, flex: 'none', borderRight: '1px solid var(--line)', padding: '10px 8px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 } },
+        h('div', { style: { fontSize: 10, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--faint)', padding: '2px 6px 6px' } }, 'Munkatársak'),
+        railBtn({ key: 'me', active: !peek, name: (meProfile && meProfile.name) || 'Én', color: pColor(myId, meProfile && meProfile.color), avatar: meProfile && meProfile.avatar, sub: 'saját fonál · te', online: true, onClick: openMine }),
+        rail.map(function (e) { return railBtn({ key: e.owner_id, active: !!(peek && peek.ownerId === e.owner_id), name: e.name, color: pColor(e.owner_id, e.color), avatar: e.avatar, online: !!railOnline[e.owner_id], sub: railOnline[e.owner_id] ? '● online' : 'fonál', onClick: function () { openPeek({ ownerId: e.owner_id, chatId: e.chat_id, name: e.name, color: e.color, avatar: e.avatar }); } }); }),
+        legacyChat ? h('div', { style: { height: 1, background: 'var(--line)', margin: '6px 4px' } }) : null,
+        legacyChat ? railBtn({ key: 'legacy', active: !!(peek && peek.legacy), name: 'Közös (örökölt)', color: 'var(--faint)', sub: 'régi közös szál', onClick: function () { openPeek({ legacy: true, chatId: legacyChat.id, name: 'Közös (örökölt)', color: null }); } }) : null
+      ),
+      h('div', { className: 'chat-col', onDragOver: function (e) { if (props.canEdit && !peek && e.dataTransfer && [].slice.call(e.dataTransfer.types || []).indexOf('Files') >= 0) { e.preventDefault(); if (!dropActive) setDropActive(true); } } },
       (dropActive && props.canEdit) ? h('div', { className: 'chat-dropzone', onDragOver: function (e) { e.preventDefault(); }, onDragLeave: function () { setDropActive(false); }, onDrop: function (e) { e.preventDefault(); chatUpload(e.dataTransfer.files); } },
         h('div', { className: 'cdz-inner' }, h('div', { style: { fontSize: 30 } }, '📎'), h('b', null, 'Engedd el a fájlokat'), h('span', null, 'Feltöltés az uploads/ mappába + csatolás az üzenethez'))) : null,
       h('h3', null, 'Chat with Publify', h('span', { style: { fontWeight: 600, color: 'var(--faint)' } }, 'research assistant')),
-      props.canEdit ? h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' } },
+      peek ? h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', margin: '4px 0 8px', borderRadius: 9, border: '1px solid ' + viewColor, background: 'var(--surface-2)' } },
+        railAvatar(peek.name, viewColor, peek.avatar, 20),
+        h('span', { style: { fontSize: 12.5, fontWeight: 600 } }, '👁 ' + peek.name + (peek.legacy ? '' : ' fonala')),
+        h('span', { style: { fontSize: 10, fontWeight: 700, letterSpacing: '.05em', color: 'var(--muted)', border: '1px solid var(--line)', borderRadius: 6, padding: '2px 6px' } }, 'CSAK OLVASHATÓ'),
+        h('span', { style: { flex: 1 } }),
+        (peek.canAdopt && props.canEdit) ? h('button', { className: 'btn pri', style: { padding: '3px 9px', fontSize: 11.5 }, title: 'Átveszed ezt a közös beszélgetést a saját száladként, és folytathatod.', onClick: adoptLegacy }, '✍️ Folytatom saját szálként') : null,
+        h('button', { className: 'btn', style: { padding: '3px 9px', fontSize: 11.5 }, onClick: openMine }, '← Vissza a sajátomhoz')
+      ) : null,
+      (props.canEdit && !peek) ? h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' } },
         h('div', { className: 'chat-mode', role: 'group', 'aria-label': 'Válasz-mód', title: 'Válasz-mód — mennyit gondolkodjon a modell egy válaszra (Claude „effort” + „thinking”). Mély: több gondolkodás, jobb, de lassabb/drágább.' },
           CHAT_MODE_META.map(function (md) { return h('button', { key: md.id, className: chatMode === md.id ? 'on' : '', 'aria-pressed': chatMode === md.id, disabled: busy, onClick: function () { setChatMode(md.id); try { localStorage.setItem('pr-chat-mode', md.id); } catch (e) { } } }, md.ic + ' ' + md.lab); })),
         h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12 }, disabled: sgBusy || !msgs.length, title: 'Suggests ideas for the Ideas list from the current conversation (manually, not continuously)', onClick: suggestIdeas }, sgBusy ? '💡 Generating…' : '💡 Generate ideas from the conversation'),
         sgMsg ? h('span', { style: { fontSize: 12, color: 'var(--muted)' } }, sgMsg) : null
       ) : null,
-      props.supervised ? h('div', { style: { fontSize: 12, color: 'var(--muted)', background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 8, padding: '7px 11px', marginBottom: 10, lineHeight: 1.45 } }, 'ℹ️ Your supervisor may receive a daily summary of your research conversations (what you worked on, what decisions you made).') : null,
+      (props.supervised && !peek) ? h('div', { style: { fontSize: 12, color: 'var(--muted)', background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 8, padding: '7px 11px', marginBottom: 10, lineHeight: 1.45 } }, 'ℹ️ Your supervisor may receive a daily summary of your research conversations (what you worked on, what decisions you made).') : null,
       h('div', { className: 'chat-msgs', ref: scrollRef, onMouseUp: onChatMouseUp, onScroll: function () { var el = scrollRef.current; if (el) atBottom.current = (el.scrollHeight - el.scrollTop - el.clientHeight) < 64; if (selPop) setSelPop(null); } },
         msgs.length ? msgs.map(function (m) {
           var isTyping = typing && typing.id === m.id;
@@ -1173,7 +1270,7 @@
             body = h('div', { className: 'btxt' }, shown.slice(0, -1).join(''), h('span', { key: typing.n, className: 'tw-word' }, shown[shown.length - 1] || ''), h('span', { className: 'tw-cursor' }, '▌'));
           } else body = h('div', { className: 'btxt' }, m.content);
           // feleletválasztós tisztázó kérdések — csak a LEGUTOLSÓ asszisztens-üzenetnél aktívak (a korábbiak már megválaszoltak)
-          var qs = (ai && !isTyping && props.canEdit && msgs.length && msgs[msgs.length - 1].id === m.id) ? extractQuestions(m.content) : [];
+          var qs = (ai && !isTyping && props.canEdit && !peek && msgs.length && msgs[msgs.length - 1].id === m.id) ? extractQuestions(m.content) : [];
           return h('div', { key: m.id, className: 'bubble ' + (ai ? 'ai' : 'user') },
             body,
             qs.length ? h('div', { className: 'chat-qs' }, qs.map(function (qq, qi) {
@@ -1198,18 +1295,21 @@
           );
         }) : h('div', null,
           h('div', { className: 'chat-empty' }, 'Ask Publify about your topic — grounded in evidence when Consensus is connected.'),
-          props.canEdit ? h('div', { className: 'chat-suggest' }, CHAT_SUGGEST.map(function (s, i) { return h('button', { key: i, onClick: function () { sendText(s); } }, s); })) : null
+          (props.canEdit && !peek) ? h('div', { className: 'chat-suggest' }, CHAT_SUGGEST.map(function (s, i) { return h('button', { key: i, onClick: function () { sendText(s); } }, s); })) : null
         ),
-        streaming ? (function () {
+        (!peek && streaming) ? (function () {
           var live = stripQuestions(streaming.text || '');   // hide the trailing questions fence from the live preview (it renders as pills after)
           return h('div', { className: 'bubble ai', key: 'stream' }, h('div', { className: 'btxt' },
             live ? live : h('span', { style: { color: 'var(--faint)' } }, chatMode === 'deep' ? '🧠 gondolkodik…' : 'Publify ír…'),
             live ? h('span', { className: 'tw-cursor' }, '▌') : null));
         })()
-          : busy ? h('div', { className: 'bubble ai' }, h('div', { className: 'btxt', style: { color: 'var(--faint)' } }, chatMode === 'deep' ? '🧠 gondolkodik…' : 'Publify is thinking…')) : null
+          : (!peek && busy) ? h('div', { className: 'bubble ai' }, h('div', { className: 'btxt', style: { color: 'var(--faint)' } }, chatMode === 'deep' ? '🧠 gondolkodik…' : 'Publify is thinking…')) : null
       ),
       err ? h('div', { style: { fontSize: 12.5, color: 'var(--warn)', margin: '6px 0 0' } }, err) : null,
-      props.canEdit ? h('div', null,
+      peek ? h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, padding: '11px', borderRadius: 9, border: '1px dashed ' + viewColor, color: 'var(--muted)', fontSize: 12.5, marginTop: 6 } },
+        h('span', null, '🔒 ' + peek.name + (peek.legacy ? ' — közös szál (olvasás)' : ' fonalát olvasod')),
+        h('button', { className: 'btn', style: { padding: '3px 9px', fontSize: 11.5 }, onClick: openMine }, '← Vissza a sajátomhoz'))
+      : (props.canEdit ? h('div', null,
         attach.length ? h('div', { className: 'attach-chips' }, attach.map(function (a, i) {
           return h('span', { className: 'attach-chip', key: i }, (a.kind === 'source' ? '📄 ' : '📎 ') + (a.label || a.name || a.title || 'attachment'),
             h('button', { 'aria-label': 'Remove attachment', title: 'Remove', onClick: function () { setAttach(attach.filter(function (_, j) { return j !== i; })); } }, '×'));
@@ -1220,7 +1320,7 @@
           h('textarea', { ref: taRef, value: input, rows: 1, placeholder: 'Message Publify…  (Enter to send · Shift+Enter newline)', disabled: busy, onChange: onTaInput, onKeyDown: onTaKey }),
           h('button', { className: 'btn pri', disabled: busy, onClick: send }, 'Send')
         )
-      ) : null
+      ) : null)
       ),
       h('div', { className: 'fb-resizer', onMouseDown: startResize, title: 'Drag to resize the panels' }),
       h(SessionFileBrowser, { projectId: props.projectId, authorId: props.authorId, canEdit: props.canEdit, version: filesVersion, width: fbWidth, onAttach: function (a) { setAttach(function (p) { return p.concat([a]); }); }, onAddIdea: function (text) { saveIdeaText(text); } }),
