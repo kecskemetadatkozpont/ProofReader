@@ -12,6 +12,7 @@
   var LINKS = [
     { key: 'profile', label: 'Open Profile', href: 'Profile.html' },
     { key: 'research', label: 'Research', href: 'Research.html' },
+    { key: 'course', label: 'Kurzus', href: 'Course.html' },
     { key: 'autopilot', label: 'Autopilot', href: 'Autopilot.html', newOnly: true },
     { key: 'kanban', label: 'My tasks', href: 'Kanban.html' },
     { key: 'memory', label: 'Memory', href: 'Memory.html' },
@@ -26,7 +27,7 @@
   // nav key → feature_catalog key (migration-49). A nav item is hidden if the user isn't entitled.
   // COSMETIC ONLY: the server enforces enforced=true features regardless. Fail-open when unloaded.
   var FEATURE_OF = {
-    research: 'page_research', kanban: 'page_kanban', memory: 'page_memory', submissions: 'page_submissions',
+    research: 'page_research', course: 'page_course', kanban: 'page_kanban', memory: 'page_memory', submissions: 'page_submissions',
     session: 'page_session', media: 'page_media', compare: 'page_compare', phd: 'page_phd', publications: 'page_publications'
   };
   function linkVisible(l, admin) {
@@ -62,6 +63,7 @@
     if (p.indexOf('profile') === 0) return 'profile';
     if (p.indexOf('autopilot') === 0) return 'autopilot';
     if (p.indexOf('research') === 0) return 'research';
+    if (p.indexOf('course') === 0 && p.indexOf('coursecanvas') !== 0) return 'course';
     if (p.indexOf('kanban') === 0) return 'kanban';
     if (p.indexOf('memory') === 0) return 'memory';
     if (p.indexOf('submissions') === 0) return 'submissions';
@@ -74,7 +76,7 @@
     if (p.indexOf('proofreader') === 0) return 'editor';
     return '';
   }
-  var PAGE_NAME = { profile: 'Profile', research: 'Research', autopilot: 'Autopilot', kanban: 'My tasks', memory: 'Memory', submissions: 'Érkeztető', session: 'Publify Chat', phd: 'Doctoral School', publications: 'Publications', admin: 'Admin', editor: 'Editor' };
+  var PAGE_NAME = { profile: 'Profile', research: 'Research', course: 'Kurzus', autopilot: 'Autopilot', kanban: 'My tasks', memory: 'Memory', submissions: 'Érkeztető', session: 'Publify Chat', phd: 'Doctoral School', publications: 'Publications', admin: 'Admin', editor: 'Editor' };
   function initials(name, email) {
     var s = (name || email || '?').trim();
     var parts = s.split(/\s+/).filter(Boolean);
@@ -221,6 +223,7 @@
     var bar = document.createElement('header'); bar.id = 'pubnav';
     bar.innerHTML = '<div class="pn-left" id="pn-left"></div>'
       + '<div class="pn-right"><nav class="pn-nav" id="pn-nav" aria-label="Primary navigation"></nav>'
+      + '<button class="pn-iconbtn" id="pn-dm" aria-label="Üzenetek" title="Üzenetek" style="position:relative">💬<span id="pn-dm-badge"></span></button>'
       + '<button class="pn-iconbtn" id="pn-theme-top" aria-label="Toggle dark mode" aria-pressed="false" title="Toggle dark mode">◐</button>'
       + '<button class="pn-iconbtn" id="pn-menu" aria-label="Open menu" aria-haspopup="dialog" aria-expanded="false" title="Menu">☰</button>'
       + '<button class="pn-prof" id="pn-prof" aria-label="Open your profile" title="Open your profile"></button></div>';
@@ -243,7 +246,7 @@
       document.documentElement.classList.toggle('pn-adminview', !!av);
       document.getElementById('pn-left').innerHTML = '<a class="pn-brand" href="' + withAv('Profile.html') + '" title="Open your profile"><span class="pn-mk"><i></i></span>Publify</a>'
         + (av ? '<span class="pn-as">👁 ' + esc(av.name || av.email || '') + '</span>' : '');
-      var SHORT = { profile: 'Profile', research: 'Research', autopilot: 'Autopilot', kanban: 'Tasks', memory: 'Memory', session: 'Chat', media: 'Media', compare: 'Compare', phd: 'Doctoral', publications: 'Publications', admin: 'Admin' };
+      var SHORT = { profile: 'Profile', research: 'Research', course: 'Kurzus', autopilot: 'Autopilot', kanban: 'Tasks', memory: 'Memory', session: 'Chat', media: 'Media', compare: 'Compare', phd: 'Doctoral', publications: 'Publications', admin: 'Admin' };
       var barNav = LINKS.filter(function (l) { return linkVisible(l, admin) && (!l.newOnly || newd); }).map(function (l) {
         return '<a href="' + withAv(l.href) + '"' + (l.key === here ? ' class="on" aria-current="page"' : '') + '>' + esc(SHORT[l.key] || l.label) + '</a>';
       }).join('');
@@ -293,6 +296,7 @@
     // user/admin may resolve after auth loads — refresh a few times
     var tries = 0; var iv = setInterval(function () { tries++; render(); if (tries > 12 || (curUser() && curUser().name)) clearInterval(iv); }, 700);
     buildBugWidget();
+    buildDMWidget();
   }
 
   // #13 — in-app bug / feature reports: floating button + modal with a category, a (client-resized)
@@ -402,6 +406,202 @@
         setTimeout(hide, 1100);
       });
     };
+  }
+
+  // ---- Person-to-person messaging (DM): global launcher + right drawer, reachable on every page. ----
+  //      1:1 messages + entity references (idea/source/study/figure/file → rich card → deep-link). Backed by
+  //      migration-94 (dm_threads/dm_messages/dm_reads + dm_start_dm/pr_notify_dm). window.PRDM = { open, openWith }.
+  var REF_ICON = { idea: '💡', source: '📄', study: '🔬', figure: '🖼', file: '📎', project: '📁', gap: '🕳', node: '📍' };
+  var REF_LBL = { idea: 'Ötlet', source: 'Forrás', study: 'Study', figure: 'Ábra', file: 'Fájl', project: 'Projekt', gap: 'Rés', node: 'Kártya' };
+  var REF_FOCUS = { idea: 'focusIdeaId', source: 'focusSourceId', file: 'focusFileId', figure: 'focusFigureId', gap: 'focusGapId', chat: 'focusChatId' };
+  var DM_PAL = ['#e11d48', '#0891b2', '#7c3aed', '#ca8a04', '#059669', '#db2777', '#2563eb', '#ea580c'];
+  function dmColor(id, canon) { if (canon) return canon; var s = String(id || ''), h = 0; for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return DM_PAL[h % DM_PAL.length]; }
+  function dmMono(nm) { var a = String(nm || '').trim().split(/\s+/).filter(Boolean); if (!a.length) return '?'; return (a.length === 1 ? a[0].slice(0, 2) : (a[0].charAt(0) + a[a.length - 1].charAt(0))).toUpperCase(); }
+  function dmRel(ts) { if (!ts) return ''; var d = (Date.now() - new Date(ts).getTime()) / 1000; if (d < 60) return 'most'; if (d < 3600) return Math.round(d / 60) + 'p'; if (d < 86400) return Math.round(d / 3600) + 'ó'; if (d < 172800) return 'tegnap'; return Math.round(d / 86400) + 'n'; }
+  function refLink(ref) { if (!ref) return '#'; var q = 'Research.html?'; if (ref.project_id) q += 'project=' + encodeURIComponent(ref.project_id); var fp = REF_FOCUS[ref.kind]; if (fp && ref.id) q += (ref.project_id ? '&' : '') + fp + '=' + encodeURIComponent(ref.id); return q; }
+
+  function buildDMWidget() {
+    if (window.__pndm) return; window.__pndm = 1;
+    var BE = window.PR_BACKEND;
+    var css = document.createElement('style'); css.id = 'pndm-css';
+    css.textContent = [
+      '#pndm-scrim{position:fixed;inset:0;z-index:96;background:rgba(15,20,40,.35);opacity:0;pointer-events:none;transition:opacity .18s}',
+      '#pndm-scrim.on{opacity:1;pointer-events:auto}',
+      '#pndm{position:fixed;top:0;right:0;bottom:0;z-index:97;width:min(392px,96vw);background:var(--pane,#fff);color:var(--ink,#111);border-left:1px solid var(--line,#e4e7ec);box-shadow:-14px 0 44px rgba(15,20,40,.20);transform:translateX(102%);transition:transform .2s ease;display:flex;flex-direction:column;font-size:13px}',
+      '#pndm.on{transform:none}',
+      '.pndm-h{display:flex;align-items:center;gap:8px;padding:11px 13px;border-bottom:1px solid var(--line,#e4e7ec);flex:none}',
+      '.pndm-h b{font-size:15px}',
+      '.pndm-ic{width:28px;height:28px;border-radius:8px;border:1px solid var(--line,#e4e7ec);background:var(--app-bg,#f7f8fa);color:inherit;display:grid;place-items:center;cursor:pointer;font-size:13px;padding:0}',
+      '.pndm-ic:hover{border-color:var(--accent,#4f46e5);color:var(--accent,#4f46e5)}',
+      '.pndm-body{flex:1;overflow-y:auto;padding:8px;min-height:0}',
+      '.pndm-conv{display:flex;gap:10px;align-items:center;padding:9px 10px;border-radius:10px;cursor:pointer}',
+      '.pndm-conv:hover{background:var(--app-bg,#f7f8fa)}',
+      '.pndm-av{width:34px;height:34px;border-radius:50%;flex:none;display:grid;place-items:center;color:#fff;font-weight:700;font-size:12px;overflow:hidden}',
+      '.pndm-av img{width:100%;height:100%;object-fit:cover}',
+      '.pndm-nm{font-size:13px;font-weight:600;line-height:1.2}',
+      '.pndm-pv{font-size:11.5px;color:var(--muted,#667);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+      '.pndm-unread{background:var(--accent,#4f46e5);color:#fff;border-radius:999px;font-size:10px;font-weight:700;min-width:17px;height:17px;padding:0 5px;display:grid;place-items:center;flex:none}',
+      '.pndm-msg{max-width:82%;padding:8px 11px;border-radius:13px;font-size:13px;line-height:1.45;margin-bottom:8px;white-space:pre-wrap;word-wrap:break-word;overflow-wrap:anywhere}',
+      '.pndm-msg.me{margin-left:auto;background:var(--accent,#4f46e5);color:#fff;border-bottom-right-radius:4px}',
+      '.pndm-msg.them{background:var(--app-bg,#f7f8fa);border:1px solid var(--line,#e4e7ec);border-bottom-left-radius:4px}',
+      '.pndm-eref{display:flex;gap:8px;align-items:center;border:1px solid var(--line,#e4e7ec);border-left:3px solid var(--accent,#4f46e5);border-radius:9px;padding:6px 9px;background:var(--pane,#fff);margin:4px 0;cursor:pointer;text-decoration:none;color:inherit}',
+      '.pndm-msg.me .pndm-eref{background:rgba(255,255,255,.15);border-color:rgba(255,255,255,.3);border-left-color:#fff;color:#fff}',
+      '.pndm-ei{width:24px;height:24px;border-radius:7px;flex:none;display:grid;place-items:center;font-size:12px;background:var(--app-bg,#f1f2f6)}',
+      '.pndm-msg.me .pndm-ei{background:rgba(255,255,255,.22)}',
+      '.pndm-foot{border-top:1px solid var(--line,#e4e7ec);padding:8px 10px;flex:none}',
+      '.pndm-chip{display:flex;gap:7px;align-items:center;border:1px solid var(--accent,#4f46e5);background:var(--accent-tint,rgba(79,70,229,.08));border-radius:9px;padding:5px 8px;margin-bottom:6px;font-size:11.5px}',
+      '.pndm-in{display:flex;gap:6px;align-items:flex-end}',
+      '.pndm-in textarea{flex:1;resize:none;border:1px solid var(--line,#e4e7ec);border-radius:10px;padding:8px 10px;font:inherit;font-size:13px;background:var(--app-bg,#fff);color:inherit;max-height:100px;min-height:20px}',
+      '.pndm-send{border:0;background:var(--accent,#4f46e5);color:#fff;border-radius:9px;width:34px;height:34px;font-size:15px;cursor:pointer;flex:none}',
+      '.pndm-send:disabled{opacity:.5;cursor:default}',
+      '.pndm-search{width:100%;box-sizing:border-box;border:1px solid var(--line,#e4e7ec);border-radius:9px;padding:8px 10px;font:inherit;font-size:13px;background:var(--app-bg,#fff);color:inherit;margin-bottom:8px}',
+      '.pndm-empty{font-size:12.5px;color:var(--muted,#667);text-align:center;padding:22px 12px;line-height:1.5}',
+      '#pn-dm-badge{position:absolute;top:-4px;right:-4px;min-width:15px;height:15px;padding:0 4px;border-radius:999px;background:#e5484d;color:#fff;font-size:9px;font-weight:700;display:none;place-items:center;border:1.5px solid var(--pane,#fff)}',
+      '#pn-dm-badge.on{display:grid}'
+    ].join('');
+    (document.head || document.documentElement).appendChild(css);
+
+    var scrim = document.createElement('div'); scrim.id = 'pndm-scrim';
+    var panel = document.createElement('aside'); panel.id = 'pndm'; panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-modal', 'true'); panel.setAttribute('aria-label', 'Üzenetek');
+    panel.innerHTML = '<div class="pndm-h"><button class="pndm-ic" id="pndm-back" title="Vissza" style="display:none">‹</button><b id="pndm-title">Üzenetek</b><span style="flex:1"></span><button class="pndm-ic" id="pndm-new" title="Új beszélgetés">✎</button><button class="pndm-ic" id="pndm-close" title="Bezárás">✕</button></div><div class="pndm-body" id="pndm-body"></div><div class="pndm-foot" id="pndm-foot" style="display:none"></div>';
+    document.body.appendChild(scrim); document.body.appendChild(panel);
+
+    var me = null, convos = [], people = {}, curThread = null, msgs = [], pendingRef = null, ch = null, loaded = false;
+    var body = panel.querySelector('#pndm-body'), foot = panel.querySelector('#pndm-foot'), titleEl = panel.querySelector('#pndm-title'), backBtn = panel.querySelector('#pndm-back');
+    function nameOf(uid) { if (uid && me && uid === me.id) return 'Te'; return (people[uid] && people[uid].name) || 'Kolléga'; }
+    function colOf(uid) { return (people[uid] && people[uid].color) || dmColor(uid); }
+    function avHtml(uid, size) { var s = size || 34, p = people[uid] || {}; var st = 'width:' + s + 'px;height:' + s + 'px;font-size:' + Math.round(s * 0.36) + 'px'; return p.avatar ? '<span class="pndm-av" style="' + st + '"><img src="' + esc(p.avatar) + '" alt=""></span>' : '<span class="pndm-av" style="' + st + ';background:' + colOf(uid) + '">' + esc(dmMono(nameOf(uid))) + '</span>'; }
+    function erefHtml(ref) { var ic = REF_ICON[ref.kind] || '🔗', lb = REF_LBL[ref.kind] || 'Hivatkozás'; return '<a class="pndm-eref" href="' + esc(refLink(ref)) + '"><span class="pndm-ei">' + ic + '</span><span style="min-width:0;flex:1"><span style="display:block;font-size:8.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;opacity:.75">' + esc(lb) + '</span><span style="display:block;font-size:12px;font-weight:600;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(ref.label || '(megnyitás)') + '</span></span><span style="opacity:.7">→</span></a>'; }
+
+    function updateBadge() { var n = convos.reduce(function (a, c) { return a + (c.unread || 0); }, 0); var b = document.getElementById('pn-dm-badge'); if (b) { b.textContent = n > 9 ? '9+' : String(n); b.classList.toggle('on', n > 0); } }
+    var reloadT = null;
+    function loadConvos(cb) {
+      var u = curUser(); if (!(BE && BE.sb && u && u.id)) { if (cb) cb(); return; } me = u; loaded = true;
+      BE.sb.from('dm_threads').select('id,kind,title,entity,updated_at').order('updated_at', { ascending: false }).then(function (r) {
+        var threads = (r && r.data) || [], ids = threads.map(function (t) { return t.id; });
+        if (!ids.length) { convos = []; if (!curThread) renderList(); updateBadge(); if (cb) cb(); return; }
+        Promise.all([
+          BE.sb.from('dm_thread_members').select('thread_id,user_id').in('thread_id', ids),
+          BE.sb.from('dm_messages').select('thread_id,sender_id,body,refs,created_at').in('thread_id', ids).order('created_at', { ascending: false }).limit(400),
+          BE.sb.from('dm_reads').select('thread_id,last_read_at').eq('user_id', u.id)
+        ]).then(function (res) {
+          var mem = (res[0] && res[0].data) || [], last = (res[1] && res[1].data) || [], reads = (res[2] && res[2].data) || [];
+          var byMem = {}; mem.forEach(function (m) { (byMem[m.thread_id] = byMem[m.thread_id] || []).push(m.user_id); });
+          var lastBy = {}, allBy = {}; last.forEach(function (m) { if (!lastBy[m.thread_id]) lastBy[m.thread_id] = m; (allBy[m.thread_id] = allBy[m.thread_id] || []).push(m); });
+          var readBy = {}; reads.forEach(function (x) { readBy[x.thread_id] = x.last_read_at; });
+          var oids = {}; threads.forEach(function (t) { (byMem[t.id] || []).forEach(function (uid) { if (uid !== u.id) oids[uid] = 1; }); });
+          var oidl = Object.keys(oids).filter(function (id) { return !people[id]; });
+          function finish() {
+            convos = threads.map(function (t) {
+              var others = (byMem[t.id] || []).filter(function (x) { return x !== u.id; }), lm = lastBy[t.id], lr = readBy[t.id];
+              var un = (allBy[t.id] || []).filter(function (m) { return m.sender_id !== u.id && (!lr || m.created_at > lr); }).length;
+              var title = t.kind === 'dm' ? (others[0] ? nameOf(others[0]) : 'Beszélgetés') : (t.title || (t.entity && t.entity.label) || 'Csoport');
+              return { id: t.id, kind: t.kind, entity: t.entity, others: others, title: title, last: lm, unread: un };
+            });
+            if (!curThread) renderList(); updateBadge(); if (cb) cb();
+          }
+          if (oidl.length) BE.sb.from('profiles_public').select('id,name,avatar_url,color').in('id', oidl).then(function (pr) { ((pr && pr.data) || []).forEach(function (p) { people[p.id] = { name: p.name, avatar: p.avatar_url, color: p.color }; }); finish(); });
+          else finish();
+        });
+      });
+    }
+    function scheduleReload() { if (reloadT) return; reloadT = setTimeout(function () { reloadT = null; loadConvos(); if (curThread) refreshThread(); }, 350); }
+
+    function renderList() {
+      curThread = null; backBtn.style.display = 'none'; titleEl.textContent = 'Üzenetek'; foot.style.display = 'none';
+      if (!loaded) { body.innerHTML = '<div class="pndm-empty">Betöltés…</div>'; return; }
+      if (!(curUser() && curUser().id)) { body.innerHTML = '<div class="pndm-empty">Jelentkezz be az üzenetekhez.</div>'; return; }
+      if (!convos.length) { body.innerHTML = '<div class="pndm-empty">Még nincs beszélgetésed.<br>Az ✎ gombbal indíthatsz egyet egy kollégával — vagy bármely ötletnél / forrásnál a „💬 Vélemény kérése" gombbal.</div>'; return; }
+      body.innerHTML = convos.map(function (c, i) {
+        var uid = c.others[0], pv = c.last ? ((c.last.sender_id === me.id ? 'Te: ' : '') + (c.last.body ? c.last.body : (c.last.refs && c.last.refs.length ? (REF_ICON[c.last.refs[0].kind] || '🔗') + ' hivatkozás' : ''))) : 'Nincs üzenet';
+        var ava = c.kind === 'dm' ? avHtml(uid, 34) : '<span class="pndm-av" style="background:linear-gradient(135deg,#7c6cf0,#e08b00)">' + (c.entity ? (REF_ICON[c.entity.kind] || '👥') : '👥') + '</span>';
+        return '<div class="pndm-conv" data-i="' + i + '">' + ava + '<span style="min-width:0;flex:1"><span class="pndm-nm">' + esc(c.title) + '</span><span class="pndm-pv">' + esc(pv) + '</span></span>' + (c.unread ? '<span class="pndm-unread">' + c.unread + '</span>' : (c.last ? '<span style="font-size:10px;color:var(--muted,#667)">' + dmRel(c.last.created_at) + '</span>' : '')) + '</div>';
+      }).join('');
+      [].forEach.call(body.querySelectorAll('.pndm-conv'), function (el) { el.onclick = function () { openThread(convos[+el.getAttribute('data-i')]); }; });
+    }
+
+    function renderFoot() {
+      foot.style.display = 'block';
+      foot.innerHTML = (pendingRef ? '<div class="pndm-chip"><span>' + (REF_ICON[pendingRef.kind] || '🔗') + '</span><span style="min-width:0;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(pendingRef.label || REF_LBL[pendingRef.kind] || 'hivatkozás') + '</span><button class="pndm-ic" id="pndm-ref-x" title="Eltávolítás" style="width:20px;height:20px;font-size:11px">✕</button></div>' : '')
+        + '<div class="pndm-in"><textarea id="pndm-ta" rows="1" placeholder="Írj üzenetet…"></textarea><button class="pndm-send" id="pndm-sendbtn" title="Küldés">➤</button></div>';
+      var ta = foot.querySelector('#pndm-ta'); ta.oninput = function () { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 100) + 'px'; };
+      ta.onkeydown = function (e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); doSend(); } };
+      foot.querySelector('#pndm-sendbtn').onclick = doSend;
+      var rx = foot.querySelector('#pndm-ref-x'); if (rx) rx.onclick = function () { pendingRef = null; renderFoot(); ta2focus(); };
+      setTimeout(function () { ta.focus(); }, 30);
+    }
+    function ta2focus() { var ta = foot.querySelector('#pndm-ta'); if (ta) ta.focus(); }
+    function renderThread() {
+      body.innerHTML = msgs.map(function (m) {
+        var mine = m.sender_id === me.id;
+        var refs = (m.refs || []).map(erefHtml).join('');
+        return '<div class="pndm-msg ' + (mine ? 'me' : 'them') + '">' + (mine ? '' : '') + (m.body ? esc(m.body) : '') + refs + '</div>';
+      }).join('') || '<div class="pndm-empty">Írj elsőként — ' + esc(curThread.title) + ' megkapja.</div>';
+      body.scrollTop = body.scrollHeight;
+    }
+    function refreshThread() { if (!curThread) return; BE.sb.from('dm_messages').select('id,sender_id,body,refs,attachments,created_at').eq('thread_id', curThread.id).order('created_at', { ascending: true }).then(function (r) { if (r && r.data) { msgs = r.data; renderThread(); markRead(); } }); }
+    function openThread(c) {
+      curThread = c; backBtn.style.display = 'grid'; titleEl.textContent = c.title; body.innerHTML = '<div class="pndm-empty">Betöltés…</div>';
+      renderFoot(); refreshThread();
+    }
+    function markRead() { var u = curUser(); if (!curThread || !u) return; BE.sb.from('dm_reads').upsert({ thread_id: curThread.id, user_id: u.id, last_read_at: new Date().toISOString() }, { onConflict: 'thread_id,user_id' }).then(function () { var c = convos.filter(function (x) { return x.id === curThread.id; })[0]; if (c) { c.unread = 0; updateBadge(); } }); }
+    function doSend() {
+      var ta = foot.querySelector('#pndm-ta'); if (!ta || !curThread) return; var txt = (ta.value || '').trim(); var ref = pendingRef;
+      if (!txt && !ref) return; var u = curUser(); if (!u) return;
+      ta.value = ''; ta.style.height = 'auto'; pendingRef = null; renderFoot();
+      var row = { thread_id: curThread.id, sender_id: u.id, body: txt }; if (ref) row.refs = [ref];
+      BE.sb.from('dm_messages').insert(row).select('id,sender_id,body,refs,created_at').maybeSingle().then(function (r) {
+        if (r && r.error) { window.PRUI && window.PRUI.toast ? window.PRUI.toast(r.error.message, { kind: 'error' }) : alert(r.error.message); return; }
+        if (r && r.data) { msgs.push(r.data); renderThread(); }
+        (curThread.others || []).forEach(function (oid) { BE.sb.rpc('pr_notify_dm', { p_recipient: oid, p_thread: curThread.id, p_excerpt: txt || 'hivatkozást küldött' }).then(function () { }, function () { }); });
+      });
+    }
+
+    function newConvoView() {
+      curThread = null; backBtn.style.display = 'grid'; titleEl.textContent = 'Új beszélgetés'; foot.style.display = 'none';
+      body.innerHTML = '<input class="pndm-search" id="pndm-search" placeholder="Kolléga keresése név / e-mail…" autocomplete="off"><div id="pndm-res"></div>';
+      var inp = body.querySelector('#pndm-search'), res = body.querySelector('#pndm-res'), t = null;
+      inp.oninput = function () { if (t) clearTimeout(t); var q = inp.value.trim(); if (q.length < 2) { res.innerHTML = ''; return; } t = setTimeout(function () {
+        BE.sb.rpc('pr_search_users', { q: q }).then(function (r) { var rows = (r && r.data) || []; var u = curUser(); rows = rows.filter(function (x) { return x.id !== (u && u.id); });
+          res.innerHTML = rows.length ? rows.map(function (p) { people[p.id] = { name: p.name, avatar: p.avatar_url, color: p.color }; return '<div class="pndm-conv" data-uid="' + esc(p.id) + '">' + avHtml(p.id, 30) + '<span class="pndm-nm">' + esc(p.name || 'Kolléga') + '</span></div>'; }).join('') : '<div class="pndm-empty">Nincs találat.</div>';
+          [].forEach.call(res.querySelectorAll('.pndm-conv'), function (el) { el.onclick = function () { startDM(el.getAttribute('data-uid')); }; });
+        }); }, 300); };
+      setTimeout(function () { inp.focus(); }, 30);
+    }
+    function startDM(otherId) {
+      if (!otherId) return; BE.sb.rpc('dm_start_dm', { p_other: otherId }).then(function (r) {
+        if (r && r.error) { alert(r.error.message); return; } var tid = r && r.data; if (!tid) return;
+        loadConvos(function () { var c = convos.filter(function (x) { return x.id === tid; })[0] || { id: tid, kind: 'dm', others: [otherId], title: nameOf(otherId), unread: 0 }; openThread(c); });
+      });
+    }
+
+    function open() { scrim.classList.add('on'); panel.classList.add('on'); loadConvos(); ensureRealtime(); }
+    function close() { scrim.classList.remove('on'); panel.classList.remove('on'); }
+    function ensureRealtime() {
+      var u = curUser(); if (ch || !(BE && BE.sb && u && u.id)) return;
+      ch = BE.sb.channel('pndm:' + u.id).on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'dm_messages' }, function (p) {
+        var m = p && p.new; if (!m) return;
+        if (curThread && m.thread_id === curThread.id) { if (!msgs.some(function (x) { return x.id === m.id; })) { msgs.push(m); renderThread(); if (m.sender_id !== (curUser() && curUser().id)) markRead(); } }
+        scheduleReload();
+      }).subscribe();
+    }
+
+    panel.querySelector('#pndm-close').onclick = close;
+    panel.querySelector('#pndm-new').onclick = newConvoView;
+    backBtn.onclick = function () { renderList(); };
+    scrim.onclick = close;
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && panel.classList.contains('on')) close(); });
+
+    // public API for entity "💬 Vélemény kérése" buttons across the app
+    window.PRDM = {
+      open: function () { open(); renderList(); },
+      openWith: function (ref, otherId) { open(); pendingRef = ref || null; if (otherId) startDM(otherId); else newConvoView(); }
+    };
+
+    // wire the topbar launcher (added to the bar) + a background unread poll
+    var launcher = document.getElementById('pn-dm'); if (launcher) launcher.onclick = function () { open(); renderList(); };
+    setTimeout(function () { loadConvos(); ensureRealtime(); }, 1400);
+    setInterval(function () { if (!panel.classList.contains('on')) loadConvos(); }, 45000);
   }
 
   if (!window.PR_NAV_BARLESS) {   // skip the bar/drawer CSS (incl. body padding-top) when only the bug widget is wanted
