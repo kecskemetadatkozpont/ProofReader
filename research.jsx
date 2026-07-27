@@ -715,6 +715,13 @@
     var lone = text.lastIndexOf('␟'); if (lone >= 0) text = text.slice(0, lone);   // hide a half-arrived trailing frame
     return { statuses: statuses, text: text };
   }
+  // Ask colleagues' opinion about a platform entity: open the person-to-person messenger (nav.js window.PRDM)
+  // pre-loaded with a reference card to this idea/source/study/figure/file. Retries briefly while nav.js loads.
+  function prAskOpinion(kind, id, projectId, label) {
+    var ref = { kind: kind, id: id, project_id: projectId, label: String(label || '').slice(0, 120) };
+    if (window.PRDM && window.PRDM.openWith) { window.PRDM.openWith(ref); return; }
+    var t = 0, iv = setInterval(function () { t++; if (window.PRDM && window.PRDM.openWith) { clearInterval(iv); window.PRDM.openWith(ref); } else if (t > 24) { clearInterval(iv); try { window.PRUI.toast('Az üzenetküldő még tölt — próbáld újra egy pillanat múlva.', { kind: 'info' }); } catch (e) { } } }, 150);
+  }
   function extractFiles(text) {   // fence-AWARE: read a ```file:PATH block to its MATCHING close, skipping BOTH tagged (```lang) AND bare (```) nested code blocks. The old non-greedy regex truncated at the first inner fence → data loss.
     var out = [], lines = String(text || '').split('\n'), n = lines.length, i = 0;
     // A bare ``` at the file's outer level is ambiguous: it either OPENS an untagged code block or CLOSES the file. We
@@ -1817,6 +1824,7 @@
                 idea.rationale ? h('div', { className: 'idb-r2' + (xp ? '' : ' clamp') }, idea.rationale) : null,
                 h('div', { className: 'idb-meta' }, srcLabel(idea.source), idea.novelty != null ? ' · novelty ' + idea.novelty : '', rej ? h('span', { className: 'idb-rejtag' }, ' · rejected') : '', runBadge(idea)),
                 props.canEdit ? h('div', { className: 'idb-acts' },
+                  h('button', { className: 'sel', title: 'Vélemény kérése a kollégáktól — üzenet a hivatkozással', onClick: function () { prAskOpinion('idea', idea.id, props.projectId, idea.question); } }, '💬 Vélemény'),
                   h('button', { className: 'sel', onClick: function () { setStatus(idea, 'selected'); } }, 'Select'),
                   rej ? h('button', { onClick: function () { setStatus(idea, 'candidate'); } }, 'Reset') : h('button', { onClick: function () { setStatus(idea, 'rejected'); } }, 'Reject'),
                   h('button', { className: 'del', 'aria-label': 'Delete idea', onClick: function () { del(idea); } }, '✕')
@@ -1905,6 +1913,7 @@
           open && idea.hypothesis ? h('div', { style: { fontSize: 12.5, color: 'var(--muted)', marginTop: 2, whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, idea.hypothesis) : null,
           open && idea.rationale ? h('div', { style: { fontSize: 12, color: 'var(--faint)', marginTop: 4, whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, idea.rationale) : null,
           props.canEdit ? h('div', { className: 'idea-foot' },
+            h('button', { title: 'Vélemény kérése a kollégáktól', onClick: function () { prAskOpinion('idea', idea.id, props.projectId, idea.question); } }, '💬 Vélemény'),
             h('button', { onClick: function () { setStatus(idea, 'selected'); } }, 'Select'),
             h('button', { onClick: function () { setStatus(idea, 'rejected'); } }, 'Reject'),
             h('button', { onClick: function () { setStatus(idea, 'candidate'); } }, 'Reset')
@@ -2189,7 +2198,9 @@
                 h('td', null, props.canEdit
                   ? h('div', { className: 'seg rv-seg', role: 'group', 'aria-label': 'Screening decision' }, ['include', 'maybe', 'exclude'].map(function (v) { return h('button', { key: v, className: s.screening === v ? 'on' : '', 'aria-pressed': s.screening === v, 'aria-label': v, onClick: function () { setScreen(s, v); } }, v); }))
                   : h('span', { className: 'chip c-grey' }, s.screening || 'unscreened')),
-                props.canEdit ? h('td', null, h('button', { className: 'icon-x', 'aria-label': 'Delete source', onClick: function () { del(s); } }, '✕')) : null
+                props.canEdit ? h('td', null, h('div', { style: { display: 'flex', gap: 4 } },
+                  h('button', { className: 'icon-x', title: 'Vélemény kérése a kollégáktól', style: { color: 'var(--accent)' }, onClick: function () { prAskOpinion('source', s.id, props.projectId, s.title); } }, '💬'),
+                  h('button', { className: 'icon-x', 'aria-label': 'Delete source', onClick: function () { del(s); } }, '✕'))) : null
               );
             }))
           )) : h('div', { className: 'rv-empty' }, lib.length ? 'No sources match these filters.' : 'No sources saved yet — search above and Add.')

@@ -216,7 +216,7 @@
   function build() {
     if (document.getElementById('pubnav') || !document.body) return;
     // barless mode (e.g. the editor, which has its own full top bar): keep ONLY the bug/feedback widget, no second bar
-    if (window.PR_NAV_BARLESS) { buildBugWidget(); return; }
+    if (window.PR_NAV_BARLESS) { buildBugWidget(); buildDMWidget(); return; }
     var here = pageKey();
 
     if (here) document.documentElement.classList.add('pn-' + here);
@@ -473,7 +473,7 @@
     function avHtml(uid, size) { var s = size || 34, p = people[uid] || {}; var st = 'width:' + s + 'px;height:' + s + 'px;font-size:' + Math.round(s * 0.36) + 'px'; return p.avatar ? '<span class="pndm-av" style="' + st + '"><img src="' + esc(p.avatar) + '" alt=""></span>' : '<span class="pndm-av" style="' + st + ';background:' + colOf(uid) + '">' + esc(dmMono(nameOf(uid))) + '</span>'; }
     function erefHtml(ref) { var ic = REF_ICON[ref.kind] || '🔗', lb = REF_LBL[ref.kind] || 'Hivatkozás'; return '<a class="pndm-eref" href="' + esc(refLink(ref)) + '"><span class="pndm-ei">' + ic + '</span><span style="min-width:0;flex:1"><span style="display:block;font-size:8.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;opacity:.75">' + esc(lb) + '</span><span style="display:block;font-size:12px;font-weight:600;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(ref.label || '(megnyitás)') + '</span></span><span style="opacity:.7">→</span></a>'; }
 
-    function updateBadge() { var n = convos.reduce(function (a, c) { return a + (c.unread || 0); }, 0); var b = document.getElementById('pn-dm-badge'); if (b) { b.textContent = n > 9 ? '9+' : String(n); b.classList.toggle('on', n > 0); } }
+    function updateBadge() { var n = convos.reduce(function (a, c) { return a + (c.unread || 0); }, 0); var t = n > 9 ? '9+' : String(n); var b = document.getElementById('pn-dm-badge'); if (b) { b.textContent = t; b.classList.toggle('on', n > 0); } var fb = document.getElementById('pndm-fab-badge'); if (fb) { fb.textContent = t; fb.style.display = n > 0 ? 'grid' : 'none'; } }
     var reloadT = null;
     function loadConvos(cb) {
       var u = curUser(); if (!(BE && BE.sb && u && u.id)) { if (cb) cb(); return; } me = u; loaded = true;
@@ -598,8 +598,14 @@
       openWith: function (ref, otherId) { open(); pendingRef = ref || null; if (otherId) startDM(otherId); else newConvoView(); }
     };
 
-    // wire the topbar launcher (added to the bar) + a background unread poll
-    var launcher = document.getElementById('pn-dm'); if (launcher) launcher.onclick = function () { open(); renderList(); };
+    // launchers: the topbar icon (where the global bar shows) AND an always-visible floating button
+    // (the reliable entry on app pages like Research where the fixed topbar is covered by the app chrome).
+    function openMsg() { open(); renderList(); }
+    var topL = document.getElementById('pn-dm'); if (topL) topL.onclick = openMsg;
+    var fab = document.createElement('button'); fab.id = 'pndm-fab'; fab.title = 'Üzenetek'; fab.setAttribute('aria-label', 'Üzenetek — kollégák chat');
+    fab.setAttribute('style', 'position:fixed;right:16px;bottom:66px;z-index:90;width:46px;height:46px;border-radius:50%;border:0;background:var(--accent,#4f46e5);color:#fff;box-shadow:0 6px 18px rgba(20,24,40,.30);font-size:20px;cursor:pointer;line-height:1;padding:0');
+    fab.innerHTML = '💬<span id="pndm-fab-badge" style="position:absolute;top:-3px;right:-3px;min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:#e5484d;color:#fff;font-size:9px;font-weight:700;display:none;place-items:center;border:2px solid var(--app-bg,#fff)"></span>';
+    fab.onclick = openMsg; document.body.appendChild(fab);
     setTimeout(function () { loadConvos(); ensureRealtime(); }, 1400);
     setInterval(function () { if (!panel.classList.contains('on')) loadConvos(); }, 45000);
   }
