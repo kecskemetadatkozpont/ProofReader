@@ -702,8 +702,18 @@
     var arr; try { arr = JSON.parse(m[1].trim()); } catch (e) { return []; }
     if (!Array.isArray(arr)) return [];
     return arr.filter(function (x) { return x && x.q; }).slice(0, 3).map(function (x) {
-      return { q: String(x.q).slice(0, 300), options: (Array.isArray(x.options) ? x.options : []).map(String).map(function (s) { return s.slice(0, 90); }).slice(0, 4) };
+      return { q: String(x.q).slice(0, 300), options: (Array.isArray(x.options) ? x.options : []).map(String).map(function (s) { return s.slice(0, 90); }).slice(0, 4), multi: !!x.multi };
     }).filter(function (x) { return x.options.length; });
+  }
+  // Live activity frames: the research-chat stream interleaves ␟{"s":"…"}␟ status markers (what the model
+  // is doing — thinking / searching / writing) with answer text. Split them out for display.
+  function parseStatus(acc) {
+    var s = String(acc || ''); if (s.indexOf('␟') < 0) return { statuses: [], text: s };
+    var statuses = [], re = /␟([\s\S]*?)␟/g, m;
+    while ((m = re.exec(s))) { try { var o = JSON.parse(m[1]); if (o && o.s) statuses.push(String(o.s)); } catch (e) { } }
+    var text = s.replace(/␟[\s\S]*?␟/g, '');            // drop complete frames
+    var lone = text.lastIndexOf('␟'); if (lone >= 0) text = text.slice(0, lone);   // hide a half-arrived trailing frame
+    return { statuses: statuses, text: text };
   }
   function extractFiles(text) {   // fence-AWARE: read a ```file:PATH block to its MATCHING close, skipping BOTH tagged (```lang) AND bare (```) nested code blocks. The old non-greedy regex truncated at the first inner fence → data loss.
     var out = [], lines = String(text || '').split('\n'), n = lines.length, i = 0;
@@ -972,6 +982,9 @@
     var myId = props.authorId;
     var pkS2 = useState(null), peek = pkS2[0], setPeek = pkS2[1];            // {ownerId, chatId, name, color, avatar, legacy} while peeking; null = my own thread
     var plS2 = useState(false), peekLoading = plS2[0], setPeekLoading = plS2[1];  // true while a peeked thread's messages are loading
+    var qsS = useState({}), qSel = qsS[0], setQSel = qsS[1];   // multi-select clarifying-question picks: (messageId:qIdx) → [selected options]
+    function toggleQ(key, o) { setQSel(function (p) { var n = Object.assign({}, p); var cur = (n[key] || []).slice(); var ix = cur.indexOf(o); if (ix >= 0) cur.splice(ix, 1); else cur.push(o); n[key] = cur; return n; }); }
+    function sendQ(key, arr) { setQSel(function (p) { var n = Object.assign({}, p); delete n[key]; return n; }); sendText(arr.join(', ')); }
     var rlS = useState([]), rail = rlS[0], setRail = rlS[1];                 // other members' ideas threads
     var lgS = useState(null), legacyChat = lgS[0], setLegacyChat = lgS[1];   // the old shared thread (owner_id NULL) → "Közös (örökölt)"
     var mpS = useState(null), meProfile = mpS[0], setMeProfile = mpS[1];     // my profiles_public row (name/avatar/color) for the rail
@@ -1168,9 +1181,9 @@
           (function pump() {
             reader.read().then(function (r) {
               if (!alive.current) return;
-              if (r.done) { setStreaming(null); setBusy(false); justStreamed.current = true; saveAiFiles(acc, cid); loadMsgs(cid); loadRail(); return; }
+              if (r.done) { setStreaming(null); setBusy(false); justStreamed.current = true; saveAiFiles(parseStatus(acc).text, cid); loadMsgs(cid); loadRail(); return; }
               acc += dec.decode(r.value, { stream: true });
-              setStreaming({ text: acc });
+              var ps = parseStatus(acc); setStreaming({ text: ps.text, statuses: ps.statuses });
               pump();
             }, function () { setStreaming(null); setBusy(false); loadMsgs(cid); });
           })();
@@ -1305,6 +1318,17 @@
           return h('div', { key: m.id, className: 'bubble ' + (ai ? 'ai' : 'user') },
             body,
             qs.length ? h('div', { className: 'chat-qs' }, qs.map(function (qq, qi) {
+              var qk = m.id + ':' + qi;
+              if (qq.multi) {
+                var sel = qSel[qk] || [];
+                return h('div', { className: 'chat-q', key: qi },
+                  h('div', { className: 'chat-q-label' }, qq.q, h('span', { style: { fontSize: 10.5, color: 'var(--faint)', fontWeight: 500, marginLeft: 6 } }, '· több is választható')),
+                  h('div', { className: 'chat-q-opts' }, qq.options.map(function (o, oi) {
+                    var on = sel.indexOf(o) >= 0;
+                    return h('button', { className: 'chat-q-pill' + (on ? ' on' : ''), key: oi, disabled: busy, 'aria-pressed': on, onClick: function () { toggleQ(qk, o); } }, (on ? '✓ ' : '') + o);
+                  })),
+                  h('button', { className: 'btn pri', style: { marginTop: 6, padding: '3px 12px', fontSize: 12 }, disabled: busy || !sel.length, onClick: function () { sendQ(qk, sel); } }, sel.length ? ('Küldés (' + sel.length + ')') : 'Válassz…'));
+              }
               return h('div', { className: 'chat-q', key: qi },
                 h('div', { className: 'chat-q-label' }, qq.q),
                 h('div', { className: 'chat-q-opts' }, qq.options.map(function (o, oi) {
@@ -1330,9 +1354,15 @@
         )),
         (!peek && streaming) ? (function () {
           var live = stripQuestions(streaming.text || '');   // hide the trailing questions fence from the live preview (it renders as pills after)
-          return h('div', { className: 'bubble ai', key: 'stream' }, h('div', { className: 'btxt' },
-            live ? live : h('span', { style: { color: 'var(--faint)' } }, chatMode === 'deep' ? '🧠 gondolkodik…' : 'Publify ír…'),
-            live ? h('span', { className: 'tw-cursor' }, '▌') : null));
+          var sts = streaming.statuses || [];
+          return h('div', { className: 'bubble ai', key: 'stream' },
+            sts.length ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 3, marginBottom: live ? 7 : 0 } }, sts.map(function (s, i) {
+              var isCur = (i === sts.length - 1) && !live;
+              return h('div', { key: i, className: 'pr-actrow ' + (isCur ? 'cur' : 'done') }, isCur ? h('span', { className: 'pr-spin' }) : h('span', null, '✓'), h('span', null, s));
+            })) : null,
+            h('div', { className: 'btxt' },
+              live ? live : (sts.length ? null : h('span', { style: { color: 'var(--faint)' } }, chatMode === 'deep' ? '🧠 gondolkodik…' : 'Publify ír…')),
+              live ? h('span', { className: 'tw-cursor' }, '▌') : null));
         })()
           : (!peek && busy) ? h('div', { className: 'bubble ai' }, h('div', { className: 'btxt', style: { color: 'var(--faint)' } }, chatMode === 'deep' ? '🧠 gondolkodik…' : 'Publify is thinking…')) : null
       ),
@@ -5008,7 +5038,10 @@
     var dpkS = useState(false), dPick = dpkS[0], setDPick = dpkS[1];   // the attach picker (AttachModal) is open
     var dtbS = useState('chat'), dkTab = dtbS[0], setDkTab = dtbS[1];   // dock body tab: 'chat' | 'files' (in-dock SessionFileBrowser — P1)
     var denS = useState(false), dEnhancing = denS[0], setDEnhancing = denS[1];   // ✨ dock prompt-enhance in flight
-    var dstS = useState(null), dStream = dstS[0], setDStream = dstS[1];   // live streaming reply bubble {text} while a dock turn streams in
+    var dstS = useState(null), dStream = dstS[0], setDStream = dstS[1];   // live streaming reply bubble {text, statuses} while a dock turn streams in
+    var dqsS = useState({}), dqSel = dqsS[0], setDqSel = dqsS[1];   // dock multi-select clarifying-question picks: (msgIdx:qIdx) → [selected]
+    function dqToggle(qk, o) { setDqSel(function (p) { var n = Object.assign({}, p); var cur = (n[qk] || []).slice(); var ix = cur.indexOf(o); if (ix >= 0) cur.splice(ix, 1); else cur.push(o); n[qk] = cur; return n; }); }
+    function dqSend(qk, arr) { setDqSel(function (p) { var n = Object.assign({}, p); delete n[qk]; return n; }); dkSend(arr.join(', ')); }
     var dspS = useState(null), dSelPop = dspS[0], setDSelPop = dspS[1];   // dock: text selection in the messages → floating "add to idea" button {text,x,y}
     var dsnS = useState([]), dSnips = dsnS[0], setDSnips = dsnS[1];   // pending md/text-preview snippets that ride the next dock turn as chat context {text,file,fileId}
     var pvsS = useState(null), pvSel = pvsS[0], setPvSel = pvsS[1];   // text selected in a card md/text preview → floating "add to chat context" button {text,x,y,file,fileId}
@@ -7893,8 +7926,9 @@
                     if (!alive.current) return;
                     if (rd.done) {
                       setDStream(null); setDBusy(false);
-                      dkSay('ai', acc || '(üres válasz)');
-                      var files = (typeof extractFiles === 'function') ? extractFiles(acc) : [];   // persist any ```file:…``` blocks → they appear as file nodes
+                      var accClean = parseStatus(acc).text;
+                      dkSay('ai', accClean || '(üres válasz)');
+                      var files = (typeof extractFiles === 'function') ? extractFiles(accClean) : [];   // persist any ```file:…``` blocks → they appear as file nodes
                       if (files.length && CORE && CORE.saveFile) Promise.all(files.map(function (f) {
                         // Batch B: capture the saved file's id → its graph-node id ('w' for writing//studies/, else 'f'), so a file
                         // derived from the attached card (an) can be pinned next to it + linked. Falls back to null (no link) on any error.
@@ -7908,7 +7942,7 @@
                       return;
                     }
                     acc += dec.decode(rd.value, { stream: true });
-                    if (alive.current) setDStream({ text: acc });
+                    if (alive.current) { var dps = parseStatus(acc); setDStream({ text: dps.text, statuses: dps.statuses }); }
                     pump();
                   }, function () { fail('A válasz olvasása megszakadt.'); });
                 })();
@@ -8584,6 +8618,17 @@
             return [
               h('div', { key: 'm' + i, className: 'rmap-dock-msg ' + (mm.role === 'user' ? 'u' : 'a') }, isAi ? stripQuestions(stripFiles(mm.text)) : mm.text),
               qs.length ? h('div', { key: 'q' + i, className: 'rmap-dock-qs' }, qs.map(function (qq, qi) {
+                var qk = i + ':' + qi;
+                if (qq.multi) {
+                  var sel = dqSel[qk] || [];
+                  return h('div', { key: qi, className: 'rmap-dock-q' },
+                    h('div', { className: 'rmap-dock-q-label' }, qq.q, h('span', { style: { fontSize: 9.5, color: 'var(--faint)', fontWeight: 500, marginLeft: 5 } }, '· több is')),
+                    h('div', { className: 'rmap-dock-q-opts' }, qq.options.map(function (o, oi) {
+                      var on = sel.indexOf(o) >= 0;
+                      return h('button', { key: oi, className: 'rmap-dock-qpill' + (on ? ' on' : ''), disabled: dBusy, 'aria-pressed': on, onClick: function () { dqToggle(qk, o); } }, (on ? '✓ ' : '') + o);
+                    })),
+                    h('button', { className: 'btn pri', style: { marginTop: 5, padding: '3px 10px', fontSize: 11.5 }, disabled: dBusy || !sel.length, onClick: function () { dqSend(qk, sel); } }, sel.length ? ('Küldés (' + sel.length + ')') : 'Válassz…'));
+                }
                 return h('div', { key: qi, className: 'rmap-dock-q' },
                   h('div', { className: 'rmap-dock-q-label' }, qq.q),
                   h('div', { className: 'rmap-dock-q-opts' }, qq.options.map(function (o, oi) {
@@ -8596,7 +8641,9 @@
                   : mm.actions.map(function (a) { return h('button', { key: a.key, className: 'rmap-dock-chip' + (a.pri ? ' pri' : ''), disabled: (dBusy && a.key !== 'undo'), onClick: function () { dkRunAction(i, a); } }, a.label); })
               ) : null
             ];
-          }), (dPeek && !dPeekMsgs.length) ? h('div', { className: 'rmap-dock-msg a', style: { color: 'var(--faint)' } }, dPeekLoading ? '⏳ Betöltés…' : ('Ez a fonál még üres — ' + (dPeek.legacy ? 'a közös szálban nincs üzenet.' : 'a kolléga még nem írt ide.'))) : null, (!dPeek && dStream) ? (function () { var live = stripQuestions(dStream.text || ''); return h('div', { className: 'rmap-dock-msg a', key: 'dstream' }, live ? live : h('span', { style: { color: 'var(--faint)' } }, dChatMode === 'deep' ? '🧠 gondolkodik…' : '✍️ írok…'), live ? h('span', { className: 'rmap-dock-cursor' }, '▌') : null); })() : ((!dPeek && dBusy) ? h('div', { className: 'rmap-dock-msg a busy' }, '⏳ dolgozom…') : null)),
+          }), (dPeek && !dPeekMsgs.length) ? h('div', { className: 'rmap-dock-msg a', style: { color: 'var(--faint)' } }, dPeekLoading ? '⏳ Betöltés…' : ('Ez a fonál még üres — ' + (dPeek.legacy ? 'a közös szálban nincs üzenet.' : 'a kolléga még nem írt ide.'))) : null, (!dPeek && dStream) ? (function () { var live = stripQuestions(dStream.text || ''); var sts = dStream.statuses || []; return h('div', { className: 'rmap-dock-msg a', key: 'dstream' },
+            sts.length ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 2, marginBottom: live ? 5 : 0 } }, sts.map(function (s, i) { var isCur = (i === sts.length - 1) && !live; return h('div', { key: i, className: 'pr-actrow ' + (isCur ? 'cur' : 'done') }, isCur ? h('span', { className: 'pr-spin' }) : h('span', null, '✓'), h('span', null, s)); })) : null,
+            live ? live : (sts.length ? null : h('span', { style: { color: 'var(--faint)' } }, dChatMode === 'deep' ? '🧠 gondolkodik…' : '✍️ írok…')), live ? h('span', { className: 'rmap-dock-cursor' }, '▌') : null); })() : ((!dPeek && dBusy) ? h('div', { className: 'rmap-dock-msg a busy' }, '⏳ dolgozom…') : null)),
           dPeek ? null : h(React.Fragment, null,
           h('div', { className: 'rmap-dock-cmds' }, [['ideas', '✦ Ötletek'], ['gaps', '🕳 Rések'], ['study', '📚 Irodalom'], ['protocol', '🧪 Protokoll'], ['writing', '✍️ Draft']].map(function (c) { return h('button', { key: c[0], className: 'rmap-dock-chip', disabled: dBusy, title: c[0] === 'ideas' ? 'Új kutatási ÖTLETEK generálása (AI) — a projektből és a kijelölt kártyából/részletből' : (c[0] === 'gaps' ? 'Kutatási RÉSEK feltárása (AI) — hiányzó irányok a projektben' : null), onClick: function () { dkCmd(c[0]); } }, c[1]); }).concat([h('button', { key: 'suggest', className: 'rmap-dock-chip', disabled: dBusy, title: 'Ötlet-jelöltek a mostani beszélgetésből (AI) — új kártyák a térképen', onClick: dkSuggest }, '💡 A beszélgetésből')])),
           // the selected card is "attached" to the next prompt — shown here like an attachment chip (× to detach)
