@@ -982,9 +982,19 @@
     var myId = props.authorId;
     var pkS2 = useState(null), peek = pkS2[0], setPeek = pkS2[1];            // {ownerId, chatId, name, color, avatar, legacy} while peeking; null = my own thread
     var plS2 = useState(false), peekLoading = plS2[0], setPeekLoading = plS2[1];  // true while a peeked thread's messages are loading
-    var qsS = useState({}), qSel = qsS[0], setQSel = qsS[1];   // multi-select clarifying-question picks: (messageId:qIdx) → [selected options]
+    var qsS = useState({}), qSel = qsS[0], setQSel = qsS[1];   // clarifying-question picks: (messageId:qIdx) → [selected options] — nothing is sent until the user confirms
+    var qnS = useState({}), qNote = qnS[0], setQNote = qnS[1]; // (messageId) → optional free-text note
     function toggleQ(key, o) { setQSel(function (p) { var n = Object.assign({}, p); var cur = (n[key] || []).slice(); var ix = cur.indexOf(o); if (ix >= 0) cur.splice(ix, 1); else cur.push(o); n[key] = cur; return n; }); }
-    function sendQ(key, arr) { setQSel(function (p) { var n = Object.assign({}, p); delete n[key]; return n; }); sendText(arr.join(', ')); }
+    function setNote(mid, v) { setQNote(function (p) { var n = Object.assign({}, p); n[mid] = v; return n; }); }
+    // gather ALL of a question-block's picks (+ any note) and send ONCE — the user decides how many, and when
+    function sendQBlock(mid, qlist) {
+      var parts = []; qlist.forEach(function (qq, qi) { var sel = qSel[mid + ':' + qi] || []; if (sel.length) parts.push(qlist.length > 1 ? (qq.q + ': ' + sel.join(', ')) : sel.join(', ')); });
+      var note = String(qNote[mid] || '').trim(); var msg = parts.join('\n'); if (note) msg = msg ? (msg + '\n' + note) : note;
+      if (!msg.trim()) return;
+      setQSel(function (p) { var n = Object.assign({}, p); qlist.forEach(function (_, qi) { delete n[mid + ':' + qi]; }); return n; });
+      setQNote(function (p) { var n = Object.assign({}, p); delete n[mid]; return n; });
+      sendText(msg);
+    }
     var rlS = useState([]), rail = rlS[0], setRail = rlS[1];                 // other members' ideas threads
     var lgS = useState(null), legacyChat = lgS[0], setLegacyChat = lgS[1];   // the old shared thread (owner_id NULL) → "Közös (örökölt)"
     var mpS = useState(null), meProfile = mpS[0], setMeProfile = mpS[1];     // my profiles_public row (name/avatar/color) for the rail
@@ -1317,24 +1327,25 @@
           var qs = (ai && !isTyping && props.canEdit && !peek && msgs.length && msgs[msgs.length - 1].id === m.id) ? extractQuestions(m.content) : [];
           return h('div', { key: m.id, className: 'bubble ' + (ai ? 'ai' : 'user') },
             body,
-            qs.length ? h('div', { className: 'chat-qs' }, qs.map(function (qq, qi) {
-              var qk = m.id + ':' + qi;
-              if (qq.multi) {
-                var sel = qSel[qk] || [];
-                return h('div', { className: 'chat-q', key: qi },
-                  h('div', { className: 'chat-q-label' }, qq.q, h('span', { style: { fontSize: 10.5, color: 'var(--faint)', fontWeight: 500, marginLeft: 6 } }, '· több is választható')),
-                  h('div', { className: 'chat-q-opts' }, qq.options.map(function (o, oi) {
-                    var on = sel.indexOf(o) >= 0;
-                    return h('button', { className: 'chat-q-pill' + (on ? ' on' : ''), key: oi, disabled: busy, 'aria-pressed': on, onClick: function () { toggleQ(qk, o); } }, (on ? '✓ ' : '') + o);
-                  })),
-                  h('button', { className: 'btn pri', style: { marginTop: 6, padding: '3px 12px', fontSize: 12 }, disabled: busy || !sel.length, onClick: function () { sendQ(qk, sel); } }, sel.length ? ('Küldés (' + sel.length + ')') : 'Válassz…'));
-              }
-              return h('div', { className: 'chat-q', key: qi },
-                h('div', { className: 'chat-q-label' }, qq.q),
-                h('div', { className: 'chat-q-opts' }, qq.options.map(function (o, oi) {
-                  return h('button', { className: 'chat-q-pill', key: oi, disabled: busy, title: 'Válasz küldése: ' + o, onClick: function () { sendText(o); } }, o);
-                })));
-            })) : null,
+            qs.length ? (function () {
+              var totalSel = qs.reduce(function (a, qq, qi) { return a + (qSel[m.id + ':' + qi] || []).length; }, 0);
+              var note = qNote[m.id] || '';
+              var canSend = !busy && (totalSel > 0 || note.trim().length > 0);
+              return h('div', { className: 'chat-qs' },
+                qs.map(function (qq, qi) {
+                  var qk = m.id + ':' + qi, sel = qSel[qk] || [];
+                  return h('div', { className: 'chat-q', key: qi },
+                    h('div', { className: 'chat-q-label' }, (qs.length > 1 ? ((qi + 1) + '. ') : '') + qq.q),
+                    h('div', { className: 'chat-q-opts' }, qq.options.map(function (o, oi) {
+                      var on = sel.indexOf(o) >= 0;
+                      return h('button', { className: 'chat-q-pill' + (on ? ' on' : ''), key: oi, disabled: busy, 'aria-pressed': on, title: on ? 'Kijelölés visszavonása' : 'Kijelölés — többet is választhatsz', onClick: function () { toggleQ(qk, o); } }, (on ? '✓ ' : '') + o);
+                    })));
+                }),
+                h('textarea', { className: 'chat-q-note', rows: 1, value: note, placeholder: 'Egyéb / pontosítás (opcionális)…', disabled: busy, onChange: function (e) { setNote(m.id, e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); if (canSend) sendQBlock(m.id, qs); } } }),
+                h('div', { className: 'chat-q-send' },
+                  h('span', { style: { fontSize: 11.5, color: 'var(--faint)' } }, totalSel ? (totalSel + ' kijelölve — küldheted') : (note.trim() ? 'saját válasz — küldheted' : 'Válassz egyet vagy többet — nyugodtan gondold át')),
+                  h('button', { className: 'btn pri', style: { padding: '4px 14px', fontSize: 12.5 }, disabled: !canSend, onClick: function () { sendQBlock(m.id, qs); } }, 'Küldés' + (totalSel ? (' (' + totalSel + ')') : ''))));
+            })() : null,
             (ai && !isTyping) ? h('div', { className: 'bmeta' },
               evByMsg[m.id] ? h('button', { className: 'evbtn' + (openEv === m.id ? ' on' : ''), title: 'Hivatkozott források / részletek', onClick: function () { toggleEv(m.id); } }, '📄 ' + evByMsg[m.id] + ' forrás ' + (openEv === m.id ? '▲' : '▼')) : null,
               h('button', { className: 'copybtn', onClick: function () { copy(m); } }, 'Copy'),
@@ -5039,9 +5050,18 @@
     var dtbS = useState('chat'), dkTab = dtbS[0], setDkTab = dtbS[1];   // dock body tab: 'chat' | 'files' (in-dock SessionFileBrowser — P1)
     var denS = useState(false), dEnhancing = denS[0], setDEnhancing = denS[1];   // ✨ dock prompt-enhance in flight
     var dstS = useState(null), dStream = dstS[0], setDStream = dstS[1];   // live streaming reply bubble {text, statuses} while a dock turn streams in
-    var dqsS = useState({}), dqSel = dqsS[0], setDqSel = dqsS[1];   // dock multi-select clarifying-question picks: (msgIdx:qIdx) → [selected]
+    var dqsS = useState({}), dqSel = dqsS[0], setDqSel = dqsS[1];   // dock clarifying-question picks: (msgIdx:qIdx) → [selected] — sent only on explicit confirm
+    var dqnS = useState({}), dqNote = dqnS[0], setDqNote = dqnS[1]; // (msgIdx) → optional free-text note
     function dqToggle(qk, o) { setDqSel(function (p) { var n = Object.assign({}, p); var cur = (n[qk] || []).slice(); var ix = cur.indexOf(o); if (ix >= 0) cur.splice(ix, 1); else cur.push(o); n[qk] = cur; return n; }); }
-    function dqSend(qk, arr) { setDqSel(function (p) { var n = Object.assign({}, p); delete n[qk]; return n; }); dkSend(arr.join(', ')); }
+    function dqSetNote(mi, v) { setDqNote(function (p) { var n = Object.assign({}, p); n[mi] = v; return n; }); }
+    function dqSendBlock(mi, qlist) {
+      var parts = []; qlist.forEach(function (qq, qi) { var sel = dqSel[mi + ':' + qi] || []; if (sel.length) parts.push(qlist.length > 1 ? (qq.q + ': ' + sel.join(', ')) : sel.join(', ')); });
+      var note = String(dqNote[mi] || '').trim(); var msg = parts.join('\n'); if (note) msg = msg ? (msg + '\n' + note) : note;
+      if (!msg.trim()) return;
+      setDqSel(function (p) { var n = Object.assign({}, p); qlist.forEach(function (_, qi) { delete n[mi + ':' + qi]; }); return n; });
+      setDqNote(function (p) { var n = Object.assign({}, p); delete n[mi]; return n; });
+      dkSend(msg);
+    }
     var dspS = useState(null), dSelPop = dspS[0], setDSelPop = dspS[1];   // dock: text selection in the messages → floating "add to idea" button {text,x,y}
     var dsnS = useState([]), dSnips = dsnS[0], setDSnips = dsnS[1];   // pending md/text-preview snippets that ride the next dock turn as chat context {text,file,fileId}
     var pvsS = useState(null), pvSel = pvsS[0], setPvSel = pvsS[1];   // text selected in a card md/text preview → floating "add to chat context" button {text,x,y,file,fileId}
@@ -8617,24 +8637,25 @@
             var qs = (isLastAi && !dPeek) ? extractQuestions(mm.text) : [];
             return [
               h('div', { key: 'm' + i, className: 'rmap-dock-msg ' + (mm.role === 'user' ? 'u' : 'a') }, isAi ? stripQuestions(stripFiles(mm.text)) : mm.text),
-              qs.length ? h('div', { key: 'q' + i, className: 'rmap-dock-qs' }, qs.map(function (qq, qi) {
-                var qk = i + ':' + qi;
-                if (qq.multi) {
-                  var sel = dqSel[qk] || [];
-                  return h('div', { key: qi, className: 'rmap-dock-q' },
-                    h('div', { className: 'rmap-dock-q-label' }, qq.q, h('span', { style: { fontSize: 9.5, color: 'var(--faint)', fontWeight: 500, marginLeft: 5 } }, '· több is')),
-                    h('div', { className: 'rmap-dock-q-opts' }, qq.options.map(function (o, oi) {
-                      var on = sel.indexOf(o) >= 0;
-                      return h('button', { key: oi, className: 'rmap-dock-qpill' + (on ? ' on' : ''), disabled: dBusy, 'aria-pressed': on, onClick: function () { dqToggle(qk, o); } }, (on ? '✓ ' : '') + o);
-                    })),
-                    h('button', { className: 'btn pri', style: { marginTop: 5, padding: '3px 10px', fontSize: 11.5 }, disabled: dBusy || !sel.length, onClick: function () { dqSend(qk, sel); } }, sel.length ? ('Küldés (' + sel.length + ')') : 'Válassz…'));
-                }
-                return h('div', { key: qi, className: 'rmap-dock-q' },
-                  h('div', { className: 'rmap-dock-q-label' }, qq.q),
-                  h('div', { className: 'rmap-dock-q-opts' }, qq.options.map(function (o, oi) {
-                    return h('button', { key: oi, className: 'rmap-dock-qpill', disabled: dBusy, title: 'Válasz küldése: ' + o, onClick: function () { dkSend(o); } }, o);
-                  })));
-              })) : null,
+              qs.length ? (function () {
+                var totalSel = qs.reduce(function (a, qq, qi) { return a + (dqSel[i + ':' + qi] || []).length; }, 0);
+                var note = dqNote[i] || '';
+                var canSend = !dBusy && (totalSel > 0 || note.trim().length > 0);
+                return h('div', { key: 'q' + i, className: 'rmap-dock-qs' },
+                  qs.map(function (qq, qi) {
+                    var qk = i + ':' + qi, sel = dqSel[qk] || [];
+                    return h('div', { key: qi, className: 'rmap-dock-q' },
+                      h('div', { className: 'rmap-dock-q-label' }, (qs.length > 1 ? ((qi + 1) + '. ') : '') + qq.q),
+                      h('div', { className: 'rmap-dock-q-opts' }, qq.options.map(function (o, oi) {
+                        var on = sel.indexOf(o) >= 0;
+                        return h('button', { key: oi, className: 'rmap-dock-qpill' + (on ? ' on' : ''), disabled: dBusy, 'aria-pressed': on, title: on ? 'Kijelölés visszavonása' : 'Kijelölés — többet is választhatsz', onClick: function () { dqToggle(qk, o); } }, (on ? '✓ ' : '') + o);
+                      })));
+                  }),
+                  h('textarea', { className: 'rmap-dock-q-note', rows: 1, value: note, placeholder: 'Egyéb / pontosítás (opcionális)…', disabled: dBusy, onChange: function (e) { dqSetNote(i, e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); if (canSend) dqSendBlock(i, qs); } } }),
+                  h('div', { className: 'rmap-dock-q-send' },
+                    h('span', { style: { fontSize: 10.5, color: 'var(--faint)' } }, totalSel ? (totalSel + ' kijelölve') : (note.trim() ? 'saját válasz' : 'Válassz — akár többet is')),
+                    h('button', { className: 'btn pri', style: { padding: '3px 12px', fontSize: 11.5 }, disabled: !canSend, onClick: function () { dqSendBlock(i, qs); } }, 'Küldés' + (totalSel ? (' (' + totalSel + ')') : ''))));
+              })() : null,
               (mm.actions && mm.actions.length) ? h('div', { key: 'a' + i, className: 'rmap-dock-cmds rmap-dock-acts' + (mm.done ? ' done' : '') },
                 mm.done
                   ? [h('button', { key: 'done', className: 'rmap-dock-chip', disabled: true }, '✓ Kész')]
