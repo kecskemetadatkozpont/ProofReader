@@ -57,7 +57,7 @@
     // workflow stages
     'Setup': 'Beállítás', 'Idea': 'Ötlet', 'Literature': 'Irodalom', 'Protocol': 'Protokoll', 'Journal': 'Folyóirat', 'Writing': 'Írás', 'Submission': 'Beküldés',
     // tabs / sub-nav
-    'Overview': 'Áttekintés', 'Ideas': 'Ötletek', 'Studies': 'Study-k', 'Canvas': 'Vászon', 'Notes': 'Jegyzetek', 'Log': 'Napló', 'Tasks': 'Feladatok', 'Data': 'Adatok', 'Map': 'Térkép', '🗺️ Map': '🗺️ Térkép', 'Compute': 'Számítás', 'Views': 'Nézetek', 'Workflow': 'Munkafolyamat',
+    'Overview': 'Áttekintő', 'Ideas': 'Ötletek', 'Studies': 'Study-k', 'Canvas': 'Vászon', 'Notes': 'Jegyzetek', 'Log': 'Napló', 'Tasks': 'Feladatok', 'Data': 'Adatok', 'Map': 'Térkép', '🗺️ Map': '🗺️ Térkép', 'Compute': 'Számítás', 'Views': 'Nézetek', 'Workflow': 'Munkafolyamat',
     // status
     'Active': 'Aktív', 'Paused': 'Szüneteltetve', 'Done': 'Kész', 'Archived': 'Archivált',
     // primary controls / project chrome
@@ -8797,6 +8797,161 @@
           (cardSizeCap && layout[menu.node.id] && layout[menu.node.id].card_h) ? h('button', { className: 'rmap-menu-b', onClick: function () { resetCardSize(menu.node); setMenu(null); } }, '↺ Auto méret') : null)) : null);
   }
 
+  // ---------- Áttekintő (F2): a live overview of where the research stands + who did what ----------
+  // Migration-free: reads existing tables under the project-reader RLS. Per-user attribution comes from
+  // research_log.profile_id; the "Pulzus" bottleneck is computed deterministically (no LLM).
+  var LOG_META = { NOTE: { ic: '📝', c: '#64748b' }, DECISION: { ic: '⚖️', c: '#7c3aed' }, RESULT: { ic: '🔬', c: '#0e9e6e' }, ARTIFACT: { ic: '📦', c: '#2563eb' }, MILESTONE: { ic: '🏁', c: '#e11d48' }, TASK: { ic: '✅', c: '#ca8a04' } };
+  function AttekintoPanel(props) {
+    var p = props.project || {};
+    var plang = (p.language === 'hu' ? 'hu' : 'en');
+    var sS = useState(null), sum = sS[0], setSum = sS[1];        // { log, counts, tasks }
+    var pS = useState({}), ppl = pS[0], setPpl = pS[1];          // profile_id → {name, avatar, color}
+    var oS = useState({}), onl = oS[0], setOnl = oS[1];          // id → true (present now)
+    var alive = useRef(true), chRef = useRef(null);
+    useEffect(function () { alive.current = true; return function () { alive.current = false; }; }, []);
+    var PAL = ['#e11d48', '#0891b2', '#7c3aed', '#ca8a04', '#059669', '#db2777', '#2563eb', '#ea580c'];
+    function pColor(id, canon) { if (canon) return canon; var s = String(id || ''), hh = 0; for (var i = 0; i < s.length; i++) hh = (hh * 31 + s.charCodeAt(i)) >>> 0; return PAL[hh % PAL.length]; }
+    function pMono(nm) { var a = String(nm || '').trim().split(/\s+/).filter(Boolean); if (!a.length) return '?'; return (a.length === 1 ? a[0].slice(0, 2) : (a[0].charAt(0) + a[a.length - 1].charAt(0))).toUpperCase(); }
+    function nmOf(uid) { if (uid && uid === (props.me && props.me.id)) return (props.me && props.me.name) || 'Te'; return (ppl[uid] && ppl[uid].name) || 'Kolléga'; }
+    function clOf(uid) { return (ppl[uid] && ppl[uid].color) || pColor(uid); }
+    function rel(ts) { if (!ts) return ''; var d = (Date.now() - new Date(ts).getTime()) / 1000; if (d < 60) return 'most'; if (d < 3600) return Math.round(d / 60) + 'p'; if (d < 86400) return Math.round(d / 3600) + 'ó'; if (d < 172800) return 'tegnap'; return Math.round(d / 86400) + ' napja'; }
+    function avatarEl(uid, size) {
+      var s = size || 26, av = ppl[uid] && ppl[uid].avatar;
+      return av ? h('img', { src: av, alt: '', style: { width: s, height: s, borderRadius: '50%', objectFit: 'cover', display: 'block', flex: 'none' } })
+        : h('span', { style: { width: s, height: s, borderRadius: '50%', flex: 'none', display: 'grid', placeItems: 'center', color: '#fff', fontWeight: 700, fontSize: Math.round(s * 0.4), background: clOf(uid) } }, pMono(nmOf(uid)));
+    }
+    function load() {
+      var pid = p.id; if (!pid) return;
+      Promise.all([
+        sb.from('research_log').select('id,type,summary,ts,profile_id').eq('project_id', pid).order('ts', { ascending: false }).limit(200),
+        sb.from('research_ideas').select('id', { count: 'exact', head: true }).eq('project_id', pid),
+        sb.from('research_sources').select('id', { count: 'exact', head: true }).eq('project_id', pid),
+        sb.from('research_sources').select('id', { count: 'exact', head: true }).eq('project_id', pid).eq('screening', 'include'),
+        sb.from('research_studies').select('id', { count: 'exact', head: true }).eq('project_id', pid),
+        sb.from('research_todos').select('id,status,due,assignee').eq('project_id', pid),
+        sb.from('research_figures').select('id', { count: 'exact', head: true }).eq('project_id', pid)
+      ]).then(function (r) {
+        if (!alive.current) return;
+        var log = (r[0] && r[0].data) || [], tasks = (r[5] && r[5].data) || [];
+        setSum({ log: log, tasks: tasks, counts: { ideas: (r[1] && r[1].count) || 0, sources: (r[2] && r[2].count) || 0, included: (r[3] && r[3].count) || 0, studies: (r[4] && r[4].count) || 0, figures: (r[6] && r[6].count) || 0 } });
+        var ids = {}; log.forEach(function (x) { if (x.profile_id) ids[x.profile_id] = 1; }); tasks.forEach(function (x) { if (x.assignee) ids[x.assignee] = 1; }); if (p.owner_id) ids[p.owner_id] = 1;
+        var idl = Object.keys(ids);
+        if (idl.length) sb.from('profiles_public').select('id,name,avatar_url,color').in('id', idl).then(function (pr) { if (!alive.current) return; var m = {}; ((pr && pr.data) || []).forEach(function (x) { m[x.id] = { name: x.name, avatar: x.avatar_url, color: x.color }; }); setPpl(m); });
+      });
+    }
+    useEffect(function () { load(); }, [p.id]);
+    // presence: who is looking at the project right now + a live refresh when someone joins
+    useEffect(function () {
+      var pid = p.id, me = props.me || {}; if (!pid) return;
+      var ch = sb.channel('rov:' + pid, { config: { presence: { key: me.id || 'anon' } } })
+        .on('presence', { event: 'sync' }, function () { var st = ch.presenceState(), o = {}; Object.keys(st).forEach(function (k) { (st[k] || []).forEach(function (m) { if (m && m.id) o[m.id] = true; }); }); if (alive.current) { setOnl(o); load(); } })
+        .subscribe(function (s) { if (s === 'SUBSCRIBED' && me.id) { try { ch.track({ id: me.id, name: me.name || '' }); } catch (e) { } } });
+      chRef.current = ch;
+      return function () { try { sb.removeChannel(ch); } catch (e) { } };
+    }, [p.id]);
+
+    if (!sum) return h('div', { className: 'panel' }, h('div', { className: 'soon' }, '⏳ Áttekintő betöltése…'));
+    var stage = Math.max(0, Math.min(STAGES.length - 1, p.stage || 0));
+    var phaseNo = stage + 1, pct = Math.round(phaseNo / STAGES.length * 100);
+    var log = sum.log, counts = sum.counts, tasks = sum.tasks;
+    var tasksOpen = tasks.filter(function (t) { return t.status !== 'done'; }).length;
+    var overdue = tasks.filter(function (t) { return t.status !== 'done' && t.due && new Date(t.due) < new Date(); }).length;
+    // per-contributor rollup from the activity log
+    var byUser = {}; log.forEach(function (x) { var u = x.profile_id || '?'; if (!byUser[u]) byUser[u] = { id: u, count: 0, byType: {}, last: x.ts }; byUser[u].count++; byUser[u].byType[x.type] = (byUser[u].byType[x.type] || 0) + 1; if (String(x.ts) > String(byUser[u].last)) byUser[u].last = x.ts; });
+    var contributors = Object.keys(byUser).map(function (k) { return byUser[k]; }).sort(function (a, b) { return b.count - a.count; });
+    // 7-day activity sparkline
+    var now = Date.now(), DAY = 86400000, buckets = [0, 0, 0, 0, 0, 0, 0];
+    log.forEach(function (x) { if (!x.ts) return; var idx = 6 - Math.floor((now - new Date(x.ts).getTime()) / DAY); if (idx >= 0 && idx < 7) buckets[idx]++; });
+    var maxB = Math.max(1, Math.max.apply(null, buckets));
+    var spk = buckets.map(function (v, i) { return (i / 6 * 100).toFixed(1) + ',' + (16 - v / maxB * 14).toFixed(1); }).join(' ');
+    var weekN = buckets.reduce(function (a, b) { return a + b; }, 0);
+    // deterministic bottleneck
+    var bn;
+    if (!counts.ideas) bn = { t: 'Még nincs kutatási ötlet — kezdd az Ötletek fülön.', tab: 'ideas' };
+    else if (!counts.sources) bn = { t: 'Még nincs irodalom — gyűjts forrásokat.', tab: 'literature' };
+    else if (!counts.studies && stage >= 2) bn = { t: 'Nincs elindított szisztematikus study.', tab: 'study' };
+    else if (overdue) bn = { t: overdue + ' lejárt határidejű feladat.', tab: 'tasks' };
+    else if (tasksOpen) bn = { t: tasksOpen + ' nyitott feladat vár.', tab: 'tasks' };
+    else if (stage < STAGES.length - 1) bn = { t: 'A munka halad — a következő fázis: ' + tr(plang, STAGES[stage + 1]) + '.', tab: STAGE_TAB[stage + 1] };
+    else bn = { t: 'A projekt a beküldési fázisban van.', tab: 'submission' };
+    var online = Object.keys(onl).filter(function (id) { return id !== 'anon'; });
+
+    function kpi(lab, val, sub, col, tab) {
+      return h('button', { className: 'atk-kpi', onClick: tab ? function () { props.onGoTab && props.onGoTab(tab); } : null,
+        style: { textAlign: 'left', border: '1px solid var(--line)', borderRadius: 12, padding: '10px 12px', background: 'var(--surface)', cursor: tab ? 'pointer' : 'default', display: 'block' } },
+        h('div', { style: { fontSize: 9.5, textTransform: 'uppercase', letterSpacing: '.06em', fontWeight: 700, color: 'var(--faint)' } }, lab),
+        h('div', { style: { fontSize: 22, fontWeight: 750, lineHeight: 1.05, marginTop: 2, color: col || 'var(--ink)', fontVariantNumeric: 'tabular-nums' } }, String(val)),
+        sub ? h('div', { style: { fontSize: 10.5, color: 'var(--muted)', marginTop: 1 } }, sub) : null);
+    }
+
+    return h('div', { className: 'panel', style: { display: 'flex', flexDirection: 'column', gap: 14 } },
+      // header
+      h('div', { style: { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' } },
+        h('h3', { style: { margin: 0 } }, '📊 Áttekintő'),
+        h('span', { style: { fontSize: 12, color: 'var(--muted)' } }, String(p.title || '').slice(0, 60)),
+        h('span', { style: { flex: 1 } }),
+        online.length ? h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 5 } }, h('span', { style: { width: 7, height: 7, borderRadius: '50%', background: '#22c55e' } }), h('span', { style: { fontSize: 11, color: 'var(--muted)' } }, online.length + ' online')) : null,
+        h('div', { style: { display: 'flex' } }, online.slice(0, 5).map(function (id, i) { return h('span', { key: id, style: { marginLeft: i ? -6 : 0, boxShadow: '0 0 0 2px var(--surface)', borderRadius: '50%' } }, avatarEl(id, 24)); }))
+      ),
+      // Pulzus callout
+      h('div', { style: { display: 'flex', gap: 14, alignItems: 'center', border: '1px solid color-mix(in srgb, var(--accent) 30%, var(--line))', background: 'color-mix(in srgb, var(--accent) 7%, var(--surface))', borderRadius: 14, padding: '13px 15px', flexWrap: 'wrap' } },
+        h('div', { style: { width: 76, height: 76, borderRadius: '50%', flex: 'none', display: 'grid', placeItems: 'center', background: 'conic-gradient(var(--accent) 0 ' + pct + '%, var(--line) ' + pct + '% 100%)' } },
+          h('div', { style: { width: 58, height: 58, borderRadius: '50%', background: 'var(--surface)', display: 'grid', placeItems: 'center', textAlign: 'center' } },
+            h('div', null, h('div', { style: { fontSize: 16, fontWeight: 750, lineHeight: 1 } }, phaseNo + '/' + STAGES.length), h('div', { style: { fontSize: 8.5, color: 'var(--faint)' } }, 'fázis')))),
+        h('div', { style: { flex: 1, minWidth: 200 } },
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: 7, marginBottom: 3 } }, h('span', { style: { fontSize: 12 } }, '✦'), h('b', { style: { fontSize: 13 } }, 'Pulzus'), h('span', { style: { fontSize: 10.5, color: 'var(--muted)' } }, '· ' + tr(plang, STAGES[stage]) + ' fázis · ' + weekN + ' esemény az elmúlt hétben')),
+          h('div', { style: { fontSize: 13.5, lineHeight: 1.5, color: 'var(--ink)' } }, 'Szűk keresztmetszet: ', h('b', null, bn.t)),
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: 10, marginTop: 7 } },
+            h('svg', { width: 108, height: 18, viewBox: '0 0 100 18', preserveAspectRatio: 'none', style: { flex: 'none' } }, h('polyline', { points: spk, fill: 'none', stroke: 'var(--accent)', strokeWidth: 1.6 })),
+            bn.tab ? h('button', { className: 'btn', style: { fontSize: 11.5, padding: '3px 10px' }, onClick: function () { props.onGoTab && props.onGoTab(bn.tab); } }, '→ ' + tr(plang, 'Megnyitás')) : null)),
+      ),
+      // stepper
+      h('div', { style: { display: 'flex', gap: 4, overflowX: 'auto' } }, STAGES.map(function (name, i) {
+        var done = i < stage, cur = i === stage;
+        return h('button', { key: i, title: tr(plang, name), onClick: function () { props.onGoTab && props.onGoTab(STAGE_TAB[i] || 'overview'); },
+          style: { flex: '1 1 0', minWidth: 82, border: '1px solid ' + (cur ? 'var(--accent)' : 'var(--line)'), background: cur ? 'color-mix(in srgb, var(--accent) 12%, var(--surface))' : (done ? 'var(--surface-2)' : 'var(--surface)'), borderRadius: 9, padding: '6px 4px', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, color: cur ? 'var(--accent)' : (done ? 'var(--muted)' : 'var(--faint)') } },
+          h('span', { style: { display: 'grid', placeItems: 'center', width: 18, height: 18 } }, STAGE_ICONS[i] || null),
+          h('span', { style: { fontSize: 9.5, fontWeight: 650, whiteSpace: 'nowrap' } }, (done ? '✓ ' : '') + tr(plang, name)));
+      })),
+      // KPI cards
+      h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(96px, 1fr))', gap: 8 } },
+        kpi('Ötlet', counts.ideas, null, '#7c3aed', 'ideas'),
+        kpi('Forrás', counts.sources, counts.included + ' bevont', '#0e93d6', 'literature'),
+        kpi('Study', counts.studies, null, '#059669', 'study'),
+        kpi('Ábra', counts.figures, null, '#db2777', null),
+        kpi('Feladat', tasksOpen + '/' + tasks.length, overdue ? (overdue + ' lejárt') : 'nyitott', overdue ? '#e11d48' : '#ca8a04', 'tasks'),
+        kpi('Esemény', log.length, weekN + ' e héten', 'var(--ink)', 'log')
+      ),
+      // feed + contributors
+      h('div', { style: { display: 'grid', gridTemplateColumns: 'minmax(0, 1.3fr) minmax(0, 1fr)', gap: 14 } },
+        // Ki mit csinált
+        h('div', null,
+          h('div', { style: { fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--faint)', marginBottom: 8 } }, 'Ki mit csinált'),
+          log.length ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 340, overflowY: 'auto' } }, log.slice(0, 40).map(function (x, i) {
+            var m = LOG_META[x.type] || { ic: '•', c: 'var(--muted)' }, col = clOf(x.profile_id);
+            return h('div', { key: x.id || i, style: { display: 'flex', gap: 8, alignItems: 'flex-start', padding: '6px 4px', borderLeft: '2px solid ' + col, paddingLeft: 9, borderRadius: '0 8px 8px 0' } },
+              avatarEl(x.profile_id, 20),
+              h('div', { style: { minWidth: 0, flex: 1 } },
+                h('div', { style: { fontSize: 12, lineHeight: 1.35, color: 'var(--ink)' } }, m.ic + ' ', h('b', { style: { fontWeight: 600 } }, nmOf(x.profile_id)), ' — ', String(x.summary || x.type || '').slice(0, 120)),
+                h('div', { style: { fontSize: 9.5, color: 'var(--faint)' } }, (x.type || '') + ' · ' + rel(x.ts))));
+          })) : h('div', { className: 'soon', style: { fontSize: 12.5 } }, 'Még nincs naplózott esemény — ahogy haladtok, itt jelenik meg, ki mit tett.')),
+        // Közreműködők
+        h('div', null,
+          h('div', { style: { fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--faint)', marginBottom: 8 } }, 'Közreműködők'),
+          contributors.length ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 8 } }, contributors.map(function (c) {
+            var total = c.count || 1;
+            return h('div', { key: c.id, style: { border: '1px solid var(--line)', borderRadius: 10, padding: 9, background: 'var(--surface)' } },
+              h('div', { style: { display: 'flex', alignItems: 'center', gap: 7 } }, avatarEl(c.id, 24),
+                h('span', { style: { fontSize: 12, fontWeight: 620, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, nmOf(c.id)),
+                onl[c.id] ? h('span', { style: { width: 7, height: 7, borderRadius: '50%', background: '#22c55e', flex: 'none' } }) : null,
+                h('span', { style: { marginLeft: 'auto', fontSize: 10.5, color: 'var(--faint)', fontVariantNumeric: 'tabular-nums' } }, c.count + ' db')),
+              h('div', { style: { display: 'flex', height: 6, borderRadius: 3, overflow: 'hidden', marginTop: 6, background: 'var(--surface-2)' } }, LOG_TYPES.filter(function (t) { return c.byType[t]; }).map(function (t) { return h('span', { key: t, title: t + ': ' + c.byType[t], style: { flex: c.byType[t], background: (LOG_META[t] || {}).c || 'var(--muted)' } }); })),
+              h('div', { style: { fontSize: 9.5, color: 'var(--faint)', marginTop: 4 } }, (onl[c.id] ? '● online · ' : '') + 'utolsó: ' + rel(c.last)));
+          })) : h('div', { className: 'soon', style: { fontSize: 12.5 } }, 'A hozzájárulások a naplóból épülnek.'))
+      )
+    );
+  }
+
   function ProjectDetail(props) {
     var p = props.project;
     var plang = (p.language === 'hu' ? 'hu' : 'en');   // per-project UI language (migration-65) → core chrome via tr(plang, …)
@@ -8911,6 +9066,7 @@
     else if (tab === 'notes') content = window.PRNotes ? h(window.PRNotes, { projectId: p.id, canEdit: props.canEdit, authorId: props.authorId }) : h('div', { className: 'empty' }, 'Loading Notes…');
     else if (tab === 'log') content = h(LogPanel, { projectId: p.id, authorId: props.authorId, entries: props.log, canEdit: props.canEdit, onChanged: props.onChanged });
     else if (tab === 'tasks') content = h(TasksPanel, { projectId: p.id, tasks: props.tasks, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged });
+    else if (tab === 'overview') content = h(AttekintoPanel, { project: p, canEdit: props.canEdit, authorId: props.authorId, me: props.me, onChanged: props.onChanged, onGoTab: function (t) { setTab(t); } });
     else content = nd() ? setupOverview() : (p.goal ? h('div', { className: 'panel' }, h('h3', null, 'Goal'), h('div', { style: { fontSize: 13.5 } }, p.goal)) : h('div', { className: 'soon' }, 'No goal set yet.'));
     // ---- Two-tier chrome (New design flag, direction B): the project nav moves into a left context panel beside the content (the AppShell sidebar becomes a thin icon rail via CSS). Classic (flag-OFF) return is unchanged below. ----
     function stageNav() {
@@ -8932,7 +9088,7 @@
       return h('div', { className: 'rv-stnav' }, kids);
     }
     function subNav() {
-      return h('div', { className: 'rv-subnav' }, [['map', '🗺️ Map', null], ['canvas', 'Canvas', null], ['notes', 'Notes', null], ['data', 'Data', (props.datasets || []).length], ['log', 'Log', (props.log || []).length], ['tasks', 'Tasks', openTasks]].map(function (nt) {
+      return h('div', { className: 'rv-subnav' }, [['overview', 'Áttekintő', null], ['map', '🗺️ Map', null], ['canvas', 'Canvas', null], ['notes', 'Notes', null], ['data', 'Data', (props.datasets || []).length], ['log', 'Log', (props.log || []).length], ['tasks', 'Tasks', openTasks]].map(function (nt) {
         return h('button', { key: nt[0], className: 'rv-sub' + (tab === nt[0] ? ' on' : ''), onClick: function () { setTab(nt[0]); } }, h('span', null, tr(plang, nt[1])), nt[2] ? h('span', { className: 'rv-sub-c' }, nt[2]) : null);
       }));
     }
