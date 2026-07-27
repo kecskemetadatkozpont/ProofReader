@@ -81,7 +81,7 @@ Deno.serve(async (req) => {
     const mcpNote = useMcp ? ` Use the Consensus tools to ground every non-trivial claim in peer-reviewed evidence, and cite the papers.` : '';
     const FILE_NOTE = ` You can save a file into the project's file browser by emitting a fenced block in EXACTLY this form (the opening line is \`\`\`file: followed by a short descriptive relative path, nothing else on that line):\n\`\`\`file:lit-review.md\n<the full file content>\n\`\`\`\nDo this whenever the user asks you to write something to a file, create/save a document, or produce an artifact (a literature summary, a research plan, a draft section, notes). Prefer .md. Keep a short normal reply too, but put the document itself inside the file block — only emit a file block when a saved file is actually wanted.`;
     // Clarifying-question fence — the client renders these as clickable answer pills (mirrors the task-assistant pattern).
-    const QUESTIONS_NOTE = ` When you genuinely need the user to clarify something BEFORE you can give a good answer (ambiguous scope, a missing constraint, a fork in the research direction), you MAY END your message with ONE fenced block of up to 3 short clarifying questions, each with 2–4 suggested answer options, in EXACTLY this form (valid JSON array, the block LAST, nothing after it):\n\`\`\`publify-questions\n[{"q":"…","options":["…","…"]}]\n\`\`\`\nGive a brief normal reply above it. Emit it ONLY when clarification truly helps — never when you already have enough to answer, and at most once per short exchange. Match the conversation's language.`;
+    const QUESTIONS_NOTE = ` When you genuinely need the user to clarify something BEFORE you can give a good answer (ambiguous scope, a missing constraint, a fork in the research direction), you MAY END your message with ONE fenced block of up to 3 short clarifying questions, each with 2–4 suggested answer options, in EXACTLY this form (valid JSON array, the block LAST, nothing after it):\n\`\`\`publify-questions\n[{"q":"…","options":["…","…"],"multi":false}]\n\`\`\`\nSet "multi": true on a question ONLY when SEVERAL options can sensibly be selected together (e.g. "Mely adathalmazokat / metrikákat vegyük be?"); keep it false for a single-choice fork. Give a brief normal reply above it. Emit it ONLY when clarification truly helps — never when you already have enough to answer, and at most once per short exchange. Match the conversation's language.`;
     const SYSTEM = persona + mcpNote + ATTACH_NOTE + FILE_NOTE + QUESTIONS_NOTE;
     const _lang = await loadProjectLang(sb, chat.project_id);
 
@@ -110,6 +110,9 @@ Deno.serve(async (req) => {
       const stream = new ReadableStream({
         async start(controller) {
           const enc = new TextEncoder();
+          // Live activity frames (like Claude/Gemini): status lines the browser renders while the model
+          // thinks / searches, wrapped in U+241F sentinels so the client can split them from answer text.
+          const emitStatus = (s: string) => { try { controller.enqueue(enc.encode('␟' + JSON.stringify({ s }) + '␟')); } catch { /* stream may be closed */ } };
           try {
             const sr = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers, body: JSON.stringify({ ...body, stream: true }) });
             if (!sr.ok || !sr.body) { controller.enqueue(enc.encode('\n\n[hiba: ' + (await sr.text()).slice(0, 300) + ']')); controller.close(); return; }
@@ -124,14 +127,21 @@ Deno.serve(async (req) => {
                 const dl = piece.split('\n').find((l) => l.startsWith('data:')); if (!dl) continue;
                 const raw = dl.slice(5).trim(); if (!raw || raw === '[DONE]') continue;
                 let ev: any; try { ev = JSON.parse(raw); } catch { continue; }
-                if (ev.type === 'content_block_start') { const b = JSON.parse(JSON.stringify(ev.content_block || {})); if (b.type === 'text' && b.text == null) b.text = ''; sblocks[ev.index] = b; }
+                if (ev.type === 'content_block_start') {
+                  const b = JSON.parse(JSON.stringify(ev.content_block || {})); if (b.type === 'text' && b.text == null) b.text = ''; sblocks[ev.index] = b;
+                  const bt = b.type;
+                  if (bt === 'thinking' || bt === 'redacted_thinking') emitStatus('🧠 Gondolkodik a válaszon…');
+                  else if (bt === 'mcp_tool_use' || bt === 'server_tool_use' || bt === 'tool_use') emitStatus('🔎 Forráskeresés a Consensusban…');
+                  else if (bt === 'mcp_tool_result' || bt === 'tool_result') emitStatus('📚 Találatok feldolgozása…');
+                  else if (bt === 'text') emitStatus('✍️ Válasz megfogalmazása…');
+                }
                 else if (ev.type === 'content_block_delta') {
                   const d = ev.delta || {};
                   if (d.type === 'text_delta' && typeof d.text === 'string') { if (!sblocks[ev.index]) sblocks[ev.index] = { type: 'text', text: '' }; sblocks[ev.index].text = (sblocks[ev.index].text || '') + d.text; controller.enqueue(enc.encode(d.text)); }
                   else if (d.type === 'input_json_delta' && typeof d.partial_json === 'string') { if (!sblocks[ev.index]) sblocks[ev.index] = {}; sblocks[ev.index]._pj = (sblocks[ev.index]._pj || '') + d.partial_json; }
                   else if (d.type === 'citations_delta' && d.citation) { if (!sblocks[ev.index]) sblocks[ev.index] = { type: 'text', text: '' }; (sblocks[ev.index].citations = sblocks[ev.index].citations || []).push(d.citation); }   // grounded-answer citations interleave with text on the same block
                 }
-                else if (ev.type === 'content_block_stop') { const b = sblocks[ev.index]; if (b && b._pj) { try { b.input = JSON.parse(b._pj); } catch { /* keep partial */ } delete b._pj; } }
+                else if (ev.type === 'content_block_stop') { const b = sblocks[ev.index]; if (b && b._pj) { try { b.input = JSON.parse(b._pj); } catch { /* keep partial */ } delete b._pj; } if (b && (b.type === 'mcp_tool_use' || b.type === 'tool_use' || b.type === 'server_tool_use')) { const q = b.input && (b.input.query || b.input.q); if (q) emitStatus('🔎 Keresés: „' + String(q).slice(0, 60) + '”'); } }
                 else if (ev.type === 'message_delta') { if (ev.delta && ev.delta.stop_reason) stopReason = ev.delta.stop_reason; }
                 else if (ev.type === 'error') { controller.enqueue(enc.encode('\n\n[hiba: ' + ((ev.error && ev.error.message) || 'anthropic') + ']')); }
               }
