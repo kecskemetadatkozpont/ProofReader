@@ -8895,13 +8895,39 @@
     var sS = useState(null), sum = sS[0], setSum = sS[1];        // { log, counts, tasks }
     var pS = useState({}), ppl = pS[0], setPpl = pS[1];          // profile_id → {name, avatar, color}
     var oS = useState({}), onl = oS[0], setOnl = oS[1];          // id → true (present now)
-    var alive = useRef(true), chRef = useRef(null), openedAtRef = useRef(Date.now());   // session baseline: "since you opened the page"
+    var shS = useState(false), shareOpen = shS[0], setShareOpen = shS[1];   // share/invite modal
+    var sqS = useState(''), shareQ = sqS[0], setShareQ = sqS[1];
+    var srS = useState([]), shareRes = srS[0], setShareRes = srS[1];
+    var sroS = useState('editor'), shareRole = sroS[0], setShareRole = sroS[1];
+    var smS = useState([]), shareMembers = smS[0], setShareMembers = smS[1];
+    var smsgS = useState(''), shareMsg = smsgS[0], setShareMsg = smsgS[1];
+    var alive = useRef(true), chRef = useRef(null), openedAtRef = useRef(Date.now()), shareT = useRef(null);   // session baseline: "since you opened the page"
     useEffect(function () { alive.current = true; return function () { alive.current = false; }; }, []);
     var PAL = ['#e11d48', '#0891b2', '#7c3aed', '#ca8a04', '#059669', '#db2777', '#2563eb', '#ea580c'];
     function pColor(id, canon) { if (canon) return canon; var s = String(id || ''), hh = 0; for (var i = 0; i < s.length; i++) hh = (hh * 31 + s.charCodeAt(i)) >>> 0; return PAL[hh % PAL.length]; }
     function pMono(nm) { var a = String(nm || '').trim().split(/\s+/).filter(Boolean); if (!a.length) return '?'; return (a.length === 1 ? a[0].slice(0, 2) : (a[0].charAt(0) + a[a.length - 1].charAt(0))).toUpperCase(); }
     function nmOf(uid) { if (uid && uid === (props.me && props.me.id)) return (props.me && props.me.name) || 'Te'; return (ppl[uid] && ppl[uid].name) || 'Kolléga'; }
     function clOf(uid) { return (ppl[uid] && ppl[uid].color) || pColor(uid); }
+    // ---- share this research with other users (invite as member) — mirrors the Map share flow ----
+    function loadShareMembers() {
+      sb.from('research_project_members').select('user_id,role,accepted').eq('project_id', p.id).then(function (r) {
+        if (!alive.current) return; var rows = (r && r.data) || [], ids = rows.map(function (m) { return m.user_id; }); if (p.owner_id) ids.push(p.owner_id);
+        if (!ids.length) { setShareMembers([]); return; }
+        sb.from('profiles_public').select('id,name,avatar_url,color').in('id', ids).then(function (pr) { if (!alive.current) return; var by = {}; ((pr && pr.data) || []).forEach(function (x) { by[x.id] = x; });
+          setPpl(function (prev) { var n = Object.assign({}, prev); ((pr && pr.data) || []).forEach(function (x) { n[x.id] = { name: x.name, avatar: x.avatar_url, color: x.color }; }); return n; });
+          setShareMembers(rows.map(function (m) { return { user_id: m.user_id, role: m.role, accepted: m.accepted, name: (by[m.user_id] && by[m.user_id].name) || 'Kolléga', avatar: by[m.user_id] && by[m.user_id].avatar_url, color: by[m.user_id] && by[m.user_id].color }; })); });
+      });
+    }
+    function searchShare(q) { setShareQ(q); if (shareT.current) clearTimeout(shareT.current); if (q.trim().length < 2) { setShareRes([]); return; } shareT.current = setTimeout(function () { sb.rpc('pr_search_users', { q: q.trim() }).then(function (r) { if (!alive.current) return; var rows = (r && r.data) || [], meId = props.me && props.me.id, mem = {}; shareMembers.forEach(function (m) { mem[m.user_id] = 1; }); setShareRes(rows.filter(function (x) { return x.id !== meId && x.id !== p.owner_id && !mem[x.id]; })); }); }, 300); }
+    function doInvite(u) {
+      if (!u || !u.id) return; var role = shareRole;
+      sb.from('research_project_members').insert({ project_id: p.id, user_id: u.id, role: role, accepted: false }).then(function (r) {
+        if (!alive.current) return; if (r && r.error) { setShareMsg('Meghívás sikertelen: ' + r.error.message); return; }
+        sb.rpc('pr_notify_research_share', { p_recipient: u.id, p_project: p.id, p_title: p.title || 'Projekt', p_role: role }).then(function () { }, function () { });
+        setShareMsg('✓ Meghívó elküldve: ' + (u.name || 'kolléga')); setShareQ(''); setShareRes([]); loadShareMembers();
+      });
+    }
+    function openShare() { setShareOpen(true); setShareMsg(''); setShareRes([]); setShareQ(''); loadShareMembers(); }
     function rel(ts) { if (!ts) return ''; var d = (Date.now() - new Date(ts).getTime()) / 1000; if (d < 60) return 'most'; if (d < 3600) return Math.round(d / 60) + 'p'; if (d < 86400) return Math.round(d / 3600) + 'ó'; if (d < 172800) return 'tegnap'; return Math.round(d / 86400) + ' napja'; }
     function avatarEl(uid, size) {
       var s = size || 26, av = ppl[uid] && ppl[uid].avatar;
@@ -8985,6 +9011,7 @@
         h('h3', { style: { margin: 0 } }, '📊 Áttekintő'),
         h('span', { style: { fontSize: 12, color: 'var(--muted)' } }, String(p.title || '').slice(0, 60)),
         h('span', { style: { flex: 1 } }),
+        props.canEdit ? h('button', { className: 'btn', style: { padding: '4px 11px', fontSize: 12 }, title: 'A kutatás megosztása más felhasználókkal', onClick: openShare }, '👥 Megosztás') : null,
         online.length ? h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 5 } }, h('span', { style: { width: 7, height: 7, borderRadius: '50%', background: '#22c55e' } }), h('span', { style: { fontSize: 11, color: 'var(--muted)' } }, online.length + ' online')) : null,
         h('div', { style: { display: 'flex' } }, online.slice(0, 5).map(function (id, i) { return h('span', { key: id, style: { marginLeft: i ? -6 : 0, boxShadow: '0 0 0 2px var(--surface)', borderRadius: '50%' } }, avatarEl(id, 24)); }))
       ),
@@ -9052,7 +9079,30 @@
                 h('div', { style: { fontSize: 12, lineHeight: 1.35, color: 'var(--ink)' } }, m.ic + ' ', h('b', { style: { fontWeight: 600 } }, nmOf(x.profile_id)), ' — ', String(x.summary || x.type || '').slice(0, 120)),
                 h('div', { style: { fontSize: 9.5, color: 'var(--faint)' } }, (fresh ? '● új · ' : '') + (x.type || '') + ' · ' + rel(x.ts))));
           })) : h('div', { className: 'soon', style: { fontSize: 12.5 } }, 'Még nincs naplózott esemény — ahogy haladtok, itt jelenik meg, ki mit tett.'))
-      )
+      ),
+      // share / invite modal
+      shareOpen ? h('div', { style: { position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(15,20,40,.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }, onClick: function () { setShareOpen(false); } },
+        h('div', { style: { background: 'var(--surface)', color: 'var(--ink)', width: 'min(460px, 96vw)', maxHeight: '88vh', overflow: 'auto', borderRadius: 14, boxShadow: '0 20px 60px rgba(15,20,40,.35)', padding: '16px 18px' }, onClick: function (e) { e.stopPropagation(); } },
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 } }, h('b', { style: { fontSize: 15 } }, '👥 Kutatás megosztása'), h('span', { style: { flex: 1 } }), h('button', { className: 'btn', style: { padding: '2px 9px' }, onClick: function () { setShareOpen(false); } }, '✕')),
+          h('div', { style: { fontSize: 12.5, color: 'var(--muted)', marginBottom: 10, lineHeight: 1.45 } }, 'Hívj meg kollégákat név vagy e-mail alapján. A meghívott értesítést kap, és elfogadás után hozzáfér a projekthez.'),
+          h('div', { style: { display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' } }, [['viewer', '👁 Megtekintő'], ['commenter', '💬 Kommentelő'], ['editor', '✎ Szerkesztő']].map(function (r) {
+            return h('button', { key: r[0], className: 'btn' + (shareRole === r[0] ? ' pri' : ''), style: { padding: '4px 10px', fontSize: 12 }, onClick: function () { setShareRole(r[0]); } }, r[1]);
+          })),
+          h('input', { style: { width: '100%', boxSizing: 'border-box', marginBottom: 8, border: '1px solid var(--line)', borderRadius: 9, padding: '8px 10px', fontSize: 13, background: 'var(--surface-2)', color: 'inherit' }, placeholder: 'Kolléga keresése név / e-mail…', value: shareQ, onChange: function (e) { searchShare(e.target.value); } }),
+          shareRes.length ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 10 } }, shareRes.map(function (u) {
+            return h('div', { key: u.id, style: { display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', border: '1px solid var(--line)', borderRadius: 9 } },
+              h('span', { style: { width: 26, height: 26, borderRadius: '50%', display: 'grid', placeItems: 'center', color: '#fff', fontWeight: 700, fontSize: 10, background: u.color || pColor(u.id), flex: 'none' } }, pMono(u.name)),
+              h('span', { style: { flex: 1, fontSize: 13, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, u.name || 'Kolléga'),
+              h('button', { className: 'btn pri', style: { padding: '4px 10px', fontSize: 12 }, onClick: function () { doInvite(u); } }, '✉ Meghívás'));
+          })) : (shareQ.trim().length >= 2 ? h('div', { style: { fontSize: 12, color: 'var(--faint)', marginBottom: 10 } }, 'Nincs találat.') : null),
+          shareMsg ? h('div', { style: { fontSize: 12.5, color: shareMsg.charAt(0) === '✓' ? 'var(--ok, #0fae82)' : 'var(--warn, #d1810b)', marginBottom: 10 } }, shareMsg) : null,
+          h('div', { style: { fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--faint)', margin: '4px 0 6px' } }, 'Résztvevők'),
+          h('div', { style: { display: 'flex', flexDirection: 'column', gap: 6 } },
+            h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5 } }, h('span', { style: { width: 24, height: 24, borderRadius: '50%', display: 'grid', placeItems: 'center', color: '#fff', fontWeight: 700, fontSize: 9.5, background: clOf(p.owner_id), flex: 'none' } }, pMono(nmOf(p.owner_id))), h('span', { style: { flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, nmOf(p.owner_id)), h('span', { style: { fontSize: 11, color: 'var(--muted)' } }, '👑 Tulajdonos')),
+            shareMembers.filter(function (m) { return m.user_id !== p.owner_id; }).map(function (m) {
+              return h('div', { key: m.user_id, style: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5 } }, h('span', { style: { width: 24, height: 24, borderRadius: '50%', display: 'grid', placeItems: 'center', color: '#fff', fontWeight: 700, fontSize: 9.5, background: m.color || pColor(m.user_id), flex: 'none' } }, pMono(m.name)), h('span', { style: { flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, m.name), h('span', { style: { fontSize: 10.5, color: m.accepted ? 'var(--muted)' : 'var(--warn)' } }, (m.accepted ? '' : '⏳ függőben · ') + (m.role === 'editor' ? '✎ szerk.' : m.role === 'commenter' ? '💬 komment' : '👁 megtekint')));
+            }))
+        )) : null
     );
   }
 
