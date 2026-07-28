@@ -419,6 +419,8 @@
   function dmMono(nm) { var a = String(nm || '').trim().split(/\s+/).filter(Boolean); if (!a.length) return '?'; return (a.length === 1 ? a[0].slice(0, 2) : (a[0].charAt(0) + a[a.length - 1].charAt(0))).toUpperCase(); }
   function dmRel(ts) { if (!ts) return ''; var d = (Date.now() - new Date(ts).getTime()) / 1000; if (d < 60) return 'most'; if (d < 3600) return Math.round(d / 60) + 'p'; if (d < 86400) return Math.round(d / 3600) + 'ó'; if (d < 172800) return 'tegnap'; return Math.round(d / 86400) + 'n'; }
   function refLink(ref) { if (!ref) return '#'; var q = 'Research.html?'; if (ref.project_id) q += 'project=' + encodeURIComponent(ref.project_id); var fp = REF_FOCUS[ref.kind]; if (fp && ref.id) q += (ref.project_id ? '&' : '') + fp + '=' + encodeURIComponent(ref.id); return q; }
+  var DM_EMOJI = ['😀', '😁', '😂', '🤣', '😊', '😍', '😘', '😎', '🤗', '🤔', '😐', '🙄', '😴', '😢', '😭', '😱', '😳', '🥳', '👍', '👎', '👏', '🙏', '💪', '🤝', '✌️', '👌', '🙌', '🔥', '⭐', '✨', '🎉', '❤️', '💜', '💯', '✅', '❌', '⚠️', '❓', '❗', '💡', '📌', '📎', '📄', '🔬', '📊', '🚀', '⏰', '☕', '👀', '🤯'];
+  function fileIcon(mime, name) { var m = (mime || '') + ' ' + (name || ''); if (/image\//.test(mime) || /\.(png|jpe?g|gif|webp|svg)$/i.test(name)) return '🖼'; if (/pdf/i.test(m)) return '📕'; if (/(sheet|excel|csv)/i.test(m)) return '📊'; if (/(word|document)/i.test(m)) return '📝'; if (/(zip|rar|tar)/i.test(m)) return '🗜'; return '📎'; }
 
   function buildDMWidget() {
     if (window.__pndm) return; window.__pndm = 1;
@@ -473,6 +475,15 @@
       '.pndm-head{pointer-events:auto;width:44px;height:44px;border-radius:50%;border:2px solid var(--pane,#fff);box-shadow:0 6px 18px rgba(20,24,40,.28);display:grid;place-items:center;color:#fff;font-weight:700;font-size:13px;cursor:pointer;position:relative}',
       '.pndm-head .b{position:absolute;top:-3px;right:-3px;min-width:15px;height:15px;padding:0 4px;border-radius:999px;background:#e5484d;color:#fff;font-size:8.5px;font-weight:700;display:grid;place-items:center;border:1.5px solid var(--pane,#fff)}',
       '@media(max-width:640px){.pndm-win{left:0!important;top:26px!important;width:100vw!important;height:calc(100% - 26px)!important;border-radius:0}.pndm-rz{display:none}}',
+      '.wa2{flex:none;width:26px;height:26px;border:1px solid var(--line,#e4e7ec);background:var(--app-bg,#f7f8fa);color:var(--muted,#667);border-radius:8px;font-size:13px;cursor:pointer;display:grid;place-items:center;padding:0}',
+      '.wa2:hover{border-color:var(--accent,#4f46e5);color:var(--accent,#4f46e5)}',
+      '.pndm-emoji-panel{display:flex;flex-wrap:wrap;gap:1px;max-height:104px;overflow-y:auto;padding:5px;border:1px solid var(--line,#e4e7ec);border-radius:9px;margin-bottom:6px;background:var(--app-bg,#fff)}',
+      '.pndm-em{border:0;background:transparent;font-size:16px;cursor:pointer;width:26px;height:26px;border-radius:6px;line-height:1;padding:0}',
+      '.pndm-em:hover{background:var(--line,#e4e7ec)}',
+      '.pndm-att{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line,#e4e7ec);border-radius:9px;padding:5px 8px;margin:3px 0;background:var(--pane,#fff);font-size:11.5px;max-width:100%;cursor:pointer;text-decoration:none;color:inherit}',
+      '.pndm-msg.me .pndm-att{background:rgba(255,255,255,.16);border-color:rgba(255,255,255,.3);color:#fff}',
+      '.pndm-att img{max-width:150px;max-height:110px;border-radius:7px;display:block}',
+      '.pndm-attchip{display:inline-flex;align-items:center;gap:6px;background:var(--app-bg,#f1f2f6);border:1px solid var(--line,#e4e7ec);border-radius:999px;padding:3px 5px 3px 8px;margin:0 5px 5px 0;font-size:11px}',
       '#pn-dm-badge{position:absolute;top:-4px;right:-4px;min-width:15px;height:15px;padding:0 4px;border-radius:999px;background:#e5484d;color:#fff;font-size:9px;font-weight:700;display:none;place-items:center;border:1.5px solid var(--pane,#fff)}',
       '#pn-dm-badge.on{display:grid}'
     ].join('');
@@ -670,24 +681,43 @@
       function up(ev) { rz.removeEventListener('pointermove', mv); rz.removeEventListener('pointerup', up); try { rz.releasePointerCapture(ev.pointerId); } catch (_) { } savePos(); }
       rz.addEventListener('pointermove', mv); rz.addEventListener('pointerup', up);
     }
-    function loadWinMsgs(id) { var W = windows[id]; if (!W) return; BE.sb.from('dm_messages').select('id,sender_id,body,refs,created_at').eq('thread_id', id).order('created_at', { ascending: true }).then(function (r) { if (!windows[id]) return; if (r && r.data) { W.msgs = r.data; renderWinMsgs(id); markReadWin(id); } }); }
+    function loadWinMsgs(id) { var W = windows[id]; if (!W) return; BE.sb.from('dm_messages').select('id,sender_id,body,refs,attachments,created_at').eq('thread_id', id).order('created_at', { ascending: true }).then(function (r) { if (!windows[id]) return; if (r && r.data) { W.msgs = r.data; renderWinMsgs(id); markReadWin(id); } }); }
     function renderWinMsgs(id) { var W = windows[id]; if (!W) return; var u = curUser(); var grp = (W.thread.kind !== 'dm') || ((W.thread.others || []).length > 1);
-      W.bodyEl.innerHTML = W.msgs.map(function (m) { var mine = m.sender_id === (u && u.id); var refs = (m.refs || []).map(erefHtml).join(''); return '<div class="pndm-msg ' + (mine ? 'me' : 'them') + '">' + ((grp && !mine) ? ('<div class="who">' + esc(nameOf(m.sender_id)) + '</div>') : '') + (m.body ? esc(m.body) : '') + refs + '</div>'; }).join('') || '<div class="pndm-empty" style="padding:10px">Írj elsőként.</div>';
+      W.bodyEl.innerHTML = W.msgs.map(function (m) { var mine = m.sender_id === (u && u.id); var refs = (m.refs || []).map(erefHtml).join(''); var atts = (m.attachments || []).map(attHtml).join(''); return '<div class="pndm-msg ' + (mine ? 'me' : 'them') + '">' + ((grp && !mine) ? ('<div class="who">' + esc(nameOf(m.sender_id)) + '</div>') : '') + (m.body ? esc(m.body) : '') + refs + atts + '</div>'; }).join('') || '<div class="pndm-empty" style="padding:10px">Írj elsőként.</div>';
+      [].forEach.call(W.bodyEl.querySelectorAll('.pndm-att'), function (el) { el.onclick = function (e) { e.preventDefault(); openAtt({ bucket: el.getAttribute('data-bucket'), path: el.getAttribute('data-path'), name: el.getAttribute('data-name') }); }; });
       W.bodyEl.scrollTop = W.bodyEl.scrollHeight; }
     function markReadWin(id) { var u = curUser(); if (!u) return; BE.sb.from('dm_reads').upsert({ thread_id: id, user_id: u.id, last_read_at: new Date().toISOString() }, { onConflict: 'thread_id,user_id' }).then(function () { var c = convos.filter(function (x) { return x.id === id; })[0]; if (c) { c.unread = 0; updateBadge(); } }); }
-    function renderFootW(id) { var W = windows[id]; if (!W) return;
+    function openAtt(a) { if (!a || !a.path) return; BE.sb.storage.from(a.bucket || 'dm-files').createSignedUrl(a.path, 3600, { download: a.name || undefined }).then(function (r) { if (r && r.data && r.data.signedUrl) window.open(r.data.signedUrl, '_blank'); else alert('Nem sikerült megnyitni a fájlt.'); }); }
+    function attHtml(a) { return '<a class="pndm-att" data-path="' + esc(a.path) + '" data-bucket="' + esc(a.bucket || 'dm-files') + '" data-name="' + esc(a.name || '') + '"><span>' + fileIcon(a.mime, a.name) + '</span><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(a.name || 'fájl') + '</span></a>'; }
+    function uploadDmFile(id, file, cb) {
+      if (!windows[id]) return; var safe = String(file.name || 'file').replace(/[^A-Za-z0-9._-]/g, '_'); var path = id + '/' + Date.now() + '_' + safe;
+      BE.sb.storage.from('dm-files').upload(path, file, { upsert: false }).then(function (res) {
+        if (res && res.error) { alert('Feltöltés sikertelen: ' + res.error.message); return; }
+        cb({ bucket: 'dm-files', path: path, name: file.name, mime: file.type || 'application/octet-stream', size: file.size });
+      }, function () { alert('Feltöltés sikertelen.'); });
+    }
+    function renderFootW(id) { var W = windows[id]; if (!W) return; W.pendingAtts = W.pendingAtts || [];
       W.footEl.innerHTML = (W.ref ? ('<div class="pndm-chip"><span>' + (REF_ICON[W.ref.kind] || '🔗') + '</span><span style="min-width:0;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(W.ref.label || REF_LBL[W.ref.kind] || 'hivatkozás') + '</span><button class="wa" data-a="refx" style="color:var(--muted,#889);border:0;background:transparent;cursor:pointer">✕</button></div>') : '')
-        + '<div class="pndm-in"><textarea class="pndm-wta" rows="1" placeholder="Üzenet…"></textarea><button class="pndm-send pndm-wsend" title="Küldés">➤</button></div>';
+        + (W.pendingAtts.length ? ('<div>' + W.pendingAtts.map(function (a, i) { return '<span class="pndm-attchip"><span>' + fileIcon(a.mime, a.name) + '</span><span style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(a.name) + '</span><button data-attx="' + i + '" style="border:0;background:transparent;cursor:pointer;color:var(--muted,#889);font-size:11px">✕</button></span>'; }).join('') + '</div>') : '')
+        + '<div class="pndm-emoji-panel" style="display:none">' + DM_EMOJI.map(function (e) { return '<button class="pndm-em">' + e + '</button>'; }).join('') + '</div>'
+        + '<div class="pndm-in"><button class="wa2" data-a="emoji" title="Emoji">😊</button><button class="wa2" data-a="file" title="Fájl csatolása">📎</button><input type="file" class="pndm-wfile" multiple style="display:none"><textarea class="pndm-wta" rows="1" placeholder="Üzenet…"></textarea><button class="pndm-send pndm-wsend" title="Küldés">➤</button></div>';
       var ta = W.footEl.querySelector('.pndm-wta'); ta.oninput = function () { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 90) + 'px'; };
       ta.onkeydown = function (e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendWin(id); } };
       W.footEl.querySelector('.pndm-wsend').onclick = function () { sendWin(id); };
       var rx = W.footEl.querySelector('[data-a="refx"]'); if (rx) rx.onclick = function () { W.ref = null; renderFootW(id); };
+      [].forEach.call(W.footEl.querySelectorAll('[data-attx]'), function (b) { b.onclick = function () { W.pendingAtts.splice(+b.getAttribute('data-attx'), 1); renderFootW(id); }; });
+      var panel = W.footEl.querySelector('.pndm-emoji-panel');
+      W.footEl.querySelector('[data-a="emoji"]').onclick = function () { panel.style.display = panel.style.display === 'none' ? 'flex' : 'none'; };
+      [].forEach.call(W.footEl.querySelectorAll('.pndm-em'), function (b) { b.onclick = function () { var s = ta.selectionStart != null ? ta.selectionStart : ta.value.length, e2 = ta.selectionEnd != null ? ta.selectionEnd : s; ta.value = ta.value.slice(0, s) + b.textContent + ta.value.slice(e2); ta.focus(); try { ta.selectionStart = ta.selectionEnd = s + b.textContent.length; } catch (e) { } panel.style.display = 'none'; }; });
+      var fin = W.footEl.querySelector('.pndm-wfile');
+      W.footEl.querySelector('[data-a="file"]').onclick = function () { fin.click(); };
+      fin.onchange = function () { var files = [].slice.call(fin.files || []); fin.value = ''; files.forEach(function (f) { if (f.size > 25 * 1024 * 1024) { alert('A fájl túl nagy (max 25 MB): ' + f.name); return; } uploadDmFile(id, f, function (a) { if (!windows[id]) return; W.pendingAtts.push(a); renderFootW(id); }); }); };
       setTimeout(function () { try { ta.focus(); } catch (e) { } }, 20); }
-    function sendWin(id) { var W = windows[id]; if (!W) return; var ta = W.footEl.querySelector('.pndm-wta'); var txt = (ta.value || '').trim(); var ref = W.ref; if (!txt && !ref) return; var u = curUser(); if (!u) return;
-      ta.value = ''; ta.style.height = 'auto'; W.ref = null; renderFootW(id);
-      var row = { thread_id: id, sender_id: u.id, body: txt }; if (ref) row.refs = [ref];
-      BE.sb.from('dm_messages').insert(row).select('id,sender_id,body,refs,created_at').maybeSingle().then(function (r) { if (r && r.error) { alert(r.error.message); return; } if (r && r.data && windows[id]) { W.msgs.push(r.data); renderWinMsgs(id); }
-        (W.thread.others || []).forEach(function (oid) { BE.sb.rpc('pr_notify_dm', { p_recipient: oid, p_thread: id, p_excerpt: txt || 'hivatkozást küldött' }).then(function () { }, function () { }); }); }); }
+    function sendWin(id) { var W = windows[id]; if (!W) return; var ta = W.footEl.querySelector('.pndm-wta'); var txt = (ta.value || '').trim(); var ref = W.ref; var atts = (W.pendingAtts || []).slice(); if (!txt && !ref && !atts.length) return; var u = curUser(); if (!u) return;
+      ta.value = ''; ta.style.height = 'auto'; W.ref = null; W.pendingAtts = []; renderFootW(id);
+      var row = { thread_id: id, sender_id: u.id, body: txt }; if (ref) row.refs = [ref]; if (atts.length) row.attachments = atts;
+      BE.sb.from('dm_messages').insert(row).select('id,sender_id,body,refs,attachments,created_at').maybeSingle().then(function (r) { if (r && r.error) { alert(r.error.message); return; } if (r && r.data && windows[id]) { W.msgs.push(r.data); renderWinMsgs(id); }
+        (W.thread.others || []).forEach(function (oid) { BE.sb.rpc('pr_notify_dm', { p_recipient: oid, p_thread: id, p_excerpt: txt || (atts.length ? 'fájlt küldött' : 'hivatkozást küldött') }).then(function () { }, function () { }); }); }); }
     function openWindow(thread, ref) {
       var id = thread.id;
       if (windows[id]) { var Ex = windows[id]; if (ref) { Ex.ref = ref; renderFootW(id); } if (Ex.minimized) restoreWindow(id); focusWindow(id); return; }
@@ -699,7 +729,7 @@
       var el = document.createElement('div'); el.className = 'pndm-win'; el.style.left = x + 'px'; el.style.top = y + 'px'; el.style.width = w + 'px'; el.style.height = h + 'px'; el.style.zIndex = (++zTop);
       el.innerHTML = '<div class="pndm-wbar" style="background:' + headColor(thread) + '">' + winTitle(thread) + '<span style="flex:1"></span><button class="wa" data-a="min" title="Kis méret">▁</button><button class="wa" data-a="close" title="Bezárás">✕</button></div><div class="pndm-wbody"></div><div class="pndm-wfoot"></div><div class="pndm-rz"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M14 6 L6 14 M14 10 L10 14"/></svg></div>';
       winLayer.appendChild(el);
-      var W = windows[id] = { thread: thread, el: el, bodyEl: el.querySelector('.pndm-wbody'), footEl: el.querySelector('.pndm-wfoot'), msgs: [], ref: ref || null, minimized: false, unread: 0 };
+      var W = windows[id] = { thread: thread, el: el, bodyEl: el.querySelector('.pndm-wbody'), footEl: el.querySelector('.pndm-wfoot'), msgs: [], ref: ref || null, minimized: false, unread: 0, pendingAtts: [] };
       el.addEventListener('pointerdown', function () { focusWindow(id); }, true);
       var bar = el.querySelector('.pndm-wbar'); bar.addEventListener('pointerdown', function (e) { if (e.target.closest && e.target.closest('.wa')) return; startDrag(id, e); });
       el.querySelector('.pndm-rz').addEventListener('pointerdown', function (e) { startResize(id, e); });
