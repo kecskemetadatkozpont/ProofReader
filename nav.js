@@ -457,6 +457,22 @@
       '.pndm-search{width:100%;box-sizing:border-box;border:1px solid var(--line,#e4e7ec);border-radius:9px;padding:8px 10px;font:inherit;font-size:13px;background:var(--app-bg,#fff);color:inherit;margin-bottom:8px}',
       '.pndm-empty{font-size:12.5px;color:var(--muted,#667);text-align:center;padding:22px 12px;line-height:1.5}',
       '.pndm-seclbl{font-size:9.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted,#667);padding:8px 8px 5px}',
+      '.pndm-msg .who{font-size:9px;font-weight:700;opacity:.72;margin-bottom:1px}',
+      '#pndm-winlayer{position:fixed;inset:0;z-index:2147482500;pointer-events:none}',
+      '.pndm-win{position:fixed;pointer-events:auto;background:var(--pane,#fff);color:var(--ink,#111);border:1px solid var(--line,#e4e7ec);border-radius:12px;box-shadow:0 14px 44px rgba(15,20,40,.30);display:flex;flex-direction:column;overflow:hidden;min-width:240px;min-height:200px}',
+      '.pndm-wbar{display:flex;align-items:center;gap:6px;padding:7px 9px;color:#fff;cursor:grab;user-select:none;touch-action:none}',
+      '.pndm-wbar.drag{cursor:grabbing}',
+      '.pndm-wbar b{font-size:12px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}',
+      '.pndm-wbar .wa{background:transparent;border:0;color:#fff;cursor:pointer;opacity:.9;font-size:12px;padding:0 3px;line-height:1}',
+      '.pndm-wbody{flex:1;overflow-y:auto;padding:8px 9px;min-height:0}',
+      '.pndm-wfoot{border-top:1px solid var(--line,#e4e7ec);padding:6px 8px}',
+      '.pndm-wta{width:100%;box-sizing:border-box;resize:none;border:1px solid var(--line,#e4e7ec);border-radius:9px;padding:6px 9px;font:inherit;font-size:12.5px;background:var(--app-bg,#fff);color:inherit;max-height:90px}',
+      '.pndm-in{display:flex;gap:5px;align-items:flex-end}',
+      '.pndm-rz{position:absolute;right:2px;bottom:2px;width:16px;height:16px;cursor:nwse-resize;color:var(--muted,#889);touch-action:none}',
+      '#pndm-heads{position:fixed;right:16px;bottom:120px;z-index:2147482400;display:flex;flex-direction:column;gap:9px;align-items:center;pointer-events:none}',
+      '.pndm-head{pointer-events:auto;width:44px;height:44px;border-radius:50%;border:2px solid var(--pane,#fff);box-shadow:0 6px 18px rgba(20,24,40,.28);display:grid;place-items:center;color:#fff;font-weight:700;font-size:13px;cursor:pointer;position:relative}',
+      '.pndm-head .b{position:absolute;top:-3px;right:-3px;min-width:15px;height:15px;padding:0 4px;border-radius:999px;background:#e5484d;color:#fff;font-size:8.5px;font-weight:700;display:grid;place-items:center;border:1.5px solid var(--pane,#fff)}',
+      '@media(max-width:640px){.pndm-win{left:0!important;top:26px!important;width:100vw!important;height:calc(100% - 26px)!important;border-radius:0}.pndm-rz{display:none}}',
       '#pn-dm-badge{position:absolute;top:-4px;right:-4px;min-width:15px;height:15px;padding:0 4px;border-radius:999px;background:#e5484d;color:#fff;font-size:9px;font-weight:700;display:none;place-items:center;border:1.5px solid var(--pane,#fff)}',
       '#pn-dm-badge.on{display:grid}'
     ].join('');
@@ -468,6 +484,9 @@
     document.body.appendChild(scrim); document.body.appendChild(panel);
 
     var me = null, convos = [], people = {}, curThread = null, msgs = [], pendingRef = null, ch = null, loaded = false, view = 'list';
+    var windows = {}, zTop = 30, POS = (function () { try { return JSON.parse(localStorage.getItem('pndm-pos') || '{}') || {}; } catch (e) { return {}; } })();
+    var winLayer = document.createElement('div'); winLayer.id = 'pndm-winlayer'; document.body.appendChild(winLayer);
+    var headsTray = document.createElement('div'); headsTray.id = 'pndm-heads'; document.body.appendChild(headsTray);
     var body = panel.querySelector('#pndm-body'), foot = panel.querySelector('#pndm-foot'), titleEl = panel.querySelector('#pndm-title'), backBtn = panel.querySelector('#pndm-back');
     function nameOf(uid) { if (uid && me && uid === me.id) return 'Te'; return (people[uid] && people[uid].name) || 'Kolléga'; }
     function colOf(uid) { return (people[uid] && people[uid].color) || dmColor(uid); }
@@ -541,10 +560,7 @@
       body.scrollTop = body.scrollHeight;
     }
     function refreshThread() { if (!curThread) return; BE.sb.from('dm_messages').select('id,sender_id,body,refs,attachments,created_at').eq('thread_id', curThread.id).order('created_at', { ascending: true }).then(function (r) { if (r && r.data) { msgs = r.data; renderThread(); markRead(); } }); }
-    function openThread(c) {
-      view = 'thread'; curThread = c; backBtn.style.display = 'grid'; titleEl.textContent = c.title; body.innerHTML = '<div class="pndm-empty">Betöltés…</div>';
-      renderFoot(); refreshThread();
-    }
+    function openThread(c) { close(); openWindow(c, pendingRef); pendingRef = null; }   // Messenger-mode: open a floating window, not the drawer
     function markRead() { var u = curUser(); if (!curThread || !u) return; BE.sb.from('dm_reads').upsert({ thread_id: curThread.id, user_id: u.id, last_read_at: new Date().toISOString() }, { onConflict: 'thread_id,user_id' }).then(function () { var c = convos.filter(function (x) { return x.id === curThread.id; })[0]; if (c) { c.unread = 0; updateBadge(); } }); }
     function doSend() {
       var ta = foot.querySelector('#pndm-ta'); if (!ta || !curThread) return; var txt = (ta.value || '').trim(); var ref = pendingRef;
@@ -597,13 +613,87 @@
       });
     }
 
+    // ---------- floating window manager (Messenger-mode): each thread is a draggable + resizable window ----------
+    function clampN(v, min, max) { return Math.max(min, Math.min(max, v)); }
+    function headColor(th) { var o = th.others || []; return (th.kind !== 'dm' && o.length > 1) ? ('linear-gradient(135deg,' + colOf(o[0]) + ',' + colOf(o[1] || o[0]) + ')') : colOf(o[0]); }
+    function winTitle(th) { var o = th.others || []; var av = (th.kind !== 'dm' && o.length > 1) ? ('<span style="display:flex;margin-right:2px">' + o.slice(0, 2).map(function (u, i) { return '<span class="pndm-av sm" style="' + (i ? 'margin-left:-7px;' : '') + 'border:1.5px solid rgba(255,255,255,.55);background:' + colOf(u) + '">' + esc(dmMono(nameOf(u))) + '</span>'; }).join('') + '</span>') : avHtml(o[0], 22); return av + '<b>' + esc(th.title || 'Beszélgetés') + '</b>'; }
+    function savePos() { try { var out = {}; Object.keys(windows).forEach(function (id) { var W = windows[id], e = W.el; out[id] = { x: parseFloat(e.style.left) || 0, y: parseFloat(e.style.top) || 0, w: parseFloat(e.style.width) || 300, h: parseFloat(e.style.height) || 384, min: !!W.minimized }; }); localStorage.setItem('pndm-pos', JSON.stringify(out)); } catch (e) { } }
+    function focusWindow(id) { var W = windows[id]; if (W) W.el.style.zIndex = (++zTop); }
+    function renderHeads() {
+      var mins = Object.keys(windows).filter(function (id) { return windows[id].minimized; });
+      headsTray.innerHTML = mins.map(function (id) { var W = windows[id], o = W.thread.others || []; return '<div class="pndm-head" data-id="' + esc(id) + '" style="background:' + headColor(W.thread) + '" title="' + esc(W.thread.title || '') + '">' + esc(dmMono(o[0] ? nameOf(o[0]) : (W.thread.title || '?'))) + (W.unread ? '<span class="b">' + (W.unread > 9 ? '9+' : W.unread) + '</span>' : '') + '</div>'; }).join('');
+      [].forEach.call(headsTray.querySelectorAll('.pndm-head'), function (el) { el.onclick = function () { restoreWindow(el.getAttribute('data-id')); }; });
+    }
+    function minimizeWindow(id) { var W = windows[id]; if (!W) return; W.minimized = true; W.el.style.display = 'none'; renderHeads(); savePos(); }
+    function restoreWindow(id) { var W = windows[id]; if (!W) return; W.minimized = false; W.unread = 0; W.el.style.display = 'flex'; focusWindow(id); renderHeads(); loadWinMsgs(id); }
+    function closeWindow(id) { var W = windows[id]; if (!W) return; try { W.el.remove(); } catch (e) { } delete windows[id]; renderHeads(); savePos(); }
+    function startDrag(id, e) {
+      var W = windows[id]; if (!W) return; var bar = W.el.querySelector('.pndm-wbar'); bar.classList.add('drag');
+      var sx = e.clientX, sy = e.clientY, ox = parseFloat(W.el.style.left) || 0, oy = parseFloat(W.el.style.top) || 0;
+      try { bar.setPointerCapture(e.pointerId); } catch (_) { }
+      function mv(ev) { W.el.style.left = clampN(ox + (ev.clientX - sx), 0, window.innerWidth - W.el.offsetWidth) + 'px'; W.el.style.top = clampN(oy + (ev.clientY - sy), 26, window.innerHeight - 34) + 'px'; }
+      function up(ev) { bar.classList.remove('drag'); bar.removeEventListener('pointermove', mv); bar.removeEventListener('pointerup', up); try { bar.releasePointerCapture(ev.pointerId); } catch (_) { } savePos(); }
+      bar.addEventListener('pointermove', mv); bar.addEventListener('pointerup', up);
+    }
+    function startResize(id, e) {
+      var W = windows[id]; if (!W) return; e.preventDefault(); e.stopPropagation(); var rz = W.el.querySelector('.pndm-rz');
+      var sx = e.clientX, sy = e.clientY, ow = W.el.offsetWidth, oh = W.el.offsetHeight;
+      try { rz.setPointerCapture(e.pointerId); } catch (_) { }
+      function mv(ev) { W.el.style.width = clampN(ow + (ev.clientX - sx), 240, window.innerWidth - 8) + 'px'; W.el.style.height = clampN(oh + (ev.clientY - sy), 200, window.innerHeight - 30) + 'px'; }
+      function up(ev) { rz.removeEventListener('pointermove', mv); rz.removeEventListener('pointerup', up); try { rz.releasePointerCapture(ev.pointerId); } catch (_) { } savePos(); }
+      rz.addEventListener('pointermove', mv); rz.addEventListener('pointerup', up);
+    }
+    function loadWinMsgs(id) { var W = windows[id]; if (!W) return; BE.sb.from('dm_messages').select('id,sender_id,body,refs,created_at').eq('thread_id', id).order('created_at', { ascending: true }).then(function (r) { if (!windows[id]) return; if (r && r.data) { W.msgs = r.data; renderWinMsgs(id); markReadWin(id); } }); }
+    function renderWinMsgs(id) { var W = windows[id]; if (!W) return; var u = curUser(); var grp = (W.thread.kind !== 'dm') || ((W.thread.others || []).length > 1);
+      W.bodyEl.innerHTML = W.msgs.map(function (m) { var mine = m.sender_id === (u && u.id); var refs = (m.refs || []).map(erefHtml).join(''); return '<div class="pndm-msg ' + (mine ? 'me' : 'them') + '">' + ((grp && !mine) ? ('<div class="who">' + esc(nameOf(m.sender_id)) + '</div>') : '') + (m.body ? esc(m.body) : '') + refs + '</div>'; }).join('') || '<div class="pndm-empty" style="padding:10px">Írj elsőként.</div>';
+      W.bodyEl.scrollTop = W.bodyEl.scrollHeight; }
+    function markReadWin(id) { var u = curUser(); if (!u) return; BE.sb.from('dm_reads').upsert({ thread_id: id, user_id: u.id, last_read_at: new Date().toISOString() }, { onConflict: 'thread_id,user_id' }).then(function () { var c = convos.filter(function (x) { return x.id === id; })[0]; if (c) { c.unread = 0; updateBadge(); } }); }
+    function renderFootW(id) { var W = windows[id]; if (!W) return;
+      W.footEl.innerHTML = (W.ref ? ('<div class="pndm-chip"><span>' + (REF_ICON[W.ref.kind] || '🔗') + '</span><span style="min-width:0;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(W.ref.label || REF_LBL[W.ref.kind] || 'hivatkozás') + '</span><button class="wa" data-a="refx" style="color:var(--muted,#889);border:0;background:transparent;cursor:pointer">✕</button></div>') : '')
+        + '<div class="pndm-in"><textarea class="pndm-wta" rows="1" placeholder="Üzenet…"></textarea><button class="pndm-send pndm-wsend" title="Küldés">➤</button></div>';
+      var ta = W.footEl.querySelector('.pndm-wta'); ta.oninput = function () { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 90) + 'px'; };
+      ta.onkeydown = function (e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendWin(id); } };
+      W.footEl.querySelector('.pndm-wsend').onclick = function () { sendWin(id); };
+      var rx = W.footEl.querySelector('[data-a="refx"]'); if (rx) rx.onclick = function () { W.ref = null; renderFootW(id); };
+      setTimeout(function () { try { ta.focus(); } catch (e) { } }, 20); }
+    function sendWin(id) { var W = windows[id]; if (!W) return; var ta = W.footEl.querySelector('.pndm-wta'); var txt = (ta.value || '').trim(); var ref = W.ref; if (!txt && !ref) return; var u = curUser(); if (!u) return;
+      ta.value = ''; ta.style.height = 'auto'; W.ref = null; renderFootW(id);
+      var row = { thread_id: id, sender_id: u.id, body: txt }; if (ref) row.refs = [ref];
+      BE.sb.from('dm_messages').insert(row).select('id,sender_id,body,refs,created_at').maybeSingle().then(function (r) { if (r && r.error) { alert(r.error.message); return; } if (r && r.data && windows[id]) { W.msgs.push(r.data); renderWinMsgs(id); }
+        (W.thread.others || []).forEach(function (oid) { BE.sb.rpc('pr_notify_dm', { p_recipient: oid, p_thread: id, p_excerpt: txt || 'hivatkozást küldött' }).then(function () { }, function () { }); }); }); }
+    function openWindow(thread, ref) {
+      var id = thread.id;
+      if (windows[id]) { var Ex = windows[id]; if (ref) { Ex.ref = ref; renderFootW(id); } if (Ex.minimized) restoreWindow(id); focusWindow(id); return; }
+      var s = POS[id] || {};
+      var w = clampN(s.w || 300, 240, window.innerWidth - 8), h = clampN(s.h || 384, 200, window.innerHeight - 40);
+      var idx = Object.keys(windows).length;
+      var x = (s.x != null) ? clampN(s.x, 0, window.innerWidth - w) : Math.max(8, window.innerWidth - w - 20 - (idx * 28) % 190);
+      var y = (s.y != null) ? clampN(s.y, 28, window.innerHeight - h) : Math.max(30, window.innerHeight - h - 14);
+      var el = document.createElement('div'); el.className = 'pndm-win'; el.style.left = x + 'px'; el.style.top = y + 'px'; el.style.width = w + 'px'; el.style.height = h + 'px'; el.style.zIndex = (++zTop);
+      el.innerHTML = '<div class="pndm-wbar" style="background:' + headColor(thread) + '">' + winTitle(thread) + '<span style="flex:1"></span><button class="wa" data-a="min" title="Kis méret">▁</button><button class="wa" data-a="close" title="Bezárás">✕</button></div><div class="pndm-wbody"></div><div class="pndm-wfoot"></div><div class="pndm-rz"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M14 6 L6 14 M14 10 L10 14"/></svg></div>';
+      winLayer.appendChild(el);
+      var W = windows[id] = { thread: thread, el: el, bodyEl: el.querySelector('.pndm-wbody'), footEl: el.querySelector('.pndm-wfoot'), msgs: [], ref: ref || null, minimized: false, unread: 0 };
+      el.addEventListener('pointerdown', function () { focusWindow(id); }, true);
+      var bar = el.querySelector('.pndm-wbar'); bar.addEventListener('pointerdown', function (e) { if (e.target.closest && e.target.closest('.wa')) return; startDrag(id, e); });
+      el.querySelector('.pndm-rz').addEventListener('pointerdown', function (e) { startResize(id, e); });
+      el.querySelector('[data-a="min"]').onclick = function () { minimizeWindow(id); };
+      el.querySelector('[data-a="close"]').onclick = function () { closeWindow(id); };
+      W.bodyEl.innerHTML = '<div class="pndm-empty" style="padding:10px">Betöltés…</div>';
+      renderFootW(id); loadWinMsgs(id); savePos();
+      if (s.min) minimizeWindow(id);
+    }
+
     function open() { scrim.classList.add('on'); panel.classList.add('on'); loadConvos(); ensureRealtime(); }
     function close() { scrim.classList.remove('on'); panel.classList.remove('on'); }
     function ensureRealtime() {
       var u = curUser(); if (ch || !(BE && BE.sb && u && u.id)) return;
       ch = BE.sb.channel('pndm:' + u.id).on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'dm_messages' }, function (p) {
-        var m = p && p.new; if (!m) return;
-        if (curThread && m.thread_id === curThread.id) { if (!msgs.some(function (x) { return x.id === m.id; })) { msgs.push(m); renderThread(); if (m.sender_id !== (curUser() && curUser().id)) markRead(); } }
+        var m = p && p.new; if (!m) return; var W = windows[m.thread_id]; var meId = curUser() && curUser().id;
+        if (W && !W.msgs.some(function (x) { return x.id === m.id; })) {
+          W.msgs.push(m);
+          if (!W.minimized) { renderWinMsgs(m.thread_id); if (m.sender_id !== meId) markReadWin(m.thread_id); }
+          else if (m.sender_id !== meId) { W.unread = (W.unread || 0) + 1; renderHeads(); }
+        }
         scheduleReload();
       }).subscribe();
     }
@@ -617,7 +707,7 @@
     // public API for entity "💬 Vélemény kérése" buttons across the app
     window.PRDM = {
       open: function () { open(); renderList(); },
-      openWith: function (ref, otherId) { open(); pendingRef = ref || null; if (otherId) startDM(otherId); else newConvoView(); }
+      openWith: function (ref, otherId) { pendingRef = ref || null; if (otherId) { startDM(otherId); } else { open(); newConvoView(); } }
     };
 
     // launchers: the topbar icon (where the global bar shows) AND an always-visible floating button
