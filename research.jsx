@@ -977,7 +977,7 @@
     var ddS = useState(false), dropActive = ddS[0], setDropActive = ddS[1];   // P2: drag files onto the chat → upload to the file manager
     var pkS = useState(false), picker = pkS[0], setPicker = pkS[1];
     var enS = useState(false), enhancing = enS[0], setEnhancing = enS[1];   // #6: prompt enhancement in flight
-    var firstLoad = useRef(true), animated = useRef({}), alive = useRef(true), scrollRef = useRef(null), taRef = useRef(null), justStreamed = useRef(false);
+    var firstLoad = useRef(true), animated = useRef({}), alive = useRef(true), scrollRef = useRef(null), taRef = useRef(null), justStreamed = useRef(false), lastLog = useRef(0);
     var atBottom = useRef(true);   // only auto-follow the stream while the user is at the bottom; if they scroll up, stay put
     var sgS = useState(''), sgMsg = sgS[0], setSgMsg = sgS[1];
     var sgB = useState(false), sgBusy = sgB[0], setSgBusy = sgB[1];
@@ -1221,6 +1221,13 @@
           if (ins && ins.error) { setBusy(false); setErr(atts.length ? 'Attachments need migration-17 + a research-chat redeploy — ' + ins.error.message : ins.error.message); return; }
           loadMsgs(cid);
           streamReply(cid);   // live token stream → persisted + reloaded on completion
+          // surface chat activity in the Áttekintő "Ki mit csinált" feed (research_log). Throttled so a fast
+          // conversation logs at most one entry/minute per user, not one per message.
+          var now = Date.now();
+          if (!lastLog.current || now - lastLog.current > 60000) {
+            lastLog.current = now;
+            sb.from('research_log').insert({ project_id: props.projectId, profile_id: props.authorId, type: 'NOTE', summary: '💬 Ötlet-chat: ' + txt.slice(0, 100) }).then(function () { if (props.onChanged) props.onChanged(); }, function () { });
+          }
         });
       });
     }
