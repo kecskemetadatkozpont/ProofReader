@@ -425,9 +425,9 @@
     var BE = window.PR_BACKEND;
     var css = document.createElement('style'); css.id = 'pndm-css';
     css.textContent = [
-      '#pndm-scrim{position:fixed;inset:0;z-index:96;background:rgba(15,20,40,.35);opacity:0;pointer-events:none;transition:opacity .18s}',
+      '#pndm-scrim{position:fixed;inset:0;z-index:2147483000;background:rgba(15,20,40,.35);opacity:0;pointer-events:none;transition:opacity .18s}',
       '#pndm-scrim.on{opacity:1;pointer-events:auto}',
-      '#pndm{position:fixed;top:0;right:0;bottom:0;z-index:97;width:min(392px,96vw);background:var(--pane,#fff);color:var(--ink,#111);border-left:1px solid var(--line,#e4e7ec);box-shadow:-14px 0 44px rgba(15,20,40,.20);transform:translateX(102%);transition:transform .2s ease;display:flex;flex-direction:column;font-size:13px}',
+      '#pndm{position:fixed;top:0;right:0;bottom:0;z-index:2147483001;width:min(392px,96vw);background:var(--pane,#fff);color:var(--ink,#111);border-left:1px solid var(--line,#e4e7ec);box-shadow:-14px 0 44px rgba(15,20,40,.20);transform:translateX(102%);transition:transform .2s ease;display:flex;flex-direction:column;font-size:13px}',
       '#pndm.on{transform:none}',
       '.pndm-h{display:flex;align-items:center;gap:8px;padding:11px 13px;border-bottom:1px solid var(--line,#e4e7ec);flex:none}',
       '.pndm-h b{font-size:15px}',
@@ -463,7 +463,7 @@
 
     var scrim = document.createElement('div'); scrim.id = 'pndm-scrim';
     var panel = document.createElement('aside'); panel.id = 'pndm'; panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-modal', 'true'); panel.setAttribute('aria-label', 'Üzenetek');
-    panel.innerHTML = '<div class="pndm-h"><button class="pndm-ic" id="pndm-back" title="Vissza" style="display:none">‹</button><b id="pndm-title">Üzenetek</b><span style="flex:1"></span><button class="pndm-ic" id="pndm-new" title="Új beszélgetés">✎</button><button class="pndm-ic" id="pndm-close" title="Bezárás">✕</button></div><div class="pndm-body" id="pndm-body"></div><div class="pndm-foot" id="pndm-foot" style="display:none"></div>';
+    panel.innerHTML = '<div class="pndm-h"><button class="pndm-ic" id="pndm-back" title="Vissza" style="display:none">‹</button><b id="pndm-title">Üzenetek</b><span style="flex:1"></span><button id="pndm-new" title="Új beszélgetés indítása egy kollégával" style="border:1px solid var(--accent,#4f46e5);background:var(--accent,#4f46e5);color:#fff;border-radius:8px;padding:6px 11px;font:inherit;font-size:12px;font-weight:600;cursor:pointer;flex:none">✏️ Új</button><button class="pndm-ic" id="pndm-close" title="Bezárás">✕</button></div><div class="pndm-body" id="pndm-body"></div><div class="pndm-foot" id="pndm-foot" style="display:none"></div>';
     document.body.appendChild(scrim); document.body.appendChild(panel);
 
     var me = null, convos = [], people = {}, curThread = null, msgs = [], pendingRef = null, ch = null, loaded = false;
@@ -511,7 +511,10 @@
       curThread = null; backBtn.style.display = 'none'; titleEl.textContent = 'Üzenetek'; foot.style.display = 'none';
       if (!loaded) { body.innerHTML = '<div class="pndm-empty">Betöltés…</div>'; return; }
       if (!(curUser() && curUser().id)) { body.innerHTML = '<div class="pndm-empty">Jelentkezz be az üzenetekhez.</div>'; return; }
-      if (!convos.length) { body.innerHTML = '<div class="pndm-empty">Még nincs beszélgetésed.<br>Az ✎ gombbal indíthatsz egyet egy kollégával — vagy bármely ötletnél / forrásnál a „💬 Vélemény kérése" gombbal.</div>'; return; }
+      if (!convos.length) {
+        body.innerHTML = '<div class="pndm-empty">Még nincs beszélgetésed.<br><br><button id="pndm-new2" style="border:0;background:var(--accent,#4f46e5);color:#fff;border-radius:9px;padding:9px 18px;font:inherit;font-size:13.5px;font-weight:600;cursor:pointer">✏️ Új beszélgetés</button><br><br><span style="font-size:11.5px;color:var(--muted,#667)">…vagy bármely ötletnél / forrásnál a „💬 Vélemény" gombbal.</span></div>';
+        var nb = body.querySelector('#pndm-new2'); if (nb) nb.onclick = newConvoView; return;
+      }
       body.innerHTML = convos.map(function (c, i) {
         var uid = c.others[0], pv = c.last ? ((c.last.sender_id === me.id ? 'Te: ' : '') + (c.last.body ? c.last.body : (c.last.refs && c.last.refs.length ? (REF_ICON[c.last.refs[0].kind] || '🔗') + ' hivatkozás' : ''))) : 'Nincs üzenet';
         var ava = c.kind === 'dm' ? avHtml(uid, 34) : '<span class="pndm-av" style="background:linear-gradient(135deg,#7c6cf0,#e08b00)">' + (c.entity ? (REF_ICON[c.entity.kind] || '👥') : '👥') + '</span>';
@@ -603,7 +606,7 @@
     function openMsg() { open(); renderList(); }
     var topL = document.getElementById('pn-dm'); if (topL) topL.onclick = openMsg;
     var fab = document.createElement('button'); fab.id = 'pndm-fab'; fab.title = 'Üzenetek'; fab.setAttribute('aria-label', 'Üzenetek — kollégák chat');
-    fab.setAttribute('style', 'position:fixed;right:16px;bottom:66px;z-index:90;width:46px;height:46px;border-radius:50%;border:0;background:var(--accent,#4f46e5);color:#fff;box-shadow:0 6px 18px rgba(20,24,40,.30);font-size:20px;cursor:pointer;line-height:1;padding:0');
+    fab.setAttribute('style', 'position:fixed;right:16px;bottom:66px;z-index:2147482000;width:46px;height:46px;border-radius:50%;border:0;background:var(--accent,#4f46e5);color:#fff;box-shadow:0 6px 18px rgba(20,24,40,.30);font-size:20px;cursor:pointer;line-height:1;padding:0');
     fab.innerHTML = '💬<span id="pndm-fab-badge" style="position:absolute;top:-3px;right:-3px;min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:#e5484d;color:#fff;font-size:9px;font-weight:700;display:none;place-items:center;border:2px solid var(--app-bg,#fff)"></span>';
     fab.onclick = openMsg; document.body.appendChild(fab);
     setTimeout(function () { loadConvos(); ensureRealtime(); }, 1400);
