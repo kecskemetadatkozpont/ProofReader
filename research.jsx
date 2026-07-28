@@ -8895,7 +8895,7 @@
     var sS = useState(null), sum = sS[0], setSum = sS[1];        // { log, counts, tasks }
     var pS = useState({}), ppl = pS[0], setPpl = pS[1];          // profile_id → {name, avatar, color}
     var oS = useState({}), onl = oS[0], setOnl = oS[1];          // id → true (present now)
-    var alive = useRef(true), chRef = useRef(null);
+    var alive = useRef(true), chRef = useRef(null), openedAtRef = useRef(Date.now());   // session baseline: "since you opened the page"
     useEffect(function () { alive.current = true; return function () { alive.current = false; }; }, []);
     var PAL = ['#e11d48', '#0891b2', '#7c3aed', '#ca8a04', '#059669', '#db2777', '#2563eb', '#ea580c'];
     function pColor(id, canon) { if (canon) return canon; var s = String(id || ''), hh = 0; for (var i = 0; i < s.length; i++) hh = (hh * 31 + s.charCodeAt(i)) >>> 0; return PAL[hh % PAL.length]; }
@@ -8944,9 +8944,16 @@
     var log = sum.log, counts = sum.counts, tasks = sum.tasks;
     var tasksOpen = tasks.filter(function (t) { return t.status !== 'done'; }).length;
     var overdue = tasks.filter(function (t) { return t.status !== 'done' && t.due && new Date(t.due) < new Date(); }).length;
-    // per-contributor rollup from the activity log
-    var byUser = {}; log.forEach(function (x) { var u = x.profile_id || '?'; if (!byUser[u]) byUser[u] = { id: u, count: 0, byType: {}, last: x.ts }; byUser[u].count++; byUser[u].byType[x.type] = (byUser[u].byType[x.type] || 0) + 1; if (String(x.ts) > String(byUser[u].last)) byUser[u].last = x.ts; });
-    var contributors = Object.keys(byUser).map(function (k) { return byUser[k]; }).sort(function (a, b) { return b.count - a.count; });
+    // per-contributor rollup from the activity log, WITH a session delta ("since you opened the page")
+    var openedAt = openedAtRef.current, sessionTotal = 0;
+    var byUser = {}; log.forEach(function (x) {
+      var u = x.profile_id || '?'; if (!byUser[u]) byUser[u] = { id: u, count: 0, byType: {}, last: x.ts, session: 0, sByType: {}, lastSession: null };
+      var b = byUser[u]; b.count++; b.byType[x.type] = (b.byType[x.type] || 0) + 1; if (String(x.ts) > String(b.last)) b.last = x.ts;
+      if (x.ts && new Date(x.ts).getTime() > openedAt) { b.session++; b.sByType[x.type] = (b.sByType[x.type] || 0) + 1; sessionTotal++; if (!b.lastSession || String(x.ts) > String(b.lastSession.ts)) b.lastSession = x; }
+    });
+    var contributors = Object.keys(byUser).map(function (k) { return byUser[k]; }).sort(function (a, b) { return (b.session - a.session) || (b.count - a.count); });
+    var sessionContributors = contributors.filter(function (c) { return c.session > 0; }).length;
+    function isFresh(x) { return x.ts && new Date(x.ts).getTime() > openedAt; }
     // 7-day activity sparkline
     var now = Date.now(), DAY = 86400000, buckets = [0, 0, 0, 0, 0, 0, 0];
     log.forEach(function (x) { if (!x.ts) return; var idx = 6 - Math.floor((now - new Date(x.ts).getTime()) / DAY); if (idx >= 0 && idx < 7) buckets[idx]++; });
@@ -9010,32 +9017,41 @@
         kpi('Feladat', tasksOpen + '/' + tasks.length, overdue ? (overdue + ' lejárt') : 'nyitott', overdue ? '#e11d48' : '#ca8a04', 'tasks'),
         kpi('Esemény', log.length, weekN + ' e héten', 'var(--ink)', 'log')
       ),
-      // feed + contributors
-      h('div', { style: { display: 'grid', gridTemplateColumns: 'minmax(0, 1.3fr) minmax(0, 1fr)', gap: 14 } },
-        // Ki mit csinált
+      // session header — "what happened since you opened the page"
+      h('div', { style: { display: 'flex', alignItems: 'center', gap: 9, padding: '9px 12px', borderRadius: 11, marginBottom: 12, border: '1px solid color-mix(in srgb, var(--accent) 25%, var(--line))', background: 'color-mix(in srgb, var(--accent) 7%, var(--surface))' } },
+        h('span', { style: { fontSize: 15 } }, '📖'),
+        h('div', { style: { flex: 1, minWidth: 0 } },
+          h('div', { style: { fontSize: 12.5, fontWeight: 700 } }, 'Mi történt, mióta megnyitottad'),
+          h('div', { style: { fontSize: 10.5, color: 'var(--muted)' } }, sessionTotal ? (sessionTotal + ' új esemény · ' + sessionContributors + ' közreműködő') : 'Egyelőre nincs új esemény — élőben frissül.')),
+        sessionTotal ? h('span', { style: { flex: 'none', background: 'var(--accent)', color: '#fff', borderRadius: 999, fontSize: 9.5, fontWeight: 700, padding: '2px 8px' } }, '● ' + sessionTotal + ' új') : null,
+        h('button', { className: 'btn', style: { padding: '3px 9px', fontSize: 11.5, flex: 'none' }, title: 'Frissítés', onClick: function () { load(); } }, '↻')),
+      // who-did-what per person (session-smart cards) + the detailed log
+      h('div', { style: { display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 14 } },
         h('div', null,
-          h('div', { style: { fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--faint)', marginBottom: 8 } }, 'Ki mit csinált'),
-          log.length ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 340, overflowY: 'auto' } }, log.slice(0, 40).map(function (x, i) {
-            var m = LOG_META[x.type] || { ic: '•', c: 'var(--muted)' }, col = clOf(x.profile_id);
-            return h('div', { key: x.id || i, style: { display: 'flex', gap: 8, alignItems: 'flex-start', padding: '6px 4px', borderLeft: '2px solid ' + col, paddingLeft: 9, borderRadius: '0 8px 8px 0' } },
-              avatarEl(x.profile_id, 20),
-              h('div', { style: { minWidth: 0, flex: 1 } },
-                h('div', { style: { fontSize: 12, lineHeight: 1.35, color: 'var(--ink)' } }, m.ic + ' ', h('b', { style: { fontWeight: 600 } }, nmOf(x.profile_id)), ' — ', String(x.summary || x.type || '').slice(0, 120)),
-                h('div', { style: { fontSize: 9.5, color: 'var(--faint)' } }, (x.type || '') + ' · ' + rel(x.ts))));
-          })) : h('div', { className: 'soon', style: { fontSize: 12.5 } }, 'Még nincs naplózott esemény — ahogy haladtok, itt jelenik meg, ki mit tett.')),
-        // Közreműködők
-        h('div', null,
-          h('div', { style: { fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--faint)', marginBottom: 8 } }, 'Közreműködők'),
+          h('div', { style: { fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--faint)', marginBottom: 8 } }, 'Ki mit csinált · személyenként'),
           contributors.length ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 8 } }, contributors.map(function (c) {
-            var total = c.count || 1;
-            return h('div', { key: c.id, style: { border: '1px solid var(--line)', borderRadius: 10, padding: 9, background: 'var(--surface)' } },
+            var ls = c.lastSession;
+            return h('div', { key: c.id, style: { border: '1px solid var(--line)', borderLeft: '3px solid ' + clOf(c.id), borderRadius: 10, padding: 10, background: 'var(--surface)' } },
               h('div', { style: { display: 'flex', alignItems: 'center', gap: 7 } }, avatarEl(c.id, 24),
                 h('span', { style: { fontSize: 12, fontWeight: 620, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, nmOf(c.id)),
                 onl[c.id] ? h('span', { style: { width: 7, height: 7, borderRadius: '50%', background: '#22c55e', flex: 'none' } }) : null,
-                h('span', { style: { marginLeft: 'auto', fontSize: 10.5, color: 'var(--faint)', fontVariantNumeric: 'tabular-nums' } }, c.count + ' db')),
-              h('div', { style: { display: 'flex', height: 6, borderRadius: 3, overflow: 'hidden', marginTop: 6, background: 'var(--surface-2)' } }, LOG_TYPES.filter(function (t) { return c.byType[t]; }).map(function (t) { return h('span', { key: t, title: t + ': ' + c.byType[t], style: { flex: c.byType[t], background: (LOG_META[t] || {}).c || 'var(--muted)' } }); })),
-              h('div', { style: { fontSize: 9.5, color: 'var(--faint)', marginTop: 4 } }, (onl[c.id] ? '● online · ' : '') + 'utolsó: ' + rel(c.last)));
-          })) : h('div', { className: 'soon', style: { fontSize: 12.5 } }, 'A hozzájárulások a naplóból épülnek.'))
+                c.session ? h('span', { style: { marginLeft: 'auto', flex: 'none', background: 'var(--accent)', color: '#fff', borderRadius: 999, fontSize: 9, fontWeight: 700, padding: '1px 7px' } }, c.session + ' új') : h('span', { style: { marginLeft: 'auto', fontSize: 10, color: 'var(--faint)' } }, c.count + ' db')),
+              ls ? h('div', { style: { fontSize: 11, color: 'var(--ink)', margin: '6px 0 5px', lineHeight: 1.4 } }, ((LOG_META[ls.type] || {}).ic || '•') + ' ' + String(ls.summary || ls.type || '').slice(0, 90)) : null,
+              h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: ls ? 0 : 6 } }, LOG_TYPES.filter(function (t) { return c.byType[t]; }).map(function (t) {
+                var m = LOG_META[t] || {};
+                return h('span', { key: t, title: t + ': ' + c.byType[t], style: { display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 9.5, color: 'var(--muted)', background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 999, padding: '1px 6px' } }, (m.ic || '•') + ' ' + c.byType[t], c.sByType[t] ? h('span', { style: { width: 5, height: 5, borderRadius: '50%', background: 'var(--accent)', display: 'inline-block' } }) : null); })),
+              h('div', { style: { fontSize: 9.5, color: 'var(--faint)', marginTop: 5 } }, (onl[c.id] ? '● online · ' : '') + 'utolsó: ' + rel(c.last)));
+          })) : h('div', { className: 'soon', style: { fontSize: 12.5 } }, 'A hozzájárulások a naplóból épülnek.')),
+        h('div', null,
+          h('div', { style: { fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--faint)', marginBottom: 8 } }, 'Napló · részletek'),
+          log.length ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 380, overflowY: 'auto' } }, log.slice(0, 40).map(function (x, i) {
+            var m = LOG_META[x.type] || { ic: '•', c: 'var(--muted)' }, col = clOf(x.profile_id), fresh = isFresh(x);
+            return h('div', { key: x.id || i, style: { display: 'flex', gap: 8, alignItems: 'flex-start', padding: '6px 4px', borderLeft: '2px solid ' + col, paddingLeft: 9, borderRadius: '0 8px 8px 0', background: fresh ? 'color-mix(in srgb, var(--accent) 6%, transparent)' : 'transparent' } },
+              avatarEl(x.profile_id, 20),
+              h('div', { style: { minWidth: 0, flex: 1 } },
+                h('div', { style: { fontSize: 12, lineHeight: 1.35, color: 'var(--ink)' } }, m.ic + ' ', h('b', { style: { fontWeight: 600 } }, nmOf(x.profile_id)), ' — ', String(x.summary || x.type || '').slice(0, 120)),
+                h('div', { style: { fontSize: 9.5, color: 'var(--faint)' } }, (fresh ? '● új · ' : '') + (x.type || '') + ' · ' + rel(x.ts))));
+          })) : h('div', { className: 'soon', style: { fontSize: 12.5 } }, 'Még nincs naplózott esemény — ahogy haladtok, itt jelenik meg, ki mit tett.'))
       )
     );
   }
