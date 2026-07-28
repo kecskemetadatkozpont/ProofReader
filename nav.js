@@ -456,6 +456,7 @@
       '.pndm-send:disabled{opacity:.5;cursor:default}',
       '.pndm-search{width:100%;box-sizing:border-box;border:1px solid var(--line,#e4e7ec);border-radius:9px;padding:8px 10px;font:inherit;font-size:13px;background:var(--app-bg,#fff);color:inherit;margin-bottom:8px}',
       '.pndm-empty{font-size:12.5px;color:var(--muted,#667);text-align:center;padding:22px 12px;line-height:1.5}',
+      '.pndm-seclbl{font-size:9.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted,#667);padding:8px 8px 5px}',
       '#pn-dm-badge{position:absolute;top:-4px;right:-4px;min-width:15px;height:15px;padding:0 4px;border-radius:999px;background:#e5484d;color:#fff;font-size:9px;font-weight:700;display:none;place-items:center;border:1.5px solid var(--pane,#fff)}',
       '#pn-dm-badge.on{display:grid}'
     ].join('');
@@ -466,7 +467,7 @@
     panel.innerHTML = '<div class="pndm-h"><button class="pndm-ic" id="pndm-back" title="Vissza" style="display:none">‹</button><b id="pndm-title">Üzenetek</b><span style="flex:1"></span><button id="pndm-new" title="Új beszélgetés indítása egy kollégával" style="border:1px solid var(--accent,#4f46e5);background:var(--accent,#4f46e5);color:#fff;border-radius:8px;padding:6px 11px;font:inherit;font-size:12px;font-weight:600;cursor:pointer;flex:none">✏️ Új</button><button class="pndm-ic" id="pndm-close" title="Bezárás">✕</button></div><div class="pndm-body" id="pndm-body"></div><div class="pndm-foot" id="pndm-foot" style="display:none"></div>';
     document.body.appendChild(scrim); document.body.appendChild(panel);
 
-    var me = null, convos = [], people = {}, curThread = null, msgs = [], pendingRef = null, ch = null, loaded = false;
+    var me = null, convos = [], people = {}, curThread = null, msgs = [], pendingRef = null, ch = null, loaded = false, view = 'list';
     var body = panel.querySelector('#pndm-body'), foot = panel.querySelector('#pndm-foot'), titleEl = panel.querySelector('#pndm-title'), backBtn = panel.querySelector('#pndm-back');
     function nameOf(uid) { if (uid && me && uid === me.id) return 'Te'; return (people[uid] && people[uid].name) || 'Kolléga'; }
     function colOf(uid) { return (people[uid] && people[uid].color) || dmColor(uid); }
@@ -498,7 +499,7 @@
               var title = t.kind === 'dm' ? (others[0] ? nameOf(others[0]) : 'Beszélgetés') : (t.title || (t.entity && t.entity.label) || 'Csoport');
               return { id: t.id, kind: t.kind, entity: t.entity, others: others, title: title, last: lm, unread: un };
             });
-            if (!curThread) renderList(); updateBadge(); if (cb) cb();
+            if (view === 'list') renderList(); updateBadge(); if (cb) cb();
           }
           if (oidl.length) BE.sb.from('profiles_public').select('id,name,avatar_url,color').in('id', oidl).then(function (pr) { ((pr && pr.data) || []).forEach(function (p) { people[p.id] = { name: p.name, avatar: p.avatar_url, color: p.color }; }); finish(); });
           else finish();
@@ -508,13 +509,10 @@
     function scheduleReload() { if (reloadT) return; reloadT = setTimeout(function () { reloadT = null; loadConvos(); if (curThread) refreshThread(); }, 350); }
 
     function renderList() {
-      curThread = null; backBtn.style.display = 'none'; titleEl.textContent = 'Üzenetek'; foot.style.display = 'none';
+      view = 'list'; curThread = null; backBtn.style.display = 'none'; titleEl.textContent = 'Üzenetek'; foot.style.display = 'none';
       if (!loaded) { body.innerHTML = '<div class="pndm-empty">Betöltés…</div>'; return; }
       if (!(curUser() && curUser().id)) { body.innerHTML = '<div class="pndm-empty">Jelentkezz be az üzenetekhez.</div>'; return; }
-      if (!convos.length) {
-        body.innerHTML = '<div class="pndm-empty">Még nincs beszélgetésed.<br><br><button id="pndm-new2" style="border:0;background:var(--accent,#4f46e5);color:#fff;border-radius:9px;padding:9px 18px;font:inherit;font-size:13.5px;font-weight:600;cursor:pointer">✏️ Új beszélgetés</button><br><br><span style="font-size:11.5px;color:var(--muted,#667)">…vagy bármely ötletnél / forrásnál a „💬 Vélemény" gombbal.</span></div>';
-        var nb = body.querySelector('#pndm-new2'); if (nb) nb.onclick = newConvoView; return;
-      }
+      if (!convos.length) { newConvoView(true); return; }   // no conversations yet → default to your contacts (shared projects), no blank search
       body.innerHTML = convos.map(function (c, i) {
         var uid = c.others[0], pv = c.last ? ((c.last.sender_id === me.id ? 'Te: ' : '') + (c.last.body ? c.last.body : (c.last.refs && c.last.refs.length ? (REF_ICON[c.last.refs[0].kind] || '🔗') + ' hivatkozás' : ''))) : 'Nincs üzenet';
         var ava = c.kind === 'dm' ? avHtml(uid, 34) : '<span class="pndm-av" style="background:linear-gradient(135deg,#7c6cf0,#e08b00)">' + (c.entity ? (REF_ICON[c.entity.kind] || '👥') : '👥') + '</span>';
@@ -544,7 +542,7 @@
     }
     function refreshThread() { if (!curThread) return; BE.sb.from('dm_messages').select('id,sender_id,body,refs,attachments,created_at').eq('thread_id', curThread.id).order('created_at', { ascending: true }).then(function (r) { if (r && r.data) { msgs = r.data; renderThread(); markRead(); } }); }
     function openThread(c) {
-      curThread = c; backBtn.style.display = 'grid'; titleEl.textContent = c.title; body.innerHTML = '<div class="pndm-empty">Betöltés…</div>';
+      view = 'thread'; curThread = c; backBtn.style.display = 'grid'; titleEl.textContent = c.title; body.innerHTML = '<div class="pndm-empty">Betöltés…</div>';
       renderFoot(); refreshThread();
     }
     function markRead() { var u = curUser(); if (!curThread || !u) return; BE.sb.from('dm_reads').upsert({ thread_id: curThread.id, user_id: u.id, last_read_at: new Date().toISOString() }, { onConflict: 'thread_id,user_id' }).then(function () { var c = convos.filter(function (x) { return x.id === curThread.id; })[0]; if (c) { c.unread = 0; updateBadge(); } }); }
@@ -560,15 +558,36 @@
       });
     }
 
-    function newConvoView() {
-      curThread = null; backBtn.style.display = 'grid'; titleEl.textContent = 'Új beszélgetés'; foot.style.display = 'none';
-      body.innerHTML = '<input class="pndm-search" id="pndm-search" placeholder="Kolléga keresése név / e-mail…" autocomplete="off"><div id="pndm-res"></div>';
-      var inp = body.querySelector('#pndm-search'), res = body.querySelector('#pndm-res'), t = null;
-      inp.oninput = function () { if (t) clearTimeout(t); var q = inp.value.trim(); if (q.length < 2) { res.innerHTML = ''; return; } t = setTimeout(function () {
-        BE.sb.rpc('pr_search_users', { q: q }).then(function (r) { var rows = (r && r.data) || []; var u = curUser(); rows = rows.filter(function (x) { return x.id !== (u && u.id); });
-          res.innerHTML = rows.length ? rows.map(function (p) { people[p.id] = { name: p.name, avatar: p.avatar_url, color: p.color }; return '<div class="pndm-conv" data-uid="' + esc(p.id) + '">' + avHtml(p.id, 30) + '<span class="pndm-nm">' + esc(p.name || 'Kolléga') + '</span></div>'; }).join('') : '<div class="pndm-empty">Nincs találat.</div>';
-          [].forEach.call(res.querySelectorAll('.pndm-conv'), function (el) { el.onclick = function () { startDM(el.getAttribute('data-uid')); }; });
-        }); }, 300); };
+    // people you already have a relationship with: everyone who shares a research project with you
+    // (owner or accepted member of a project you can see — RLS-scoped). Shown by default so you don't have to search.
+    function loadContacts(cb) {
+      var u = curUser(); if (!(BE && BE.sb && u && u.id)) { cb([]); return; }
+      Promise.all([
+        BE.sb.from('research_projects').select('id,owner_id'),
+        BE.sb.from('research_project_members').select('user_id')
+      ]).then(function (res) {
+        var projs = (res[0] && res[0].data) || [], mems = (res[1] && res[1].data) || [], ids = {};
+        projs.forEach(function (p) { if (p.owner_id && p.owner_id !== u.id) ids[p.owner_id] = 1; });
+        mems.forEach(function (m) { if (m.user_id && m.user_id !== u.id) ids[m.user_id] = 1; });
+        var idl = Object.keys(ids); if (!idl.length) { cb([]); return; }
+        BE.sb.from('profiles_public').select('id,name,avatar_url,color').in('id', idl).then(function (pr) {
+          var rows = (pr && pr.data) || []; rows.forEach(function (p) { people[p.id] = { name: p.name, avatar: p.avatar_url, color: p.color }; });
+          rows.sort(function (a, b) { return String(a.name || '').localeCompare(String(b.name || '')); }); cb(rows);
+        }, function () { cb([]); });
+      }, function () { cb([]); });
+    }
+    function convItemHtml(p) { return '<div class="pndm-conv" data-uid="' + esc(p.id) + '">' + avHtml(p.id, 30) + '<span class="pndm-nm">' + esc(p.name || 'Kolléga') + '</span></div>'; }
+    function newConvoView(isDefault) {
+      view = 'picker'; curThread = null; foot.style.display = 'none';
+      backBtn.style.display = isDefault ? 'none' : 'grid'; titleEl.textContent = isDefault ? 'Üzenetek' : 'Új beszélgetés';
+      body.innerHTML = '<input class="pndm-search" id="pndm-search" placeholder="Kolléga keresése név / e-mail…" autocomplete="off"><div id="pndm-res"><div class="pndm-empty" style="padding:12px">Betöltés…</div></div>';
+      var inp = body.querySelector('#pndm-search'), res = body.querySelector('#pndm-res'), t = null, contacts = [];
+      function wire(c) { [].forEach.call(c.querySelectorAll('.pndm-conv'), function (el) { el.onclick = function () { startDM(el.getAttribute('data-uid')); }; }); }
+      function showContacts() { res.innerHTML = contacts.length ? ('<div class="pndm-seclbl">Kapcsolataid · közös projektekből</div>' + contacts.map(convItemHtml).join('')) : '<div class="pndm-empty" style="padding:14px">Nincs még közös projekted mással.<br>Keress rá egy kollégára fent név vagy e-mail alapján.</div>'; wire(res); }
+      loadContacts(function (rows) { contacts = rows; if (view === 'picker' && inp.value.trim().length < 2) showContacts(); });
+      inp.oninput = function () { if (t) clearTimeout(t); var q = inp.value.trim(); if (q.length < 2) { showContacts(); return; } t = setTimeout(function () {
+        BE.sb.rpc('pr_search_users', { q: q }).then(function (r) { var rows = (r && r.data) || [], u = curUser(); rows = rows.filter(function (x) { return x.id !== (u && u.id); }); rows.forEach(function (p) { people[p.id] = { name: p.name, avatar: p.avatar_url, color: p.color }; });
+          res.innerHTML = rows.length ? rows.map(convItemHtml).join('') : '<div class="pndm-empty" style="padding:14px">Nincs találat.</div>'; wire(res); }); }, 300); };
       setTimeout(function () { inp.focus(); }, 30);
     }
     function startDM(otherId) {
@@ -590,7 +609,7 @@
     }
 
     panel.querySelector('#pndm-close').onclick = close;
-    panel.querySelector('#pndm-new').onclick = newConvoView;
+    panel.querySelector('#pndm-new').onclick = function () { newConvoView(); };
     backBtn.onclick = function () { renderList(); };
     scrim.onclick = close;
     document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && panel.classList.contains('on')) close(); });
