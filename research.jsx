@@ -5195,7 +5195,7 @@
     var invrS = useState([]), invRes = invrS[0], setInvRes = invrS[1];   // invite: search results
     var invrolS = useState('viewer'), invRole = invrolS[0], setInvRole = invrolS[1];   // invite: role to grant
     var invSelS = useState(null), invSel = invSelS[0], setInvSel = invSelS[1];   // invite: the PICKED user (invite is sent by an explicit button, not on result-click)
-    var drag = useRef(null), stageRef = useRef(null), alive = useRef(true), bumpT = useRef(null), driving = useRef(false), mapDriver = useRef(null), ndrag = useRef(null), selRef = useRef(null), refBusy = useRef({}), dcRef = useRef(null), dScroll = useRef(null), dPeekChRef = useRef(null);
+    var drag = useRef(null), stageRef = useRef(null), alive = useRef(true), bumpT = useRef(null), driving = useRef(false), mapDriver = useRef(null), ndrag = useRef(null), selRef = useRef(null), refBusy = useRef({}), dcRef = useRef(null), dScroll = useRef(null), dPeekChRef = useRef(null), dkLastLog = useRef(0);
     var histRef = useRef({ undo: [], redo: [] }), histBusy = useRef(false), layoutRef = useRef({});   // undo/redo: per-session data-based stack + a serialize lock + a live-layout mirror for the collaborative guard
     if (!mapDriver.current) mapDriver.current = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : ('00000000-0000-4000-8000-' + String(Date.now()).slice(-12));
     useEffect(function () { return function () { alive.current = false; driving.current = false; if (bumpT.current) clearTimeout(bumpT.current); }; }, []);
@@ -7943,6 +7943,8 @@
       var attEcho = atts.length ? atts.map(function (a) { return '📎 ' + String(a.label || a.name || a.title || 'csatolmány').slice(0, 44); }).join('\n') + '\n' : '';
       var snipEcho = snips.length ? snips.map(function (s) { return '✂ „' + String(s.text).slice(0, 40) + (s.text.length > 40 ? '…' : '') + '"'; }).join('\n') + '\n' : '';
       if (!skipEcho) dkSay('user', snipEcho + attEcho + (an ? '📎 ' + String(an.title || 'kártya').slice(0, 44) + '\n' : '') + txt); if (!isOv) { setDInput(''); setDAttach([]); setDSnips([]); } setDBusy(true);
+      // surface Map-dock chat activity in the Áttekintő "Ki mit csinált" feed (research_log), throttled to ≤1/min/user
+      (function () { var _n = Date.now(); if (!isOv && props.authorId && (!dkLastLog.current || _n - dkLastLog.current > 60000)) { dkLastLog.current = _n; sb.from('research_log').insert({ project_id: props.projectId, profile_id: props.authorId, type: 'NOTE', summary: '💬 Térkép-chat: ' + txt.slice(0, 100) }).then(function () { }, function () { }); } })();
       var CFG = window.PR_CONFIG || {}, CORE = window.PRAutopilotCore, pid = props.projectId;
       function fail(msg) { if (alive.current) { setDBusy(false); setDStream(null); dkSay('ai', msg || 'Hiba történt.'); } }   // single failure path → dBusy/dStream never strand
       dkEnsureChat().then(function (cid) {
