@@ -5442,6 +5442,8 @@
           var wg = pathWr.current[np.id]; if (wg && (wg.t || (wg.ts && Date.now() - wg.ts < 1500))) return;   // ignore the echo of my own in-flight/just-committed write (avoids flicker)
           setPaths(function (P) { var found = false, out = P.map(function (x) { if (x.id === np.id) { found = true; return { id: np.id, name: np.name, ord: np.ord, steps: np.steps }; } return x; }); if (!found) out.push({ id: np.id, name: np.name, ord: np.ord, steps: np.steps }); return out; });
         })
+        // parallel protocol work: reload when ANY collaborator inserts / updates / archives a protocol in this project (else a teammate's new protocol wouldn't appear live)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'research_protocols', filter: 'project_id=eq.' + pid }, function () { if (alive.current) bumpSoon(); })
         .on('broadcast', { event: 'story_beat' }, function (m) {
           if (!alive.current) return; var pl = m && m.payload; if (!pl || pl.id === props.viewerId) return;
           // a presenter broadcasts the target of the current beat; audience flies there locally (bandwidth-cheap)
@@ -5523,7 +5525,7 @@
         sb.from('research_sources').select('id,title,venue,cited_by,year,screening,url,abstract,created_at').eq('project_id', pid).order('cited_by', { ascending: false, nullsFirst: false }).limit(10),
         sb.from('research_sources').select('id', { count: 'exact', head: true }).eq('project_id', pid),
         sb.from('research_sources').select('id', { count: 'exact', head: true }).eq('project_id', pid).eq('screening', 'include'),
-        sb.from('research_protocols').select('id,title,status,idea_id,created_by').eq('project_id', pid).neq('status', 'archived').order('created_at', { ascending: false }).limit(1),
+        sb.from('research_protocols').select('id,title,status,idea_id,created_by,created_at').eq('project_id', pid).neq('status', 'archived').order('created_at', { ascending: true }).limit(24),
         sb.from('research_journal_picks').select('id,title,status,npi_level,created_by,created_at').eq('project_id', pid),
         sb.from('research_files').select('id,path,size,storage_path,created_by,created_at,updated_at').eq('project_id', pid).or('path.like.writing/%,path.like.studies/%,path.like.submission/%'),
         // F5 — multi-modal nodes: datasets, uploaded/material files (NOT writing/studies), chat threads, paper figures
@@ -5539,20 +5541,28 @@
         sb.from('research_figures').select('id,source_id,fig_label,caption,storage_path').eq('project_id', pid).eq('hidden', false).eq('on_map', false).order('created_at', { ascending: true }).limit(30)
       ]).then(function (r) {
         if (!alive.current) return;
-        var base = { ideas: (r[0].data) || [], studies: (r[1].data) || [], topSrc: (r[2].data) || [], srcTotal: r[3].count || 0, inclTotal: r[4].count || 0, protocol: (r[5].data && r[5].data[0]) || null, journals: (r[6].data) || [], wfiles: (r[7].data) || [], datasets: (r[8] && r[8].data) || [], mfiles: (r[9] && r[9].data) || [], chats: (r[10] && r[10].data) || [], figures: (r[11] && r[11].data) || [], srcands: (r[12] && r[12].data) || [], sreviews: (r[13] && r[13].data) || [] };
+        var _protos = (r[5].data) || [];
+        var base = { ideas: (r[0].data) || [], studies: (r[1].data) || [], topSrc: (r[2].data) || [], srcTotal: r[3].count || 0, inclTotal: r[4].count || 0, protocols: _protos, protocol: _protos.slice(-1)[0] || null, journals: (r[6].data) || [], wfiles: (r[7].data) || [], datasets: (r[8] && r[8].data) || [], mfiles: (r[9] && r[9].data) || [], chats: (r[10] && r[10].data) || [], figures: (r[11] && r[11].data) || [], srcands: (r[12] && r[12].data) || [], sreviews: (r[13] && r[13].data) || [] };
         // remove Map-hidden figures (on_map=false) client-side + keep them for the restore panel
         var hiddenFigs = (r[14] && !r[14].error && r[14].data) ? r[14].data : []; var hidSet = {}; hiddenFigs.forEach(function (x) { hidSet[x.id] = 1; });
         base.figures = base.figures.filter(function (f) { return !hidSet[f.id]; }); base.hiddenFigs = hiddenFigs;
-        if (base.protocol) {
-          // probe the migration-75 columns (assignee/sign-off); on error fall back to the basic select
-          sb.from('research_protocol_steps').select('id,ord,title,kind,status,needs_approval,assignee_id,signed_off_by,signed_off_at,created_at').eq('protocol_id', base.protocol.id).order('ord', { ascending: true }).then(function (sr) {
+        var _protIds = (base.protocols || []).map(function (x) { return x.id; });
+        function _groupSteps(rows) { var by = {}; (rows || []).forEach(function (s) { (by[s.protocol_id] = by[s.protocol_id] || []).push(s); }); return by; }
+        if (_protIds.length) {
+          // load steps for ALL non-archived protocols (parallel users → parallel protocols); probe migration-75 columns, fall back on error
+          sb.from('research_protocol_steps').select('id,ord,title,kind,status,needs_approval,assignee_id,signed_off_by,signed_off_at,protocol_id,created_at').in('protocol_id', _protIds).order('ord', { ascending: true }).then(function (sr) {
             if (!alive.current) return;
-            if (sr && sr.error) { sb.from('research_protocol_steps').select('id,ord,title,kind,status,needs_approval,created_at').eq('protocol_id', base.protocol.id).order('ord', { ascending: true }).then(function (sr2) { if (alive.current) setData(Object.assign(base, { steps: (sr2.data) || [] })); }); return; }
-            setStepFlagsCap(true); setData(Object.assign(base, { steps: (sr.data) || [] }));
+            if (sr && sr.error) {
+              sb.from('research_protocol_steps').select('id,ord,title,kind,status,needs_approval,protocol_id,created_at').in('protocol_id', _protIds).order('ord', { ascending: true }).then(function (sr2) {
+                if (!alive.current) return; var by2 = _groupSteps((sr2 && sr2.data) || []); setData(Object.assign(base, { stepsByProt: by2, steps: (base.protocol ? (by2[base.protocol.id] || []) : []) }));
+              });
+              return;
+            }
+            setStepFlagsCap(true); var by = _groupSteps((sr.data) || []); setData(Object.assign(base, { stepsByProt: by, steps: (base.protocol ? (by[base.protocol.id] || []) : []) }));
           });
         }
-        else setData(Object.assign(base, { steps: [] }));
-      }, function () { if (alive.current) setData({ ideas: [], studies: [], topSrc: [], srcTotal: 0, inclTotal: 0, protocol: null, journals: [], wfiles: [], steps: [], datasets: [], mfiles: [], chats: [], figures: [], srcands: [], sreviews: [], hiddenFigs: [] }); });
+        else setData(Object.assign(base, { stepsByProt: {}, steps: [] }));
+      }, function () { if (alive.current) setData({ ideas: [], studies: [], topSrc: [], srcTotal: 0, inclTotal: 0, protocol: null, protocols: [], stepsByProt: {}, journals: [], wfiles: [], steps: [], datasets: [], mfiles: [], chats: [], figures: [], srcands: [], sreviews: [], hiddenFigs: [] }); });
     }, [props.projectId, bump]);
     // measure each card's REAL rendered height after paint → feed the no-overlap rule with true heights (estimates
     // undershoot long-title cards, e.g. the H1/H2 hypotheses, leaving residual overlap). Converges in one extra render.
@@ -5679,12 +5689,23 @@
       var firstIdea = d.ideas.length ? ('i' + d.ideas[0].id) : null;
       var litId = hasLit ? 'lit' : null, srId = hasSR ? 'sr' : null;
       function ideaHas(id) { return (d.ideas || []).some(function (x) { return x.id === id; }); }
-      var protoIdea = (d.protocol && d.protocol.idea_id && ideaHas(d.protocol.idea_id)) ? ('i' + d.protocol.idea_id) : null;
-      var lastStep = (d.protocol && d.steps.length) ? ('r' + d.steps[d.steps.length - 1].id) : null;
-      if (d.protocol && d.steps.length) {
-        d.steps.forEach(function (s, i) { var sm = { Kind: s.kind || '—', Státusz: s.status || '—', Jóváhagyás: s.needs_approval ? 'szükséges' : '—' }; if (stepFlagsCap) { sm['Felelős'] = s.assignee_id ? nameOf(s.assignee_id) : '—'; sm['Sign-off'] = s.signed_off_by ? (nameOf(s.signed_off_by) + (s.signed_off_at ? ' · ' + String(s.signed_off_at).slice(0, 10) : '')) : '—'; } N.push({ id: 'r' + s.id, t: 'step', ph: 3, title: s.title || ('Lépés ' + (i + 1)), m: sm, st: s.status, gate: !!s.needs_approval, ref: s, createdBy: (d.protocol && d.protocol.created_by) || null }); if (i > 0) E.push(['r' + d.steps[i - 1].id, 'r' + s.id]); });
-        var protUp = srId || litId || protoIdea || firstIdea; if (protUp) E.push([protUp, 'r' + d.steps[0].id]);
-      }
+      // MULTI-PROTOCOL: render EVERY non-archived protocol as its OWN step-chain, so parallel collaborators' protocols coexist (nem tűnnek el).
+      var protoList = (d.protocols && d.protocols.length) ? d.protocols : (d.protocol ? [d.protocol] : []);
+      var stepsByProt = d.stepsByProt || (d.protocol ? (function () { var o = {}; o[d.protocol.id] = d.steps || []; return o; })() : {});
+      protoList.forEach(function (prot) {
+        var psteps = stepsByProt[prot.id] || [];
+        if (!psteps.length) return;
+        psteps.forEach(function (s, i) {
+          var sm = { Kind: s.kind || '—', Státusz: s.status || '—', Jóváhagyás: s.needs_approval ? 'szükséges' : '—' };
+          if (stepFlagsCap) { sm['Felelős'] = s.assignee_id ? nameOf(s.assignee_id) : '—'; sm['Sign-off'] = s.signed_off_by ? (nameOf(s.signed_off_by) + (s.signed_off_at ? ' · ' + String(s.signed_off_at).slice(0, 10) : '')) : '—'; }
+          N.push({ id: 'r' + s.id, t: 'step', ph: 3, title: s.title || ('Lépés ' + (i + 1)), m: sm, st: s.status, gate: !!s.needs_approval, ref: s, createdBy: prot.created_by || null });
+          if (i > 0) E.push(['r' + psteps[i - 1].id, 'r' + s.id]);
+        });
+        var pIdea = (prot.idea_id && ideaHas(prot.idea_id)) ? ('i' + prot.idea_id) : null;
+        var pUp = srId || litId || pIdea || firstIdea; if (pUp) E.push([pUp, 'r' + psteps[0].id]);
+      });
+      // downstream anchors (venue / writing / datasets) hang off the NEWEST protocol's chain (d.protocol / d.steps)
+      var lastStep = (d.protocol && (d.steps || []).length) ? ('r' + d.steps[d.steps.length - 1].id) : null;
       var venueUp = srId || lastStep || litId || firstIdea;
       d.journals.forEach(function (j) { N.push({ id: 'v' + j.id, t: 'venue', ph: 4, title: j.title || 'Folyóirat', m: { NPI: j.npi_level || '—', Státusz: j.status || '—' }, ref: j }); if (venueUp) E.push([venueUp, 'v' + j.id]); });
       var writeUp = lastStep || srId || litId || firstIdea;

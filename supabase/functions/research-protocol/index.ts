@@ -80,10 +80,19 @@ Deno.serve(async (req) => {
       const steps = Array.isArray(parsed.steps) ? parsed.steps : [];
       if (!steps.length) return json({ error: 'no steps generated' }, 502);
 
-      // one active protocol per project — archive any current non-terminal one first (unique index rprot_one_active)
-      await sb.from('research_protocols').update({ status: 'archived', updated_at: new Date().toISOString() }).eq('project_id', projectId).in('status', ['draft', 'ready', 'running', 'paused', 'failed']);
+      // Per-user active protocol (migration-98): archive ONLY the caller's own previous active protocol, so a
+      // collaborator generating in parallel never wipes another user's protocol.
+      const ACTIVE = ['draft', 'ready', 'running', 'paused', 'failed'];
+      await sb.from('research_protocols').update({ status: 'archived', updated_at: new Date().toISOString() }).eq('project_id', projectId).eq('created_by', ures.user.id).in('status', ACTIVE);
       const snapshot = { idea: idea ? { id: idea.id, question: idea.question } : null, included_sources: lit.map((s: any) => s.title), datasets: datasets.map((d: any) => d.name), generated_at: new Date().toISOString() };
-      const protIns = await sb.from('research_protocols').insert({ project_id: projectId, idea_id: idea ? idea.id : null, title: String(parsed.title || 'Research protocol').slice(0, 200), goal: goal || null, status: 'draft', context_snapshot: snapshot, created_by: ures.user.id }).select('id').single();
+      const newRow = { project_id: projectId, idea_id: idea ? idea.id : null, title: String(parsed.title || 'Research protocol').slice(0, 200), goal: goal || null, status: 'draft', context_snapshot: snapshot, created_by: ures.user.id };
+      let protIns = await sb.from('research_protocols').insert(newRow).select('id').single();
+      if (protIns.error && /duplicate key|unique|rprot_one_active/i.test(protIns.error.message || '')) {
+        // Pre-migration-98 the unique index is still per-PROJECT → another user's active protocol blocks this insert.
+        // Fall back to the legacy project-wide archive (only when the index actually blocks us), then retry once. Safe to deploy before the migration.
+        await sb.from('research_protocols').update({ status: 'archived', updated_at: new Date().toISOString() }).eq('project_id', projectId).in('status', ACTIVE);
+        protIns = await sb.from('research_protocols').insert(newRow).select('id').single();
+      }
       if (protIns.error || !protIns.data) return json({ error: 'insert protocol failed: ' + (protIns.error && protIns.error.message) }, 500);
       const pid = protIns.data.id;
       const rows = steps.slice(0, 20).map((s: any, i: number) => ({
