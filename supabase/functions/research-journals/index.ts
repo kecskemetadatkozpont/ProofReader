@@ -1,5 +1,6 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 import { assertEntitled, clampModel } from '../_shared/entitlement.ts';
+import { langDirective, loadProjectLang } from '../_shared/lang.ts';
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type', 'Access-Control-Allow-Methods': 'POST, OPTIONS' };
 const ANTHROPIC_KEY = Deno.env.get('ANTHROPIC_API_KEY');
 const OA_KEY = Deno.env.get('OPENALEX_API_KEY') || '';
@@ -129,6 +130,44 @@ Deno.serve(async (req) => {
       let ai: any = {};
       try { const raw = await callClaude(sys, u, 1500, model); const m = raw.match(/\{[\s\S]*\}/); if (m) ai = JSON.parse(m[0]); } catch (_e) { /* ai optional */ }
       return json({ ok: true, journal: jr, openalex: oa, ai });
+    }
+
+    // JF3 — Beadási stratégia: given the author's project + the journal's RECENT papers (fetched client-side in JF2),
+    // produce a tailored submission playbook (fit score, verdict, playbook, gaps). Grounded in the supplied papers.
+    if (action === 'fit') {
+      const jid = body.journal_id;
+      const issn = String(body.issn || '').replace(/[^0-9Xx-]/g, '').slice(0, 12);
+      const jsel = 'title,publisher,field,discipline,country,issn_print,issn_online,sjr_quartile,npi_level';
+      const jq = jid != null ? sb.from('journals_ref').select(jsel).eq('id', jid)
+        : (issn ? sb.from('journals_ref').select(jsel).or(`issn_print.eq.${issn},issn_online.eq.${issn}`) : null);
+      const jr: any = (jq ? ((await jq.limit(1)).data || [])[0] : null) || { title: String(body.journal_title || 'the target journal') };
+      const papers: any[] = Array.isArray(body.papers) ? body.papers.slice(0, 16) : [];
+      const themes: string[] = Array.isArray(body.themes) ? body.themes.slice(0, 12).map((t: any) => String(t)) : [];
+      if (!papers.length) return json({ error: 'no recent papers supplied — run the facts-only analysis first' }, 400);
+
+      const proj: any = (await sb.from('research_projects').select('*').eq('id', projectId).single()).data || {};
+      const ideas: any[] = (await sb.from('research_ideas').select('question,hypothesis').eq('project_id', projectId).limit(8)).data || [];
+      const prot: any = ((await sb.from('research_protocols').select('id,title,goal').eq('project_id', projectId).neq('status', 'archived').order('created_at', { ascending: false }).limit(1)).data || [])[0];
+      let findings: string[] = [];
+      if (prot) {
+        const steps: any[] = (await sb.from('research_protocol_steps').select('title,result').eq('protocol_id', prot.id).order('ord')).data || [];
+        findings = steps.map((s) => (s.result && s.result.summary) || s.title).filter(Boolean).slice(0, 8);
+      }
+      const lang = await loadProjectLang(sb, projectId);
+      const ctx = `PROJECT (the author's paper): ${proj.title || ''}\nTOPIC: ${proj.topic || proj.description || proj.summary || ''}\n` +
+        (proj.keywords ? `KEYWORDS: ${(Array.isArray(proj.keywords) ? proj.keywords.join(', ') : proj.keywords)}\n` : '') +
+        `RESEARCH QUESTIONS:\n${ideas.map((i) => '- ' + String(i.question || '').slice(0, 240)).join('\n')}\n` +
+        (prot ? `EXECUTED WORK: ${prot.title} — ${prot.goal || ''}\nKEY RESULTS:\n${findings.map((f) => '- ' + String(f).slice(0, 240)).join('\n')}\n` : '');
+      const recent = papers.map((p, i) => `${i + 1}. (${p.year || '—'}) ${String(p.title || '').slice(0, 160)}` +
+        (p.abstract ? `\n   ${String(p.abstract).slice(0, 300)}` : '') +
+        (Array.isArray(p.concepts) && p.concepts.length ? `\n   [${p.concepts.slice(0, 4).join(', ')}]` : '')).join('\n');
+
+      const sys = "You are a scholarly-publishing strategist. Given an author's research project and a TARGET JOURNAL's recent publications, produce a concrete, tailored submission strategy for THIS paper: how well it fits, what the journal publishes lately, and exactly how to position the paper. Ground every claim in the supplied recent papers + project context; do NOT invent journal policies, acceptance rates or metrics. Return ONLY JSON: {\"fit_score\":<integer 0-100>,\"verdict\":\"<2-3 sentences: fit strengths + the main caveat>\",\"themes_observed\":[\"<recurring topic/method/framing the journal favours, drawn from the abstracts>\"],\"playbook\":{\"title_framing\":\"<how to frame this paper's title for this venue>\",\"keywords\":[\"<6 submission keywords>\"],\"emphasize\":[\"<which of the author's results/contributions to foreground, and why>\"],\"structure_length\":\"<expected structure + rough length if inferable, else empty>\",\"cover_letter\":\"<1-2 sentence cover-letter angle>\",\"formatting\":[\"<short checklist item>\"]},\"gaps\":[{\"your_side\":\"<a trait of the author's work>\",\"journal_side\":\"<the journal's recent expectation>\",\"bridge\":\"<one concrete adjustment>\"}]}" + langDirective(lang);
+      const u = `${ctx}\nTARGET JOURNAL: ${jr.title}${jr.publisher ? ' (' + jr.publisher + ')' : ''}${jr.sjr_quartile ? ' · ' + jr.sjr_quartile : ''}\nRECURRING THEMES (from recent works): ${themes.join(', ')}\n\nTHE JOURNAL'S RECENT PUBLICATIONS:\n${recent}`;
+      const raw = await callClaude(sys, u, 3200, model);
+      const m = raw.match(/\{[\s\S]*\}/); if (!m) return json({ error: 'fit report returned no JSON' }, 502);
+      let report: any; try { report = JSON.parse(m[0]); } catch (_e) { return json({ error: 'fit report JSON parse failed' }, 502); }
+      return json({ ok: true, report });
     }
 
     return json({ error: 'unknown action: ' + action }, 400);

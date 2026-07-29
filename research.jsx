@@ -4782,10 +4782,50 @@
         var ex = pick || picks.filter(function (p) { return p.journal_id === j.id; })[0];
         var det = (ex && ex.details) || {}; var ai = d.ai || {};
         var form = { scope: det.scope || ai.scope || '', peer_review: det.peer_review || ai.peer_review || '', acceptance_rate: det.acceptance_rate || ai.acceptance_rate || '', first_decision: det.first_decision || ai.first_decision || '', apc: det.apc || ai.apc || '', submission_url: det.submission_url || ai.submission_url || '' };
-        setDv({ j: j, loading: false, data: d, form: form, tpl: (ex && ex.template && Object.keys(ex.template).length ? ex.template : (ai.template || {})), notes: det.notes || '', pickId: ex && ex.id });
+        setDv({ j: j, loading: false, data: d, form: form, tpl: (ex && ex.template && Object.keys(ex.template).length ? ex.template : (ai.template || {})), notes: det.notes || '', pickId: ex && ex.id, fit: det.fit || null });
       }, function (e) { window.PRUI.toast('Dossier failed: ' + e, { kind: 'error' }); setDv(null); });
     }
     function dvSet(k, v) { setDv(function (x) { var f = Object.assign({}, x.form); f[k] = v; return Object.assign({}, x, { form: f }); }); }
+    function setDvFit(patch) { setDv(function (y) { return y ? Object.assign({}, y, patch) : y; }); }
+    // JF2 — Beadási elemzés (facts-only): a folyóirat ~24 friss cikke OpenAlexből, ISSN-re szűrve; kivonat + visszatérő témák. AI nélkül, kliens-oldalon.
+    function runJournalFit(jr) {
+      var issn = String((jr && (jr.issn_print || jr.issn_online)) || '').trim();
+      if (!issn) { window.PRUI.toast('Nincs ISSN ehhez a folyóirathoz — a beadási elemzés ISSN-t igényel.', { kind: 'error' }); return; }
+      setDvFit({ fitBusy: true, fitStep: '⬇️ Friss cikkek letöltése (OpenAlex)…', fitErr: null });
+      var email = (BE.user && BE.user.email) || 'research@publify.app';
+      function fetchWorks(withType) {
+        var filter = 'primary_location.source.issn:' + issn + (withType ? ',type:article' : '');
+        var url = 'https://api.openalex.org/works?filter=' + filter + '&sort=publication_date:desc&per-page=24&mailto=' + encodeURIComponent(email);
+        return fetch(url).then(function (r) { return r.json(); }).then(function (j) { return (j && j.results) || []; });
+      }
+      fetchWorks(true).then(function (ws) { return ws.length ? ws : fetchWorks(false); }).then(function (ws) {
+        if (!ws.length) { setDvFit({ fitBusy: false, fitStep: null, fitErr: 'Nem találhatók friss cikkek erre az ISSN-re az OpenAlexben (' + issn + ').' }); return; }
+        setDvFit({ fitStep: '✍️ Absztraktok kivonatolása…' });
+        var papers = ws.map(function (w) {
+          var ab = abstractFromInverted(w.abstract_inverted_index); if (ab) ab = ab.slice(0, 400);
+          var cons = (w.concepts || []).filter(function (c) { return c.level >= 1; }).slice(0, 4).map(function (c) { return c.display_name; }).filter(Boolean);
+          return { title: w.display_name || '—', year: w.publication_year || null, date: w.publication_date || null, type: w.type || null, cites: w.cited_by_count || 0, oa: !!(w.open_access && w.open_access.is_oa), url: w.doi || w.id, abstract: ab, concepts: cons };
+        });
+        var agg = {};
+        ws.forEach(function (w) { (w.concepts || []).forEach(function (c) { if (!c || c.level < 1 || !c.display_name) return; agg[c.display_name] = (agg[c.display_name] || 0) + (c.score || 0.1) + 0.3; }); });
+        var themes = Object.keys(agg).map(function (k) { return { n: k, w: agg[k] }; }).sort(function (a, b) { return b.w - a.w; }).slice(0, 10).map(function (t) { return t.n; });
+        var years = papers.map(function (p) { return p.year; }).filter(Boolean);
+        var oaN = papers.filter(function (p) { return p.oa; }).length;
+        var stats = { count: papers.length, yearMin: years.length ? Math.min.apply(null, years) : null, yearMax: years.length ? Math.max.apply(null, years) : null, oaShare: Math.round(100 * oaN / papers.length), avgCites: Math.round(papers.reduce(function (a, p) { return a + (p.cites || 0); }, 0) / papers.length) };
+        setDvFit({ fitBusy: false, fitStep: null, fitErr: null, fit: { generatedAt: new Date().toISOString(), issn: issn, themes: themes, papers: papers, stats: stats } });
+      }, function () { setDvFit({ fitBusy: false, fitStep: null, fitErr: 'Hálózati hiba az OpenAlex lekérdezésekor.' }); });
+    }
+    // JF3 — AI beadási stratégia: a JF2-ben már letöltött friss cikkeket + a projekt kontextusát átadja az edge-fn-nek (LLM).
+    function runJournalFitAI(jr) {
+      var f = dv && dv.fit; if (!f || !f.papers || !f.papers.length) { window.PRUI.toast('Előbb futtasd a friss-cikk elemzést.', {}); return; }
+      setDvFit({ fitAiBusy: true, fitAiErr: null });
+      var lite = f.papers.slice(0, 16).map(function (p) { return { title: p.title, year: p.year, abstract: p.abstract, concepts: p.concepts }; });
+      sb.functions.invoke('research-journals', { body: { action: 'fit', project_id: props.projectId, journal_id: jr.id, issn: (jr.issn_print || jr.issn_online || ''), journal_title: jr.title, papers: lite, themes: f.themes } }).then(function (r) {
+        var d = r && r.data; var err = (d && d.error) || (r && r.error && r.error.message);
+        if (err) { setDvFit({ fitAiBusy: false, fitAiErr: err }); return; }
+        setDv(function (y) { var nf = Object.assign({}, y.fit || {}, { report: d.report }); return Object.assign({}, y, { fit: nf, fitAiBusy: false, fitAiErr: null }); });
+      }, function (e) { setDvFit({ fitAiBusy: false, fitAiErr: String(e) }); });
+    }
     function tplUpload(e) {
       var fs = Array.prototype.slice.call((e.target && e.target.files) || []); if (e.target) e.target.value = ''; if (!fs.length) return;
       var batch = String(Date.now()) + '_' + Math.random().toString(36).slice(2, 7); var added = [];
@@ -4799,7 +4839,7 @@
     function tplRemove(i) { setDv(function (x) { var t = Object.assign({}, x.tpl); t.uploads = (t.uploads || []).filter(function (_, j) { return j !== i; }); return Object.assign({}, x, { tpl: t }); }); }
     function tplDl(a) { sb.storage.from('research-data').createSignedUrl(a.storage_path, 3600, { download: (a.name || '').split('/').pop() }).then(function (r) { if (r && r.data && r.data.signedUrl) window.open(r.data.signedUrl, '_blank'); }); }
     function saveDossier() {
-      var x = dv; if (!x) return; var det = Object.assign({}, x.form, { notes: x.notes });
+      var x = dv; if (!x) return; var det = Object.assign({}, x.form, { notes: x.notes }); if (x.fit) det.fit = x.fit;
       var base = { project_id: props.projectId, journal_id: x.j.id, title: x.j.title, field: x.j.field, npi_level: x.j.npi_level, sjr_quartile: x.j.sjr_quartile, url: x.j.url, details: det, template: x.tpl || {} };
       var op = x.pickId ? sb.from('research_journal_picks').update({ details: det, template: x.tpl || {} }).eq('id', x.pickId) : sb.from('research_journal_picks').insert(Object.assign({ status: 'shortlisted', created_by: props.authorId }, base));
       op.then(function (r) { if (r && r.error) { window.PRUI.toast(r.error.message, { kind: 'error' }); return; } window.PRUI.toast('Dossier saved to shortlist', { kind: 'ok' }); setDv(function (y) { return Object.assign({}, y, { pickId: y.pickId }); }); loadPicks(); });
@@ -4873,6 +4913,67 @@
                 h('button', { className: 'fb-mini', 'aria-label': 'Download', title: 'Download', onClick: function () { tplDl(a); } }, '⬇'),
                 h('button', { className: 'fb-mini', 'aria-label': 'Remove', title: 'Remove', onClick: function () { tplRemove(i); } }, '×'));
             }) : h('div', { style: { fontSize: 11.5, color: 'var(--faint)' } }, "Upload the journal's own .cls/.sty/.docx or a template folder you already have.")) : null,
+          h('h2', { style: { marginTop: 22 } }, '🔬 Beadási elemzés ', h('span', { style: { fontSize: 11, fontWeight: 400, color: 'var(--faint)' } }, '· friss cikkek az OpenAlexből — AI nélkül')),
+          (function () {
+            var f = x.fit; var issnAvail = jr.issn_print || jr.issn_online;
+            if (x.fitBusy) return h('div', { style: { padding: '6px 0' } }, h(AiThinking, { label: x.fitStep || 'Elemzés…' }));
+            if (x.fitErr) return h('div', { style: { fontSize: 12.5, color: 'var(--warn)', padding: '4px 0' } }, x.fitErr, ' ', h('button', { className: 'btn', style: { padding: '3px 9px', fontSize: 12, marginLeft: 6 }, onClick: function () { runJournalFit(jr); } }, 'Újra'));
+            if (!f) return h('div', null,
+              h('div', { style: { fontSize: 12.5, color: 'var(--muted)', marginBottom: 6 } }, issnAvail ? 'Letölti a folyóirat utolsó ~24 cikkét, kivonatolja az absztraktokat, és kigyűjti a visszatérő témákat — hogy lásd, mit publikál mostanában.' : 'Ehhez a folyóirathoz nincs ISSN a nyilvántartásban, ezért a friss-cikk elemzés nem futtatható.'),
+              issnAvail ? h('button', { className: 'btn pri', style: { padding: '5px 12px', fontSize: 12.5 }, onClick: function () { runJournalFit(jr); } }, '🔬 Elemzés futtatása') : null);
+            return h('div', null,
+              h('div', { style: { fontSize: 11.5, color: 'var(--faint)', marginBottom: 8 } }, f.stats.count + ' friss cikk' + (f.stats.yearMin && f.stats.yearMax ? ' · ' + (f.stats.yearMin === f.stats.yearMax ? f.stats.yearMax : f.stats.yearMin + '–' + f.stats.yearMax) : '') + ' · OA ' + f.stats.oaShare + '% · ⌀ ' + f.stats.avgCites + ' idézet' + (f.generatedAt ? ' · elemezve: ' + String(f.generatedAt).slice(0, 10) : '')),
+              f.themes && f.themes.length ? h('div', { style: { marginBottom: 10 } }, h('div', { className: 'field-label', style: { marginBottom: 4 } }, 'Visszatérő témák'), f.themes.map(function (t, i) { return h('span', { key: i, className: 'mtag', style: { marginRight: 5, marginBottom: 5, display: 'inline-block' } }, t); })) : null,
+              h('div', { className: 'field-label', style: { marginBottom: 4 } }, 'Friss cikkek'),
+              h('div', null, f.papers.slice(0, 12).map(function (p, i) {
+                return h('div', { key: i, style: { padding: '7px 0', borderTop: i ? '1px solid var(--line)' : 'none' } },
+                  h('div', { style: { display: 'flex', gap: 8, alignItems: 'baseline' } },
+                    h('span', { style: { fontSize: 10.5, color: 'var(--faint)', flex: 'none', fontVariantNumeric: 'tabular-nums', width: 30 } }, p.year || ''),
+                    h('a', { href: p.url || '#', target: '_blank', rel: 'noopener noreferrer', style: { fontSize: 12.5, fontWeight: 600, lineHeight: 1.3 } }, p.title)),
+                  p.abstract ? h('div', { style: { fontSize: 11.5, color: 'var(--muted)', marginTop: 2, marginLeft: 38, lineHeight: 1.4 } }, p.abstract.slice(0, 220) + (p.abstract.length > 220 ? '…' : '')) : null,
+                  (p.concepts && p.concepts.length) ? h('div', { style: { marginLeft: 38, marginTop: 3 } }, p.concepts.map(function (c, ci) { return h('span', { key: ci, style: { fontSize: 9.5, color: 'var(--accent)', background: 'var(--surface-2)', borderRadius: 999, padding: '1px 7px', marginRight: 4, display: 'inline-block' } }, c); })) : null);
+              })),
+              h('div', { style: { marginTop: 8, display: 'flex', gap: 12, alignItems: 'center' } },
+                h('button', { className: 'btn', style: { padding: '3px 10px', fontSize: 12 }, onClick: function () { runJournalFit(jr); } }, '🔄 Újraelemzés'),
+                ce ? h('span', { style: { fontSize: 10.5, color: 'var(--faint)' } }, 'A „💾 Save"-vel a dossziéba is mentődik.') : null));
+          })(),
+          (function () {
+            var f = x.fit; if (!f) return null; var rep = f.report;
+            function pbText(label, val) { return val ? h('div', { style: { marginBottom: 7 } }, h('div', { className: 'field-label', style: { marginBottom: 2 } }, label), h('div', { style: { fontSize: 12.5, color: 'var(--muted)', lineHeight: 1.45 } }, String(val))) : null; }
+            function pbList(label, arr) { return (arr && arr.length) ? h('div', { style: { marginBottom: 7 } }, h('div', { className: 'field-label', style: { marginBottom: 2 } }, label), arr.map(function (it, i) { return h('div', { key: i, style: { fontSize: 12.5, color: 'var(--muted)', lineHeight: 1.4, paddingLeft: 12, textIndent: -12 } }, '• ' + String(it)); })) : null; }
+            if (x.fitAiBusy) return h('div', { style: { marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--line)' } }, h(AiThinking, { label: '🧭 Beadási stratégia készítése…' }));
+            if (!rep) return h('div', { style: { marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--line)' } },
+              h('div', { style: { fontSize: 12.5, color: 'var(--muted)', marginBottom: 6 } }, 'AI beadási stratégia: illeszkedés-pont + testre szabott playbook a te cikkedhez, a fenti friss cikkekre és a projekted tartalmára alapozva.'),
+              x.fitAiErr ? h('div', { style: { fontSize: 12, color: 'var(--warn)', marginBottom: 6 } }, x.fitAiErr) : null,
+              h('button', { className: 'btn pri', style: { padding: '5px 12px', fontSize: 12.5 }, onClick: function () { runJournalFitAI(jr); } }, '🧭 Beadási stratégia (AI)'),
+              h('span', { style: { fontSize: 10.5, color: 'var(--faint)', marginLeft: 8 } }, '· LLM-hívás'));
+            var pb = rep.playbook || {};
+            var scorePct = Math.max(0, Math.min(100, parseInt(rep.fit_score, 10) || 0));
+            return h('div', { style: { marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--line)' } },
+              h('div', { style: { display: 'flex', gap: 12, alignItems: 'center', marginBottom: 12 } },
+                h('div', { style: { width: 58, height: 58, borderRadius: '50%', flex: 'none', background: 'conic-gradient(var(--accent) 0 ' + scorePct + '%, var(--surface-2) ' + scorePct + '%)', display: 'grid', placeItems: 'center' } },
+                  h('div', { style: { width: 42, height: 42, borderRadius: '50%', background: 'var(--surface)', display: 'grid', placeItems: 'center', fontWeight: 700, fontSize: 14 } }, scorePct + '%')),
+                h('div', { style: { flex: 1 } },
+                  h('div', { style: { fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em', color: 'var(--accent)', marginBottom: 2 } }, 'Illeszkedés — AI'),
+                  h('div', { style: { fontSize: 12.5, color: 'var(--ink)', lineHeight: 1.45 } }, rep.verdict || ''))),
+              (rep.themes_observed && rep.themes_observed.length) ? pbList('Megfigyelt minták', rep.themes_observed) : null,
+              h('div', { className: 'field-label', style: { margin: '10px 0 5px' } }, 'Beadási playbook'),
+              pbText('Cím-keretezés', pb.title_framing),
+              (pb.keywords && pb.keywords.length) ? h('div', { style: { marginBottom: 7 } }, h('div', { className: 'field-label', style: { marginBottom: 3 } }, 'Kulcsszavak'), pb.keywords.map(function (k, i) { return h('span', { key: i, className: 'mtag', style: { marginRight: 5, marginBottom: 4, display: 'inline-block' } }, k); })) : null,
+              pbList('Mit emelj ki', pb.emphasize),
+              pbText('Struktúra & terjedelem', pb.structure_length),
+              pbText('Cover-letter szög', pb.cover_letter),
+              pbList('Formázás', pb.formatting),
+              (rep.gaps && rep.gaps.length) ? h('details', { style: { marginTop: 8 } },
+                h('summary', { style: { cursor: 'pointer', fontSize: 12, fontWeight: 600, color: 'var(--ink)' } }, '🔧 Rések — mit igazíts (' + rep.gaps.length + ')'),
+                h('div', { style: { marginTop: 6 } }, rep.gaps.map(function (g, i) {
+                  return h('div', { key: i, style: { fontSize: 11.5, color: 'var(--muted)', padding: '6px 0', borderTop: i ? '1px solid var(--line)' : 'none', lineHeight: 1.45 } },
+                    h('b', { style: { color: 'var(--ink)' } }, (g.your_side || '') + ' → ' + (g.journal_side || '')), h('br'), '▹ ' + (g.bridge || ''));
+                }))) : null,
+              h('div', { style: { marginTop: 10, display: 'flex', gap: 12, alignItems: 'center' } },
+                h('button', { className: 'btn', style: { padding: '3px 10px', fontSize: 12 }, onClick: function () { runJournalFitAI(jr); } }, '🔄 Stratégia újragenerálása'),
+                ce ? h('span', { style: { fontSize: 10.5, color: 'var(--faint)' } }, 'A „💾 Save" a stratégiát is menti.') : null));
+          })(),
           h('h2', { style: { marginTop: 22 } }, 'Notes'),
           h('textarea', { className: 'field', rows: 3, style: { width: '100%', boxSizing: 'border-box' }, value: x.notes || '', placeholder: 'Your notes on this venue…', onChange: function (e) { setDv(function (y) { return Object.assign({}, y, { notes: e.target.value }); }); } }),
           ce ? h('div', { style: { marginTop: 14 } }, h('button', { className: 'btn pri', onClick: saveDossier }, '💾 Save dossier to shortlist')) : null
