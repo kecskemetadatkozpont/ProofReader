@@ -77,7 +77,11 @@
     // in-project pipeline first-run (empty states + primary CTAs)
     'No sources saved yet — search above and Add.': 'Még nincs mentett forrás — keress fent, és add hozzá.',
     'No sources match these filters.': 'Nincs a szűrőknek megfelelő forrás.',
-    'Search': 'Keresés', 'Searching…': 'Keresés…', 'Add': 'Hozzáad'
+    'Search': 'Keresés', 'Searching…': 'Keresés…', 'Add': 'Hozzáad',
+    '✨ Working…': '✨ Dolgozom…',
+    'No protocol yet.': 'Még nincs protokoll.', 'Loading protocol…': 'Protokoll betöltése…', '✨ Generate protocol': '✨ Protokoll generálása',
+    '✨ Generate draft (AutoMode)': '✨ Draft generálása (AutoMode)', 'Previously generated draft. Re-generate to refresh.': 'Korábban generált draft. Újragenerálás a frissítéshez.',
+    '✨ Recommend journals': '✨ Folyóirat-ajánlás'
   };
   function tr(lang, en) { return (lang === 'hu' && I18N_HU[en]) ? I18N_HU[en] : en; }
 
@@ -2567,7 +2571,7 @@
             picks.map(function (x) { return h('option', { key: x.id, value: x.id }, x.title + (x.status === 'submitted' ? ' ✓' : '')); }))
         ) : h('div', { style: { fontSize: 12.5, color: 'var(--warn)', marginBottom: 8 } }, '⚠ No journal selected yet — pick one on the Journal step first (the draft still generates, but without journal-specific formatting).'),
         h('div', { style: { fontSize: 12, color: 'var(--faint)', marginBottom: 10 } }, 'Inputs: your protocol results & figures, ' + inc.length + ' included reference' + (inc.length === 1 ? '' : 's') + (selPick ? ', journal “' + selPick.title + '”' + (selPick.template && selPick.template.family ? ' (' + selPick.template.family + ')' : '') : '') + '.'),
-        ce ? h('button', { className: 'btn pri', disabled: busy, onClick: generate }, busy ? '✨ Working…' : '✨ Generate draft (AutoMode)') : null,
+        ce ? h('button', { className: 'btn pri', disabled: busy, onClick: generate }, busy ? tr(props.lang, '✨ Working…') : tr(props.lang, '✨ Generate draft (AutoMode)')) : null,
         busy ? h('div', { style: { marginTop: 10 } }, h(AiThinking, { label: prog || 'Writing your manuscript' })) : null
       ),
       draft ? h('div', { className: 'panel' },
@@ -2576,7 +2580,7 @@
           draft.id ? h('a', { className: 'btn pri', style: { textDecoration: 'none', padding: '5px 12px' }, href: 'ProofReader.html?draft=' + draft.id }, '📝 Open in LaTeX editor') : null,
           draft.files && draft.files['main.tex'] ? h('button', { className: 'btn', style: { padding: '5px 12px' }, onClick: function () { dl('main.tex', draft.files['main.tex'].content); } }, '⬇ main.tex') : null,
           draft.files && draft.files['refs.bib'] ? h('button', { className: 'btn', style: { padding: '5px 12px' }, onClick: function () { dl('refs.bib', draft.files['refs.bib'].content); } }, '⬇ refs.bib') : null),
-        draft.existing ? h('div', { style: { fontSize: 11.5, color: 'var(--faint)', marginTop: 2 } }, 'Previously generated draft. Re-generate to refresh.') : null,
+        draft.existing ? h('div', { style: { fontSize: 11.5, color: 'var(--faint)', marginTop: 2 } }, tr(props.lang, 'Previously generated draft. Re-generate to refresh.')) : null,
         (draft.outline && draft.outline.abstract) ? h('div', { style: { fontSize: 12.5, color: 'var(--muted)', marginTop: 8, lineHeight: 1.5 } }, h('b', null, 'Abstract. '), draft.outline.abstract) : null,
         (draft.sections && draft.sections.length) ? h('div', { style: { marginTop: 10 } }, h('b', { style: { fontSize: 12 } }, 'Sections:'),
           h('ol', { className: 'wp-secs', style: { margin: '4px 0', paddingLeft: 20, fontSize: 12.5 } }, draft.sections.map(function (s, i) {
@@ -4392,16 +4396,16 @@
       }, function (e) { setAiBusy(false); window.PRUI.toast('Add failed: ' + e, { kind: 'error' }); });
     }
 
-    if (loading) return h('div', { className: 'empty' }, 'Loading protocol…');
+    if (loading) return h('div', { className: 'empty' }, tr(props.lang, 'Loading protocol…'));
 
     if (!prot) return h('div', { className: 'panel' },
       h('h3', { style: { marginTop: 0 } }, '🧪 Protocol'),
       h('p', { style: { fontSize: 13, color: 'var(--muted)', lineHeight: 1.5 } }, 'Generate an executable research plan — an ordered ToDo list (data → preprocess → baselines → method → evaluation → figures) built from your idea and the literature you selected in Studies. A Claude agent on your dedicated machine can then run it step by step, with your approval on the expensive ones.'),
       ce ? h('div', null,
         h('textarea', { className: 'field', rows: 2, style: { width: '100%', boxSizing: 'border-box', marginBottom: 8 }, placeholder: 'Optional goal / constraints (e.g. "reproduce the per-class AUROC + Fisher fusion rescue on nuScenes")', value: goal, disabled: busy, onChange: function (e) { setGoal(e.target.value); } }),
-        h('button', { className: 'btn pri', disabled: busy, onClick: generate }, busy ? '✨ Working…' : '✨ Generate protocol'),
+        h('button', { className: 'btn pri', disabled: busy, onClick: generate }, busy ? tr(props.lang, '✨ Working…') : tr(props.lang, '✨ Generate protocol')),
         busy ? h('div', { style: { marginTop: 10 } }, h(AiThinking, { label: 'Reading your idea & the selected literature, drafting an executable protocol' })) : null
-      ) : h('div', { className: 'empty' }, 'No protocol yet.')
+      ) : h('div', { className: 'empty' }, tr(props.lang, 'No protocol yet.'))
     );
 
     if (rvMd) return h(ReportViewer, {
@@ -5048,7 +5052,7 @@
         ce ? h('div', null,
           h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap' } },
             h('input', { className: 'field', style: { flex: 1, minWidth: 180 }, placeholder: 'Optional preference (e.g. "open access", "high impact", "European venue")', value: hint, disabled: busy, onChange: function (e) { setHint(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter') recommend(); } }),
-            h('button', { className: 'btn pri', style: { flex: 'none' }, disabled: busy, onClick: recommend }, busy ? '✨ Working…' : '✨ Recommend journals')),
+            h('button', { className: 'btn pri', style: { flex: 'none' }, disabled: busy, onClick: recommend }, busy ? tr(props.lang, '✨ Working…') : tr(props.lang, '✨ Recommend journals'))),
           busy ? h('div', { style: { marginTop: 10 } }, h(AiThinking, { label: 'Matching your research to fields, then ranking journals' })) : null
         ) : null),
       rec ? h('div', { className: 'panel' },
