@@ -785,3 +785,45 @@
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', build); else build();
 })();
+
+/* ── Production error logging (client_errors, migration-100) ──────────────────
+ * Captures uncaught JS errors + unhandled promise rejections on EVERY page and
+ * writes them to client_errors (fire-and-forget). Deduped + hard-capped per
+ * page-load so a render loop can't flood. Only logs for an authenticated user
+ * (RLS); the logger itself never throws. Manual hook: window.PRLogError(msg,ctx). */
+(function () {
+  var LOGGED = {}, COUNT = 0, MAX = 25;   // per page-load: dedupe identical + hard cap
+  function logClientError(kind, message, stack) {
+    try {
+      var BE = window.PR_BACKEND; if (!BE || !BE.sb) return;
+      var u = BE.user || null; if (!u || !u.id) return;   // authenticated only (RLS) — pre-login crashes are skipped
+      message = String(message == null ? '' : message).slice(0, 2000); if (!message) return;
+      var key = kind + '|' + message.slice(0, 200);
+      if (LOGGED[key] || COUNT >= MAX) return;
+      LOGGED[key] = 1; COUNT++;
+      BE.sb.from('client_errors').insert({
+        user_id: u.id,
+        page: String(location.pathname + location.search).slice(0, 300),
+        message: message,
+        stack: String(stack || '').slice(0, 6000),
+        kind: kind,
+        user_agent: String(navigator.userAgent || '').slice(0, 300),
+        app_build: (window.PR_BUILD && window.PR_BUILD.build) ? String(window.PR_BUILD.build) : null
+      }).then(function () { }, function () { });   // fire-and-forget; a logging failure must never surface
+    } catch (e) { /* the logger must never crash the app */ }
+  }
+  try {
+    window.addEventListener('error', function (e) {
+      if (!e) return;
+      var msg = e.message || (e.error && e.error.message) || 'error';
+      var st = (e.error && e.error.stack) || (e.filename ? (e.filename + ':' + e.lineno + ':' + e.colno) : '');
+      logClientError('error', msg, st);
+    });
+    window.addEventListener('unhandledrejection', function (e) {
+      var r = e && e.reason;
+      var msg = (r && (r.message || (typeof r === 'string' ? r : ''))) || 'unhandledrejection';
+      logClientError('unhandledrejection', msg, (r && r.stack) || '');
+    });
+  } catch (e) { }
+  window.PRLogError = function (msg, ctx) { logClientError('manual', ctx ? (msg + ' · ' + ctx) : msg, ''); };
+})();

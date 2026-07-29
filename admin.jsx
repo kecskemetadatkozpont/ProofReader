@@ -427,6 +427,43 @@
 
   /* ---------- main ---------- */
   // #13 — admin bug / feature-request console: see every report, set status, reply to the reporter
+  // Production client-side errors (client_errors, migration-100) — read-only list for admins.
+  function ClientErrors() {
+    var lS = useState(null), rows = lS[0], setRows = lS[1];
+    var uS = useState({}), users = uS[0], setUsers = uS[1];
+    var xS = useState({}), expanded = xS[0], setExpanded = xS[1];
+    function load() {
+      sb.from('client_errors').select('*').order('created_at', { ascending: false }).limit(100).then(function (r) {
+        if (r && r.error) { setRows([]); return; }
+        var data = (r && r.data) || []; setRows(data);
+        var ids = []; data.forEach(function (b) { if (b.user_id && ids.indexOf(b.user_id) < 0) ids.push(b.user_id); });
+        if (ids.length) sb.from('profiles').select('id,name,email').in('id', ids).then(function (p) { var m = {}; ((p && p.data) || []).forEach(function (u) { m[u.id] = u; }); setUsers(m); });
+      }, function () { setRows([]); });
+    }
+    useEffect(function () { load(); }, []);
+    function rel(ts) { if (!ts) return ''; var d = (Date.now() - new Date(ts).getTime()) / 1000; if (d < 60) return 'most'; if (d < 3600) return Math.round(d / 60) + 'p'; if (d < 86400) return Math.round(d / 3600) + 'ó'; return Math.round(d / 86400) + ' napja'; }
+    if (rows === null) return h(React.Fragment, null, h('div', { className: 'sec-h' }, h('h2', null, '🐛 Kliens-hibák')), h('div', { className: 'panel' }, h('div', { style: { padding: 12, color: 'var(--muted)' } }, 'Betöltés…')));
+    var since = Date.now() - 24 * 3600 * 1000, last24 = rows.filter(function (b) { return b.created_at && new Date(b.created_at).getTime() > since; }).length;
+    return h(React.Fragment, null,
+      h('div', { className: 'sec-h' }, h('h2', null, '🐛 Kliens-hibák'), h('span', { className: 'count' }, rows.length + ' (utolsó 100) · ' + last24 + ' az elmúlt 24 órában'), h('button', { className: 'btn', style: { marginLeft: 'auto', padding: '4px 10px', fontSize: 12 }, onClick: load }, '↻ Frissítés')),
+      h('div', { className: 'panel' },
+        rows.length === 0 ? h('div', { className: 'empty' }, 'Nincs rögzített kliens-hiba. 🎉 (Ha az oldalon volt hiba, de üres marad, ellenőrizd, hogy a migration-100 lefutott-e.)') :
+          rows.map(function (b) {
+            var u = users[b.user_id], ex = !!expanded[b.id];
+            return h('div', { key: b.id, style: { borderBottom: '1px solid var(--line)', padding: '10px 14px' } },
+              h('div', { style: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' } },
+                h('span', { className: 'badge', style: { background: b.kind === 'unhandledrejection' ? '#fef3e6' : '#fde8e8', color: b.kind === 'unhandledrejection' ? '#b4530f' : '#c02626' } }, b.kind || 'error'),
+                h('code', { style: { fontSize: 12.5, fontWeight: 600, wordBreak: 'break-word' } }, String(b.message || '').slice(0, 200)),
+                h('span', { style: { marginLeft: 'auto', fontSize: 11.5, color: 'var(--muted)' } }, rel(b.created_at))),
+              h('div', { style: { fontSize: 11.5, color: 'var(--muted)', marginTop: 4, display: 'flex', gap: 12, flexWrap: 'wrap' } },
+                h('span', null, '📄 ' + (b.page || '—')),
+                h('span', null, '👤 ' + (u ? (u.name || u.email) : (b.user_id ? String(b.user_id).slice(0, 8) + '…' : '—'))),
+                b.app_build ? h('span', null, 'build ' + b.app_build) : null,
+                b.stack ? h('button', { style: { background: 'none', border: 0, color: 'var(--accent, #4f46e5)', cursor: 'pointer', font: 'inherit', fontSize: 11.5, padding: 0 }, onClick: function () { setExpanded(function (E) { var n = Object.assign({}, E); n[b.id] = !n[b.id]; return n; }); } }, ex ? 'stack elrejtése' : 'stack megnyitása') : null),
+              ex && b.stack ? h('pre', { style: { fontSize: 11, background: 'var(--surface-2, #f6f7f9)', padding: 8, borderRadius: 6, marginTop: 6, overflow: 'auto', maxHeight: 220, whiteSpace: 'pre-wrap' } }, b.stack) : null);
+          }))
+    );
+  }
   function BugReports() {
     var lS = useState(null), rows = lS[0], setRows = lS[1];
     var rpS = useState({}), replies = rpS[0], setReplies = rpS[1];
@@ -829,6 +866,7 @@
               );
             })
         ),
+        h(ClientErrors),
         h(BugReports)
       ),
       h(UserDrawer, { user: selUser, agg: selUser ? aggFor(selUser.id) : { projects: [], storage: 0, chars: 0, requests: 0 }, onClose: function () { setSelUser(null); }, onPreview: function (p) { setPreview(p); }, onAction: setStatus, onSetModel: setModel, onSetWorkflows: setWorkflows, onSetFigures: setFigures, onSetFeature: setFeature, onSetAllowlist: setAllowlist, catalog: catalog }),
