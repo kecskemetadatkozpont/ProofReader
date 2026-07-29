@@ -9006,6 +9006,26 @@
     var giKey = 'pub-gami-' + ((props.me && props.me.id) || '');
     var giS = useState(function () { try { return localStorage.getItem(giKey) === '1'; } catch (e) { return false; } }), gamiOn = giS[0], setGamiOn = giS[1];
     function setGami(on) { try { localStorage.setItem(giKey, on ? '1' : '0'); } catch (e) { } setGamiOn(on); }
+    // LB — kooperatív ranglista opt-in (megosztott állapot: research_gami_prefs, migration-97). Projekt-szintű, opt-in, sose globális.
+    var loS = useState({}), lbOptin = loS[0], setLbOptin = loS[1];      // user_id → true (megjelenik-e a ranglistában)
+    var leS = useState(false), lbErr = leS[0], setLbErr = leS[1];       // true, ha a tábla még nincs (migration-97 nincs alkalmazva)
+    function loadOptin() {
+      var pid = p.id; if (!pid) return;
+      sb.from('research_gami_prefs').select('user_id,leaderboard_optin').eq('project_id', pid).then(function (r) {
+        if (!alive.current) return;
+        if (r && r.error) { setLbErr(true); return; }
+        var m = {}; ((r && r.data) || []).forEach(function (x) { if (x.leaderboard_optin) m[x.user_id] = true; }); setLbOptin(m); setLbErr(false);
+      }, function () { if (alive.current) setLbErr(true); });
+    }
+    function toggleMyOptin() {
+      var pid = p.id, uid = props.me && props.me.id; if (!pid || !uid) return;
+      var next = !lbOptin[uid];
+      sb.from('research_gami_prefs').upsert({ project_id: pid, user_id: uid, leaderboard_optin: next, updated_at: new Date().toISOString() }, { onConflict: 'project_id,user_id' }).then(function (r) {
+        if (!alive.current) return;
+        if (r && r.error) { window.PRUI.toast(r.error.message, { kind: 'error' }); return; }
+        setLbOptin(function (prev) { var n = Object.assign({}, prev); if (next) n[uid] = true; else delete n[uid]; return n; });
+      });
+    }
     var alive = useRef(true), chRef = useRef(null), openedAtRef = useRef(Date.now()), shareT = useRef(null);   // session baseline: "since you opened the page"
     useEffect(function () { alive.current = true; return function () { alive.current = false; }; }, []);
     var PAL = ['#e11d48', '#0891b2', '#7c3aed', '#ca8a04', '#059669', '#db2777', '#2563eb', '#ea580c'];
@@ -9058,7 +9078,7 @@
         if (idl.length) sb.from('profiles_public').select('id,name,avatar_url,color').in('id', idl).then(function (pr) { if (!alive.current) return; var m = {}; ((pr && pr.data) || []).forEach(function (x) { m[x.id] = { name: x.name, avatar: x.avatar_url, color: x.color }; }); setPpl(m); });
       });
     }
-    useEffect(function () { load(); }, [p.id]);
+    useEffect(function () { load(); loadOptin(); }, [p.id]);
     // presence: who is looking at the project right now + a live refresh when someone joins
     useEffect(function () {
       var pid = p.id, me = props.me || {}; if (!pid) return;
@@ -9172,6 +9192,39 @@
             return h('span', { key: i, title: b.on ? b.t : (b.t + ' — még nincs meg'), style: { display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, padding: '3px 9px', borderRadius: 999, border: '1px solid ' + (b.on ? 'color-mix(in srgb, var(--growth, #12ae7a) 40%, var(--line))' : 'var(--line)'), background: b.on ? 'color-mix(in srgb, var(--growth, #12ae7a) 10%, var(--surface))' : 'var(--surface)', color: b.on ? 'var(--ink)' : 'var(--faint)', opacity: b.on ? 1 : 0.55 } },
               h('span', { style: { filter: b.on ? 'none' : 'grayscale(1)' } }, b.ic), b.t);
           })));
+      })(),
+      // LB — Kooperatív ranglista: projekt-szintű, opt-in (research_gami_prefs), mérföldkő-súlyozott pont, kooperatív keret (nem verseny). Csak gamiOn mellett.
+      (function () {
+        if (!gamiOn || !giMeId) return null;
+        var LBW = { MILESTONE: 5, RESULT: 4, DECISION: 3, ARTIFACT: 2, TASK: 1 };
+        function lbScore(b) { var s = 0; Object.keys(b.byType || {}).forEach(function (t) { s += (LBW[t] || 1) * b.byType[t]; }); return s; }
+        var lbRows = contributors.filter(function (c) { return lbOptin[c.id]; }).map(function (c) { return { id: c.id, score: lbScore(c) }; }).sort(function (a, b) { return b.score - a.score; });
+        var lbTotal = lbRows.reduce(function (a, r) { return a + r.score; }, 0);
+        var lbMax = Math.max(1, lbRows.length ? lbRows[0].score : 1);
+        var mine = !!lbOptin[giMeId];
+        var MED = ['🥇', '🥈', '🥉'];
+        return h('div', { key: 'lb-card', style: { border: '1px solid color-mix(in srgb, var(--accent) 26%, var(--line))', background: 'color-mix(in srgb, var(--accent) 5%, var(--surface))', borderRadius: 14, padding: '12px 14px' } },
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 } },
+            h('b', { style: { fontSize: 13 } }, '🤝 Csapat-hozzájárulás'),
+            h('span', { style: { fontSize: 10, color: 'var(--faint)', border: '1px solid var(--line)', borderRadius: 999, padding: '1px 7px' } }, 'kooperatív · projekt-szintű'),
+            h('span', { style: { flex: 1 } }),
+            h('button', { onClick: toggleMyOptin, disabled: lbErr, title: 'Te döntöd el, megjelensz-e a ranglistában', style: { display: 'inline-flex', alignItems: 'center', gap: 6, background: 'none', border: '1px solid var(--line)', borderRadius: 999, padding: '3px 9px', cursor: lbErr ? 'not-allowed' : 'pointer', fontSize: 11, color: mine ? 'var(--ink)' : 'var(--muted)', opacity: lbErr ? 0.5 : 1 } },
+              h('span', null, mine ? '☑' : '☐'), 'Megjelenek')),
+          h('div', { style: { fontSize: 10.5, color: 'var(--faint)', marginBottom: 9 } }, 'A közös munkát ünnepli, nem verseny · mérföldkő-súlyozott pont · csak az opt-inolt tagok.'),
+          lbErr ? h('div', { style: { fontSize: 11.5, color: 'var(--warn)' } }, '⚠️ A ranglistához alkalmazd a migration-97-et (research_gami_prefs) a Supabase SQL editorban.')
+            : (!lbRows.length ? h('div', { style: { fontSize: 11.5, color: 'var(--muted)' } }, mine ? 'Bekapcsoltad a megjelenést — amint más tagok is opt-inolnak, itt lesz a csapat-nézet.' : 'Még senki sem kapcsolta be a megjelenést. Kezdd a „Megjelenek" gombbal.')
+              : h('div', null,
+                h('div', { style: { fontSize: 11.5, color: 'var(--muted)', marginBottom: 8 } }, 'Csapat összesen: ', h('b', { style: { color: 'var(--ink)' } }, lbTotal + ' pont'), ' · ', lbRows.length + ' résztvevő'),
+                lbRows.map(function (row, i) {
+                  var pctW = Math.round(row.score / lbMax * 100);
+                  return h('div', { key: row.id, style: { display: 'flex', alignItems: 'center', gap: 9, padding: '4px 0' } },
+                    h('span', { style: { flex: 'none', width: 20, textAlign: 'center', fontSize: i < 3 ? 14 : 11, color: 'var(--muted)', fontVariantNumeric: 'tabular-nums' } }, i < 3 ? MED[i] : (i + 1)),
+                    avatarEl(row.id, 22),
+                    h('div', { style: { flex: 1, minWidth: 0 } },
+                      h('div', { style: { fontSize: 12, fontWeight: row.id === giMeId ? 700 : 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } }, nmOf(row.id), row.id === giMeId ? h('span', { style: { color: 'var(--faint)', fontWeight: 400 } }, ' · te') : null),
+                      h('div', { style: { height: 5, borderRadius: 3, background: 'var(--line)', marginTop: 3, overflow: 'hidden' } }, h('div', { style: { height: '100%', width: pctW + '%', background: clOf(row.id), borderRadius: 3 } }))),
+                    h('span', { style: { flex: 'none', fontSize: 11.5, fontWeight: 700, color: 'var(--ink)', fontVariantNumeric: 'tabular-nums' } }, row.score));
+                }))));
       })(),
       // Pulzus callout
       h('div', { style: { display: 'flex', gap: 14, alignItems: 'center', border: '1px solid color-mix(in srgb, var(--accent) 30%, var(--line))', background: 'color-mix(in srgb, var(--accent) 7%, var(--surface))', borderRadius: 14, padding: '13px 15px', flexWrap: 'wrap' } },
