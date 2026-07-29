@@ -9002,6 +9002,10 @@
     var sroS = useState('editor'), shareRole = sroS[0], setShareRole = sroS[1];
     var smS = useState([]), shareMembers = smS[0], setShareMembers = smS[1];
     var smsgS = useState(''), shareMsg = smsgS[0], setShareMsg = smsgS[1];
+    // GP1 — gamifikáció opt-in (G0 guardrail: default KI, per-user, localStorage — nincs migráció; a nézet privát, csak a saját logból).
+    var giKey = 'pub-gami-' + ((props.me && props.me.id) || '');
+    var giS = useState(function () { try { return localStorage.getItem(giKey) === '1'; } catch (e) { return false; } }), gamiOn = giS[0], setGamiOn = giS[1];
+    function setGami(on) { try { localStorage.setItem(giKey, on ? '1' : '0'); } catch (e) { } setGamiOn(on); }
     var alive = useRef(true), chRef = useRef(null), openedAtRef = useRef(Date.now()), shareT = useRef(null);   // session baseline: "since you opened the page"
     useEffect(function () { alive.current = true; return function () { alive.current = false; }; }, []);
     var PAL = ['#e11d48', '#0891b2', '#7c3aed', '#ca8a04', '#059669', '#db2777', '#2563eb', '#ea580c'];
@@ -9069,6 +9073,28 @@
     var stage = Math.max(0, Math.min(STAGES.length - 1, p.stage || 0));
     var phaseNo = stage + 1, pct = Math.round(phaseNo / STAGES.length * 100);
     var log = sum.log, counts = sum.counts, tasks = sum.tasks;
+    // GP1 data — a JELEN felhasználó saját, privát haladás-tükre a research_log-ból (this month vs last month). Semleges, sose kudarcként.
+    var giMeId = props.me && props.me.id;
+    var giMine = giMeId ? log.filter(function (x) { return x.profile_id === giMeId; }) : [];
+    var giNow = new Date(), giY = giNow.getFullYear(), giM = giNow.getMonth();
+    var giPrev = new Date(giY, giM - 1, 1), giPY = giPrev.getFullYear(), giPM = giPrev.getMonth();
+    function giIn(ts, y, m) { if (!ts) return false; var d = new Date(ts); return d.getFullYear() === y && d.getMonth() === m; }
+    var giThis = giMine.filter(function (x) { return giIn(x.ts, giY, giM); });
+    var giLast = giMine.filter(function (x) { return giIn(x.ts, giPY, giPM); });
+    var giDays = {}; giThis.forEach(function (x) { giDays[String(x.ts).slice(0, 10)] = 1; });
+    var giActiveDays = Object.keys(giDays).length;
+    var giMilestones = giThis.filter(function (x) { return x.type === 'MILESTONE' || x.type === 'RESULT'; }).length;
+    var giThisN = giThis.length, giLastN = giLast.length;
+    // GP6 — aktív-kadencia: az utóbbi 8 hét közül hányban volt legalább 1 saját aktivitás (nem-folytonos, szünet-toleráns; nincs veszteségkerülés).
+    var giWeekMs = 7 * 86400000, giWeeks = [];
+    for (var giw = 7; giw >= 0; giw--) { var giEnd = giNow.getTime() - giw * giWeekMs, giStart = giEnd - giWeekMs; giWeeks.push({ active: giMine.some(function (x) { if (!x.ts) return false; var t = new Date(x.ts).getTime(); return t > giStart && t <= giEnd; }) }); }
+    var giActiveWeeks = giWeeks.filter(function (w) { return w.active; }).length;
+    // GP3 — privát mérföldkő-jelvények, VALÓS rögzített eseményekhez kötve (nem aktivitás-mennyiséghez).
+    var giBadges = [
+      { on: giMine.some(function (x) { return x.type === 'MILESTONE'; }), ic: '🎯', t: 'Mérföldkő' },
+      { on: giMine.some(function (x) { return x.type === 'RESULT'; }), ic: '📊', t: 'Eredmény rögzítve' },
+      { on: giActiveDays >= 8, ic: '🔥', t: 'Kitartó hónap (8+ aktív nap)' }
+    ];
     var tasksOpen = tasks.filter(function (t) { return t.status !== 'done'; }).length;
     var overdue = tasks.filter(function (t) { return t.status !== 'done' && t.due && new Date(t.due) < new Date(); }).length;
     // per-contributor rollup from the activity log, WITH a session delta ("since you opened the page")
@@ -9116,6 +9142,37 @@
         online.length ? h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 5 } }, h('span', { style: { width: 7, height: 7, borderRadius: '50%', background: '#22c55e' } }), h('span', { style: { fontSize: 11, color: 'var(--muted)' } }, online.length + ' online')) : null,
         h('div', { style: { display: 'flex' } }, online.slice(0, 5).map(function (id, i) { return h('span', { key: id, style: { marginLeft: i ? -6 : 0, boxShadow: '0 0 0 2px var(--surface)', borderRadius: '50%' } }, avatarEl(id, 24)); }))
       ),
+      // GP1 — Személyes haladás-tükör: opt-in (default KI), privát (csak a saját logból), semleges keret — sose kudarcként (a kritika guardrailjei szerint).
+      (function () {
+        if (!giMeId) return null;
+        if (!gamiOn) return h('button', { key: 'gami-invite', onClick: function () { setGami(true); }, style: { textAlign: 'left', border: '1px dashed var(--line)', background: 'var(--surface)', borderRadius: 12, padding: '8px 12px', cursor: 'pointer', fontSize: 12, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 8 } },
+          h('span', null, '🌱'), h('span', null, 'Kapcsold be a személyes haladás-nézeted — ', h('b', { style: { color: 'var(--ink)' } }, 'csak te látod'), '.'));
+        function tile(lab, val, col) { return h('div', { style: { flex: 1, minWidth: 78, border: '1px solid var(--line)', borderRadius: 10, padding: '8px 10px', background: 'var(--surface)' } }, h('div', { style: { fontSize: 20, fontWeight: 750, lineHeight: 1, color: col || 'var(--ink)', fontVariantNumeric: 'tabular-nums' } }, String(val)), h('div', { style: { fontSize: 10, color: 'var(--faint)', marginTop: 3, textTransform: 'uppercase', letterSpacing: '.04em' } }, lab)); }
+        var trend = giLastN === 0 ? 'Az első aktív hónapod ebben a projektben — épül a lendület.'
+          : (giThisN >= giLastN ? 'Élénk hónap — hasonló vagy nagyobb ütem, mint múlt hónapban.'
+            : 'Csendesebb hónap eddig — a kutatás üteme természetesen hullámzik, ez rendben van.');
+        return h('div', { key: 'gami-card', style: { border: '1px solid color-mix(in srgb, var(--growth, #12ae7a) 30%, var(--line))', background: 'color-mix(in srgb, var(--growth, #12ae7a) 6%, var(--surface))', borderRadius: 14, padding: '12px 14px' } },
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 9 } },
+            h('b', { style: { fontSize: 13 } }, '🌱 A te haladásod'),
+            h('span', { style: { fontSize: 10, color: 'var(--faint)', border: '1px solid var(--line)', borderRadius: 999, padding: '1px 7px' } }, '🔒 csak te látod'),
+            h('span', { style: { flex: 1 } }),
+            h('button', { onClick: function () { setGami(false); }, title: 'Elrejtés', style: { background: 'none', border: 'none', color: 'var(--faint)', cursor: 'pointer', fontSize: 11 } }, 'elrejtés')),
+          h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 9 } },
+            tile('aktív nap / hó', giActiveDays),
+            tile('mérföldkő / hó', giMilestones, 'var(--growth, #12ae7a)'),
+            tile('bejegyzés / hó', giThisN)),
+          h('div', { style: { fontSize: 11.5, color: 'var(--muted)', lineHeight: 1.45 } }, trend),
+          // GP6 — aktív-kadencia strip
+          h('div', { style: { marginTop: 11, display: 'flex', alignItems: 'center', gap: 8 } },
+            h('span', { style: { fontSize: 10.5, color: 'var(--faint)', flex: 'none' } }, 'Aktív hetek'),
+            h('div', { style: { display: 'flex', gap: 3 } }, giWeeks.map(function (w, i) { return h('span', { key: i, title: w.active ? 'aktív' : '—', style: { width: 9, height: 9, borderRadius: 2, background: w.active ? 'var(--growth, #12ae7a)' : 'var(--line)' } }); })),
+            h('span', { style: { fontSize: 10.5, color: 'var(--muted)' } }, giActiveWeeks + ' / 8')),
+          // GP3 — privát mérföldkő-jelvények
+          h('div', { style: { marginTop: 10, display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' } }, giBadges.map(function (b, i) {
+            return h('span', { key: i, title: b.on ? b.t : (b.t + ' — még nincs meg'), style: { display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, padding: '3px 9px', borderRadius: 999, border: '1px solid ' + (b.on ? 'color-mix(in srgb, var(--growth, #12ae7a) 40%, var(--line))' : 'var(--line)'), background: b.on ? 'color-mix(in srgb, var(--growth, #12ae7a) 10%, var(--surface))' : 'var(--surface)', color: b.on ? 'var(--ink)' : 'var(--faint)', opacity: b.on ? 1 : 0.55 } },
+              h('span', { style: { filter: b.on ? 'none' : 'grayscale(1)' } }, b.ic), b.t);
+          })));
+      })(),
       // Pulzus callout
       h('div', { style: { display: 'flex', gap: 14, alignItems: 'center', border: '1px solid color-mix(in srgb, var(--accent) 30%, var(--line))', background: 'color-mix(in srgb, var(--accent) 7%, var(--surface))', borderRadius: 14, padding: '13px 15px', flexWrap: 'wrap' } },
         h('div', { style: { width: 76, height: 76, borderRadius: '50%', flex: 'none', display: 'grid', placeItems: 'center', background: 'conic-gradient(var(--accent) 0 ' + pct + '%, var(--line) ' + pct + '% 100%)' } },
