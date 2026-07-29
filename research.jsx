@@ -65,7 +65,15 @@
     // common fields
     'Title': 'Cím', 'Title *': 'Cím *', 'Field': 'Terület', 'Keywords (comma-separated)': 'Kulcsszavak (vesszővel)', 'Goal / expected output': 'Cél / várt eredmény', 'Stage': 'Fázis', 'Status': 'Állapot',
     // main panel headers
-    'Library': 'Könyvtár', 'Literature search': 'Irodalomkeresés'
+    'Library': 'Könyvtár', 'Literature search': 'Irodalomkeresés',
+    // dashboard / first-run (pre-project chrome)
+    'Research projects': 'Kutatási projektek', 'Project': 'Projekt', 'Protocol tasks': 'Protokoll-feladatok',
+    'No research projects yet. ': 'Még nincs kutatási projekted. ',
+    'Create one to start tracking a study from idea to submission.': 'Hozz létre egyet, és követheted a kutatást az ötlettől a beadásig.',
+    'My research': 'Saját kutatásom', 'My students’ research': 'Diákjaim kutatása',
+    'Protocol board': 'Protokoll-tábla', 'Projects': 'Projektek', 'stage': 'fázis',
+    'project': 'projekt', 'projects': 'projekt', 'student': 'diák', 'students': 'diák',
+    'Every research project’s protocol steps in one board · personal to-dos live in “My tasks”': 'Minden kutatási projekt protokoll-lépései egy táblán · a személyes teendők a „Feladataim" alatt'
   };
   function tr(lang, en) { return (lang === 'hu' && I18N_HU[en]) ? I18N_HU[en] : en; }
 
@@ -10240,11 +10248,13 @@
     }, [meId, props.projects.length]);
     if (!isSup && view === 'supervised') view = 'mine';
     var roleLabel = me.role === 'admin' ? 'Administrator' : (isSup ? 'Supervisor' : 'Researcher');
-    var sub = sel ? STAGES[sel.stage || 0] + ' stage' : (view === 'supervised' ? (studentList.length + ' student(s)') : (mineProjects.length + ' project' + (mineProjects.length === 1 ? '' : 's')));
+    // pre-project dashboard has no project language context → follow the browser locale, OR 'hu' if the user has any Hungarian project (migration-65). In-project chrome uses the project's own language.
+    var dashLang = (function () { try { if (String(navigator.language || '').toLowerCase().indexOf('hu') === 0) return 'hu'; if ((props.projects || []).some(function (p) { return p.language === 'hu'; })) return 'hu'; return 'en'; } catch (e) { return 'en'; } })();
+    var sub = sel ? (tr(dashLang, STAGES[sel.stage || 0]) + ' ' + tr(dashLang, 'stage')) : (view === 'supervised' ? (studentList.length + ' ' + tr(dashLang, studentList.length === 1 ? 'student' : 'students')) : (mineProjects.length + ' ' + tr(dashLang, mineProjects.length === 1 ? 'project' : 'projects')));
 
     var seg = (isSup && !sel) ? h('div', { className: 'segctl', role: 'group', 'aria-label': 'Research view' },
-      h('button', { className: view === 'mine' ? 'on' : '', 'aria-pressed': view === 'mine', onClick: function () { setView('mine'); } }, 'My research (' + mineProjects.length + ')'),
-      h('button', { className: view === 'supervised' ? 'on' : '', 'aria-pressed': view === 'supervised', onClick: function () { setView('supervised'); } }, 'My students’ research (' + supProjects.length + ')')
+      h('button', { className: view === 'mine' ? 'on' : '', 'aria-pressed': view === 'mine', onClick: function () { setView('mine'); } }, tr(dashLang, 'My research') + ' (' + mineProjects.length + ')'),
+      h('button', { className: view === 'supervised' ? 'on' : '', 'aria-pressed': view === 'supervised', onClick: function () { setView('supervised'); } }, tr(dashLang, 'My students’ research') + ' (' + supProjects.length + ')')
     ) : null;
     var body;
     if (sel) {
@@ -10255,7 +10265,7 @@
     } else if (view === 'supervised') {
       body = h('div', null, seg, h(SupervisedView, { students: props.students, projects: supProjects, studentById: studentById, onOpen: props.openProject }));
     } else if (!mineProjects.length && !sharedProjects.length) {
-      body = h('div', null, seg, h('div', { className: 'soon' }, h('b', null, 'No research projects yet. '), 'Create one to start tracking a study from idea to submission.', h('div', { style: { marginTop: 14 } }, h('button', { className: 'btn pri', onClick: function () { setAdding(true); } }, '+ New project'))));
+      body = h('div', null, seg, h('div', { className: 'soon' }, h('b', null, tr(dashLang, 'No research projects yet. ')), tr(dashLang, 'Create one to start tracking a study from idea to submission.'), h('div', { style: { marginTop: 14 } }, h('button', { className: 'btn pri', onClick: function () { setAdding(true); } }, tr(dashLang, '+ New project')))));
     } else {
       body = h('div', null, seg,
         mineProjects.length ? h('div', { className: 'grid' }, mineProjects.map(function (p) { return h(ProjectCard, { key: p.id, project: p, meId: meId, studentById: studentById, onOpen: props.openProject, apRun: apRuns[p.id], counts: pCounts[p.id], onChanged: props.reloadProjects }); })) : null,
@@ -10273,12 +10283,12 @@
       h('div', { className: 'main' },
         props.preview ? h('div', { className: 'preview-banner' }, '👁 Admin preview — viewing ', h('b', null, me.name), '’s Research. ', h('a', { href: 'PhD.html?adminView=1' }, 'Doctoral School'), ' · ', h('a', { href: 'Profile.html?adminView=1' }, 'Profile'), ' · ', h('a', { href: 'Admin.html' }, '← Back to admin')) : null,
         h('div', { className: 'head' },
-          (nd() && sel) ? h('div', { className: 'rv-crumb' }, h('b', null, 'Research')) : h('div', null, h('h1', null, sel ? 'Project' : (board ? 'Protocol tasks' : 'Research projects')), h('div', { className: 'sub' }, board && !sel ? 'Every research project’s protocol steps in one board · personal to-dos live in “My tasks”' : sub)),
+          (nd() && sel) ? h('div', { className: 'rv-crumb' }, h('b', null, 'Research')) : h('div', null, h('h1', null, sel ? tr(dashLang, 'Project') : (board ? tr(dashLang, 'Protocol tasks') : tr(dashLang, 'Research projects'))), h('div', { className: 'sub' }, board && !sel ? tr(dashLang, 'Every research project’s protocol steps in one board · personal to-dos live in “My tasks”') : sub)),
           h('div', { style: { display: 'flex', gap: 10, alignItems: 'center' } },
             h(NotifBell, null),
-            sel ? null : h('button', { className: 'btn' + (board ? ' pri' : ''), onClick: function () { setBoard(!board); }, title: 'Protocol task board — every project’s protocol steps in one Kanban' }, board ? '☷ Projects' : '🗂️ Protocol board'),
+            sel ? null : h('button', { className: 'btn' + (board ? ' pri' : ''), onClick: function () { setBoard(!board); }, title: 'Protocol task board — every project’s protocol steps in one Kanban' }, board ? ('☷ ' + tr(dashLang, 'Projects')) : ('🗂️ ' + tr(dashLang, 'Protocol board'))),
             (nd() && !(sel || board || view === 'supervised')) ? h('a', { className: 'btn', href: 'Autopilot.html', style: { textDecoration: 'none' }, title: 'Chat-alapú belépő — állítsd össze a briefet és indítsd az Autopilotot' }, '⚡ Autopilot') : null,
-            (sel || board || view === 'supervised') ? null : h('button', { className: 'btn pri', onClick: function () { setAdding(true); } }, '+ New project')
+            (sel || board || view === 'supervised') ? null : h('button', { className: 'btn pri', onClick: function () { setAdding(true); } }, tr(dashLang, '+ New project'))
           )
         ),
         body,
