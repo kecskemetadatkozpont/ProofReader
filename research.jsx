@@ -5076,7 +5076,11 @@
   var TL_PHASE_COLORS = ['#ffcf5c', '#5b9dff', '#7fc8b0', '#57c98a', '#b98bff', '#f0a868', '#9fb0c8'];   // per-phase lane chip
   var TL_TYPE_COLORS = ['#ffcf5c', '#5b9dff', '#57c98a', '#f0a868', '#9fb0c8', '#8fa0ff'];   // per type-group lane chip (matches TL_TYPE_LABELS)
   function tlFmtDay(ts) { var d = new Date(ts); return (d.getMonth() + 1) + '.' + d.getDate(); }
-  var RMAP_TYPE = { idea: { ic: '💡', lab: 'Ötlet', tab: 'ideas' }, gap: { ic: '🕳️', lab: 'Kutatási rés', tab: 'gap' }, paper: { ic: '📄', lab: 'Cikk', tab: 'literature' }, study: { ic: '🔎', lab: 'Irodalom', tab: 'literature' }, review: { ic: '📝', lab: 'Áttekintés', tab: 'study' }, step: { ic: '🧪', lab: 'Protokoll-lépés', tab: 'protocol' }, venue: { ic: '🎯', lab: 'Folyóirat', tab: 'journal' }, section: { ic: '✍️', lab: 'Draft-szekció', tab: 'writing' }, dataset: { ic: '🗂️', lab: 'Adathalmaz', tab: 'data' }, file: { ic: '📎', lab: 'Fájl', tab: 'ideas' }, chat: { ic: '💬', lab: 'Beszélgetés', tab: 'ideas' }, figure: { ic: '🖼️', lab: 'Ábra', tab: 'literature' }, srq: { ic: '❓', lab: 'Review-kérdés', tab: 'study' }, sreview: { ic: '🔬', lab: 'Szisztematikus áttekintés', tab: 'study' }, submission: { ic: '📤', lab: 'Beküldés', tab: 'submission' }, revision: { ic: '🔁', lab: 'Revízió / bírálati válasz', tab: 'submission' } };
+  var RMAP_TYPE = { idea: { ic: '💡', lab: 'Ötlet', tab: 'ideas' }, gap: { ic: '🕳️', lab: 'Kutatási rés', tab: 'gap' }, paper: { ic: '📄', lab: 'Cikk', tab: 'literature' }, study: { ic: '🔎', lab: 'Irodalom', tab: 'literature' }, review: { ic: '📝', lab: 'Áttekintés', tab: 'study' }, step: { ic: '🧪', lab: 'Protokoll-lépés', tab: 'protocol' }, venue: { ic: '🎯', lab: 'Folyóirat', tab: 'journal' }, section: { ic: '✍️', lab: 'Draft-szekció', tab: 'writing' }, dataset: { ic: '🗂️', lab: 'Adathalmaz', tab: 'data' }, file: { ic: '📎', lab: 'Fájl', tab: 'ideas' }, chat: { ic: '💬', lab: 'Beszélgetés', tab: 'ideas' }, figure: { ic: '🖼️', lab: 'Ábra', tab: 'literature' }, srq: { ic: '❓', lab: 'Review-kérdés', tab: 'study' }, sreview: { ic: '🔬', lab: 'Szisztematikus áttekintés', tab: 'study' }, submission: { ic: '📤', lab: 'Beküldés', tab: 'submission' }, revision: { ic: '🔁', lab: 'Revízió / bírálati válasz', tab: 'submission' }, object: { ic: '📝', lab: 'Vászon-elem', tab: null } };
+  // Canvas→Map merge: free-floating object cards (note / media / link). Per-kind icon + external-embed helpers.
+  var OBJ_IC = { note: '📝', image: '🖼️', pdf: '📕', video: '🎬', link: '🔗', markdown: '📄' };
+  function ytId(u) { var m = String(u || '').match(/(?:youtube\.com\/(?:watch\?v=|embed\/)|youtu\.be\/)([\w-]{11})/); return m ? m[1] : null; }
+  function vimeoId(u) { var m = String(u || '').match(/vimeo\.com\/(\d+)/); return m ? m[1] : null; }
   // interactive-edge relation presets (migration-81). Each type is a full look-preset: color + line-style + arrow + default animation.
   // The two structural derived kinds (flow/cite) map to erd/idz and keep today's exact stroke for backward-compat.
   var EDGE_TYPES = {
@@ -5143,6 +5147,7 @@
     var loS = useState(false), litOpen = loS[0], setLitOpen = loS[1];   // F4: expand the study funnel's paper nodes (collapsed by default)
     var mnS = useState(null), menu = mnS[0], setMenu = mnS[1];   // F1: node "generate from here" context menu {node,x,y}
     var rmadS = useState(null), radial = rmadS[0], setRadial = rmadS[1];   // radial quick-add menu on canvas double-click {sx,sy,wx,wy}
+    var objUpRef = useRef(null), objUpPos = useRef(null);   // Canvas→Map merge: hidden file input + pending world-pos for media upload
     var drpS = useState(null), drop = drpS[0], setDrop = drpS[1];   // the "it landed here" drop-pulse {sx,sy}
     var gbS = useState(false), genBusy = gbS[0], setGenBusy = gbS[1];
     var hgS = useState({}), hgt = hgS[0], setHgt = hgS[1];   // measured real card heights (id → px) → the no-overlap rule uses them, not an estimate
@@ -5444,6 +5449,8 @@
         })
         // parallel protocol work: reload when ANY collaborator inserts / updates / archives a protocol in this project (else a teammate's new protocol wouldn't appear live)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'research_protocols', filter: 'project_id=eq.' + pid }, function () { if (alive.current) bumpSoon(); })
+        // Canvas→Map merge: reload when a collaborator adds / edits / removes a free object card (note / media / link)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'research_map_objects', filter: 'project_id=eq.' + pid }, function () { if (alive.current) bumpSoon(); })
         .on('broadcast', { event: 'story_beat' }, function (m) {
           if (!alive.current) return; var pl = m && m.payload; if (!pl || pl.id === props.viewerId) return;
           // a presenter broadcasts the target of the current beat; audience flies there locally (bandwidth-cheap)
@@ -5538,11 +5545,13 @@
         sb.from('elicit_jobs').select('id,research_question,status,result_title,created_at').eq('project_id', pid).eq('kind', 'sysreview').order('created_at', { ascending: true }).limit(16),
         // figures the user REMOVED from the Map (on_map=false) — for the restore panel. Graceful: pre-migration-69 the
         // column is absent → this query errors → [] → no filtering, no panel (the Map shows all figures as before).
-        sb.from('research_figures').select('id,source_id,fig_label,caption,storage_path').eq('project_id', pid).eq('hidden', false).eq('on_map', false).order('created_at', { ascending: true }).limit(30)
+        sb.from('research_figures').select('id,source_id,fig_label,caption,storage_path').eq('project_id', pid).eq('hidden', false).eq('on_map', false).order('created_at', { ascending: true }).limit(30),
+        // Canvas→Map merge: free-floating note / media / link cards (graceful: pre-migration-99 this errors → [] → no object nodes)
+        sb.from('research_map_objects').select('id,kind,text,url,storage_path,meta,created_by,created_at').eq('project_id', pid).order('created_at', { ascending: true }).limit(200)
       ]).then(function (r) {
         if (!alive.current) return;
         var _protos = (r[5].data) || [];
-        var base = { ideas: (r[0].data) || [], studies: (r[1].data) || [], topSrc: (r[2].data) || [], srcTotal: r[3].count || 0, inclTotal: r[4].count || 0, protocols: _protos, protocol: _protos.slice(-1)[0] || null, journals: (r[6].data) || [], wfiles: (r[7].data) || [], datasets: (r[8] && r[8].data) || [], mfiles: (r[9] && r[9].data) || [], chats: (r[10] && r[10].data) || [], figures: (r[11] && r[11].data) || [], srcands: (r[12] && r[12].data) || [], sreviews: (r[13] && r[13].data) || [] };
+        var base = { ideas: (r[0].data) || [], studies: (r[1].data) || [], topSrc: (r[2].data) || [], srcTotal: r[3].count || 0, inclTotal: r[4].count || 0, protocols: _protos, protocol: _protos.slice(-1)[0] || null, journals: (r[6].data) || [], wfiles: (r[7].data) || [], datasets: (r[8] && r[8].data) || [], mfiles: (r[9] && r[9].data) || [], chats: (r[10] && r[10].data) || [], figures: (r[11] && r[11].data) || [], srcands: (r[12] && r[12].data) || [], sreviews: (r[13] && r[13].data) || [], objects: (r[15] && !r[15].error && Array.isArray(r[15].data)) ? r[15].data : [] };
         // remove Map-hidden figures (on_map=false) client-side + keep them for the restore panel
         var hiddenFigs = (r[14] && !r[14].error && r[14].data) ? r[14].data : []; var hidSet = {}; hiddenFigs.forEach(function (x) { hidSet[x.id] = 1; });
         base.figures = base.figures.filter(function (f) { return !hidSet[f.id]; }); base.hiddenFigs = hiddenFigs;
@@ -5562,7 +5571,7 @@
           });
         }
         else setData(Object.assign(base, { stepsByProt: {}, steps: [] }));
-      }, function () { if (alive.current) setData({ ideas: [], studies: [], topSrc: [], srcTotal: 0, inclTotal: 0, protocol: null, protocols: [], stepsByProt: {}, journals: [], wfiles: [], steps: [], datasets: [], mfiles: [], chats: [], figures: [], srcands: [], sreviews: [], hiddenFigs: [] }); });
+      }, function () { if (alive.current) setData({ ideas: [], studies: [], topSrc: [], srcTotal: 0, inclTotal: 0, protocol: null, protocols: [], stepsByProt: {}, journals: [], wfiles: [], steps: [], datasets: [], mfiles: [], chats: [], figures: [], srcands: [], sreviews: [], objects: [], hiddenFigs: [] }); });
     }, [props.projectId, bump]);
     // measure each card's REAL rendered height after paint → feed the no-overlap rule with true heights (estimates
     // undershoot long-title cards, e.g. the H1/H2 hypotheses, leaving residual overlap). Converges in one extra render.
@@ -5741,6 +5750,12 @@
         var kids = (d.ideas || []).filter(function (x) { return x.source === 'chat'; });   // connect the chat to EVERY idea that came from chat ideation, not just the first
         if (kids.length) kids.forEach(function (x) { E.push(['c' + c.id, 'i' + x.id]); });
         else if (d.ideas.length) E.push(['c' + c.id, 'i' + d.ideas[0].id]);   // no chat-sourced idea yet → keep one representative edge so the chat isn't orphaned
+      });
+      // Canvas→Map merge: free-floating object cards (note / media / link) — standalone nodes, no derived edges (users connect them with manual edges).
+      (d.objects || []).forEach(function (o) {
+        var okind = o.kind || 'note';
+        var otitle = okind === 'note' ? (o.text ? String(o.text).replace(/\s+/g, ' ').slice(0, 44) : 'Jegyzet') : ((o.meta && o.meta.name) || (okind === 'link' ? (o.url || 'Link') : (RMAP_TYPE.object.lab)));
+        N.push({ id: 'o' + o.id, t: 'object', ph: 0, title: otitle, m: {}, ref: o, okind: okind, createdBy: o.created_by || null });
       });
       (d.figures || []).forEach(function (fg) {   // figures extracted from Library papers (ph 1)
         N.push({ id: 'g' + fg.id, t: 'figure', ph: 1, title: fg.fig_label || String(fg.caption || 'Ábra').slice(0, 40), m: { Felirat: fg.caption || '—' }, ref: fg });
@@ -6216,6 +6231,7 @@
       if (pref === 'f') return { table: 'research_files', id: rest, dataKey: 'mfiles' };
       if (pref === 'q') return { table: 'research_sr_candidates', id: rest, dataKey: 'srcands' };
       if (pref === 'g') return { table: 'research_figures', id: rest, dataKey: 'figures' };
+      if (pref === 'o') return { table: 'research_map_objects', id: rest, dataKey: 'objects' };
       return null;
     }
     function hRestoreLayout(rows) {   // undo/redo positions AND (when present) card_w/card_h. A row WITHOUT a card_w key leaves the size untouched (plain move); a row WITH card_w:null reverts the card to auto-size (smart-layout undo).
@@ -6388,7 +6404,7 @@
     // ── DELETE a card = delete its underlying row (per node type) + the map layout + any storage blob. Confirm-gated,
     // FK-graceful. Scoped to the user's OWN artifacts; shared/pipeline data (paper library, SR jobs) is NOT deletable here
     // (those have their own management + FK dependents) → they can only be 🙈 hidden. Aggregate nodes (lit/sr) excluded.
-    var DEL_BY_TYPE = { idea: 'research_ideas', gap: 'research_ideas', step: 'research_protocol_steps', venue: 'research_journal_picks', section: 'research_files', review: 'research_files', dataset: 'research_datasets', file: 'research_files', chat: 'research_chats', figure: 'research_figures', submission: 'research_files', revision: 'research_files' };
+    var DEL_BY_TYPE = { idea: 'research_ideas', gap: 'research_ideas', step: 'research_protocol_steps', venue: 'research_journal_picks', section: 'research_files', review: 'research_files', dataset: 'research_datasets', file: 'research_files', chat: 'research_chats', figure: 'research_figures', submission: 'research_files', revision: 'research_files', object: 'research_map_objects' };
     // cascade children whose rows are ON DELETE CASCADE from the deleted parent — snapshot them BEFORE the delete so undo can faithfully restore them (else e.g. a restored chat comes back with an empty conversation). Ordered so each parent's children reinsert after it. research_protocol_notes is intentionally excluded: its INSERT RLS requires author_id = auth.uid(), so another user's notes can't be restored (documented caveat).
     var CASCADE_CHILDREN = { chat: [{ table: 'research_messages', fk: 'chat_id' }, { table: 'research_evidence', fk: 'chat_id' }], idea: [{ table: 'research_sr_candidates', fk: 'idea_id' }], gap: [{ table: 'research_sr_candidates', fk: 'idea_id' }] };
     function nodeDeletable(n) { return !!(props.canEdit && n && n.ref && n.ref.id && DEL_BY_TYPE[n.t] && n.id !== 'lit' && n.id !== 'sr'); }
@@ -6491,6 +6507,51 @@
       if (applyOptimistic) setData(applyOptimistic); else setBump(function (x) { return x + 1; });
       setSel(nid);
       if (histLabel) { histPushCreate(histLabel + ' létrehozása', [nid], null); window.PRUI.toast('Létrehozva: ' + histLabel + ' · ⌘Z a visszavonáshoz', { kind: 'ok' }); }   // pain-killer: name it + tell them undo works
+    }
+    // Canvas→Map merge: free object genesis (note / link / uploaded media) — insert a research_map_objects row, pin at the cursor (+ optional initial media size), optimistic-append.
+    function objInsert(row, wx, wy, sizeW, sizeH, histLabel) {
+      sb.from('research_map_objects').insert(Object.assign({ project_id: props.projectId, created_by: props.authorId }, row)).select('id,kind,text,url,storage_path,meta,created_by,created_at').single().then(function (r) {
+        if (!alive.current) return;
+        if (r && r.error) { window.PRUI.toast('Létrehozás sikertelen: ' + r.error.message, { kind: 'error' }); return; }
+        if (!r || !r.data) return;
+        var nid = 'o' + r.data.id, X = Math.round(wx), Y = Math.round(wy);
+        setLayout(function (L) { var m = Object.assign({}, L); var patch = { x: X, y: Y }; if (sizeW) patch.card_w = sizeW; if (sizeH) patch.card_h = sizeH; m[nid] = Object.assign(patch, m[nid]); return m; });
+        var lrow = { project_id: props.projectId, node_id: nid, x: X, y: Y, updated_at: new Date().toISOString() }; if (sizeW) lrow.card_w = sizeW; if (sizeH) lrow.card_h = sizeH;
+        sb.from('research_map_layout').upsert(lrow, { onConflict: 'project_id,node_id' });
+        setData(function (D) { return D ? Object.assign({}, D, { objects: (D.objects || []).concat([r.data]) }) : D; });
+        setSel(nid);
+        if (histLabel) { histPushCreate(histLabel + ' létrehozása', [nid], null); window.PRUI.toast('Létrehozva: ' + histLabel + ' · ⌘Z a visszavonáshoz', { kind: 'ok' }); }
+      });
+    }
+    function noteAtPos(wx, wy) { if (props.canEdit) objInsert({ kind: 'note', text: '' }, wx, wy, null, null, 'Jegyzet'); }
+    function linkAtPos(wx, wy) {
+      if (!props.canEdit) return;
+      var url = window.prompt('Link URL (weboldal, YouTube, Vimeo…):'); if (!url) return; url = url.trim(); if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+      var big = ytId(url) || vimeoId(url);
+      objInsert({ kind: 'link', url: url, meta: { name: url } }, wx, wy, big ? 340 : 280, big ? 210 : null, 'Link');
+    }
+    function uploadObjectAtPos(wx, wy) { if (!props.canEdit) return; objUpPos.current = { wx: wx, wy: wy }; if (objUpRef.current) { objUpRef.current.value = ''; objUpRef.current.click(); } }
+    function onObjUpload(e) {
+      var f = e.target.files && e.target.files[0]; if (!f) return; var pos = objUpPos.current || { wx: 0, wy: 0 };
+      var mime = f.type || '', name = f.name, ext = (name.split('.').pop() || '').toLowerCase();
+      var kind = mime.indexOf('image') === 0 ? 'image' : (mime === 'application/pdf' || ext === 'pdf') ? 'pdf' : mime.indexOf('video') === 0 ? 'video' : (ext === 'md' || ext === 'markdown' || mime === 'text/markdown') ? 'markdown' : null;
+      if (!kind) { window.PRUI.toast('Nem támogatott típus. Feltölthető: kép, PDF, videó, .md.', { kind: 'error' }); return; }
+      var path = props.projectId + '/canvas/' + Date.now() + '_' + name.replace(/[^A-Za-z0-9._-]/g, '_');
+      window.PRUI.toast('Feltöltés…', {});
+      sb.storage.from('research-data').upload(path, f).then(function (res) {
+        if (res && res.error) { window.PRUI.toast('Feltöltés sikertelen: ' + res.error.message, { kind: 'error' }); return; }
+        var SZ = { image: [260, 190], pdf: [320, 380], video: [340, 210], markdown: [320, 240] }[kind] || [260, 180];
+        if (kind === 'markdown') { f.text().then(function (txt) { objInsert({ kind: 'markdown', text: String(txt).slice(0, 60000), storage_path: path, meta: { name: name, mime: mime } }, pos.wx, pos.wy, SZ[0], SZ[1], 'Markdown'); }); }
+        else { objInsert({ kind: kind, storage_path: path, meta: { name: name, mime: mime } }, pos.wx, pos.wy, SZ[0], SZ[1], 'Média'); }
+      }, function () { window.PRUI.toast('Feltöltés sikertelen.', { kind: 'error' }); });
+    }
+    function editObjectNote(n) {
+      if (!n || !n.ref || !n.ref.id) return; var cur = n.ref.text || '';
+      var txt = window.prompt('Jegyzet szövege:', cur); if (txt == null) return;
+      sb.from('research_map_objects').update({ text: txt, updated_at: new Date().toISOString() }).eq('id', n.ref.id).then(function (r) {
+        if (!alive.current) return; if (r && r.error) { window.PRUI.toast(r.error.message, { kind: 'error' }); return; }
+        setData(function (D) { return D ? Object.assign({}, D, { objects: (D.objects || []).map(function (o) { return o.id === n.ref.id ? Object.assign({}, o, { text: txt }) : o; }) }) : D; });
+      });
     }
     function ideaAtPos(wx, wy) {
       if (!props.canEdit) return;
@@ -8275,7 +8336,8 @@
           h('text', { x: 12, y: 15, textAnchor: 'middle', fontSize: 8, fontWeight: 800, fill: 'var(--ink)' }, String(nov))));
     }
     function body(n) {
-      var k = [h('div', { className: 'rmap-nh', key: 'h' }, h('span', { className: 'rmap-ni' }, RMAP_TYPE[n.t].ic), h('span', { className: 'rmap-nt' }, n.title))];
+      var _ic = n.t === 'object' ? (OBJ_IC[n.okind] || '📝') : RMAP_TYPE[n.t].ic;
+      var k = [h('div', { className: 'rmap-nh', key: 'h' }, h('span', { className: 'rmap-ni' }, _ic), h('span', { className: 'rmap-nt' }, n.title))];
       if (n.t === 'study') k.push(h('div', { className: 'rmap-nm', key: 'm' }, h('b', null, n.m.Források), ' forrás → ', h('b', null, n.m.Included), ' incl', n.pcount ? h('span', { className: 'rmap-exp' }, (litOpen ? '▾ ' : '▸ ') + n.pcount + ' cikk') : null));
       else if (n.t === 'paper') k.push(h('div', { className: 'rmap-nm', key: 'm' }, (n.m.Venue || '') + ' · ' + n.m.Idézettség + ' cite', n.dec === 'include' ? h('span', { className: 'rmap-chip inc' }, '✓ incl') : null));
       else if (n.t === 'step') k.push(h('div', { className: 'rmap-nm', key: 'm' }, h('span', { className: 'rmap-chip ' + (n.st === 'done' ? 'done' : (n.st === 'running' || n.st === 'doing') ? 'run' : 'pend') }, n.st || 'vár'), ' ' + (n.m.Kind || ''), n.gate ? h('span', { className: 'rmap-chip gate' }, 'gate') : null));
@@ -8289,12 +8351,33 @@
       else if (n.t === 'figure') k.push(h('div', { className: 'rmap-nm', key: 'm' }, String(n.m.Felirat || '').slice(0, 64)));
       else if (n.t === 'srq') k.push(h('div', { className: 'rmap-nm', key: 'm' }, '💡 ' + String(n.m.Alap || '').slice(0, 52)));
       else if (n.t === 'sreview') k.push(h('div', { className: 'rmap-nm', key: 'm' }, h('span', { className: 'rmap-chip ' + (n.m.Státusz === 'completed' ? 'done' : n.m.Státusz === 'failed' ? '' : 'run') }, n.m.Státusz || 'vár')));
+      else if (n.t === 'object') {
+        if (n.okind === 'note') k.push(h('div', { className: 'rmap-nm', key: 'm', style: { whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: (n.ref && n.ref.text) ? 'var(--ink)' : 'var(--faint)' } }, (n.ref && n.ref.text) ? String(n.ref.text).slice(0, 160) : 'dupla-katt: szerkesztés'));
+        else k.push(h('div', { className: 'rmap-nm', key: 'm' }, n.okind));
+      }
       return k;
     }
     // P1: tier-gated EXTRA content revealed by CSS @container as the card grows (or by the zoom LOD floor).
     // Appended after body(n); each block is display:none by default and shown by a @container/lod rule.
     function richTier(n) {
       var r = n.ref || {}, t = n.t, out = [];
+      if (t === 'object') {
+        var okind = n.okind, obig = (n._h || 0) >= 120 && (n._w || 0) >= 180, ou;
+        if (okind === 'note') {
+          if (r.text) out.push(h('div', { key: 'onote', className: 'rmap-t rmap-t-l' }, h('div', { style: { fontSize: 12, lineHeight: 1.42, whiteSpace: 'pre-wrap', wordBreak: 'break-word', padding: '2px 2px 0' } }, String(r.text).slice(0, 600))));
+        } else if (okind === 'markdown') {
+          out.push(h('div', { key: 'omd', className: 'rmap-t rmap-t-l' }, h('div', { className: 'rmap-pv-md md', dangerouslySetInnerHTML: { __html: mdHtml(String(r.text || '').slice(0, 12000)) } })));
+        } else if (okind === 'link') {
+          var yt = ytId(r.url), vm = vimeoId(r.url), dom = r.url;
+          if (yt || vm) out.push(h('div', { key: 'oemb', className: 'rmap-t rmap-t-xl' }, h('iframe', { src: yt ? ('https://www.youtube.com/embed/' + yt) : ('https://player.vimeo.com/video/' + vm), title: 'embed', allowFullScreen: true, style: { width: '100%', height: '100%', minHeight: 150, border: 0, borderRadius: 6 }, onMouseDown: function (e) { e.stopPropagation(); } })));
+          else { try { dom = new URL(r.url).hostname.replace(/^www\./, ''); } catch (e) { } out.push(h('div', { key: 'olink', className: 'rmap-t rmap-t-l' }, h('a', { href: r.url, target: '_blank', rel: 'noopener noreferrer', onMouseDown: function (e) { e.stopPropagation(); }, style: { display: 'flex', alignItems: 'center', gap: 8, textDecoration: 'none', color: 'var(--accent)', fontSize: 12 } }, h('img', { src: 'https://www.google.com/s2/favicons?domain=' + encodeURIComponent(dom) + '&sz=32', width: 16, height: 16, style: { borderRadius: 3, flex: 'none' }, alt: '' }), h('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, dom)))); }
+        } else if (r.storage_path) {
+          if (obig) ensureFigUrls([r]); ou = figUrls[r.storage_path];
+          if (okind === 'image') out.push(h('div', { key: 'oimg', className: 'rmap-t rmap-t-fig' }, ou ? h('img', { className: 'rmap-pv-img', src: ou, alt: '', loading: 'lazy' }) : h('div', { className: 'rmap-pv-imgph' }, obig ? '⏳ kép' : '')));
+          else if (okind === 'pdf') out.push(h('div', { key: 'opdf', className: 'rmap-t rmap-t-xl' }, ou ? h('iframe', { src: ou + '#toolbar=0&navpanes=0', title: 'pdf', style: { width: '100%', height: '100%', minHeight: 200, border: 0, borderRadius: 6, background: '#fff' }, onMouseDown: function (e) { e.stopPropagation(); } }) : h('div', { className: 'rmap-pv-load' }, obig ? '⏳ PDF' : '')));
+          else if (okind === 'video') out.push(h('div', { key: 'ovid', className: 'rmap-t rmap-t-xl' }, ou ? h('video', { className: 'rmap-pv-media', src: ou, controls: true, preload: 'metadata', onMouseDown: function (e) { e.stopPropagation(); } }) : h('div', { className: 'rmap-pv-load' }, obig ? '⏳ videó' : '')));
+        }
+      }
       if (t === 'figure' && r.storage_path) {
         if ((n._h || 0) > 110) ensureFigUrls([r]);   // fetch the signed URL only for figure cards enlarged tall enough to SHOW the thumbnail
         var url = figUrls[r.storage_path];
@@ -8419,7 +8502,7 @@
               h('marker', { id: 'rmap-ar', viewBox: '0 0 8 8', refX: 6.5, refY: 4, markerWidth: 6.5, markerHeight: 6.5, orient: 'auto-start-reverse', markerUnits: 'userSpaceOnUse' }, h('path', { d: 'M0.5,0.5 L7.5,4 L0.5,7.5 Z', fill: 'context-stroke' })),
               h('marker', { id: 'rmap-bl', viewBox: '0 0 8 8', refX: 5.5, refY: 4, markerWidth: 8, markerHeight: 8, orient: 'auto-start-reverse', markerUnits: 'userSpaceOnUse' }, h('path', { d: 'M5,1 L5,7', stroke: 'context-stroke', strokeWidth: 1.6 }))),
             edgeEls, linkRubber),
-          g.N.map(function (n) { if (!nodeVisible(n)) return null; var _sized = !!((nrzLive && nrzLive.id === n.id) || (layout[n.id] && layout[n.id].card_h)); var _kk = view.k, _cw = Math.min((n._w || NW), (cardVP.w - 16) / _kk); var _st = { left: n.x + 'px', top: n.y + 'px', width: _cw + 'px' }; if (_sized) _st.height = Math.min((n._h || NH), (cardVP.h - 16) / _kk) + 'px'; return h('div', { key: n.id, 'data-nid': n.id, className: 'rmap-node t-' + n.t + (_sized ? ' rmap-sized' : '') + (sel === n.id ? ' sel' : '') + (msel[n.id] ? ' rmap-mselected' : '') + (n.mapPinned ? ' rmap-pinned' : '') + (activeKey && n.ph === RMAP_PHASE_IDX[activeKey] ? ' inphase' : '') + (props.canEdit ? ' editable' : '') + (dlive && dlive.id === n.id ? ' dragging' : '') + ((nrzLive && nrzLive.id === n.id) ? ' rmap-resizing' : '') + (linkDrag && linkDrag.over === n.id ? ' rmap-linktarget' : '') + (linkDrag && linkDrag.from === n.id ? ' rmap-linksource' : '') + (justPlaced && justPlaced.indexOf(n.id) >= 0 ? ' rmap-justplaced' : '') + (hovCarry[n.id] ? ' rmap-carry-preview' : '') + (tlCurT != null && n.ts != null && n.ts > tlCurT ? ' rmap-tl-future' : '') + (tlOn && n.tsEst ? ' rmap-tl-est' : ''), style: _st, onMouseDown: function (e) { e.stopPropagation(); startNodeDrag(e, n); }, onDoubleClick: function (e) { e.stopPropagation(); if (canEnter(n)) enterNode(n); }, onContextMenu: function (e) { e.preventDefault(); e.stopPropagation(); if (props.canEdit && (genActions(n).length || regenActions(n).length || (cardSizeCap && layout[n.id] && layout[n.id].card_h))) setMenu({ node: n, x: e.clientX, y: e.clientY }); } }, n.mapPinned ? h('span', { className: 'rmap-pin-badge', title: 'Kitűzött' }, '📌') : null, nodeCmCount(n.id) ? h('span', { className: 'rmap-cm-badge', title: nodeCmCount(n.id) + ' nyitott komment', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); setOpenThread(n.id); } }, '💬' + nodeCmCount(n.id)) : null, (n.t === 'step' && n.ref && (n.ref.assignee_id || n.ref.signed_off_by)) ? h('span', { className: 'rmap-step-badges' }, n.ref.assignee_id ? h('span', { className: 'rmap-assignee', title: 'Felelős: ' + nameOf(n.ref.assignee_id), style: { background: userColor(n.ref.assignee_id) } }, String(nameOf(n.ref.assignee_id) || '?').trim().charAt(0).toUpperCase()) : null, n.ref.signed_off_by ? h('span', { className: 'rmap-signoff', title: 'Jóváhagyta: ' + nameOf(n.ref.signed_off_by) }, '✅') : null) : null, (members && members.length > 0 && creatorOf(n)) ? (function () { var _cu = creatorOf(n), _av = avatarOf(_cu); return h('span', { className: 'rmap-creator', title: 'Létrehozta: ' + nameOf(_cu), style: _av ? {} : { background: colorOf(_cu) } }, _av ? h('img', { src: _av, alt: '', draggable: false }) : monogram(nameOf(_cu))); })() : null, n.t === 'gap' ? gapNovRing(n) : null, h('div', { className: 'rmap-nb' }, body(n), richTier(n)),
+          g.N.map(function (n) { if (!nodeVisible(n)) return null; var _sized = !!((nrzLive && nrzLive.id === n.id) || (layout[n.id] && layout[n.id].card_h)); var _kk = view.k, _cw = Math.min((n._w || NW), (cardVP.w - 16) / _kk); var _st = { left: n.x + 'px', top: n.y + 'px', width: _cw + 'px' }; if (_sized) _st.height = Math.min((n._h || NH), (cardVP.h - 16) / _kk) + 'px'; return h('div', { key: n.id, 'data-nid': n.id, className: 'rmap-node t-' + n.t + (_sized ? ' rmap-sized' : '') + (sel === n.id ? ' sel' : '') + (msel[n.id] ? ' rmap-mselected' : '') + (n.mapPinned ? ' rmap-pinned' : '') + (activeKey && n.ph === RMAP_PHASE_IDX[activeKey] ? ' inphase' : '') + (props.canEdit ? ' editable' : '') + (dlive && dlive.id === n.id ? ' dragging' : '') + ((nrzLive && nrzLive.id === n.id) ? ' rmap-resizing' : '') + (linkDrag && linkDrag.over === n.id ? ' rmap-linktarget' : '') + (linkDrag && linkDrag.from === n.id ? ' rmap-linksource' : '') + (justPlaced && justPlaced.indexOf(n.id) >= 0 ? ' rmap-justplaced' : '') + (hovCarry[n.id] ? ' rmap-carry-preview' : '') + (tlCurT != null && n.ts != null && n.ts > tlCurT ? ' rmap-tl-future' : '') + (tlOn && n.tsEst ? ' rmap-tl-est' : ''), style: _st, onMouseDown: function (e) { e.stopPropagation(); startNodeDrag(e, n); }, onDoubleClick: function (e) { e.stopPropagation(); if (canEnter(n)) enterNode(n); else if (n.t === 'object' && n.okind === 'note' && props.canEdit) editObjectNote(n); }, onContextMenu: function (e) { e.preventDefault(); e.stopPropagation(); if (props.canEdit && (genActions(n).length || regenActions(n).length || (cardSizeCap && layout[n.id] && layout[n.id].card_h))) setMenu({ node: n, x: e.clientX, y: e.clientY }); } }, n.mapPinned ? h('span', { className: 'rmap-pin-badge', title: 'Kitűzött' }, '📌') : null, nodeCmCount(n.id) ? h('span', { className: 'rmap-cm-badge', title: nodeCmCount(n.id) + ' nyitott komment', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); setOpenThread(n.id); } }, '💬' + nodeCmCount(n.id)) : null, (n.t === 'step' && n.ref && (n.ref.assignee_id || n.ref.signed_off_by)) ? h('span', { className: 'rmap-step-badges' }, n.ref.assignee_id ? h('span', { className: 'rmap-assignee', title: 'Felelős: ' + nameOf(n.ref.assignee_id), style: { background: userColor(n.ref.assignee_id) } }, String(nameOf(n.ref.assignee_id) || '?').trim().charAt(0).toUpperCase()) : null, n.ref.signed_off_by ? h('span', { className: 'rmap-signoff', title: 'Jóváhagyta: ' + nameOf(n.ref.signed_off_by) }, '✅') : null) : null, (members && members.length > 0 && creatorOf(n)) ? (function () { var _cu = creatorOf(n), _av = avatarOf(_cu); return h('span', { className: 'rmap-creator', title: 'Létrehozta: ' + nameOf(_cu), style: _av ? {} : { background: colorOf(_cu) } }, _av ? h('img', { src: _av, alt: '', draggable: false }) : monogram(nameOf(_cu))); })() : null, n.t === 'gap' ? gapNovRing(n) : null, h('div', { className: 'rmap-nb' }, body(n), richTier(n)),
             (props.canEdit && edgesCap) ? ['n', 'e', 's', 'w'].map(function (dir) { return h('span', { key: 'port' + dir, className: 'rmap-port rmap-port-' + dir, title: 'Húzz kapcsolatot egy másik kártyához', onMouseDown: function (e) { e.stopPropagation(); startLinkDrag(e, n.id); } }); }) : null,
             (props.canEdit && producibleTypes(n).length) ? h('span', { key: 'arcpip', className: 'rmap-arcpip' + (arcOpen === n.id ? ' on' : ''), title: 'Generálj ebből ▸', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); if (sel !== n.id) { setSelEdge(null); setMsel({}); setSel(n.id); } setArcOpen(arcOpen === n.id ? null : n.id); } }, '✦') : null,
             (props.canEdit && cardSizeCap && !tlOn && !phaseArr) ? h('span', { className: 'rmap-node-rz', title: 'Átméretezés (húzd)', onMouseDown: function (e) { e.stopPropagation(); startNodeResize(e, n); } }) : null); })),
@@ -8623,6 +8706,7 @@
             })) : h('div', { style: { fontSize: 12, color: 'var(--faint)' } }, 'Nincs rejtett kártya.'));
         })() : null,
         // radial quick-add menu (double-click the empty canvas) — a bloom ring of object types at the cursor
+        props.canEdit ? h('input', { key: 'objup', ref: objUpRef, type: 'file', accept: 'image/*,application/pdf,video/*,.md,.markdown,text/markdown', style: { display: 'none' }, onChange: onObjUpload }) : null,
         radial ? (function () {
           var segs = [
             { key: 'keret', label: 'Keret', col: '#5b63e6', icon: keretIcon(), on: props.canEdit && framesCap, run: function (wx, wy) { frameCreate(wx, wy); } },
@@ -8631,7 +8715,10 @@
             { key: 'adat', label: 'Adat', col: '#0d9488', icon: '🗂️', on: props.canEdit, run: function (wx, wy) { datasetAtPos(wx, wy); } },
             { key: 'folyoirat', label: 'Folyóirat', col: '#c026d3', icon: '🎯', on: props.canEdit, run: function (wx, wy) { venueAtPos(wx, wy); } },
             { key: 'bekuldes', label: 'Beküldés', col: '#dc2626', icon: '📤', on: props.canEdit, run: function (wx, wy) { submissionAtPos(wx, wy); } },
-            { key: 'komment', label: 'Komment', col: '#17a34a', icon: '💬', on: commentsCap, run: function (wx, wy) { setComposer({ x: wx, y: wy }); setCmText(''); } }
+            { key: 'komment', label: 'Komment', col: '#17a34a', icon: '💬', on: commentsCap, run: function (wx, wy) { setComposer({ x: wx, y: wy }); setCmText(''); } },
+            { key: 'jegyzet', label: 'Jegyzet', col: '#64748b', icon: '📝', on: props.canEdit, run: function (wx, wy) { noteAtPos(wx, wy); } },
+            { key: 'media', label: 'Média', col: '#7c3aed', icon: '🖼️', on: props.canEdit, run: function (wx, wy) { uploadObjectAtPos(wx, wy); } },
+            { key: 'linkobj', label: 'Link', col: '#0ea5e9', icon: '🔗', on: props.canEdit, run: function (wx, wy) { linkAtPos(wx, wy); } }
           ].filter(function (s) { return s.on; });
           var vp = stageVP(), n = segs.length || 1, R = n > 6 ? 134 : (n > 4 ? 118 : 100), pad = R + 44;   // wider ring as the menu grows (up to 7 segments)
           var cx = Math.max(pad, Math.min(radial.sx, vp.w - pad)), cy = Math.max(pad, Math.min(radial.sy, vp.h - pad));
