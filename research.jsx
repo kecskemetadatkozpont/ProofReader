@@ -5148,6 +5148,9 @@
     var mnS = useState(null), menu = mnS[0], setMenu = mnS[1];   // F1: node "generate from here" context menu {node,x,y}
     var rmadS = useState(null), radial = rmadS[0], setRadial = rmadS[1];   // radial quick-add menu on canvas double-click {sx,sy,wx,wy}
     var objUpRef = useRef(null), objUpPos = useRef(null);   // Canvas→Map merge: hidden file input + pending world-pos for media upload
+    var ciS = useState(null), canvasImport = ciS[0], setCanvasImport = ciS[1];   // Canvas→Map: pending legacy-canvas import {n, nodes} or null
+    var ocpS = useState(false), objCap = ocpS[0], setObjCap = ocpS[1];           // research_map_objects present (migration-99 applied)
+    var ciBusyRef = useRef(false);
     var drpS = useState(null), drop = drpS[0], setDrop = drpS[1];   // the "it landed here" drop-pulse {sx,sy}
     var gbS = useState(false), genBusy = gbS[0], setGenBusy = gbS[1];
     var hgS = useState({}), hgt = hgS[0], setHgt = hgS[1];   // measured real card heights (id → px) → the no-overlap rule uses them, not an estimate
@@ -5550,6 +5553,7 @@
         sb.from('research_map_objects').select('id,kind,text,url,storage_path,meta,created_by,created_at').eq('project_id', pid).order('created_at', { ascending: true }).limit(200)
       ]).then(function (r) {
         if (!alive.current) return;
+        setObjCap(!(r[15] && r[15].error));   // migration-99 present?
         var _protos = (r[5].data) || [];
         var base = { ideas: (r[0].data) || [], studies: (r[1].data) || [], topSrc: (r[2].data) || [], srcTotal: r[3].count || 0, inclTotal: r[4].count || 0, protocols: _protos, protocol: _protos.slice(-1)[0] || null, journals: (r[6].data) || [], wfiles: (r[7].data) || [], datasets: (r[8] && r[8].data) || [], mfiles: (r[9] && r[9].data) || [], chats: (r[10] && r[10].data) || [], figures: (r[11] && r[11].data) || [], srcands: (r[12] && r[12].data) || [], sreviews: (r[13] && r[13].data) || [], objects: (r[15] && !r[15].error && Array.isArray(r[15].data)) ? r[15].data : [] };
         // remove Map-hidden figures (on_map=false) client-side + keep them for the restore panel
@@ -5573,6 +5577,19 @@
         else setData(Object.assign(base, { stepsByProt: {}, steps: [] }));
       }, function () { if (alive.current) setData({ ideas: [], studies: [], topSrc: [], srcTotal: 0, inclTotal: 0, protocol: null, protocols: [], stepsByProt: {}, journals: [], wfiles: [], steps: [], datasets: [], mfiles: [], chats: [], figures: [], srcands: [], sreviews: [], objects: [], hiddenFigs: [] }); });
     }, [props.projectId, bump]);
+    // Canvas→Map merge: detect un-imported legacy research_canvas content (only once migration-99 is present) → show a one-click import banner.
+    useEffect(function () {
+      if (!objCap || !props.canEdit) { setCanvasImport(null); return; }
+      var pid = props.projectId;
+      sb.from('research_canvas').select('data').eq('project_id', pid).maybeSingle().then(function (r) {
+        if (!alive.current) return;
+        var d = (r && r.data && r.data.data) || {};
+        if (d.imported_to_map) { setCanvasImport(null); return; }
+        var IK = { note: 1, image: 1, pdf: 1, video: 1, markdown: 1, link: 1 };
+        var nodes = (Array.isArray(d.nodes) ? d.nodes : []).filter(function (n) { return n && IK[n.type]; });
+        setCanvasImport(nodes.length ? { n: nodes.length, nodes: nodes, data: d } : null);
+      }, function () { if (alive.current) setCanvasImport(null); });
+    }, [props.projectId, objCap]);
     // measure each card's REAL rendered height after paint → feed the no-overlap rule with true heights (estimates
     // undershoot long-title cards, e.g. the H1/H2 hypotheses, leaving residual overlap). Converges in one extra render.
     useEffect(function () {
@@ -6522,6 +6539,25 @@
         setSel(nid);
         if (histLabel) { histPushCreate(histLabel + ' létrehozása', [nid], null); window.PRUI.toast('Létrehozva: ' + histLabel + ' · ⌘Z a visszavonáshoz', { kind: 'ok' }); }
       });
+    }
+    // Canvas→Map merge: one-time import of legacy research_canvas note/media/link nodes → research_map_objects (position + size preserved via meta.src pairing; flag prevents re-run).
+    function runCanvasImport() {
+      var ci = canvasImport; if (!ci || ciBusyRef.current || !props.canEdit) return;
+      ciBusyRef.current = true; var pid = props.projectId;
+      var rows = ci.nodes.map(function (n) { return { project_id: pid, kind: n.type, text: (n.type === 'note' || n.type === 'markdown') ? (n.text || '') : null, url: n.type === 'link' ? (n.url || null) : null, storage_path: n.path || null, meta: { name: n.name || null, mime: n.mime || null, imported: true, src: n.id }, created_by: props.authorId }; });
+      sb.from('research_map_objects').insert(rows).select('id,meta').then(function (ir) {
+        if (!alive.current) { ciBusyRef.current = false; return; }
+        if (ir && ir.error) { ciBusyRef.current = false; window.PRUI.toast('Import sikertelen: ' + ir.error.message, { kind: 'error' }); return; }
+        var bySrc = {}; ci.nodes.forEach(function (n) { bySrc[n.id] = n; });
+        var lrows = (ir.data || []).map(function (row) { var n = bySrc[row.meta && row.meta.src]; if (!n) return null; var l = { project_id: pid, node_id: 'o' + row.id, x: Math.round(n.x || 0), y: Math.round(n.y || 0), updated_at: new Date().toISOString() }; if (n.w) l.card_w = Math.round(n.w); if (n.h) l.card_h = Math.round(n.h); return l; }).filter(Boolean);
+        var done = function () {
+          var nd = Object.assign({}, ci.data, { imported_to_map: true });
+          sb.from('research_canvas').upsert({ project_id: pid, data: nd, updated_at: new Date().toISOString(), updated_by: props.authorId }, { onConflict: 'project_id' }).then(function () { }, function () { });
+          ciBusyRef.current = false; setCanvasImport(null); setBump(function (x) { return x + 1; });
+          window.PRUI.toast(rows.length + ' Vászon-elem áthelyezve a Térképre', { kind: 'ok' });
+        };
+        if (lrows.length) sb.from('research_map_layout').upsert(lrows, { onConflict: 'project_id,node_id' }).then(done, done); else done();
+      }, function () { ciBusyRef.current = false; window.PRUI.toast('Import sikertelen (hálózat).', { kind: 'error' }); });
     }
     function noteAtPos(wx, wy) { if (props.canEdit) objInsert({ kind: 'note', text: '' }, wx, wy, null, null, 'Jegyzet'); }
     function linkAtPos(wx, wy) {
@@ -7498,7 +7534,7 @@
       if (n.t === 'step') return [['writing', '✍️ Draft-vázlat']];
       if (n.t === 'venue' || n.t === 'section') return [['writing', '✍️ Draft-vázlat'], ['ideas', '✦ Ötletek']];
       if (n.t === 'dataset') return [['protocol', '🧪 Protokoll ehhez az adathoz']];
-      if (n.t === 'file' || n.t === 'chat' || n.t === 'figure' || n.t === 'srq' || n.t === 'sreview') return [];   // content nodes — no generation from them
+      if (n.t === 'file' || n.t === 'chat' || n.t === 'figure' || n.t === 'srq' || n.t === 'sreview' || n.t === 'object') return [];   // content nodes — no generation from them (object = free note/media/link card)
       return [['ideas', '✦ Ötletek generálása'], ['protocol', '🧪 Protokoll']];
     }
     // F3: REGENERATE this exact node (in place, keeps its position). Only where an existing edge cleanly supports it:
@@ -8707,6 +8743,10 @@
         })() : null,
         // radial quick-add menu (double-click the empty canvas) — a bloom ring of object types at the cursor
         props.canEdit ? h('input', { key: 'objup', ref: objUpRef, type: 'file', accept: 'image/*,application/pdf,video/*,.md,.markdown,text/markdown', style: { display: 'none' }, onChange: onObjUpload }) : null,
+        (canvasImport && props.canEdit) ? h('div', { key: 'ciban', style: { position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)', zIndex: 60, display: 'flex', alignItems: 'center', gap: 10, background: 'var(--surface)', border: '1px solid var(--accent)', borderRadius: 999, padding: '7px 14px', boxShadow: '0 6px 22px rgba(0,0,0,.18)', fontSize: 12.5 } },
+          h('span', null, '📋 ' + canvasImport.n + ' elem a régi Vászonról'),
+          h('button', { className: 'btn pri', style: { padding: '4px 11px', fontSize: 12 }, onClick: runCanvasImport }, 'Áthelyezés a Térképre'),
+          h('button', { title: 'Elrejtés', onClick: function () { setCanvasImport(null); }, style: { background: 'none', border: 'none', color: 'var(--faint)', cursor: 'pointer', fontSize: 14, lineHeight: 1 } }, '×')) : null,
         radial ? (function () {
           var segs = [
             { key: 'keret', label: 'Keret', col: '#5b63e6', icon: keretIcon(), on: props.canEdit && framesCap, run: function (wx, wy) { frameCreate(wx, wy); } },
@@ -9562,6 +9602,7 @@
       return null;   // compute/map/canvas/notes/log/tasks are not embeddable
     }
     var content;
+    if (nd() && tab === 'canvas') tab = 'map';   // Canvas→Map merge: in nd the Canvas tab is retired → its features live on the Map; a stale/deep-linked 'canvas' lands on the Map (classic mode keeps its own Canvas tab)
     if (tab === 'ideas') content = h('div', { className: nd() ? 'ideas2' : null }, h(ChatPanel, { projectId: p.id, supervised: !!p.student_id, canEdit: props.canEdit, authorId: props.authorId, fileOwnerId: props.fileOwnerId, sources: props.sources, onChanged: props.onChanged }), h(IdeasPanel, { projectId: p.id, ideas: props.ideas, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, onStartStudyMulti: function (ideas) { setAutoSR(function (x) { return x + 1; }); setTab('study'); }, onGoStudy: function () { setTab('study'); }, onGoGap: function () { setTab('gap'); } }));
     else if (tab === 'gap') content = h(GapPanel, { projectId: p.id, project: p, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, onGoIdeas: function () { setTab('ideas'); }, onGoStudy: function () { setTab('study'); }, onStartStudy: startStudyFromIdea });
     else if (tab === 'figboard') content = embedFrame('FigureBoard');
@@ -9607,7 +9648,7 @@
       return h('div', { className: 'rv-stnav' }, kids);
     }
     function subNav() {
-      return h('div', { className: 'rv-subnav' }, [['overview', 'Áttekintő', null], ['map', '🗺️ Map', null], ['canvas', 'Canvas', null], ['notes', 'Notes', null], ['data', 'Data', (props.datasets || []).length], ['log', 'Log', (props.log || []).length], ['tasks', 'Tasks', openTasks]].map(function (nt) {
+      return h('div', { className: 'rv-subnav' }, [['overview', 'Áttekintő', null], ['map', '🗺️ Map', null], ['notes', 'Notes', null], ['data', 'Data', (props.datasets || []).length], ['log', 'Log', (props.log || []).length], ['tasks', 'Tasks', openTasks]].map(function (nt) {
         return h('button', { key: nt[0], className: 'rv-sub' + (tab === nt[0] ? ' on' : ''), onClick: function () { setTab(nt[0]); } }, h('span', null, tr(plang, nt[1])), nt[2] ? h('span', { className: 'rv-sub-c' }, nt[2]) : null);
       }));
     }
