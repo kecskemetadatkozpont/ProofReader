@@ -9026,6 +9026,11 @@
         setLbOptin(function (prev) { var n = Object.assign({}, prev); if (next) n[uid] = true; else delete n[uid]; return n; });
       });
     }
+    // GP2 — heti retrospektív (privát, localStorage; hetente külön kulcs, csak ezen az eszközön).
+    var giWeekId = (function () { var d = new Date(), oj = new Date(d.getFullYear(), 0, 1), wk = Math.ceil((((d - oj) / 86400000) + oj.getDay() + 1) / 7); return d.getFullYear() + '-W' + wk; })();
+    var retroKey = 'pub-retro-' + ((props.me && props.me.id) || '') + '-' + ((p && p.id) || '') + '-' + giWeekId;
+    var rtS = useState(function () { try { return JSON.parse(localStorage.getItem(retroKey) || '{}') || {}; } catch (e) { return {}; } }), retro = rtS[0], setRetro = rtS[1];
+    function setRetroField(k, v) { setRetro(function (prev) { var n = Object.assign({}, prev); n[k] = v; try { localStorage.setItem(retroKey, JSON.stringify(n)); } catch (e) { } return n; }); }
     var alive = useRef(true), chRef = useRef(null), openedAtRef = useRef(Date.now()), shareT = useRef(null);   // session baseline: "since you opened the page"
     useEffect(function () { alive.current = true; return function () { alive.current = false; }; }, []);
     var PAL = ['#e11d48', '#0891b2', '#7c3aed', '#ca8a04', '#059669', '#db2777', '#2563eb', '#ea580c'];
@@ -9068,17 +9073,21 @@
         sb.from('research_sources').select('id', { count: 'exact', head: true }).eq('project_id', pid).eq('screening', 'include'),
         sb.from('research_studies').select('id', { count: 'exact', head: true }).eq('project_id', pid),
         sb.from('research_todos').select('id,status,due,assignee').eq('project_id', pid),
-        sb.from('research_figures').select('id', { count: 'exact', head: true }).eq('project_id', pid)
+        sb.from('research_figures').select('id', { count: 'exact', head: true }).eq('project_id', pid),
+        sb.from('research_drafts').select('sections').eq('project_id', pid).order('created_at', { ascending: false }).limit(1)
       ]).then(function (r) {
         if (!alive.current) return;
         var log = (r[0] && r[0].data) || [], tasks = (r[5] && r[5].data) || [];
-        setSum({ log: log, tasks: tasks, counts: { ideas: (r[1] && r[1].count) || 0, sources: (r[2] && r[2].count) || 0, included: (r[3] && r[3].count) || 0, studies: (r[4] && r[4].count) || 0, figures: (r[6] && r[6].count) || 0 } });
+        var _dr = (r[7] && r[7].data && r[7].data[0]) || null, _ds = (_dr && Array.isArray(_dr.sections)) ? _dr.sections : [];
+        var _dDone = _ds.filter(function (s) { return s && String(s.latex || '').trim().length > 40; }).length;   // GP4: valós szekció-tartalom, endowment nélkül
+        setSum({ log: log, tasks: tasks, draft: { total: _ds.length, done: _dDone }, counts: { ideas: (r[1] && r[1].count) || 0, sources: (r[2] && r[2].count) || 0, included: (r[3] && r[3].count) || 0, studies: (r[4] && r[4].count) || 0, figures: (r[6] && r[6].count) || 0 } });
         var ids = {}; log.forEach(function (x) { if (x.profile_id) ids[x.profile_id] = 1; }); tasks.forEach(function (x) { if (x.assignee) ids[x.assignee] = 1; }); if (p.owner_id) ids[p.owner_id] = 1;
         var idl = Object.keys(ids);
         if (idl.length) sb.from('profiles_public').select('id,name,avatar_url,color').in('id', idl).then(function (pr) { if (!alive.current) return; var m = {}; ((pr && pr.data) || []).forEach(function (x) { m[x.id] = { name: x.name, avatar: x.avatar_url, color: x.color }; }); setPpl(m); });
       });
     }
     useEffect(function () { load(); loadOptin(); }, [p.id]);
+    useEffect(function () { try { setRetro(JSON.parse(localStorage.getItem(retroKey) || '{}') || {}); } catch (e) { setRetro({}); } }, [retroKey]);
     // presence: who is looking at the project right now + a live refresh when someone joins
     useEffect(function () {
       var pid = p.id, me = props.me || {}; if (!pid) return;
@@ -9115,6 +9124,12 @@
       { on: giMine.some(function (x) { return x.type === 'RESULT'; }), ic: '📊', t: 'Eredmény rögzítve' },
       { on: giActiveDays >= 8, ic: '🔥', t: 'Kitartó hónap (8+ aktív nap)' }
     ];
+    // GP5 — haladás-elv: ma született-e valós TERMINÁLIS esemény a projektben (esemény-vezérelt, nem napi-kötelező → sose fabrikál).
+    var gp5Start = new Date(); gp5Start.setHours(0, 0, 0, 0); var gp5Ms = gp5Start.getTime();
+    var gp5Today = log.filter(function (x) { return x.ts && new Date(x.ts).getTime() >= gp5Ms && (x.type === 'MILESTONE' || x.type === 'RESULT'); }).length;
+    // GP2 — a heti retro „mit értem el" auto-listája: a SAJÁT elmúlt 7 nap terminális/érdemi bejegyzései.
+    var gp2Since = Date.now() - 7 * 86400000;
+    var gp2Done = giMine.filter(function (x) { return x.ts && new Date(x.ts).getTime() >= gp2Since && (x.type === 'MILESTONE' || x.type === 'RESULT' || x.type === 'DECISION' || x.type === 'ARTIFACT'); }).map(function (x) { return x.summary; }).slice(0, 6);
     var tasksOpen = tasks.filter(function (t) { return t.status !== 'done'; }).length;
     var overdue = tasks.filter(function (t) { return t.status !== 'done' && t.due && new Date(t.due) < new Date(); }).length;
     // per-contributor rollup from the activity log, WITH a session delta ("since you opened the page")
@@ -9162,6 +9177,8 @@
         online.length ? h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 5 } }, h('span', { style: { width: 7, height: 7, borderRadius: '50%', background: '#22c55e' } }), h('span', { style: { fontSize: 11, color: 'var(--muted)' } }, online.length + ' online')) : null,
         h('div', { style: { display: 'flex' } }, online.slice(0, 5).map(function (id, i) { return h('span', { key: id, style: { marginLeft: i ? -6 : 0, boxShadow: '0 0 0 2px var(--surface)', borderRadius: '50%' } }, avatarEl(id, 24)); }))
       ),
+      // GP5 — haladás-elv banner: CSAK ha ma valós terminális esemény történt (esemény-vezérelt, sose fabrikált; gamiOn mellett).
+      (gamiOn && giMeId && gp5Today > 0) ? h('div', { key: 'gp5', style: { border: '1px solid color-mix(in srgb, var(--growth, #12ae7a) 32%, var(--line))', background: 'color-mix(in srgb, var(--growth, #12ae7a) 8%, var(--surface))', borderRadius: 12, padding: '9px 13px', fontSize: 12, color: 'var(--ink)' } }, '🎉 Ma már ' + gp5Today + ' mérföldkő/eredmény született a projektben — a haladás számít.') : null,
       // GP1 — Személyes haladás-tükör: opt-in (default KI), privát (csak a saját logból), semleges keret — sose kudarcként (a kritika guardrailjei szerint).
       (function () {
         if (!giMeId) return null;
@@ -9192,6 +9209,35 @@
             return h('span', { key: i, title: b.on ? b.t : (b.t + ' — még nincs meg'), style: { display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, padding: '3px 9px', borderRadius: 999, border: '1px solid ' + (b.on ? 'color-mix(in srgb, var(--growth, #12ae7a) 40%, var(--line))' : 'var(--line)'), background: b.on ? 'color-mix(in srgb, var(--growth, #12ae7a) 10%, var(--surface))' : 'var(--surface)', color: b.on ? 'var(--ink)' : 'var(--faint)', opacity: b.on ? 1 : 0.55 } },
               h('span', { style: { filter: b.on ? 'none' : 'grayscale(1)' } }, b.ic), b.t);
           })));
+      })(),
+      // GP2 — Heti retrospektív: privát composer, a naplóból előtöltött „mit értem el" + szabad szöveg (localStorage). Csak gamiOn mellett.
+      (function () {
+        if (!gamiOn || !giMeId) return null;
+        return h('details', { key: 'gp2', style: { border: '1px solid var(--line)', borderRadius: 12, padding: '4px 12px', background: 'var(--surface)' } },
+          h('summary', { style: { cursor: 'pointer', fontSize: 12.5, fontWeight: 600, padding: '6px 0' } }, '📝 Heti retrospektív ', h('span', { style: { fontSize: 10, color: 'var(--faint)', fontWeight: 400 } }, '· 🔒 csak te látod')),
+          h('div', { style: { padding: '4px 0 10px' } },
+            h('div', { className: 'field-label', style: { marginBottom: 4 } }, 'Mit értem el (elmúlt 7 nap, a naplóból)'),
+            gp2Done.length ? h('ul', { style: { margin: '0 0 10px', paddingLeft: 18 } }, gp2Done.map(function (s, i) { return h('li', { key: i, style: { fontSize: 11.5, color: 'var(--muted)', marginBottom: 2 } }, String(s || '').slice(0, 120)); }))
+              : h('div', { style: { fontSize: 11.5, color: 'var(--faint)', marginBottom: 10 } }, 'Ezen a héten még nincs mérföldkő/eredmény a naplódban — ez is rendben van.'),
+            h('div', { className: 'field-label', style: { marginBottom: 4 } }, 'Mi akadt el?'),
+            h('textarea', { className: 'field', rows: 2, style: { width: '100%', boxSizing: 'border-box', marginBottom: 8 }, value: retro.blockers || '', placeholder: '…', onChange: function (e) { setRetroField('blockers', e.target.value); } }),
+            h('div', { className: 'field-label', style: { marginBottom: 4 } }, 'Következő lépés'),
+            h('textarea', { className: 'field', rows: 2, style: { width: '100%', boxSizing: 'border-box' }, value: retro.next || '', placeholder: '…', onChange: function (e) { setRetroField('next', e.target.value); } }),
+            h('div', { style: { fontSize: 10, color: 'var(--faint)', marginTop: 6 } }, 'Automatikusan mentődik ehhez a héthez, csak ezen az eszközön (privát).')));
+      })(),
+      // GP4 — Kézirat haladása: valós szekció-tartalomból (research_drafts.sections), fabrikált kezdő-% NÉLKÜL. Projekt-szintű, gamiOn mellett.
+      (function () {
+        if (!gamiOn) return null;
+        var draft = sum.draft || { total: 0, done: 0 };
+        if (!draft.total) return null;
+        var pctD = Math.round(draft.done / draft.total * 100);
+        return h('div', { key: 'gp4', style: { border: '1px solid var(--line)', borderRadius: 12, padding: '11px 14px', background: 'var(--surface)' } },
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 7 } },
+            h('b', { style: { fontSize: 13 } }, '📄 Kézirat haladása'),
+            h('span', { style: { flex: 1 } }),
+            h('span', { style: { fontSize: 12, fontWeight: 700, color: 'var(--accent)', fontVariantNumeric: 'tabular-nums' } }, pctD + '%')),
+          h('div', { style: { height: 8, borderRadius: 4, background: 'var(--line)', overflow: 'hidden' } }, h('div', { style: { height: '100%', width: pctD + '%', background: 'var(--accent)', borderRadius: 4 } })),
+          h('div', { style: { fontSize: 10.5, color: 'var(--faint)', marginTop: 5 } }, draft.done + ' / ' + draft.total + ' szekció megírva · valós szekció-tartalomból'));
       })(),
       // LB — Kooperatív ranglista: projekt-szintű, opt-in (research_gami_prefs), mérföldkő-súlyozott pont, kooperatív keret (nem verseny). Csak gamiOn mellett.
       (function () {
