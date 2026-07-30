@@ -1708,8 +1708,7 @@
           ev.length ? h('div', { className: 'gev' }, h('b', null, 'Bizonyíték: '), ev.map(function (e, i) { return h('span', { className: 'gsrc', key: i, title: e.coverage || '' }, String(e.title || 'forrás').slice(0, 44)); })) : null,
           g.hypothesis ? h('div', { className: 'gev' }, h('b', null, 'Következő lépés: '), g.hypothesis) : null,
           h('div', { className: 'gacts' },
-            props.canEdit ? h('button', { className: 'gact pri', disabled: promoted, onClick: function () { toIdea(g); } }, promoted ? '✓ Ötlet létrehozva' : '→ Ötletté alakítás') : null,
-            props.canEdit ? h('button', { className: 'gact', title: 'Szisztematikus áttekintés indítása ebből a résből', onClick: function () { if (props.onStartStudy) props.onStartStudy(Object.assign({}, g, { question: g.hypothesis || g.question })); else if (props.onGoStudy) props.onGoStudy(); } }, '🔍 Study a résből') : null,
+            props.canEdit ? h('button', { className: 'gact pri', title: 'Szisztematikus review indítása ebből a résből — Elicit → automatikus backup; közben ötletként is elmentődik (rés→ötlet link a térképen)', onClick: function () { if (props.onStartStudy) props.onStartStudy(Object.assign({}, g, { question: g.hypothesis || g.question })); else if (props.onGoStudy) props.onGoStudy(); } }, '🔍 Study a résből') : null,
             props.canEdit ? h('button', { className: 'gact', onClick: function () { dismiss(g); } }, '✕ Elvetés') : null,
             h('span', { className: 'gstatus' + (promoted ? ' promoted' : '') }, h('span', { className: 'gdot' }), promoted ? 'Előléptetve' : 'Nyitott')));
       }))));
@@ -9746,13 +9745,28 @@
     }
     function setStatus(e) { sb.from('research_projects').update({ status: e.target.value }).eq('id', p.id).then(props.onChanged); }
     var openTasks = (props.tasks || []).filter(function (t) { return t.status !== 'done'; }).length;
-    function startStudyFromIdea(idea) {
-      var title = String((idea && idea.question) || 'Literature').slice(0, 80);
-      sb.from('research_studies').insert({ project_id: p.id, idea_id: idea ? idea.id : null, title: title, question: idea ? idea.question : p.title, created_by: props.authorId }).select('id').maybeSingle().then(function (r) {
-        var id = r && r.data && r.data.id; if (!id) return;
-        var rows = LS_STEPS.map(function (s) { return { study_id: id, step: s.step, kind: s.kind, config: lsDefaultConfig(s.step, p, idea) }; });
-        sb.from('research_study_steps').insert(rows).then(function () { props.onChanged(); setTab('study'); });
-      });
+    // "🔍 Study a résből" (unified): promote the gap to an idea for provenance (the Map gap→idea edge, via addressed_by_idea_id),
+    // then launch the review through the SAME unified path as the Studies launcher — Elicit primary, built-in backup if Elicit
+    // is unavailable. Replaces the old "→ Ötletté alakítás" + direct-native-study two-button split with one consistent action.
+    function startStudyFromIdea(gap) {
+      var rq = String((gap && gap.question) || p.title);
+      function launch(ideaId) {
+        callElicit({ action: 'sr.create', researchQuestion: rq, project_id: p.id, title: rq.slice(0, 80), generateReport: true, genAbstract: true, genExtraction: true, runFullText: true, maxResults: 1000 }).then(function (d) {
+          var em = (d && d.error) ? String(d.error) : '';
+          if (em) {
+            if (/rate limit|429|max concurrent|too many requests|plan limit|403/i.test(em)) { if (window.PRUI) window.PRUI.toast('Elicit: ' + em + ' — próbáld kicsit később.', { kind: 'error' }); }
+            else { PRStudyRunner.startBackup(rq, { projectId: p.id, project: p, authorId: props.authorId, onChanged: props.onChanged, ideaId: ideaId || null }); if (window.PRUI) window.PRUI.toast('⚡ Elicit nem elérhető — beépített backup indult a résből.', { kind: 'info' }); }
+          } else if (window.PRUI) { window.PRUI.toast('✓ Review elindítva a résből (Elicit).', { kind: 'success' }); }
+          if (props.onChanged) props.onChanged(); setTab('study');
+        }, function () { PRStudyRunner.startBackup(rq, { projectId: p.id, project: p, authorId: props.authorId, onChanged: props.onChanged, ideaId: ideaId || null }); if (props.onChanged) props.onChanged(); setTab('study'); });
+      }
+      if (gap && gap.id) {
+        sb.from('research_ideas').insert({ project_id: p.id, source: 'own', status: 'candidate', question: rq, rationale: (gap && gap.rationale) || null, created_by: props.authorId }).select('id').maybeSingle().then(function (r) {
+          var newId = r && r.data && r.data.id;
+          if (newId) { sb.from('research_ideas').update({ addressed_by_idea_id: newId }).eq('id', gap.id).then(function () { }, function () { }); }   // link gap → idea (best-effort; feeds the Map edge)
+          launch(newId || null);
+        }, function () { launch(null); });   // idea insert failed → still launch the review (provenance is best-effort)
+      } else { launch(null); }
     }
     // (the visible sub-tab row is a separate array below; Data/Compute are intentionally not surfaced)
     // ---- Setup Checklist (New design flag, direction B): the sparse Overview/Setup tab becomes a guided getting-started checklist + Goal, driven by real project state. ----
