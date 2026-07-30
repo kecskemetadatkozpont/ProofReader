@@ -3184,6 +3184,15 @@
       }, function () { if (!alive.current) return; setBusy(false); runBackup(rq, idea.id); });
     }
     function runReviewAll(list) { (list || []).forEach(function (idea, i) { setTimeout(function () { if (alive.current) runReviewForIdea(idea); }, i * 600); }); }
+    // Has a systematic review already COMPLETED for this idea? → a native/backup study with this idea_id is done, OR an
+    // Elicit job whose research_question begins with the idea question (runReviewForIdea sets rq = question [+ hypothesis]).
+    // Used to green-out the launcher row for ideas that have already been reviewed.
+    function ideaReviewDone(idea) {
+      if (!idea) return false;
+      if ((allStudies || []).some(function (s) { return s.idea_id === idea.id && (s.status === 'done' || s.status === 'completed'); })) return true;
+      var q = String(idea.question || '');
+      return !!(q && (jobs || []).some(function (j) { return j.status === 'completed' && j.research_question && String(j.research_question).indexOf(q) === 0; }));
+    }
     // ---- Claude backup: Elicit SR out of quota → run the built-in Claude + OpenAlex Study funnel. MULTIPLE studies run in
     //      parallel, keyed by a per-run id, each with its own independent status card. ----
     // The Claude backup runs in the module-level PRStudyRunner → it KEEPS GOING across tab/view switches. This component
@@ -3341,9 +3350,9 @@
       var st = j.status;
       var stuck = !!(j.warning && j.warning.code === 'all_excluded');   // surface an all-excluded review as Stuck, not "running"
       var cls = stuck ? 'warn' : st === 'completed' ? 'ok' : st === 'failed' ? 'fail' : st === 'pausedForInsufficientQuota' ? 'pause' : 'run';
-      var lab = stuck ? '⚠ Stuck' : st === 'completed' ? '✓ Done' : st === 'failed' ? 'Failed' : st === 'pausedForInsufficientQuota' ? 'Paused' : (function () { var i = srStageIdx(j.stage); return i >= 0 ? 'Step ' + (i + 1) + '/' + SR_STAGES.length : 'Working'; })();
+      var lab = stuck ? '⚠ Stuck' : st === 'completed' ? 'Done' : st === 'failed' ? 'Failed' : st === 'pausedForInsufficientQuota' ? 'Paused' : (function () { var i = srStageIdx(j.stage); return i >= 0 ? 'Step ' + (i + 1) + '/' + SR_STAGES.length : 'Working'; })();
       var idx = st === 'completed' ? SR_STAGES.length - 1 : (srStageIdx(j.stage) < 0 ? 0 : srStageIdx(j.stage));
-      return h('button', { key: j.id, className: 'sr-rrow' + (isSel ? ' on' : '') + (st === 'completed' ? ' done' : ''), onClick: function () { setSelJob(j.id); } },
+      return h('button', { key: j.id, className: 'sr-rrow' + (isSel ? ' on' : ''), onClick: function () { setSelJob(j.id); } },
         h('div', { className: 'sr-rrow-t' }, j.result_title || j.research_question || 'Systematic review'),
         h('div', { className: 'sr-rrow-b' },
           h('span', { className: 'sr-rst ' + cls }, lab),
@@ -3398,9 +3407,11 @@
               h('b', { style: { fontSize: 12.5 } }, '🔬 Review indítása a kijelölt ötletekből'),
               sel.length ? h('button', { className: 'btn pri', style: { padding: '4px 10px', fontSize: 12, marginLeft: 'auto' }, disabled: busy, onClick: function () { runReviewAll(sel); } }, '🔬 Mind a ' + sel.length + '-ből') : null),
             sel.length ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 5 } }, sel.map(function (idea) {
-              return h('div', { key: idea.id, style: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, padding: '5px 8px', background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 7 } },
-                h('span', { style: { flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, '💡 ' + (idea.question || '')),
-                h('button', { className: 'btn', style: { padding: '3px 10px', fontSize: 11.5, flex: 'none' }, disabled: busy, title: 'Review indítása ebből (Elicit → automatikus backup)', onClick: function () { runReviewForIdea(idea); } }, '▶ Review'));
+              var revDone = ideaReviewDone(idea);   // review already ran for this idea → green the whole row
+              return h('div', { key: idea.id, style: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, padding: '5px 8px', background: revDone ? 'color-mix(in srgb, var(--ok, #15803d) 9%, var(--surface))' : 'var(--surface)', border: '1px solid ' + (revDone ? 'color-mix(in srgb, var(--ok, #15803d) 45%, var(--line))' : 'var(--line)'), borderRadius: 7 } },
+                h('span', { style: { flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: revDone ? 'var(--ok, #15803d)' : 'inherit', fontWeight: revDone ? 600 : 400 } }, (revDone ? '✓ ' : '💡 ') + (idea.question || '')),
+                revDone ? h('span', { style: { fontSize: 10, fontWeight: 700, color: 'var(--ok, #15803d)', flex: 'none', whiteSpace: 'nowrap' } }, 'Lefutott') : null,
+                h('button', { className: 'btn', style: { padding: '3px 10px', fontSize: 11.5, flex: 'none' }, disabled: busy, title: revDone ? 'Új review futtatása ebből az ötletből' : 'Review indítása ebből (Elicit → automatikus backup)', onClick: function () { runReviewForIdea(idea); } }, revDone ? '↻ Újra' : '▶ Review'));
             })) : h('div', { style: { fontSize: 11.5, color: 'var(--muted)' } }, 'Jelölj ki ötleteket az Ötletek fülön („Select"), hogy review-t indíthass belőlük — Elicittel, vagy ha az nem elérhető, a beépített szűréssel.'));
         })(),
         backupEl(),
@@ -3417,7 +3428,7 @@
               h('div', { className: 'sr-rail-hd' }, 'Beépített (backup) ', h('span', { className: 'sr-rail-c' }, allStudies.length)),
               h('div', { className: 'sr-rlist' }, allStudies.map(function (s) {
                 var running = PRStudyRunner.isStudyRunning(s.id), done = s.status === 'done' || s.status === 'completed';
-                return h('div', { key: s.id, onClick: function () { goStudyFunnel(s); }, title: 'Megnyitás a keyword-screening funnelben', style: { cursor: 'pointer', border: '1px solid ' + (done ? 'color-mix(in srgb, var(--ok, #15803d) 45%, var(--line))' : 'var(--line)'), borderRadius: 7, padding: '6px 8px', marginBottom: 5, background: done ? 'color-mix(in srgb, var(--ok, #15803d) 7%, var(--surface))' : 'var(--surface)' } },
+                return h('div', { key: s.id, onClick: function () { goStudyFunnel(s); }, title: 'Megnyitás a keyword-screening funnelben', style: { cursor: 'pointer', border: '1px solid var(--line)', borderRadius: 7, padding: '6px 8px', marginBottom: 5, background: 'var(--surface)' } },
                   h('div', { style: { display: 'flex', gap: 6, alignItems: 'center' } },
                     h('span', { style: { fontSize: 8.5, fontWeight: 750, textTransform: 'uppercase', color: 'var(--warn, #d9820a)', background: 'color-mix(in srgb, var(--warn, #d9820a) 15%, transparent)', borderRadius: 4, padding: '1px 5px', flex: 'none' } }, 'Backup'),
                     h('span', { style: { flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12, fontWeight: 600 } }, s.title || 'Irodalom-study')),
@@ -3820,10 +3831,9 @@
         h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 6 } },
           studies.map(function (s) {
             var on = s.id === selId;
-            var isDone = s.status === 'done';
-            var st = isDone ? '✓ done' : ('step ' + (s.cur_step || 1) + '/4');
+            var st = s.status === 'done' ? '✓ done' : ('step ' + (s.cur_step || 1) + '/4');
             var editing = renameId === s.id;
-            return h('div', { key: s.id, className: PRStudyRunner.isStudyRunning(s.id) ? 'pulse-run' : null, onClick: editing ? null : function () { setSelId(s.id); setCurStep(s.cur_step || 1); }, style: { textAlign: 'left', maxWidth: 260, minWidth: 150, border: '1.5px solid ' + (on ? 'var(--accent)' : isDone ? 'color-mix(in srgb, var(--ok, #15803d) 45%, var(--line))' : 'var(--line)'), background: on ? 'var(--surface-2)' : isDone ? 'color-mix(in srgb, var(--ok, #15803d) 7%, var(--surface))' : 'var(--surface)', borderRadius: 8, padding: '6px 10px', cursor: editing ? 'default' : 'pointer' } },
+            return h('div', { key: s.id, className: PRStudyRunner.isStudyRunning(s.id) ? 'pulse-run' : null, onClick: editing ? null : function () { setSelId(s.id); setCurStep(s.cur_step || 1); }, style: { textAlign: 'left', maxWidth: 260, minWidth: 150, border: '1.5px solid ' + (on ? 'var(--accent)' : 'var(--line)'), background: on ? 'var(--surface-2)' : 'var(--surface)', borderRadius: 8, padding: '6px 10px', cursor: editing ? 'default' : 'pointer' } },
               editing
                 ? h('div', { onClick: function (e) { e.stopPropagation(); }, style: { display: 'flex', flexDirection: 'column', gap: 4 } },
                     h('input', { className: 'field', autoFocus: true, style: { fontSize: 12.5, width: '100%', boxSizing: 'border-box' }, value: renameVal, placeholder: 'Study name…', onChange: function (e) { setRenameVal(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter') { e.preventDefault(); renameStudy(s); } else if (e.key === 'Escape') { setRenameId(null); } } }),
@@ -3834,7 +3844,7 @@
                     h('div', { style: { display: 'flex', gap: 4, alignItems: 'center' } },
                       h('div', { style: { flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } }, s.title),
                       props.canEdit ? h('button', { className: 'icon-x', 'aria-label': 'Rename study', title: 'Rename', style: { flex: 'none', fontSize: 11 }, onClick: function (e) { e.stopPropagation(); setRenameId(s.id); setRenameVal(s.title || ''); } }, h('span', { 'aria-hidden': 'true' }, '✏️')) : null),
-                    h('div', { style: { fontSize: 11, color: (running && on) ? 'var(--accent)' : isDone ? 'var(--ok, #15803d)' : 'var(--muted)', marginTop: 2, fontWeight: isDone ? 700 : 400 } }, (running && on ? '⏳ running… ' : '') + st))
+                    h('div', { style: { fontSize: 11, color: (running && on) ? 'var(--accent)' : 'var(--muted)', marginTop: 2 } }, (running && on ? '⏳ running… ' : '') + st))
             );
           }),
           props.canEdit ? h('button', { onClick: function () { newStudy(null); }, style: { border: '1px dashed var(--line)', background: 'transparent', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontSize: 12.5, color: 'var(--muted)' } }, '+ New study') : null
@@ -3842,7 +3852,7 @@
       // funnel stepper
       h('div', { className: 'funnel' }, LS_STEPS.map(function (s) {
         return h('button', { key: s.step, 'aria-current': curStep === s.step ? 'step' : null, 'aria-label': s.label, className: 'funnel-step' + (curStep === s.step ? ' on' : '') + (((stepRow(s.step) || {}).status === 'done') ? ' done' : '') + (stepActive === s.step ? ' pulse-run' : ''), onClick: function () { viewStep(s.step); } },
-          h('b', null, (((stepRow(s.step) || {}).status === 'done') ? '✓ ' : '') + s.label), stepActive === s.step ? h('span', { className: 'funnel-count', style: { color: '#a16207', fontWeight: 700 } }, '⏳ fut…') : s.step < 4 ? h('span', { className: 'funnel-count' }, incCount(s.step) + ' include') : h('span', { className: 'funnel-count' }, (stepRow(4) || {}).status === 'done' ? '✓ done' : 'review'));
+          h('b', null, s.label), stepActive === s.step ? h('span', { className: 'funnel-count', style: { color: '#a16207', fontWeight: 700 } }, '⏳ fut…') : s.step < 4 ? h('span', { className: 'funnel-count' }, incCount(s.step) + ' include') : h('span', { className: 'funnel-count' }, (stepRow(4) || {}).status === 'done' ? 'done' : 'review'));
       })),
       // config panel (steps 1-3) or review panel (step 4)
       curStep < 4 ? h('div', { className: 'panel', style: { marginTop: 10 } },
