@@ -3046,6 +3046,14 @@
     var ibS = useState({}), ideaById = ibS[0], setIdeaById = ibS[1];   // idea_id → question, so each candidate shows the Study-basis idea it came from
     var ifS = useState([]), ideasFull = ifS[0], setIdeasFull = ifS[1];   // full selected ideas → the one-path per-idea launcher
     var asS = useState([]), allStudies = asS[0], setAllStudies = asS[1];  // ALL native/backup studies → merged into the Reviews list
+    var advS = useState(false), showAdv = advS[0], setShowAdv = advS[1];  // ⚙ Speciális collapse (PICO cards + manual review) — off by default (clean process spine)
+    // numbered process-spine step label (Studies redesign, direction A) — a light "1 · Title" header before each stage
+    function stepHd(n, title, sub) {
+      return h('div', { style: { display: 'flex', alignItems: 'center', gap: 9, margin: '14px 0 8px' } },
+        h('span', { style: { width: 23, height: 23, borderRadius: '50%', background: 'var(--accent-tint, #eef0ff)', color: 'var(--accent, #4f46e5)', display: 'grid', placeItems: 'center', fontSize: 11.5, fontWeight: 750, flex: 'none', fontVariantNumeric: 'tabular-nums' } }, String(n)),
+        h('b', { style: { fontSize: 13 } }, title),
+        sub ? h('span', { style: { fontSize: 11, color: 'var(--faint)' } }, '· ' + sub) : null);
+    }
     var stByS = useState({}), studiesByIdea = stByS[0], setStudiesByIdea = stByS[1];   // idea_id → [research_studies] : the literature studies belonging to each idea (shown on the review-question modal)
     var bkS = useState(0), setBkTick = bkS[1];   // re-render tick — the actual backup runs live in the module-level PRStudyRunner so they survive tab/view switches
     var alive = useRef(true), fromCand = useRef(null);   // the candidate a review is being started from → link its launched_job_id after create
@@ -3368,10 +3376,11 @@
       var sel = (jobs && jobs.length) ? (jobs.filter(function (x) { return x.id === selId; })[0] || jobs[0]) : null;
       return h('div', { className: 'panel sr2-panel', style: { marginTop: 14 } },
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
-          h('h3', { style: { margin: 0, flex: 1 } }, '🔬 Systematic Review Studio ', h('span', { style: { fontSize: 11.5, color: 'var(--faint)', fontWeight: 400 } }, '· from your Ideas → PRISMA')),
-          canCreate ? h('button', { className: 'btn pri', style: { padding: '5px 11px', fontSize: 12.5 }, disabled: gen, onClick: generate }, gen ? '✨ Generating…' : '✨ Generate from Ideas') : null,
-          canCreate ? h('button', { className: 'btn', style: { padding: '5px 11px', fontSize: 12.5 }, onClick: function () { fromCand.current = null; setF({ q: '', protocol: '', abs: [], ft: [], ex: [], exclude: [], gen: true, genAbs: true, genEx: true, useFig: false, runFT: true, maxResults: '1000' }); setOpenForm(true); } }, '+ Manual review') : null),
+          h('h3', { style: { margin: 0, flex: 1 } }, '🔬 Szisztematikus review ', h('span', { style: { fontSize: 11.5, color: 'var(--faint)', fontWeight: 400 } }, '· az ötletektől a PRISMA-ig')),
+          canCreate ? h('button', { className: 'btn', style: { padding: '5px 11px', fontSize: 12 }, onClick: function () { setShowAdv(!showAdv); } }, showAdv ? '⚙ Speciális ▲' : '⚙ Speciális ▾') : null),
         err ? h('div', { style: { fontSize: 12.5, color: /^✓/.test(err) ? 'var(--ok, #15803d)' : 'var(--danger, #b42318)', margin: '6px 0' } }, err) : null,
+        // STEP 1 — Kiindulás & indítás (Studies redesign A: numbered process spine)
+        stepHd(1, 'Kiindulás & indítás', 'jelöld ki az ötleteket → indíts review-t'),
         // ONE-PATH engine-status line: Elicit primary, built-in backup on standby. The launch auto-falls-back if Elicit is down.
         (function () {
           var up = srHealth && srHealth.available;
@@ -3395,6 +3404,8 @@
             })) : h('div', { style: { fontSize: 11.5, color: 'var(--muted)' } }, 'Jelölj ki ötleteket az Ötletek fülön („Select"), hogy review-t indíthass belőlük — Elicittel, vagy ha az nem elérhető, a beépített szűréssel.'));
         })(),
         backupEl(),
+        // STEP 2 — Review-k & eredmény (numbered process spine)
+        stepHd(2, 'Review-k & eredmény', 'egy lista: futó + kész · nyisd meg a részletekért'),
         // Reviews exist → master-detail (rail + the selected review). No reviews yet → the review-question cards fill the
         // FULL width in a responsive grid (side by side) instead of a narrow rail + a big empty detail pane.
         ((jobs && jobs.length) || (allStudies && allStudies.length)) ? h('div', { className: 'sr2' },
@@ -3420,7 +3431,14 @@
             : (cands && cands.length) ? h('div', { style: { marginTop: 6 } },
                 h('div', { className: 'field-label' }, '📋 Review-kérdések a projekt ötleteiből — válassz egyet („🔬 Start review"), vagy „+ Manual review"'),
                 h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 12, marginTop: 8, alignItems: 'start' } }, cands.map(candCard)))
-              : h('div', { className: 'sr-detail-empty', style: { padding: '36px 16px', textAlign: 'center', lineHeight: 1.6 } }, 'Még nincs review. Kattints a „✨ Generate from Ideas"-ra, hogy a projekt ötleteiből review-kérdéseket készíts, majd indíts egyet.'),
+              : h('div', { className: 'sr-detail-empty', style: { padding: '36px 16px', textAlign: 'center', lineHeight: 1.6 } }, 'Még nincs review. Jelölj ki ötleteket az Ötletek fülön, majd fent, az „1 · Kiindulás & indítás" szakaszban indíts review-t belőlük.'),
+        // ⚙ Speciális — advanced entries (PICO candidate cards + manual review), collapsed by default to keep the process spine clean
+        (canCreate && showAdv) ? h('div', { style: { border: '1px dashed var(--line)', borderRadius: 10, padding: '12px 13px', marginTop: 10, background: 'var(--surface-2)' } },
+          h('div', { style: { fontSize: 11, fontWeight: 700, color: 'var(--muted)', marginBottom: 9, textTransform: 'uppercase', letterSpacing: '.05em' } }, '⚙ Speciális belépők'),
+          h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap' } },
+            h('button', { className: 'btn', style: { padding: '5px 11px', fontSize: 12.5 }, disabled: gen, onClick: generate }, gen ? '✨ Generating…' : '✨ PICO-kérdés kártyák az ötletekből'),
+            h('button', { className: 'btn', style: { padding: '5px 11px', fontSize: 12.5 }, onClick: function () { fromCand.current = null; setF({ q: '', protocol: '', abs: [], ft: [], ex: [], exclude: [], gen: true, genAbs: true, genEx: true, useFig: false, runFT: true, maxResults: '1000' }); setOpenForm(true); } }, '+ Kézi review')),
+          h('div', { style: { fontSize: 11, color: 'var(--faint)', marginTop: 8 } }, 'A fő folyamathoz nem szükséges — a review-kat a kijelölt ötletekből indítod fent. Ez a PICO-alapú finomításhoz / egyedi review-kérdéshez való.')) : null,
         openR ? h('div', { className: 'scrim', onClick: function () { setOpenR(null); } }, h('div', { className: 'modal', style: { width: 780 }, onClick: function (e) { e.stopPropagation(); } },
           h('div', { className: 'modal-h' }, h('h3', { style: { margin: 0, flex: 1 } }, openR.result_title || 'Systematic review'), h('button', { className: 'icon-x', 'aria-label': 'Close', onClick: function () { setOpenR(null); } }, '✕')),
           (window.marked && window.DOMPurify)
