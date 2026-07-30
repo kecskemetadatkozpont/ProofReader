@@ -4385,6 +4385,9 @@
     // ---- Cockpit dashboard (A): comprehensive project-state summary — contributor names + the SR reviews ----
     var cmS = useState({}), contribMap = cmS[0], setContribMap = cmS[1];   // profiles_public: id → {name,color}
     var srjS = useState([]), srJobs = srjS[0], setSrJobs = srjS[1];        // Elicit SR reviews (studies summary)
+    var cmsgS = useState([]), chatMsgs = cmsgS[0], setChatMsgs = cmsgS[1]; // cockpit chat transcript [{role:'me'|'ai', content, added?}]
+    var cinS = useState(''), chatInput = cinS[0], setChatInput = cinS[1];
+    var cbzS = useState(false), chatBusy = cbzS[0], setChatBusy = cbzS[1];
     var lkoS = useState(false), linkOpen = lkoS[0], setLinkOpen = lkoS[1];
     var lkuS = useState(''), linkUrl = lkuS[0], setLinkUrl = lkuS[1];
     var pcmS = useState([]), pcMsgs = pcmS[0], setPcMsgs = pcmS[1];   // protocol-wide chat (ephemeral)
@@ -4531,6 +4534,29 @@
         if (err) { window.PRUI.toast('Generation failed: ' + err, { kind: 'error' }); return; }
         setGoal(''); load(); if (props.onChanged) props.onChanged();
       }, function (e) { setBusy(false); window.PRUI.toast('Generation failed: ' + e, { kind: 'error' }); });
+    }
+    // Cockpit chat (phase 2): insert AI-proposed tasks as protocol steps (creating a draft protocol if none exists yet).
+    function insertCockpitSteps(newSteps, cb) {
+      if (!newSteps || !newSteps.length) { if (cb) cb(0); return; }
+      function ins(pid, baseOrd) {
+        var rows = newSteps.map(function (s, i) { return { protocol_id: pid, ord: baseOrd + i + 1, title: String(s.title || 'Task').slice(0, 240), kind: String(s.kind || 'custom'), spec: { instruction: s.instruction || '', inputs: s.inputs || [], expected_outputs: s.expected_outputs || [], acceptance: s.acceptance || [], command_hint: s.command_hint || '', est_minutes: Number.isFinite(s.est_minutes) ? s.est_minutes : null }, depends_on: [], needs_approval: !!s.needs_approval }; });
+        sb.from('research_protocol_steps').insert(rows).then(function (r) { if (r && r.error) { window.PRUI.toast('Task mentés hiba: ' + r.error.message, { kind: 'error' }); } load(); if (props.onChanged) props.onChanged(); if (cb) cb(rows.length); });
+      }
+      if (prot) { var baseOrd = steps.reduce(function (m, s) { return Math.max(m, s.ord || 0); }, 0); ins(prot.id, baseOrd); }
+      else { sb.from('research_protocols').insert({ project_id: props.projectId, title: 'Protokoll (chatből)', goal: null, status: 'draft', context_snapshot: {}, created_by: props.authorId }).select('id').maybeSingle().then(function (r) { var pid = r && r.data && r.data.id; if (pid) ins(pid, 0); else if (cb) cb(0); }, function () { if (cb) cb(0); }); }
+    }
+    function sendChat(text) {
+      var msg = String(text || '').trim(); if (!msg || chatBusy) return;
+      var hist = chatMsgs.slice();
+      setChatMsgs(hist.concat([{ role: 'me', content: msg }])); setChatInput(''); setChatBusy(true);
+      sb.functions.invoke('research-protocol', { body: { action: 'cockpit_chat', project_id: props.projectId, message: msg, history: hist.map(function (m) { return { role: m.role, content: m.content }; }) } }).then(function (r) {
+        setChatBusy(false);
+        var d = r && r.data; var err = (d && d.error) || (r && r.error && r.error.message);
+        if (err) { setChatMsgs(function (l) { return l.concat([{ role: 'ai', content: '⚠ ' + err }]); }); return; }
+        var nSteps = (d && d.steps) || [];
+        setChatMsgs(function (l) { return l.concat([{ role: 'ai', content: (d && d.reply) || '…', added: nSteps.length }]); });
+        if (nSteps.length) insertCockpitSteps(nSteps);
+      }, function () { setChatBusy(false); setChatMsgs(function (l) { return l.concat([{ role: 'ai', content: '⚠ AI-kapcsolat hiba — telepítve van a research-protocol edge?' }]); }); });
     }
     function setPStatus(st) { sb.from('research_protocols').update({ status: st, updated_at: new Date().toISOString() }).eq('id', prot.id).then(load); }
     function setProtField(field, val) { var patch = {}; patch[field] = val; patch.updated_at = new Date().toISOString(); sb.from('research_protocols').update(patch).eq('id', prot.id).then(function () { }); }
@@ -4731,10 +4757,31 @@
                   studies.slice(0, 2).map(function (s) { var run = PRStudyRunner.isStudyRunning(s.id), dn = s.status === 'done' || s.status === 'completed'; return h('div', { key: 'ss' + s.id, className: 'pcpit-row' }, h('span', { className: 'pcpit-badge', style: badge(dn ? 'done' : run ? 'run' : 'todo') }, dn ? '✓' : run ? '⏳' : '•'), h('span', { className: 't', title: s.title }, s.title || 'Study')); }))
               : h('div', { style: { fontSize: 11.5, color: 'var(--muted)' } }, 'Nincs study.'))));
     }
+    // ---- Cockpit chat (A, phase 2): context-aware co-pilot → proposes protocol tasks that land on the board ----
+    function cockpitChat() {
+      if (!ce) return null;
+      return h('div', { className: 'pcpit-chat' },
+        h('div', { className: 'pcpit-chat-h' }, '💬 Protokoll-építő chat ', h('span', { style: { fontWeight: 500, color: 'var(--faint)', fontSize: 11.5 } }, '· ismeri a fenti állapotot — a taskok a táblára kerülnek')),
+        chatMsgs.length
+          ? h('div', { className: 'pcpit-msgs' }, chatMsgs.map(function (m, i) {
+              return h('div', { key: i, className: 'pcpit-msg ' + (m.role === 'me' ? 'me' : 'ai') },
+                h('div', { className: 'b' }, m.content, m.added ? h('span', { className: 'pcpit-taskref' }, '📋 +' + m.added + ' task a táblán') : null));
+            }))
+          : h('div', { className: 'pcpit-msgs-empty' }, 'Pl.: „Csinálj taskokat a legfontosabb nyitott résre, baseline + a mi módszerünk" · „Adj ábra-taskot a DeLong-teszthez".'),
+        chatBusy ? h('div', { className: 'pcpit-typing' }, '✦ Publify gépel…') : null,
+        h('div', { className: 'pcpit-compose' },
+          h('div', { className: 'pcpit-presets' },
+            ['🕳️ Task a legfontosabb nyitott résre', '📊 Kiértékelő + ábra task az eddigi study-khoz', '➡️ Mi a következő logikus lépés? Vezesd le taskként'].map(function (p, i) {
+              return h('button', { key: i, className: 'pcpit-preset', disabled: chatBusy, onClick: function () { sendChat(p); } }, p);
+            })),
+          h('div', { className: 'pcpit-inbox' },
+            h('input', { className: 'field', value: chatInput, disabled: chatBusy, placeholder: 'Írd le, mit vizsgáljunk / módosítsunk…', onChange: function (e) { setChatInput(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter') sendChat(chatInput); } }),
+            h('button', { className: 'btn pri', disabled: chatBusy || !chatInput.trim(), onClick: function () { sendChat(chatInput); } }, chatBusy ? '…' : 'Küldés'))));
+    }
 
     if (loading) return h('div', { className: 'empty' }, tr(props.lang, 'Loading protocol…'));
 
-    if (!prot) return h('div', null, cockpitDashboard(), h('div', { className: 'panel' },
+    if (!prot) return h('div', null, cockpitDashboard(), cockpitChat(), h('div', { className: 'panel' },
       h('h3', { style: { marginTop: 0 } }, '🧪 Protocol'),
       h('p', { style: { fontSize: 13, color: 'var(--muted)', lineHeight: 1.5 } }, 'Generate an executable research plan — an ordered ToDo list (data → preprocess → baselines → method → evaluation → figures) built from your idea and the literature you selected in Studies. A Claude agent on your dedicated machine can then run it step by step, with your approval on the expensive ones.'),
       ce ? h('div', null,
@@ -4929,6 +4976,7 @@
     }
     return h('div', null,
       cockpitDashboard(),
+      cockpitChat(),
       h('div', { className: 'panel' },
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
           h('h3', { style: { margin: 0, flex: 1, minWidth: 160 } }, '🧪 ', prot.title),

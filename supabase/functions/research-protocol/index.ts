@@ -106,6 +106,39 @@ Deno.serve(async (req) => {
       return json({ ok: true, protocol_id: pid, steps: rows.length });
     }
 
+    // ---- Cockpit chat (A): a context-aware co-pilot. Knows the WHOLE project state (gaps/studies/literature/existing steps)
+    // and turns the conversation into proposed protocol tasks. Returns {reply, steps} — the client inserts the steps (RLS). ----
+    if (action === 'cockpit_chat') {
+      const message = String(body.message || '').slice(0, 2000);
+      const history = Array.isArray(body.history) ? body.history.slice(-10) : [];
+      const pj = await sb.from('research_projects').select('title,goal').eq('id', projectId).maybeSingle();
+      const proj: any = pj.data || { title: '', goal: '' };
+      const ideasQ = await sb.from('research_ideas').select('question,status,source').eq('project_id', projectId).neq('status', 'rejected').limit(60);
+      const ideas = (ideasQ.data || []) as any[];
+      const gaps = ideas.filter((i: any) => i.source === 'gap');
+      const realIdeas = ideas.filter((i: any) => i.source !== 'gap');
+      const srcQ = await sb.from('research_sources').select('screening').eq('project_id', projectId).limit(400);
+      const inc = ((srcQ.data || []) as any[]).filter((s: any) => s.screening === 'include' || s.screening === 'included');
+      const studiesQ = await sb.from('research_studies').select('title,status').eq('project_id', projectId).limit(20);
+      const protQ = await sb.from('research_protocols').select('id,goal').eq('project_id', projectId).eq('created_by', ures.user.id).in('status', ['draft', 'ready', 'running', 'paused', 'failed']).order('created_at', { ascending: false }).limit(1);
+      const prot: any = protQ.data && protQ.data[0];
+      const stepsQ: any = prot ? await sb.from('research_protocol_steps').select('ord,title,kind,status').eq('protocol_id', prot.id).order('ord') : { data: [] };
+      const existingSteps = (stepsQ.data || []) as any[];
+      const ctx = `PROJECT: ${proj.title}${proj.goal ? ' — ' + proj.goal : ''}\n`
+        + `SELECTED IDEAS: ${realIdeas.filter((i: any) => i.status === 'selected').map((i: any) => i.question).slice(0, 6).join('; ') || '—'}\n`
+        + `OPEN RESEARCH GAPS: ${gaps.map((g: any) => g.question).slice(0, 8).join('; ') || '—'}\n`
+        + `LITERATURE: ${((srcQ.data || []) as any[]).length} sources, ${inc.length} included\n`
+        + `STUDIES: ${((studiesQ.data || []) as any[]).map((s: any) => s.title + ' (' + s.status + ')').slice(0, 8).join('; ') || '—'}\n`
+        + `EXISTING PROTOCOL STEPS:\n${existingSteps.map((s: any) => `${s.ord}. [${s.kind}] ${s.title} (${s.status})`).join('\n') || '(none yet)'}`;
+      const sys = `You are Publify's protocol co-pilot in a research command center. You know the whole project state (below) — ideas, gaps, studies, literature, existing tasks. The researcher chats with you to CREATE or MODIFY executable protocol tasks that a Claude agent will later run on a machine. Reply conversationally and BRIEFLY (1-3 sentences). When they ask to add/build tasks, propose concrete NEW steps grounded in the gaps/studies/goal above. Return ONLY a JSON object, no prose, no fences: {"reply":"<short conversational reply>","steps":[{"title":"<imperative>","kind":"data|preprocess|train|eval|analysis|figure|writeup|custom","instruction":"<concrete, <=2 sentences>","inputs":[],"expected_outputs":[],"acceptance":[],"command_hint":"","est_minutes":<int>,"depends_on":[],"needs_approval":<bool>}]}. Use steps:[] when no task is requested (pure discussion/answer). At most 4 steps per turn.`;
+      const u = `${ctx}\n\nCONVERSATION SO FAR:\n${history.map((m: any) => `${m.role === 'me' ? 'Researcher' : 'You'}: ${String(m.content || '').slice(0, 500)}`).join('\n')}\nResearcher: ${message}\n\nReply now (JSON only).`;
+      let raw = '';
+      try { raw = await callClaude(sys + langDirective(_lang), u, model); } catch (_e) { return json({ error: 'AI unavailable — try again.' }, 502); }
+      const mm = raw.match(/\{[\s\S]*\}/);
+      let parsed: any = {}; try { parsed = mm ? JSON.parse(mm[0]) : {}; } catch (_e) { parsed = { reply: raw.slice(0, 400), steps: [] }; }
+      return json({ ok: true, reply: String(parsed.reply || '…'), steps: Array.isArray(parsed.steps) ? parsed.steps.slice(0, 4) : [], protocol_id: prot ? prot.id : null });
+    }
+
     // ---- Task Editor AI-assist: these RETURN data (no DB writes); the client applies them via RLS ----
     if (action === 'refine_step') {
       const stepId = String(body.step_id || ''); const hint = String(body.hint || '').slice(0, 1500);
