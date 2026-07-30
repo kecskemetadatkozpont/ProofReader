@@ -3193,6 +3193,20 @@
       var q = String(idea.question || '');
       return !!(q && (jobs || []).some(function (j) { return j.status === 'completed' && j.research_question && String(j.research_question).indexOf(q) === 0; }));
     }
+    // The generated PICO candidate for this idea (if "Generate from Ideas" produced one) → enriches the unified launcher row.
+    function ideaCand(idea) { return idea ? ((cands || []).filter(function (c) { return c.idea_id === idea.id; })[0] || null) : null; }
+    // Rich review state for an idea's launcher row: done / running, plus which job/study to open. Merges the Elicit job
+    // (matched by research_question prefix, since sr.create stores no idea_id) with the native/backup study (idea_id-linked).
+    function ideaReviewState(idea) {
+      if (!idea) return { done: false, running: false, job: null, study: null };
+      var q = String(idea.question || '');
+      var studies = (allStudies || []).filter(function (s) { return s.idea_id === idea.id; });
+      var jb = q ? (jobs || []).filter(function (j) { return j.research_question && String(j.research_question).indexOf(q) === 0; }) : [];
+      var doneJob = jb.filter(function (j) { return j.status === 'completed'; })[0];
+      var doneStudy = studies.filter(function (s) { return s.status === 'done' || s.status === 'completed'; })[0];
+      var running = studies.some(function (s) { return PRStudyRunner.isStudyRunning(s.id); }) || jb.some(function (j) { return j.status !== 'completed' && j.status !== 'failed'; });
+      return { done: !!(doneJob || doneStudy), running: running, job: doneJob || jb[0] || null, study: doneStudy || studies[0] || null };
+    }
     // ---- Claude backup: Elicit SR out of quota → run the built-in Claude + OpenAlex Study funnel. MULTIPLE studies run in
     //      parallel, keyed by a per-run id, each with its own independent status card. ----
     // The Claude backup runs in the module-level PRStudyRunner → it KEEPS GOING across tab/view switches. This component
@@ -3406,12 +3420,34 @@
             h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: sel.length ? 8 : 0, flexWrap: 'wrap' } },
               h('b', { style: { fontSize: 12.5 } }, '🔬 Review indítása a kijelölt ötletekből'),
               sel.length ? h('button', { className: 'btn pri', style: { padding: '4px 10px', fontSize: 12, marginLeft: 'auto' }, disabled: busy, onClick: function () { runReviewAll(sel); } }, '🔬 Mind a ' + sel.length + '-ből') : null),
-            sel.length ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 5 } }, sel.map(function (idea) {
-              var revDone = ideaReviewDone(idea);   // review already ran for this idea → green the whole row
-              return h('div', { key: idea.id, style: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, padding: '5px 8px', background: revDone ? 'color-mix(in srgb, var(--ok, #15803d) 9%, var(--surface))' : 'var(--surface)', border: '1px solid ' + (revDone ? 'color-mix(in srgb, var(--ok, #15803d) 45%, var(--line))' : 'var(--line)'), borderRadius: 7 } },
-                h('span', { style: { flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: revDone ? 'var(--ok, #15803d)' : 'inherit', fontWeight: revDone ? 600 : 400 } }, (revDone ? '✓ ' : '💡 ') + (idea.question || '')),
-                revDone ? h('span', { style: { fontSize: 10, fontWeight: 700, color: 'var(--ok, #15803d)', flex: 'none', whiteSpace: 'nowrap' } }, 'Lefutott') : null,
-                h('button', { className: 'btn', style: { padding: '3px 10px', fontSize: 11.5, flex: 'none' }, disabled: busy, title: revDone ? 'Új review futtatása ebből az ötletből' : 'Review indítása ebből (Elicit → automatikus backup)', onClick: function () { runReviewForIdea(idea); } }, revDone ? '↻ Újra' : '▶ Review'));
+            sel.length ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 7 } }, sel.map(function (idea) {
+              // UNIFIED launcher row (B): one row per selected idea, enriched with its PICO candidate if generated. Merges
+              // the old launcher (idea → ▶ Review) and the "From your Ideas" candidate cards into ONE list.
+              var cand = ideaCand(idea);
+              var pico = (cand && cand.pico) || null;
+              var picoBits = pico ? [['P', pico.population], ['I', pico.intervention], ['C', pico.comparison], ['O', pico.outcome]].filter(function (x) { return x[1]; }) : [];
+              var rs = ideaReviewState(idea);
+              var bg = rs.done ? 'color-mix(in srgb, var(--ok, #15803d) 8%, var(--surface))' : rs.running ? 'color-mix(in srgb, var(--warn, #d9820a) 9%, var(--surface))' : 'var(--surface)';
+              var bd = rs.done ? 'color-mix(in srgb, var(--ok, #15803d) 42%, var(--line))' : rs.running ? 'color-mix(in srgb, var(--warn, #d9820a) 45%, var(--line))' : 'var(--line)';
+              function openIt() { if (rs.job && rs.job.status === 'completed' && rs.job.result_body) { setOpenR(rs.job); } else if (rs.study) { goStudyFunnel(rs.study); } else if (rs.job) { setSelJob(rs.job.id); } }
+              function launchIt() { if (cand) { startFromCand(cand); } else { runReviewForIdea(idea); } }   // PICO → pre-filled form (uses criteria); else direct Elicit → backup
+              return h('div', { key: idea.id, style: { display: 'grid', gridTemplateColumns: 'minmax(0, 1.4fr) minmax(0, 1fr) auto', gap: 12, alignItems: 'center', fontSize: 12, padding: '8px 10px', background: bg, border: '1px solid ' + bd, borderRadius: 8 } },
+                h('div', { style: { minWidth: 0, fontWeight: 600, color: rs.done ? 'var(--ok, #15803d)' : 'inherit', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', lineHeight: 1.3 } }, (rs.done ? '✓ ' : '💡 ') + ((cand && cand.question) || idea.question || '')),
+                picoBits.length
+                  ? h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 4, minWidth: 0 } }, picoBits.map(function (x) {
+                      return h('span', { key: x[0], style: { fontSize: 10, borderRadius: 6, padding: '2px 6px', background: 'var(--surface-2)', border: '1px solid var(--line)', display: 'inline-flex', gap: 4, maxWidth: '100%', minWidth: 0 } },
+                        h('b', { style: { color: 'var(--accent, #4f46e5)', flex: 'none' } }, x[0]),
+                        h('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, String(x[1]).slice(0, 38)));
+                    }))
+                  : h('div', { style: { fontSize: 10.5, color: 'var(--faint)', display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 } },
+                      h('span', { style: { whiteSpace: 'nowrap' } }, '◦ nincs PICO'),
+                      h('button', { className: 'btn', style: { padding: '2px 8px', fontSize: 10.5, flex: 'none' }, disabled: gen, title: 'PICO-kérdés generálása az ötletekből', onClick: generate }, gen ? '✨…' : '✨ PICO')),
+                h('div', { style: { display: 'flex', gap: 6, alignItems: 'center', flex: 'none' } },
+                  rs.done ? h('span', { style: { fontSize: 10, fontWeight: 800, color: 'var(--ok, #15803d)', background: 'color-mix(in srgb, var(--ok, #15803d) 12%, transparent)', borderRadius: 6, padding: '2px 7px', whiteSpace: 'nowrap' } }, '✓ Lefutott')
+                    : rs.running ? h('span', { style: { fontSize: 10, fontWeight: 800, color: '#a16207', background: 'color-mix(in srgb, var(--warn, #d9820a) 15%, transparent)', borderRadius: 6, padding: '2px 7px', whiteSpace: 'nowrap' } }, '⏳ Fut')
+                      : (cand && (cand.abstract_criteria || []).length) ? h('span', { style: { fontSize: 10, color: 'var(--faint)', whiteSpace: 'nowrap' } }, cand.abstract_criteria.length + ' krit') : null,
+                  (rs.done || rs.running) ? h('button', { className: 'btn', style: { padding: '3px 10px', fontSize: 11.5, flex: 'none' }, title: 'Eredmény / részletek megnyitása', onClick: openIt }, 'Megnyitás') : null,
+                  !rs.running ? h('button', { className: 'btn' + (rs.done ? '' : ' pri'), style: { padding: '3px 10px', fontSize: 11.5, flex: 'none' }, disabled: busy, title: rs.done ? 'Új review futtatása ebből az ötletből' : 'Review indítása ebből (Elicit → automatikus backup)', onClick: launchIt }, rs.done ? '↻ Újra' : '▶ Review') : null));
             })) : h('div', { style: { fontSize: 11.5, color: 'var(--muted)' } }, 'Jelölj ki ötleteket az Ötletek fülön („Select"), hogy review-t indíthass belőlük — Elicittel, vagy ha az nem elérhető, a beépített szűréssel.'));
         })(),
         backupEl(),
@@ -3433,16 +3469,10 @@
                     h('span', { style: { fontSize: 8.5, fontWeight: 750, textTransform: 'uppercase', color: 'var(--warn, #d9820a)', background: 'color-mix(in srgb, var(--warn, #d9820a) 15%, transparent)', borderRadius: 4, padding: '1px 5px', flex: 'none' } }, 'Backup'),
                     h('span', { style: { flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12, fontWeight: 600 } }, s.title || 'Irodalom-study')),
                   h('div', { style: { fontSize: 10.5, color: running ? '#a16207' : done ? 'var(--ok, #15803d)' : 'var(--faint)', marginTop: 2 } }, running ? ('⏳ ' + studyStepName(s.cur_step || 1)) : done ? '✓ kész' : (studyStepName(s.cur_step || 1) + ' (' + (s.cur_step || 1) + '/4)')));
-              }))) : null,
-            (cands && cands.length) ? h('div', { className: 'sr-rail-sec' },
-              h('div', { className: 'sr-rail-hd' }, 'From your Ideas ', h('span', { className: 'sr-rail-c' }, cands.length)),
-              cands.map(railCand)) : null),
+              }))) : null),
           h('div', { className: 'sr-detail' }, sel ? card(sel) : h('div', { className: 'sr-detail-empty' }, 'Válassz egy review-t a bal oldali listából.')))
           : (jobs === null) ? h('div', { className: 'sr-detail-empty', style: { padding: '28px 16px', textAlign: 'center' } }, 'Loading reviews…')
-            : (cands && cands.length) ? h('div', { style: { marginTop: 6 } },
-                h('div', { className: 'field-label' }, '📋 Review-kérdések a projekt ötleteiből — válassz egyet („🔬 Start review"), vagy „+ Manual review"'),
-                h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 12, marginTop: 8, alignItems: 'start' } }, cands.map(candCard)))
-              : h('div', { className: 'sr-detail-empty', style: { padding: '36px 16px', textAlign: 'center', lineHeight: 1.6 } }, 'Még nincs review. Jelölj ki ötleteket az Ötletek fülön, majd fent, az „1 · Kiindulás & indítás" szakaszban indíts review-t belőlük.'),
+            : h('div', { className: 'sr-detail-empty', style: { padding: '36px 16px', textAlign: 'center', lineHeight: 1.6 } }, 'Még nincs review. Jelölj ki ötleteket az Ötletek fülön, majd fent, az „1 · Kiindulás & indítás" szakaszban indíts review-t belőlük — soronként (PICO-val vagy anélkül).'),
         // ⚙ Speciális — advanced entries (PICO candidate cards + manual review), collapsed by default to keep the process spine clean
         (canCreate && showAdv) ? h('div', { style: { border: '1px dashed var(--line)', borderRadius: 10, padding: '12px 13px', marginTop: 10, background: 'var(--surface-2)' } },
           h('div', { style: { fontSize: 11, fontWeight: 700, color: 'var(--muted)', marginBottom: 9, textTransform: 'uppercase', letterSpacing: '.05em' } }, '⚙ Speciális belépők'),
