@@ -31,6 +31,22 @@ export async function assertEntitled(sb: any, feature: string): Promise<Response
   if (e1 || active !== true) return deny('A fiók nem aktív (jóváhagyásra vár vagy felfüggesztve).', 403);
   const { data: enabled, error: e2 } = await sb.rpc('is_feature_enabled', { p_key: feature });
   if (e2 || enabled !== true) return deny(`Ez a funkció (${feature}) nincs engedélyezve ehhez a felhasználóhoz.`, 403);
+  return await assertBudget(sb);   // Gate 2.5: per-user daily AI budget (migration-48) — deny if over, else count this request
+}
+
+/**
+ * Gate 2.5 (per-user daily AI budget, migration-48). Deny once the caller is at their daily cap,
+ * else count this request. Fail-OPEN on a missing/erroring RPC (undefined !== true → proceed), so
+ * this is safe to ship before/after redeploys and pre-migration. Per-user cap: profiles.ai_daily_cap
+ * (if the column exists, ai_over_budget honors it); otherwise the AI_DAILY_CALLS env (default 200).
+ * NOTE: functions with their OWN inline ai_over_budget/ai_usage_bump (mcp-bridge, research-writing,
+ * tts-translate) should NOT ALSO route through here, or the request double-counts.
+ */
+export async function assertBudget(sb: any): Promise<Response | null> {
+  const cap = parseInt(Deno.env.get('AI_DAILY_CALLS') || '200', 10);
+  const { data: over } = await sb.rpc('ai_over_budget', { max_calls: cap });
+  if (over === true) return deny(`Elérted a mai AI-kereted (${cap} kérés). A keret holnap újra feltöltődik.`, 429);
+  sb.rpc('ai_usage_bump').then(() => { }, () => { });   // count this request (fire-and-forget; never blocks/throws)
   return null;
 }
 

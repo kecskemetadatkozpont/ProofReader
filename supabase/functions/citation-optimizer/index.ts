@@ -15,7 +15,7 @@
 // Secrets: ANTHROPIC_API_KEY (reused); S2_API_KEY (optional — a free Semantic Scholar key; without it we
 //          fall back to the shared unauthenticated pool + 429 backoff).
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { assertActive, resolveModel } from '../_shared/entitlement.ts';
+import { assertActive, assertBudget, resolveModel } from '../_shared/entitlement.ts';
 import { langDirective, loadProjectLang } from '../_shared/lang.ts';
 
 const ANTHROPIC_KEY = Deno.env.get('ANTHROPIC_API_KEY');
@@ -78,6 +78,7 @@ Deno.serve(async (req) => {
     const { data: ures } = await sb.auth.getUser();
     if (!ures?.user?.id) return json({ error: 'unauthenticated' }, 401);
     const gate = await assertActive(sb); if (gate) return gate;
+    const bud = await assertBudget(sb); if (bud) return bud;   // per-user daily AI budget (migration-48)
 
     const body = await req.json().catch(() => ({} as any));
     const action = String(body.action || '');
