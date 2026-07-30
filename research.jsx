@@ -4388,6 +4388,7 @@
     var cmsgS = useState([]), chatMsgs = cmsgS[0], setChatMsgs = cmsgS[1]; // cockpit chat transcript [{role:'me'|'ai', content, added?}]
     var cinS = useState(''), chatInput = cinS[0], setChatInput = cinS[1];
     var cbzS = useState(false), chatBusy = cbzS[0], setChatBusy = cbzS[1];
+    var onS = useState({}), onlineUsers = onS[0], setOnlineUsers = onS[1];   // presence: id → true (who's on the Protocol page now)
     var lkoS = useState(false), linkOpen = lkoS[0], setLinkOpen = lkoS[1];
     var lkuS = useState(''), linkUrl = lkuS[0], setLinkUrl = lkuS[1];
     var pcmS = useState([]), pcMsgs = pcmS[0], setPcMsgs = pcmS[1];   // protocol-wide chat (ephemeral)
@@ -4526,6 +4527,18 @@
     }, [props.projectId, (props.ideas || []).length, (props.studies || []).length, (props.sources || []).length]);
     useEffect(function () { loadNotes(); }, [prot && prot.id]);
     useEffect(function () { if (!prot || prot.status !== 'running') return; var t = setInterval(function () { load(); loadFiles(); loadNotes(); }, 5000); return function () { clearInterval(t); }; }, [prot && prot.id, prot && prot.status]);
+    // cockpit (phase 3): realtime channel — presence (who's on the Protocol page now) + live board updates when ANYONE changes steps
+    useEffect(function () {
+      if (!props.projectId) return;
+      var myId = props.authorId || 'anon';
+      var ch = sb.channel('pcpit:' + props.projectId, { config: { presence: { key: myId } } });
+      ch.on('presence', { event: 'sync' }, function () { var st = ch.presenceState(), on = {}; Object.keys(st).forEach(function (k) { (st[k] || []).forEach(function (m) { if (m && m.id) on[m.id] = true; }); }); setOnlineUsers(on); });
+      if (prot && prot.id) ch.on('postgres_changes', { event: '*', schema: 'public', table: 'research_protocol_steps', filter: 'protocol_id=eq.' + prot.id }, function () { load(); });
+      ch.subscribe(function (status) { if (status === 'SUBSCRIBED') { try { ch.track({ id: props.authorId, surface: 'protocol' }); } catch (e) { } } });
+      return function () { try { sb.removeChannel(ch); } catch (e) { } };
+    }, [props.projectId, prot && prot.id]);
+    // fallback: a light poll so a collaborator's chat-created tasks appear within ~12s even before migration-103 (realtime publication) is applied
+    useEffect(function () { if (!prot) return; var t = setInterval(function () { load(); }, 12000); return function () { clearInterval(t); }; }, [prot && prot.id]);
     function generate() {
       if (busy) return; setBusy(true);
       sb.functions.invoke('research-protocol', { body: { action: 'generate', project_id: props.projectId, goal: goal } }).then(function (r) {
@@ -4719,7 +4732,10 @@
       function leg(col, lab) { return h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 5 } }, h('i', { style: { width: 9, height: 9, borderRadius: 2, background: col, display: 'inline-block' } }), lab); }
       var topGaps = gaps.slice().sort(function (a, b) { return (b.novelty || 0) - (a.novelty || 0); }).slice(0, 4);
       return h('div', null,
-        h('div', { className: 'pcpit-hd' }, '🧭 Projekt-áttekintés ', h('span', { className: 'sub' }, '· a kutatás jelenlegi állapota egy helyen')),
+        h('div', { className: 'pcpit-hd' }, '🧭 Projekt-áttekintés ', h('span', { className: 'sub' }, '· a kutatás jelenlegi állapota egy helyen'),
+          (function () { var oids = Object.keys(onlineUsers || {}); if (!oids.length) return null; return h('span', { style: { marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4 } },
+            oids.slice(0, 5).map(function (id, i) { var pf = contribMap[id] || {}; var nm = pf.name || 'Kutató'; var col = pf.color || ['#3a5bd9', '#0e8a6a', '#c67912', '#a23a86'][i % 4]; var ini = (nm[0] || '?').toUpperCase() + ((nm.split(' ')[1] || '')[0] || '').toUpperCase(); return h('span', { key: id, title: nm + (id === props.authorId ? ' (te)' : ''), style: { width: 22, height: 22, borderRadius: '50%', background: col, color: '#fff', fontSize: 9, fontWeight: 750, display: 'grid', placeItems: 'center', marginLeft: i ? -6 : 0, border: '2px solid var(--surface)' } }, ini); }),
+            h('span', { style: { fontSize: 11, color: 'var(--faint)', marginLeft: 6, fontWeight: 500 } }, '🟢 ' + oids.length + ' online')); })()),
         h('div', { className: 'pcpit' },
           h('div', { className: 'pcpit-card', style: { gridColumn: 'span 8' } },
             h('h4', null, '🔬 Eddigi eredmények', h('span', { className: 'c' }, (doneStudies.length + doneSR.length) + ' study · ' + doneSteps.length + '/' + steps.length + ' lépés')),
