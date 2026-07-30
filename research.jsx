@@ -3044,6 +3044,8 @@
     var ehS = useState(null), enh = ehS[0], setEnh = ehS[1];       // AI-suggested sharper questions (item 4)
     var ebS = useState(false), enhBusy = ebS[0], setEnhBusy = ebS[1];
     var ibS = useState({}), ideaById = ibS[0], setIdeaById = ibS[1];   // idea_id → question, so each candidate shows the Study-basis idea it came from
+    var ifS = useState([]), ideasFull = ifS[0], setIdeasFull = ifS[1];   // full selected ideas → the one-path per-idea launcher
+    var asS = useState([]), allStudies = asS[0], setAllStudies = asS[1];  // ALL native/backup studies → merged into the Reviews list
     var stByS = useState({}), studiesByIdea = stByS[0], setStudiesByIdea = stByS[1];   // idea_id → [research_studies] : the literature studies belonging to each idea (shown on the review-question modal)
     var bkS = useState(0), setBkTick = bkS[1];   // re-render tick — the actual backup runs live in the module-level PRStudyRunner so they survive tab/view switches
     var alive = useRef(true), fromCand = useRef(null);   // the candidate a review is being started from → link its launched_job_id after create
@@ -3069,6 +3071,10 @@
         setStudiesByIdea(m);
       }, function () { });
     }
+    // ALL native/backup studies (idea-linked or not) → merged into the unified Reviews list with a Backup badge
+    function loadAllStudies() {
+      sb.from('research_studies').select('id,idea_id,title,status,cur_step,created_at').eq('project_id', props.projectId).order('created_at', { ascending: false }).then(function (r) { if (alive.current) setAllStudies((r && r.data) || []); }, function () { });
+    }
     // open a literature study's review markdown in the same viewer modal (openR) the SR reports use
     // step 1..4 → a short Hungarian stage name, so the "Study" chip says WHICH stage the study is at
     function studyStepName(n) { return n === 4 ? 'Áttekintés' : n === 3 ? 'Full-text' : n === 2 ? 'Absztrakt-szűrés' : 'Keresés'; }
@@ -3080,7 +3086,7 @@
     function picoText(p) { if (!p) return ''; return [['P', p.population], ['I', p.intervention], ['C', p.comparison], ['O', p.outcome]].filter(function (x) { return x[1]; }).map(function (x) { return x[0] + ': ' + x[1]; }).join('\n'); }
     function startFromCand(c) { fromCand.current = c.id; setF({ q: c.question || '', protocol: picoText(c.pico), abs: c.abstract_criteria || [], ft: [], ex: c.extraction_questions || [], exclude: c.exclusion_criteria || [], gen: true, genAbs: true, genEx: true, useFig: false, runFT: true, maxResults: '1000' }); setOpenForm(true); setErr(''); }
     function dismissCand(c) { setCands(function (l) { return (l || []).filter(function (x) { return x.id !== c.id; }); }); sb.from('research_sr_candidates').update({ dismissed: true }).eq('id', c.id); }
-    useEffect(function () { alive.current = true; ensureSrCss(); if (canView) { load(); loadCands(); loadStudies(); callElicit({ action: 'sr.health' }).then(function (d) { if (alive.current) setSrHealth((d && typeof d.available === 'boolean') ? d : { available: false, reason: 'error' }); }, function () { if (alive.current) setSrHealth({ available: false, reason: 'error' }); }); sb.from('research_ideas').select('id,question').eq('project_id', props.projectId).then(function (r) { if (!alive.current) return; var m = {}; ((r && r.data) || []).forEach(function (x) { m[x.id] = x.question; }); setIdeaById(m); }); } return function () { alive.current = false; }; }, [canView]);
+    useEffect(function () { alive.current = true; ensureSrCss(); if (canView) { load(); loadCands(); loadStudies(); callElicit({ action: 'sr.health' }).then(function (d) { if (alive.current) setSrHealth((d && typeof d.available === 'boolean') ? d : { available: false, reason: 'error' }); }, function () { if (alive.current) setSrHealth({ available: false, reason: 'error' }); }); sb.from('research_ideas').select('id,question,hypothesis,status').eq('project_id', props.projectId).order('created_at', { ascending: true }).then(function (r) { if (!alive.current) return; var rows = (r && r.data) || [], m = {}; rows.forEach(function (x) { m[x.id] = x.question; }); setIdeaById(m); setIdeasFull(rows); }); loadAllStudies(); } return function () { alive.current = false; }; }, [canView]);
     // re-render whenever a background study run changes (the runs live in PRStudyRunner, not in this component's state)
     var loadStudiesRef = useRef(null), pidRefSr = useRef(props.projectId), stSigRef = useRef('');
     loadStudiesRef.current = loadStudies; pidRefSr.current = props.projectId;
@@ -3153,6 +3159,23 @@
         setOpenForm(false); setF({ q: '', protocol: '', abs: [], ft: [], ex: [], exclude: [], gen: true, genAbs: true, genEx: true, useFig: false, runFT: true, maxResults: '1000' }); if (d.deduped) setErr('A review for this question is already in progress.'); load();
       });
     }
+    // ONE-PATH launcher: start a systematic review straight from a SELECTED idea. Elicit primary → on ANY non-transient
+    // failure (not configured / 5xx / network / quota) the built-in Claude+OpenAlex backup auto-runs on the same question.
+    function runReviewForIdea(idea) {
+      if (!idea || !idea.question) return;
+      var rq = String(idea.question) + (idea.hypothesis ? ' — hypothesis: ' + idea.hypothesis : '');
+      setBusy(true); setErr('');
+      callElicit({ action: 'sr.create', researchQuestion: rq, project_id: props.projectId, title: (props.project && props.project.title) || null, generateReport: true, genAbstract: true, genExtraction: true, runFullText: true, maxResults: 1000 }).then(function (d) {
+        if (!alive.current) return; setBusy(false);
+        if (!d || d.error) {
+          var em = String((d && d.error) || 'Could not start the review.');
+          if (/rate limit|429|max concurrent|too many requests|plan limit|403/i.test(em)) { setErr('Elicit: ' + em + ' — próbáld újra kicsit később.'); return; }
+          setErr('⚡ Elicit nem elérhető — beépített backup indult: „' + String(idea.question).slice(0, 48) + '…"'); runBackup(rq, idea.id); return;
+        }
+        setErr('✓ Review elindítva (Elicit): „' + String(idea.question).slice(0, 48) + '…"'); load(); loadStudies(); loadAllStudies();
+      }, function () { if (!alive.current) return; setBusy(false); runBackup(rq, idea.id); });
+    }
+    function runReviewAll(list) { (list || []).forEach(function (idea, i) { setTimeout(function () { if (alive.current) runReviewForIdea(idea); }, i * 600); }); }
     // ---- Claude backup: Elicit SR out of quota → run the built-in Claude + OpenAlex Study funnel. MULTIPLE studies run in
     //      parallel, keyed by a per-run id, each with its own independent status card. ----
     // The Claude backup runs in the module-level PRStudyRunner → it KEEPS GOING across tab/view switches. This component
@@ -3357,14 +3380,38 @@
           var txt = srHealth == null ? 'Motor ellenőrzése…' : up ? '🟢 Motor: Elicit elérhető · a beépített backup (Claude + OpenAlex) készenlétben' : '🟠 Elicit nem elérhető' + (srHealth.reason === 'not_configured' ? ' (nincs API-kulcs)' : '') + ' — a review-k automatikusan a beépített szűréssel (Claude + OpenAlex) futnak';
           return h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 11.5, fontWeight: 600, color: col, background: bg, border: '1px solid var(--line)', borderRadius: 9, padding: '7px 11px', margin: '4px 0 8px' } }, txt);
         })(),
+        // ONE-PATH launcher: the selected ideas → start a review each (Elicit primary → auto backup). Replaces the two separate entries.
+        (function () {
+          if (!canCreate) return null;
+          var sel = (ideasFull || []).filter(function (i) { return i.status === 'selected'; });
+          return h('div', { style: { border: '1px solid var(--line)', borderRadius: 10, padding: '11px 13px', margin: '2px 0 10px', background: 'var(--surface-2)' } },
+            h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: sel.length ? 8 : 0, flexWrap: 'wrap' } },
+              h('b', { style: { fontSize: 12.5 } }, '🔬 Review indítása a kijelölt ötletekből'),
+              sel.length ? h('button', { className: 'btn pri', style: { padding: '4px 10px', fontSize: 12, marginLeft: 'auto' }, disabled: busy, onClick: function () { runReviewAll(sel); } }, '🔬 Mind a ' + sel.length + '-ből') : null),
+            sel.length ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 5 } }, sel.map(function (idea) {
+              return h('div', { key: idea.id, style: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, padding: '5px 8px', background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 7 } },
+                h('span', { style: { flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, '💡 ' + (idea.question || '')),
+                h('button', { className: 'btn', style: { padding: '3px 10px', fontSize: 11.5, flex: 'none' }, disabled: busy, title: 'Review indítása ebből (Elicit → automatikus backup)', onClick: function () { runReviewForIdea(idea); } }, '▶ Review'));
+            })) : h('div', { style: { fontSize: 11.5, color: 'var(--muted)' } }, 'Jelölj ki ötleteket az Ötletek fülön („Select"), hogy review-t indíthass belőlük — Elicittel, vagy ha az nem elérhető, a beépített szűréssel.'));
+        })(),
         backupEl(),
         // Reviews exist → master-detail (rail + the selected review). No reviews yet → the review-question cards fill the
         // FULL width in a responsive grid (side by side) instead of a narrow rail + a big empty detail pane.
-        (jobs && jobs.length) ? h('div', { className: 'sr2' },
+        ((jobs && jobs.length) || (allStudies && allStudies.length)) ? h('div', { className: 'sr2' },
           h('div', { className: 'sr-rail' },
-            h('div', null,
-              h('div', { className: 'sr-rail-hd' }, 'Reviews ', h('span', { className: 'sr-rail-c' }, jobs.length)),
-              h('div', { className: 'sr-rlist' }, jobs.map(function (j) { return railRow(j, selId); }))),
+            (jobs && jobs.length) ? h('div', null,
+              h('div', { className: 'sr-rail-hd' }, 'Reviews (Elicit) ', h('span', { className: 'sr-rail-c' }, jobs.length)),
+              h('div', { className: 'sr-rlist' }, jobs.map(function (j) { return railRow(j, selId); }))) : null,
+            (allStudies && allStudies.length) ? h('div', { className: 'sr-rail-sec' },
+              h('div', { className: 'sr-rail-hd' }, 'Beépített (backup) ', h('span', { className: 'sr-rail-c' }, allStudies.length)),
+              h('div', { className: 'sr-rlist' }, allStudies.map(function (s) {
+                var running = PRStudyRunner.isStudyRunning(s.id), done = s.status === 'done' || s.status === 'completed';
+                return h('div', { key: s.id, onClick: function () { goStudyFunnel(s); }, title: 'Megnyitás a keyword-screening funnelben', style: { cursor: 'pointer', border: '1px solid var(--line)', borderRadius: 7, padding: '6px 8px', marginBottom: 5, background: 'var(--surface)' } },
+                  h('div', { style: { display: 'flex', gap: 6, alignItems: 'center' } },
+                    h('span', { style: { fontSize: 8.5, fontWeight: 750, textTransform: 'uppercase', color: 'var(--warn, #d9820a)', background: 'color-mix(in srgb, var(--warn, #d9820a) 15%, transparent)', borderRadius: 4, padding: '1px 5px', flex: 'none' } }, 'Backup'),
+                    h('span', { style: { flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12, fontWeight: 600 } }, s.title || 'Irodalom-study')),
+                  h('div', { style: { fontSize: 10.5, color: running ? '#a16207' : done ? 'var(--ok, #15803d)' : 'var(--faint)', marginTop: 2 } }, running ? ('⏳ ' + studyStepName(s.cur_step || 1)) : done ? '✓ kész' : (studyStepName(s.cur_step || 1) + ' (' + (s.cur_step || 1) + '/4)')));
+              }))) : null,
             (cands && cands.length) ? h('div', { className: 'sr-rail-sec' },
               h('div', { className: 'sr-rail-hd' }, 'From your Ideas ', h('span', { className: 'sr-rail-c' }, cands.length)),
               cands.map(railCand)) : null),
@@ -3707,10 +3754,10 @@
       if (planning) return h('div', { className: 'panel' }, h('h3', null, '🔬 Literature study'), h('div', { style: { fontSize: 13, color: 'var(--muted)', padding: '12px 0' } }, '✨ Publify is preparing the study from the selected ideas — one moment, loading the Step-1 data (keywords, criteria, filters)…'));
       var selIdeas = (props.ideas || []).filter(function (i) { return i.status === 'selected'; });
       return h('div', { className: 'panel' }, h('h3', null, '🔬 Literature study'),
-        h('p', { style: { fontSize: 13, color: 'var(--muted)' } }, 'Select (Select) the Ideas the study should be based on, then start a 4-step screening: quick screening → abstract → full text → review. Publify pre-fills the steps (keywords, criteria, filters) based on the ideas — you only fine-tune.'),
+        h('p', { style: { fontSize: 13, color: 'var(--muted)' } }, 'Ez a nézet a keyword-szűrési funnel. A szisztematikus review-t fent, a „🔬 Systematic Review Studio"-ból indítsd (Elicit → automatikus backup, ha az nem elérhető). Alább közvetlenül is indíthatsz beépített szűrést: jelölj ki ötleteket (Select), majd a 4 lépés (gyors-szűrés → absztrakt → full-text → áttekintés) fut — a Publify előtölti a kulcsszavakat/kritériumokat, te finomítod.'),
         props.canEdit ? h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginTop: 10 } },
           selIdeas.length
-            ? h('button', { className: 'btn pri', disabled: planning, onClick: function () { newStudy(selIdeas); } }, planning ? '✨ Publify is planning…' : ('🔬 Study from the selected ' + selIdeas.length + ' idea(s)'))
+            ? h('button', { className: 'btn', disabled: planning, onClick: function () { newStudy(selIdeas); } }, planning ? '✨ Publify is planning…' : ('⚙ Közvetlen beépített study (' + selIdeas.length + ' ötlet)'))
             : h('span', { style: { fontSize: 12.5, color: 'var(--warn)' } }, 'Select at least one idea (Select) on the Ideas tab.'),
           h('button', { className: 'btn', disabled: planning, onClick: function () { newStudy(null); } }, '+ Empty study')
         ) : h('div', { style: { fontSize: 13, color: 'var(--faint)' } }, 'Read-only view.'),
