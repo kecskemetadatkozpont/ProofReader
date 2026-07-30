@@ -121,12 +121,18 @@ Deno.serve(async (req) => {
     // evidence-gap MATRIX (EGM): derive method×domain axes from the library and count coverage per cell (empty cells = gaps).
     if (action === 'gap_matrix') {
       const { data: msrc } = await sb.from('research_sources')
-        .select('title,year,venue,abstract,screening').eq('project_id', project_id).order('cited_by', { ascending: false, nullsFirst: false }).limit(60);
+        .select('id,title,year,venue,abstract,screening').eq('project_id', project_id).order('cited_by', { ascending: false, nullsFirst: false }).limit(60);
       const all = msrc || [];
       const inc = all.filter((s: any) => s.screening === 'include' || s.screening === 'included');
       const lib = (inc.length >= 4 ? inc : all);
       if (lib.length < 3) return json({ ok: true, matrix: null, reason: 'too_few' });
       const matrix = await askClaudeMatrix(proj, lib, userModel, _lang);
+      if (matrix && Array.isArray(matrix.refs)) {
+        // map the AI's per-cell library refs (1-based indices into `lib`) → concrete sources, so the client can list the LITERATURE per cell
+        matrix.cellSources = matrix.refs.map((rrow: any) => (Array.isArray(rrow) ? rrow : []).map((cell: any) =>
+          (Array.isArray(cell) ? cell : []).map((n: any) => lib[(n | 0) - 1]).filter(Boolean).map((s: any) => ({ id: s.id, title: s.title, year: s.year, screening: s.screening }))));
+        delete matrix.refs;
+      }
       return json({ ok: true, matrix: matrix, count: lib.length });
     }
     // P5.2b — generate ONE typed gap for a specific matrix cell (method×domain). Read-only inputs; inserts one gap.
@@ -339,13 +345,13 @@ ${lib || '(none)'}
 Derive TWO axes that best organise THIS literature into a gap map:
 - rows = the main METHODS / interventions / approaches (3 to 5)
 - cols = the main DOMAINS / datasets / outcomes / contexts (3 to 5)
-Then for every (row,col) cell count how many of the numbered library items above genuinely cover that combination. Cells with 0 are the research gaps. Keep every label short (<= 22 chars) and in the project language.
+Then for every (row,col) cell list which of the numbered library items above genuinely cover that combination. Cells with 0 items are the research gaps. Keep every label short (<= 22 chars) and in the project language.
 
-Return ONLY JSON, no prose: {"rows":["..."],"cols":["..."],"cells":[[<int>, ...], ...]} where cells has one array per row (same order as rows) and one int per col (same order as cols).` + langDirective(lang);
+Return ONLY JSON, no prose: {"rows":["..."],"cols":["..."],"cells":[[<int>, ...], ...],"refs":[[[<item number>, ...], ...], ...]} where cells[r][c] = the COUNT of numbered library items covering rows[r]×cols[c], and refs[r][c] = the ARRAY of those item numbers (use [] for empty gap cells). refs must have the same shape as cells and the length of refs[r][c] must equal cells[r][c].` + langDirective(lang);
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'x-api-key': ANTHROPIC_KEY!, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-    body: JSON.stringify({ model, max_tokens: 1400, messages: [{ role: 'user', content: prompt }] }),
+    body: JSON.stringify({ model, max_tokens: 1900, messages: [{ role: 'user', content: prompt }] }),
   });
   const j = await r.json();
   const text = (j?.content?.[0]?.text) || '';

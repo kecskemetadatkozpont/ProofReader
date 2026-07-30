@@ -1753,6 +1753,7 @@
     var present = {}; gaps.forEach(function (g) { present[g.gap_type || 'knowledge'] = 1; });
     var list = gaps.filter(function (g) { return !off[g.gap_type || 'knowledge']; }).slice().sort(function (a, b) { return (b.gap_important ? 1 : 0) - (a.gap_important ? 1 : 0); });   // important gaps first (stable → keeps novelty order otherwise)
     var cellList = selCell ? list.filter(function (g) { return gapMatchesCell(g, selCell.row, selCell.col); }) : list;   // heatmap cell → filtered gap list (combined view)
+    var cellSrc = (selCell && matrix && typeof matrix === 'object' && matrix.cellSources && matrix.cellSources[selCell.ri] && matrix.cellSources[selCell.ri][selCell.ci]) || [];   // the LITERATURE (sources) covering the selected cell
     // P5.4b — flag likely-duplicate gaps (conservative word-overlap heuristic; badge only, non-destructive)
     var dupOf = {}, _seen = [];
     gaps.forEach(function (g, gi) {
@@ -1775,13 +1776,25 @@
       h('div', { className: 'gp-combo' },
       gapHeatmapEl(),
       h('div', { className: 'gp-listcol' },
-      selCell ? h('div', { className: 'gp-cellfilter' }, h('span', null, '🔍 ' + selCell.row + ' × ' + selCell.col + ' — ' + cellList.length + ' rés'), h('button', { title: 'Szűrő törlése', onClick: function () { setSelCell(null); } }, '✕')) : null,
-      h('div', { className: 'gp-legend' }, GAP_TYPES.filter(function (t) { return present[t.slug]; }).map(function (t) {
-        return h('button', { key: t.slug, className: 'gp-lchip' + (off[t.slug] ? ' off' : ''), style: { borderColor: t.c, color: t.c }, onClick: function () { toggleType(t.slug); } }, t.lab);
-      })),
+      selCell ? h('div', { className: 'gp-cellfilter' }, h('span', null, '🔍 ' + selCell.row + ' × ' + selCell.col), h('button', { title: 'Szűrő törlése', onClick: function () { setSelCell(null); } }, '✕')) : null,
+      // when a cell is selected: LITERATURE covering it (from matrix.cellSources) + the gaps for it. Otherwise: the type legend + all gaps.
+      selCell ? h('div', { className: 'gp-cellsec' },
+        h('div', { className: 'gp-cellsec-h' }, '📚 Irodalom ', h('span', { className: 'gp-cnt' }, '· ' + cellSrc.length)),
+        cellSrc.length
+          ? h('div', { className: 'gp-litlist' }, cellSrc.slice(0, 40).map(function (s, i) {
+              return h('div', { key: i, className: 'gp-lit' + ((s.screening === 'include' || s.screening === 'included') ? ' inc' : '') },
+                h('span', { className: 'gp-lit-t', title: s.title || '' }, s.title || 'Forrás'),
+                s.year ? h('span', { className: 'gp-lit-y' }, String(s.year)) : null);
+            }))
+          : h('div', { className: 'gp-lit-none' }, '🕳️ Nincs irodalom ehhez a metszethez — ez kutatási rés.')) : null,
+      selCell
+        ? h('div', { className: 'gp-cellsec-h', style: { marginTop: 13 } }, '🕳️ Kutatási rések ', h('span', { className: 'gp-cnt' }, '· ' + cellList.length))
+        : h('div', { className: 'gp-legend' }, GAP_TYPES.filter(function (t) { return present[t.slug]; }).map(function (t) {
+            return h('button', { key: t.slug, className: 'gp-lchip' + (off[t.slug] ? ' off' : ''), style: { borderColor: t.c, color: t.c }, onClick: function () { toggleType(t.slug); } }, t.lab);
+          })),
       (selCell && !cellList.length)
-        ? h('div', { className: 'gp-empty', style: { padding: '22px 14px', fontSize: 13, lineHeight: 1.55 } }, h('div', { style: { marginBottom: 10 } }, 'Ehhez a metszethez („' + selCell.row + ' × ' + selCell.col + '") még nincs feltárt rés.'), props.canEdit ? h('button', { className: 'gp-bigbtn', onClick: function () { createGapFromCell(selCell.row, selCell.col); } }, '＋ Rés létrehozása ide') : null)
-        : h('div', { className: 'gp-list' }, cellList.map(function (g) {
+        ? (props.canEdit ? h('button', { className: 'gp-bigbtn', style: { margin: '8px 0' }, disabled: cellBusyRef.current, onClick: function () { createGapFromCell(selCell.row, selCell.col); } }, '＋ Rés létrehozása ide') : h('div', { className: 'gp-lit-none' }, 'Nincs feltárt rés ehhez a metszethez.'))
+        : h('div', { className: 'gp-list' }, (selCell ? cellList : list).map(function (g) {
         var t = gapType(g.gap_type || 'knowledge'), ev = Array.isArray(g.evidence) ? g.evidence : [], promoted = !!g.addressed_by_idea_id;
         var grst = gapRunState(g);   // has this gap spawned a study/review? → status strip + open + relabel the launch button
         var staged = g.status === 'selected';   // sent to the "1 · Kiindulás" launcher (waiting to be started there)
