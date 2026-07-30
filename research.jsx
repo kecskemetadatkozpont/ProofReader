@@ -1741,6 +1741,7 @@
       h('div', { className: 'gp-list' }, list.map(function (g) {
         var t = gapType(g.gap_type || 'knowledge'), ev = Array.isArray(g.evidence) ? g.evidence : [], promoted = !!g.addressed_by_idea_id;
         var grst = gapRunState(g);   // has this gap spawned a study/review? → status strip + open + relabel the launch button
+        var staged = g.status === 'selected';   // sent to the "1 · Kiindulás" launcher (waiting to be started there)
         var canFlag = impCap && (props.canEdit || isSupervisor);
         return h('div', { className: 'gcard' + (g.gap_important ? ' important' : ''), key: g.id, style: { borderLeftColor: t.c } },
           h('div', { className: 'gcard-top' },
@@ -1755,11 +1756,15 @@
           grst ? h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, borderRadius: 9, padding: '7px 10px', fontSize: 11.5, fontWeight: 600, margin: '2px 0', background: (grst.done && !grst.running) ? 'var(--ok-bg, #e7f6ee)' : 'color-mix(in srgb, var(--warn, #d9820a) 12%, var(--surface))', color: (grst.done && !grst.running) ? 'var(--ok, #15803d)' : 'var(--warn, #d9820a)', border: '1px solid ' + ((grst.done && !grst.running) ? 'color-mix(in srgb, var(--ok, #15803d) 40%, var(--line))' : 'color-mix(in srgb, var(--warn, #d9820a) 40%, var(--line))') } },
             h('span', { style: { flex: 'none' } }, grst.running ? '⏳' : '✓'),
             h('span', { style: { flex: 1, minWidth: 0 } }, grst.running ? 'Study fut a résből' : ('Study kész a résből' + (grst.count > 1 ? ' (' + grst.count + ')' : ''))),
-            h('button', { className: 'gact', style: { padding: '3px 9px', fontSize: 11, flex: 'none' }, title: 'A study megnyitása a Study fülön', onClick: function () { openGapRun(g); } }, 'Megnyitás →')) : null,
+            h('button', { className: 'gact', style: { padding: '3px 9px', fontSize: 11, flex: 'none' }, title: 'A study megnyitása a Study fülön', onClick: function () { openGapRun(g); } }, 'Megnyitás →'))
+            : (staged ? h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, borderRadius: 9, padding: '7px 10px', fontSize: 11.5, fontWeight: 600, margin: '2px 0', background: 'var(--accent-tint, #eef0ff)', color: 'var(--accent, #4f46e5)', border: '1px solid color-mix(in srgb, var(--accent, #4f46e5) 35%, var(--line))' } },
+                h('span', { style: { flex: 'none' } }, '📋'),
+                h('span', { style: { flex: 1, minWidth: 0 } }, 'Elküldve az indítólistába — indítsd a „1 · Kiindulás"-nál'),
+                props.onGoStudy ? h('button', { className: 'gact', style: { padding: '3px 9px', fontSize: 11, flex: 'none' }, title: 'Ugrás az indítólistához', onClick: function () { props.onGoStudy(); } }, 'Indítólista →') : null) : null),
           h('div', { className: 'gacts' },
-            props.canEdit ? h('button', { className: 'gact pri', title: 'Szisztematikus review indítása ebből a résből — Elicit → automatikus backup', onClick: function () { if (props.onStartStudy) props.onStartStudy(g); else if (props.onGoStudy) props.onGoStudy(); } }, grst ? '🔁 Új futtatás' : '🔍 Study a résből') : null,
+            props.canEdit ? h('button', { className: 'gact pri', title: 'A rés az indítólistába kerül (1 · Kiindulás), és onnan indítod a review-t (▶ Review)', onClick: function () { if (staged && !grst && props.onGoStudy) { props.onGoStudy(); } else if (props.onSendToLauncher) { props.onSendToLauncher(g); } else if (props.onStartStudy) { props.onStartStudy(g); } else if (props.onGoStudy) { props.onGoStudy(); } } }, grst ? '🔁 Újra az indítólistába' : (staged ? '→ Indítólistában' : '🔍 Study a résből')) : null,
             props.canEdit ? h('button', { className: 'gact', onClick: function () { dismiss(g); } }, '✕ Elvetés') : null,
-            h('span', { className: 'gstatus' + (((grst && (grst.done || grst.running)) || promoted) ? ' promoted' : '') }, h('span', { className: 'gdot' }), grst ? (grst.running ? 'Study alatt' : 'Vizsgálva') : (promoted ? 'Előléptetve' : 'Nyitott'))));
+            h('span', { className: 'gstatus' + (((grst && (grst.done || grst.running)) || staged || promoted) ? ' promoted' : '') }, h('span', { className: 'gdot' }), grst ? (grst.running ? 'Study alatt' : 'Vizsgálva') : (staged ? 'Indítólistában' : (promoted ? 'Előléptetve' : 'Nyitott')))));
       }))));
   }
 
@@ -3142,7 +3147,7 @@
     function picoText(p) { if (!p) return ''; return [['P', p.population], ['I', p.intervention], ['C', p.comparison], ['O', p.outcome]].filter(function (x) { return x[1]; }).map(function (x) { return x[0] + ': ' + x[1]; }).join('\n'); }
     function startFromCand(c) { fromCand.current = c.id; setF({ q: c.question || '', protocol: picoText(c.pico), abs: c.abstract_criteria || [], ft: [], ex: c.extraction_questions || [], exclude: c.exclusion_criteria || [], gen: true, genAbs: true, genEx: true, useFig: false, runFT: true, maxResults: '1000' }); setOpenForm(true); setErr(''); }
     function dismissCand(c) { setCands(function (l) { return (l || []).filter(function (x) { return x.id !== c.id; }); }); sb.from('research_sr_candidates').update({ dismissed: true }).eq('id', c.id); }
-    useEffect(function () { alive.current = true; ensureSrCss(); if (canView) { load(); loadCands(); loadStudies(); callElicit({ action: 'sr.health' }).then(function (d) { if (alive.current) setSrHealth((d && typeof d.available === 'boolean') ? d : { available: false, reason: 'error' }); }, function () { if (alive.current) setSrHealth({ available: false, reason: 'error' }); }); sb.from('research_ideas').select('id,question,hypothesis,status').eq('project_id', props.projectId).order('created_at', { ascending: true }).then(function (r) { if (!alive.current) return; var rows = (r && r.data) || [], m = {}; rows.forEach(function (x) { m[x.id] = x.question; }); setIdeaById(m); setIdeasFull(rows); }); loadAllStudies(); } return function () { alive.current = false; }; }, [canView]);
+    useEffect(function () { alive.current = true; ensureSrCss(); if (canView) { load(); loadCands(); loadStudies(); callElicit({ action: 'sr.health' }).then(function (d) { if (alive.current) setSrHealth((d && typeof d.available === 'boolean') ? d : { available: false, reason: 'error' }); }, function () { if (alive.current) setSrHealth({ available: false, reason: 'error' }); }); sb.from('research_ideas').select('id,question,hypothesis,status,source').eq('project_id', props.projectId).order('created_at', { ascending: true }).then(function (r) { if (!alive.current) return; var rows = (r && r.data) || [], m = {}; rows.forEach(function (x) { m[x.id] = x.question; }); setIdeaById(m); setIdeasFull(rows); }); loadAllStudies(); } return function () { alive.current = false; }; }, [canView]);
     // re-render whenever a background study run changes (the runs live in PRStudyRunner, not in this component's state)
     var loadStudiesRef = useRef(null), pidRefSr = useRef(props.projectId), stSigRef = useRef('');
     loadStudiesRef.current = loadStudies; pidRefSr.current = props.projectId;
@@ -3479,23 +3484,26 @@
               var bd = rs.done ? 'color-mix(in srgb, var(--ok, #15803d) 42%, var(--line))' : rs.running ? 'color-mix(in srgb, var(--warn, #d9820a) 45%, var(--line))' : 'var(--line)';
               function openIt() { if (rs.job && rs.job.status === 'completed' && rs.job.result_body) { setOpenR(rs.job); } else if (rs.study) { goStudyFunnel(rs.study); } else if (rs.job) { setSelJob(rs.job.id); } }
               function launchIt() { if (cand) { startFromCand(cand); } else { runReviewForIdea(idea); } }   // PICO → pre-filled form (uses criteria); else direct Elicit → backup
-              return h('div', { key: idea.id, style: { display: 'grid', gridTemplateColumns: 'minmax(0, 1.4fr) minmax(0, 1fr) auto', gap: 12, alignItems: 'center', fontSize: 12, padding: '8px 10px', background: bg, border: '1px solid ' + bd, borderRadius: 8 } },
-                h('div', { style: { minWidth: 0, fontWeight: 600, color: rs.done ? 'var(--ok, #15803d)' : 'inherit', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', lineHeight: 1.3 } }, (rs.done ? '✓ ' : '💡 ') + ((cand && cand.question) || idea.question || '')),
-                picoBits.length
-                  ? h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 4, minWidth: 0 } }, picoBits.map(function (x) {
-                      return h('span', { key: x[0], style: { fontSize: 10, borderRadius: 6, padding: '2px 6px', background: 'var(--surface-2)', border: '1px solid var(--line)', display: 'inline-flex', gap: 4, maxWidth: '100%', minWidth: 0 } },
-                        h('b', { style: { color: 'var(--accent, #4f46e5)', flex: 'none' } }, x[0]),
-                        h('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, String(x[1]).slice(0, 38)));
-                    }))
-                  : h('div', { style: { fontSize: 10.5, color: 'var(--faint)', display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 } },
-                      h('span', { style: { whiteSpace: 'nowrap' } }, '◦ nincs PICO'),
-                      h('button', { className: 'btn', style: { padding: '2px 8px', fontSize: 10.5, flex: 'none' }, disabled: gen, title: 'PICO-kérdés generálása az ötletekből', onClick: generate }, gen ? '✨…' : '✨ PICO')),
-                h('div', { style: { display: 'flex', gap: 6, alignItems: 'center', flex: 'none' } },
-                  rs.done ? h('span', { style: { fontSize: 10, fontWeight: 800, color: 'var(--ok, #15803d)', background: 'color-mix(in srgb, var(--ok, #15803d) 12%, transparent)', borderRadius: 6, padding: '2px 7px', whiteSpace: 'nowrap' } }, '✓ Lefutott')
-                    : rs.running ? h('span', { style: { fontSize: 10, fontWeight: 800, color: '#a16207', background: 'color-mix(in srgb, var(--warn, #d9820a) 15%, transparent)', borderRadius: 6, padding: '2px 7px', whiteSpace: 'nowrap' } }, '⏳ Fut')
-                      : (cand && (cand.abstract_criteria || []).length) ? h('span', { style: { fontSize: 10, color: 'var(--faint)', whiteSpace: 'nowrap' } }, cand.abstract_criteria.length + ' krit') : null,
-                  (rs.done || rs.running) ? h('button', { className: 'btn', style: { padding: '3px 10px', fontSize: 11.5, flex: 'none' }, title: 'Eredmény / részletek megnyitása', onClick: openIt }, 'Megnyitás') : null,
-                  !rs.running ? h('button', { className: 'btn' + (rs.done ? '' : ' pri'), style: { padding: '3px 10px', fontSize: 11.5, flex: 'none' }, disabled: busy, title: rs.done ? 'Új review futtatása ebből az ötletből' : 'Review indítása ebből (Elicit → automatikus backup)', onClick: launchIt }, rs.done ? '↻ Újra' : '▶ Review') : null));
+              var isGap = idea.source === 'gap';   // origin: research gap vs a developed idea
+              var picoRow = picoBits.length
+                ? h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 4 } }, picoBits.map(function (x) {
+                    return h('span', { key: x[0], style: { fontSize: 10, borderRadius: 6, padding: '2px 6px', background: 'var(--surface-2)', border: '1px solid var(--line)', display: 'inline-flex', gap: 4, maxWidth: '100%', minWidth: 0 } },
+                      h('b', { style: { color: 'var(--accent, #4f46e5)', flex: 'none' } }, x[0]),
+                      h('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, String(x[1]).slice(0, 42)));
+                  }))
+                : h('div', { style: { fontSize: 10.5, color: 'var(--faint)', display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' } },
+                    h('span', null, isGap ? 'Eredet: kutatási rés-elemzés' : 'Eredet: kijelölt ötlet'),
+                    h('button', { className: 'btn', style: { padding: '2px 8px', fontSize: 10, flex: 'none' }, disabled: gen, title: 'PICO-kérdés generálása az ötletekből', onClick: generate }, gen ? '✨…' : '✨ PICO'));
+              return h('div', { key: idea.id, style: { display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: 12, alignItems: 'center', fontSize: 12, padding: '11px 13px', background: bg, border: '1px solid ' + bd, borderLeft: '3px solid ' + (rs.done ? 'var(--ok, #15803d)' : rs.running ? 'var(--warn, #d9820a)' : (isGap ? '#a23a86' : 'var(--accent, #4f46e5)')), borderRadius: 10 } },
+                h('div', { style: { minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 } },
+                  h('div', { style: { display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' } },
+                    h('span', { style: { fontSize: 10, fontWeight: 750, borderRadius: 6, padding: '2px 8px', whiteSpace: 'nowrap', background: isGap ? 'color-mix(in srgb, #a23a86 14%, transparent)' : 'var(--accent-tint, #eef0ff)', color: isGap ? '#a23a86' : 'var(--accent, #4f46e5)' } }, isGap ? '🕳️ Kutatási rés' : '💡 Ötlet'),
+                    rs.done ? h('span', { style: { fontSize: 10, fontWeight: 750, color: 'var(--ok, #15803d)' } }, '✓ Lefutott') : rs.running ? h('span', { style: { fontSize: 10, fontWeight: 750, color: '#a16207' } }, '⏳ Fut') : null),
+                  h('div', { style: { minWidth: 0, fontWeight: 600, fontSize: 13, color: rs.done ? 'var(--ok, #15803d)' : 'inherit', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden', lineHeight: 1.4 } }, (cand && cand.question) || idea.question || ''),
+                  picoRow),
+                h('div', { style: { display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'stretch', flex: 'none' } },
+                  (rs.done || rs.running) ? h('button', { className: 'btn', style: { padding: '4px 11px', fontSize: 11.5, whiteSpace: 'nowrap' }, title: 'Eredmény / részletek megnyitása', onClick: openIt }, 'Megnyitás') : null,
+                  !rs.running ? h('button', { className: 'btn' + (rs.done ? '' : ' pri'), style: { padding: '4px 11px', fontSize: 11.5, whiteSpace: 'nowrap' }, disabled: busy, title: rs.done ? 'Új review futtatása' : 'Review indítása (Elicit → automatikus backup)', onClick: launchIt }, rs.done ? '↻ Újra' : '▶ Review') : null));
             })) : h('div', { style: { fontSize: 11.5, color: 'var(--muted)' } }, 'Jelölj ki ötleteket az Ötletek fülön („Select"), hogy review-t indíthass belőlük — Elicittel, vagy ha az nem elérhető, a beépített szűréssel.'));
         })(),
         backupEl(),
@@ -3911,7 +3919,10 @@
             var on = s.id === selId;
             var st = s.status === 'done' ? '✓ done' : ('step ' + (s.cur_step || 1) + '/4');
             var editing = renameId === s.id;
-            return h('div', { key: s.id, className: PRStudyRunner.isStudyRunning(s.id) ? 'pulse-run' : null, onClick: editing ? null : function () { setSelId(s.id); setCurStep(s.cur_step || 1); }, style: { textAlign: 'left', maxWidth: 260, minWidth: 150, border: '1.5px solid ' + (on ? 'var(--accent)' : 'var(--line)'), background: on ? 'var(--surface-2)' : 'var(--surface)', borderRadius: 8, padding: '6px 10px', cursor: editing ? 'default' : 'pointer' } },
+            var linkedIdea = s.idea_id ? (props.ideas || []).filter(function (i) { return i.id === s.idea_id; })[0] : null;
+            var sIsGap = !!(linkedIdea && linkedIdea.source === 'gap');
+            var sOrigin = linkedIdea ? (sIsGap ? 'gap' : 'idea') : null;   // where this study came from (research gap vs idea)
+            return h('div', { key: s.id, className: PRStudyRunner.isStudyRunning(s.id) ? 'pulse-run' : null, onClick: editing ? null : function () { setSelId(s.id); setCurStep(s.cur_step || 1); }, style: { textAlign: 'left', width: 250, maxWidth: '100%', border: '1.5px solid ' + (on ? 'var(--accent)' : 'var(--line)'), borderLeft: '3px solid ' + (sOrigin === 'gap' ? '#a23a86' : sOrigin === 'idea' ? 'var(--accent, #4f46e5)' : 'var(--line)'), background: on ? 'var(--surface-2)' : 'var(--surface)', borderRadius: 10, padding: '10px 12px', cursor: editing ? 'default' : 'pointer' } },
               editing
                 ? h('div', { onClick: function (e) { e.stopPropagation(); }, style: { display: 'flex', flexDirection: 'column', gap: 4 } },
                     h('input', { className: 'field', autoFocus: true, style: { fontSize: 12.5, width: '100%', boxSizing: 'border-box' }, value: renameVal, placeholder: 'Study name…', onChange: function (e) { setRenameVal(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter') { e.preventDefault(); renameStudy(s); } else if (e.key === 'Escape') { setRenameId(null); } } }),
@@ -3919,10 +3930,11 @@
                       h('button', { className: 'btn pri', style: { padding: '2px 9px', fontSize: 11 }, onClick: function () { renameStudy(s); } }, 'Save'),
                       h('button', { className: 'btn', style: { padding: '2px 9px', fontSize: 11 }, onClick: function () { setRenameId(null); } }, 'Cancel')))
                 : h('div', null,
-                    h('div', { style: { display: 'flex', gap: 4, alignItems: 'center' } },
-                      h('div', { style: { flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } }, s.title),
+                    sOrigin ? h('div', { style: { marginBottom: 6 } }, h('span', { style: { fontSize: 9.5, fontWeight: 750, borderRadius: 6, padding: '2px 7px', background: sIsGap ? 'color-mix(in srgb, #a23a86 14%, transparent)' : 'var(--accent-tint, #eef0ff)', color: sIsGap ? '#a23a86' : 'var(--accent, #4f46e5)' } }, sIsGap ? '🕳️ Rés' : '💡 Ötlet')) : null,
+                    h('div', { style: { display: 'flex', gap: 4, alignItems: 'flex-start' } },
+                      h('div', { style: { flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, lineHeight: 1.35, display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' } }, s.title),
                       props.canEdit ? h('button', { className: 'icon-x', 'aria-label': 'Rename study', title: 'Rename', style: { flex: 'none', fontSize: 11 }, onClick: function (e) { e.stopPropagation(); setRenameId(s.id); setRenameVal(s.title || ''); } }, h('span', { 'aria-hidden': 'true' }, '✏️')) : null),
-                    h('div', { style: { fontSize: 11, color: (running && on) ? 'var(--accent)' : 'var(--muted)', marginTop: 2 } }, (running && on ? '⏳ running… ' : '') + st))
+                    h('div', { style: { fontSize: 11, color: (running && on) ? 'var(--accent)' : 'var(--muted)', marginTop: 6 } }, (running && on ? '⏳ running… ' : '') + st))
             );
           }),
           props.canEdit ? h('button', { onClick: function () { newStudy(null); }, style: { border: '1px dashed var(--line)', background: 'transparent', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontSize: 12.5, color: 'var(--muted)' } }, '+ New study') : null
@@ -9812,6 +9824,16 @@
         if (props.onChanged) props.onChanged(); setTab('study');
       }, function () { PRStudyRunner.startBackup(rq, { projectId: p.id, project: p, authorId: props.authorId, onChanged: props.onChanged, ideaId: gapId }); if (props.onChanged) props.onChanged(); setTab('study'); });
     }
+    // "Study a résből" now STAGES the gap into the launcher (status='selected' → appears in the "1 · Kiindulás" list with an
+    // origin badge) instead of launching immediately; the study is started from there. The gap stays on the Rések tab (marked).
+    function sendGapToLauncher(gap) {
+      if (!gap || !gap.id) return;
+      sb.from('research_ideas').update({ status: 'selected' }).eq('id', gap.id).then(function () {
+        if (props.onChanged) props.onChanged();
+        setTab('study');
+        if (window.PRUI) window.PRUI.toast('→ A rés az indítólistába került (1 · Kiindulás). Onnan indítsd a review-t (▶ Review).', { kind: 'success' });
+      }, function () { if (window.PRUI) window.PRUI.toast('Nem sikerült az indítólistába tenni.', { kind: 'error' }); });
+    }
     // (the visible sub-tab row is a separate array below; Data/Compute are intentionally not surfaced)
     // ---- Setup Checklist (New design flag, direction B): the sparse Overview/Setup tab becomes a guided getting-started checklist + Goal, driven by real project state. ----
     function setupOverview() {
@@ -9854,7 +9876,7 @@
     function panelForTab(t, focus) {
       focus = focus || {};
       if (t === 'ideas') return h('div', { className: nd() ? 'ideas2' : null }, h(ChatPanel, { projectId: p.id, supervised: !!p.student_id, canEdit: props.canEdit, authorId: props.authorId, fileOwnerId: props.fileOwnerId, sources: props.sources, onChanged: props.onChanged, focusChatId: focus.focusChatId, focusFileId: focus.focusFileId }), h(IdeasPanel, { projectId: p.id, ideas: props.ideas, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, onStartStudyMulti: function (ideas) { setAutoSR(function (x) { return x + 1; }); setTab('study'); }, onGoStudy: function () { setTab('study'); }, onGoGap: function () { setTab('gap'); }, focusIdeaId: focus.focusIdeaId }));
-      if (t === 'gap') return h(GapPanel, { projectId: p.id, project: p, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, onGoIdeas: function () { setTab('ideas'); }, onGoStudy: function () { setTab('study'); }, onOpenStudy: function (sid) { setFocusStudy(sid); setTab('study'); }, onStartStudy: startStudyFromIdea, focusGapId: focus.focusGapId });
+      if (t === 'gap') return h(GapPanel, { projectId: p.id, project: p, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, onGoIdeas: function () { setTab('ideas'); }, onGoStudy: function () { setTab('study'); }, onOpenStudy: function (sid) { setFocusStudy(sid); setTab('study'); }, onSendToLauncher: sendGapToLauncher, onStartStudy: startStudyFromIdea, focusGapId: focus.focusGapId });
       if (t === 'figboard') return embedFrame('FigureBoard');
       if (t === 'citopt') return embedFrame('CitationOptimizer');
       if (t === 'literature') return h(React.Fragment, null, h(LiteraturePanel, { lang: plang, projectId: p.id, sources: props.sources, studies: props.studies, canEdit: props.canEdit, myEmail: props.myEmail, onChanged: props.onChanged, onOpenFigboard: function () { setTab('figboard'); }, focusSourceId: focus.focusSourceId, focusFigureId: focus.focusFigureId }), h(ElicitReports, { projectId: p.id, project: p, canEdit: props.canEdit, authorId: props.authorId, onGoStudy: function () { setTab('study'); } }), h(ElicitTrials, { projectId: p.id, canEdit: props.canEdit }));
@@ -9872,7 +9894,7 @@
     var content;
     if (nd() && tab === 'canvas') tab = 'map';   // Canvas→Map merge: in nd the Canvas tab is retired → its features live on the Map; a stale/deep-linked 'canvas' lands on the Map (classic mode keeps its own Canvas tab)
     if (tab === 'ideas') content = h('div', { className: nd() ? 'ideas2' : null }, h(ChatPanel, { projectId: p.id, supervised: !!p.student_id, canEdit: props.canEdit, authorId: props.authorId, fileOwnerId: props.fileOwnerId, sources: props.sources, onChanged: props.onChanged }), h(IdeasPanel, { projectId: p.id, ideas: props.ideas, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, onStartStudyMulti: function (ideas) { setAutoSR(function (x) { return x + 1; }); setTab('study'); }, onGoStudy: function () { setTab('study'); }, onGoGap: function () { setTab('gap'); } }));
-    else if (tab === 'gap') content = h(GapPanel, { projectId: p.id, project: p, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, onGoIdeas: function () { setTab('ideas'); }, onGoStudy: function () { setTab('study'); }, onOpenStudy: function (sid) { setFocusStudy(sid); setTab('study'); }, onStartStudy: startStudyFromIdea });
+    else if (tab === 'gap') content = h(GapPanel, { projectId: p.id, project: p, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, onGoIdeas: function () { setTab('ideas'); }, onGoStudy: function () { setTab('study'); }, onOpenStudy: function (sid) { setFocusStudy(sid); setTab('study'); }, onSendToLauncher: sendGapToLauncher, onStartStudy: startStudyFromIdea });
     else if (tab === 'figboard') content = embedFrame('FigureBoard');
     else if (tab === 'citopt') content = embedFrame('CitationOptimizer');
     else if (tab === 'literature') content = h(React.Fragment, null,
