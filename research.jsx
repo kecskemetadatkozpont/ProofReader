@@ -1463,7 +1463,8 @@
     var pgS = useState(0), prog = pgS[0], setProg = pgS[1];
     var msgS = useState(''), msg = msgS[0], setMsg = msgS[1];
     var ofS = useState({}), off = ofS[0], setOff = ofS[1];   // legend type-filter
-    var gvS = useState('lista'), view = gvS[0], setView = gvS[1];   // P3: Lista | Mátrix (evidence-gap map)
+    var gvS = useState('lista'), view = gvS[0], setView = gvS[1];   // P3: (retired toggle) — the matrix + list now live on ONE page (direction A)
+    var scS = useState(null), selCell = scS[0], setSelCell = scS[1];   // selected heatmap cell {ri,ci,row,col} → filters the gap list
     var mxS = useState(null), matrix = mxS[0], setMatrix = mxS[1];   // null=not loaded; {rows,cols,cells}; 'error'; 'none' (too few sources)
     var mbS = useState(false), mxBusy = mbS[0], setMxBusy = mbS[1];
     var isS = useState(false), isSupervisor = isS[0], setIsSupervisor = isS[1];   // P5.4a: can the viewer approve gaps (supervisor)?
@@ -1473,6 +1474,8 @@
     var cellBusyRef = useRef(false);   // in-flight guard for "create gap from matrix cell" (the matrix stays mounted until insert resolves)
     useEffect(function () { aliveR.current = true; return function () { aliveR.current = false; }; }, []);
     useEffect(function () { loadGaps(); }, [props.projectId]);
+    // auto-load the evidence-gap heatmap once gaps exist (combined view — the matrix is always on the page now, not a toggle)
+    useEffect(function () { if (gaps && gaps.length && matrix === null && !mxBusy) fetchMatrix(); }, [gaps && gaps.length]);
     useEffect(function () { sb.rpc('research_is_supervisor', { pid: props.projectId }).then(function (r) { if (aliveR.current && r && !r.error) setIsSupervisor(!!r.data); }, function () { }); }, [props.projectId]);
     // ---- gap → study/review tracking: which gap spawned which study + live status (so the card shows "Study fut/kész" + open) ----
     var grS = useState({}), gapRuns = grS[0], setGapRuns = grS[1];   // gap.id → [{kind,id,sid,title,status}]
@@ -1699,6 +1702,43 @@
           }))),
         h('div', { className: 'egm-note' }, 'Az üres (0) cellák a kutatási rések — ahol a szakirodalom nem fed le egy módszer×domén kombinációt.'));
     }
+    // Direction A — interactive evidence-gap HEATMAP + the gap list on ONE page. A gap "belongs to" a cell when its
+    // question mentions both the method (row) and the domain (col) — matches cell-created gaps and topical AI gaps.
+    function gapMatchesCell(g, row, col) {
+      var q = String((g && g.question) || '').toLowerCase();
+      return q.indexOf(String(row).toLowerCase()) >= 0 && q.indexOf(String(col).toLowerCase()) >= 0;
+    }
+    function gapHeatmapEl() {
+      if (mxBusy || matrix === null) return h('div', { className: 'gp-empty', style: { padding: '26px 16px' } }, '⏳ Bizonyíték-rés-térkép számítása…');
+      if (matrix === 'none') return h('div', { className: 'gp-empty', style: { padding: '22px 16px', fontSize: 13 } }, 'Túl kevés forrás a rés-térképhez — bővítsd a Könyvtárat, majd „↻ Újraelemzés".');
+      if (matrix === 'error') return h('div', { className: 'gp-empty', style: { padding: '20px 16px' } }, h('div', { style: { fontSize: 13, marginBottom: 10 } }, 'A rés-térkép nem érhető el (research-ai · gap_matrix).'), h('button', { className: 'gp-rebtn', onClick: fetchMatrix }, '↻ Újra'));
+      var mcols = matrix.cols || [], mrows = matrix.rows || [], cells = matrix.cells || [], maxN = 1;
+      cells.forEach(function (row) { (row || []).forEach(function (n) { if (n > maxN) maxN = n; }); });
+      function heatCls(n) { var r = n / maxN; return n === 0 ? 'h0' : r < 0.25 ? 'h1' : r < 0.5 ? 'h2' : r < 0.75 ? 'h3' : 'h4'; }
+      return h('div', { className: 'gp-heatmap' },
+        h('div', { className: 'gp-heat-scroll' },
+          h('table', { className: 'egm' }, h('tbody', null,
+            h('tr', null, h('th', null, ''), mcols.map(function (c, ci) { return h('th', { key: ci, title: String(c) }, String(c)); })),
+            mrows.map(function (rl, ri) {
+              return h('tr', { key: ri }, h('th', { className: 'rowh', title: String(rl) }, String(rl)),
+                mcols.map(function (c, ci) {
+                  var n = (cells[ri] && cells[ri][ci] != null) ? cells[ri][ci] : 0, isGap = !n;
+                  var cg = isGap ? gaps.filter(function (g) { return gapMatchesCell(g, rl, c); }) : [];
+                  var running = cg.some(function (g) { var s = gapRunState(g); return !!(s && s.running); });
+                  var done = !running && cg.some(function (g) { var s = gapRunState(g); return !!(s && s.done); });
+                  var isSel = !!(selCell && selCell.ri === ri && selCell.ci === ci);
+                  return h('td', { key: ci }, h('div', {
+                    className: 'egm-cell ' + (isGap ? 'gapcell' : heatCls(n)) + (isSel ? ' sel' : ''),
+                    title: isGap ? (rl + ' × ' + c + ' — RÉS (0 forrás)' + (cg.length ? ' · ' + cg.length + ' feltárt rés' : '')) : (n + ' forrás · ' + rl + ' × ' + c),
+                    onClick: function () { setSelCell(isSel ? null : { ri: ri, ci: ci, row: rl, col: c }); }
+                  },
+                    (running || done) ? h('span', { className: 'egm-sd', style: { background: running ? 'var(--warn, #d9820a)' : 'var(--ok, #15803d)' } }) : null,
+                    h('span', { className: 'egm-n' }, String(n)),
+                    h('span', { className: 'egm-lbl' }, isGap ? 'rés' : 'forrás')));
+                }));
+            })))),
+        h('div', { className: 'egm-note' }, 'A szín a lefedettség; a rózsaszín cellák a rések (0 forrás), a pötty a study-státusz (⏳/✓). Kattints egy cellára → a lista arra szűr.'));
+    }
 
     if (gaps === null) return h('div', { className: 'panel gappanel' }, h('div', { className: 'gp-empty' }, '⏳ Rések betöltése…'));
     if (!gaps.length) {
@@ -1712,6 +1752,7 @@
     }
     var present = {}; gaps.forEach(function (g) { present[g.gap_type || 'knowledge'] = 1; });
     var list = gaps.filter(function (g) { return !off[g.gap_type || 'knowledge']; }).slice().sort(function (a, b) { return (b.gap_important ? 1 : 0) - (a.gap_important ? 1 : 0); });   // important gaps first (stable → keeps novelty order otherwise)
+    var cellList = selCell ? list.filter(function (g) { return gapMatchesCell(g, selCell.row, selCell.col); }) : list;   // heatmap cell → filtered gap list (combined view)
     // P5.4b — flag likely-duplicate gaps (conservative word-overlap heuristic; badge only, non-destructive)
     var dupOf = {}, _seen = [];
     gaps.forEach(function (g, gi) {
@@ -1727,18 +1768,20 @@
     return h('div', { className: 'panel gappanel' },
       h('div', { className: 'gp-head' },
         h('h3', null, '🕳️ Kutatási rések ', h('span', { className: 'gp-cnt' }, '· ' + gaps.length)),
-        h('span', { className: 'gp-viewtog' },
-          h('button', { className: view === 'lista' ? 'on' : '', onClick: function () { setView('lista'); } }, 'Lista'),
-          h('button', { className: view === 'matrix' ? 'on' : '', onClick: showMatrix }, 'Mátrix')),
         h('button', { className: 'gp-rebtn', title: 'Export Markdownba (rés-lista + mátrix)', onClick: exportMd }, '⤓ Export'),
         props.canEdit ? h('button', { className: 'gp-rebtn', disabled: busy, onClick: analyze }, busy ? ('AI elemez… ' + prog + '%') : '↻ Újraelemzés') : null),
       (typedOk === false) ? h('div', { className: 'gp-degrade' }, 'Degradált mód: futtasd a migration-83-at + deploy-old a research-ai edge-et a tipizált résekhez (típus, bizonyíték). Most a meglévő gap-ötletek jelennek meg.') : null,
       msg ? h('div', { className: 'gp-degrade' }, msg) : null,
-      view === 'matrix' ? gapMatrixEl() : h('div', { className: 'gp-listwrap' },
+      h('div', { className: 'gp-combo' },
+      gapHeatmapEl(),
+      h('div', { className: 'gp-listcol' },
+      selCell ? h('div', { className: 'gp-cellfilter' }, h('span', null, '🔍 ' + selCell.row + ' × ' + selCell.col + ' — ' + cellList.length + ' rés'), h('button', { title: 'Szűrő törlése', onClick: function () { setSelCell(null); } }, '✕')) : null,
       h('div', { className: 'gp-legend' }, GAP_TYPES.filter(function (t) { return present[t.slug]; }).map(function (t) {
         return h('button', { key: t.slug, className: 'gp-lchip' + (off[t.slug] ? ' off' : ''), style: { borderColor: t.c, color: t.c }, onClick: function () { toggleType(t.slug); } }, t.lab);
       })),
-      h('div', { className: 'gp-list' }, list.map(function (g) {
+      (selCell && !cellList.length)
+        ? h('div', { className: 'gp-empty', style: { padding: '22px 14px', fontSize: 13, lineHeight: 1.55 } }, h('div', { style: { marginBottom: 10 } }, 'Ehhez a metszethez („' + selCell.row + ' × ' + selCell.col + '") még nincs feltárt rés.'), props.canEdit ? h('button', { className: 'gp-bigbtn', onClick: function () { createGapFromCell(selCell.row, selCell.col); } }, '＋ Rés létrehozása ide') : null)
+        : h('div', { className: 'gp-list' }, cellList.map(function (g) {
         var t = gapType(g.gap_type || 'knowledge'), ev = Array.isArray(g.evidence) ? g.evidence : [], promoted = !!g.addressed_by_idea_id;
         var grst = gapRunState(g);   // has this gap spawned a study/review? → status strip + open + relabel the launch button
         var staged = g.status === 'selected';   // sent to the "1 · Kiindulás" launcher (waiting to be started there)
@@ -1765,7 +1808,7 @@
             props.canEdit ? h('button', { className: 'gact pri', title: 'A rés az indítólistába kerül (1 · Kiindulás), és onnan indítod a review-t (▶ Review)', onClick: function () { if (staged && !grst && props.onGoStudy) { props.onGoStudy(); } else if (props.onSendToLauncher) { props.onSendToLauncher(g); } else if (props.onStartStudy) { props.onStartStudy(g); } else if (props.onGoStudy) { props.onGoStudy(); } } }, grst ? '🔁 Újra az indítólistába' : (staged ? '→ Indítólistában' : '🔍 Study a résből')) : null,
             props.canEdit ? h('button', { className: 'gact', onClick: function () { dismiss(g); } }, '✕ Elvetés') : null,
             h('span', { className: 'gstatus' + (((grst && (grst.done || grst.running)) || staged || promoted) ? ' promoted' : '') }, h('span', { className: 'gdot' }), grst ? (grst.running ? 'Study alatt' : 'Vizsgálva') : (staged ? 'Indítólistában' : (promoted ? 'Előléptetve' : 'Nyitott')))));
-      }))));
+      })))));
   }
 
   function IdeasPanel(props) {

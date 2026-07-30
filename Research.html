@@ -1442,6 +1442,32 @@
     .egm-cell.clk { cursor: pointer; transition: background .12s, transform .12s; }
     .egm-cell.clk:hover { background: color-mix(in srgb, #d6455f 22%, transparent); transform: scale(1.04); }
     .egm-note { margin-top: 12px; font-size: 11.5px; color: var(--muted); text-align: center; }
+    /* ---- Gap matrix redesign (A): interactive heatmap + gap list on ONE page ---- */
+    .gp-combo { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(300px, 1fr); gap: 16px; align-items: start; padding: 14px 16px; }
+    @media (max-width: 900px) { .gp-combo { grid-template-columns: 1fr; } }
+    .gp-heatmap { min-width: 0; }
+    .gp-heat-scroll { overflow-x: auto; padding-bottom: 4px; }
+    .gp-heatmap .egm { border-collapse: separate; border-spacing: 5px; }
+    .gp-heatmap .egm th { font-size: 10.5px; font-weight: 700; color: var(--muted); padding: 2px 5px; text-align: center; white-space: nowrap; max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
+    .gp-heatmap .egm th.rowh { text-align: right; color: var(--ink); }
+    .gp-heatmap .egm-cell { position: relative; min-width: 60px; height: 50px; border-radius: 9px; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; border: 1.5px solid transparent; transition: transform .08s, box-shadow .12s; font-family: inherit; font-weight: 750; }
+    .gp-heatmap .egm-cell:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(20,26,38,.14); }
+    .gp-heatmap .egm-cell.sel { border-color: var(--ink); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); }
+    .gp-heatmap .egm-cell .egm-n { font-size: 15px; font-weight: 750; line-height: 1; }
+    .gp-heatmap .egm-cell .egm-lbl { font-size: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; opacity: .72; margin-top: 2px; }
+    .gp-heatmap .egm-cell.h0 { background: color-mix(in srgb, var(--accent) 4%, var(--surface)); color: var(--faint); }
+    .gp-heatmap .egm-cell.h1 { background: color-mix(in srgb, var(--accent) 16%, var(--surface)); color: var(--ink); }
+    .gp-heatmap .egm-cell.h2 { background: color-mix(in srgb, var(--accent) 34%, var(--surface)); color: var(--ink); }
+    .gp-heatmap .egm-cell.h3 { background: color-mix(in srgb, var(--accent) 62%, var(--surface)); color: #fff; }
+    .gp-heatmap .egm-cell.h4 { background: var(--accent); color: #fff; }
+    .gp-heatmap .egm-cell.gapcell { background: color-mix(in srgb, #a23a86 12%, var(--surface)); border: 1.5px solid color-mix(in srgb, #a23a86 45%, transparent); color: #a23a86; }
+    .gp-heatmap .egm-cell.gapcell.sel { border-color: #a23a86; }
+    .gp-heatmap .egm-sd { position: absolute; top: 5px; right: 6px; width: 8px; height: 8px; border-radius: 50%; }
+    .gp-listcol { min-width: 0; }
+    .gp-listcol .gp-legend { padding: 0 0 10px; border: none; }
+    .gp-listcol .gp-list { padding: 0; }
+    .gp-cellfilter { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 650; color: var(--accent); background: var(--accent-tint, #eef0ff); border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line)); border-radius: 8px; padding: 7px 11px; margin-bottom: 10px; }
+    .gp-cellfilter button { margin-left: auto; border: none; background: none; color: var(--accent); cursor: pointer; font-size: 14px; font-family: inherit; line-height: 1; }
     /* P1.5 — novelty ring on a gap node */
     .rmap-gap-ring { position: absolute; top: 3px; right: 3px; z-index: 3; line-height: 0; filter: drop-shadow(0 1px 2px rgba(0,0,0,.22)); }
     .rmap-dock-mode { display: flex; gap: 6px; padding: 9px 12px 0; }
@@ -1703,9 +1729,9 @@
     html.dark .rmap-genbusy { background: #4f46e5; }
     @media (max-width: 900px) { .rmap-wrap { flex-direction: column; } .rmap-insp { width: auto; } }
   </style>
-  <script src="theme.js?v=1785418761"></script>
-  <script src="nav.js?v=1785418761"></script>
-  <script src="entitlements.js?v=1785418761"></script>
+  <script src="theme.js?v=1785420481"></script>
+  <script src="nav.js?v=1785420481"></script>
+  <script src="entitlements.js?v=1785420481"></script>
 </head>
 
 <body>
@@ -1717,23 +1743,23 @@
   <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
   <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="backend/config.js?v=1785418761"></script>
-  <script src="auth.js?v=1785418761"></script>
-  <script src="backend.js?v=1785418761"></script>
-  <script src="onboarding.js?v=1785418761"></script>
-  <script src="office.js?v=1785418761"></script>
-  <script src="publications.js?v=1785418761"></script>
+  <script src="backend/config.js?v=1785420481"></script>
+  <script src="auth.js?v=1785420481"></script>
+  <script src="backend.js?v=1785420481"></script>
+  <script src="onboarding.js?v=1785420481"></script>
+  <script src="office.js?v=1785420481"></script>
+  <script src="publications.js?v=1785420481"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/tus-js-client@4.1.0/dist/tus.min.js"></script>
-  <script type="text/babel" src="canvas.jsx?v=1785418761"></script>
-  <script type="text/babel" src="notes.jsx?v=1785418761"></script>
-  <script src="autopilot-core.js?v=1785418761"></script>
-  <script type="text/babel" src="research.jsx?v=1785418761"></script>
+  <script type="text/babel" src="canvas.jsx?v=1785420481"></script>
+  <script type="text/babel" src="notes.jsx?v=1785420481"></script>
+  <script src="autopilot-core.js?v=1785420481"></script>
+  <script type="text/babel" src="research.jsx?v=1785420481"></script>
 
-  <script src="build.js?v=1785418761"></script>
-  <script src="version-badge.js?v=1785418761"></script>
+  <script src="build.js?v=1785420481"></script>
+  <script src="version-badge.js?v=1785420481"></script>
 </body>
 
 </html>
