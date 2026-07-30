@@ -9195,6 +9195,30 @@
     var retroKey = 'pub-retro-' + ((props.me && props.me.id) || '') + '-' + ((p && p.id) || '') + '-' + giWeekId;
     var rtS = useState(function () { try { return JSON.parse(localStorage.getItem(retroKey) || '{}') || {}; } catch (e) { return {}; } }), retro = rtS[0], setRetro = rtS[1];
     function setRetroField(k, v) { setRetro(function (prev) { var n = Object.assign({}, prev); n[k] = v; try { localStorage.setItem(retroKey, JSON.stringify(n)); } catch (e) { } return n; }); }
+    // #1 Integritás-őr (migration-102 + research-integrity edge-fn): minden szám/állítás a valós artifactok ellen.
+    var ifS = useState(null), intFindings = ifS[0], setIntFindings = ifS[1];   // null=töltés, []=nincs
+    var ibS = useState(false), intBusy = ibS[0], setIntBusy = ibS[1];
+    var ieS = useState(null), intErr = ieS[0], setIntErr = ieS[1];
+    var ixS = useState({}), intOpen = ixS[0], setIntOpen = ixS[1];             // kinyitott findingok
+    function loadIntegrity() {
+      var pid = p.id; if (!pid) return;
+      sb.from('research_integrity_findings').select('*').eq('project_id', pid).eq('status', 'open').order('created_at', { ascending: false }).then(function (r) {
+        if (!alive.current) return; setIntFindings((r && !r.error && r.data) ? r.data : []);
+      }, function () { if (alive.current) setIntFindings([]); });
+    }
+    function runIntegrity() {
+      setIntBusy(true); setIntErr(null);
+      sb.functions.invoke('research-integrity', { body: { project_id: p.id } }).then(function (r) {
+        if (!alive.current) return; setIntBusy(false);
+        var d = r && r.data, err = (d && d.error) || (r && r.error && r.error.message);
+        if (err) { setIntErr(err); return; }
+        if (d && d.note === 'no_manuscript') { setIntErr('Még nincs kézirat/draft az ellenőrzéshez — előbb generálj vagy tölts fel egyet az Írás fülön.'); setIntFindings([]); return; }
+        loadIntegrity();
+      }, function (e) { if (alive.current) { setIntBusy(false); setIntErr(String(e)); } });
+    }
+    function ackFinding(f, status) {
+      sb.from('research_integrity_findings').update({ status: status, updated_at: new Date().toISOString() }).eq('id', f.id).then(function () { if (alive.current) setIntFindings(function (L) { return (L || []).filter(function (x) { return x.id !== f.id; }); }); });
+    }
     var alive = useRef(true), chRef = useRef(null), openedAtRef = useRef(Date.now()), shareT = useRef(null);   // session baseline: "since you opened the page"
     useEffect(function () { alive.current = true; return function () { alive.current = false; }; }, []);
     var PAL = ['#e11d48', '#0891b2', '#7c3aed', '#ca8a04', '#059669', '#db2777', '#2563eb', '#ea580c'];
@@ -9250,7 +9274,7 @@
         if (idl.length) sb.from('profiles_public').select('id,name,avatar_url,color').in('id', idl).then(function (pr) { if (!alive.current) return; var m = {}; ((pr && pr.data) || []).forEach(function (x) { m[x.id] = { name: x.name, avatar: x.avatar_url, color: x.color }; }); setPpl(m); });
       });
     }
-    useEffect(function () { load(); loadOptin(); }, [p.id]);
+    useEffect(function () { load(); loadOptin(); loadIntegrity(); }, [p.id]);
     useEffect(function () { try { setRetro(JSON.parse(localStorage.getItem(retroKey) || '{}') || {}); } catch (e) { setRetro({}); } }, [retroKey]);
     // presence: who is looking at the project right now + a live refresh when someone joins
     useEffect(function () {
@@ -9341,6 +9365,40 @@
         online.length ? h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 5 } }, h('span', { style: { width: 7, height: 7, borderRadius: '50%', background: '#22c55e' } }), h('span', { style: { fontSize: 11, color: 'var(--muted)' } }, online.length + ' online')) : null,
         h('div', { style: { display: 'flex' } }, online.slice(0, 5).map(function (id, i) { return h('span', { key: id, style: { marginLeft: i ? -6 : 0, boxShadow: '0 0 0 2px var(--surface)', borderRadius: '50%' } }, avatarEl(id, 24)); }))
       ),
+      // #1 Integritás-őr kártya — a kézirat számai/állításai a valós artifactok ellen (Claude Science reviewer átvéve). Nem gamiOn-függő (mag-funkció).
+      (function () {
+        var f = intFindings;
+        var crit = (f || []).filter(function (x) { return x.severity === 'high'; }).length;
+        var SEVC = { high: 'var(--bad, #e0455f)', medium: 'var(--warn, #e08b00)', low: 'var(--faint)' };
+        var KINDL = { untraceable_number: '🔢 Nyomon-nem-követhető', figure_data: '📊 Ábra↔adat', stat_flag: '🧮 Statisztika', citation: '📚 Hivatkozás', cross_inconsistency: '🔁 Kereszt-eltérés' };
+        var accent = crit ? 'var(--bad, #e0455f)' : (f && f.length ? 'var(--warn, #e08b00)' : 'var(--accent)');
+        return h('div', { key: 'integrity', style: { border: '1px solid color-mix(in srgb, ' + accent + ' 28%, var(--line))', background: 'color-mix(in srgb, ' + accent + ' 5%, var(--surface))', borderRadius: 14, padding: '12px 14px' } },
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
+            h('b', { style: { fontSize: 13 } }, '🔍 Integritás-őr'),
+            (f && f.length) ? h('span', { style: { fontSize: 11, fontWeight: 700, color: '#fff', background: crit ? SEVC.high : SEVC.medium, borderRadius: 999, padding: '1px 8px' } }, f.length + ' jelzés' + (crit ? ' · ' + crit + ' kritikus' : ''))
+              : (f ? h('span', { style: { fontSize: 11, color: 'var(--ok, #12a065)', fontWeight: 600 } }, '✓ nincs nyitott jelzés') : h('span', { style: { fontSize: 11, color: 'var(--faint)' } }, '…')),
+            h('span', { style: { flex: 1 } }),
+            props.canEdit ? h('button', { className: 'btn', disabled: intBusy, style: { padding: '4px 11px', fontSize: 12 }, onClick: runIntegrity }, intBusy ? '✨ Ellenőrzés…' : '🔍 Ellenőrzés futtatása') : null),
+          h('div', { style: { fontSize: 10.5, color: 'var(--faint)', marginTop: 3 } }, 'A kézirat számait és állításait a valós artifactok (CSV, log, források) ellen veti — jelöl, nem ír át.'),
+          intBusy ? h('div', { style: { marginTop: 8 } }, h(AiThinking, { label: 'A kéziratot a projekt adataihoz méri…' })) : null,
+          intErr ? h('div', { style: { fontSize: 11.5, color: 'var(--warn, #e08b00)', marginTop: 7 } }, intErr) : null,
+          (f && f.length) ? h('div', { style: { marginTop: 9, display: 'flex', flexDirection: 'column', gap: 7 } }, f.map(function (x) {
+            var ex = !!intOpen[x.id];
+            return h('div', { key: x.id, style: { border: '1px solid var(--line)', borderRadius: 10, background: 'var(--surface)', overflow: 'hidden' } },
+              h('div', { style: { display: 'flex', gap: 9, alignItems: 'flex-start', padding: '9px 11px', cursor: 'pointer' }, onClick: function () { setIntOpen(function (O) { var n = Object.assign({}, O); n[x.id] = !n[x.id]; return n; }); } },
+                h('span', { style: { flex: 'none', fontSize: 9, fontWeight: 750, textTransform: 'uppercase', color: '#fff', background: SEVC[x.severity] || SEVC.low, borderRadius: 5, padding: '2px 6px', marginTop: 1 } }, x.severity === 'high' ? 'kritikus' : x.severity === 'medium' ? 'közepes' : 'alacsony'),
+                h('div', { style: { flex: 1, minWidth: 0 } },
+                  h('div', { style: { fontSize: 12.5, fontWeight: 600, lineHeight: 1.35 } }, x.claim),
+                  h('div', { style: { fontSize: 10.5, color: 'var(--faint)', marginTop: 2 } }, (KINDL[x.kind] || x.kind) + (x.location ? ' · ' + x.location : ''))),
+                h('span', { style: { color: 'var(--faint)', fontSize: 11 } }, ex ? '▾' : '▸')),
+              ex ? h('div', { style: { padding: '0 11px 10px', fontSize: 11.5, color: 'var(--muted)', lineHeight: 1.45 } },
+                x.evidence ? h('div', { style: { marginBottom: 5 } }, h('b', { style: { color: 'var(--ink)' } }, 'Ellenőrizve: '), x.evidence) : null,
+                x.suggestion ? h('div', { style: { marginBottom: 8, color: 'var(--accent)' } }, '💡 ' + x.suggestion) : null,
+                props.canEdit ? h('div', { style: { display: 'flex', gap: 7 } },
+                  h('button', { className: 'btn', style: { padding: '3px 10px', fontSize: 11.5 }, onClick: function () { ackFinding(x, 'acknowledged'); } }, '✓ Igazolom'),
+                  h('button', { className: 'btn', style: { padding: '3px 10px', fontSize: 11.5 }, onClick: function () { ackFinding(x, 'dismissed'); } }, '✕ Elvetem')) : null) : null);
+          })) : null);
+      })(),
       // GP5 — haladás-elv banner: CSAK ha ma valós terminális esemény történt (esemény-vezérelt, sose fabrikált; gamiOn mellett).
       (gamiOn && giMeId && gp5Today > 0) ? h('div', { key: 'gp5', style: { border: '1px solid color-mix(in srgb, var(--growth, #12ae7a) 32%, var(--line))', background: 'color-mix(in srgb, var(--growth, #12ae7a) 8%, var(--surface))', borderRadius: 12, padding: '9px 13px', fontSize: 12, color: 'var(--ink)' } }, '🎉 Ma már ' + gp5Today + ' mérföldkő/eredmény született a projektben — a haladás számít.') : null,
       // GP1 — Személyes haladás-tükör: opt-in (default KI), privát (csak a saját logból), semleges keret — sose kudarcként (a kritika guardrailjei szerint).
