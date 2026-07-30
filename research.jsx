@@ -1466,6 +1466,7 @@
     var gvS = useState('lista'), view = gvS[0], setView = gvS[1];   // P3: (retired toggle) — the matrix + list now live on ONE page (direction A)
     var scS = useState(null), selCell = scS[0], setSelCell = scS[1];   // selected heatmap cell {ri,ci,row,col} → filters the gap list
     var cgS = useState({}), cellGapIds = cgS[0], setCellGapIds = cgS[1];   // "ri,ci" → [gapId] created from that cell (reliable cell↔gap link, session)
+    var mkS = useState(false), mkGap = mkS[0], setMkGap = mkS[1];   // "Rés létrehozása ide" in progress → button spinner (cellBusyRef is a ref, doesn't re-render)
     var mxS = useState(null), matrix = mxS[0], setMatrix = mxS[1];   // null=not loaded; {rows,cols,cells}; 'error'; 'none' (too few sources)
     var mbS = useState(false), mxBusy = mbS[0], setMxBusy = mbS[1];
     var isS = useState(false), isSupervisor = isS[0], setIsSupervisor = isS[1];   // P5.4a: can the viewer approve gaps (supervisor)?
@@ -1667,16 +1668,16 @@
     // P4.1 — turn an empty (0) matrix cell into a concrete gap the user can then refine/promote.
     function createGapFromCell(row, col) {
       if (!props.canEdit || cellBusyRef.current) return;
-      cellBusyRef.current = true;
+      cellBusyRef.current = true; setMkGap(true);
       var cellKey = selCell ? (selCell.ri + ',' + selCell.ci) : null;   // reliably link the new gap to THIS cell (text-match alone is unreliable for AI gaps)
       function track(ids) { if (!cellKey || !ids) return; var v = ids.filter(Boolean); if (!v.length) return; setCellGapIds(function (m) { var n = Object.assign({}, m); n[cellKey] = (n[cellKey] || []).concat(v); return n; }); }
-      function done(ids) { cellBusyRef.current = false; if (!aliveR.current) return; track(ids); window.PRUI.toast('✓ Rés létrehozva a(z) „' + String(row) + ' × ' + String(col) + '" cellához', { kind: 'success' }); loadGaps(); if (props.onChanged) props.onChanged(); }
+      function done(ids) { cellBusyRef.current = false; if (!aliveR.current) return; setMkGap(false); track(ids); window.PRUI.toast('✓ Rés létrehozva a(z) „' + String(row) + ' × ' + String(col) + '" cellához', { kind: 'success' }); loadGaps(); if (props.onChanged) props.onChanged(); }
       function template() {   // P4.1 fallback: a plain templated gap (used when the gap_cell edge action is unavailable) — already cell-matchable
         var q = String(row) + ' × ' + String(col) + ' — feltáratlan terület: a szakirodalom nem fedi le ezt a metszetet.';
         sb.from('research_ideas').insert({ project_id: props.projectId, source: 'gap', status: 'candidate', question: q, gap_type: 'population', evidence: [], created_by: props.authorId }).select('id').maybeSingle().then(function (r) {
-          if (r && r.error) { cellBusyRef.current = false; if (aliveR.current) window.PRUI.toast('Nem sikerült: ' + r.error.message, { kind: 'error' }); return; }
+          if (r && r.error) { cellBusyRef.current = false; if (aliveR.current) { setMkGap(false); window.PRUI.toast('Nem sikerült: ' + r.error.message, { kind: 'error' }); } return; }
           done([r && r.data && r.data.id]);
-        }, function () { cellBusyRef.current = false; if (aliveR.current) window.PRUI.toast('Hálózati hiba', { kind: 'error' }); });
+        }, function () { cellBusyRef.current = false; if (aliveR.current) { setMkGap(false); window.PRUI.toast('Hálózati hiba', { kind: 'error' }); } });
       }
       // P5.2b — prefer an AI-generated typed gap for the cell; on any failure (old edge → 400 unknown action) fall back to the template
       sb.functions.invoke('research-ai', { body: { action: 'gap_cell', project_id: props.projectId, row: String(row), col: String(col) } }).then(function (res) {
@@ -1799,7 +1800,7 @@
             return h('button', { key: t.slug, className: 'gp-lchip' + (off[t.slug] ? ' off' : ''), style: { borderColor: t.c, color: t.c }, onClick: function () { toggleType(t.slug); } }, t.lab);
           })),
       (selCell && !cellList.length)
-        ? (props.canEdit ? h('button', { className: 'gp-bigbtn', style: { margin: '8px 0' }, disabled: cellBusyRef.current, onClick: function () { createGapFromCell(selCell.row, selCell.col); } }, '＋ Rés létrehozása ide') : h('div', { className: 'gp-lit-none' }, 'Nincs feltárt rés ehhez a metszethez.'))
+        ? (props.canEdit ? h('button', { className: 'gp-bigbtn', style: { margin: '8px 0' }, disabled: mkGap, onClick: function () { createGapFromCell(selCell.row, selCell.col); } }, mkGap ? '⏳ Rés létrehozása…' : '＋ Rés létrehozása ide') : h('div', { className: 'gp-lit-none' }, 'Nincs feltárt rés ehhez a metszethez.'))
         : h('div', { className: 'gp-list' }, (selCell ? cellList : list).map(function (g) {
         var t = gapType(g.gap_type || 'knowledge'), ev = Array.isArray(g.evidence) ? g.evidence : [], promoted = !!g.addressed_by_idea_id;
         var grst = gapRunState(g);   // has this gap spawned a study/review? → status strip + open + relabel the launch button
