@@ -327,7 +327,7 @@
 
   /* ---------- user drawer ---------- */
   function UserDrawer(props) {
-    var u = props.user, agg = props.agg, onClose = props.onClose, onPreview = props.onPreview, onAction = props.onAction, onSetModel = props.onSetModel, onSetWorkflows = props.onSetWorkflows, onSetFigures = props.onSetFigures;
+    var u = props.user, agg = props.agg, onClose = props.onClose, onPreview = props.onPreview, onAction = props.onAction, onSetModel = props.onSetModel, onSetWorkflows = props.onSetWorkflows, onSetFigures = props.onSetFigures, onSetDailyCap = props.onSetDailyCap;
     var onSetFeature = props.onSetFeature, onSetAllowlist = props.onSetAllowlist, catalog = props.catalog || [];
     var open = !!u;
     useEffect(function () { if (!open) return; var onKey = function (e) { if (e.key === 'Escape') onClose(); }; window.addEventListener('keydown', onKey); return function () { window.removeEventListener('keydown', onKey); }; }, [open]);
@@ -353,6 +353,11 @@
               h('select', { value: u.ai_model || '', onChange: function (e) { onSetModel(u.id, e.target.value); }, style: { width: '100%', height: 36, border: '1px solid var(--line)', borderRadius: 8, padding: '0 10px', fontFamily: 'inherit', fontSize: 13, background: 'var(--surface)', color: 'inherit' } },
                 AI_MODELS.filter(function (m) { var al = u.model_allowlist || null; return m[0] === '' || al === null || al.indexOf(m[0]) >= 0; })
                   .map(function (m) { return h('option', { key: m[0], value: m[0] }, m[0] === '' ? 'Default (cheapest allowed)' : m[1]); }))
+            ),
+            h('div', { style: { marginBottom: 16 } },
+              h('div', { style: { fontSize: 12, fontWeight: 700, color: 'var(--muted)', marginBottom: 5 } }, 'Daily AI cap (requests/day) — empty = global default (200)'),
+              h('input', { key: u.id + '-cap', type: 'number', min: 0, step: 10, defaultValue: (u.ai_daily_cap == null ? '' : u.ai_daily_cap), placeholder: '200 (default)', onBlur: function (e) { onSetDailyCap(u.id, e.target.value); }, style: { width: '100%', height: 36, border: '1px solid var(--line)', borderRadius: 8, padding: '0 10px', fontFamily: 'inherit', fontSize: 13, background: 'var(--surface)', color: 'inherit', boxSizing: 'border-box' } }),
+              h('div', { style: { fontSize: 11, color: 'var(--faint)', marginTop: 4 } }, 'Per-user napi AI-kérés-limit. Üres = a globális AI_DAILY_CALLS (200). 0 = letiltás. (migration-101)')
             ),
             h('div', { style: { marginBottom: 16 } },
               h('label', { style: { display: 'flex', alignItems: 'flex-start', gap: 9, fontSize: 13, cursor: 'pointer' } },
@@ -693,6 +698,12 @@
       setSelUser(function (u) { return u && u.id === uid ? Object.assign({}, u, { ai_model: m }) : u; });
       sb.from('profiles').update({ ai_model: m }).eq('id', uid).then(function (r) { if (r && r.error) { window.PRUI.toast('Model update failed: ' + r.error.message, { kind: 'error' }); loadData(); } });
     }
+    function setDailyCap(uid, val) {
+      var v = (val === '' || val == null) ? null : Math.max(0, parseInt(val, 10) || 0);
+      setProfiles(function (list) { return list.map(function (u) { return u.id === uid ? Object.assign({}, u, { ai_daily_cap: v }) : u; }); });
+      setSelUser(function (u) { return u && u.id === uid ? Object.assign({}, u, { ai_daily_cap: v }) : u; });
+      sb.from('profiles').update({ ai_daily_cap: v }).eq('id', uid).then(function (r) { if (r && r.error) { window.PRUI.toast('Cap update failed (fut a migration-101?): ' + r.error.message, { kind: 'error' }); loadData(); } else { window.PRUI.toast('AI-cap mentve: ' + (v == null ? 'globális alap' : v + '/nap'), { kind: 'ok' }); } });
+    }
     function setWorkflows(uid, on) {
       setProfiles(function (list) { return list.map(function (u) { return u.id === uid ? Object.assign({}, u, { can_workflows: on }) : u; }); });
       setSelUser(function (u) { return u && u.id === uid ? Object.assign({}, u, { can_workflows: on }) : u; });
@@ -869,7 +880,7 @@
         h(ClientErrors),
         h(BugReports)
       ),
-      h(UserDrawer, { user: selUser, agg: selUser ? aggFor(selUser.id) : { projects: [], storage: 0, chars: 0, requests: 0 }, onClose: function () { setSelUser(null); }, onPreview: function (p) { setPreview(p); }, onAction: setStatus, onSetModel: setModel, onSetWorkflows: setWorkflows, onSetFigures: setFigures, onSetFeature: setFeature, onSetAllowlist: setAllowlist, catalog: catalog }),
+      h(UserDrawer, { user: selUser, agg: selUser ? aggFor(selUser.id) : { projects: [], storage: 0, chars: 0, requests: 0 }, onClose: function () { setSelUser(null); }, onPreview: function (p) { setPreview(p); }, onAction: setStatus, onSetModel: setModel, onSetWorkflows: setWorkflows, onSetFigures: setFigures, onSetDailyCap: setDailyCap, onSetFeature: setFeature, onSetAllowlist: setAllowlist, catalog: catalog }),
       preview && h(ProjectPreview, { project: preview, onClose: function () { setPreview(null); } })
     );
   }
