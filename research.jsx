@@ -3802,6 +3802,15 @@
     // secondary sort: keep includes/maybe/exclude grouped, then highest relevance, then most cited
     function sortPapers(arr) { return arr.slice().sort(function (a, b) { return (sortKey(a) - sortKey(b)) || ((DEC_ORDER[a.decision] || 0) - (DEC_ORDER[b.decision] || 0)) || ((b.score || 0) - (a.score || 0)) || ((metaOf(b).cited_by || 0) - (metaOf(a).cited_by || 0)); }); }
     var cur = stepRow(curStep) || {};
+    // Which funnel step is being actively processed RIGHT NOW (background backup runner OR a manual step-run) → pulse THAT
+    // step amber, not only the main study card, so the user can follow progress step-by-step (1 Keresés → 2 Absztrakt → …).
+    // status==='running' is the precise per-step signal; while a run is active but no row is marked running yet, fall back
+    // to the first not-yet-done step. Recomputes live via the PRStudyRunner subscribe tick + loadStudy(sid,true) reload.
+    var stepActive = 0;
+    if ((sel && PRStudyRunner.isStudyRunning(sel.id)) || running) {
+      for (var _si = 1; _si <= 4; _si++) { if ((stepRow(_si) || {}).status === 'running') { stepActive = _si; break; } }
+      if (!stepActive) { for (var _sj = 1; _sj <= 4; _sj++) { if (((stepRow(_sj) || {}).status) !== 'done') { stepActive = _sj; break; } } }
+    }
     return h('div', null,
       // studies overview — every study with its progress + status; click to open one. Lets you follow several.
       h('div', { style: { marginBottom: 12 } },
@@ -3831,8 +3840,8 @@
         )),
       // funnel stepper
       h('div', { className: 'funnel' }, LS_STEPS.map(function (s) {
-        return h('button', { key: s.step, 'aria-current': curStep === s.step ? 'step' : null, 'aria-label': s.label, className: 'funnel-step' + (curStep === s.step ? ' on' : '') + (((stepRow(s.step) || {}).status === 'done') ? ' done' : ''), onClick: function () { viewStep(s.step); } },
-          h('b', null, s.label), s.step < 4 ? h('span', { className: 'funnel-count' }, incCount(s.step) + ' include') : h('span', { className: 'funnel-count' }, (stepRow(4) || {}).status === 'done' ? 'done' : 'review'));
+        return h('button', { key: s.step, 'aria-current': curStep === s.step ? 'step' : null, 'aria-label': s.label, className: 'funnel-step' + (curStep === s.step ? ' on' : '') + (((stepRow(s.step) || {}).status === 'done') ? ' done' : '') + (stepActive === s.step ? ' pulse-run' : ''), onClick: function () { viewStep(s.step); } },
+          h('b', null, s.label), stepActive === s.step ? h('span', { className: 'funnel-count', style: { color: '#a16207', fontWeight: 700 } }, '⏳ fut…') : s.step < 4 ? h('span', { className: 'funnel-count' }, incCount(s.step) + ' include') : h('span', { className: 'funnel-count' }, (stepRow(4) || {}).status === 'done' ? 'done' : 'review'));
       })),
       // config panel (steps 1-3) or review panel (step 4)
       curStep < 4 ? h('div', { className: 'panel', style: { marginTop: 10 } },
