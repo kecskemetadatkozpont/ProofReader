@@ -1474,6 +1474,50 @@
     useEffect(function () { aliveR.current = true; return function () { aliveR.current = false; }; }, []);
     useEffect(function () { loadGaps(); }, [props.projectId]);
     useEffect(function () { sb.rpc('research_is_supervisor', { pid: props.projectId }).then(function (r) { if (aliveR.current && r && !r.error) setIsSupervisor(!!r.data); }, function () { }); }, [props.projectId]);
+    // ---- gap → study/review tracking: which gap spawned which study + live status (so the card shows "Study fut/kész" + open) ----
+    var grS = useState({}), gapRuns = grS[0], setGapRuns = grS[1];   // gap.id → [{kind,id,sid,title,status}]
+    var grtS = useState(0), setGrTick = grtS[1];   // cheap re-render on runner progress (live)
+    var grkS = useState(''), grReloadKey = grkS[0], setGrReloadKey = grkS[1];   // reload the gap→runs map only when the running-set changes
+    var gpidRef = useRef(props.projectId); gpidRef.current = props.projectId;
+    useEffect(function () {
+      return PRStudyRunner.subscribe(function () {
+        if (!aliveR.current) return;
+        setGrTick(function (x) { return x + 1; });
+        var pid = gpidRef.current, all = PRStudyRunner.runs(), sig = [];
+        for (var k in all) { var r = all[k]; if (r.projectId === pid && r.sid) sig.push(r.sid + ':' + ((r.stage === 'done' || r.stage === 'error') ? '1' : '0')); }
+        sig.sort(); setGrReloadKey(sig.join('|'));
+      });
+    }, []);
+    // load the studies (idea_id === gap.id — the direct gap→study link) + Elicit reviews (research_question === gap.question) per gap
+    useEffect(function () {
+      var pid = props.projectId; if (!pid) return;
+      var list = gaps || []; if (!list.length) { setGapRuns({}); return; }
+      var gapIds = {}, qByGap = {};
+      list.forEach(function (g) { gapIds[g.id] = 1; if (g.question) qByGap[String(g.question)] = g.id; });
+      Promise.all([
+        sb.from('research_studies').select('id,idea_id,title,status').eq('project_id', pid).not('idea_id', 'is', null),
+        sb.from('elicit_jobs').select('id,status,result_title,research_question').eq('project_id', pid).eq('kind', 'sysreview')
+      ]).then(function (r) {
+        if (!aliveR.current) return;
+        var studies = (r[0] && r[0].data) || [], jobs = (r[1] && r[1].data) || [], map = {};
+        studies.forEach(function (s) { if (s.idea_id && gapIds[s.idea_id]) (map[s.idea_id] = map[s.idea_id] || []).push({ kind: 'study', id: s.id, sid: s.id, title: s.title || 'Irodalom-study', status: s.status }); });
+        jobs.forEach(function (j) { var gid = qByGap[String(j.research_question || '')]; if (gid) (map[gid] = map[gid] || []).push({ kind: 'review', id: j.id, title: j.result_title || j.research_question || 'Szisztematikus review', status: j.status }); });
+        setGapRuns(map);
+      }, function () { if (aliveR.current) setGapRuns({}); });
+    }, [props.projectId, (gaps || []).length, grReloadKey]);
+    // live study/review state for a gap card's status strip
+    function gapRunState(g) {
+      var runs = gapRuns[g.id] || []; if (!runs.length) return null;
+      var running = runs.some(function (r) { return r.kind === 'study' ? PRStudyRunner.isStudyRunning(r.id) : (r.status !== 'completed' && r.status !== 'failed'); });
+      var done = runs.some(function (r) { return r.kind === 'study' ? (r.status === 'done' || r.status === 'completed') : (r.status === 'completed'); });
+      var openStudy = runs.filter(function (r) { return r.kind === 'study'; })[0];   // prefer a study (reveals the funnel) over a review
+      return { runs: runs, running: running, done: done, openStudy: openStudy, count: runs.length };
+    }
+    function openGapRun(g) {
+      var st = gapRunState(g); if (!st) return;
+      if (st.openStudy && props.onOpenStudy) props.onOpenStudy(st.openStudy.id);   // reveal the study in the keyword funnel, where it is
+      else if (props.onGoStudy) props.onGoStudy();   // review → Study tab (the review is in the rail, titled by the gap)
+    }
     function loadGaps() {
       var pid = props.projectId;
       sb.from('research_ideas').select('id,question,hypothesis,rationale,novelty,status,source,gap_type,evidence,addressed_by_idea_id').eq('project_id', pid).eq('source', 'gap').neq('status', 'rejected').order('novelty', { ascending: false, nullsFirst: false }).then(function (r) {
@@ -1696,6 +1740,7 @@
       })),
       h('div', { className: 'gp-list' }, list.map(function (g) {
         var t = gapType(g.gap_type || 'knowledge'), ev = Array.isArray(g.evidence) ? g.evidence : [], promoted = !!g.addressed_by_idea_id;
+        var grst = gapRunState(g);   // has this gap spawned a study/review? → status strip + open + relabel the launch button
         var canFlag = impCap && (props.canEdit || isSupervisor);
         return h('div', { className: 'gcard' + (g.gap_important ? ' important' : ''), key: g.id, style: { borderLeftColor: t.c } },
           h('div', { className: 'gcard-top' },
@@ -1707,10 +1752,14 @@
           g.rationale ? h('div', { className: 'gwhy' }, h('b', null, 'Miért rés? '), g.rationale) : null,
           ev.length ? h('div', { className: 'gev' }, h('b', null, 'Bizonyíték: '), ev.map(function (e, i) { return h('span', { className: 'gsrc', key: i, title: e.coverage || '' }, String(e.title || 'forrás').slice(0, 44)); })) : null,
           g.hypothesis ? h('div', { className: 'gev' }, h('b', null, 'Következő lépés: '), g.hypothesis) : null,
+          grst ? h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, borderRadius: 9, padding: '7px 10px', fontSize: 11.5, fontWeight: 600, margin: '2px 0', background: (grst.done && !grst.running) ? 'var(--ok-bg, #e7f6ee)' : 'color-mix(in srgb, var(--warn, #d9820a) 12%, var(--surface))', color: (grst.done && !grst.running) ? 'var(--ok, #15803d)' : 'var(--warn, #d9820a)', border: '1px solid ' + ((grst.done && !grst.running) ? 'color-mix(in srgb, var(--ok, #15803d) 40%, var(--line))' : 'color-mix(in srgb, var(--warn, #d9820a) 40%, var(--line))') } },
+            h('span', { style: { flex: 'none' } }, grst.running ? '⏳' : '✓'),
+            h('span', { style: { flex: 1, minWidth: 0 } }, grst.running ? 'Study fut a résből' : ('Study kész a résből' + (grst.count > 1 ? ' (' + grst.count + ')' : ''))),
+            h('button', { className: 'gact', style: { padding: '3px 9px', fontSize: 11, flex: 'none' }, title: 'A study megnyitása a Study fülön', onClick: function () { openGapRun(g); } }, 'Megnyitás →')) : null,
           h('div', { className: 'gacts' },
-            props.canEdit ? h('button', { className: 'gact pri', title: 'Szisztematikus review indítása ebből a résből — Elicit → automatikus backup; közben ötletként is elmentődik (rés→ötlet link a térképen)', onClick: function () { if (props.onStartStudy) props.onStartStudy(Object.assign({}, g, { question: g.hypothesis || g.question })); else if (props.onGoStudy) props.onGoStudy(); } }, '🔍 Study a résből') : null,
+            props.canEdit ? h('button', { className: 'gact pri', title: 'Szisztematikus review indítása ebből a résből — Elicit → automatikus backup', onClick: function () { if (props.onStartStudy) props.onStartStudy(g); else if (props.onGoStudy) props.onGoStudy(); } }, grst ? '🔁 Új futtatás' : '🔍 Study a résből') : null,
             props.canEdit ? h('button', { className: 'gact', onClick: function () { dismiss(g); } }, '✕ Elvetés') : null,
-            h('span', { className: 'gstatus' + (promoted ? ' promoted' : '') }, h('span', { className: 'gdot' }), promoted ? 'Előléptetve' : 'Nyitott')));
+            h('span', { className: 'gstatus' + (((grst && (grst.done || grst.running)) || promoted) ? ' promoted' : '') }, h('span', { className: 'gdot' }), grst ? (grst.running ? 'Study alatt' : 'Vizsgálva') : (promoted ? 'Előléptetve' : 'Nyitott'))));
       }))));
   }
 
@@ -9748,25 +9797,20 @@
     // "🔍 Study a résből" (unified): promote the gap to an idea for provenance (the Map gap→idea edge, via addressed_by_idea_id),
     // then launch the review through the SAME unified path as the Studies launcher — Elicit primary, built-in backup if Elicit
     // is unavailable. Replaces the old "→ Ötletté alakítás" + direct-native-study two-button split with one consistent action.
+    // "🔍 Study a résből" (unified): launch a review from the gap through the SAME unified path as the Studies launcher —
+    // Elicit primary, built-in backup if Elicit is unavailable. The study/review is TITLED by the gap statement (g.question)
+    // and linked DIRECTLY to the gap (backup study idea_id = gap.id) so the gap card can show + open exactly this study.
     function startStudyFromIdea(gap) {
       var rq = String((gap && gap.question) || p.title);
-      function launch(ideaId) {
-        callElicit({ action: 'sr.create', researchQuestion: rq, project_id: p.id, title: rq.slice(0, 80), generateReport: true, genAbstract: true, genExtraction: true, runFullText: true, maxResults: 1000 }).then(function (d) {
-          var em = (d && d.error) ? String(d.error) : '';
-          if (em) {
-            if (/rate limit|429|max concurrent|too many requests|plan limit|403/i.test(em)) { if (window.PRUI) window.PRUI.toast('Elicit: ' + em + ' — próbáld kicsit később.', { kind: 'error' }); }
-            else { PRStudyRunner.startBackup(rq, { projectId: p.id, project: p, authorId: props.authorId, onChanged: props.onChanged, ideaId: ideaId || null }); if (window.PRUI) window.PRUI.toast('⚡ Elicit nem elérhető — beépített backup indult a résből.', { kind: 'info' }); }
-          } else if (window.PRUI) { window.PRUI.toast('✓ Review elindítva a résből (Elicit).', { kind: 'success' }); }
-          if (props.onChanged) props.onChanged(); setTab('study');
-        }, function () { PRStudyRunner.startBackup(rq, { projectId: p.id, project: p, authorId: props.authorId, onChanged: props.onChanged, ideaId: ideaId || null }); if (props.onChanged) props.onChanged(); setTab('study'); });
-      }
-      if (gap && gap.id) {
-        sb.from('research_ideas').insert({ project_id: p.id, source: 'own', status: 'candidate', question: rq, rationale: (gap && gap.rationale) || null, created_by: props.authorId }).select('id').maybeSingle().then(function (r) {
-          var newId = r && r.data && r.data.id;
-          if (newId) { sb.from('research_ideas').update({ addressed_by_idea_id: newId }).eq('id', gap.id).then(function () { }, function () { }); }   // link gap → idea (best-effort; feeds the Map edge)
-          launch(newId || null);
-        }, function () { launch(null); });   // idea insert failed → still launch the review (provenance is best-effort)
-      } else { launch(null); }
+      var gapId = (gap && gap.id) || null;
+      callElicit({ action: 'sr.create', researchQuestion: rq, project_id: p.id, title: rq.slice(0, 80), generateReport: true, genAbstract: true, genExtraction: true, runFullText: true, maxResults: 1000 }).then(function (d) {
+        var em = (d && d.error) ? String(d.error) : '';
+        if (em) {
+          if (/rate limit|429|max concurrent|too many requests|plan limit|403/i.test(em)) { if (window.PRUI) window.PRUI.toast('Elicit: ' + em + ' — próbáld kicsit később.', { kind: 'error' }); }
+          else { PRStudyRunner.startBackup(rq, { projectId: p.id, project: p, authorId: props.authorId, onChanged: props.onChanged, ideaId: gapId }); if (window.PRUI) window.PRUI.toast('⚡ Elicit nem elérhető — beépített backup indult a résből.', { kind: 'info' }); }
+        } else if (window.PRUI) { window.PRUI.toast('✓ Review elindítva a résből (Elicit).', { kind: 'success' }); }
+        if (props.onChanged) props.onChanged(); setTab('study');
+      }, function () { PRStudyRunner.startBackup(rq, { projectId: p.id, project: p, authorId: props.authorId, onChanged: props.onChanged, ideaId: gapId }); if (props.onChanged) props.onChanged(); setTab('study'); });
     }
     // (the visible sub-tab row is a separate array below; Data/Compute are intentionally not surfaced)
     // ---- Setup Checklist (New design flag, direction B): the sparse Overview/Setup tab becomes a guided getting-started checklist + Goal, driven by real project state. ----
@@ -9810,7 +9854,7 @@
     function panelForTab(t, focus) {
       focus = focus || {};
       if (t === 'ideas') return h('div', { className: nd() ? 'ideas2' : null }, h(ChatPanel, { projectId: p.id, supervised: !!p.student_id, canEdit: props.canEdit, authorId: props.authorId, fileOwnerId: props.fileOwnerId, sources: props.sources, onChanged: props.onChanged, focusChatId: focus.focusChatId, focusFileId: focus.focusFileId }), h(IdeasPanel, { projectId: p.id, ideas: props.ideas, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, onStartStudyMulti: function (ideas) { setAutoSR(function (x) { return x + 1; }); setTab('study'); }, onGoStudy: function () { setTab('study'); }, onGoGap: function () { setTab('gap'); }, focusIdeaId: focus.focusIdeaId }));
-      if (t === 'gap') return h(GapPanel, { projectId: p.id, project: p, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, onGoIdeas: function () { setTab('ideas'); }, onGoStudy: function () { setTab('study'); }, onStartStudy: startStudyFromIdea, focusGapId: focus.focusGapId });
+      if (t === 'gap') return h(GapPanel, { projectId: p.id, project: p, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, onGoIdeas: function () { setTab('ideas'); }, onGoStudy: function () { setTab('study'); }, onOpenStudy: function (sid) { setFocusStudy(sid); setTab('study'); }, onStartStudy: startStudyFromIdea, focusGapId: focus.focusGapId });
       if (t === 'figboard') return embedFrame('FigureBoard');
       if (t === 'citopt') return embedFrame('CitationOptimizer');
       if (t === 'literature') return h(React.Fragment, null, h(LiteraturePanel, { lang: plang, projectId: p.id, sources: props.sources, studies: props.studies, canEdit: props.canEdit, myEmail: props.myEmail, onChanged: props.onChanged, onOpenFigboard: function () { setTab('figboard'); }, focusSourceId: focus.focusSourceId, focusFigureId: focus.focusFigureId }), h(ElicitReports, { projectId: p.id, project: p, canEdit: props.canEdit, authorId: props.authorId, onGoStudy: function () { setTab('study'); } }), h(ElicitTrials, { projectId: p.id, canEdit: props.canEdit }));
@@ -9828,7 +9872,7 @@
     var content;
     if (nd() && tab === 'canvas') tab = 'map';   // Canvas→Map merge: in nd the Canvas tab is retired → its features live on the Map; a stale/deep-linked 'canvas' lands on the Map (classic mode keeps its own Canvas tab)
     if (tab === 'ideas') content = h('div', { className: nd() ? 'ideas2' : null }, h(ChatPanel, { projectId: p.id, supervised: !!p.student_id, canEdit: props.canEdit, authorId: props.authorId, fileOwnerId: props.fileOwnerId, sources: props.sources, onChanged: props.onChanged }), h(IdeasPanel, { projectId: p.id, ideas: props.ideas, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, onStartStudyMulti: function (ideas) { setAutoSR(function (x) { return x + 1; }); setTab('study'); }, onGoStudy: function () { setTab('study'); }, onGoGap: function () { setTab('gap'); } }));
-    else if (tab === 'gap') content = h(GapPanel, { projectId: p.id, project: p, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, onGoIdeas: function () { setTab('ideas'); }, onGoStudy: function () { setTab('study'); }, onStartStudy: startStudyFromIdea });
+    else if (tab === 'gap') content = h(GapPanel, { projectId: p.id, project: p, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, onGoIdeas: function () { setTab('ideas'); }, onGoStudy: function () { setTab('study'); }, onOpenStudy: function (sid) { setFocusStudy(sid); setTab('study'); }, onStartStudy: startStudyFromIdea });
     else if (tab === 'figboard') content = embedFrame('FigureBoard');
     else if (tab === 'citopt') content = embedFrame('CitationOptimizer');
     else if (tab === 'literature') content = h(React.Fragment, null,
