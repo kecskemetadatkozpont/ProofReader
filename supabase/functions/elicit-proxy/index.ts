@@ -157,6 +157,12 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({} as any));
     const action = String(body.action || '');
 
+    // ---- health probe: is Elicit usable RIGHT NOW? (drives the SR panel's engine-status line + one-path routing) ----
+    if (action === 'sr.health') {
+      const configured = !!ELICIT_KEY;
+      return json({ ok: true, available: configured, reason: configured ? 'ok' : 'not_configured' });
+    }
+
     // ---- cron sweep (secret-authed; refresh only, no resume) ----
     if (action === 'cron_sweep') {
       if (!CRON_SECRET || req.headers.get('x-elicit-secret') !== CRON_SECRET) return json({ error: 'forbidden' }, 403);

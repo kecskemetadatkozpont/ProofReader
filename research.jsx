@@ -3038,6 +3038,7 @@
     var buS = useState(false), busy = buS[0], setBusy = buS[1];
     var erS = useState(''), err = erS[0], setErr = erS[1];
     var opS = useState(null), openR = opS[0], setOpenR = opS[1];
+    var shS = useState(null), srHealth = shS[0], setSrHealth = shS[1];   // {available,reason} — is Elicit usable now (engine-status line + one-path routing)
     var caS = useState(null), cands = caS[0], setCands = caS[1];   // SR-question candidates generated from Ideas
     var gnS = useState(false), gen = gnS[0], setGen = gnS[1];
     var ehS = useState(null), enh = ehS[0], setEnh = ehS[1];       // AI-suggested sharper questions (item 4)
@@ -3079,7 +3080,7 @@
     function picoText(p) { if (!p) return ''; return [['P', p.population], ['I', p.intervention], ['C', p.comparison], ['O', p.outcome]].filter(function (x) { return x[1]; }).map(function (x) { return x[0] + ': ' + x[1]; }).join('\n'); }
     function startFromCand(c) { fromCand.current = c.id; setF({ q: c.question || '', protocol: picoText(c.pico), abs: c.abstract_criteria || [], ft: [], ex: c.extraction_questions || [], exclude: c.exclusion_criteria || [], gen: true, genAbs: true, genEx: true, useFig: false, runFT: true, maxResults: '1000' }); setOpenForm(true); setErr(''); }
     function dismissCand(c) { setCands(function (l) { return (l || []).filter(function (x) { return x.id !== c.id; }); }); sb.from('research_sr_candidates').update({ dismissed: true }).eq('id', c.id); }
-    useEffect(function () { alive.current = true; ensureSrCss(); if (canView) { load(); loadCands(); loadStudies(); sb.from('research_ideas').select('id,question').eq('project_id', props.projectId).then(function (r) { if (!alive.current) return; var m = {}; ((r && r.data) || []).forEach(function (x) { m[x.id] = x.question; }); setIdeaById(m); }); } return function () { alive.current = false; }; }, [canView]);
+    useEffect(function () { alive.current = true; ensureSrCss(); if (canView) { load(); loadCands(); loadStudies(); callElicit({ action: 'sr.health' }).then(function (d) { if (alive.current) setSrHealth((d && typeof d.available === 'boolean') ? d : { available: false, reason: 'error' }); }, function () { if (alive.current) setSrHealth({ available: false, reason: 'error' }); }); sb.from('research_ideas').select('id,question').eq('project_id', props.projectId).then(function (r) { if (!alive.current) return; var m = {}; ((r && r.data) || []).forEach(function (x) { m[x.id] = x.question; }); setIdeaById(m); }); } return function () { alive.current = false; }; }, [canView]);
     // re-render whenever a background study run changes (the runs live in PRStudyRunner, not in this component's state)
     var loadStudiesRef = useRef(null), pidRefSr = useRef(props.projectId), stSigRef = useRef('');
     loadStudiesRef.current = loadStudies; pidRefSr.current = props.projectId;
@@ -3135,11 +3136,15 @@
       callElicit({ action: 'sr.create', researchQuestion: rq, protocolDetails: f.protocol || null, abstractCriteria: absAll, fulltextCriteria: f.ft, extractionQuestions: f.ex, generateReport: f.gen, genAbstract: f.genAbs, genExtraction: f.genEx, useFigures: f.useFig, runFullText: f.runFT, maxResults: f.maxResults ? parseInt(f.maxResults, 10) : undefined, project_id: props.projectId, title: (props.project && props.project.title) || null }).then(function (d) {
         setBusy(false);
         if (!d || d.error) {
-          var em = (d && d.error) || 'Could not start the review.';
-          // Elicit truly EXHAUSTED (out of quota / daily cap) → auto-fall-back to the built-in Claude + OpenAlex Study funnel.
-          // Transient conditions (429 "Rate limit hit", 403 "plan limit or max concurrent") must NOT auto-spend tokens — they surface as a retryable error.
-          if (/out of quota|over quota|kvóta|napi|budget|daily .*limit reached/i.test(String(em))) { var qCand = (cands || []).filter(function (x) { return x.id === fromCand.current; })[0]; setErr('⚡ Elicit nem elérhető (kvóta/napi limit) — automatikus Claude backup Study indul ugyanerre a kérdésre…'); setOpenForm(false); runBackup(rq, qCand && qCand.idea_id); fromCand.current = null; }
-          else setErr(em);
+          var em = String((d && d.error) || 'Could not start the review.');
+          // ONE PATH: Elicit is the primary engine; if it isn't usable NOW (not configured / 5xx / network / quota /
+          // daily-cap), auto-fall-back to the built-in Claude + OpenAlex backup on the SAME question. Only TRANSIENT
+          // conditions (429 rate-limit, 403 plan-limit / max-concurrent) must NOT auto-spend — they stay retryable.
+          var transient = /rate limit|429|max concurrent|too many requests|plan limit|403/i.test(em);
+          if (transient) { setErr(em); return; }
+          var qCand = (cands || []).filter(function (x) { return x.id === fromCand.current; })[0];
+          setErr('⚡ Elicit nem elérhető — automatikus beépített backup (Claude + OpenAlex) indul ugyanerre a kérdésre…');
+          setOpenForm(false); runBackup(rq, qCand && qCand.idea_id); fromCand.current = null;
           return;
         }
         var jid = d.job && d.job.id;   // link the review back to the Study-basis candidate it was started from (Map provenance)
@@ -3344,6 +3349,14 @@
           canCreate ? h('button', { className: 'btn pri', style: { padding: '5px 11px', fontSize: 12.5 }, disabled: gen, onClick: generate }, gen ? '✨ Generating…' : '✨ Generate from Ideas') : null,
           canCreate ? h('button', { className: 'btn', style: { padding: '5px 11px', fontSize: 12.5 }, onClick: function () { fromCand.current = null; setF({ q: '', protocol: '', abs: [], ft: [], ex: [], exclude: [], gen: true, genAbs: true, genEx: true, useFig: false, runFT: true, maxResults: '1000' }); setOpenForm(true); } }, '+ Manual review') : null),
         err ? h('div', { style: { fontSize: 12.5, color: /^✓/.test(err) ? 'var(--ok, #15803d)' : 'var(--danger, #b42318)', margin: '6px 0' } }, err) : null,
+        // ONE-PATH engine-status line: Elicit primary, built-in backup on standby. The launch auto-falls-back if Elicit is down.
+        (function () {
+          var up = srHealth && srHealth.available;
+          var bg = srHealth == null ? 'var(--surface-2)' : up ? 'color-mix(in srgb, var(--ok, #15803d) 12%, var(--surface))' : 'color-mix(in srgb, var(--warn, #d9820a) 14%, var(--surface))';
+          var col = srHealth == null ? 'var(--muted)' : up ? 'var(--ok, #15803d)' : 'var(--warn, #d9820a)';
+          var txt = srHealth == null ? 'Motor ellenőrzése…' : up ? '🟢 Motor: Elicit elérhető · a beépített backup (Claude + OpenAlex) készenlétben' : '🟠 Elicit nem elérhető' + (srHealth.reason === 'not_configured' ? ' (nincs API-kulcs)' : '') + ' — a review-k automatikusan a beépített szűréssel (Claude + OpenAlex) futnak';
+          return h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 11.5, fontWeight: 600, color: col, background: bg, border: '1px solid var(--line)', borderRadius: 9, padding: '7px 11px', margin: '4px 0 8px' } }, txt);
+        })(),
         backupEl(),
         // Reviews exist → master-detail (rail + the selected review). No reviews yet → the review-question cards fill the
         // FULL width in a responsive grid (side by side) instead of a narrow rail + a big empty detail pane.
