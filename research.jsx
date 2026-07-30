@@ -81,7 +81,15 @@
     '✨ Working…': '✨ Dolgozom…',
     'No protocol yet.': 'Még nincs protokoll.', 'Loading protocol…': 'Protokoll betöltése…', '✨ Generate protocol': '✨ Protokoll generálása',
     '✨ Generate draft (AutoMode)': '✨ Draft generálása (AutoMode)', 'Previously generated draft. Re-generate to refresh.': 'Korábban generált draft. Újragenerálás a frissítéshez.',
-    '✨ Recommend journals': '✨ Folyóirat-ajánlás'
+    '✨ Recommend journals': '✨ Folyóirat-ajánlás',
+    // Áttekintő (overview) core chrome — the guidance a user relies on
+    'No research idea yet — start on the Ideas tab.': 'Még nincs kutatási ötlet — kezdd az Ötletek fülön.',
+    'No literature yet — gather sources.': 'Még nincs irodalom — gyűjts forrásokat.',
+    'No systematic study started.': 'Nincs elindított szisztematikus study.',
+    'Work is progressing — next phase: ': 'A munka halad — a következő fázis: ',
+    'The project is in the submission phase.': 'A projekt a beküldési fázisban van.',
+    'What happened since you opened this': 'Mi történt, mióta megnyitottad',
+    'Who did what · per person': 'Ki mit csinált · személyenként'
   };
   function tr(lang, en) { return (lang === 'hu' && I18N_HU[en]) ? I18N_HU[en] : en; }
 
@@ -9338,13 +9346,13 @@
     var weekN = buckets.reduce(function (a, b) { return a + b; }, 0);
     // deterministic bottleneck
     var bn;
-    if (!counts.ideas) bn = { t: 'Még nincs kutatási ötlet — kezdd az Ötletek fülön.', tab: 'ideas' };
-    else if (!counts.sources) bn = { t: 'Még nincs irodalom — gyűjts forrásokat.', tab: 'literature' };
-    else if (!counts.studies && stage >= 2) bn = { t: 'Nincs elindított szisztematikus study.', tab: 'study' };
+    if (!counts.ideas) bn = { t: tr(plang, 'No research idea yet — start on the Ideas tab.'), tab: 'ideas' };
+    else if (!counts.sources) bn = { t: tr(plang, 'No literature yet — gather sources.'), tab: 'literature' };
+    else if (!counts.studies && stage >= 2) bn = { t: tr(plang, 'No systematic study started.'), tab: 'study' };
     else if (overdue) bn = { t: overdue + ' lejárt határidejű feladat.', tab: 'tasks' };
     else if (tasksOpen) bn = { t: tasksOpen + ' nyitott feladat vár.', tab: 'tasks' };
-    else if (stage < STAGES.length - 1) bn = { t: 'A munka halad — a következő fázis: ' + tr(plang, STAGES[stage + 1]) + '.', tab: STAGE_TAB[stage + 1] };
-    else bn = { t: 'A projekt a beküldési fázisban van.', tab: 'submission' };
+    else if (stage < STAGES.length - 1) bn = { t: tr(plang, 'Work is progressing — next phase: ') + tr(plang, STAGES[stage + 1]) + '.', tab: STAGE_TAB[stage + 1] };
+    else bn = { t: tr(plang, 'The project is in the submission phase.'), tab: 'submission' };
     var online = Object.keys(onl).filter(function (id) { return id !== 'anon'; });
 
     function kpi(lab, val, sub, col, tab) {
@@ -9358,7 +9366,7 @@
     return h('div', { className: 'panel', style: { display: 'flex', flexDirection: 'column', gap: 14 } },
       // header
       h('div', { style: { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' } },
-        h('h3', { style: { margin: 0 } }, '📊 Áttekintő'),
+        h('h3', { style: { margin: 0 } }, '📊 ' + tr(plang, 'Overview')),
         h('span', { style: { fontSize: 12, color: 'var(--muted)' } }, String(p.title || '').slice(0, 60)),
         h('span', { style: { flex: 1 } }),
         props.canEdit ? h('button', { className: 'btn', style: { padding: '4px 11px', fontSize: 12 }, title: 'A kutatás megosztása más felhasználókkal', onClick: openShare }, '👥 Megosztás') : null,
@@ -9527,14 +9535,14 @@
       h('div', { style: { display: 'flex', alignItems: 'center', gap: 9, padding: '9px 12px', borderRadius: 11, marginBottom: 12, border: '1px solid color-mix(in srgb, var(--accent) 25%, var(--line))', background: 'color-mix(in srgb, var(--accent) 7%, var(--surface))' } },
         h('span', { style: { fontSize: 15 } }, '📖'),
         h('div', { style: { flex: 1, minWidth: 0 } },
-          h('div', { style: { fontSize: 12.5, fontWeight: 700 } }, 'Mi történt, mióta megnyitottad'),
+          h('div', { style: { fontSize: 12.5, fontWeight: 700 } }, tr(plang, 'What happened since you opened this')),
           h('div', { style: { fontSize: 10.5, color: 'var(--muted)' } }, sessionTotal ? (sessionTotal + ' új esemény · ' + sessionContributors + ' közreműködő') : 'Egyelőre nincs új esemény — élőben frissül.')),
         sessionTotal ? h('span', { style: { flex: 'none', background: 'var(--accent)', color: '#fff', borderRadius: 999, fontSize: 9.5, fontWeight: 700, padding: '2px 8px' } }, '● ' + sessionTotal + ' új') : null,
         h('button', { className: 'btn', style: { padding: '3px 9px', fontSize: 11.5, flex: 'none' }, title: 'Frissítés', onClick: function () { load(); } }, '↻')),
       // who-did-what per person (session-smart cards) + the detailed log
       h('div', { style: { display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 14 } },
         h('div', null,
-          h('div', { style: { fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--faint)', marginBottom: 8 } }, 'Ki mit csinált · személyenként'),
+          h('div', { style: { fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--faint)', marginBottom: 8 } }, tr(plang, 'Who did what · per person')),
           contributors.length ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 8 } }, contributors.map(function (c) {
             var ls = c.lastSession;
             return h('div', { key: c.id, style: { border: '1px solid var(--line)', borderLeft: '3px solid ' + clOf(c.id), borderRadius: 10, padding: 10, background: 'var(--surface)' } },
