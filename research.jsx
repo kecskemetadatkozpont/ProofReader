@@ -4382,6 +4382,9 @@
     var afS = useState([]), aiFiles = afS[0], setAiFiles = afS[1];     // data for AI task generation: uploaded {storage_path} or referenced {url}
     var aubS = useState(''), aiUpBusy = aubS[0], setAiUpBusy = aubS[1];   // null | {done,total,name,pct}
     var aiFileRef = useRef(null);
+    // ---- Cockpit dashboard (A): comprehensive project-state summary — contributor names + the SR reviews ----
+    var cmS = useState({}), contribMap = cmS[0], setContribMap = cmS[1];   // profiles_public: id → {name,color}
+    var srjS = useState([]), srJobs = srjS[0], setSrJobs = srjS[1];        // Elicit SR reviews (studies summary)
     var lkoS = useState(false), linkOpen = lkoS[0], setLinkOpen = lkoS[1];
     var lkuS = useState(''), linkUrl = lkuS[0], setLinkUrl = lkuS[1];
     var pcmS = useState([]), pcMsgs = pcmS[0], setPcMsgs = pcmS[1];   // protocol-wide chat (ephemeral)
@@ -4508,6 +4511,16 @@
     function loadTodos() { sb.from('research_todos').select('*').eq('project_id', props.projectId).order('created_at', { ascending: false }).then(function (r) { setTodos((r && r.data) || []); }); }
     function moveTodo(t, key) { if (!ce) return; var p = todoColPatch(key); if (!p) return; setTodos(function (l) { return l.map(function (x) { return x.id === t.id ? Object.assign({}, x, p) : x; }); }); sb.from('research_todos').update(Object.assign({ updated_at: new Date().toISOString() }, p)).eq('id', t.id).then(function (r) { if (r && r.error) { window.PRUI.toast(r.error.message, { kind: 'error' }); loadTodos(); } }); }
     useEffect(function () { load(); loadFiles(); loadTodos(); }, [props.projectId]);
+    // cockpit: resolve contributor names + load the SR reviews (Elicit) for the studies summary
+    useEffect(function () {
+      var ids = {};
+      (props.ideas || []).forEach(function (i) { if (i.created_by) ids[i.created_by] = 1; });
+      (props.studies || []).forEach(function (s) { if (s.created_by) ids[s.created_by] = 1; });
+      (props.sources || []).forEach(function (s) { if (s.created_by) ids[s.created_by] = 1; });
+      var idl = Object.keys(ids);
+      if (idl.length) sb.from('profiles_public').select('id,name,color').in('id', idl).then(function (r) { var m = {}; ((r && r.data) || []).forEach(function (x) { m[x.id] = x; }); setContribMap(m); }, function () { });
+      sb.from('elicit_jobs').select('id,status,result_title,research_question').eq('project_id', props.projectId).eq('kind', 'sysreview').then(function (r) { setSrJobs((r && r.data) || []); }, function () { });
+    }, [props.projectId, (props.ideas || []).length, (props.studies || []).length, (props.sources || []).length]);
     useEffect(function () { loadNotes(); }, [prot && prot.id]);
     useEffect(function () { if (!prot || prot.status !== 'running') return; var t = setInterval(function () { load(); loadFiles(); loadNotes(); }, 5000); return function () { clearInterval(t); }; }, [prot && prot.id, prot && prot.status]);
     function generate() {
@@ -4655,9 +4668,73 @@
       }, function (e) { setAiBusy(false); window.PRUI.toast('Add failed: ' + e, { kind: 'error' }); });
     }
 
+    // ---- Cockpit dashboard (A, phase 1): the comprehensive project-state summary shown atop the Protocol page ----
+    function cockpitDashboard() {
+      var ideasAll = props.ideas || [], srcs = props.sources || [], studies = props.studies || [];
+      var gaps = ideasAll.filter(function (i) { return i.source === 'gap' && i.status !== 'rejected'; });
+      var realIdeas = ideasAll.filter(function (i) { return i.source !== 'gap' && i.status !== 'rejected'; });
+      var selIdeas = realIdeas.filter(function (i) { return i.status === 'selected'; });
+      var inc = srcs.filter(function (s) { return s.screening === 'include' || s.screening === 'included'; });
+      var doneSteps = steps.filter(function (s) { return s.status === 'done'; });
+      var openGaps = gaps.filter(function (g) { return !g.addressed_by_idea_id; });
+      var doneStudies = studies.filter(function (s) { return s.status === 'done' || s.status === 'completed'; });
+      var doneSR = (srJobs || []).filter(function (j) { return j.status === 'completed'; });
+      var agg = {};   // contributor attribution from created_by across ideas / gaps / studies / sources
+      function bump(uid, key) { if (!uid) return; var a = (agg[uid] = agg[uid] || { ideas: 0, gaps: 0, studies: 0, sources: 0 }); a[key]++; }
+      realIdeas.forEach(function (i) { bump(i.created_by, 'ideas'); });
+      gaps.forEach(function (g) { bump(g.created_by, 'gaps'); });
+      studies.forEach(function (s) { bump(s.created_by, 'studies'); });
+      srcs.forEach(function (s) { bump(s.created_by, 'sources'); });
+      var contribs = Object.keys(agg).map(function (uid) { var a = agg[uid]; return { uid: uid, a: a, total: a.ideas + a.gaps + a.studies + a.sources, name: (contribMap[uid] && contribMap[uid].name) || 'Kutató' }; }).sort(function (x, y) { return y.total - x.total; }).slice(0, 6);
+      var maxTotal = contribs.reduce(function (m, c) { return Math.max(m, c.total); }, 1);
+      function seg(v, col) { return v ? h('i', { style: { width: Math.round(v / maxTotal * 100) + '%', background: col } }) : null; }
+      function badge(kind) { var map = { done: ['var(--ok, #15803d)', 'var(--ok-bg, #e7f6ee)'], run: ['#a16207', 'color-mix(in srgb, var(--warn, #d9820a) 15%, transparent)'], todo: ['var(--faint)', 'var(--surface-2)'] }; var m = map[kind] || map.todo; return { color: m[0], background: m[1] }; }
+      var CI = 'var(--accent, #4f46e5)', CG = '#a23a86', CS = 'var(--ok, #15803d)', CR = 'var(--warn, #d9820a)';
+      function leg(col, lab) { return h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 5 } }, h('i', { style: { width: 9, height: 9, borderRadius: 2, background: col, display: 'inline-block' } }), lab); }
+      var topGaps = gaps.slice().sort(function (a, b) { return (b.novelty || 0) - (a.novelty || 0); }).slice(0, 4);
+      return h('div', null,
+        h('div', { className: 'pcpit-hd' }, '🧭 Projekt-áttekintés ', h('span', { className: 'sub' }, '· a kutatás jelenlegi állapota egy helyen')),
+        h('div', { className: 'pcpit' },
+          h('div', { className: 'pcpit-card', style: { gridColumn: 'span 8' } },
+            h('h4', null, '🔬 Eddigi eredmények', h('span', { className: 'c' }, (doneStudies.length + doneSR.length) + ' study · ' + doneSteps.length + '/' + steps.length + ' lépés')),
+            (doneSteps.length || doneStudies.length || doneSR.length)
+              ? h('div', null,
+                  doneSteps.slice(0, 3).map(function (s) { var sm = (s.result && (s.result.summary || s.result.note)) || ''; return h('div', { key: 'st' + s.id, className: 'pcpit-find' }, h('span', { className: 'prov' }, 'S' + s.ord), h('span', null, s.title + (sm ? ' — ' + String(sm).slice(0, 130) : ''))); }),
+                  doneSR.slice(0, 2).map(function (j) { return h('div', { key: 'jr' + j.id, className: 'pcpit-find' }, h('span', { className: 'prov' }, 'Review'), h('span', null, (j.result_title || j.research_question || 'Szisztematikus review') + ' — kész')); }),
+                  doneStudies.slice(0, 2).map(function (s) { return h('div', { key: 'sd' + s.id, className: 'pcpit-find' }, h('span', { className: 'prov' }, 'Study'), h('span', null, (s.title || 'Irodalom-study') + ' — kész')); }))
+              : h('div', { style: { fontSize: 12.5, color: 'var(--muted)', lineHeight: 1.5 } }, 'Még nincsenek rögzített eredmények — futtass protokoll-lépéseket vagy study-kat, és a kimenetük itt jelenik meg (provenance-szel).')),
+          h('div', { className: 'pcpit-card', style: { gridColumn: 'span 4' } },
+            h('h4', null, '📈 Projekt-állapot'),
+            h('div', { className: 'pcpit-metric' }, h('b', null, doneSteps.length + ' / ' + steps.length), h('small', null, 'protokoll-lépés kész')),
+            h('div', { className: 'pcpit-bar' }, h('i', { style: { width: (steps.length ? Math.round(doneSteps.length / steps.length * 100) : 0) + '%' } })),
+            h('div', { className: 'pcpit-row' }, h('span', { className: 't' }, '🕳️ Kutatási rések'), h('span', { className: 'q' }, gaps.length + ' · ' + openGaps.length + ' nyitva')),
+            h('div', { className: 'pcpit-row' }, h('span', { className: 't' }, '📚 Irodalom'), h('span', { className: 'q' }, srcs.length + ' · ' + inc.length + ' included')),
+            h('div', { className: 'pcpit-row' }, h('span', { className: 't' }, '💡 Ötletek'), h('span', { className: 'q' }, realIdeas.length + ' · ' + selIdeas.length + ' kijelölve'))),
+          h('div', { className: 'pcpit-card', style: { gridColumn: 'span 6' } },
+            h('h4', null, '👥 Ki mivel járult hozzá'),
+            contribs.length
+              ? h('div', null, contribs.map(function (c) {
+                  return h('div', { key: c.uid, className: 'pcpit-crow' },
+                    h('div', { className: 'who' }, h('b', { title: c.name }, c.name), h('small', null, c.total + ' hozzájárulás')),
+                    h('div', { className: 'pcpit-cbar' }, seg(c.a.ideas, CI), seg(c.a.gaps, CG), seg(c.a.studies, CS), seg(c.a.sources, CR)));
+                }))
+              : h('div', { style: { fontSize: 12, color: 'var(--muted)' } }, 'Még nincs rögzített hozzájárulás.'),
+            h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 8, fontSize: 10.5, color: 'var(--faint)' } }, leg(CI, 'ötlet'), leg(CG, 'rés'), leg(CS, 'study'), leg(CR, 'forrás'))),
+          h('div', { className: 'pcpit-card', style: { gridColumn: 'span 3' } },
+            h('h4', null, '🕳️ Top rések'),
+            topGaps.length ? h('div', null, topGaps.map(function (g) { return h('div', { key: g.id, className: 'pcpit-row' }, h('span', { className: 't', title: g.question }, g.question), g.novelty != null ? h('span', { className: 'q' }, g.novelty) : null); })) : h('div', { style: { fontSize: 11.5, color: 'var(--muted)' } }, 'Nincs feltárt rés.')),
+          h('div', { className: 'pcpit-card', style: { gridColumn: 'span 3' } },
+            h('h4', null, '🔬 Study-k'),
+            (studies.length || srJobs.length)
+              ? h('div', null,
+                  (srJobs || []).slice(0, 3).map(function (j) { return h('div', { key: 'sj' + j.id, className: 'pcpit-row' }, h('span', { className: 'pcpit-badge', style: badge(j.status === 'completed' ? 'done' : 'run') }, j.status === 'completed' ? '✓' : '⏳'), h('span', { className: 't', title: j.result_title || j.research_question }, j.result_title || j.research_question || 'Review')); }),
+                  studies.slice(0, 2).map(function (s) { var run = PRStudyRunner.isStudyRunning(s.id), dn = s.status === 'done' || s.status === 'completed'; return h('div', { key: 'ss' + s.id, className: 'pcpit-row' }, h('span', { className: 'pcpit-badge', style: badge(dn ? 'done' : run ? 'run' : 'todo') }, dn ? '✓' : run ? '⏳' : '•'), h('span', { className: 't', title: s.title }, s.title || 'Study')); }))
+              : h('div', { style: { fontSize: 11.5, color: 'var(--muted)' } }, 'Nincs study.'))));
+    }
+
     if (loading) return h('div', { className: 'empty' }, tr(props.lang, 'Loading protocol…'));
 
-    if (!prot) return h('div', { className: 'panel' },
+    if (!prot) return h('div', null, cockpitDashboard(), h('div', { className: 'panel' },
       h('h3', { style: { marginTop: 0 } }, '🧪 Protocol'),
       h('p', { style: { fontSize: 13, color: 'var(--muted)', lineHeight: 1.5 } }, 'Generate an executable research plan — an ordered ToDo list (data → preprocess → baselines → method → evaluation → figures) built from your idea and the literature you selected in Studies. A Claude agent on your dedicated machine can then run it step by step, with your approval on the expensive ones.'),
       ce ? h('div', null,
@@ -4665,7 +4742,7 @@
         h('button', { className: 'btn pri', disabled: busy, onClick: generate }, busy ? tr(props.lang, '✨ Working…') : tr(props.lang, '✨ Generate protocol')),
         busy ? h('div', { style: { marginTop: 10 } }, h(AiThinking, { label: 'Reading your idea & the selected literature, drafting an executable protocol' })) : null
       ) : h('div', { className: 'empty' }, tr(props.lang, 'No protocol yet.'))
-    );
+    ));
 
     if (rvMd) return h(ReportViewer, {
       md: rvMd, inline: true, title: prot.title + ' — result report', onClose: function () { setRvMd(null); },
@@ -4851,6 +4928,7 @@
       );
     }
     return h('div', null,
+      cockpitDashboard(),
       h('div', { className: 'panel' },
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
           h('h3', { style: { margin: 0, flex: 1, minWidth: 160 } }, '🧪 ', prot.title),
