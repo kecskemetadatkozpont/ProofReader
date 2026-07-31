@@ -101,10 +101,10 @@
       + '  <div class="err" id="ob-aff-err">Please select or enter your institution.</div>'
       + '</div>'
       + '<div class="field" id="ob-cc-field" style="display:none">'
-      + '  <label for="ob-cc">Cost center <span class="opt">— John von Neumann University</span></label>'
-      + '  <input id="ob-cc" autocomplete="off" placeholder="Search by name or code…" />'
+      + '  <label for="ob-cc">Cost center / Department <span class="req">*</span> <span class="opt">— John von Neumann University</span></label>'
+      + '  <input id="ob-cc" autocomplete="off" placeholder="Start typing to search or add…" />'
       + '  <div class="menu" id="ob-cc-menu"></div>'
-      + '  <div class="err" id="ob-cc-err">Please select a cost center from the list.</div>'
+      + '  <div class="err" id="ob-cc-err">Please select or enter a cost center / department.</div>'
       + '</div>'
       + '<div class="field">'
       + '  <label for="ob-mtmt">MTMT identifier <span class="opt">— optional</span></label>'
@@ -149,24 +149,26 @@
     });
     document.addEventListener('mousedown', function (e) { if (!menu.contains(e.target) && e.target !== aff) menu.classList.remove('on'); });
 
-    // Cost center (Költséghely) — shown + required only for John von Neumann University. The selected
-    // {code,name} live on the input's dataset so submit() (a sibling function) can read them.
-    var CC = window.PR_COST_CENTERS || [];
+    // Cost center / Department — shown + required only for John von Neumann University.
+    // A USER-COLLECTED list (retires the fixed cost-centers.js). Loaded from the DB
+    // (pr_departments = distinct profiles.cost_center) so a user picks a previously-registered one OR types a new one.
+    var CC = [];
+    sb.rpc('pr_departments').then(function (r) { CC = ((r && r.data) || []).map(function (x) { return x.name; }).filter(Boolean); }, function () { CC = []; });
     var ccField = document.getElementById('ob-cc-field'), ccIn = document.getElementById('ob-cc'), ccMenu = document.getElementById('ob-cc-menu'), ccErr = document.getElementById('ob-cc-err');
     function isJnu(v) { return /neumann/i.test(v || ''); }
-    function ccClear() { delete ccIn.dataset.code; delete ccIn.dataset.name; }
-    function syncCC() { if (isJnu(aff.value)) { ccField.style.display = ''; } else { ccField.style.display = 'none'; ccIn.value = ''; ccClear(); ccMenu.classList.remove('on'); ccErr.classList.remove('on'); ccIn.classList.remove('bad'); } }
+    function syncCC() { if (isJnu(aff.value)) { ccField.style.display = ''; } else { ccField.style.display = 'none'; ccIn.value = ''; ccMenu.classList.remove('on'); ccErr.classList.remove('on'); ccIn.classList.remove('bad'); } }
     function ccRender(q) {
       var ql = norm(q.trim());
-      var list = ql ? CC.filter(function (x) { return norm(x.n).indexOf(ql) >= 0 || norm(x.c).indexOf(ql) >= 0; }).slice(0, 12) : CC.slice(0, 12);
-      ccMenu.innerHTML = list.map(function (x) { return '<div class="it" data-c="' + esc(x.c) + '" data-n="' + esc(x.n) + '">' + esc(x.n) + '<span class="opt"> · ' + esc(x.c) + (x.a ? ' · ' + esc(x.a) : '') + '</span></div>'; }).join('');
-      ccMenu.classList.toggle('on', !!ccMenu.innerHTML);
+      var list = ql ? CC.filter(function (n) { return norm(n).indexOf(ql) >= 0; }).slice(0, 12) : CC.slice(0, 12);
+      var html = list.map(function (n) { return '<div class="it" data-n="' + esc(n) + '">' + esc(n) + '</div>'; }).join('');
+      if (ql && !CC.some(function (n) { return norm(n) === ql; })) { html += '<div class="it add" data-n="' + esc(q.trim()) + '">Use “' + esc(q.trim()) + '”</div>'; }
+      ccMenu.innerHTML = html; ccMenu.classList.toggle('on', !!html);
     }
     ccIn.addEventListener('focus', function () { ccRender(ccIn.value); });
-    ccIn.addEventListener('input', function () { ccClear(); ccIn.classList.remove('bad'); ccErr.classList.remove('on'); ccRender(ccIn.value); });
-    ccMenu.addEventListener('mousedown', function (e) { var it = e.target.closest('.it'); if (!it) return; e.preventDefault(); ccIn.dataset.code = it.getAttribute('data-c'); ccIn.dataset.name = it.getAttribute('data-n'); ccIn.value = ccIn.dataset.name + ' (' + ccIn.dataset.code + ')'; ccMenu.classList.remove('on'); ccErr.classList.remove('on'); });
+    ccIn.addEventListener('input', function () { ccIn.classList.remove('bad'); ccErr.classList.remove('on'); ccRender(ccIn.value); });
+    ccMenu.addEventListener('mousedown', function (e) { var it = e.target.closest('.it'); if (!it) return; e.preventDefault(); ccIn.value = it.getAttribute('data-n'); ccMenu.classList.remove('on'); ccErr.classList.remove('on'); });
     document.addEventListener('mousedown', function (e) { if (!ccMenu.contains(e.target) && e.target !== ccIn) ccMenu.classList.remove('on'); });
-    try { if (me.cost_center_code && me.cost_center) { ccIn.dataset.code = me.cost_center_code; ccIn.dataset.name = me.cost_center; ccIn.value = me.cost_center + ' (' + me.cost_center_code + ')'; } } catch (e) { }
+    try { if (me.cost_center) { ccIn.value = me.cost_center; } } catch (e) { }
     syncCC();
 
     var orcid = document.getElementById('ob-orcid');
@@ -185,10 +187,10 @@
     var btn = document.getElementById('ob-submit');
     var ok = true;
     if (!aff.value.trim()) { aff.classList.add('bad'); document.getElementById('ob-aff-err').classList.add('on'); ok = false; }
-    // John von Neumann University → cost center (Költséghely) is mandatory, chosen from the list.
+    // John von Neumann University → cost center / department is mandatory (pick a registered one or type a new one).
     var jnu = /neumann/i.test(aff.value);
-    var ccCode = (ccIn && ccIn.dataset.code) || '', ccName = (ccIn && ccIn.dataset.name) || '';
-    if (jnu && !ccCode) { if (ccIn) ccIn.classList.add('bad'); document.getElementById('ob-cc-err').classList.add('on'); ok = false; }
+    var ccName = (ccIn && ccIn.value.trim()) || '';
+    if (jnu && !ccName) { if (ccIn) ccIn.classList.add('bad'); document.getElementById('ob-cc-err').classList.add('on'); ok = false; }
     if (mtmt.value.trim() && !/^\d+$/.test(mtmt.value.trim())) { mtmt.classList.add('bad'); document.getElementById('ob-mtmt-err').classList.add('on'); ok = false; }
     var orc = orcid.value.trim();
     if (orc && !/^\d{4}-\d{4}-\d{4}-\d{3}[\dX]$/.test(orc)) { orcid.classList.add('bad'); document.getElementById('ob-orcid-err').classList.add('on'); ok = false; }
@@ -196,7 +198,7 @@
     btn.disabled = true; btn.textContent = 'Submitting…';
     sb.from('profiles').update({
       affiliation: aff.value.trim(),
-      cost_center_code: jnu ? (ccCode || null) : null,
+      cost_center_code: null,
       cost_center: jnu ? (ccName || null) : null,
       mtmt_id: mtmt.value.trim() || null,
       orcid: orc || null,
