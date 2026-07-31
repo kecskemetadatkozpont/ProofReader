@@ -4566,7 +4566,7 @@
           var x2 = tr.left - cr.left, y2 = tr.top + tr.height / 2 - cr.top;
           if (x2 < x1 + 10) { x1 = sr.left - cr.left; x2 = tr.right - cr.left; }   // wrapped (narrow) — connect nearest edges
           var mx = (x1 + x2) / 2;
-          out.push('M' + x1 + ' ' + y1 + ' C' + mx + ' ' + y1 + ' ' + mx + ' ' + y2 + ' ' + x2 + ' ' + y2);
+          out.push({ d: 'M' + x1 + ' ' + y1 + ' C' + mx + ' ' + y1 + ' ' + mx + ' ' + y2 + ' ' + x2 + ' ' + y2, prop: t.classList.contains('pcg-prop') });
         });
         setEdgePaths(out);
       }
@@ -4599,13 +4599,18 @@
     function approveProposed() {
       if (!proposed) return;
       var req = proposed.request; var originId = prot && prot.idea_id ? ('i' + prot.idea_id) : null;
+      function edgeRows(fromId, ids) { return (ids || []).filter(Boolean).map(function (id) { var to = 'r' + id; return { project_id: props.projectId, edge_key: fromId + '|' + to + '|manual', from_id: fromId, to_id: to, kind: 'kap', manual: true, updated_at: new Date().toISOString() }; }); }
+      function commitEdges(rows) { if (!rows.length) return; sb.from('research_map_edges').upsert(rows, { onConflict: 'project_id,edge_key' }).then(function () { setMapEdges(function (m) { return (m || []).concat(rows.filter(function (e) { return String(e.to_id).charAt(0) === 'r'; }).map(function (e) { return { from_id: e.from_id, to_id: e.to_id }; })); }); }, function () { }); }
       insertCockpitSteps(proposed.steps, req, function (ids) {
-        if (originId && ids && ids.length) {
-          var erows = ids.filter(Boolean).map(function (id) { var to = 'r' + id; return { project_id: props.projectId, edge_key: originId + '|' + to + '|manual', from_id: originId, to_id: to, kind: 'kap', manual: true, updated_at: new Date().toISOString() }; });
-          if (erows.length) sb.from('research_map_edges').upsert(erows, { onConflict: 'project_id,edge_key' }).then(function () { setMapEdges(function (m) { return (m || []).concat(erows.map(function (e) { return { from_id: e.from_id, to_id: e.to_id }; })); }); }, function () { });
-        }
+        // Phase 3: the chat request becomes a PERSISTENT Map node (research_map_objects → o<id>), wired origin → request → tasks,
+        // so it shows on the Map canvas too. Fallback to origin → tasks if the objects table is unavailable.
+        sb.from('research_map_objects').insert({ project_id: props.projectId, created_by: props.authorId, kind: 'note', text: '🗣️ ' + String(req).slice(0, 600) }).select('id').single().then(function (r) {
+          var reqNid = (r && r.data) ? ('o' + r.data.id) : null;
+          if (reqNid) { var e = edgeRows(reqNid, ids); if (originId) e.push({ project_id: props.projectId, edge_key: originId + '|' + reqNid + '|manual', from_id: originId, to_id: reqNid, kind: 'kap', manual: true, updated_at: new Date().toISOString() }); commitEdges(e); }
+          else if (originId) { commitEdges(edgeRows(originId, ids)); }
+        }, function () { if (originId) commitEdges(edgeRows(originId, ids)); });
         setProposed(null);
-        if (window.PRUI) window.PRUI.toast('✓ ' + ((ids && ids.length) || 0) + ' task hozzáadva — becsúszott a protokollba.', { kind: 'success' });
+        if (window.PRUI) window.PRUI.toast('✓ ' + ((ids && ids.length) || 0) + ' task hozzáadva — becsúszott + felkerült a Map-re.', { kind: 'success' });
       });
     }
     function dismissProposed() { setProposed(null); if (window.PRUI) window.PRUI.toast('Javaslat elvetve.', { kind: 'info' }); }
@@ -4892,7 +4897,7 @@
       var srcs = Object.keys(used).map(srcOf);
       var hasProp = !!(proposed && proposed.steps && proposed.steps.length);
       return h('div', { className: 'pcg', ref: graphRef },
-        h('svg', { className: 'pcg-edges' }, edgePaths.map(function (d, i) { return h('path', { key: i, d: d }); })),
+        h('svg', { className: 'pcg-edges' }, edgePaths.map(function (p, i) { return h('path', { key: i, d: p.d, className: p.prop ? 'prop' : '' }); })),
         h('div', { className: 'pcg-cols' },
           h('div', { className: 'pcg-col' },
             h('div', { className: 'pcg-colh' }, 'Források — eredmények · study-k · ötletek · rések'),
