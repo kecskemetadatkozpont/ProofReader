@@ -11,6 +11,9 @@
 //   COST:  supabase secrets set RESEARCH_AI_MODEL=claude-haiku-4-5-20251001   (cheapest; default sonnet)
 //          supabase secrets set RESEARCH_MAX_TOKENS=8192               (output cap per reply; default 4096)
 //          supabase secrets set RESEARCH_HISTORY=12                    (last N messages sent; default 12)
+//    WEB:  native web search is GA (no beta). Per-turn client toggle + per-user entitlement (research_web_search,
+//          migration-106; admins bypass). Tool version is overridable: RESEARCH_WEBSEARCH_TOOL (default
+//          web_search_20250305 = basic/direct), RESEARCH_WEBSEARCH_MAX_USES (default 5). Cost ~$10/1k searches.
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { assertEntitled, resolveModel } from '../_shared/entitlement.ts';
 import { langDirective, loadProjectLang } from '../_shared/lang.ts';
@@ -23,6 +26,11 @@ const MODEL = Deno.env.get('RESEARCH_AI_MODEL') || 'claude-sonnet-4-6';
 const ALLOWED_MODELS = new Set(['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001']);
 const MAX_TOKENS = parseInt(Deno.env.get('RESEARCH_MAX_TOKENS') || '4096', 10);  // long answers were cut at 800 (stop_reason=max_tokens)
 const HISTORY = parseInt(Deno.env.get('RESEARCH_HISTORY') || '12', 10);
+// Web search (GA server-side tool, ~$10/1k searches). Basic `web_search_20250305` calls Anthropic directly
+// (no code-execution provisioning, no allowed_callers gymnastics) → the safest default. Overridable to a newer
+// dated version via the env secret if you want dynamic filtering. Gated per-user (research_web_search) + per-turn.
+const WS_TOOL = Deno.env.get('RESEARCH_WEBSEARCH_TOOL') || 'web_search_20250305';
+const WS_MAX = parseInt(Deno.env.get('RESEARCH_WEBSEARCH_MAX_USES') || '5', 10);   // hard cap on searches per reply (cost ceiling)
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -37,7 +45,7 @@ Deno.serve(async (req) => {
     const useMcp = !!CONSENSUS_TOKEN;
     const auth = req.headers.get('Authorization') || '';
     const sb = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!, { global: { headers: { Authorization: auth } } });
-    const { chat_id, stream: wantStream, effort: reqEffort, think: reqThink } = await req.json().catch(() => ({}));
+    const { chat_id, stream: wantStream, effort: reqEffort, think: reqThink, web: reqWeb } = await req.json().catch(() => ({}));
     if (!chat_id) return json({ error: 'chat_id required' }, 400);
 
     const { data: chat } = await sb.from('research_chats').select('id,project_id').eq('id', chat_id).maybeSingle();
@@ -55,6 +63,10 @@ Deno.serve(async (req) => {
     // per-user model assigned by an admin (profiles.ai_model); fall back to the env default if unset/invalid
     const { data: profRow } = await sb.from('profiles').select('ai_model').eq('id', callerUid).maybeSingle();
     const userModel = await resolveModel(sb);
+    // Web search is a paid server-side tool → require BOTH the per-turn client toggle AND the per-user
+    // entitlement (admins bypass via is_feature_enabled/migration-54). Off unless explicitly requested + granted.
+    let webOn = false;
+    if (reqWeb) { try { const { data: wsOk } = await sb.rpc('is_feature_enabled', { p_key: 'research_web_search' }); webOn = !!wsOk; } catch { webOn = false; } }
 
     const ctx = proj ? `\n\nCurrent project — Title: ${proj.title}; Field: ${proj.field ?? '—'}; Goal: ${proj.goal ?? '—'}; Keywords: ${(proj.keywords ?? []).join(', ')}` : '';
     let rows: any[] = (history || []).filter((m: any) => m.content);
@@ -92,6 +104,10 @@ Deno.serve(async (req) => {
     const sysText = SYSTEM + ctx + langDirective(_lang);
     const body: Record<string, unknown> = { model: userModel, max_tokens: MAX_TOKENS, system: [{ type: 'text', text: sysText, cache_control: { type: 'ephemeral' } }], messages };
     if (useMcp) body.mcp_servers = [{ type: 'url', url: CONSENSUS_MCP_URL, name: 'consensus', authorization_token: CONSENSUS_TOKEN }];
+    // Native web search — Anthropic executes it INSIDE this single call (server-side tool), so no client-side
+    // agentic loop is needed; results stream in as server_tool_use → web_search_tool_result, with web citations
+    // interleaved on the text blocks. Coexists with the Consensus MCP connector (scholarly) when both are on.
+    if (webOn) body.tools = [{ type: WS_TOOL, name: 'web_search', max_uses: WS_MAX }];
     // Optional reasoning controls from the client "válasz-mód": effort (output_config.effort) + adaptive thinking.
     // GATE by model — sending these to a model that doesn't support them 400s the whole reply, so apply only to the
     // new-gen models that accept them; any other model silently ignores the toggle (graceful).
@@ -131,8 +147,8 @@ Deno.serve(async (req) => {
                   const b = JSON.parse(JSON.stringify(ev.content_block || {})); if (b.type === 'text' && b.text == null) b.text = ''; sblocks[ev.index] = b;
                   const bt = b.type;
                   if (bt === 'thinking' || bt === 'redacted_thinking') emitStatus('🧠 Gondolkodik a válaszon…');
-                  else if (bt === 'mcp_tool_use' || bt === 'server_tool_use' || bt === 'tool_use') emitStatus('🔎 Forráskeresés a Consensusban…');
-                  else if (bt === 'mcp_tool_result' || bt === 'tool_result') emitStatus('📚 Találatok feldolgozása…');
+                  else if (bt === 'mcp_tool_use' || bt === 'server_tool_use' || bt === 'tool_use') emitStatus(b.name === 'web_search' ? '🌐 Keresés a weben…' : '🔎 Forráskeresés a Consensusban…');
+                  else if (bt === 'mcp_tool_result' || bt === 'tool_result' || bt === 'web_search_tool_result') emitStatus('📚 Találatok feldolgozása…');
                   else if (bt === 'text') emitStatus('✍️ Válasz megfogalmazása…');
                 }
                 else if (ev.type === 'content_block_delta') {
@@ -149,6 +165,7 @@ Deno.serve(async (req) => {
             const cleanBlocks = sblocks.filter(Boolean);
             let text = cleanBlocks.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
             if (stopReason === 'max_tokens') { controller.enqueue(enc.encode(TRUNC)); text += TRUNC; }
+            else if (stopReason === 'pause_turn') { const P = '\n\n---\n_⚠️ A webkeresés megszakadt (a modell szüneteltette a hosszú keresést). Írd be, hogy **„folytasd”**, és a bot újrapróbálja._'; controller.enqueue(enc.encode(P)); text += P; }
             // persist + evidence — best-effort, never fail the already-delivered stream
             try {
               const { data: saved } = await sb.from('research_messages').insert({ chat_id, role: 'assistant', content: text || '(no text)', blocks: cleanBlocks }).select('id').maybeSingle();
@@ -156,7 +173,7 @@ Deno.serve(async (req) => {
               for (const b of cleanBlocks) {
                 if (b.type === 'mcp_tool_use') lastQuery = typeof b.input === 'object' ? (b.input.query || b.input.q || JSON.stringify(b.input)) : String(b.input);
                 if (b.type === 'mcp_tool_result') { const c = Array.isArray(b.content) ? b.content : [b.content]; for (const item of c) { const snip = item?.text ?? (typeof item === 'string' ? item : JSON.stringify(item)); if (snip) ev2.push({ chat_id, message_id: saved?.id ?? null, query: lastQuery, snippet: String(snip).slice(0, 4000) }); } }
-                if (b.type === 'text' && Array.isArray(b.citations)) { for (const cit of b.citations) { const snip = cit?.cited_text; if (snip) ev2.push({ chat_id, message_id: saved?.id ?? null, query: cit.document_title || null, snippet: String(snip).slice(0, 4000) }); } }   // uploaded-doc citations → evidence (surfaced by the 📄 badge)
+                if (b.type === 'text' && Array.isArray(b.citations)) { for (const cit of b.citations) { const snip = cit?.cited_text; if (snip) { const src = cit.document_title || cit.title || cit.url || null; const withUrl = cit.url ? String(snip).slice(0, 3900) + '\n[' + cit.url + ']' : String(snip).slice(0, 4000); ev2.push({ chat_id, message_id: saved?.id ?? null, query: src, snippet: withUrl }); } } }   // doc + web citations → evidence (surfaced by the 📄 badge; web adds the source URL)
               }
               if (ev2.length) await sb.from('research_evidence').insert(ev2);
             } catch { /* persistence is best-effort here */ }
@@ -175,6 +192,7 @@ Deno.serve(async (req) => {
     let text = blocks.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
     // If the model ran out of output budget, don't leave a silent mid-sentence stop — tell the user.
     if (out.stop_reason === 'max_tokens') text += '\n\n---\n_⚠️ A válasz a hosszkorlát miatt megszakadt. Írd be, hogy **„folytasd"**, és a bot folytatja onnan._';
+    else if (out.stop_reason === 'pause_turn') text += '\n\n---\n_⚠️ A webkeresés megszakadt (a modell szüneteltette a hosszú keresést). Írd be, hogy „folytasd", és a bot újrapróbálja._';
     const { data: saved, error: smErr } = await sb.from('research_messages')
       .insert({ chat_id, role: 'assistant', content: text || '(no text)', blocks }).select('id').maybeSingle();
     if (smErr) return json({ error: 'persist failed: ' + smErr.message }, 403);
@@ -190,11 +208,11 @@ Deno.serve(async (req) => {
           if (snip) ev.push({ chat_id, message_id: saved?.id ?? null, query: lastQuery, snippet: String(snip).slice(0, 4000) });
         }
       }
-      if (b.type === 'text' && Array.isArray(b.citations)) { for (const cit of b.citations) { const snip = cit?.cited_text; if (snip) ev.push({ chat_id, message_id: saved?.id ?? null, query: cit.document_title || null, snippet: String(snip).slice(0, 4000) }); } }   // uploaded-doc citations → evidence
+      if (b.type === 'text' && Array.isArray(b.citations)) { for (const cit of b.citations) { const snip = cit?.cited_text; if (snip) { const src = cit.document_title || cit.title || cit.url || null; const withUrl = cit.url ? String(snip).slice(0, 3900) + '\n[' + cit.url + ']' : String(snip).slice(0, 4000); ev.push({ chat_id, message_id: saved?.id ?? null, query: src, snippet: withUrl }); } } }   // doc + web citations → evidence
     }
     if (ev.length) await sb.from('research_evidence').insert(ev);
 
-    return json({ ok: true, version: 'attach-v4', message_id: saved?.id, evidence: ev.length, mode: useMcp ? 'consensus' : 'plain', model: userModel, usage: out.usage, dbg });
+    return json({ ok: true, version: 'attach-v4', message_id: saved?.id, evidence: ev.length, mode: useMcp ? 'consensus' : (webOn ? 'web' : 'plain'), model: userModel, usage: out.usage, dbg });
   } catch (e) {
     return json({ error: String(e) }, 500);
   }

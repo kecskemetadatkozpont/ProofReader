@@ -1007,6 +1007,8 @@
     var sgB = useState(false), sgBusy = sgB[0], setSgBusy = sgB[1];
     // válasz-mód: mennyit "gondolkodjon" a modell — az effort + thinking API-paraméterek egy intuitív kapcsolóban
     var cmS = useState(function () { try { return localStorage.getItem('pr-chat-mode') || 'balanced'; } catch (e) { return 'balanced'; } }), chatMode = cmS[0], setChatMode = cmS[1];
+    // 🌐 webkeresés kapcsoló — ha be, a kérés `web:true`-t küld; a szerver per-user entitlementtel kapuzza (research_web_search). Perzisztens.
+    var wsS = useState(function () { try { return localStorage.getItem('pr-chat-web') === '1'; } catch (e) { return false; } }), webOn = wsS[0], setWebOn = wsS[1];
     useEffect(function () { return function () { alive.current = false; }; }, []);
     // ---- F1 (migration-92): each user works in their OWN ideas thread; a collaborator rail lets you peek,
     //      read-only + live, into anyone else's thread. Authorship is carried by research_chats.owner_id. ----
@@ -1214,7 +1216,7 @@
         fetch(CFG.supabaseUrl + '/functions/v1/research-chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'apikey': CFG.supabaseAnonKey, 'Authorization': 'Bearer ' + token },
-          body: JSON.stringify({ chat_id: cid, stream: true, effort: mm.effort, think: mm.think })
+          body: JSON.stringify({ chat_id: cid, stream: true, effort: mm.effort, think: mm.think, web: webOn })
         }).then(function (resp) {
           if (!resp.ok || !resp.body || !resp.body.getReader) { setBusy(false); setErr('AI connection pending — deploy the research-chat Edge function and set ANTHROPIC_API_KEY.'); return; }
           var reader = resp.body.getReader(), dec = new TextDecoder(), acc = '';
@@ -1347,6 +1349,7 @@
       (props.canEdit && !peek) ? h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' } },
         h('div', { className: 'chat-mode', role: 'group', 'aria-label': 'Válasz-mód', title: 'Válasz-mód — mennyit gondolkodjon a modell egy válaszra (Claude „effort” + „thinking”). Mély: több gondolkodás, jobb, de lassabb/drágább.' },
           CHAT_MODE_META.map(function (md) { return h('button', { key: md.id, className: chatMode === md.id ? 'on' : '', 'aria-pressed': chatMode === md.id, disabled: busy, onClick: function () { setChatMode(md.id); try { localStorage.setItem('pr-chat-mode', md.id); } catch (e) { } } }, md.ic + ' ' + md.lab); })),
+        h('button', { className: 'btn', 'aria-pressed': webOn, disabled: busy, style: { padding: '4px 10px', fontSize: 12, borderColor: webOn ? 'var(--accent)' : undefined, color: webOn ? 'var(--accent)' : undefined, fontWeight: webOn ? 700 : undefined }, title: 'Webkeresés — ha bekapcsolod, a Publify valós idejű internetes forrásokból is meríthet és idézi őket (a modell dönti el, mikor keres). Költséges művelet, ezért kapcsolható; jogosultsághoz kötött.', onClick: function () { setWebOn(function (v) { var n = !v; try { localStorage.setItem('pr-chat-web', n ? '1' : '0'); } catch (e) { } return n; }); } }, webOn ? '🌐 Web: be' : '🌐 Web: ki'),
         h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12 }, disabled: sgBusy || !msgs.length, title: 'Suggests ideas for the Ideas list from the current conversation (manually, not continuously)', onClick: suggestIdeas }, sgBusy ? '💡 Generating…' : '💡 Generate ideas from the conversation'),
         sgMsg ? h('span', { style: { fontSize: 12, color: 'var(--muted)' } }, sgMsg) : null
       ) : null,
