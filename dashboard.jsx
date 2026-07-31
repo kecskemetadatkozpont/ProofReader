@@ -45,6 +45,14 @@ function useNotifications(uid) {
   // everyone's notifications — and in admin "view as" preview they'd be misattributed to the target.
   const load = useCallback(() => { if (!sb || !uid) { setNotes([]); return; } sb.from('notifications').select('id,kind,payload,read_at,created_at').eq('recipient_id', uid).order('created_at', { ascending: false }).limit(40).then((r) => setNotes((r && r.data) || [])); }, [uid]);
   useEffect(() => { load(); }, [load]);
+  // Live: a new invitation (or any notification) lands in the bell without a reload; also sync read_at across tabs.
+  useEffect(() => {
+    const BE = window.PR_BACKEND; if (!BE || !BE.subscribeNotifications || !uid) return;
+    return BE.subscribeNotifications(uid, {
+      insert: (n) => setNotes((l) => l.some((x) => x.id === n.id) ? l : [n, ...l]),
+      update: (n) => setNotes((l) => l.map((x) => x.id === n.id ? { ...x, ...n } : x))
+    });
+  }, [uid]);
   const markRead = (n) => { if (!n || n.read_at || !sb) return; sb.from('notifications').update({ read_at: new Date().toISOString() }).eq('id', n.id).then(() => setNotes((l) => l.map((x) => x.id === n.id ? { ...x, read_at: 'now' } : x))); };
   const markAll = () => { const ids = notes.filter((n) => !n.read_at).map((n) => n.id); if (!ids.length || !sb) return; sb.from('notifications').update({ read_at: new Date().toISOString() }).in('id', ids).then(load); };
   const unread = notes.filter((n) => !n.read_at).length;

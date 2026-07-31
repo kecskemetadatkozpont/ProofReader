@@ -122,6 +122,23 @@
       return sb.rpc('pr_search_users', { q: q })
         .then(function (r) { return ((r && r.data) || []).map(function (row) { var u = { id: row.id, name: row.name, avatar: row.avatar_url, color: colorFor(row.id), plan: 'free' }; PROFILES[u.id] = u; return u; }); })
         .catch(function () { return []; });
+    },
+    // Live notifications: subscribe to INSERT/UPDATE on the caller's OWN notification rows so a new
+    // project invitation (or any notification) lands in the bell without a page reload. RLS scopes
+    // delivery to recipient_id = auth.uid(); the recipient filter also keeps admins from being flooded.
+    // Cloud only + requires the `notifications` table in the supabase_realtime publication (migration-105).
+    // handlers = { insert(row), update(row) }. Returns an unsubscribe function (safe no-op when unavailable).
+    subscribeNotifications: function (uid, handlers) {
+      handlers = handlers || {};
+      if (mode !== 'cloud' || !sb || !uid) return function () { };
+      var ch;
+      try {
+        ch = sb.channel('notif:' + uid)
+          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: 'recipient_id=eq.' + uid }, function (p) { if (handlers.insert && p && p.new) handlers.insert(p.new); })
+          .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'notifications', filter: 'recipient_id=eq.' + uid }, function (p) { if (handlers.update && p && p.new) handlers.update(p.new); })
+          .subscribe();
+      } catch (e) { return function () { }; }
+      return function () { try { sb.removeChannel(ch); } catch (e) { } };
     }
   };
 
