@@ -34,6 +34,7 @@
       + '#pr-ob .who b{font-size:14px;display:block} #pr-ob .who span{font-size:12.5px;color:var(--muted)}'
       + '#pr-ob label{display:block;font-size:12.5px;font-weight:700;color:var(--ink);margin:0 0 6px}'
       + '#pr-ob .opt{font-weight:500;color:var(--muted)}'
+      + '#pr-ob .req{font-weight:600;color:var(--danger,#d92d20)}'
       + '#pr-ob .field{margin-bottom:16px;position:relative}'
       + '#pr-ob input{width:100%;height:42px;border:1px solid #d9dce3;border-radius:10px;padding:0 13px;font-family:inherit;font-size:14px;color:var(--ink);background:var(--surface)}'
       + '#pr-ob input:focus{outline:none;border-color:#4f46e5;box-shadow:0 0 0 3px rgba(79,70,229,.14)}'
@@ -94,7 +95,7 @@
       + '<p class="sub">' + (me.affiliation ? 'We’ve pre-filled the details we have for you — please review them and submit for approval.' : 'Publify is free for academic research. Tell us where you work so an administrator can approve your account.') + '</p>'
       + whoBlock()
       + '<div class="field">'
-      + '  <label for="ob-aff">University / institution</label>'
+      + '  <label for="ob-aff">University / institution <span class="req">*</span> <span class="opt">— required</span></label>'
       + '  <input id="ob-aff" autocomplete="off" placeholder="Start typing to search…" />'
       + '  <div class="menu" id="ob-menu"></div>'
       + '  <div class="err" id="ob-aff-err">Please select or enter your institution.</div>'
