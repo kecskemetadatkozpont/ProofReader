@@ -4391,6 +4391,11 @@
     var onS = useState({}), onlineUsers = onS[0], setOnlineUsers = onS[1];   // presence: id → true (who's on the Protocol page now)
     var cvS = useState('dash'), cview = cvS[0], setCview = cvS[1];           // A redesign: top-level view tab — dash | tasks | result | runner
     var dkS = useState(false), dockOpen = dkS[0], setDockOpen = dkS[1];      // co-pilot chat dock open?
+    // A provenance graph (phase 1): shared with the Map — node IDs (r<step>/i<idea|gap>/e<job>) + research_map_edges
+    var meS = useState([]), mapEdges = meS[0], setMapEdges = meS[1];         // research_map_edges (provenance to steps)
+    var epS = useState([]), edgePaths = epS[0], setEdgePaths = epS[1];       // computed SVG edge <path d> strings
+    var gtkS = useState(0), setGraphTick = gtkS[1];                          // resize/relayout → recompute edges
+    var graphRef = useRef(null);
     var lkoS = useState(false), linkOpen = lkoS[0], setLinkOpen = lkoS[1];
     var lkuS = useState(''), linkUrl = lkuS[0], setLinkUrl = lkuS[1];
     var pcmS = useState([]), pcMsgs = pcmS[0], setPcMsgs = pcmS[1];   // protocol-wide chat (ephemeral)
@@ -4541,6 +4546,34 @@
     }, [props.projectId, prot && prot.id]);
     // fallback: a light poll so a collaborator's chat-created tasks appear within ~12s even before migration-103 (realtime publication) is applied
     useEffect(function () { if (!prot) return; var t = setInterval(function () { load(); }, 12000); return function () { clearInterval(t); }; }, [prot && prot.id]);
+    // provenance graph (phase 1): load the edges that point to steps from research_map_edges — the SAME table the Map uses
+    useEffect(function () {
+      if (!props.projectId) return;
+      sb.from('research_map_edges').select('from_id,to_id').eq('project_id', props.projectId).then(function (r) { setMapEdges(((r && r.data) || []).filter(function (e) { return e.to_id && String(e.to_id).charAt(0) === 'r'; })); }, function () { });
+    }, [props.projectId, prot && prot.id, steps.length]);
+    // recompute SVG edge paths when the graph view is visible (source-card right → task-card left, cubic curve)
+    useEffect(function () {
+      if (cview !== 'graph') return;
+      function compute() {
+        var root = graphRef.current; if (!root) return;
+        var cr = root.getBoundingClientRect(), out = [];
+        root.querySelectorAll('.pcg-task[data-src]').forEach(function (t) {
+          var sid = t.getAttribute('data-src'); if (!sid) return;
+          var s = root.querySelector('.pcg-src[data-nid="' + sid + '"]'); if (!s) return;
+          var sr = s.getBoundingClientRect(), tr = t.getBoundingClientRect();
+          var x1 = sr.right - cr.left, y1 = sr.top + sr.height / 2 - cr.top;
+          var x2 = tr.left - cr.left, y2 = tr.top + tr.height / 2 - cr.top;
+          if (x2 < x1 + 10) { x1 = sr.left - cr.left; x2 = tr.right - cr.left; }   // wrapped (narrow) — connect nearest edges
+          var mx = (x1 + x2) / 2;
+          out.push('M' + x1 + ' ' + y1 + ' C' + mx + ' ' + y1 + ' ' + mx + ' ' + y2 + ' ' + x2 + ' ' + y2);
+        });
+        setEdgePaths(out);
+      }
+      var raf = requestAnimationFrame(function () { requestAnimationFrame(compute); });
+      function onR() { setGraphTick(function (x) { return x + 1; }); }
+      window.addEventListener('resize', onR);
+      return function () { cancelAnimationFrame(raf); window.removeEventListener('resize', onR); };
+    }, [cview, steps.length, mapEdges.length, gtkS[0]]);
     function generate() {
       if (busy) return; setBusy(true);
       sb.functions.invoke('research-protocol', { body: { action: 'generate', project_id: props.projectId, goal: goal } }).then(function (r) {
@@ -4821,6 +4854,40 @@
           h('button', { className: 'btn', title: 'Teljes formázott riport', onClick: function () { setRvMd(buildFullReport()); } }, '📄 Teljes riport')) : h('div', { className: 'muted', style: { fontSize: 12 } }, 'Csak olvasható nézet.'));
     }
 
+    // A provenance graph (phase 1): sources (results/studies/ideas/gaps) left, tasks (steps) right, SVG provenance edges.
+    // Shared with the Map: node IDs (i<idea|gap>/e<job>/r<step>) + research_map_edges. Per-task edge from research_map_edges → step,
+    // else the protocol's origin (prot.idea_id). Clicking a task jumps to the Feladatok list.
+    function protocolGraph() {
+      var byStep = {}; (mapEdges || []).forEach(function (e) { byStep[e.to_id] = e.from_id; });
+      var originId = prot && prot.idea_id ? ('i' + prot.idea_id) : null;
+      var ideaByNid = {}; (props.ideas || []).forEach(function (i) { ideaByNid['i' + i.id] = i; });
+      var jobByNid = {}; (srJobs || []).forEach(function (j) { jobByNid['e' + j.id] = j; });
+      var used = {}; steps.forEach(function (s) { var src = byStep['r' + s.id] || originId; if (src) used[src] = 1; });
+      function srcOf(nid) {
+        var idea = ideaByNid[nid]; if (idea) { var g = idea.source === 'gap'; return { nid: nid, cls: g ? 'gap' : 'idea', nt: (g ? '🕳️ Kutatási rés' : '💡 Ötlet'), title: idea.question || (g ? 'Rés' : 'Ötlet'), sum: idea.hypothesis || (idea.novelty != null ? 'Újdonság ' + idea.novelty + ' / 100' : '') }; }
+        var job = jobByNid[nid]; if (job) { return { nid: nid, cls: 'result', nt: '🔬 Szisztematikus review', title: job.result_title || job.research_question || 'Review', sum: job.status === 'completed' ? '✓ kész' : job.status }; }
+        return { nid: nid, cls: 'result', nt: '🔗 Forrás', title: nid, sum: '' };
+      }
+      var srcs = Object.keys(used).map(srcOf);
+      return h('div', { className: 'pcg', ref: graphRef },
+        h('svg', { className: 'pcg-edges' }, edgePaths.map(function (d, i) { return h('path', { key: i, d: d }); })),
+        h('div', { className: 'pcg-cols' },
+          h('div', { className: 'pcg-col' },
+            h('div', { className: 'pcg-colh' }, 'Források — eredmények · study-k · ötletek · rések'),
+            srcs.length ? h('div', { className: 'pcg-stack' }, srcs.map(function (s) {
+              return h('div', { key: s.nid, className: 'pcg-src ' + s.cls, 'data-nid': s.nid }, h('span', { className: 'pcg-nt' }, s.nt), h('div', { className: 'pcg-ttl' }, s.title), s.sum ? h('div', { className: 'pcg-sum' }, s.sum) : null);
+            })) : h('div', { className: 'muted', style: { fontSize: 12, padding: '8px 2px' } }, 'Nincs forrás — a protokoll még nincs ötlethez/réshez kötve.')),
+          h('div', { className: 'pcg-col' },
+            h('div', { className: 'pcg-colh' }, 'Taskok — protokoll-lépések'),
+            steps.length ? h('div', { className: 'pcg-stack' }, steps.map(function (s) {
+              var src = byStep['r' + s.id] || originId; var sx = s.spec || {};
+              return h('div', { key: s.id, className: 'pcg-task' + (s.status === 'done' ? ' done' : (s.status === 'running' ? ' run' : '')), 'data-tid': 'r' + s.id, 'data-src': src || '', title: 'Ugrás a Feladatok listára', onClick: function () { setCview('tasks'); } },
+                h('span', { className: 'pcg-kind' }, s.kind || 'custom'), h('div', { className: 'pcg-ttl' }, s.title),
+                sx.instruction ? h('div', { className: 'pcg-sum' }, String(sx.instruction).slice(0, 90)) : null,
+                h('div', { className: 'pcg-foot' }, (PST[s.status] || PST.todo)[1] + (s.needs_approval && s.status === 'todo' ? ' · ⏸ jóváhagyás' : '')));
+            })) : h('div', { className: 'empty', style: { padding: '24px 16px' } }, 'Nincs task — generálj a co-pilottal (💬), és itt megjelenik a forrásához kötve.'))));
+    }
+
     if (loading) return h('div', { className: 'empty' }, tr(props.lang, 'Loading protocol…'));
 
     if (!prot) return h('div', null, cockpitDashboard(), cockpitChat(), h('div', { className: 'panel' },
@@ -5031,6 +5098,7 @@
           cmdPrimary())),
       h('div', { className: 'pcpit-tabs2' },
         cmdTab('dash', '📊 Áttekintés'),
+        cmdTab('graph', '🔗 Gráf'),
         cmdTab('tasks', '📋 Feladatok', steps.length),
         cmdTab('result', '📄 Eredmény'),
         cmdTab('runner', '⚙ Futtató')),
@@ -5038,6 +5106,7 @@
         h('div', { className: 'pcpit-body-main' },
           busy ? h('div', { style: { marginBottom: 10 } }, h(AiThinking, { label: 'The AI is working on this protocol' })) : null,
           cview === 'dash' ? cockpitDashboard() : null,
+          cview === 'graph' ? protocolGraph() : null,
           cview === 'tasks' ? execDashboard() : null,
           cview === 'result' ? (hasResults ? renderOverview() : h('div', { className: 'panel' }, h('div', { className: 'empty', style: { padding: '30px 16px' } }, 'Még nincs eredmény — futtasd a protokoll-lépéseket a „⚙ Futtató" fülről, majd itt jelenik meg a verdikt + a riport.'))) : null,
           cview === 'runner' ? runnerPanel() : null),
