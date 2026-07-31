@@ -4389,6 +4389,8 @@
     var cinS = useState(''), chatInput = cinS[0], setChatInput = cinS[1];
     var cbzS = useState(false), chatBusy = cbzS[0], setChatBusy = cbzS[1];
     var onS = useState({}), onlineUsers = onS[0], setOnlineUsers = onS[1];   // presence: id → true (who's on the Protocol page now)
+    var cvS = useState('dash'), cview = cvS[0], setCview = cvS[1];           // A redesign: top-level view tab — dash | tasks | result | runner
+    var dkS = useState(false), dockOpen = dkS[0], setDockOpen = dkS[1];      // co-pilot chat dock open?
     var lkoS = useState(false), linkOpen = lkoS[0], setLinkOpen = lkoS[1];
     var lkuS = useState(''), linkUrl = lkuS[0], setLinkUrl = lkuS[1];
     var pcmS = useState([]), pcMsgs = pcmS[0], setPcMsgs = pcmS[1];   // protocol-wide chat (ephemeral)
@@ -4732,10 +4734,7 @@
       function leg(col, lab) { return h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 5 } }, h('i', { style: { width: 9, height: 9, borderRadius: 2, background: col, display: 'inline-block' } }), lab); }
       var topGaps = gaps.slice().sort(function (a, b) { return (b.novelty || 0) - (a.novelty || 0); }).slice(0, 4);
       return h('div', null,
-        h('div', { className: 'pcpit-hd' }, '🧭 Projekt-áttekintés ', h('span', { className: 'sub' }, '· a kutatás jelenlegi állapota egy helyen'),
-          (function () { var oids = Object.keys(onlineUsers || {}); if (!oids.length) return null; return h('span', { style: { marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4 } },
-            oids.slice(0, 5).map(function (id, i) { var pf = contribMap[id] || {}; var nm = pf.name || 'Kutató'; var col = pf.color || ['#3a5bd9', '#0e8a6a', '#c67912', '#a23a86'][i % 4]; var ini = (nm[0] || '?').toUpperCase() + ((nm.split(' ')[1] || '')[0] || '').toUpperCase(); return h('span', { key: id, title: nm + (id === props.authorId ? ' (te)' : ''), style: { width: 22, height: 22, borderRadius: '50%', background: col, color: '#fff', fontSize: 9, fontWeight: 750, display: 'grid', placeItems: 'center', marginLeft: i ? -6 : 0, border: '2px solid var(--surface)' } }, ini); }),
-            h('span', { style: { fontSize: 11, color: 'var(--faint)', marginLeft: 6, fontWeight: 500 } }, '🟢 ' + oids.length + ' online')); })()),
+        h('div', { className: 'pcpit-hd' }, '🧭 Projekt-áttekintés ', h('span', { className: 'sub' }, '· a kutatás jelenlegi állapota egy helyen')),
         h('div', { className: 'pcpit' },
           h('div', { className: 'pcpit-card', style: { gridColumn: 'span 8' } },
             h('h4', null, '🔬 Eddigi eredmények', h('span', { className: 'c' }, (doneStudies.length + doneSR.length) + ' study · ' + doneSteps.length + '/' + steps.length + ' lépés')),
@@ -4777,7 +4776,7 @@
     function cockpitChat() {
       if (!ce) return null;
       return h('div', { className: 'pcpit-chat' },
-        h('div', { className: 'pcpit-chat-h' }, '💬 Protokoll-építő chat ', h('span', { style: { fontWeight: 500, color: 'var(--faint)', fontSize: 11.5 } }, '· ismeri a fenti állapotot — a taskok a táblára kerülnek')),
+        h('div', { className: 'pcpit-chat-h' }, '💬 Protokoll-építő co-pilot ', h('span', { style: { fontWeight: 500, color: 'var(--faint)', fontSize: 11.5 } }, '· ismeri az állapotot'), h('button', { style: { marginLeft: 'auto', border: 'none', background: 'none', color: 'var(--faint)', cursor: 'pointer', fontSize: 14, fontFamily: 'inherit', lineHeight: 1 }, title: 'Bezárás', onClick: function () { setDockOpen(false); } }, '✕')),
         chatMsgs.length
           ? h('div', { className: 'pcpit-msgs' }, chatMsgs.map(function (m, i) {
               return h('div', { key: i, className: 'pcpit-msg ' + (m.role === 'me' ? 'me' : 'ai') },
@@ -4793,6 +4792,33 @@
           h('div', { className: 'pcpit-inbox' },
             h('input', { className: 'field', value: chatInput, disabled: chatBusy, placeholder: 'Írd le, mit vizsgáljunk / módosítsunk…', onChange: function (e) { setChatInput(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter') sendChat(chatInput); } }),
             h('button', { className: 'btn pri', disabled: chatBusy || !chatInput.trim(), onClick: function () { sendChat(chatInput); } }, chatBusy ? '…' : 'Küldés'))));
+    }
+
+    // ---- A redesign helpers: command-header stat/tab, the primary action, and the runner-settings tab ----
+    function cmdStat(v, lab) { return h('span', { className: 'pcpit-stat' }, h('b', null, String(v)), h('small', null, lab)); }
+    function cmdTab(id, label, count) { return h('button', { className: 'pcpit-tab2' + (cview === id ? ' on' : ''), onClick: function () { setCview(id); } }, label, (count != null) ? h('span', { className: 'pcpit-tab2-c' }, count) : null); }
+    function cmdPrimary() {
+      if (!ce || !prot) return null;
+      if (prot.status === 'draft' || prot.status === 'paused') return h('button', { className: 'btn pri', style: { padding: '6px 12px', fontSize: 12 }, onClick: function () { setPStatus('ready'); } }, '▶ Futtatás');
+      if (prot.status === 'done' || prot.status === 'failed') return h('button', { className: 'btn pri', style: { padding: '6px 12px', fontSize: 12 }, onClick: function () { setPStatus('ready'); } }, '▶ Újra');
+      if (prot.status === 'ready' || prot.status === 'running') return h('button', { className: 'btn', style: { padding: '6px 12px', fontSize: 12 }, onClick: function () { setPStatus('paused'); } }, '⏸ Szünet');
+      return null;
+    }
+    function runnerPanel() {
+      var al = prot && prot.heartbeat_at && (Date.now() - new Date(prot.heartbeat_at).getTime() < 30000);
+      return h('div', { className: 'panel' },
+        h('h3', { style: { marginTop: 0 } }, '⚙ Futtató (dedikált gép)'),
+        prot.goal ? h('div', { style: { fontSize: 12.5, color: 'var(--muted)', marginBottom: 10 } }, '🎯 ' + prot.goal) : null,
+        h('div', { style: { fontSize: 12.5, color: 'var(--muted)', marginBottom: 12 } }, al ? h('span', { style: { color: 'var(--ok)' } }, '● runner aktív · heartbeat < 30 mp') : (prot.status === 'ready' ? 'runner-re vár, hogy átvegye…' : 'nincs aktív runner')),
+        ce ? h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 } },
+          h('input', { className: 'field', style: { flex: 1, minWidth: 140 }, placeholder: 'Runner ID (dedikált gép)', defaultValue: prot.runner_id || '', onBlur: function (e) { setProtField('runner_id', e.target.value || null); } }),
+          h('input', { className: 'field', style: { flex: 2, minWidth: 180 }, placeholder: 'Repo URL (git)', defaultValue: (prot.repo && prot.repo.url) || '', onBlur: function (e) { setProtField('repo', Object.assign({}, prot.repo || {}, { url: e.target.value })); } })) : null,
+        ce ? h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap' } },
+          (prot.status === 'draft' || prot.status === 'paused') ? h('button', { className: 'btn pri', onClick: function () { setPStatus('ready'); } }, '▶ Ready → futtatás') : null,
+          (prot.status === 'done' || prot.status === 'failed') ? h('button', { className: 'btn pri', onClick: function () { setPStatus('ready'); } }, '▶ Újranyitás & futtatás') : null,
+          (prot.status === 'ready' || prot.status === 'running') ? h('button', { className: 'btn', onClick: function () { setPStatus('paused'); } }, '⏸ Szünet') : null,
+          h('button', { className: 'btn', disabled: busy, onClick: generate }, busy ? '✨…' : '↻ Protokoll újragenerálása'),
+          h('button', { className: 'btn', title: 'Teljes formázott riport', onClick: function () { setRvMd(buildFullReport()); } }, '📄 Teljes riport')) : h('div', { className: 'muted', style: { fontSize: 12 } }, 'Csak olvasható nézet.'));
     }
 
     if (loading) return h('div', { className: 'empty' }, tr(props.lang, 'Loading protocol…'));
@@ -4823,6 +4849,10 @@
     var pct = steps.length ? Math.round(done / steps.length * 100) : 0;
     var alive = prot.heartbeat_at && (Date.now() - new Date(prot.heartbeat_at).getTime() < 30000);
     var hasResults = steps.some(function (s) { return s.result && (s.result.report || s.result.summary); });
+    // A redesign: command-header key stats
+    var openGapsCount = (props.ideas || []).filter(function (i) { return i.source === 'gap' && i.status !== 'rejected' && !i.addressed_by_idea_id; }).length;
+    var studiesCount = (props.studies || []).length + (srJobs || []).length;
+    var incCount = (props.sources || []).filter(function (s) { return s.screening === 'include' || s.screening === 'included'; }).length;
     var stt = protStats();
     // ---- Overview: verdict + status matrix + deliverables + the full report rendered inline ----
     function renderOverview() {
@@ -4991,37 +5021,28 @@
       );
     }
     return h('div', null,
-      cockpitDashboard(),
-      cockpitChat(),
-      h('div', { className: 'panel' },
-        h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
-          h('h3', { style: { margin: 0, flex: 1, minWidth: 160 } }, '🧪 ', prot.title),
-          h('span', { className: 'chip ' + (PROT_CHIP[prot.status] || 'c-grey') }, prot.status),
-          steps.some(function (s) { return s.result && (s.result.report || s.result.summary); }) ? h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12, flex: 'none' }, title: 'Open the full formatted result report', onClick: function () { setRvMd(buildFullReport()); } }, '📄 Report') : null,
-          ce ? h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12, flex: 'none' }, disabled: busy, title: 'Re-generate (archives the current one)', onClick: generate }, busy ? '✨…' : '↻ Re-generate') : null,
-          (ce && (prot.status === 'draft' || prot.status === 'paused')) ? h('button', { className: 'btn pri', style: { padding: '4px 10px', fontSize: 12, flex: 'none' }, title: 'Make it claimable by your dedicated runner', onClick: function () { setPStatus('ready'); } }, '▶ Mark ready') : null,
-          (ce && (prot.status === 'done' || prot.status === 'failed')) ? h('button', { className: 'btn pri', style: { padding: '4px 10px', fontSize: 12, flex: 'none' }, title: 'Re-open this protocol so the runner picks up newly added tasks', onClick: function () { setPStatus('ready'); } }, '▶ Re-open & run') : null,
-          (ce && (prot.status === 'ready' || prot.status === 'running')) ? h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12, flex: 'none' }, onClick: function () { setPStatus('paused'); } }, '⏸ Pause') : null
-        ),
-        prot.goal ? h('div', { style: { fontSize: 12.5, color: 'var(--muted)', marginTop: 4 } }, prot.goal) : null,
-        h('div', { className: 'meter', style: { marginTop: 10 } }, h('i', { style: { width: pct + '%' } })),
-        h('div', { style: { display: 'flex', gap: 12, fontSize: 11.5, color: 'var(--muted)', marginTop: 4 } },
-          h('span', null, done + '/' + steps.length + ' done · ' + pct + '%'),
-          alive ? h('span', { style: { color: 'var(--ok)' } }, '● runner active') : (prot.status === 'ready' ? h('span', null, 'waiting for a runner to claim it…') : null)),
-        ce ? h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 } },
-          h('input', { className: 'field', style: { flex: 1, minWidth: 140 }, placeholder: 'Runner ID (dedicated machine)', defaultValue: prot.runner_id || '', onBlur: function (e) { setProtField('runner_id', e.target.value || null); } }),
-          h('input', { className: 'field', style: { flex: 2, minWidth: 180 }, placeholder: 'Repo URL (git)', defaultValue: (prot.repo && prot.repo.url) || '', onBlur: function (e) { setProtField('repo', Object.assign({}, prot.repo || {}, { url: e.target.value })); } })
-        ) : null,
-        busy ? h('div', { style: { marginTop: 10 } }, h(AiThinking, { label: 'The AI is working on this protocol' })) : null,
-        hasResults ? h('div', { className: 'ptabs' },
-          h('button', { className: 'ptab' + (pview === 'overview' ? ' on' : ''), onClick: function () { setPview('overview'); } }, 'Overview'),
-          h('button', { className: 'ptab' + (pview === 'steps' ? ' on' : ''), onClick: function () { setPview('steps'); } }, 'Tasks & results', h('span', { className: 'ptab-c' }, steps.length)),
-          h('button', { className: 'ptab' + (pview === 'board' ? ' on' : ''), onClick: function () { setPview('board'); } }, '🗂️ Board')
-        ) : null
-      ),
-      (hasResults && pview === 'overview') ? renderOverview() : null,
-      (hasResults && pview === 'board') ? renderBoard() : null,
-      (nd() && (!hasResults || pview === 'steps')) ? execDashboard() : null,
+      // ── A redesign: command header (always visible) + view tabs + routed body + co-pilot dock ──
+      h('div', { className: 'pcpit-cmd' },
+        h('span', { className: 'pcpit-cmd-t' }, '🧪 ', prot.title, h('span', { className: 'chip ' + (PROT_CHIP[prot.status] || 'c-grey'), style: { marginLeft: 8, flex: 'none' } }, prot.status)),
+        h('span', { className: 'pcpit-cmd-stats' }, cmdStat(done + '/' + steps.length, 'lépés'), cmdStat(openGapsCount, 'nyitott rés'), cmdStat(studiesCount, 'study'), cmdStat(incCount, 'included')),
+        h('span', { className: 'pcpit-cmd-r' },
+          (function () { var oids = Object.keys(onlineUsers || {}); if (!oids.length) return null; return h('span', { style: { display: 'inline-flex', alignItems: 'center', marginRight: 4 } }, oids.slice(0, 4).map(function (id, i) { var pf = contribMap[id] || {}; var nm = pf.name || 'Kutató'; var col = pf.color || ['#3a5bd9', '#0e8a6a', '#c67912', '#a23a86'][i % 4]; return h('span', { key: id, title: nm + (id === props.authorId ? ' (te)' : ''), style: { width: 22, height: 22, borderRadius: '50%', background: col, color: '#fff', fontSize: 9, fontWeight: 750, display: 'grid', placeItems: 'center', marginLeft: i ? -6 : 0, border: '2px solid var(--surface)' } }, (nm[0] || '?').toUpperCase()); })); })(),
+          ce ? h('button', { className: 'btn' + (dockOpen ? ' pri' : ''), style: { padding: '6px 11px', fontSize: 12 }, onClick: function () { setDockOpen(!dockOpen); } }, '💬 Co-pilot') : null,
+          cmdPrimary())),
+      h('div', { className: 'pcpit-tabs2' },
+        cmdTab('dash', '📊 Áttekintés'),
+        cmdTab('tasks', '📋 Feladatok', steps.length),
+        cmdTab('result', '📄 Eredmény'),
+        cmdTab('runner', '⚙ Futtató')),
+      h('div', { className: 'pcpit-body' + (dockOpen ? ' with-dock' : '') },
+        h('div', { className: 'pcpit-body-main' },
+          busy ? h('div', { style: { marginBottom: 10 } }, h(AiThinking, { label: 'The AI is working on this protocol' })) : null,
+          cview === 'dash' ? cockpitDashboard() : null,
+          cview === 'tasks' ? execDashboard() : null,
+          cview === 'result' ? (hasResults ? renderOverview() : h('div', { className: 'panel' }, h('div', { className: 'empty', style: { padding: '30px 16px' } }, 'Még nincs eredmény — futtasd a protokoll-lépéseket a „⚙ Futtató" fülről, majd itt jelenik meg a verdikt + a riport.'))) : null,
+          cview === 'runner' ? runnerPanel() : null),
+        dockOpen ? h('div', { className: 'pcpit-body-dock' }, cockpitChat()) : null),
+      (!nd() && (!hasResults || pview === 'steps')) ? execDashboard() : null,
       (!nd() && (!hasResults || pview === 'steps')) ? h('div', { className: 'panel' },
         h('h3', null, 'Steps (' + steps.length + ')', ce ? h('span', { style: { marginLeft: 10, fontSize: 10.5, color: 'var(--faint)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 } }, '⤓ drop files on a task to attach') : null, ce ? h('button', { className: 'btn', style: { marginLeft: 'auto', padding: '3px 9px', fontSize: 11.5, flex: 'none' }, onClick: function () { setEditing({ step: {}, isNew: true, after: null }); } }, '+ Add task') : null),
         steps.length ? steps.map(function (s, i) {
