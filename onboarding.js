@@ -76,6 +76,8 @@
   function unmount() { var d = document.getElementById('pr-ob'); if (d) d.remove(); }
   function whoBlock() { return '<div class="who">' + avatar() + '<div><b>' + esc(me.name || 'You') + '</b><span>' + esc(me.email || '') + '</span></div></div>'; }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  // diacritic-insensitive fold so "eotvos" matches "Eötvös", "pecs" → "Pécs", etc. (Hungarian users often type without accents)
+  function norm(s) { try { return String(s == null ? '' : s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, ''); } catch (e) { return String(s == null ? '' : s).toLowerCase(); } }
   function signOutBtn() {
     var b = document.getElementById('pr-ob-signout');
     if (b) b.onclick = function () { BE.signOut(); };
@@ -129,10 +131,11 @@
     var aff = document.getElementById('ob-aff'), menu = document.getElementById('ob-menu');
     var affErr = document.getElementById('ob-aff-err');
     function render(q) {
-      var ql = q.trim().toLowerCase();
-      var list = ql ? UNIS.filter(function (u) { return u.toLowerCase().indexOf(ql) >= 0; }).slice(0, 8) : UNIS.slice(0, 8);
+      var POOL = (window.PR_UNIVERSITIES && window.PR_UNIVERSITIES.length) ? window.PR_UNIVERSITIES : UNIS;   // read at call-time so a late/missing universities.js can't leave the list empty
+      var ql = norm(q.trim());
+      var list = ql ? POOL.filter(function (u) { return norm(u).indexOf(ql) >= 0; }).slice(0, 8) : POOL.slice(0, 8);
       var h = list.map(function (u) { return '<div class="it" data-v="' + esc(u) + '">' + esc(u) + '</div>'; }).join('');
-      if (ql && !UNIS.some(function (u) { return u.toLowerCase() === ql; })) {
+      if (ql && !POOL.some(function (u) { return norm(u) === ql; })) {
         h += '<div class="it add" data-v="' + esc(q.trim()) + '">Use “' + esc(q.trim()) + '”</div>';
       }
       menu.innerHTML = h; menu.classList.toggle('on', !!h);
@@ -153,8 +156,8 @@
     function ccClear() { delete ccIn.dataset.code; delete ccIn.dataset.name; }
     function syncCC() { if (isJnu(aff.value)) { ccField.style.display = ''; } else { ccField.style.display = 'none'; ccIn.value = ''; ccClear(); ccMenu.classList.remove('on'); ccErr.classList.remove('on'); ccIn.classList.remove('bad'); } }
     function ccRender(q) {
-      var ql = q.trim().toLowerCase();
-      var list = ql ? CC.filter(function (x) { return x.n.toLowerCase().indexOf(ql) >= 0 || x.c.toLowerCase().indexOf(ql) >= 0; }).slice(0, 12) : CC.slice(0, 12);
+      var ql = norm(q.trim());
+      var list = ql ? CC.filter(function (x) { return norm(x.n).indexOf(ql) >= 0 || norm(x.c).indexOf(ql) >= 0; }).slice(0, 12) : CC.slice(0, 12);
       ccMenu.innerHTML = list.map(function (x) { return '<div class="it" data-c="' + esc(x.c) + '" data-n="' + esc(x.n) + '">' + esc(x.n) + '<span class="opt"> · ' + esc(x.c) + (x.a ? ' · ' + esc(x.a) : '') + '</span></div>'; }).join('');
       ccMenu.classList.toggle('on', !!ccMenu.innerHTML);
     }
