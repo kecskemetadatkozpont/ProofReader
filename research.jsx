@@ -4396,6 +4396,7 @@
     var epS = useState([]), edgePaths = epS[0], setEdgePaths = epS[1];       // computed SVG edge <path d> strings
     var gtkS = useState(0), setGraphTick = gtkS[1];                          // resize/relayout → recompute edges
     var graphRef = useRef(null);
+    var ppS = useState(null), proposed = ppS[0], setProposed = ppS[1];      // pending chat-proposed tasks {steps, request} → shown as animated proposed cards in the graph
     var lkoS = useState(false), linkOpen = lkoS[0], setLinkOpen = lkoS[1];
     var lkuS = useState(''), linkUrl = lkuS[0], setLinkUrl = lkuS[1];
     var pcmS = useState([]), pcMsgs = pcmS[0], setPcMsgs = pcmS[1];   // protocol-wide chat (ephemeral)
@@ -4573,7 +4574,7 @@
       function onR() { setGraphTick(function (x) { return x + 1; }); }
       window.addEventListener('resize', onR);
       return function () { cancelAnimationFrame(raf); window.removeEventListener('resize', onR); };
-    }, [cview, steps.length, mapEdges.length, gtkS[0]]);
+    }, [cview, steps.length, mapEdges.length, gtkS[0], proposed && proposed.steps ? proposed.steps.length : 0]);
     function generate() {
       if (busy) return; setBusy(true);
       sb.functions.invoke('research-protocol', { body: { action: 'generate', project_id: props.projectId, goal: goal } }).then(function (r) {
@@ -4584,15 +4585,30 @@
       }, function (e) { setBusy(false); window.PRUI.toast('Generation failed: ' + e, { kind: 'error' }); });
     }
     // Cockpit chat (phase 2): insert AI-proposed tasks as protocol steps (creating a draft protocol if none exists yet).
-    function insertCockpitSteps(newSteps, cb) {
-      if (!newSteps || !newSteps.length) { if (cb) cb(0); return; }
+    function insertCockpitSteps(newSteps, originRequest, cb) {
+      if (!newSteps || !newSteps.length) { if (cb) cb([]); return; }
       function ins(pid, baseOrd) {
-        var rows = newSteps.map(function (s, i) { return { protocol_id: pid, ord: baseOrd + i + 1, title: String(s.title || 'Task').slice(0, 240), kind: String(s.kind || 'custom'), spec: { instruction: s.instruction || '', inputs: s.inputs || [], expected_outputs: s.expected_outputs || [], acceptance: s.acceptance || [], command_hint: s.command_hint || '', est_minutes: Number.isFinite(s.est_minutes) ? s.est_minutes : null }, depends_on: [], needs_approval: !!s.needs_approval }; });
-        sb.from('research_protocol_steps').insert(rows).then(function (r) { if (r && r.error) { window.PRUI.toast('Task mentés hiba: ' + r.error.message, { kind: 'error' }); } load(); if (props.onChanged) props.onChanged(); if (cb) cb(rows.length); });
+        var rows = newSteps.map(function (s, i) { return { protocol_id: pid, ord: baseOrd + i + 1, title: String(s.title || 'Task').slice(0, 240), kind: String(s.kind || 'custom'), spec: { instruction: s.instruction || '', inputs: s.inputs || [], expected_outputs: s.expected_outputs || [], acceptance: s.acceptance || [], command_hint: s.command_hint || '', est_minutes: Number.isFinite(s.est_minutes) ? s.est_minutes : null, origin_request: originRequest || null }, depends_on: [], needs_approval: !!s.needs_approval }; });
+        sb.from('research_protocol_steps').insert(rows).select('id').then(function (r) { if (r && r.error) { window.PRUI.toast('Task mentés hiba: ' + r.error.message, { kind: 'error' }); } var ids = ((r && r.data) || []).map(function (x) { return x.id; }); load(); if (props.onChanged) props.onChanged(); if (cb) cb(ids); });
       }
       if (prot) { var baseOrd = steps.reduce(function (m, s) { return Math.max(m, s.ord || 0); }, 0); ins(prot.id, baseOrd); }
-      else { sb.from('research_protocols').insert({ project_id: props.projectId, title: 'Protokoll (chatből)', goal: null, status: 'draft', context_snapshot: {}, created_by: props.authorId }).select('id').maybeSingle().then(function (r) { var pid = r && r.data && r.data.id; if (pid) ins(pid, 0); else if (cb) cb(0); }, function () { if (cb) cb(0); }); }
+      else { sb.from('research_protocols').insert({ project_id: props.projectId, title: 'Protokoll (chatből)', goal: null, status: 'draft', context_snapshot: {}, created_by: props.authorId }).select('id').maybeSingle().then(function (r) { var pid = r && r.data && r.data.id; if (pid) ins(pid, 0); else if (cb) cb([]); }, function () { if (cb) cb([]); }); }
     }
+    // A graph phase 2: approve the chat-proposed tasks → commit them (with the request stored in spec.origin_request) and
+    // write origin→step edges to research_map_edges (so the provenance also shows on the Map — "one graph, two views").
+    function approveProposed() {
+      if (!proposed) return;
+      var req = proposed.request; var originId = prot && prot.idea_id ? ('i' + prot.idea_id) : null;
+      insertCockpitSteps(proposed.steps, req, function (ids) {
+        if (originId && ids && ids.length) {
+          var erows = ids.filter(Boolean).map(function (id) { var to = 'r' + id; return { project_id: props.projectId, edge_key: originId + '|' + to + '|manual', from_id: originId, to_id: to, kind: 'kap', manual: true, updated_at: new Date().toISOString() }; });
+          if (erows.length) sb.from('research_map_edges').upsert(erows, { onConflict: 'project_id,edge_key' }).then(function () { setMapEdges(function (m) { return (m || []).concat(erows.map(function (e) { return { from_id: e.from_id, to_id: e.to_id }; })); }); }, function () { });
+        }
+        setProposed(null);
+        if (window.PRUI) window.PRUI.toast('✓ ' + ((ids && ids.length) || 0) + ' task hozzáadva — becsúszott a protokollba.', { kind: 'success' });
+      });
+    }
+    function dismissProposed() { setProposed(null); if (window.PRUI) window.PRUI.toast('Javaslat elvetve.', { kind: 'info' }); }
     function sendChat(text) {
       var msg = String(text || '').trim(); if (!msg || chatBusy) return;
       var hist = chatMsgs.slice();
@@ -4602,8 +4618,8 @@
         var d = r && r.data; var err = (d && d.error) || (r && r.error && r.error.message);
         if (err) { setChatMsgs(function (l) { return l.concat([{ role: 'ai', content: '⚠ ' + err }]); }); return; }
         var nSteps = (d && d.steps) || [];
-        setChatMsgs(function (l) { return l.concat([{ role: 'ai', content: (d && d.reply) || '…', added: nSteps.length }]); });
-        if (nSteps.length) insertCockpitSteps(nSteps);
+        setChatMsgs(function (l) { return l.concat([{ role: 'ai', content: (d && d.reply) || '…', proposed: nSteps.length }]); });
+        if (nSteps.length) { setProposed({ steps: nSteps, request: msg }); setCview('graph'); }   // propose (animated card in the graph) → user approves
       }, function () { setChatBusy(false); setChatMsgs(function (l) { return l.concat([{ role: 'ai', content: '⚠ AI-kapcsolat hiba — telepítve van a research-protocol edge?' }]); }); });
     }
     function setPStatus(st) { sb.from('research_protocols').update({ status: st, updated_at: new Date().toISOString() }).eq('id', prot.id).then(load); }
@@ -4813,7 +4829,7 @@
         chatMsgs.length
           ? h('div', { className: 'pcpit-msgs' }, chatMsgs.map(function (m, i) {
               return h('div', { key: i, className: 'pcpit-msg ' + (m.role === 'me' ? 'me' : 'ai') },
-                h('div', { className: 'b' }, m.content, m.added ? h('span', { className: 'pcpit-taskref' }, '📋 +' + m.added + ' task a táblán') : null));
+                h('div', { className: 'b' }, m.content, m.proposed ? h('span', { className: 'pcpit-taskref' }, '📋 ' + m.proposed + ' javasolt task — hagyd jóvá a 🔗 Gráfon') : null));
             }))
           : h('div', { className: 'pcpit-msgs-empty' }, 'Pl.: „Csinálj taskokat a legfontosabb nyitott résre, baseline + a mi módszerünk" · „Adj ábra-taskot a DeLong-teszthez".'),
         chatBusy ? h('div', { className: 'pcpit-typing' }, '✦ Publify gépel…') : null,
@@ -4862,30 +4878,45 @@
       var originId = prot && prot.idea_id ? ('i' + prot.idea_id) : null;
       var ideaByNid = {}; (props.ideas || []).forEach(function (i) { ideaByNid['i' + i.id] = i; });
       var jobByNid = {}; (srJobs || []).forEach(function (j) { jobByNid['e' + j.id] = j; });
-      var used = {}; steps.forEach(function (s) { var src = byStep['r' + s.id] || originId; if (src) used[src] = 1; });
+      // committed chat-request sources: the request text (spec.origin_request) becomes a "🗣️ Kérés" source card
+      var reqMap = {}, reqList = [];
+      steps.forEach(function (s) { var r = s.spec && s.spec.origin_request; if (r && !reqMap[r]) { var nid = 'req-' + reqList.length; reqMap[r] = nid; reqList.push({ nid: nid, text: r }); } });
+      function stepSrc(s) { var r = s.spec && s.spec.origin_request; if (r && reqMap[r]) return reqMap[r]; return byStep['r' + s.id] || originId; }
+      var used = {}; steps.forEach(function (s) { var src = stepSrc(s); if (src) used[src] = 1; });
       function srcOf(nid) {
+        if (nid.indexOf('req-') === 0) { var rq = reqList.filter(function (x) { return x.nid === nid; })[0]; return { nid: nid, cls: 'req', nt: '🗣️ Kérés (chat)', title: (rq && rq.text) || 'Kérés', sum: '' }; }
         var idea = ideaByNid[nid]; if (idea) { var g = idea.source === 'gap'; return { nid: nid, cls: g ? 'gap' : 'idea', nt: (g ? '🕳️ Kutatási rés' : '💡 Ötlet'), title: idea.question || (g ? 'Rés' : 'Ötlet'), sum: idea.hypothesis || (idea.novelty != null ? 'Újdonság ' + idea.novelty + ' / 100' : '') }; }
         var job = jobByNid[nid]; if (job) { return { nid: nid, cls: 'result', nt: '🔬 Szisztematikus review', title: job.result_title || job.research_question || 'Review', sum: job.status === 'completed' ? '✓ kész' : job.status }; }
         return { nid: nid, cls: 'result', nt: '🔗 Forrás', title: nid, sum: '' };
       }
       var srcs = Object.keys(used).map(srcOf);
+      var hasProp = !!(proposed && proposed.steps && proposed.steps.length);
       return h('div', { className: 'pcg', ref: graphRef },
         h('svg', { className: 'pcg-edges' }, edgePaths.map(function (d, i) { return h('path', { key: i, d: d }); })),
         h('div', { className: 'pcg-cols' },
           h('div', { className: 'pcg-col' },
             h('div', { className: 'pcg-colh' }, 'Források — eredmények · study-k · ötletek · rések'),
-            srcs.length ? h('div', { className: 'pcg-stack' }, srcs.map(function (s) {
-              return h('div', { key: s.nid, className: 'pcg-src ' + s.cls, 'data-nid': s.nid }, h('span', { className: 'pcg-nt' }, s.nt), h('div', { className: 'pcg-ttl' }, s.title), s.sum ? h('div', { className: 'pcg-sum' }, s.sum) : null);
-            })) : h('div', { className: 'muted', style: { fontSize: 12, padding: '8px 2px' } }, 'Nincs forrás — a protokoll még nincs ötlethez/réshez kötve.')),
+            h('div', { className: 'pcg-stack' },
+              hasProp ? h('div', { key: 'reqp', className: 'pcg-src req pcg-prop-card', 'data-nid': 'req-pending' }, h('span', { className: 'pcg-nt' }, '🗣️ Kérés (chat) · új'), h('div', { className: 'pcg-ttl' }, proposed.request)) : null,
+              srcs.length ? srcs.map(function (s) {
+                return h('div', { key: s.nid, className: 'pcg-src ' + s.cls, 'data-nid': s.nid }, h('span', { className: 'pcg-nt' }, s.nt), h('div', { className: 'pcg-ttl' }, s.title), s.sum ? h('div', { className: 'pcg-sum' }, s.sum) : null);
+              }) : (hasProp ? null : h('div', { className: 'muted', style: { fontSize: 12, padding: '8px 2px' } }, 'Nincs forrás — a protokoll még nincs ötlethez/réshez kötve.')))),
           h('div', { className: 'pcg-col' },
             h('div', { className: 'pcg-colh' }, 'Taskok — protokoll-lépések'),
-            steps.length ? h('div', { className: 'pcg-stack' }, steps.map(function (s) {
-              var src = byStep['r' + s.id] || originId; var sx = s.spec || {};
-              return h('div', { key: s.id, className: 'pcg-task' + (s.status === 'done' ? ' done' : (s.status === 'running' ? ' run' : '')), 'data-tid': 'r' + s.id, 'data-src': src || '', title: 'Ugrás a Feladatok listára', onClick: function () { setCview('tasks'); } },
-                h('span', { className: 'pcg-kind' }, s.kind || 'custom'), h('div', { className: 'pcg-ttl' }, s.title),
-                sx.instruction ? h('div', { className: 'pcg-sum' }, String(sx.instruction).slice(0, 90)) : null,
-                h('div', { className: 'pcg-foot' }, (PST[s.status] || PST.todo)[1] + (s.needs_approval && s.status === 'todo' ? ' · ⏸ jóváhagyás' : '')));
-            })) : h('div', { className: 'empty', style: { padding: '24px 16px' } }, 'Nincs task — generálj a co-pilottal (💬), és itt megjelenik a forrásához kötve.'))));
+            h('div', { className: 'pcg-stack' },
+              hasProp ? proposed.steps.map(function (ps, i) {
+                return h('div', { key: 'prop' + i, className: 'pcg-task pcg-prop', 'data-tid': 'prop' + i, 'data-src': 'req-pending' },
+                  h('span', { className: 'pcg-kind' }, ps.kind || 'custom'), h('div', { className: 'pcg-ttl' }, ps.title),
+                  ps.instruction ? h('div', { className: 'pcg-sum' }, String(ps.instruction).slice(0, 90)) : null,
+                  i === 0 ? h('div', { className: 'pcg-prop-acts' }, h('button', { className: 'pcg-approve', onClick: approveProposed }, '✓ Approve → becsúszik (' + proposed.steps.length + ')'), h('button', { className: 'pcg-dismiss', onClick: dismissProposed }, '✕ Elvetés')) : null);
+              }) : null,
+              steps.length ? steps.map(function (s) {
+                var sx = s.spec || {};
+                return h('div', { key: s.id, className: 'pcg-task' + (s.status === 'done' ? ' done' : (s.status === 'running' ? ' run' : '')), 'data-tid': 'r' + s.id, 'data-src': stepSrc(s) || '', title: 'Ugrás a Feladatok listára', onClick: function () { setCview('tasks'); } },
+                  h('span', { className: 'pcg-kind' }, s.kind || 'custom'), h('div', { className: 'pcg-ttl' }, s.title),
+                  sx.instruction ? h('div', { className: 'pcg-sum' }, String(sx.instruction).slice(0, 90)) : null,
+                  h('div', { className: 'pcg-foot' }, (PST[s.status] || PST.todo)[1] + (s.needs_approval && s.status === 'todo' ? ' · ⏸ jóváhagyás' : '')));
+              }) : (hasProp ? null : h('div', { className: 'empty', style: { padding: '24px 16px' } }, 'Nincs task — generálj a co-pilottal (💬), és itt megjelenik a forrásához kötve.'))))));
     }
 
     if (loading) return h('div', { className: 'empty' }, tr(props.lang, 'Loading protocol…'));

@@ -1561,6 +1561,15 @@
     .pcg-task.done { border-left: 3px solid var(--ok, #15803d); } .pcg-task.run { border-left: 3px solid var(--warn, #d9820a); }
     .pcg-kind { font-size: 8.5px; font-weight: 750; text-transform: uppercase; border-radius: 4px; padding: 2px 6px; background: var(--surface-2); color: var(--muted); }
     .pcg-foot { font-size: 10px; color: var(--faint); margin-top: 7px; }
+    /* graph phase 2: chat request source + proposed (pending) task cards */
+    .pcg-src.req { border-left: 3px solid #6d4bd6; }
+    .pcg-prop-card { border: 1.5px dashed #6d4bd6 !important; background: color-mix(in srgb, #6d4bd6 6%, var(--surface)); animation: pcgpop .35s ease; }
+    .pcg-task.pcg-prop { border: 1.5px dashed #6d4bd6; background: color-mix(in srgb, #6d4bd6 5%, var(--surface)); animation: pcgpop .35s ease; cursor: default; }
+    .pcg-task.pcg-prop:hover { transform: none; border-color: #6d4bd6; }
+    @keyframes pcgpop { from { opacity: 0; transform: translateY(10px) scale(.96); } to { opacity: 1; transform: none; } }
+    .pcg-prop-acts { display: flex; gap: 6px; margin-top: 9px; }
+    .pcg-approve { border: none; background: var(--ok, #15803d); color: #fff; border-radius: 7px; padding: 5px 11px; font-size: 11px; font-weight: 700; cursor: pointer; font-family: inherit; }
+    .pcg-dismiss { border: 1px solid var(--line); background: var(--surface); color: var(--muted); border-radius: 7px; padding: 5px 9px; font-size: 11px; cursor: pointer; font-family: inherit; }
     /* P1.5 — novelty ring on a gap node */
     .rmap-gap-ring { position: absolute; top: 3px; right: 3px; z-index: 3; line-height: 0; filter: drop-shadow(0 1px 2px rgba(0,0,0,.22)); }
     .rmap-dock-mode { display: flex; gap: 6px; padding: 9px 12px 0; }
@@ -1822,9 +1831,9 @@
     html.dark .rmap-genbusy { background: #4f46e5; }
     @media (max-width: 900px) { .rmap-wrap { flex-direction: column; } .rmap-insp { width: auto; } }
   </style>
-  <script src="theme.js?v=1785476759"></script>
-  <script src="nav.js?v=1785476759"></script>
-  <script src="entitlements.js?v=1785476759"></script>
+  <script src="theme.js?v=1785489980"></script>
+  <script src="nav.js?v=1785489980"></script>
+  <script src="entitlements.js?v=1785489980"></script>
 </head>
 
 <body>
@@ -1836,23 +1845,23 @@
   <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
   <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="backend/config.js?v=1785476759"></script>
-  <script src="auth.js?v=1785476759"></script>
-  <script src="backend.js?v=1785476759"></script>
-  <script src="onboarding.js?v=1785476759"></script>
-  <script src="office.js?v=1785476759"></script>
-  <script src="publications.js?v=1785476759"></script>
+  <script src="backend/config.js?v=1785489980"></script>
+  <script src="auth.js?v=1785489980"></script>
+  <script src="backend.js?v=1785489980"></script>
+  <script src="onboarding.js?v=1785489980"></script>
+  <script src="office.js?v=1785489980"></script>
+  <script src="publications.js?v=1785489980"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/tus-js-client@4.1.0/dist/tus.min.js"></script>
-  <script type="text/babel" src="canvas.jsx?v=1785476759"></script>
-  <script type="text/babel" src="notes.jsx?v=1785476759"></script>
-  <script src="autopilot-core.js?v=1785476759"></script>
-  <script type="text/babel" src="research.jsx?v=1785476759"></script>
+  <script type="text/babel" src="canvas.jsx?v=1785489980"></script>
+  <script type="text/babel" src="notes.jsx?v=1785489980"></script>
+  <script src="autopilot-core.js?v=1785489980"></script>
+  <script type="text/babel" src="research.jsx?v=1785489980"></script>
 
-  <script src="build.js?v=1785476759"></script>
-  <script src="version-badge.js?v=1785476759"></script>
+  <script src="build.js?v=1785489980"></script>
+  <script src="version-badge.js?v=1785489980"></script>
 </body>
 
 </html>
