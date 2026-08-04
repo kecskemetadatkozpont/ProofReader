@@ -5748,6 +5748,7 @@
     // itself (no click needed). Re-fetches when the thread's updated_at changes (after the map data reloads).
     var cmsgS = useState({}), chatMsgs = cmsgS[0], setChatMsgs = cmsgS[1];   // chat id → [{role,content}]
     var chatMsgsLoading = useRef({}), chatMsgsAt = useRef({});
+    var cpvS = useState(null), cpv = cpvS[0], setCpv = cpvS[1];   // full-conversation modal {title, owner, msgs} opened from a chat card
     function ensureChatMsgs(id, at) {
       if (id == null || chatMsgsLoading.current[id]) return;
       if (chatMsgs[id] != null && chatMsgsAt.current[id] === at) return;   // already have the current version
@@ -6170,7 +6171,7 @@
         // F5 — multi-modal nodes: datasets, uploaded/material files (NOT writing/studies), chat threads, paper figures
         sb.from('research_datasets').select('id,name,source,status,size_bytes,notes,created_by,created_at').eq('project_id', pid).order('created_at', { ascending: true }).limit(16),
         sb.from('research_files').select('id,path,size,source,storage_path,created_by,created_at,updated_at').eq('project_id', pid).not('path', 'like', 'writing/%').not('path', 'like', 'studies/%').not('path', 'like', 'submission/%').order('updated_at', { ascending: false }).limit(16),
-        sb.from('research_chats').select('id,title,updated_at,created_at').eq('project_id', pid).order('updated_at', { ascending: false }).limit(8),
+        sb.from('research_chats').select('id,title,updated_at,created_at,owner_id').eq('project_id', pid).order('updated_at', { ascending: false }).limit(8),
         sb.from('research_figures').select('id,source_id,fig_label,caption,storage_path,created_by,created_at').eq('project_id', pid).eq('hidden', false).order('created_at', { ascending: false }).limit(16),   // newest-first so a freshly-generated figure always survives the 16-cap
         // SR/Elicit provenance: the "Study basis" review-question candidates (linked to their idea) + the launched Elicit reviews
         sb.from('research_sr_candidates').select('id,idea_id,question,launched_job_id,created_by,created_at').eq('project_id', pid).eq('dismissed', false).order('created_at', { ascending: true }).limit(16),
@@ -9015,14 +9016,18 @@
       else if (n.t === 'chat') {
         ensureChatMsgs(n.ref && n.ref.id, n.ref && n.ref.updated_at);
         var _cms = chatMsgs[n.ref && n.ref.id];
+        var _own = nameOf(n.ref && n.ref.owner_id) || 'Kutató';   // the thread owner asked the user-role messages → show their name, not "ÉN"
         k.push(h('div', { className: 'rmap-nm', key: 'm' }, 'frissítve ' + n.m.Frissítve));
         if (_cms == null) k.push(h('div', { className: 'rmap-chatpv ld', key: 'cpv' }, '⏳ beszélgetés…'));
         else if (!_cms.length) k.push(h('div', { className: 'rmap-chatpv ld', key: 'cpv' }, 'Üres beszélgetés'));
-        else k.push(h('div', { className: 'rmap-chatpv', key: 'cpv', onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } }, _cms.slice(-10).map(function (mm, mi) {
-          return h('div', { key: mi, className: 'rmap-chatpv-m ' + (mm.role === 'assistant' ? 'ai' : 'me') },
-            h('span', { className: 'rmap-chatpv-r' }, mm.role === 'assistant' ? 'Publify' : 'Én'),
-            h('span', { className: 'rmap-chatpv-t' }, chatpvClean(mm.content)));
-        })));
+        else k.push(h('div', { className: 'rmap-chatpv', key: 'cpv', onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
+          _cms.slice(-10).map(function (mm, mi) {
+            return h('div', { key: mi, className: 'rmap-chatpv-m ' + (mm.role === 'assistant' ? 'ai' : 'me') },
+              h('span', { className: 'rmap-chatpv-r' }, mm.role === 'assistant' ? 'Publify' : _own),
+              h('span', { className: 'rmap-chatpv-t' }, chatpvClean(mm.content)));
+          }).concat([
+            h('button', { key: '_more', className: 'rmap-chatpv-more', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); setCpv({ title: n.title || 'Beszélgetés', owner: _own, msgs: _cms }); } }, '⤢ Teljes beszélgetés')
+          ])));
       }
       else if (n.t === 'figure') k.push(h('div', { className: 'rmap-nm', key: 'm' }, String(n.m.Felirat || '').slice(0, 64)));
       else if (n.t === 'srq') k.push(h('div', { className: 'rmap-nm', key: 'm' }, '💡 ' + String(n.m.Alap || '').slice(0, 52)));
@@ -9737,6 +9742,17 @@
           h('div', { className: 'rmap-win-b' }, (props.renderPanel && w.w >= 320 && w.h >= 200) ? props.renderPanel(w.tab, w.fp) : h('div', { className: 'rmap-focus-loading' }, h('div', { className: 'rmap-focus-ic' }, (RMAP_TYPE[w.t] && RMAP_TYPE[w.t].ic) || '◻'), h('div', null, 'Húzd nagyobbra…'))),
           h('span', { className: 'rmap-win-rz', title: 'Átméretezés', onMouseDown: function (e) { startWinDrag(e, w, 'resize'); } }));
       }),
+      // full-conversation modal opened from a chat card's "⤢ Teljes beszélgetés" — the whole thread, untruncated
+      cpv ? h('div', { className: 'rmap-cpv-scrim', onMouseDown: function (e) { if (e.target === e.currentTarget) setCpv(null); } },
+        h('div', { className: 'rmap-cpv-modal', onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
+          h('div', { className: 'rmap-cpv-head' },
+            h('span', { className: 'rmap-cpv-title' }, '💬 ' + cpv.title),
+            h('button', { className: 'rmap-cpv-x', title: 'Bezárás', onClick: function () { setCpv(null); } }, '✕')),
+          h('div', { className: 'rmap-cpv-body' }, (cpv.msgs || []).map(function (mm, mi) {
+            return h('div', { key: mi, className: 'rmap-cpv-m ' + (mm.role === 'assistant' ? 'ai' : 'me') },
+              h('div', { className: 'rmap-cpv-r' }, mm.role === 'assistant' ? 'Publify' : cpv.owner),
+              h('div', { className: 'rmap-cpv-t md', dangerouslySetInnerHTML: { __html: mdHtml(stripFiles(String(mm.content || ''))) } }));
+          })))) : null,
       // Prezi-mód focus overlay — the card's real workflow panel mounted in-place (screen-space, over the dimmed map)
       focus ? h('div', { className: 'rmap-focus', onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
         h('div', { className: 'rmap-focus-scrim', onClick: function () { (tour ? tourStop : exitFocus)(); } }),
