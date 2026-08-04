@@ -5744,6 +5744,21 @@
         sb.from('research_files').select('content').eq('id', id).maybeSingle().then(function (r) { done((r && r.data && r.data.content) || ''); }, function () { done(''); });
       }
     }
+    // Map chat-card inline transcript: lazy-load a chat's recent messages so the card shows the conversation
+    // itself (no click needed). Re-fetches when the thread's updated_at changes (after the map data reloads).
+    var cmsgS = useState({}), chatMsgs = cmsgS[0], setChatMsgs = cmsgS[1];   // chat id → [{role,content}]
+    var chatMsgsLoading = useRef({}), chatMsgsAt = useRef({});
+    function ensureChatMsgs(id, at) {
+      if (id == null || chatMsgsLoading.current[id]) return;
+      if (chatMsgs[id] != null && chatMsgsAt.current[id] === at) return;   // already have the current version
+      chatMsgsLoading.current[id] = 1;
+      sb.from('research_messages').select('role,content').eq('chat_id', id).order('created_at', { ascending: true }).limit(40).then(function (r) {
+        delete chatMsgsLoading.current[id]; if (!alive.current) return; chatMsgsAt.current[id] = at;
+        var rows = ((r && r.data) || []).filter(function (m) { return m.content; });
+        setChatMsgs(function (prev) { var nx = Object.assign({}, prev); nx[id] = rows; return nx; });
+      }, function () { delete chatMsgsLoading.current[id]; });
+    }
+    function chatpvClean(s) { return String(s || '').replace(/```file:[^\n]*\n[\s\S]*?```/g, '📄 fájl').replace(/```publify-questions[\s\S]*?```/g, '').replace(/\s+/g, ' ').trim().slice(0, 220); }
     // lazily sign the storage URLs for a set of figures (idempotent; in-flight guarded)
     function ensureFigUrls(figs) {
       var paths = (figs || []).map(function (f) { return f && f.storage_path; }).filter(function (pp) { return pp && !figUrls[pp] && !figLoading.current[pp]; });
@@ -8997,7 +9012,18 @@
       else if (n.t === 'review') k.push(h('div', { className: 'rmap-nm', key: 'm' }, n.m.Studies + ' study'));
       else if (n.t === 'dataset') k.push(h('div', { className: 'rmap-nm', key: 'm' }, (n.m.Forrás || '') + ' · ' + (n.m.Státusz || ''), n.m.Méret && n.m.Méret !== '—' ? h('span', { className: 'rmap-chip' }, n.m.Méret) : null));
       else if (n.t === 'file') k.push(h('div', { className: 'rmap-nm', key: 'm' }, (n.m.Forrás && n.m.Forrás !== '—' ? n.m.Forrás + ' · ' : '') + n.m.Méret));
-      else if (n.t === 'chat') k.push(h('div', { className: 'rmap-nm', key: 'm' }, 'frissítve ' + n.m.Frissítve));
+      else if (n.t === 'chat') {
+        ensureChatMsgs(n.ref && n.ref.id, n.ref && n.ref.updated_at);
+        var _cms = chatMsgs[n.ref && n.ref.id];
+        k.push(h('div', { className: 'rmap-nm', key: 'm' }, 'frissítve ' + n.m.Frissítve));
+        if (_cms == null) k.push(h('div', { className: 'rmap-chatpv ld', key: 'cpv' }, '⏳ beszélgetés…'));
+        else if (!_cms.length) k.push(h('div', { className: 'rmap-chatpv ld', key: 'cpv' }, 'Üres beszélgetés'));
+        else k.push(h('div', { className: 'rmap-chatpv', key: 'cpv', onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } }, _cms.slice(-10).map(function (mm, mi) {
+          return h('div', { key: mi, className: 'rmap-chatpv-m ' + (mm.role === 'assistant' ? 'ai' : 'me') },
+            h('span', { className: 'rmap-chatpv-r' }, mm.role === 'assistant' ? 'Publify' : 'Én'),
+            h('span', { className: 'rmap-chatpv-t' }, chatpvClean(mm.content)));
+        })));
+      }
       else if (n.t === 'figure') k.push(h('div', { className: 'rmap-nm', key: 'm' }, String(n.m.Felirat || '').slice(0, 64)));
       else if (n.t === 'srq') k.push(h('div', { className: 'rmap-nm', key: 'm' }, '💡 ' + String(n.m.Alap || '').slice(0, 52)));
       else if (n.t === 'sreview') k.push(h('div', { className: 'rmap-nm', key: 'm' }, h('span', { className: 'rmap-chip ' + (n.m.Státusz === 'completed' ? 'done' : n.m.Státusz === 'failed' ? '' : 'run') }, n.m.Státusz || 'vár')));
