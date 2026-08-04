@@ -1112,6 +1112,19 @@
       });
     }
     useEffect(function () {
+      // Map deep-link: when opened for a SPECIFIC chat node (a Map window/panel carries focusChatId), show THAT
+      // conversation — not my default thread (that's why the Map chat windows looked empty). My own ideas thread
+      // → writable; anyone else's / legacy / a canvas-surface thread → read-only peek so the discussion is visible.
+      if (props.focusChatId) {
+        firstLoad.current = true;
+        sb.from('research_chats').select('id,owner_id,title,surface').eq('id', props.focusChatId).maybeSingle().then(function (r) {
+          if (!alive.current) return; var c = r && r.data; if (!c) return;
+          if (myId && c.owner_id === myId && (c.surface === 'ideas' || !c.surface)) { setChat(c); loadMsgs(c.id); }
+          else { setPeek({ chatId: c.id, name: c.title || 'Beszélgetés', color: null, legacy: !c.owner_id, canAdopt: !c.owner_id && !!myId }); loadMsgs(c.id); }
+        });
+        loadRail();
+        return;
+      }
       if (!myId) {   // safety: without an author id, fall back to the first thread (legacy behaviour)
         sb.from('research_chats').select('id,owner_id').eq('project_id', props.projectId).order('created_at', { ascending: true }).limit(1).then(function (r) { var c = (r && r.data && r.data[0]) || null; setChat(c); if (c) loadMsgs(c.id); });
         return;
