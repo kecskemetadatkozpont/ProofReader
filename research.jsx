@@ -3607,7 +3607,7 @@
         metaEl);
     }
     function delEl(j) {   // delete a systematic review (elicit_jobs) — owner-only by RLS; also unlink its Study-basis candidate
-      window.PRUI.confirm({ title: 'Áttekintés törlése?', body: (j.result_title || j.research_question || 'Systematic review') + ' — véglegesen törlődik.', confirmLabel: 'Törlés', danger: true }).then(function (ok) {
+      window.PRUI.confirm({ title: 'Áttekintés törlése?', body: reviewName(j) + ' — véglegesen törlődik.', confirmLabel: 'Törlés', danger: true }).then(function (ok) {
         if (!ok) return;
         sb.from('research_sr_candidates').update({ launched_job_id: null }).eq('launched_job_id', j.id).then(function () { });
         sb.from('elicit_jobs').delete().eq('id', j.id).then(function (r) {
@@ -3617,6 +3617,14 @@
           load();
         });
       });
+    }
+    // Display name for a review: prefer result_title, EXCEPT when it's just the project title (passed as the launch
+    // title → identical for every review of a project); then fall back to the research_question, the real differentiator.
+    function reviewName(j) {
+      if (!j) return 'Systematic review';
+      var pt = (props.project && props.project.title) || '';
+      if (j.result_title && j.result_title !== pt) return j.result_title;
+      return j.research_question || j.result_title || 'Systematic review';
     }
     // Manual backfill: import a completed review's papers into the project Library (research_sources).
     // New reviews auto-import on completion server-side; this covers reviews that finished before that landed.
@@ -3644,7 +3652,7 @@
       var exps = [['pdf', 'PDF'], ['docx', 'DOCX'], ['bib', 'BibTeX'], ['ris', 'RIS']].map(function (x) { return e[x[0]] ? h('a', { key: x[0], className: 'btn', style: { padding: '4px 9px', fontSize: 12 }, href: e[x[0]], target: '_blank' }, x[1]) : null; }).filter(Boolean);
       return h('div', { key: j.id, style: { border: '1px solid var(--line)', borderRadius: 10, padding: '10px 12px' } },
         h('div', { style: { display: 'flex', gap: 8, alignItems: 'flex-start' } },
-          h('div', { style: { flex: 1, minWidth: 0 } }, h('div', { style: { fontWeight: 600, fontSize: 13.5 } }, j.result_title || j.research_question || 'Systematic review'),
+          h('div', { style: { flex: 1, minWidth: 0 } }, h('div', { style: { fontWeight: 600, fontSize: 13.5 } }, reviewName(j)),
             statusLine(j))),
         !failed ? tracker(j) : null,
         (j.warning && j.warning.code === 'all_excluded') ? h('div', { style: { marginTop: 8, fontSize: 12, lineHeight: 1.5, background: 'var(--warn-bg, #fbf1dd)', color: 'var(--warn, #b45309)', border: '1px solid color-mix(in srgb, var(--warn, #b45309) 30%, transparent)', borderRadius: 9, padding: '9px 11px' } },
@@ -3719,7 +3727,7 @@
       var lab = stuck ? '⚠ Stuck' : st === 'completed' ? 'Done' : st === 'failed' ? 'Failed' : st === 'pausedForInsufficientQuota' ? 'Paused' : (function () { var i = srStageIdx(j.stage); return i >= 0 ? 'Step ' + (i + 1) + '/' + SR_STAGES.length : 'Working'; })();
       var idx = st === 'completed' ? SR_STAGES.length - 1 : (srStageIdx(j.stage) < 0 ? 0 : srStageIdx(j.stage));
       return h('button', { key: j.id, className: 'sr-rrow' + (isSel ? ' on' : ''), onClick: function () { setSelJob(j.id); } },
-        h('div', { className: 'sr-rrow-t' }, j.result_title || j.research_question || 'Systematic review'),
+        h('div', { className: 'sr-rrow-t' }, reviewName(j)),
         h('div', { className: 'sr-rrow-b' },
           h('span', { className: 'sr-rst ' + cls }, lab),
           h('span', { className: 'sr-dots', 'aria-hidden': 'true' }, SR_STAGES.map(function (s, i) { var d = (i < idx) || st === 'completed'; var c = i === idx && st !== 'completed' && st !== 'failed'; return h('i', { key: i, className: 'sr-dot' + (d ? ' d' : '') + (c ? ' c' : '') }); }))
@@ -3859,7 +3867,7 @@
             h('button', { className: 'btn', style: { padding: '5px 11px', fontSize: 12.5 }, onClick: function () { fromCand.current = null; setF({ q: '', protocol: '', abs: [], ft: [], ex: [], exclude: [], gen: true, genAbs: true, genEx: true, useFig: false, runFT: true, maxResults: '1000' }); setOpenForm(true); } }, '+ Kézi review')),
           h('div', { style: { fontSize: 11, color: 'var(--faint)', marginTop: 8 } }, 'A fő folyamathoz nem szükséges — a review-kat a kijelölt ötletekből indítod fent. Ez a PICO-alapú finomításhoz / egyedi review-kérdéshez való.')) : null,
         openR ? h('div', { className: 'scrim', onClick: function () { setOpenR(null); } }, h('div', { className: 'modal', style: { width: 780 }, onClick: function (e) { e.stopPropagation(); } },
-          h('div', { className: 'modal-h' }, h('h3', { style: { margin: 0, flex: 1 } }, openR.result_title || 'Systematic review'), h('button', { className: 'icon-x', 'aria-label': 'Close', onClick: function () { setOpenR(null); } }, '✕')),
+          h('div', { className: 'modal-h' }, h('h3', { style: { margin: 0, flex: 1 } }, reviewName(openR)), h('button', { className: 'icon-x', 'aria-label': 'Close', onClick: function () { setOpenR(null); } }, '✕')),
           (window.marked && window.DOMPurify)
             ? h('div', { className: 'md-report', style: { padding: 18, maxHeight: '72vh', overflow: 'auto', lineHeight: 1.6, fontSize: 13.5 }, dangerouslySetInnerHTML: { __html: enhanceReport(openR.result_body || '') } })
             : h('div', { style: { padding: 18, maxHeight: '72vh', overflow: 'auto', whiteSpace: 'pre-wrap', fontSize: 13 } }, openR.result_body || ''))) : null,
@@ -3939,7 +3947,7 @@
         h('div', { style: { display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 } }, jobs.map(card))
       ) : null,
       openR ? h('div', { className: 'scrim', onClick: function () { setOpenR(null); } }, h('div', { className: 'modal', style: { width: 780 }, onClick: function (e) { e.stopPropagation(); } },
-        h('div', { className: 'modal-h' }, h('h3', { style: { margin: 0, flex: 1 } }, openR.result_title || 'Systematic review'), h('button', { className: 'icon-x', 'aria-label': 'Close', onClick: function () { setOpenR(null); } }, '✕')),
+        h('div', { className: 'modal-h' }, h('h3', { style: { margin: 0, flex: 1 } }, reviewName(openR)), h('button', { className: 'icon-x', 'aria-label': 'Close', onClick: function () { setOpenR(null); } }, '✕')),
         (window.marked && window.DOMPurify)
           ? h('div', { className: 'md-report', style: { padding: 18, maxHeight: '72vh', overflow: 'auto', lineHeight: 1.6, fontSize: 13.5 }, dangerouslySetInnerHTML: { __html: enhanceReport(openR.result_body || '') } })
           : h('div', { style: { padding: 18, maxHeight: '72vh', overflow: 'auto', whiteSpace: 'pre-wrap', fontSize: 13 } }, openR.result_body || ''))) : null
