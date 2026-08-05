@@ -1914,6 +1914,8 @@
     useEffect(function () { aliveR.current = true; return function () { aliveR.current = false; }; }, []);
     // collapsible Shortlist rail — toggles a root class so the .ideas2 grid reclaims the column for the chat
     var slcS = useState(function () { try { return localStorage.getItem('pr-shortlist-collapsed') === '1'; } catch (e) { return false; } }), slCollapsed = slcS[0], setSlCollapsed = slcS[1];
+    var slmS = useState(function () { try { return localStorage.getItem('pr-shortlist-mine:' + props.projectId) === '1'; } catch (e) { return false; } }), mineOnly = slmS[0], setMineOnly = slmS[1];   // "csak az enyémek" filter on the Shortlist
+    function setMine(v) { setMineOnly(v); try { if (v) localStorage.setItem('pr-shortlist-mine:' + props.projectId, '1'); else localStorage.removeItem('pr-shortlist-mine:' + props.projectId); } catch (e) { } }
     useEffect(function () { try { document.documentElement.classList.toggle('pr-sl-collapsed', slCollapsed); } catch (e) { } return function () { try { document.documentElement.classList.remove('pr-sl-collapsed'); } catch (e) { } }; }, [slCollapsed]);
     function toggleSl() { setSlCollapsed(function (v) { var n = !v; try { localStorage.setItem('pr-shortlist-collapsed', n ? '1' : '0'); } catch (e) { } return n; }); }
     var rtS = useState(0), setRunTick = rtS[1];   // cheap re-render on every runner progress so the pulse reflects running↔done
@@ -2005,7 +2007,11 @@
         setMsg(''); props.onChanged();
       }, function () { setBusy(false); setMsg('AI not configured yet — deploy the research-ai Edge function.'); });
     }
-    var ideas = props.ideas || [];
+    var allIdeas = props.ideas || [];
+    var _meId = props.viewerId || props.authorId;   // the current viewer (created_by == viewer for my own ideas; suggest stamps the auth uid)
+    var hasOthers = allIdeas.some(function (i) { return i.created_by && i.created_by !== _meId; });   // are there ideas by OTHER users? → offer the "mine only" filter
+    // "csak az enyémek": keep my own ideas (created_by == me) + unattributed/legacy (null) ones; hide OTHER users'
+    var ideas = mineOnly ? allIdeas.filter(function (i) { return !(i.created_by && i.created_by !== _meId); }) : allIdeas;
     var selected = ideas.filter(function (i) { return i.status === 'selected'; });
     var rest = ideas.filter(function (i) { return i.status !== 'selected'; });
     // ---- AI-Native Brainstorm (New design flag, direction B): IdeasPanel becomes the right-hand "Shortlist + Study basis" rail beside the chat. Same data + handlers. ----
@@ -2023,6 +2029,9 @@
         h('div', { className: 'idb-card' },
           h('div', { className: 'idb-h' }, h('span', null, 'Shortlist'), h('span', { className: 'idb-c' }, String(rest.length)),
             h('span', { style: { flex: 1 } }),
+            hasOthers ? h('div', { className: 'idb-mine-seg', role: 'group', 'aria-label': 'Ötlet-szűrő' },
+              h('button', { className: !mineOnly ? 'on' : '', onClick: function () { setMine(false); }, title: 'Minden ötlet (mindenkié)' }, 'Mind'),
+              h('button', { className: mineOnly ? 'on' : '', onClick: function () { setMine(true); }, title: 'Csak az általad létrehozott ötletek (a gazdátlan, régi ötletekkel együtt)' }, '💡 Enyém')) : null,
             props.canEdit ? h('button', { className: 'idb-gap', disabled: busy, onClick: gap, title: 'Kutatási rés-elemzés (Rések fül)' }, '✨ Rés-elemzés →') : null,
             h('button', { className: 'pnl-cbtn', title: 'Shortlist becsukása', onClick: toggleSl }, '›')),
           msg ? h('div', { className: 'idb-msg' }, msg) : null,
@@ -10345,7 +10354,7 @@
     // non-embeddable tabs → the Map falls back to onGoTab. Kept in sync with the tab switch below.
     function panelForTab(t, focus) {
       focus = focus || {};
-      if (t === 'ideas') return h('div', { className: nd() ? 'ideas2' : null }, h(ChatPanel, { projectId: p.id, supervised: !!p.student_id, canEdit: props.canEdit, authorId: props.authorId, fileOwnerId: props.fileOwnerId, sources: props.sources, onChanged: props.onChanged, focusChatId: focus.focusChatId, focusFileId: focus.focusFileId }), h(IdeasPanel, { projectId: p.id, ideas: props.ideas, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, onStartStudyMulti: function (ideas) { setAutoSR(function (x) { return x + 1; }); setTab('study'); }, onGoStudy: function () { setTab('study'); }, onGoGap: function () { setTab('gap'); }, focusIdeaId: focus.focusIdeaId }));
+      if (t === 'ideas') return h('div', { className: nd() ? 'ideas2' : null }, h(ChatPanel, { projectId: p.id, supervised: !!p.student_id, canEdit: props.canEdit, authorId: props.authorId, fileOwnerId: props.fileOwnerId, sources: props.sources, onChanged: props.onChanged, focusChatId: focus.focusChatId, focusFileId: focus.focusFileId }), h(IdeasPanel, { projectId: p.id, ideas: props.ideas, canEdit: props.canEdit, authorId: props.authorId, viewerId: props.viewerId, onChanged: props.onChanged, onStartStudyMulti: function (ideas) { setAutoSR(function (x) { return x + 1; }); setTab('study'); }, onGoStudy: function () { setTab('study'); }, onGoGap: function () { setTab('gap'); }, focusIdeaId: focus.focusIdeaId }));
       if (t === 'gap') return h(GapPanel, { projectId: p.id, project: p, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, onGoIdeas: function () { setTab('ideas'); }, onGoStudy: function () { setTab('study'); }, onOpenStudy: function (sid) { setFocusStudy(sid); setTab('study'); }, onSendToLauncher: sendGapToLauncher, onStartStudy: startStudyFromIdea, focusGapId: focus.focusGapId });
       if (t === 'figboard') return embedFrame('FigureBoard');
       if (t === 'citopt') return embedFrame('CitationOptimizer');
@@ -10363,7 +10372,7 @@
     }
     var content;
     if (nd() && tab === 'canvas') tab = 'map';   // Canvas→Map merge: in nd the Canvas tab is retired → its features live on the Map; a stale/deep-linked 'canvas' lands on the Map (classic mode keeps its own Canvas tab)
-    if (tab === 'ideas') content = h('div', { className: nd() ? 'ideas2' : null }, h(ChatPanel, { projectId: p.id, supervised: !!p.student_id, canEdit: props.canEdit, authorId: props.authorId, fileOwnerId: props.fileOwnerId, sources: props.sources, onChanged: props.onChanged }), h(IdeasPanel, { projectId: p.id, ideas: props.ideas, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, onStartStudyMulti: function (ideas) { setAutoSR(function (x) { return x + 1; }); setTab('study'); }, onGoStudy: function () { setTab('study'); }, onGoGap: function () { setTab('gap'); } }));
+    if (tab === 'ideas') content = h('div', { className: nd() ? 'ideas2' : null }, h(ChatPanel, { projectId: p.id, supervised: !!p.student_id, canEdit: props.canEdit, authorId: props.authorId, fileOwnerId: props.fileOwnerId, sources: props.sources, onChanged: props.onChanged }), h(IdeasPanel, { projectId: p.id, ideas: props.ideas, canEdit: props.canEdit, authorId: props.authorId, viewerId: props.viewerId, onChanged: props.onChanged, onStartStudyMulti: function (ideas) { setAutoSR(function (x) { return x + 1; }); setTab('study'); }, onGoStudy: function () { setTab('study'); }, onGoGap: function () { setTab('gap'); } }));
     else if (tab === 'gap') content = h(GapPanel, { projectId: p.id, project: p, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, onGoIdeas: function () { setTab('ideas'); }, onGoStudy: function () { setTab('study'); }, onOpenStudy: function (sid) { setFocusStudy(sid); setTab('study'); }, onSendToLauncher: sendGapToLauncher, onStartStudy: startStudyFromIdea });
     else if (tab === 'figboard') content = embedFrame('FigureBoard');
     else if (tab === 'citopt') content = embedFrame('CitationOptimizer');
@@ -10921,7 +10930,7 @@
       Promise.all([
         sb.from('research_log').select('id,type,summary,ts,profile_id').eq('project_id', projectId).order('ts', { ascending: false }),
         sb.from('research_todos').select('id,title,status,due,assignee').eq('project_id', projectId).order('sort', { ascending: true }).order('created_at', { ascending: false }),
-        sb.from('research_ideas').select('id,source,question,hypothesis,rationale,novelty,status').eq('project_id', projectId).order('created_at', { ascending: false }),
+        sb.from('research_ideas').select('id,source,question,hypothesis,rationale,novelty,status,created_by').eq('project_id', projectId).order('created_at', { ascending: false }),
         sb.from('research_sources').select('id,source_api,ext_id,doi,title,authors,year,venue,cited_by,url,issn,screening').eq('project_id', projectId).order('cited_by', { ascending: false, nullsFirst: false }),
         sb.from('research_datasets').select('id,name,source,uri,size_bytes,license,status,local_path').eq('project_id', projectId).order('created_at', { ascending: false }),
         sb.from('research_jobs').select('id,type,title,status,progress,result,result_path,logs,created_at').eq('project_id', projectId).order('created_at', { ascending: false }),
