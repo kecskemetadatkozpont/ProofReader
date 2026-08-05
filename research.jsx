@@ -3263,6 +3263,15 @@
     var ibS = useState({}), ideaById = ibS[0], setIdeaById = ibS[1];   // idea_id → question, so each candidate shows the Study-basis idea it came from
     var ifS = useState([]), ideasFull = ifS[0], setIdeasFull = ifS[1];   // full selected ideas → the one-path per-idea launcher
     var asS = useState([]), allStudies = asS[0], setAllStudies = asS[1];  // ALL native/backup studies → merged into the Reviews list
+    // launch engine choice + the admin-approval requests for this project (migration-109)
+    var smS = useState(function () { try { return localStorage.getItem('pr-sr-mode') || 'elicit'; } catch (e) { return 'elicit'; } }), srMode = smS[0], setSrMode = smS[1];   // 'elicit' (jóváhagyással) | 'openalex' (automatikus)
+    var rrS = useState([]), reqReqs = rrS[0], setReqReqs = rrS[1];   // research_review_requests for this project
+    var rrFallbackRef = useRef({});   // request ids for which we've already kicked off the OpenAlex fallback (once per session)
+    function pickSrMode(m) { setSrMode(m); try { localStorage.setItem('pr-sr-mode', m); } catch (e) { } }
+    function loadReqReqs() {
+      sb.from('research_review_requests').select('id,project_id,requested_by,research_question,status,decision_note,job_id,params,created_at').eq('project_id', props.projectId).order('created_at', { ascending: false }).limit(40)
+        .then(function (r) { if (alive.current && !(r && r.error)) setReqReqs((r && r.data) || []); }, function () { });
+    }
     var advS = useState(false), showAdv = advS[0], setShowAdv = advS[1];  // ⚙ Speciális collapse (PICO cards + manual review) — off by default (clean process spine)
     // numbered process-spine step label (Studies redesign, direction A) — a light "1 · Title" header before each stage
     function stepHd(n, title, sub) {
@@ -3317,7 +3326,28 @@
     function picoText(p) { if (!p) return ''; return [['P', p.population], ['I', p.intervention], ['C', p.comparison], ['O', p.outcome]].filter(function (x) { return x[1]; }).map(function (x) { return x[0] + ': ' + x[1]; }).join('\n'); }
     function startFromCand(c) { fromCand.current = c.id; setF({ q: c.question || '', protocol: picoText(c.pico), abs: c.abstract_criteria || [], ft: [], ex: c.extraction_questions || [], exclude: c.exclusion_criteria || [], gen: true, genAbs: true, genEx: true, useFig: false, runFT: true, maxResults: '1000' }); setOpenForm(true); setErr(''); }
     function dismissCand(c) { setCands(function (l) { return (l || []).filter(function (x) { return x.id !== c.id; }); }); sb.from('research_sr_candidates').update({ dismissed: true }).eq('id', c.id); }
-    useEffect(function () { alive.current = true; ensureSrCss(); if (canView) { load(); loadCands(); loadStudies(); callElicit({ action: 'sr.health' }).then(function (d) { if (alive.current) setSrHealth((d && typeof d.available === 'boolean') ? d : { available: false, reason: 'error' }); }, function () { if (alive.current) setSrHealth({ available: false, reason: 'error' }); }); sb.from('research_ideas').select('id,question,hypothesis,status,source').eq('project_id', props.projectId).order('created_at', { ascending: true }).then(function (r) { if (!alive.current) return; var rows = (r && r.data) || [], m = {}; rows.forEach(function (x) { m[x.id] = x.question; }); setIdeaById(m); setIdeasFull(rows); }); loadAllStudies(); } return function () { alive.current = false; }; }, [canView]);
+    useEffect(function () { alive.current = true; ensureSrCss(); if (canView) { load(); loadCands(); loadStudies(); callElicit({ action: 'sr.health' }).then(function (d) { if (alive.current) setSrHealth((d && typeof d.available === 'boolean') ? d : { available: false, reason: 'error' }); }, function () { if (alive.current) setSrHealth({ available: false, reason: 'error' }); }); sb.from('research_ideas').select('id,question,hypothesis,status,source').eq('project_id', props.projectId).order('created_at', { ascending: true }).then(function (r) { if (!alive.current) return; var rows = (r && r.data) || [], m = {}; rows.forEach(function (x) { m[x.id] = x.question; }); setIdeaById(m); setIdeasFull(rows); }); loadAllStudies(); loadReqReqs(); } return function () { alive.current = false; }; }, [canView]);
+    // review-request realtime (approve/reject appears live for the requester + admin) — reloads the request list.
+    useEffect(function () {
+      var pid = props.projectId; if (!pid) return; var t = null, ch;
+      try {
+        ch = sb.channel('rrr:' + pid).on('postgres_changes', { event: '*', schema: 'public', table: 'research_review_requests', filter: 'project_id=eq.' + pid }, function () {
+          if (t) return; t = setTimeout(function () { t = null; if (alive.current) loadReqReqs(); }, 800);
+        }).subscribe();
+      } catch (e) { }
+      return function () { if (t) clearTimeout(t); try { sb.removeChannel(ch); } catch (e) { } };
+    }, [props.projectId]);
+    // OpenAlex-fallback runner: admin approved but Elicit was down (approved, no job_id, params.fallback_openalex) →
+    // the REQUESTER's client runs the built-in funnel ONCE (rrFallbackRef guards against re-runs).
+    useEffect(function () {
+      var me = props.viewerId || props.authorId;
+      (reqReqs || []).forEach(function (rr) {
+        if (rr.requested_by !== me || rr.status !== 'approved' || rr.job_id) return;
+        if (!(rr.params && rr.params.fallback_openalex) || rrFallbackRef.current[rr.id]) return;
+        rrFallbackRef.current[rr.id] = 1;
+        runBackup(String((rr.params && rr.params.researchQuestion) || rr.research_question || ''), null);
+      });
+    }, [reqReqs]);
     // re-render whenever a background study run changes (the runs live in PRStudyRunner, not in this component's state)
     // realtime: a study run-lock set/cleared by any collaborator refreshes the SR-studio study cards live (migration-108)
     useEffect(function () {
@@ -3376,12 +3406,16 @@
       });
     }, [jobs && jobs.map(function (j) { return j.id + j.status + ((j.exports && j.exports.pdf) ? '1' : '0'); }).join(',')]);
     function create() {
-      var rq = f.q.trim(); if (!rq) return; setBusy(true); setErr('');
+      var rq = f.q.trim(); if (!rq) return;
+      var qCand0 = (cands || []).filter(function (x) { return x.id === fromCand.current; })[0];
+      if (srMode === 'openalex') { setErr('⚙ Automatikus futtatás (OpenAlex)…'); setOpenForm(false); runBackup(rq, qCand0 && qCand0.idea_id); fromCand.current = null; return; }   // (b) no approval
+      setBusy(true); setErr('');
       // Elicit screening has no separate exclusion field → fold each exclusion criterion into the screening criteria as an
       // inclusion-style rule ("must NOT match …") so a paper meeting it is correctly EXCLUDED. Abstract screen is the primary gate.
       var absAll = (f.abs || []).concat((f.exclude || []).filter(Boolean).map(function (e) { return 'The paper must NOT meet this exclusion condition: ' + e; }));
-      callElicit({ action: 'sr.create', researchQuestion: rq, protocolDetails: f.protocol || null, abstractCriteria: absAll, fulltextCriteria: f.ft, extractionQuestions: f.ex, generateReport: f.gen, genAbstract: f.genAbs, genExtraction: f.genEx, useFigures: f.useFig, runFullText: f.runFT, maxResults: f.maxResults ? parseInt(f.maxResults, 10) : undefined, project_id: props.projectId, title: (props.project && props.project.title) || null }).then(function (d) {
+      callElicit({ action: 'sr.request', researchQuestion: rq, candidate_id: fromCand.current || null, protocolDetails: f.protocol || null, abstractCriteria: absAll, fulltextCriteria: f.ft, extractionQuestions: f.ex, generateReport: f.gen, genAbstract: f.genAbs, genExtraction: f.genEx, useFigures: f.useFig, runFullText: f.runFT, maxResults: f.maxResults ? parseInt(f.maxResults, 10) : undefined, project_id: props.projectId, title: (props.project && props.project.title) || null }).then(function (d) {
         setBusy(false);
+        if (d && d.pending_approval) { setErr('📨 Kérés elküldve — admin jóváhagyásra vár.'); setOpenForm(false); fromCand.current = null; loadReqReqs(); return; }   // (a) queued
         if (!d || d.error) {
           var em = String((d && d.error) || 'Could not start the review.');
           // ONE PATH: Elicit is the primary engine; if it isn't usable NOW (not configured / 5xx / network / quota /
@@ -3405,15 +3439,19 @@
     function runReviewForIdea(idea) {
       if (!idea || !idea.question) return;
       var rq = String(idea.question) + (idea.hypothesis ? ' — hypothesis: ' + idea.hypothesis : '');
+      var short = String(idea.question).slice(0, 48);
+      if (srMode === 'openalex') { setErr('⚙ Automatikus futtatás (OpenAlex): „' + short + '…"'); runBackup(rq, idea.id); return; }   // (b) no approval
       setBusy(true); setErr('');
-      callElicit({ action: 'sr.create', researchQuestion: rq, project_id: props.projectId, title: (props.project && props.project.title) || null, generateReport: true, genAbstract: true, genExtraction: true, runFullText: true, maxResults: 1000 }).then(function (d) {
+      var cand = ideaCand(idea);
+      callElicit({ action: 'sr.request', researchQuestion: rq, project_id: props.projectId, candidate_id: (cand && cand.id) || null, title: (props.project && props.project.title) || null, generateReport: true, genAbstract: true, genExtraction: true, runFullText: true, maxResults: 1000 }).then(function (d) {
         if (!alive.current) return; setBusy(false);
+        if (d && d.pending_approval) { setErr('📨 Kérés elküldve — admin jóváhagyásra vár: „' + short + '…"'); loadReqReqs(); return; }   // (a) queued
         if (!d || d.error) {
           var em = String((d && d.error) || 'Could not start the review.');
           if (/rate limit|429|max concurrent|too many requests|plan limit|403/i.test(em)) { setErr('Elicit: ' + em + ' — próbáld újra kicsit később.'); return; }
-          setErr('⚡ Elicit nem elérhető — beépített backup indult: „' + String(idea.question).slice(0, 48) + '…"'); runBackup(rq, idea.id); return;
+          setErr('⚡ Elicit nem elérhető — beépített backup indult: „' + short + '…"'); runBackup(rq, idea.id); return;   // admin auto-run path only
         }
-        setErr('✓ Review elindítva (Elicit): „' + String(idea.question).slice(0, 48) + '…"'); load(); loadStudies(); loadAllStudies();
+        setErr('✓ Review elindítva (Elicit): „' + short + '…"'); load(); loadStudies(); loadAllStudies();
       }, function () { if (!alive.current) return; setBusy(false); runBackup(rq, idea.id); });
     }
     function runReviewAll(list) { (list || []).forEach(function (idea, i) { setTimeout(function () { if (alive.current) runReviewForIdea(idea); }, i * 600); }); }
@@ -3644,6 +3682,25 @@
           var col = srHealth == null ? 'var(--muted)' : up ? 'var(--ok, #15803d)' : 'var(--warn, #d9820a)';
           var txt = srHealth == null ? 'Motor ellenőrzése…' : up ? '🟢 Motor: Elicit elérhető · a beépített backup (Claude + OpenAlex) készenlétben' : '🟠 Elicit nem elérhető' + (srHealth.reason === 'not_configured' ? ' (nincs API-kulcs)' : '') + ' — a review-k automatikusan a beépített szűréssel (Claude + OpenAlex) futnak';
           return h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 11.5, fontWeight: 600, color: col, background: bg, border: '1px solid var(--line)', borderRadius: 9, padding: '7px 11px', margin: '4px 0 8px' } }, txt);
+        })(),
+        // (a) Elicit (admin-approval) vs (b) OpenAlex (automatic) — the launch-engine choice (migration-109)
+        (props.canEdit ? h('div', { style: { display: 'flex', alignItems: 'center', gap: 9, margin: '0 0 8px', flexWrap: 'wrap' } },
+          h('span', { style: { fontSize: 11.5, color: 'var(--muted)' } }, 'Futtatómotor:'),
+          h('div', { className: 'sr-mode-seg', role: 'group', 'aria-label': 'Futtatómotor' },
+            h('button', { className: srMode === 'elicit' ? 'on' : '', 'aria-pressed': srMode === 'elicit', onClick: function () { pickSrMode('elicit'); }, title: 'Elicit-alapú review — admin jóváhagyással' }, '🔬 Elicit (jóváhagyással)'),
+            h('button', { className: srMode === 'openalex' ? 'on' : '', 'aria-pressed': srMode === 'openalex', onClick: function () { pickSrMode('openalex'); }, title: 'Beépített, automatikus szűrés (Claude + OpenAlex) — jóváhagyás nélkül' }, '⚙ OpenAlex (automatikus)')),
+          h('span', { style: { fontSize: 11, color: 'var(--faint)' } }, srMode === 'elicit' ? 'Az Elicit-futtatás admin jóváhagyást igényel.' : 'Azonnal fut, jóváhagyás nélkül.')) : null),
+        // my review requests: awaiting approval / rejected (approved ones become normal running jobs below)
+        (function () {
+          var me = props.viewerId || props.authorId;
+          var mine = (reqReqs || []).filter(function (rr) { return rr.requested_by === me && (rr.status === 'pending_approval' || rr.status === 'rejected'); });
+          if (!mine.length) return null;
+          return h('div', { style: { display: 'flex', flexDirection: 'column', gap: 5, margin: '0 0 8px' } }, mine.map(function (rr) {
+            var pend = rr.status === 'pending_approval';
+            return h('div', { key: rr.id, style: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 11.5, padding: '6px 10px', borderRadius: 8, border: '1px solid ' + (pend ? 'color-mix(in srgb, var(--warn,#d9820a) 45%, var(--line))' : 'color-mix(in srgb, var(--danger,#b42318) 40%, var(--line))'), background: pend ? 'color-mix(in srgb, var(--warn,#d9820a) 9%, var(--surface))' : 'color-mix(in srgb, var(--danger,#b42318) 8%, var(--surface))' } },
+              h('span', { style: { flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: pend ? '#a16207' : 'var(--danger,#b42318)' } }, (pend ? '📨 Jóváhagyásra vár: ' : '⛔ Elutasítva: ') + String(rr.research_question || '').slice(0, 70) + (rr.decision_note && !pend ? ' — ' + rr.decision_note : '')),
+              (pend && props.canEdit) ? h('button', { className: 'btn', style: { padding: '2px 8px', fontSize: 10.5, flex: 'none' }, onClick: function () { sb.rpc('review_request_decide', { req_id: rr.id, approve: false, note: null }).then(function () { loadReqReqs(); }, function () { }); } }, 'Visszavonás') : null);
+          }));
         })(),
         // ONE-PATH launcher: the selected ideas → start a review each (Elicit primary → auto backup). Replaces the two separate entries.
         (function () {
@@ -10376,7 +10433,8 @@
     function startStudyFromIdea(gap) {
       var rq = String((gap && gap.question) || p.title);
       var gapId = (gap && gap.id) || null;
-      callElicit({ action: 'sr.create', researchQuestion: rq, project_id: p.id, title: rq.slice(0, 80), generateReport: true, genAbstract: true, genExtraction: true, runFullText: true, maxResults: 1000 }).then(function (d) {
+      callElicit({ action: 'sr.request', researchQuestion: rq, project_id: p.id, title: rq.slice(0, 80), generateReport: true, genAbstract: true, genExtraction: true, runFullText: true, maxResults: 1000 }).then(function (d) {   // sr.request → admin approval (non-admins); admins auto-run
+        if (d && d.pending_approval) { if (window.PRUI) window.PRUI.toast('📨 Kérés elküldve — admin jóváhagyásra vár.', { kind: 'info' }); if (props.onChanged) props.onChanged(); setTab('study'); return; }
         var em = (d && d.error) ? String(d.error) : '';
         if (em) {
           if (/rate limit|429|max concurrent|too many requests|plan limit|403/i.test(em)) { if (window.PRUI) window.PRUI.toast('Elicit: ' + em + ' — próbáld kicsit később.', { kind: 'error' }); }
@@ -10717,6 +10775,8 @@
       if (n.kind === 'digest') return 'Daily research digest';
       if (n.kind === 'share') return '👥 Meghívó közreműködőnek';
       var p = n.payload || {};
+      if (n.kind === 'sr_request') return '🔬 Elicit review kérelem';
+      if (n.kind === 'sr_review') return (p.decision === 'rejected') ? '⛔ Review elutasítva' : (p.decision === 'approved_fallback' ? '✓ Jóváhagyva (OpenAlex)' : '✓ Review jóváhagyva');
       if (p.type === 'research_map_mention') return '💬 Említés a térképen';
       return p.title || p.project_title || n.kind;
     }
@@ -10724,6 +10784,8 @@
       var p = n.payload || {};
       if (n.kind === 'digest') return (p.day || '') + ' · ' + (p.students || 0) + ' student' + (p.students === 1 ? '' : 's') + ', ' + (p.entries || 0) + ' update' + (p.entries === 1 ? '' : 's');
       if (n.kind === 'share') return (p.by || 'Valaki') + ' meghívott a(z) „' + (p.title || 'Projekt') + '" projektbe (' + shareRoleLabel(p.role) + ').';
+      if (n.kind === 'sr_request') return 'Egy felhasználó Elicit review-t kér — jóváhagyás az Admin felületen: „' + String(p.title || '').slice(0, 90) + '"';
+      if (n.kind === 'sr_review') return String(p.title || '').slice(0, 100) + (p.decision === 'rejected' ? ' — elutasítva' : (p.decision === 'approved_fallback' ? ' — Elicit nem elérhető, OpenAlex fut' : ' — elindult'));
       if (p.type === 'research_map_mention') return (p.from || 'Kolléga') + (p.project_title ? ' — „' + p.project_title + '"' : '') + (p.excerpt ? ': ' + p.excerpt : '');
       return p.body || '';
     }
@@ -10740,6 +10802,8 @@
             h('b', null, title(n)), h('div', { className: 'nx' }, summ(n)),
             n.kind === 'share' ? h('div', { style: { marginTop: 8 } },
               h('button', { className: 'btn pri', style: { fontSize: 12, padding: '4px 12px' }, onClick: function (e) { e.stopPropagation(); acceptShare(n); } }, 'Elfogadom')) : null,
+            (p.href && (n.kind === 'sr_request' || n.kind === 'sr_review')) ? h('div', { style: { marginTop: 8 } },
+              h('button', { className: 'btn', style: { fontSize: 12, padding: '4px 12px' }, onClick: function (e) { e.stopPropagation(); markRead(n); try { location.href = p.href; } catch (er) { } } }, n.kind === 'sr_request' ? 'Admin felület →' : 'Megnyitás →')) : null,
             (expanded === n.id && n.kind === 'digest' && p.items && p.items.length) ? h('div', { style: { marginTop: 8 } }, p.items.map(function (it, i) {
               return h('div', { key: i, className: 'nx', style: { paddingTop: 4 } }, h('span', { className: 'chip c-grey', style: { marginRight: 6 } }, it.type), it.student + ' — ' + it.summary);
             })) : null

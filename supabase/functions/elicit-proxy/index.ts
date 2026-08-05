@@ -148,6 +148,66 @@ async function notifyDone(svc: any, row: any, patch: any, kind: string): Promise
 }
 const GET_PATH: Record<string, string> = { report: '/api/v1/reports/', sysreview: '/api/v1/systematic-reviews/' };
 
+// Build the Elicit systematic-review request body from UI/candidate params. Shared by sr.create / sr.request / sr.approve
+// so the approved run replays byte-identically. Returns null if there's no research question.
+function buildSrBody(body: any): { rq: string; qh: string; srBody: any } | null {
+  const rq = String(body.researchQuestion || '').trim();
+  if (!rq) return null;
+  const qh = hashStr('sr:' + rq.toLowerCase().replace(/\s+/g, ' '));
+  const critArr = (a: any) => Array.isArray(a) ? a.map((x: any) => String(x || '').trim()).filter(Boolean).slice(0, 20) : [];
+  const toItem = (s: string) => ({ name: (s.length <= 90 ? s : s.slice(0, 88).replace(/\s+\S*$/, '') + '…').slice(0, 200), instructions: s.slice(0, 2000) });
+  const absC = critArr(body.abstractCriteria).map(toItem);
+  const ftC = critArr(body.fulltextCriteria).map(toItem);
+  const exQ = critArr(body.extractionQuestions).map(toItem);
+  const genA = body.genAbstract !== false, genE = body.genExtraction !== false, useFig = body.useFigures === true;
+  const runFT = body.runFullText !== false;
+  const abstractScreening: any = { generate: absC.length ? genA : true };
+  if (absC.length) abstractScreening.criteria = absC;
+  const extraction: any = { generate: exQ.length ? genE : true };
+  if (exQ.length) extraction.questions = exQ;
+  if (useFig) extraction.useFigures = true;
+  const srBody: any = {
+    researchQuestion: rq.slice(0, 2000),
+    protocolDetails: body.protocolDetails ? String(body.protocolDetails).slice(0, 4000) : undefined,
+    abstractScreening, extraction,
+    generateReport: body.generateReport !== false,
+    title: body.title ? String(body.title).slice(0, 200) : undefined,
+    isPublic: false,
+  };
+  if (runFT) srBody.fulltextScreening = ftC.length ? { criteria: ftC, reuseAbstractCriteria: false } : { reuseAbstractCriteria: true };
+  const maxR = clampInt(body.maxResults, 1, 10000, 0);
+  if (maxR >= 1) srBody.searches = [{ query: rq.slice(0, 2000), corpus: 'elicit', searchMode: 'semantic', maxResults: maxR }];
+  return { rq, qh, srBody };
+}
+
+// Claim-first (TOCTOU-safe) + fire the paid Elicit run + update the elicit_jobs row. `db` = the client that OWNS the
+// write (caller-JWT for a direct run; SERVICE-ROLE for an admin approving on the requester's behalf). `runUid` = whose
+// elicit_jobs row this is. Returns {ok,job} | {ok,job,deduped} | {error,status,detail}.
+async function igniteSR(db: any, runUid: string, projectId: string | null, rq: string, qh: string, srBody: any): Promise<any> {
+  if (!ELICIT_KEY) return { error: 'The research engine is not configured on the server.', status: 503 };
+  const { data: claim, error: claimErr } = await db.from('elicit_jobs').insert({
+    user_id: runUid, project_id: projectId || null, kind: 'sysreview',
+    research_question: rq.slice(0, 2000), q_hash: qh, status: 'processing', is_public: false, request: srBody,
+  }).select('id').single();
+  if (claimErr) {
+    const { data: dup } = await db.from('elicit_jobs').select('id,elicit_id,status,stage,url')
+      .eq('user_id', runUid).eq('kind', 'sysreview').eq('q_hash', qh).not('status', 'in', '(completed,failed)').limit(1);
+    if (dup && dup.length) return { ok: true, job: dup[0], deduped: true };
+    return { error: 'Could not create the review.', status: 500 };
+  }
+  const cr = await elicitCall('/api/v1/systematic-reviews', 'POST', srBody);
+  if (!cr.ok || !cr.body?.reviewId) {
+    await db.from('elicit_jobs').delete().eq('id', claim.id);
+    if (cr.status === 402) return { error: 'Out of quota — an admin must top it up.', status: 402 };
+    if (cr.status === 403) return { error: (cr.body && cr.body.error && cr.body.error.message) || 'Systematic reviews unavailable (plan limit or max concurrent reviews reached).', status: 403 };
+    if (cr.status === 429) return { error: 'Rate limit hit — try again shortly.', status: 429 };
+    return { error: 'Systematic review creation failed.', status: 502, detail: cr.status };
+  }
+  const { data: row } = await db.from('elicit_jobs').update({ elicit_id: cr.body.reviewId, status: cr.body.status || 'processing', url: cr.body.url || null })
+    .eq('id', claim.id).select('id,kind,status,stage,research_question,url,is_public,created_at,updated_at,project_id').single();
+  return { ok: true, job: row };
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
   if (req.method !== 'POST') return json({ error: 'POST only' }, 405);
@@ -406,6 +466,70 @@ Deno.serve(async (req) => {
       const { data: row } = await sb.from('elicit_jobs').update({ elicit_id: cr.body.reviewId, status: cr.body.status || 'processing', url: cr.body.url || null })
         .eq('id', claim.id).select('id,kind,status,stage,research_question,url,is_public,created_at,updated_at,project_id').single();
       return json({ ok: true, job: row });
+    }
+
+    // ── Admin-approval workflow (migration-109) ─────────────────────────────────────────────────────────────
+    // sr.request: a user files an Elicit review REQUEST. Admins bypass the queue (run immediately). Everyone else
+    // gets a pending_approval row + the admins are notified. The paid Elicit call only fires here for admins.
+    if (action === 'sr.request') {
+      const gate = await assertEntitled(sb, 'elicit_sysreview'); if (gate) return gate;
+      const built = buildSrBody(body);
+      if (!built) return json({ error: 'researchQuestion required' }, 400);
+      const cap = parseInt(Deno.env.get('ELICIT_SYSREVIEW_DAILY') || '1', 10);
+      const { data: over } = await sb.rpc('feature_over_budget', { p_key: 'elicit_sysreview', max_calls: cap });
+      if (over === true) return json({ error: 'Daily systematic-review limit reached — try again tomorrow.' }, 429);
+      const { data: prof } = await sb.from('profiles').select('role').eq('id', uid).maybeSingle();
+      if (prof && prof.role === 'admin') {   // admins skip approval — run immediately (same ignition as sr.create)
+        const ig = await igniteSR(sb, uid!, body.project_id || null, built.rq, built.qh, built.srBody);
+        if (ig.error) return json({ error: ig.error, detail: ig.detail }, ig.status || 500);
+        if (!ig.deduped) await sb.rpc('feature_usage_bump', { p_key: 'elicit_sysreview' });
+        return json({ ok: true, job: ig.job, auto_approved: true });
+      }
+      // non-admin → file the approval request (counts against the daily cap so requests can't be spammed)
+      await sb.rpc('feature_usage_bump', { p_key: 'elicit_sysreview' });
+      const { data: reqRow, error: reqErr } = await sb.from('research_review_requests').insert({
+        project_id: body.project_id || null, candidate_id: body.candidate_id || null, requested_by: uid,
+        kind: 'sysreview', research_question: built.rq, params: built.srBody, q_hash: built.qh,
+      }).select('id,status,research_question,project_id,created_at').single();
+      if (reqErr) {
+        if (/duplicate|unique|rrr_pending_uniq/i.test(reqErr.message || '')) return json({ ok: true, pending_approval: true, deduped: true });
+        return json({ error: 'Could not file the request: ' + reqErr.message }, 500);
+      }
+      try {   // notify every admin (service-role → cross-user insert allowed)
+        const { data: admins } = await svc.from('profiles').select('id').eq('role', 'admin');
+        const rows = ((admins || []) as any[]).map((a) => ({ recipient_id: a.id, kind: 'sr_request', payload: { type: 'sr_request', request_id: reqRow.id, requester: uid, title: built.rq.slice(0, 160), href: 'Admin.html' } }));
+        if (rows.length) await svc.from('notifications').insert(rows);
+      } catch (_e) { /* best-effort */ }
+      return json({ ok: true, pending_approval: true, request: reqRow });
+    }
+
+    // sr.approve: an admin approves a pending request → the review RUNS server-side now (requester need not be online),
+    // replaying the exact stored params. On non-transient Elicit failure → mark approved + OpenAlex fallback (the
+    // requester's client runs the built-in funnel). Transient failures (rate/plan/concurrency) stay pending for retry.
+    if (action === 'sr.approve') {
+      const { data: prof } = await sb.from('profiles').select('role').eq('id', uid).maybeSingle();
+      if (!prof || prof.role !== 'admin') return json({ error: 'Admin only.' }, 403);
+      const reqId = body.req_id || body.request_id;
+      if (!reqId) return json({ error: 'req_id required' }, 400);
+      const { data: r } = await svc.from('research_review_requests').select('*').eq('id', reqId).maybeSingle();
+      if (!r) return json({ error: 'request not found' }, 404);
+      if (r.status !== 'pending_approval') return json({ error: 'Ez a kérés már el lett bírálva.', status: r.status }, 409);
+      const rq = String(r.research_question || (r.params && r.params.researchQuestion) || '').trim();
+      const qh = r.q_hash || hashStr('sr:' + rq.toLowerCase().replace(/\s+/g, ' '));
+      const ig = await igniteSR(svc, r.requested_by, r.project_id || null, rq, qh, r.params || {});   // svc: the job belongs to the REQUESTER
+      const nowIso = new Date().toISOString();
+      if (ig.error) {
+        const transient = ig.status === 429 || ig.status === 403;
+        if (transient) return json({ error: ig.error, detail: ig.detail, transient: true }, ig.status || 502);   // leave pending → admin retries
+        // non-transient (Elicit down / not configured / 5xx) → approve + OpenAlex fallback (user's chosen policy)
+        await svc.from('research_review_requests').update({ status: 'approved', decided_by: uid, decided_at: nowIso, decision_note: 'Elicit nem elérhető — automatikus OpenAlex futtatás', params: { ...(r.params || {}), fallback_openalex: true }, updated_at: nowIso }).eq('id', reqId);
+        await svc.from('notifications').insert({ recipient_id: r.requested_by, kind: 'sr_review', payload: { type: 'sr_decision', decision: 'approved_fallback', request_id: reqId, title: rq.slice(0, 160), project_id: r.project_id, href: 'Research.html?project=' + (r.project_id || '') } });
+        return json({ ok: true, approved: true, fallback: 'openalex' });
+      }
+      await svc.from('research_review_requests').update({ status: 'approved', decided_by: uid, decided_at: nowIso, job_id: ig.job.id, updated_at: nowIso }).eq('id', reqId);
+      if (r.candidate_id) { try { await svc.from('research_sr_candidates').update({ launched_job_id: ig.job.id }).eq('id', r.candidate_id); } catch (_e) { /* best-effort back-link */ } }
+      await svc.from('notifications').insert({ recipient_id: r.requested_by, kind: 'sr_review', payload: { type: 'sr_decision', decision: 'approved', request_id: reqId, job_id: ig.job.id, title: rq.slice(0, 160), project_id: r.project_id, href: 'Research.html?project=' + (r.project_id || '') } });
+      return json({ ok: true, approved: true, job: ig.job });
     }
 
     if (action === 'sr.status') {

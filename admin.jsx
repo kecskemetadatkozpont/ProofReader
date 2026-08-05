@@ -640,7 +640,32 @@
     var pcS = useState({}), pubsCache = pcS[0], setPubsCache = pcS[1];
     var ogS = useState({}), openGroups = ogS[0], setOpenGroups = ogS[1];   // expanded affiliation groups
     var fcS = useState([]), catalog = fcS[0], setCatalog = fcS[1];   // feature_catalog (migration-49) drives the permission matrix
+    var rqS = useState([]), reviewReqs = rqS[0], setReviewReqs = rqS[1];   // pending Elicit review requests (migration-109)
+    var rqbS = useState({}), reqBusy = rqbS[0], setReqBusy = rqbS[1];      // req id → 'approving' | 'rejecting'
     function toggleGroup(k) { setOpenGroups(function (m) { var n = Object.assign({}, m); n[k] = !n[k]; return n; }); }
+    function loadReqs() {   // pending review requests; graceful if migration-109 isn't applied yet
+      sb.from('research_review_requests').select('id,project_id,requested_by,research_question,params,status,created_at').eq('status', 'pending_approval').order('created_at', { ascending: true })
+        .then(function (r) { if (!(r && r.error)) setReviewReqs((r && r.data) || []); }, function () { });
+    }
+    function approveReq(req) {
+      setReqBusy(function (m) { var n = Object.assign({}, m); n[req.id] = 'approving'; return n; });
+      sb.functions.invoke('elicit-proxy', { body: { action: 'sr.approve', req_id: req.id } }).then(function (res) {
+        setReqBusy(function (m) { var n = Object.assign({}, m); delete n[req.id]; return n; });
+        var d = res && res.data, e = (res && res.error) || (d && d.error);
+        if (e) { window.PRUI.toast('Jóváhagyás sikertelen: ' + (e.message || e), { kind: 'error' }); loadReqs(); return; }
+        window.PRUI.toast(d && d.fallback ? '✓ Jóváhagyva — Elicit nem elérhető, OpenAlex-futtatás indul.' : '✓ Jóváhagyva — a review elindult (Elicit).', { kind: 'ok' });
+        setReviewReqs(function (l) { return l.filter(function (x) { return x.id !== req.id; }); });
+      }, function () { setReqBusy(function (m) { var n = Object.assign({}, m); delete n[req.id]; return n; }); window.PRUI.toast('Jóváhagyás sikertelen (hálózat).', { kind: 'error' }); });
+    }
+    function rejectReq(req) {
+      var note = (window.prompt('Elutasítás indoka (opcionális):', '') || '').slice(0, 400);
+      setReqBusy(function (m) { var n = Object.assign({}, m); n[req.id] = 'rejecting'; return n; });
+      sb.rpc('review_request_decide', { req_id: req.id, approve: false, note: note || null }).then(function (r) {
+        setReqBusy(function (m) { var n = Object.assign({}, m); delete n[req.id]; return n; });
+        if (r && r.error) { window.PRUI.toast('Elutasítás sikertelen: ' + r.error.message, { kind: 'error' }); loadReqs(); return; }
+        setReviewReqs(function (l) { return l.filter(function (x) { return x.id !== req.id; }); });
+      }, function () { setReqBusy(function (m) { var n = Object.assign({}, m); delete n[req.id]; return n; }); });
+    }
 
     useEffect(function () { boot(); }, []);
     function boot() {
@@ -674,8 +699,17 @@
         setRprojects((res[3] && res[3].data) || []);
         setCatalog((res[4] && res[4].data) || []);   // empty until migration-49 is applied → matrix simply hides
         setPhase('ready');
+        loadReqs();
       }).catch(function (e) { setErr(String(e)); setPhase('error'); });
     }
+    // live pending-review-request queue (migration-109 realtime)
+    useEffect(function () {
+      if (phase !== 'ready') return; var t = null, ch;
+      try {
+        ch = sb.channel('rrr-admin').on('postgres_changes', { event: '*', schema: 'public', table: 'research_review_requests' }, function () { if (t) return; t = setTimeout(function () { t = null; loadReqs(); }, 800); }).subscribe();
+      } catch (e) { }
+      return function () { if (t) clearTimeout(t); try { sb.removeChannel(ch); } catch (e) { } };
+    }, [phase]);
     function aggFor(uid) {
       var ps = projects.filter(function (p) { return p.owner_id === uid; });
       var rps = rprojects.filter(function (p) { return p.owner_id === uid; });   // research projects
@@ -839,7 +873,8 @@
           h('div', { className: 'stat' + (pending.length ? ' alert' : '') }, h('div', { className: 'n' }, pending.length), h('div', { className: 'l' }, 'Pending approval')),
           h('div', { className: 'stat' }, h('div', { className: 'n' }, profiles.filter(function (u) { return u.status === 'approved'; }).length), h('div', { className: 'l' }, 'Approved')),
           h('div', { className: 'stat' }, h('div', { className: 'n' }, projects.length + rprojects.length), h('div', { className: 'l' }, 'Total projects')),
-          h('div', { className: 'stat' }, h('div', { className: 'n' }, fmtBytes(totalStorage)), h('div', { className: 'l' }, 'Total storage · ' + credits(totalChars) + ' credits'))
+          h('div', { className: 'stat' }, h('div', { className: 'n' }, fmtBytes(totalStorage)), h('div', { className: 'l' }, 'Total storage · ' + credits(totalChars) + ' credits')),
+          reviewReqs.length ? h('div', { className: 'stat alert' }, h('div', { className: 'n' }, reviewReqs.length), h('div', { className: 'l' }, 'Függő review-k')) : null
         ),
 
         h(GlobalTaskBoard, { profiles: profiles }),
@@ -847,6 +882,24 @@
         h(ElicitMcpPanel, null),
 
         h(PermissionsPanel, { profiles: profiles, catalog: catalog, onSetFeature: setFeature, onSetWorkflows: setWorkflows, onSetFigures: setFigures }),
+
+        (reviewReqs.length > 0) && h(React.Fragment, null,
+          h('div', { className: 'sec-h' }, h('h2', null, '🔬 Függőben lévő Elicit review kérelmek'), h('span', { className: 'count' }, reviewReqs.length + ' vár jóváhagyásra')),
+          h('div', { className: 'panel' }, h('table', null,
+            h('thead', null, h('tr', null, h('th', null, 'Kérelmező'), h('th', null, 'Kutatási kérdés'), h('th', null, 'Kért'), h('th', { style: { textAlign: 'right' } }, 'Döntés'))),
+            h('tbody', null, reviewReqs.map(function (req) {
+              var u = profiles.filter(function (p) { return p.id === req.requested_by; })[0] || { name: '—', id: req.requested_by };
+              var maxR = (req.params && req.params.searches && req.params.searches[0] && req.params.searches[0].maxResults) || null;
+              var b = reqBusy[req.id];
+              return h('tr', { key: req.id },
+                h('td', null, h('div', { className: 'u' }, h(Avatar, { u: u, size: 24 }), h('b', null, u.name || u.email || '—'))),
+                h('td', null, h('div', { style: { maxWidth: 460, fontSize: 12.5, lineHeight: 1.4 } }, String(req.research_question || '').slice(0, 220), maxR ? h('div', { style: { fontSize: 10.5, color: 'var(--muted)', marginTop: 2 } }, 'maxResults: ' + maxR) : null)),
+                h('td', null, h('span', { style: { fontSize: 11.5, color: 'var(--muted)' } }, String(req.created_at || '').slice(0, 10))),
+                h('td', null, h('div', { style: { display: 'flex', gap: 6, justifyContent: 'flex-end' } },
+                  h('button', { className: 'btn ok', disabled: !!b, onClick: function () { approveReq(req); } }, b === 'approving' ? '…' : '✓ Jóváhagyás'),
+                  h('button', { className: 'btn dng', disabled: !!b, onClick: function () { rejectReq(req); } }, b === 'rejecting' ? '…' : '✕ Elutasítás'))));
+            }))))
+        ),
 
         pending.length > 0 && h(React.Fragment, null,
           h('div', { className: 'sec-h' }, h('h2', null, 'Pending registrations'), h('span', { className: 'count' }, pending.length + ' waiting')),
