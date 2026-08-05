@@ -5921,6 +5921,17 @@
       }, function () { delete chatMsgsLoading.current[id]; });
     }
     function chatpvClean(s) { return String(s || '').replace(/```file:[^\n]*\n[\s\S]*?```/g, '📄 fájl').replace(/```publify-questions[\s\S]*?```/g, '').replace(/\s+/g, ' ').trim().slice(0, 220); }
+    // Elicit-review (sreview) card preview: lazy-load the completed report body so the green card isn't empty.
+    var rbS = useState({}), reviewBody = rbS[0], setReviewBody = rbS[1];   // elicit_job id → { title, body }
+    var reviewBodyLoading = useRef({});
+    function ensureReviewBody(id) {
+      if (id == null || reviewBody[id] != null || reviewBodyLoading.current[id]) return;
+      reviewBodyLoading.current[id] = 1;
+      sb.from('elicit_jobs').select('result_title,result_body').eq('id', id).maybeSingle().then(function (r) {
+        delete reviewBodyLoading.current[id]; if (!alive.current) return; var j = (r && r.data) || {};
+        setReviewBody(function (prev) { var nx = Object.assign({}, prev); nx[id] = { title: j.result_title || '', body: String(j.result_body || '') }; return nx; });
+      }, function () { delete reviewBodyLoading.current[id]; });
+    }
     // lazily sign the storage URLs for a set of figures (idempotent; in-flight guarded)
     function ensureFigUrls(figs) {
       var paths = (figs || []).map(function (f) { return f && f.storage_path; }).filter(function (pp) { return pp && !figUrls[pp] && !figLoading.current[pp]; });
@@ -9219,7 +9230,14 @@
       }
       else if (n.t === 'figure') k.push(h('div', { className: 'rmap-nm', key: 'm' }, String(n.m.Felirat || '').slice(0, 64)));
       else if (n.t === 'srq') k.push(h('div', { className: 'rmap-nm', key: 'm' }, '💡 ' + String(n.m.Alap || '').slice(0, 52)));
-      else if (n.t === 'sreview') k.push(h('div', { className: 'rmap-nm', key: 'm', style: { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' } }, h('span', { className: 'rmap-chip ' + (n.m.Státusz === 'completed' ? 'done' : n.m.Státusz === 'failed' ? '' : 'run') }, n.m.Státusz || 'vár'), (n.m['Ötlet'] || n.m['Ötletek']) ? h('span', { style: { fontSize: 10.5, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 } }, '💡 ' + (n.m['Ötletek'] || n.m['Ötlet'])) : null));
+      else if (n.t === 'sreview') {
+        var srj = n.ref || {};
+        if (srj.status === 'completed') ensureReviewBody(srj.id);   // lazy: fetch the report so the compact card shows a snippet (not empty)
+        var srb = reviewBody[srj.id];
+        k.push(h('div', { className: 'rmap-nm', key: 'm', style: { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' } }, h('span', { className: 'rmap-chip ' + (n.m.Státusz === 'completed' ? 'done' : n.m.Státusz === 'failed' ? '' : 'run') }, n.m.Státusz || 'vár'), (n.m['Ötlet'] || n.m['Ötletek']) ? h('span', { style: { fontSize: 10.5, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 } }, '💡 ' + (n.m['Ötletek'] || n.m['Ötlet'])) : null));
+        var srSnip = (srb && srb.body) ? String(srb.body).replace(/[#*_>`~\[\]]/g, '').replace(/\s+/g, ' ').trim().slice(0, 200) : '';
+        if (srSnip) k.push(h('div', { key: 'snip', style: { fontSize: 11, color: 'var(--muted)', lineHeight: 1.4, marginTop: 2, display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' } }, srSnip));
+      }
       else if (n.t === 'object') {
         if (n.okind === 'note') k.push(h('div', { className: 'rmap-nm', key: 'm', style: { whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: (n.ref && n.ref.text) ? 'var(--ink)' : 'var(--faint)' } }, (n.ref && n.ref.text) ? String(n.ref.text).slice(0, 160) : 'dupla-katt: szerkesztés'));
         else k.push(h('div', { className: 'rmap-nm', key: 'm' }, n.okind));
@@ -9283,6 +9301,18 @@
         out.push(h('div', { key: 'scr', className: 'rmap-t rmap-t-l' }, h('div', { className: 'rmap-pv-seg' }, ['include', 'maybe', 'exclude'].map(function (v) {
           return h('button', { key: v, className: 'rmap-pv-sb' + (r.screening === v ? ' on s-' + v : ''), title: 'Szűrés: ' + v, onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); setPaperScreen(r, v); } }, v === 'include' ? '✓ incl' : v === 'maybe' ? '~ maybe' : '✕ excl');
         }))));
+      }
+      // SREVIEW preview: a big-enough Elicit-review card renders its completed report (lazy-loaded) so the green card isn't empty.
+      if (t === 'sreview' && r.id) {
+        var srBig = (n._h || 0) >= 130 && (n._w || 0) >= 200;
+        if (srBig) ensureReviewBody(r.id);
+        var rb = reviewBody[r.id], srpv;
+        if (r.status === 'completed') {
+          if (rb == null) srpv = h('div', { className: 'rmap-pv-load' }, srBig ? '⏳ riport betöltése…' : '');
+          else if (rb.body) srpv = h('div', { className: 'rmap-pv-md md', dangerouslySetInnerHTML: { __html: mdHtml(String(rb.body).slice(0, 8000)) } });
+          else srpv = h('div', { className: 'rmap-pv-load' }, '✓ Kész — nyisd meg a részletekhez');
+        } else srpv = h('div', { className: 'rmap-pv-load' }, r.status === 'failed' ? '✗ Sikertelen futtatás' : '⏳ Fut — még nincs kész riport');
+        out.push(h('div', { key: 'srpv', className: 'rmap-t rmap-t-pv', onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); if (sel !== n.id) { setSelEdge(null); setMsel({}); setSel(n.id); } } }, srpv));
       }
       if (canEnter(n)) out.push(h('div', { key: 'xl', className: 'rmap-t rmap-t-xl' }, h('button', { className: 'rmap-pv-btn pri', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); enterNode(n); } }, n.t === 'file' ? '👁 Előnézet ↗' : '◇ Belépés — teljes panel ↗')));
       // FILE preview: a big-enough file/section/review card renders its content by type (md/csv/text → lazy content; image/video/audio/pdf → signed URL).
