@@ -6594,10 +6594,18 @@
         if (basis) E.push(['i' + cd.idea_id, 'q' + cd.id]);
       });
       (d.sreviews || []).forEach(function (jb) {
-        N.push({ id: 'e' + jb.id, t: 'sreview', ph: 2, title: jb.result_title || jb.research_question || 'Áttekintés', m: { Státusz: jb.status || '—' }, ref: jb });
-        // link to the candidate it was launched from (via launched_job_id, or the question text) → idea → candidate → review chain
+        // Trace the review back to its SOURCE IDEA(S). elicit_jobs store no idea_id, but sr.request/runReviewForIdea set
+        // research_question = idea.question [+ hypothesis], so an idea whose question PREFIXES the review question is a
+        // source. Link ALL matches — a review derived from 1 OR several ideas is thereby attributed to each of them.
+        var rq = String(jb.research_question || '');
+        var srcIdeas = rq ? (d.ideas || []).filter(function (x) { return x.question && rq.indexOf(String(x.question)) === 0; }) : [];
+        var em = { Státusz: jb.status || '—' };
+        if (srcIdeas.length === 1) em['Ötlet'] = String(srcIdeas[0].question).slice(0, 46);
+        else if (srcIdeas.length > 1) em['Ötletek'] = srcIdeas.length + ' ötletből';
+        N.push({ id: 'e' + jb.id, t: 'sreview', ph: 2, title: jb.result_title || jb.research_question || 'Áttekintés', m: em, ref: jb, srcIdeas: srcIdeas.map(function (x) { return x.id; }) });
         var cand = (d.srcands || []).filter(function (cd) { return cd.launched_job_id === jb.id || (cd.question && jb.research_question && cd.question === jb.research_question); })[0];
-        if (cand) E.push(['q' + cand.id, 'e' + jb.id]);
+        if (cand) E.push(['q' + cand.id, 'e' + jb.id]);                          // via its PICO candidate → idea, if one exists
+        else if (srcIdeas.length) srcIdeas.forEach(function (x) { E.push(['i' + x.id, 'e' + jb.id]); });   // else straight from each source idea (per-idea provenance — fixes "3 ideas → 1 card")
         else if (hasLit) E.push(['lit', 'e' + jb.id]);
         else if (d.ideas.length) E.push(['i' + d.ideas[0].id, 'e' + jb.id]);
       });
@@ -9211,7 +9219,7 @@
       }
       else if (n.t === 'figure') k.push(h('div', { className: 'rmap-nm', key: 'm' }, String(n.m.Felirat || '').slice(0, 64)));
       else if (n.t === 'srq') k.push(h('div', { className: 'rmap-nm', key: 'm' }, '💡 ' + String(n.m.Alap || '').slice(0, 52)));
-      else if (n.t === 'sreview') k.push(h('div', { className: 'rmap-nm', key: 'm' }, h('span', { className: 'rmap-chip ' + (n.m.Státusz === 'completed' ? 'done' : n.m.Státusz === 'failed' ? '' : 'run') }, n.m.Státusz || 'vár')));
+      else if (n.t === 'sreview') k.push(h('div', { className: 'rmap-nm', key: 'm', style: { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' } }, h('span', { className: 'rmap-chip ' + (n.m.Státusz === 'completed' ? 'done' : n.m.Státusz === 'failed' ? '' : 'run') }, n.m.Státusz || 'vár'), (n.m['Ötlet'] || n.m['Ötletek']) ? h('span', { style: { fontSize: 10.5, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 } }, '💡 ' + (n.m['Ötletek'] || n.m['Ötlet'])) : null));
       else if (n.t === 'object') {
         if (n.okind === 'note') k.push(h('div', { className: 'rmap-nm', key: 'm', style: { whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: (n.ref && n.ref.text) ? 'var(--ink)' : 'var(--faint)' } }, (n.ref && n.ref.text) ? String(n.ref.text).slice(0, 160) : 'dupla-katt: szerkesztés'));
         else k.push(h('div', { className: 'rmap-nm', key: 'm' }, n.okind));
