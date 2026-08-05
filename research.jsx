@@ -3343,9 +3343,10 @@
       var me = props.viewerId || props.authorId;
       (reqReqs || []).forEach(function (rr) {
         if (rr.requested_by !== me || rr.status !== 'approved' || rr.job_id) return;
-        if (!(rr.params && rr.params.fallback_openalex) || rrFallbackRef.current[rr.id]) return;
+        if (!(rr.params && rr.params.fallback_openalex) || rr.params.fallback_ran || rrFallbackRef.current[rr.id]) return;   // durable guard (fallback_ran, DB) + session guard (ref)
         rrFallbackRef.current[rr.id] = 1;
         runBackup(String((rr.params && rr.params.researchQuestion) || rr.research_question || ''), null);
+        sb.rpc('review_request_consume', { req_id: rr.id }).then(function () { loadReqReqs(); }, function () { });   // mark consumed → a remount/reload can't re-fire (no duplicate studies/paid runs)
       });
     }, [reqReqs]);
     // re-render whenever a background study run changes (the runs live in PRStudyRunner, not in this component's state)

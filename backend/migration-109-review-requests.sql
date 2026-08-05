@@ -39,12 +39,15 @@ drop policy if exists rrr_read on public.research_review_requests;
 create policy rrr_read on public.research_review_requests for select to authenticated
   using (requested_by = auth.uid() or public.is_admin()
          or (project_id is not null and public.research_can_read_project(project_id)));
--- INSERT: only your OWN request, on a project you can write, only if entitled (defense-in-depth; edge fn also checks)
+-- INSERT: only your OWN request, on a project you can write, only if entitled (defense-in-depth; edge fn also checks).
+-- PIN the decision/lifecycle fields so a direct client insert can't plant a forged 'approved'/decided/job-linked row
+-- (the only way to reach 'approved' is the edge fn / admin approval).
 drop policy if exists rrr_insert on public.research_review_requests;
 create policy rrr_insert on public.research_review_requests for insert to authenticated
   with check (requested_by = auth.uid()
               and (project_id is null or public.research_can_write_project(project_id))
-              and public.is_feature_enabled('elicit_sysreview'));
+              and public.is_feature_enabled('elicit_sysreview')
+              and status = 'pending_approval' and decided_by is null and decided_at is null and job_id is null);
 -- ADMIN: full management for the console. NO non-admin UPDATE/DELETE → decisions flow only through the RPC / edge fn.
 drop policy if exists rrr_admin on public.research_review_requests;
 create policy rrr_admin on public.research_review_requests for all to authenticated
@@ -66,15 +69,30 @@ begin
      set status = case when public.is_admin() then 'rejected' else 'cancelled' end,
          decided_by = auth.uid(), decided_at = now(), decision_note = note, updated_at = now()
    where id = req_id and status = 'pending_approval';
-  insert into public.notifications (recipient_id, kind, payload)
-  values (r.requested_by, 'sr_review',
-          jsonb_build_object('type','sr_decision','decision','rejected','request_id',req_id,
-                             'title', coalesce(r.research_question,'Elicit review'),
-                             'project_id', r.project_id,
-                             'href','Research.html?project='||coalesce(r.project_id::text,'')));
+  -- notify the requester ONLY on an admin rejection (a self-cancel needs no notification to oneself)
+  if public.is_admin() and r.requested_by <> auth.uid() then
+    insert into public.notifications (recipient_id, kind, payload)
+    values (r.requested_by, 'sr_review',
+            jsonb_build_object('type','sr_decision','decision','rejected','request_id',req_id,
+                               'title', coalesce(r.research_question,'Elicit review'),
+                               'project_id', r.project_id,
+                               'href','Research.html?project='||coalesce(r.project_id::text,'')));
+  end if;
 end; $$;
 revoke all on function public.review_request_decide(uuid,boolean,text) from public, anon;
 grant execute on function public.review_request_decide(uuid,boolean,text) to authenticated;
+
+-- the REQUESTER marks their own approved-fallback request as consumed after their client kicks the OpenAlex funnel,
+-- so a remount/reload can't re-fire the fallback (params.fallback_ran becomes the durable one-shot guard).
+create or replace function public.review_request_consume(req_id uuid)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  update public.research_review_requests
+     set params = jsonb_set(coalesce(params,'{}'::jsonb), '{fallback_ran}', 'true'::jsonb), updated_at = now()
+   where id = req_id and requested_by = auth.uid() and status = 'approved';
+end; $$;
+revoke all on function public.review_request_consume(uuid) from public, anon;
+grant execute on function public.review_request_consume(uuid) to authenticated;
 
 do $$ begin
   if not exists (select 1 from pg_publication_tables where pubname='supabase_realtime' and tablename='research_review_requests') then

@@ -185,6 +185,10 @@ function buildSrBody(body: any): { rq: string; qh: string; srBody: any } | null 
 // elicit_jobs row this is. Returns {ok,job} | {ok,job,deduped} | {error,status,detail}.
 async function igniteSR(db: any, runUid: string, projectId: string | null, rq: string, qh: string, srBody: any): Promise<any> {
   if (!ELICIT_KEY) return { error: 'The research engine is not configured on the server.', status: 503 };
+  // sanitize the stored/passed body before the paid POST (defense-in-depth: params may be an untrusted stored jsonb) —
+  // force a private review and re-clamp the search size regardless of what was persisted at request time.
+  srBody = Object.assign({}, srBody || {}, { isPublic: false });
+  if (Array.isArray(srBody.searches)) srBody.searches = srBody.searches.map((s: any) => Object.assign({}, s, { maxResults: clampInt(s && s.maxResults, 1, 10000, 200) }));
   const { data: claim, error: claimErr } = await db.from('elicit_jobs').insert({
     user_id: runUid, project_id: projectId || null, kind: 'sysreview',
     research_question: rq.slice(0, 2000), q_hash: qh, status: 'processing', is_public: false, request: srBody,
@@ -403,6 +407,10 @@ Deno.serve(async (req) => {
 
     if (action === 'sr.create') {
       const gate = await assertEntitled(sb, 'elicit_sysreview'); if (gate) return gate;
+      // sr.create fires a PAID run directly → ADMIN-ONLY (non-admins must go through sr.request → admin approval).
+      // The client no longer calls sr.create; this closes the curl/devtools approval-bypass.
+      const { data: prof0 } = await sb.from('profiles').select('role').eq('id', uid).maybeSingle();
+      if (!prof0 || prof0.role !== 'admin') return json({ error: 'Az Elicit-futtatás jóváhagyás-köteles — használd a jóváhagyási folyamatot.' }, 403);
       if (!ELICIT_KEY) return json({ error: 'The research engine is not configured on the server.' }, 503);
       const rq = String(body.researchQuestion || '').trim();
       if (!rq) return json({ error: 'researchQuestion required' }, 400);
@@ -485,8 +493,8 @@ Deno.serve(async (req) => {
         if (!ig.deduped) await sb.rpc('feature_usage_bump', { p_key: 'elicit_sysreview' });
         return json({ ok: true, job: ig.job, auto_approved: true });
       }
-      // non-admin → file the approval request (counts against the daily cap so requests can't be spammed)
-      await sb.rpc('feature_usage_bump', { p_key: 'elicit_sysreview' });
+      // non-admin → file the approval request. NOTE: we do NOT bump the daily cap here — a rejected/never-approved
+      // request must not burn the requester's quota. The admin approval is the rate limiter for the paid run.
       const { data: reqRow, error: reqErr } = await sb.from('research_review_requests').insert({
         project_id: body.project_id || null, candidate_id: body.candidate_id || null, requested_by: uid,
         kind: 'sysreview', research_question: built.rq, params: built.srBody, q_hash: built.qh,
@@ -516,7 +524,8 @@ Deno.serve(async (req) => {
       if (r.status !== 'pending_approval') return json({ error: 'Ez a kérés már el lett bírálva.', status: r.status }, 409);
       const rq = String(r.research_question || (r.params && r.params.researchQuestion) || '').trim();
       const qh = r.q_hash || hashStr('sr:' + rq.toLowerCase().replace(/\s+/g, ' '));
-      const ig = await igniteSR(svc, r.requested_by, r.project_id || null, rq, qh, r.params || {});   // svc: the job belongs to the REQUESTER
+      const approveBody = Object.assign({}, r.params || {}, { researchQuestion: rq });   // pin the run to what the admin SAW (research_question) — not a possibly-forged params.researchQuestion (confused-deputy)
+      const ig = await igniteSR(svc, r.requested_by, r.project_id || null, rq, qh, approveBody);   // svc: the job belongs to the REQUESTER; igniteSR also forces isPublic:false + clamps maxResults
       const nowIso = new Date().toISOString();
       if (ig.error) {
         const transient = ig.status === 429 || ig.status === 403;
