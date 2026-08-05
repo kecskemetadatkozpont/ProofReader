@@ -883,22 +883,24 @@
 
         h(PermissionsPanel, { profiles: profiles, catalog: catalog, onSetFeature: setFeature, onSetWorkflows: setWorkflows, onSetFigures: setFigures }),
 
-        (reviewReqs.length > 0) && h(React.Fragment, null,
-          h('div', { className: 'sec-h' }, h('h2', null, '🔬 Függőben lévő Elicit review kérelmek'), h('span', { className: 'count' }, reviewReqs.length + ' vár jóváhagyásra')),
-          h('div', { className: 'panel' }, h('table', null,
-            h('thead', null, h('tr', null, h('th', null, 'Kérelmező'), h('th', null, 'Kutatási kérdés'), h('th', null, 'Kért'), h('th', { style: { textAlign: 'right' } }, 'Döntés'))),
-            h('tbody', null, reviewReqs.map(function (req) {
-              var u = profiles.filter(function (p) { return p.id === req.requested_by; })[0] || { name: '—', id: req.requested_by };
-              var maxR = (req.params && req.params.searches && req.params.searches[0] && req.params.searches[0].maxResults) || null;
-              var b = reqBusy[req.id];
-              return h('tr', { key: req.id },
-                h('td', null, h('div', { className: 'u' }, h(Avatar, { u: u, size: 24 }), h('b', null, u.name || u.email || '—'))),
-                h('td', null, h('div', { style: { maxWidth: 460, fontSize: 12.5, lineHeight: 1.4 } }, String(req.research_question || '').slice(0, 220), maxR ? h('div', { style: { fontSize: 10.5, color: 'var(--muted)', marginTop: 2 } }, 'maxResults: ' + maxR) : null)),
-                h('td', null, h('span', { style: { fontSize: 11.5, color: 'var(--muted)' } }, String(req.created_at || '').slice(0, 10))),
-                h('td', null, h('div', { style: { display: 'flex', gap: 6, justifyContent: 'flex-end' } },
-                  h('button', { className: 'btn ok', disabled: !!b, onClick: function () { approveReq(req); } }, b === 'approving' ? '…' : '✓ Jóváhagyás'),
-                  h('button', { className: 'btn dng', disabled: !!b, onClick: function () { rejectReq(req); } }, b === 'rejecting' ? '…' : '✕ Elutasítás'))));
-            }))))
+        h(React.Fragment, null,   // always visible so admins can find it (even with 0 pending requests)
+          h('div', { className: 'sec-h' }, h('h2', null, '🔬 Függőben lévő Elicit review kérelmek'), h('span', { className: 'count' }, reviewReqs.length ? (reviewReqs.length + ' vár jóváhagyásra') : 'nincs függőben lévő kérés'), h('button', { className: 'btn', style: { marginLeft: 'auto', padding: '4px 10px', fontSize: 12 }, onClick: loadReqs }, '↻ Frissítés')),
+          h('div', { className: 'panel' }, reviewReqs.length === 0
+            ? h('div', { style: { padding: 16, color: 'var(--muted)', fontSize: 13, lineHeight: 1.5 } }, 'Nincs jóváhagyásra váró Elicit review kérelem. Amikor egy felhasználó „🔬 Elicit (jóváhagyással)" módban indít egy review-t, a kérése itt jelenik meg — jóváhagyhatod vagy elutasíthatod.')
+            : h('table', null,
+              h('thead', null, h('tr', null, h('th', null, 'Kérelmező'), h('th', null, 'Kutatási kérdés'), h('th', null, 'Kért'), h('th', { style: { textAlign: 'right' } }, 'Döntés'))),
+              h('tbody', null, reviewReqs.map(function (req) {
+                var u = profiles.filter(function (p) { return p.id === req.requested_by; })[0] || { name: '—', id: req.requested_by };
+                var maxR = (req.params && req.params.searches && req.params.searches[0] && req.params.searches[0].maxResults) || null;
+                var b = reqBusy[req.id];
+                return h('tr', { key: req.id },
+                  h('td', null, h('div', { className: 'u' }, h(Avatar, { u: u, size: 24 }), h('b', null, u.name || u.email || '—'))),
+                  h('td', null, h('div', { style: { maxWidth: 460, fontSize: 12.5, lineHeight: 1.4 } }, String(req.research_question || '').slice(0, 220), maxR ? h('div', { style: { fontSize: 10.5, color: 'var(--muted)', marginTop: 2 } }, 'maxResults: ' + maxR) : null)),
+                  h('td', null, h('span', { style: { fontSize: 11.5, color: 'var(--muted)' } }, String(req.created_at || '').slice(0, 10))),
+                  h('td', null, h('div', { style: { display: 'flex', gap: 6, justifyContent: 'flex-end' } },
+                    h('button', { className: 'btn ok', disabled: !!b, onClick: function () { approveReq(req); } }, b === 'approving' ? '…' : '✓ Jóváhagyás'),
+                    h('button', { className: 'btn dng', disabled: !!b, onClick: function () { rejectReq(req); } }, b === 'rejecting' ? '…' : '✕ Elutasítás'))));
+              }))))
         ),
 
         pending.length > 0 && h(React.Fragment, null,
