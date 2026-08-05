@@ -4680,6 +4680,9 @@
   // ---------- Protocol (executable research plan; a Claude agent on a dedicated machine runs the steps) ----------
   function ProtocolPanel(props) {
     var KINDS = PROT_KINDS;
+    // Display name for an Elicit review: prefer the research_question (the distinct differentiator). result_title is
+    // often just the project title (older reviews were launched with it), so it would make every review look identical.
+    function srName(j) { return (j && (j.research_question || j.result_title)) || 'Szisztematikus review'; }
     var PST = { todo: ['c-grey', 'To do'], queued: ['c-acc', 'Queued'], running: ['c-warn', 'Running…'], blocked: ['c-warn', '⏸ Needs approval'], done: ['c-ok', '✓ Done'], failed: ['c-danger', '✗ Failed'], skipped: ['c-grey', 'Skipped'] };
     var PROT_CHIP = { draft: 'c-grey', ready: 'c-acc', running: 'c-warn', paused: 'c-grey', done: 'c-ok', failed: 'c-danger' };
     var lp = useState(null), prot = lp[0], setProt = lp[1];
@@ -5107,7 +5110,7 @@
             (doneSteps.length || doneStudies.length || doneSR.length)
               ? h('div', null,
                   doneSteps.slice(0, 3).map(function (s) { var sm = (s.result && (s.result.summary || s.result.note)) || ''; return h('div', { key: 'st' + s.id, className: 'pcpit-find' }, h('span', { className: 'prov' }, 'S' + s.ord), h('span', null, s.title + (sm ? ' — ' + String(sm).slice(0, 130) : ''))); }),
-                  doneSR.slice(0, 2).map(function (j) { return h('div', { key: 'jr' + j.id, className: 'pcpit-find' }, h('span', { className: 'prov' }, 'Review'), h('span', null, (j.result_title || j.research_question || 'Szisztematikus review') + ' — kész')); }),
+                  doneSR.slice(0, 2).map(function (j) { return h('div', { key: 'jr' + j.id, className: 'pcpit-find' }, h('span', { className: 'prov' }, 'Review'), h('span', null, srName(j) + ' — kész')); }),
                   doneStudies.slice(0, 2).map(function (s) { return h('div', { key: 'sd' + s.id, className: 'pcpit-find' }, h('span', { className: 'prov' }, 'Study'), h('span', null, (s.title || 'Irodalom-study') + ' — kész')); }))
               : h('div', { style: { fontSize: 12.5, color: 'var(--muted)', lineHeight: 1.5 } }, 'Még nincsenek rögzített eredmények — futtass protokoll-lépéseket vagy study-kat, és a kimenetük itt jelenik meg (provenance-szel).')),
           h('div', { className: 'pcpit-card', style: { gridColumn: 'span 4' } },
@@ -5134,7 +5137,7 @@
             h('h4', null, '🔬 Study-k'),
             (studies.length || srJobs.length)
               ? h('div', null,
-                  (srJobs || []).slice(0, 3).map(function (j) { return h('div', { key: 'sj' + j.id, className: 'pcpit-row' }, h('span', { className: 'pcpit-badge', style: badge(j.status === 'completed' ? 'done' : 'run') }, j.status === 'completed' ? '✓' : '⏳'), h('span', { className: 't', title: j.result_title || j.research_question }, j.result_title || j.research_question || 'Review')); }),
+                  (srJobs || []).slice(0, 3).map(function (j) { return h('div', { key: 'sj' + j.id, className: 'pcpit-row' }, h('span', { className: 'pcpit-badge', style: badge(j.status === 'completed' ? 'done' : 'run') }, j.status === 'completed' ? '✓' : '⏳'), h('span', { className: 't', title: srName(j) }, srName(j))); }),
                   studies.slice(0, 2).map(function (s) { var run = PRStudyRunner.isStudyRunning(s.id), dn = s.status === 'done' || s.status === 'completed'; return h('div', { key: 'ss' + s.id, className: 'pcpit-row' }, h('span', { className: 'pcpit-badge', style: badge(dn ? 'done' : run ? 'run' : 'todo') }, dn ? '✓' : run ? '⏳' : '•'), h('span', { className: 't', title: s.title }, s.title || 'Study')); }))
               : h('div', { style: { fontSize: 11.5, color: 'var(--muted)' } }, 'Nincs study.'))));
     }
@@ -5203,7 +5206,7 @@
       function srcOf(nid) {
         if (nid.indexOf('req-') === 0) { var rq = reqList.filter(function (x) { return x.nid === nid; })[0]; return { nid: nid, cls: 'req', nt: '🗣️ Kérés (chat)', title: (rq && rq.text) || 'Kérés', sum: '' }; }
         var idea = ideaByNid[nid]; if (idea) { var g = idea.source === 'gap'; return { nid: nid, cls: g ? 'gap' : 'idea', nt: (g ? '🕳️ Kutatási rés' : '💡 Ötlet'), title: idea.question || (g ? 'Rés' : 'Ötlet'), sum: idea.hypothesis || (idea.novelty != null ? 'Újdonság ' + idea.novelty + ' / 100' : '') }; }
-        var job = jobByNid[nid]; if (job) { return { nid: nid, cls: 'result', nt: '🔬 Szisztematikus review', title: job.result_title || job.research_question || 'Review', sum: job.status === 'completed' ? '✓ kész' : job.status }; }
+        var job = jobByNid[nid]; if (job) { return { nid: nid, cls: 'result', nt: '🔬 Szisztematikus review', title: srName(job), sum: job.status === 'completed' ? '✓ kész' : job.status }; }
         return { nid: nid, cls: 'result', nt: '🔗 Forrás', title: nid, sum: '' };
       }
       var srcs = Object.keys(used).map(srcOf);
