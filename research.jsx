@@ -5092,21 +5092,40 @@
       setPvBody(function (p) { var n = Object.assign({}, p); n[key] = { loading: true }; return n; });
       function put(v) { setPvBody(function (p) { var n = Object.assign({}, p); n[key] = v; return n; }); }
       if (kind === 'review') {
-        sb.from('elicit_jobs').select('result_summary,result_body,research_question,status').eq('id', item.id).maybeSingle()
-          .then(function (r) { var j = (r && r.data) || {}; put({ summary: j.result_summary || '', body: String(j.result_body || ''), q: j.research_question || '', status: j.status }); }, function () { put({ error: true }); });
+        Promise.all([
+          sb.from('elicit_jobs').select('result_summary,result_body,research_question,status').eq('id', item.id).maybeSingle(),
+          // the papers THIS review included → imported into the Library tagged with origin_job_id + screening='include'
+          sb.from('research_sources').select('id,title,year,url,screening').eq('project_id', props.projectId).eq('origin_job_id', item.id).eq('screening', 'include').order('cited_by', { ascending: false, nullsFirst: false }).limit(30)
+        ]).then(function (res) {
+          var j = (res[0] && res[0].data) || {}, incl = (res[1] && !res[1].error && res[1].data) || [];
+          put({ summary: j.result_summary || '', body: String(j.result_body || ''), q: j.research_question || '', status: j.status, incl: incl });
+        }, function () { put({ error: true }); });
       } else if (kind === 'study') {
         Promise.all([
-          sb.from('research_study_papers').select('step,decision').eq('study_id', item.id),
+          sb.from('research_study_papers').select('step,decision,source_id').eq('study_id', item.id),
           sb.from('research_studies').select('question,cur_step,status').eq('id', item.id).maybeSingle()
         ]).then(function (res) {
           var papers = (res[0] && res[0].data) || [], meta = (res[1] && res[1].data) || {};
           var byStep = {};
           papers.forEach(function (p) { var k = p.step; if (!byStep[k]) byStep[k] = { total: 0 }; byStep[k].total++; byStep[k][p.decision] = (byStep[k][p.decision] || 0) + 1; });
-          put({ byStep: byStep, meta: meta, total: papers.length });
+          var incIds = papers.filter(function (p) { return p.decision === 'include' && p.source_id; }).map(function (p) { return p.source_id; });
+          incIds = incIds.filter(function (id, i) { return incIds.indexOf(id) === i; }).slice(0, 30);
+          if (!incIds.length) { put({ byStep: byStep, meta: meta, total: papers.length, incl: [] }); return; }
+          sb.from('research_sources').select('id,title,year,url').in('id', incIds).then(function (r2) {
+            put({ byStep: byStep, meta: meta, total: papers.length, incl: (r2 && r2.data) || [] });
+          }, function () { put({ byStep: byStep, meta: meta, total: papers.length, incl: [] }); });
         }, function () { put({ error: true }); });
       }
     }
     function pvSpin() { return h('div', { style: { padding: '18px 4px', color: 'var(--muted)', fontSize: 12.5 } }, '⏳ Részeredmények betöltése…'); }
+    function pvInclList(incl) {
+      return h('div', { style: { marginTop: 10, borderTop: '1px solid var(--line)', paddingTop: 8 } },
+        h('div', { style: { fontSize: 11.5, fontWeight: 700, color: 'var(--ok, #15803d)', marginBottom: 5 } }, '✅ Beválogatott cikkek' + ((incl && incl.length) ? ' (' + incl.length + ')' : '')),
+        (incl && incl.length)
+          ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 3, maxHeight: 200, overflow: 'auto' } }, incl.map(function (s) {
+              return h('div', { key: s.id, style: { fontSize: 12, lineHeight: 1.4 } }, s.url ? h('a', { href: s.url, target: '_blank' }, s.title || 'Untitled') : (s.title || 'Untitled'), s.year ? h('span', { style: { color: 'var(--faint)' } }, ' (' + s.year + ')') : null); }))
+          : h('div', { style: { fontSize: 12, color: 'var(--muted)' } }, 'Ez a futtatás egyetlen cikket sem válogatott be.'));
+    }
     function pvModal() {
       if (!pv) return null;
       var it = pv.item, kind = pv.kind, b = pvBody[pvKey(kind, it.id)] || {}, head = '', body = null, link = null;
@@ -5117,7 +5136,8 @@
           b.q ? h('div', { style: { fontSize: 12, color: 'var(--muted)', marginBottom: 8 } }, '❓ ' + b.q) : null,
           b.summary ? h('div', { style: { fontSize: 13, lineHeight: 1.5, marginBottom: 8, fontWeight: 500 } }, b.summary) : null,
           b.body ? h('div', { style: { fontSize: 12.5, lineHeight: 1.55, whiteSpace: 'pre-wrap', maxHeight: 300, overflow: 'auto', background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 8, padding: '10px 12px' } }, b.body.slice(0, 1600) + (b.body.length > 1600 ? '…' : ''))
-            : (!b.summary ? h('div', { style: { fontSize: 12.5, color: 'var(--muted)' } }, 'Ehhez a review-hoz nincs szöveges riport — a teljes eredmény (szűrési + kivonatolási táblák) a PRISMA-nézetben látható.') : null));
+            : (!b.summary ? h('div', { style: { fontSize: 12.5, color: 'var(--muted)' } }, 'Ehhez a review-hoz nincs szöveges riport — a teljes eredmény (szűrési + kivonatolási táblák) a PRISMA-nézetben látható.') : null),
+          pvInclList(b.incl));
       } else if (kind === 'study') {
         head = '🔎 ' + (it.title || 'Study');
         body = b.loading ? pvSpin() : b.error ? h('div', { style: { color: 'var(--danger,#b42318)', fontSize: 12.5 } }, 'Nem sikerült betölteni.') : (function () {
@@ -5129,7 +5149,8 @@
           });
           return h('div', null,
             h('div', { style: { fontSize: 12, color: 'var(--muted)', marginBottom: 8 } }, 'Állapot: ' + ((b.meta && b.meta.status) || it.status || '?') + ' · lépés ' + ((b.meta && b.meta.cur_step) || it.cur_step || 1) + '/4 · összesen ' + (b.total || 0) + ' cikk'),
-            rows.length ? h('div', null, rows) : h('div', { style: { fontSize: 12.5, color: 'var(--muted)' } }, 'Még nincs szűrési részeredmény.'));
+            rows.length ? h('div', null, rows) : h('div', { style: { fontSize: 12.5, color: 'var(--muted)' } }, 'Még nincs szűrési részeredmény.'),
+            pvInclList(b.incl));
         })();
       } else if (kind === 'gap') {
         head = '🕳️ Kutatási rés';
