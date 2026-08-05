@@ -3938,6 +3938,26 @@
       setErr(''); setPlanning(true);
       callStudy({ action: 'plan', study_id: selId }).then(function (d) { setPlanning(false); if (d && d.error) { setErr('AI fill-in: ' + d.error); return; } loadStudy(selId); }, function () { setPlanning(false); setErr('AI fill-in failed.'); });
     }
+    // prominent "Publify is working" feedback while the AI pre-fills the funnel config (keywords/criteria/filters)
+    function lsPlanningBox(inline) {
+      return h('div', { className: 'ls-planning' + (inline ? ' ls-planning-inline' : '') },
+        h('span', { className: 'ls-spin' }),
+        h('div', null,
+          h('div', { className: 'ls-planning-t' }, inline ? '✨ Publify tölti ki a mezőket…' : '✨ Publify előkészíti a study-t…'),
+          h('div', { className: 'ls-planning-s' }, 'Kulcsszavak, beválogatási kritériumok és szűrők betöltése a kijelölt ötletekből — ez pár másodperc.')));
+    }
+    // clear "which ideas entered the pool" list shown before creating the study from selected ideas
+    function lsPoolBox(ideas) {
+      return h('div', { className: 'ls-pool' },
+        h('div', { className: 'ls-pool-h' }, '📥 ' + ideas.length + ' ötlet kerül a study-ba'),
+        h('div', { className: 'ls-pool-list' }, ideas.map(function (i, k) {
+          return h('div', { key: i.id, className: 'ls-pool-item' },
+            h('span', { className: 'ls-pool-n' }, String(k + 1)),
+            h('div', { className: 'ls-pool-body' },
+              h('div', { className: 'ls-pool-q' }, i.question),
+              i.hypothesis ? h('div', { className: 'ls-pool-hy' }, 'H: ' + i.hypothesis) : null));
+        })));
+    }
     // (re)generate the prompt preview from the CURRENT question + criteria (reflects manual edits)
     function genPrompt() { setPromptText(buildScreenPrompt((sel && (sel.question || sel.title)) || '', cfg, curStep)); }
     // delete a whole study (cascades to its steps + papers)
@@ -4009,15 +4029,16 @@
         })));
     }
     if (!studies.length) {
-      if (planning) return h('div', { className: 'panel' }, h('h3', null, '🔬 Literature study'), h('div', { style: { fontSize: 13, color: 'var(--muted)', padding: '12px 0' } }, '✨ Publify is preparing the study from the selected ideas — one moment, loading the Step-1 data (keywords, criteria, filters)…'));
+      if (planning) return h('div', { className: 'panel' }, h('h3', null, '🔬 Literature study'), lsPlanningBox(false));
       var selIdeas = (props.ideas || []).filter(function (i) { return i.status === 'selected'; });
       return h('div', { className: 'panel' }, h('h3', null, '🔬 Literature study'),
         h('p', { style: { fontSize: 13, color: 'var(--muted)' } }, 'Ez a nézet a keyword-szűrési funnel. A szisztematikus review-t fent, a „🔬 Systematic Review Studio"-ból indítsd (Elicit → automatikus backup, ha az nem elérhető). Alább közvetlenül is indíthatsz beépített szűrést: jelölj ki ötleteket (Select), majd a 4 lépés (gyors-szűrés → absztrakt → full-text → áttekintés) fut — a Publify előtölti a kulcsszavakat/kritériumokat, te finomítod.'),
+        selIdeas.length ? lsPoolBox(selIdeas) : null,
         props.canEdit ? h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginTop: 10 } },
           selIdeas.length
-            ? h('button', { className: 'btn', disabled: planning, onClick: function () { newStudy(selIdeas); } }, planning ? '✨ Publify is planning…' : ('⚙ Közvetlen beépített study (' + selIdeas.length + ' ötlet)'))
-            : h('span', { style: { fontSize: 12.5, color: 'var(--warn)' } }, 'Select at least one idea (Select) on the Ideas tab.'),
-          h('button', { className: 'btn', disabled: planning, onClick: function () { newStudy(null); } }, '+ Empty study')
+            ? h('button', { className: 'btn pri', disabled: planning, onClick: function () { newStudy(selIdeas); } }, planning ? '✨ Publify tervez…' : ('⚙ Study indítása ' + selIdeas.length + ' ötletből →'))
+            : h('span', { style: { fontSize: 12.5, color: 'var(--warn)' } }, 'Jelölj ki legalább egy ötletet (Select) az Ötlet fülön.'),
+          h('button', { className: 'btn', disabled: planning, onClick: function () { newStudy(null); } }, '+ Üres study')
         ) : h('div', { style: { fontSize: 13, color: 'var(--faint)' } }, 'Read-only view.'),
         err ? h('div', { style: { color: 'var(--danger)', fontSize: 12.5, marginTop: 8 } }, err) : null);
     }
@@ -4089,6 +4110,7 @@
       })),
       // config panel (steps 1-3) or review panel (step 4)
       curStep < 4 ? h('div', { className: 'panel', style: { marginTop: 10 } },
+        planning ? lsPlanningBox(true) : null,
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
           h('h3', { style: { margin: 0 } }, LS_STEPS[curStep - 1].label + ' — settings'),
           props.canEdit ? h('button', { className: 'btn', style: { padding: '3px 9px', fontSize: 11.5, marginLeft: 'auto', flex: 'none' }, disabled: planning, title: 'Publify (re)fills the keywords, criteria and filters based on the ideas', onClick: runPlan }, planning ? '✨ Publify is filling…' : '✨ AI fill-in') : null),
