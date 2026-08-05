@@ -2897,11 +2897,31 @@
   //      when the user switches tabs / views (the recursion is NOT tied to any component's mount). Run state lives here;
   //      components subscribe to render it and can dismiss/cancel. (A full page reload still stops it — the DB keeps the
   //      partial funnel state, so nothing is lost.) ----
+  // ---- Study run-lock (migration-108): a study being run/re-run is locked for EVERYONE else. running_by/running_at
+  //      on research_studies (+ realtime), so all collaborators see it and can't modify/re-run it. A lock older than
+  //      STUDY_LOCK_FRESH_MS is treated as stale (a crashed run) and ignored, so a dead client never wedges a study.
+  var STUDY_LOCK_FRESH_MS = 12 * 60 * 1000;
+  function studyLockOn(sid, uid) { if (!sid) return; try { sb.from('research_studies').update({ running_by: uid || null, running_at: new Date().toISOString() }).eq('id', sid).then(function () { }, function () { }); } catch (e) { } }
+  var _studyBeat = {};
+  function studyLockBeat(sid) { if (!sid) return; var now = Date.now(); if (_studyBeat[sid] && now - _studyBeat[sid] < 45000) return; _studyBeat[sid] = now; try { sb.from('research_studies').update({ running_at: new Date().toISOString() }).eq('id', sid).then(function () { }, function () { }); } catch (e) { } }
+  function studyLockOff(sid) { if (!sid) return; try { sb.from('research_studies').update({ running_by: null, running_at: null }).eq('id', sid).then(function () { }, function () { }); } catch (e) { } }
+  function studyLockState(s, meId) {
+    if (!s || !s.running_by || !s.running_at) return { locked: false };
+    var age = Date.now() - Date.parse(s.running_at);
+    if (isNaN(age) || age > STUDY_LOCK_FRESH_MS) return { locked: false, stale: true };
+    return { locked: true, by: s.running_by, mine: !!meId && s.running_by === meId };
+  }
   var PRStudyRunner = (function () {
     var runs = {}, subs = [], seq = 0;
     var BK = { setup: 'Study előkészítése', s1: 'Keresés + gyors triage (OpenAlex)', s2: 'Absztrakt-szűrés (Claude)', s3: 'Full-text szűrés (Claude)', review: 'Áttekintés írása (Claude)' };
     function notify() { for (var i = 0; i < subs.length; i++) { try { subs[i](); } catch (e) { } } }
-    function set(id, patch) { if (!runs[id]) return; runs[id] = Object.assign({}, runs[id], patch); notify(); }
+    function set(id, patch) {
+      if (!runs[id]) return; runs[id] = Object.assign({}, runs[id], patch);
+      var sid = runs[id].sid;   // keep the server run-lock in sync: clear on a terminal stage, heartbeat on a working stage
+      if (patch.stage === 'done' || patch.stage === 'error') { if (sid) studyLockOff(sid); }
+      else if (patch.stage && sid) studyLockBeat(sid);
+      notify();
+    }
     function drive(id, sid, stage, offset, iter) {
       if (!runs[id]) return;   // dismissed / cancelled → stop the recursion
       if (stage === 'review') {
@@ -2927,7 +2947,7 @@
     return {
       runs: function () { return runs; },
       subscribe: function (fn) { subs.push(fn); return function () { var i = subs.indexOf(fn); if (i >= 0) subs.splice(i, 1); }; },
-      dismiss: function (id) { if (runs[id]) { delete runs[id]; notify(); } },   // dismiss a finished card OR cancel a running funnel (the recursion stops on the next step)
+      dismiss: function (id) { if (runs[id]) { var s = runs[id].sid; if (s) studyLockOff(s); delete runs[id]; notify(); } },   // dismiss a finished card OR cancel a running funnel — release the study run-lock (else it wedges other users until the 12-min staleness)
       // is a given study (by id) or question currently being worked on (non-terminal stage)? → drives the pulsing indicators
       isStudyRunning: function (sid) { if (!sid) return false; for (var k in runs) { var r = runs[k]; if (r.sid === sid && r.stage !== 'done' && r.stage !== 'error') return true; } return false; },
       isQuestionRunning: function (q) { if (!q) return false; for (var k in runs) { var r = runs[k]; if (r.rq === q && r.stage !== 'done' && r.stage !== 'error') return true; } return false; },
@@ -2941,6 +2961,7 @@
           var sid = sr && sr.data && sr.data.id;
           if (!sid) { set(id, { stage: 'error', msg: 'A study nem jött létre' + (sr && sr.error ? ': ' + sr.error.message : '') }); return; }
           set(id, { sid: sid });   // now the study card / candidate / idea badge can match this run + pulse
+          studyLockOn(sid, ctx.authorId);   // lock the study for other collaborators for the duration of this backup run
           var rows = LS_STEPS.map(function (s) { return { study_id: sid, step: s.step, kind: s.kind, config: lsDefaultConfig(s.step, ctx.project, null) }; });
           sb.from('research_study_steps').insert(rows).then(function (rr) {
             if (!runs[id]) return;
@@ -3269,15 +3290,21 @@
     // the literature studies started FROM each idea (idea_id-linked) → shown on the review-question modal so you can
     // see / open the studies that already belong to this idea and their status
     function loadStudies() {
-      sb.from('research_studies').select('id,idea_id,title,status,cur_step,created_at').eq('project_id', props.projectId).not('idea_id', 'is', null).order('created_at', { ascending: false }).then(function (r) {
-        if (!alive.current) return;
-        var m = {}; ((r && r.data) || []).forEach(function (s) { if (s.idea_id) (m[s.idea_id] = m[s.idea_id] || []).push(s); });
-        setStudiesByIdea(m);
-      }, function () { });
+      var base = 'id,idea_id,title,status,cur_step,created_at';   // self-gate: fall back to base columns if migration-108 (running_by/at) isn't applied yet
+      sb.from('research_studies').select(base + ',running_by,running_at').eq('project_id', props.projectId).not('idea_id', 'is', null).order('created_at', { ascending: false })
+        .then(function (r) { return (r && r.error) ? sb.from('research_studies').select(base).eq('project_id', props.projectId).not('idea_id', 'is', null).order('created_at', { ascending: false }) : r; })
+        .then(function (r) {
+          if (!alive.current) return;
+          var m = {}; ((r && r.data) || []).forEach(function (s) { if (s.idea_id) (m[s.idea_id] = m[s.idea_id] || []).push(s); });
+          setStudiesByIdea(m);
+        }, function () { });
     }
     // ALL native/backup studies (idea-linked or not) → merged into the unified Reviews list with a Backup badge
     function loadAllStudies() {
-      sb.from('research_studies').select('id,idea_id,title,status,cur_step,created_at').eq('project_id', props.projectId).order('created_at', { ascending: false }).then(function (r) { if (alive.current) setAllStudies((r && r.data) || []); }, function () { });
+      var base = 'id,idea_id,title,status,cur_step,created_at';
+      sb.from('research_studies').select(base + ',running_by,running_at').eq('project_id', props.projectId).order('created_at', { ascending: false })
+        .then(function (r) { return (r && r.error) ? sb.from('research_studies').select(base).eq('project_id', props.projectId).order('created_at', { ascending: false }) : r; })
+        .then(function (r) { if (alive.current) setAllStudies((r && r.data) || []); }, function () { });
     }
     // open a literature study's review markdown in the same viewer modal (openR) the SR reports use
     // step 1..4 → a short Hungarian stage name, so the "Study" chip says WHICH stage the study is at
@@ -3292,6 +3319,16 @@
     function dismissCand(c) { setCands(function (l) { return (l || []).filter(function (x) { return x.id !== c.id; }); }); sb.from('research_sr_candidates').update({ dismissed: true }).eq('id', c.id); }
     useEffect(function () { alive.current = true; ensureSrCss(); if (canView) { load(); loadCands(); loadStudies(); callElicit({ action: 'sr.health' }).then(function (d) { if (alive.current) setSrHealth((d && typeof d.available === 'boolean') ? d : { available: false, reason: 'error' }); }, function () { if (alive.current) setSrHealth({ available: false, reason: 'error' }); }); sb.from('research_ideas').select('id,question,hypothesis,status,source').eq('project_id', props.projectId).order('created_at', { ascending: true }).then(function (r) { if (!alive.current) return; var rows = (r && r.data) || [], m = {}; rows.forEach(function (x) { m[x.id] = x.question; }); setIdeaById(m); setIdeasFull(rows); }); loadAllStudies(); } return function () { alive.current = false; }; }, [canView]);
     // re-render whenever a background study run changes (the runs live in PRStudyRunner, not in this component's state)
+    // realtime: a study run-lock set/cleared by any collaborator refreshes the SR-studio study cards live (migration-108)
+    useEffect(function () {
+      var pid = props.projectId; if (!pid) return; var t = null, ch;
+      try {
+        ch = sb.channel('rstudy-sr:' + pid).on('postgres_changes', { event: '*', schema: 'public', table: 'research_studies', filter: 'project_id=eq.' + pid }, function () {
+          if (t) return; t = setTimeout(function () { t = null; if (alive.current) { if (loadStudiesRef.current) loadStudiesRef.current(); loadAllStudies(); } }, 1000);
+        }).subscribe();
+      } catch (e) { }
+      return function () { if (t) clearTimeout(t); try { sb.removeChannel(ch); } catch (e) { } };
+    }, [props.projectId]);
     var loadStudiesRef = useRef(null), pidRefSr = useRef(props.projectId), stSigRef = useRef('');
     loadStudiesRef.current = loadStudies; pidRefSr.current = props.projectId;
     useEffect(function () {
@@ -3820,6 +3857,26 @@
 
   function LiteratureStudy(props) {
     var studies = props.studies || [];
+    var meId = props.viewerId || props.authorId;   // the current user, for the study run-lock (migration-108)
+    var lnS = useState({}), lockNames = lnS[0], setLockNames = lnS[1];   // running_by uid → name, for the "🔒 X is running" lock UI
+    useEffect(function () {
+      var ids = {}; (props.studies || []).forEach(function (s) { if (s.running_by) ids[s.running_by] = 1; });
+      var need = Object.keys(ids).filter(function (id) { return !lockNames[id]; });
+      if (!need.length) return;
+      sb.from('profiles_public').select('id,name').in('id', need).then(function (r) { var m = {}; ((r && r.data) || []).forEach(function (p) { m[p.id] = p.name; }); if (Object.keys(m).length) setLockNames(function (prev) { return Object.assign({}, prev, m); }); }, function () { });
+    }, [(props.studies || []).map(function (s) { return s.running_by || ''; }).join(',')]);
+    function lockNameOf(uid) { return (uid && lockNames[uid]) || 'egy másik felhasználó'; }
+    // realtime: a study's run-lock (running_by/at) set/cleared by ANY collaborator refreshes everyone's view live
+    // (migration-108 adds research_studies to the realtime publication; graceful no-op before it's applied).
+    useEffect(function () {
+      var pid = props.projectId; if (!pid) return; var t = null, ch;
+      try {
+        ch = sb.channel('rstudy:' + pid).on('postgres_changes', { event: '*', schema: 'public', table: 'research_studies', filter: 'project_id=eq.' + pid }, function () {
+          if (t) return; t = setTimeout(function () { t = null; if (alive.current && props.onChanged) props.onChanged(); }, 1000);
+        }).subscribe();
+      } catch (e) { }
+      return function () { if (t) clearTimeout(t); try { sb.removeChannel(ch); } catch (e) { } };
+    }, [props.projectId]);
     var seS = useState((studies[0] && studies[0].id) || null), selId = seS[0], setSelId = seS[1];
     var stS = useState([]), steps = stS[0], setSteps = stS[1];
     var paS = useState([]), papers = paS[0], setPapers = paS[1];
@@ -3871,6 +3928,8 @@
     }, [studies.length]);
     useEffect(function () { if (selId) { try { localStorage.setItem('pr-study-' + props.projectId, selId); } catch (e) { } } }, [selId]);
     var sel = studies.filter(function (x) { return x.id === selId; })[0];
+    var lock = studyLockState(sel, meId);   // run-lock on the SELECTED study; locked-by-other → block modify/re-run
+    var lockedByOther = lock.locked && !lock.mine;
     var srcMap = {}; (props.sources || []).forEach(function (s) { srcMap[s.id] = s; });
 
     function loadReview(id) {
@@ -3958,10 +4017,19 @@
               i.hypothesis ? h('div', { className: 'ls-pool-hy' }, 'H: ' + i.hypothesis) : null));
         })));
     }
+    // "another user is running this study" lock notice — shown when locked by someone else (blocks modify/re-run)
+    function lsLockBox(lk) {
+      return h('div', { className: 'ls-lock' },
+        h('span', { className: 'ls-spin' }),
+        h('div', null,
+          h('div', { className: 'ls-lock-t' }, '🔒 ' + lockNameOf(lk.by) + ' éppen futtatja ezt a study-t'),
+          h('div', { className: 'ls-lock-s' }, 'A study módosítása és újrafuttatása zárolva, amíg a futtatás be nem fejeződik.')));
+    }
     // (re)generate the prompt preview from the CURRENT question + criteria (reflects manual edits)
     function genPrompt() { setPromptText(buildScreenPrompt((sel && (sel.question || sel.title)) || '', cfg, curStep)); }
     // delete a whole study (cascades to its steps + papers)
     function delStudy(s) {
+      var dlk = studyLockState(s, meId); if (dlk.locked && !dlk.mine) { setErr(lockNameOf(dlk.by) + ' éppen futtatja ezt a study-t — most nem törölhető.'); return; }   // don't delete a study a peer is mid-run on
       window.PRUI.confirm({ title: 'Delete “' + (s.title || '') + '”?', body: 'This study and all its steps and results will be permanently deleted.', confirmLabel: 'Delete', danger: true }).then(function (ok) {
         if (!ok) return;
         sb.from('research_studies').delete().eq('id', s.id).then(function (r) {
@@ -3986,34 +4054,39 @@
     function runStep(n) {
       if (running) return;
       if (!selId) { setErr('No study selected — choose one from the list.'); return; }   // #12 guard
+      var lkMe = props.viewerId || props.authorId, lk = studyLockState(sel, lkMe);
+      if (lk.locked && !lk.mine) { setErr('Ezt a study-t éppen egy másik felhasználó futtatja — várd meg, míg befejezi.'); return; }   // server run-lock (migration-108)
+      function endRun() { setRunning(false); studyLockOff(selId); }   // clear the run-lock on EVERY terminal path
       setErr(''); stop.current = false; setRunning(true); setProg({ done: 0, total: 0, counts: {} }); setTitles({});
+      studyLockOn(selId, lkMe);
       sb.from('research_study_steps').update({ config: cfg, status: 'running' }).eq('study_id', selId).eq('step', n).then(function () {
         if (n === 4) {
           callStudy({ action: 'generate_review', study_id: selId }).then(function (d) {
-            setRunning(false); setProg(null);
+            endRun(); setProg(null);
             if (!d || d.error) { setErr((d && d.error) || 'Error generating the review.'); return; }
             loadStudy(selId); props.onChanged(); window.PRUI.toast('Review ready: ' + d.file_path + ' (in Files).', { kind: 'ok' });
-          });
+          }, function () { endRun(); setProg(null); setErr('A review-hívás nem sikerült.'); });   // reject → release the lock (else it wedges)
           return;
         }
         sb.from('research_study_papers').delete().eq('study_id', selId).gte('step', n).eq('overridden', false).then(function () {
           var action = n === 1 ? 'search_step1' : 'screen_batch';
           var srcUsed = 'openalex', rateInfo = null;   // captured from the first batch (source_adapter result)
           (function loop(offset) {
-            if (!alive.current || stop.current) { setRunning(false); setProg(null); loadStudy(selId); return; }
+            if (!alive.current || stop.current) { endRun(); setProg(null); loadStudy(selId); return; }
+            studyLockBeat(selId);   // heartbeat so the lock stays fresh through a long multi-batch run
             callStudy({ action: action, study_id: selId, step: n, offset: offset }).then(function (d) {
-              if (!d || d.error) { setRunning(false); setProg(null); setErr((d && d.error) || 'The step failed.'); loadStudy(selId); return; }
+              if (!d || d.error) { endRun(); setProg(null); setErr((d && d.error) || 'The step failed.'); loadStudy(selId); return; }
               if (offset === 0) { srcUsed = d.source || 'openalex'; rateInfo = d.elicit_rate || null; }
               setProg({ done: d.next_offset, total: d.total_estimate || d.next_offset, counts: d.counts });
               setTitles(function (t) { var n2 = Object.assign({}, t); (d.results || []).forEach(function (x) { if (x.title) n2[x.source_id] = x.title; }); return n2; });
               loadStudy(selId);
               if (!d.done && alive.current && !stop.current) loop(d.next_offset);
-              else { setRunning(false); setProg(null); loadStudy(selId); props.onChanged();
+              else { endRun(); setProg(null); loadStudy(selId); props.onChanged();
                 if (n === 1 && srcUsed === 'elicit') setErr('✓ Searched via Publify (' + ((cfg.source_adapter === 'elicit_keyword') ? 'keyword' : 'semantic') + ').' + (rateInfo && rateInfo.remaining != null ? ' Search budget: ' + rateInfo.remaining + ' searches left today.' : ''));
                 else if (n === 1 && String(cfg.source_adapter || '').indexOf('elicit') === 0) setErr('ℹ️ Semantic search was unavailable (rate limit, quota, plan, or not enabled for you) — searched via OpenAlex instead.');
                 else if (n === 1 && !(d.total_estimate || d.new_sources || d.fetched)) setErr('0 results on OpenAlex — try broader/different keywords, or looser filters (e.g. clear “From year” or “Journals only”), then run again.');
                 else if (n === 1 && d.relaxed) setErr('ℹ️ The keywords/filters you gave were too narrow — I relaxed them automatically (e.g. searched without filters) to find papers. You can refine the keywords/filters and run again.'); }
-            });
+            }, function () { endRun(); setProg(null); setErr('Hálózati hiba a szűrés közben.'); loadStudy(selId); });   // reject → release the lock (else it wedges)
           })(0);
         });
       });
@@ -4083,10 +4156,11 @@
             var on = s.id === selId;
             var st = s.status === 'done' ? '✓ done' : ('step ' + (s.cur_step || 1) + '/4');
             var editing = renameId === s.id;
+            var sLk = studyLockState(s, meId);   // server run-lock → visible to ALL collaborators
             var linkedIdea = s.idea_id ? (props.ideas || []).filter(function (i) { return i.id === s.idea_id; })[0] : null;
             var sIsGap = !!(linkedIdea && linkedIdea.source === 'gap');
             var sOrigin = linkedIdea ? (sIsGap ? 'gap' : 'idea') : null;   // where this study came from (research gap vs idea)
-            return h('div', { key: s.id, className: PRStudyRunner.isStudyRunning(s.id) ? 'pulse-run' : null, onClick: editing ? null : function () { setSelId(s.id); setCurStep(s.cur_step || 1); }, style: { textAlign: 'left', width: 250, maxWidth: '100%', border: '1.5px solid ' + (on ? 'var(--accent)' : 'var(--line)'), borderLeft: '3px solid ' + (sOrigin === 'gap' ? '#a23a86' : sOrigin === 'idea' ? 'var(--accent, #4f46e5)' : 'var(--line)'), background: on ? 'var(--surface-2)' : 'var(--surface)', borderRadius: 10, padding: '10px 12px', cursor: editing ? 'default' : 'pointer' } },
+            return h('div', { key: s.id, className: (PRStudyRunner.isStudyRunning(s.id) || sLk.locked) ? 'pulse-run' : null, onClick: editing ? null : function () { setSelId(s.id); setCurStep(s.cur_step || 1); }, style: { textAlign: 'left', width: 250, maxWidth: '100%', border: '1.5px solid ' + (on ? 'var(--accent)' : 'var(--line)'), borderLeft: '3px solid ' + (sOrigin === 'gap' ? '#a23a86' : sOrigin === 'idea' ? 'var(--accent, #4f46e5)' : 'var(--line)'), background: on ? 'var(--surface-2)' : 'var(--surface)', borderRadius: 10, padding: '10px 12px', cursor: editing ? 'default' : 'pointer' } },
               editing
                 ? h('div', { onClick: function (e) { e.stopPropagation(); }, style: { display: 'flex', flexDirection: 'column', gap: 4 } },
                     h('input', { className: 'field', autoFocus: true, style: { fontSize: 12.5, width: '100%', boxSizing: 'border-box' }, value: renameVal, placeholder: 'Study name…', onChange: function (e) { setRenameVal(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter') { e.preventDefault(); renameStudy(s); } else if (e.key === 'Escape') { setRenameId(null); } } }),
@@ -4098,7 +4172,7 @@
                     h('div', { style: { display: 'flex', gap: 4, alignItems: 'flex-start' } },
                       h('div', { style: { flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, lineHeight: 1.35, display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' } }, s.title),
                       props.canEdit ? h('button', { className: 'icon-x', 'aria-label': 'Rename study', title: 'Rename', style: { flex: 'none', fontSize: 11 }, onClick: function (e) { e.stopPropagation(); setRenameId(s.id); setRenameVal(s.title || ''); } }, h('span', { 'aria-hidden': 'true' }, '✏️')) : null),
-                    h('div', { style: { fontSize: 11, color: (running && on) ? 'var(--accent)' : 'var(--muted)', marginTop: 6 } }, (running && on ? '⏳ running… ' : '') + st))
+                    h('div', { style: { fontSize: 11, color: sLk.locked ? '#a16207' : (running && on) ? 'var(--accent)' : 'var(--muted)', marginTop: 6 } }, sLk.locked ? ('🔒 ' + (sLk.mine ? 'Te futtatod…' : (lockNameOf(sLk.by) + ' futtatja…')) + ' ') : (running && on ? '⏳ running… ' : '') + st))
             );
           }),
           props.canEdit ? h('button', { onClick: function () { newStudy(null); }, style: { border: '1px dashed var(--line)', background: 'transparent', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontSize: 12.5, color: 'var(--muted)' } }, '+ New study') : null
@@ -4110,13 +4184,14 @@
       })),
       // config panel (steps 1-3) or review panel (step 4)
       curStep < 4 ? h('div', { className: 'panel', style: { marginTop: 10 } },
+        lockedByOther ? lsLockBox(lock) : null,
         planning ? lsPlanningBox(true) : null,
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
           h('h3', { style: { margin: 0 } }, LS_STEPS[curStep - 1].label + ' — settings'),
-          props.canEdit ? h('button', { className: 'btn', style: { padding: '3px 9px', fontSize: 11.5, marginLeft: 'auto', flex: 'none' }, disabled: planning, title: 'Publify (re)fills the keywords, criteria and filters based on the ideas', onClick: runPlan }, planning ? '✨ Publify is filling…' : '✨ AI fill-in') : null),
+          props.canEdit ? h('button', { className: 'btn', style: { padding: '3px 9px', fontSize: 11.5, marginLeft: 'auto', flex: 'none' }, disabled: planning || lockedByOther, title: 'Publify (re)fills the keywords, criteria and filters based on the ideas', onClick: runPlan }, planning ? '✨ Publify is filling…' : '✨ AI fill-in') : null),
         props.canEdit ? h('div', { style: { fontSize: 11.5, color: 'var(--muted)', margin: '4px 0 8px', lineHeight: 1.4 } }, planning ? '✨ Publify is filling the fields based on your ideas…' : '✨ The fields were filled by Publify based on your ideas — edit them freely, then run the step.') : null,
         h('div', { className: 'field-label' }, 'Keywords (comma-separated)'),
-        h('input', { className: 'field', style: { width: '100%' }, disabled: !props.canEdit, value: (cfg.keywords || []).join(', '), placeholder: 'e.g. out-of-distribution, LiDAR', onChange: function (e) { up('keywords', e.target.value.split(',').map(function (x) { return x.trim(); }).filter(Boolean)); } }),
+        h('input', { className: 'field', style: { width: '100%' }, disabled: !props.canEdit || lockedByOther, value: (cfg.keywords || []).join(', '), placeholder: 'e.g. out-of-distribution, LiDAR', onChange: function (e) { up('keywords', e.target.value.split(',').map(function (x) { return x.trim(); }).filter(Boolean)); } }),
         h('div', { style: { display: 'flex', gap: 12, marginTop: 8, flexWrap: 'wrap' } },
           h('div', { style: { flex: 1, minWidth: 220 } }, h('div', { className: 'field-label' }, '✓ Inclusion criteria'), h(CritEditor, { items: cfg.include || [], onChange: function (a) { up('include', a); }, disabled: !props.canEdit, accent: '#16a34a', placeholder: 'e.g. has a public github repo or dataset', empty: 'No inclusion criteria yet.' })),
           h('div', { style: { flex: 1, minWidth: 220 } }, h('div', { className: 'field-label' }, '✕ Exclusion criteria'), h(CritEditor, { items: cfg.exclude || [], onChange: function (a) { up('exclude', a); }, disabled: !props.canEdit, accent: '#dc2626', placeholder: 'e.g. no quantitative evaluation', empty: 'No exclusion criteria yet.' }))),
@@ -4142,7 +4217,7 @@
         curStep > 1 && incCount(curStep - 1) === 0 ? h('div', { style: { fontSize: 12.5, color: 'var(--warn)', marginTop: 8 } }, 'There is no “include” paper in the previous step yet — run that first.') : null,
         curStep === 3 ? h('div', { style: { fontSize: 12, color: 'var(--muted)', marginTop: 8, lineHeight: 1.45, background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 8, padding: '7px 10px' } }, '📄 Full-text screening runs on step 2’s “include” papers: it downloads the available open access (OA) PDFs and screens on the full text; where no PDF is downloadable, it falls back to the abstract. This is therefore slower (3–4 papers per batch) — in the table below you can see live which paper got “📄 full text” and which got “📝 abstract only”, and the download ratio in the header.') : null,
         props.canEdit ? h('div', { className: 'runbar' },
-          h('button', { className: 'btn pri', disabled: running || (curStep > 1 && incCount(curStep - 1) === 0), onClick: function () { runStep(curStep); } }, running ? 'Running…' : ((cur.status === 'done' ? 'Rerun: ' : 'Run: ') + LS_STEPS[curStep - 1].label)),
+          h('button', { className: 'btn pri', disabled: running || lockedByOther || (curStep > 1 && incCount(curStep - 1) === 0), title: lockedByOther ? (lockNameOf(lock.by) + ' éppen futtatja') : null, onClick: function () { runStep(curStep); } }, lockedByOther ? '🔒 Fut (' + lockNameOf(lock.by) + ')' : running ? 'Running…' : ((cur.status === 'done' ? 'Rerun: ' : 'Run: ') + LS_STEPS[curStep - 1].label)),
           running ? h('button', { className: 'btn', onClick: function () { stop.current = true; } }, 'Cancel') : null,
           (cur.status === 'done' && curStep < 4) ? h('span', { style: { fontSize: 11.5, color: 'var(--warn)' } }, 'Rerunning deletes the later steps.') : null,
           prog ? (function () {
@@ -4170,7 +4245,7 @@
       ) : h('div', { className: 'panel', style: { marginTop: 10 } },
         h('h3', null, '4. Review paper'),
         h('p', { style: { fontSize: 13, color: 'var(--muted)' } }, 'We generate a structured review from the ' + incCount(3) + ' paper(s) “include”-d in step 3 (also saved to Files). Consensus grounding if the token is connected.'),
-        props.canEdit ? h('div', { className: 'runbar' }, h('button', { className: 'btn pri', disabled: running || incCount(3) === 0, onClick: function () { runStep(4); } }, running ? 'Generating…' : (review ? '🔄 Regenerate review' : 'Generate review')), (stepRow(4) || {}).status === 'done' ? h('span', { className: 'chip c-ok' }, '✓ Done · saved to Files') : null) : null,
+        props.canEdit ? h('div', { className: 'runbar' }, lockedByOther ? lsLockBox(lock) : null, h('button', { className: 'btn pri', disabled: running || lockedByOther || incCount(3) === 0, onClick: function () { runStep(4); } }, lockedByOther ? '🔒 Fut (' + lockNameOf(lock.by) + ')' : running ? 'Generating…' : (review ? '🔄 Regenerate review' : 'Generate review')), (stepRow(4) || {}).status === 'done' ? h('span', { className: 'chip c-ok' }, '✓ Done · saved to Files') : null) : null,
         running ? h('div', { style: { marginTop: 10 } }, h(AiThinking, { label: 'Synthesizing the review from the included papers' })) : null,
         err ? h('div', { style: { color: 'var(--danger)', fontSize: 12.5, marginTop: 6 } }, err) : null,
         review ? h('div', { style: { marginTop: 12 } },
@@ -4232,7 +4307,7 @@
                 h('td', { style: { padding: '7px 8px', textAlign: 'right' } }, p.score != null ? p.score + '%' : '–'),
                 props.canEdit ? h('td', { style: { padding: '7px 8px' } },
                   h('div', { style: { fontSize: 10, color: 'var(--muted)', fontWeight: 600, marginBottom: 3, textAlign: 'center' }, title: 'Click to override the AI decision' }, 'Your decision'),
-                  h('div', { className: 'seg', role: 'group', 'aria-label': 'Your decision — override the AI screening', style: { flex: 'none' } }, ['include', 'maybe', 'exclude'].map(function (v) { return h('button', { key: v, className: p.decision === v ? 'on' : '', 'aria-pressed': p.decision === v, 'aria-label': v, title: v, onClick: function () { override(p, v); } }, v === 'include' ? '✓' : v === 'maybe' ? '?' : '✕'); }))) : null);
+                  h('div', { className: 'seg', role: 'group', 'aria-label': 'Your decision — override the AI screening', style: { flex: 'none' } }, ['include', 'maybe', 'exclude'].map(function (v) { return h('button', { key: v, className: p.decision === v ? 'on' : '', 'aria-pressed': p.decision === v, 'aria-label': v, title: lockedByOther ? (lockNameOf(lock.by) + ' éppen futtatja') : v, disabled: lockedByOther, onClick: function () { override(p, v); } }, v === 'include' ? '✓' : v === 'maybe' ? '?' : '✕'); }))) : null);
             }))))
       ) : null,
       // 📚 studies manage modal — view all studies + delete (cascades to steps/papers)
@@ -10456,7 +10531,7 @@
       var funnelN = h('div', { style: { display: tab === 'study' ? 'block' : 'none' } },
         h('details', { id: 'pr-funnel-details', className: 'panel', style: { marginTop: 14, padding: '12px 16px' } },
           h('summary', { style: { cursor: 'pointer', fontSize: 13, fontWeight: 600, color: 'var(--muted)' } }, '⏸ Keyword screening funnel (OpenAlex search → screen) — paused · click to open'),
-          h('div', { style: { marginTop: 12 } }, h(LiteratureStudy, { projectId: p.id, project: p, studies: props.studies, sources: props.sources, ideas: props.ideas, loading: props.loading, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, autoCreateFrom: autoStudy, onAutoConsumed: function () { setAutoStudy(null); }, openStudyId: focusStudy, onStudyOpened: function () { setFocusStudy(null); } }))));
+          h('div', { style: { marginTop: 12 } }, h(LiteratureStudy, { projectId: p.id, project: p, studies: props.studies, sources: props.sources, ideas: props.ideas, loading: props.loading, canEdit: props.canEdit, authorId: props.authorId, viewerId: props.viewerId, onChanged: props.onChanged, autoCreateFrom: autoStudy, onAutoConsumed: function () { setAutoStudy(null); }, openStudyId: focusStudy, onStudyOpened: function () { setFocusStudy(null); } }))));
       return h('div', { className: 'rv-2t' + (navCollapsed ? ' rv-collapsed' : '') },
         h('aside', { className: 'rv-ctx' },
           h('div', { className: 'rv-ctx-top' },
@@ -10522,7 +10597,7 @@
       h('div', { style: { display: tab === 'study' ? 'block' : 'none' } },
         h('details', { id: 'pr-funnel-details', className: 'panel', style: { marginTop: 14, padding: '12px 16px' } },
           h('summary', { style: { cursor: 'pointer', fontSize: 13, fontWeight: 600, color: 'var(--muted)' } }, '⏸ Keyword screening funnel (OpenAlex search → screen) — paused · click to open'),
-          h('div', { style: { marginTop: 12 } }, h(LiteratureStudy, { projectId: p.id, project: p, studies: props.studies, sources: props.sources, ideas: props.ideas, loading: props.loading, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, autoCreateFrom: autoStudy, onAutoConsumed: function () { setAutoStudy(null); }, openStudyId: focusStudy, onStudyOpened: function () { setFocusStudy(null); } })))),
+          h('div', { style: { marginTop: 12 } }, h(LiteratureStudy, { projectId: p.id, project: p, studies: props.studies, sources: props.sources, ideas: props.ideas, loading: props.loading, canEdit: props.canEdit, authorId: props.authorId, viewerId: props.viewerId, onChanged: props.onChanged, autoCreateFrom: autoStudy, onAutoConsumed: function () { setAutoStudy(null); }, openStudyId: focusStudy, onStudyOpened: function () { setFocusStudy(null); } })))),
       editOpen ? h(ProjectSettingsModal, { project: p, onClose: function () { setEditOpen(false); }, onSaved: function () { setEditOpen(false); props.onChanged(); } }) : null
     );
   }
@@ -10956,7 +11031,7 @@
         sb.from('research_sources').select('id,source_api,ext_id,doi,title,authors,year,venue,cited_by,url,issn,screening').eq('project_id', projectId).order('cited_by', { ascending: false, nullsFirst: false }),
         sb.from('research_datasets').select('id,name,source,uri,size_bytes,license,status,local_path').eq('project_id', projectId).order('created_at', { ascending: false }),
         sb.from('research_jobs').select('id,type,title,status,progress,result,result_path,logs,created_at').eq('project_id', projectId).order('created_at', { ascending: false }),
-        sb.from('research_studies').select('id,idea_id,title,question,status,cur_step,created_at').eq('project_id', projectId).order('created_at', { ascending: false })
+        sb.from('research_studies').select('id,idea_id,title,question,status,cur_step,created_at,running_by,running_at').eq('project_id', projectId).order('created_at', { ascending: false }).then(function (r) { return (r && r.error) ? sb.from('research_studies').select('id,idea_id,title,question,status,cur_step,created_at').eq('project_id', projectId).order('created_at', { ascending: false }) : r; })
       ]).then(function (res) {
         var log = (res[0] && res[0].data) || [];
         var base = { log: log, tasks: (res[1] && res[1].data) || [], ideas: (res[2] && res[2].data) || [], sources: (res[3] && res[3].data) || [], datasets: (res[4] && res[4].data) || [], jobs: (res[5] && res[5].data) || [], studies: (res[6] && res[6].data) || [], loading: false };
