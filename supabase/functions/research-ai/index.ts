@@ -71,6 +71,7 @@ Deno.serve(async (req) => {
         hypothesis: i.hypothesis ? String(i.hypothesis).slice(0, 800) : null,
         rationale: i.rationale ? String(i.rationale).slice(0, 1000) : null,
         status: 'candidate',
+        created_by: ures?.user?.id ?? null,   // attribute the idea to the researcher whose chat produced it (→ per-user Map links + "only mine" filter)
       })).filter((r: any) => r.question);
       if (rows.length) {
         // return the inserted rows (id + fields) so the client can place EXACTLY these (race-free) instead of

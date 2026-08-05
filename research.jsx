@@ -5886,6 +5886,8 @@
     var pathWr = useRef({});   // per-path debounced write state + last-write ts (throttles keystroke writes; guards the realtime echo)
     var sfcS = useState(false), stepFlagsCap = sfcS[0], setStepFlagsCap = sfcS[1];   // migration-75 capability: step assignee/sign-off columns present
     var htS = useState({}), hiddenTypes = htS[0], setHiddenTypes = htS[1];   // temporary per-type visibility filter {node_type: true = hidden} (client-only, localStorage)
+    var moS = useState(false), mineOnly = moS[0], setMineOnly = moS[1];   // "csak az én ötleteim" — hide OTHER users' idea nodes (client-only, per-project localStorage)
+    function toggleMineOnly() { setMineOnly(function (v) { var n = !v; try { if (n) localStorage.setItem('pr-rmap-mine:' + props.projectId, '1'); else localStorage.removeItem('pr-rmap-mine:' + props.projectId); } catch (e) { } return n; }); }
     var tfoS = useState(false), typeFilterOpen = tfoS[0], setTypeFilterOpen = tfoS[1];   // the type-filter popover
     // decluttered dock (V1): named popover menus fold the low-frequency / arrange / zoom controls behind 3 buttons
     var vmS = useState(false), viewMenu = vmS[0], setViewMenu = vmS[1];       // 👁 Nézet menu (filter/files/export/refresh/tour/pres/comments/restores)
@@ -6102,6 +6104,7 @@
     }, [props.projectId]);
     useEffect(function () { loadMembers(); }, [props.projectId]);   // collaborators (graceful: null pre-migration-74)
     useEffect(function () { try { var v = JSON.parse(localStorage.getItem('pr-rmap-types:' + props.projectId) || '{}'); setHiddenTypes(v && typeof v === 'object' ? v : {}); } catch (e) { setHiddenTypes({}); } }, [props.projectId]);   // per-project type filter
+    useEffect(function () { try { setMineOnly(localStorage.getItem('pr-rmap-mine:' + props.projectId) === '1'); } catch (e) { setMineOnly(false); } }, [props.projectId]);   // per-project "csak az enyémek"
     useEffect(function () { try { var v = JSON.parse(localStorage.getItem('pr-rmap-etypes:' + props.projectId) || '{}'); setHiddenEdgeTypes(v && typeof v === 'object' ? v : {}); } catch (e) { setHiddenEdgeTypes({}); } }, [props.projectId]);   // per-project edge-relation filter (P1)
     // viewport-fit P2: re-fit every open float + the card cap when the STAGE box resizes (window resize / sidebar collapse).
     // Pan/zoom already re-render via `view`; only a size change without a view change needs this. Bumping vpGen never resizes
@@ -6171,7 +6174,7 @@
         // F5 — multi-modal nodes: datasets, uploaded/material files (NOT writing/studies), chat threads, paper figures
         sb.from('research_datasets').select('id,name,source,status,size_bytes,notes,created_by,created_at').eq('project_id', pid).order('created_at', { ascending: true }).limit(16),
         sb.from('research_files').select('id,path,size,source,storage_path,chat_id,created_by,created_at,updated_at').eq('project_id', pid).not('path', 'like', 'writing/%').not('path', 'like', 'studies/%').not('path', 'like', 'submission/%').order('updated_at', { ascending: false }).limit(16),
-        sb.from('research_chats').select('id,title,updated_at,created_at,owner_id').eq('project_id', pid).order('updated_at', { ascending: false }).limit(8),
+        sb.from('research_chats').select('id,title,updated_at,created_at,owner_id,surface').eq('project_id', pid).order('updated_at', { ascending: false }).limit(8),
         sb.from('research_figures').select('id,source_id,fig_label,caption,storage_path,created_by,created_at').eq('project_id', pid).eq('hidden', false).order('created_at', { ascending: false }).limit(16),   // newest-first so a freshly-generated figure always survives the 16-cap
         // SR/Elicit provenance: the "Study basis" review-question candidates (linked to their idea) + the launched Elicit reviews
         sb.from('research_sr_candidates').select('id,idea_id,question,launched_job_id,created_by,created_at').eq('project_id', pid).eq('dismissed', false).order('created_at', { ascending: true }).limit(16),
@@ -6394,12 +6397,23 @@
         if (fromChat) E.push([fromChat, 'f' + f.id]);          // an AI-written file belongs to the chat that produced it (dangling edge is dropped if that chat isn't among the top-8 nodes)
         else if (protStep0) E.push(['f' + f.id, protStep0]);   // otherwise it's an uploaded input to the protocol
       });
-      (d.chats || []).forEach(function (c) {   // chat threads drive ideation (ph 0)
+      // chat threads drive ideation (ph 0). Attribute each chat-sourced idea to the chat that PRODUCED it: an
+      // idea's created_by == the ideas-thread owner (research-ai 'suggest' now stamps created_by), so a user's
+      // chat links only to THAT user's ideas — not to everyone's (the old code linked every chat to every idea).
+      var chatIdeas = (d.ideas || []).filter(function (x) { return x.source === 'chat'; });
+      var ideaOwners = {};   // owner_id → has an ideas-surface chat node on this map
+      (d.chats || []).forEach(function (c) {
         N.push({ id: 'c' + c.id, t: 'chat', ph: 0, title: c.title || 'Beszélgetés', m: { Frissítve: String(c.updated_at || '').slice(0, 10) || '—' }, ref: c });
-        var kids = (d.ideas || []).filter(function (x) { return x.source === 'chat'; });   // connect the chat to EVERY idea that came from chat ideation, not just the first
-        if (kids.length) kids.forEach(function (x) { E.push(['c' + c.id, 'i' + x.id]); });
-        else if (d.ideas.length) E.push(['c' + c.id, 'i' + d.ideas[0].id]);   // no chat-sourced idea yet → keep one representative edge so the chat isn't orphaned
+        if (c.surface === 'ideas' || !c.surface) {
+          if (c.owner_id) ideaOwners[c.owner_id] = 1;
+          var mine = chatIdeas.filter(function (x) { return x.created_by && x.created_by === c.owner_id; });
+          if (mine.length) mine.forEach(function (x) { E.push(['c' + c.id, 'i' + x.id]); });
+          else if (d.ideas.length) E.push(['c' + c.id, 'i' + d.ideas[0].id]);   // orphan guard: a chat with no attributed idea keeps one representative edge
+        }
       });
+      // legacy / unattributed chat ideas (created_by null, or the author has no chat node here) → the first ideas-chat so they don't float
+      var firstIdeaChat = (d.chats || []).filter(function (c) { return c.surface === 'ideas' || !c.surface; })[0];
+      if (firstIdeaChat) chatIdeas.forEach(function (x) { if (!(x.created_by && ideaOwners[x.created_by])) E.push(['c' + firstIdeaChat.id, 'i' + x.id]); });
       // Canvas→Map merge: free-floating object cards (note / media / link) — standalone nodes, no derived edges (users connect them with manual edges).
       (d.objects || []).forEach(function (o) {
         var okind = o.kind || 'note';
@@ -8905,7 +8919,8 @@
     // active page (saved view) filter: a "curated" page shows only pinned cards. Defined before edgeEls so edges honor it.
     var activePageObj = (activePage && pagesCap) ? (pages.filter(function (p) { return p.id === activePage; })[0] || null) : null;
     function pageHides(n) { return !!(activePageObj && activePageObj.only_pinned && !n.mapPinned); }
-    function nodeVisible(n) { return !n.mapHidden && !hiddenTypes[n.t] && !pageHides(n); }
+    function mineHides(n) { return mineOnly && n.t === 'idea' && n.ref && n.ref.created_by && n.ref.created_by !== props.viewerId; }   // "csak az enyémek": hide OTHER users' ideas; unattributed (null created_by) stay visible
+    function nodeVisible(n) { return !n.mapHidden && !hiddenTypes[n.t] && !pageHides(n) && !mineHides(n); }
     // P2 Prezi story-thread: during a tour, the edge between the previous and current NODE-beat lights up (a comet runs the
     // narrative path). Derived from the live tour state — no extra state. Page/viewport beats (no nodeId) yield no thread.
     var storyPair = null;
@@ -9337,6 +9352,7 @@
           var types = order.filter(function (t) { return counts[t]; }); Object.keys(counts).forEach(function (t) { if (order.indexOf(t) < 0) types.push(t); });
           return h('div', { className: 'rmap-typefilter', onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
             h('div', { className: 'rmap-tf-h' }, h('b', { style: { flex: 1 } }, '👁 Típusok megjelenítése'), Object.keys(hiddenTypes).length ? h('button', { className: 'rmap-tf-all', onClick: showAllTypes }, 'Mind') : null, h('button', { className: 'rmap-cm-x', onClick: function () { setTypeFilterOpen(false); } }, '×')),
+            h('button', { className: 'rmap-tf-mine' + (mineOnly ? ' on' : ''), title: 'Csak az általad létrehozott ötletek megjelenítése a térképen (mások ötletei rejtve). A gazdátlan, régi ötletek láthatók maradnak.', onClick: toggleMineOnly }, h('span', { className: 'rmap-tf-mine-box' }, mineOnly ? '☑' : '☐'), h('span', { style: { flex: 1, textAlign: 'left' } }, '💡 Csak az én ötleteim')),
             types.length ? h('div', { className: 'rmap-tf-list' }, types.map(function (t) {
               var hidden = !!hiddenTypes[t];
               return h('button', { key: t, className: 'rmap-tf-row' + (hidden ? ' off' : ''), title: (hidden ? 'Megjelenítés: ' : 'Elrejtés: ') + ((RMAP_TYPE[t] && RMAP_TYPE[t].lab) || t), onClick: function () { toggleType(t); } },
