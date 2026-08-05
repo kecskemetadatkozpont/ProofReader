@@ -3467,6 +3467,13 @@
     }
     // The generated PICO candidate for this idea (if "Generate from Ideas" produced one) → enriches the unified launcher row.
     function ideaCand(idea) { return idea ? ((cands || []).filter(function (c) { return c.idea_id === idea.id; })[0] || null) : null; }
+    // pending-approval / rejected review REQUEST for this idea (migration-109) → colours the launcher card.
+    // sr.request stores research_question = idea.question [+ hypothesis], so match by prefix like ideaReviewState.
+    function reqStateForIdea(idea) {
+      if (!idea) return null; var q = String(idea.question || ''); if (!q) return null;
+      var mine = (reqReqs || []).filter(function (rr) { return rr.research_question && String(rr.research_question).indexOf(q) === 0; });
+      return mine.filter(function (rr) { return rr.status === 'pending_approval'; })[0] || mine.filter(function (rr) { return rr.status === 'rejected'; })[0] || null;
+    }
     // Rich review state for an idea's launcher row: done / running, plus which job/study to open. Merges the Elicit job
     // (matched by research_question prefix, since sr.create stores no idea_id) with the native/backup study (idea_id-linked).
     function ideaReviewState(idea) {
@@ -3718,8 +3725,11 @@
               var pico = (cand && cand.pico) || null;
               var picoBits = pico ? [['P', pico.population], ['I', pico.intervention], ['C', pico.comparison], ['O', pico.outcome]].filter(function (x) { return x[1]; }) : [];
               var rs = ideaReviewState(idea);
-              var bg = rs.done ? 'color-mix(in srgb, var(--ok, #15803d) 8%, var(--surface))' : rs.running ? 'color-mix(in srgb, var(--warn, #d9820a) 9%, var(--surface))' : 'var(--surface)';
-              var bd = rs.done ? 'color-mix(in srgb, var(--ok, #15803d) 42%, var(--line))' : rs.running ? 'color-mix(in srgb, var(--warn, #d9820a) 45%, var(--line))' : 'var(--line)';
+              var rrq = reqStateForIdea(idea);   // pending-approval / rejected review request → colour the card
+              var pend = !!(rrq && rrq.status === 'pending_approval') && !rs.done && !rs.running;
+              var rej = !!(rrq && rrq.status === 'rejected') && !rs.done && !rs.running && !pend;
+              var bg = rs.done ? 'color-mix(in srgb, var(--ok, #15803d) 8%, var(--surface))' : rs.running ? 'color-mix(in srgb, var(--warn, #d9820a) 9%, var(--surface))' : pend ? 'color-mix(in srgb, #7c3aed 8%, var(--surface))' : rej ? 'color-mix(in srgb, var(--danger, #b42318) 7%, var(--surface))' : 'var(--surface)';
+              var bd = rs.done ? 'color-mix(in srgb, var(--ok, #15803d) 42%, var(--line))' : rs.running ? 'color-mix(in srgb, var(--warn, #d9820a) 45%, var(--line))' : pend ? 'color-mix(in srgb, #7c3aed 48%, var(--line))' : rej ? 'color-mix(in srgb, var(--danger, #b42318) 40%, var(--line))' : 'var(--line)';
               function openIt() { if (rs.job && rs.job.status === 'completed' && rs.job.result_body) { setOpenR(rs.job); } else if (rs.study) { goStudyFunnel(rs.study); } else if (rs.job) { setSelJob(rs.job.id); } }
               function launchIt() { if (cand) { startFromCand(cand); } else { runReviewForIdea(idea); } }   // PICO → pre-filled form (uses criteria); else direct Elicit → backup
               var isGap = idea.source === 'gap';   // origin: research gap vs a developed idea
@@ -3732,16 +3742,17 @@
                 : h('div', { style: { fontSize: 10.5, color: 'var(--faint)', display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' } },
                     h('span', null, isGap ? 'Eredet: kutatási rés-elemzés' : 'Eredet: kijelölt ötlet'),
                     h('button', { className: 'btn', style: { padding: '2px 8px', fontSize: 10, flex: 'none' }, disabled: gen || !props.canEdit, title: 'PICO-kérdés generálása az ötletekből', onClick: generate }, gen ? '✨…' : '✨ PICO'));
-              return h('div', { key: idea.id, style: { display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: 12, alignItems: 'center', fontSize: 12, padding: '11px 13px', background: bg, border: '1px solid ' + bd, borderLeft: '3px solid ' + (rs.done ? 'var(--ok, #15803d)' : rs.running ? 'var(--warn, #d9820a)' : (isGap ? '#a23a86' : 'var(--accent, #4f46e5)')), borderRadius: 10 } },
+              return h('div', { key: idea.id, style: { display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: 12, alignItems: 'center', fontSize: 12, padding: '11px 13px', background: bg, border: '1px solid ' + bd, borderLeft: '4px solid ' + (rs.done ? 'var(--ok, #15803d)' : rs.running ? 'var(--warn, #d9820a)' : pend ? '#7c3aed' : rej ? 'var(--danger, #b42318)' : (isGap ? '#a23a86' : 'var(--accent, #4f46e5)')), borderRadius: 10 } },
                 h('div', { style: { minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 } },
                   h('div', { style: { display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' } },
                     h('span', { style: { fontSize: 10, fontWeight: 750, borderRadius: 6, padding: '2px 8px', whiteSpace: 'nowrap', background: isGap ? 'color-mix(in srgb, #a23a86 14%, transparent)' : 'var(--accent-tint, #eef0ff)', color: isGap ? '#a23a86' : 'var(--accent, #4f46e5)' } }, isGap ? '🕳️ Kutatási rés' : '💡 Ötlet'),
-                    rs.done ? h('span', { style: { fontSize: 10, fontWeight: 750, color: 'var(--ok, #15803d)' } }, '✓ Lefutott') : rs.running ? h('span', { style: { fontSize: 10, fontWeight: 750, color: '#a16207' } }, '⏳ Fut') : null),
+                    rs.done ? h('span', { style: { fontSize: 10, fontWeight: 750, color: 'var(--ok, #15803d)' } }, '✓ Lefutott') : rs.running ? h('span', { style: { fontSize: 10, fontWeight: 750, color: '#a16207' } }, '⏳ Fut') : pend ? h('span', { style: { fontSize: 10, fontWeight: 750, borderRadius: 6, padding: '2px 7px', background: 'color-mix(in srgb, #7c3aed 14%, transparent)', color: '#7c3aed' } }, '📨 Jóváhagyásra vár') : rej ? h('span', { style: { fontSize: 10, fontWeight: 750, borderRadius: 6, padding: '2px 7px', background: 'color-mix(in srgb, var(--danger,#b42318) 12%, transparent)', color: 'var(--danger, #b42318)' } }, '⛔ Elutasítva') : null),
                   h('div', { style: { minWidth: 0, fontWeight: 600, fontSize: 13, color: rs.done ? 'var(--ok, #15803d)' : 'inherit', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden', lineHeight: 1.4 } }, (cand && cand.question) || idea.question || ''),
                   picoRow),
                 h('div', { style: { display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'stretch', flex: 'none' } },
                   (rs.done || rs.running) ? h('button', { className: 'btn', style: { padding: '4px 11px', fontSize: 11.5, whiteSpace: 'nowrap' }, title: 'Eredmény / részletek megnyitása', onClick: openIt }, 'Megnyitás') : null,
-                  !rs.running ? h('button', { className: 'btn' + (rs.done ? '' : ' pri'), style: { padding: '4px 11px', fontSize: 11.5, whiteSpace: 'nowrap' }, disabled: busy || !props.canEdit, title: rs.done ? 'Új review futtatása' : 'Review indítása (Elicit → automatikus backup)', onClick: launchIt }, rs.done ? '↻ Újra' : '▶ Review') : null));
+                  (pend) ? h('span', { style: { fontSize: 11, fontWeight: 700, color: '#7c3aed', whiteSpace: 'nowrap' }, title: 'Admin jóváhagyásra vár' }, '📨 Függőben')
+                    : (!rs.running ? h('button', { className: 'btn' + (rs.done ? '' : ' pri'), style: { padding: '4px 11px', fontSize: 11.5, whiteSpace: 'nowrap' }, disabled: busy || !props.canEdit, title: rs.done ? 'Új review futtatása' : 'Review indítása (Elicit → automatikus backup)', onClick: launchIt }, rs.done ? '↻ Újra' : '▶ Review') : null)));
             })) : h('div', { style: { fontSize: 11.5, color: 'var(--muted)' } }, 'Jelölj ki ötleteket az Ötletek fülön („Select"), hogy review-t indíthass belőlük — Elicittel, vagy ha az nem elérhető, a beépített szűréssel.'));
         })(),
         backupEl(),
