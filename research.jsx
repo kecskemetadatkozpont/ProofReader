@@ -6170,7 +6170,7 @@
         sb.from('research_files').select('id,path,size,storage_path,created_by,created_at,updated_at').eq('project_id', pid).or('path.like.writing/%,path.like.studies/%,path.like.submission/%'),
         // F5 — multi-modal nodes: datasets, uploaded/material files (NOT writing/studies), chat threads, paper figures
         sb.from('research_datasets').select('id,name,source,status,size_bytes,notes,created_by,created_at').eq('project_id', pid).order('created_at', { ascending: true }).limit(16),
-        sb.from('research_files').select('id,path,size,source,storage_path,created_by,created_at,updated_at').eq('project_id', pid).not('path', 'like', 'writing/%').not('path', 'like', 'studies/%').not('path', 'like', 'submission/%').order('updated_at', { ascending: false }).limit(16),
+        sb.from('research_files').select('id,path,size,source,storage_path,chat_id,created_by,created_at,updated_at').eq('project_id', pid).not('path', 'like', 'writing/%').not('path', 'like', 'studies/%').not('path', 'like', 'submission/%').order('updated_at', { ascending: false }).limit(16),
         sb.from('research_chats').select('id,title,updated_at,created_at,owner_id').eq('project_id', pid).order('updated_at', { ascending: false }).limit(8),
         sb.from('research_figures').select('id,source_id,fig_label,caption,storage_path,created_by,created_at').eq('project_id', pid).eq('hidden', false).order('created_at', { ascending: false }).limit(16),   // newest-first so a freshly-generated figure always survives the 16-cap
         // SR/Elicit provenance: the "Study basis" review-question candidates (linked to their idea) + the launched Elicit reviews
@@ -6388,9 +6388,11 @@
         N.push({ id: 'd' + ds.id, t: 'dataset', ph: 3, title: ds.name || 'Adathalmaz', m: { Forrás: ds.source || '—', Státusz: ds.status || '—', Méret: (ds.size_bytes ? Math.round(ds.size_bytes / 1024) + ' KB' : '—'), Megjegyzés: ds.notes || '—' }, ref: ds });
         if (protStep0) E.push(['d' + ds.id, protStep0]);
       });
-      (d.mfiles || []).forEach(function (f) {   // uploaded / material files (ph 3) — inputs to the protocol
-        N.push({ id: 'f' + f.id, t: 'file', ph: 3, title: String(f.path).replace(/^.*\//, '') || 'fájl', m: { Útvonal: f.path, Méret: (f.size || 0) + ' B', Forrás: f.source || '—' }, ref: f });
-        if (protStep0) E.push(['f' + f.id, protStep0]);
+      (d.mfiles || []).forEach(function (f) {   // uploaded material files (ph 3 → protocol inputs) OR AI-written chat artifacts (ph 0 → linked to their chat)
+        var fromChat = f.chat_id ? ('c' + f.chat_id) : null;   // saveAiFiles stamps chat_id on files the chat AI produced (```file: fences)
+        N.push({ id: 'f' + f.id, t: 'file', ph: fromChat ? 0 : 3, title: String(f.path).replace(/^.*\//, '') || 'fájl', m: { Útvonal: f.path, Méret: (f.size || 0) + ' B', Forrás: f.source || '—' }, ref: f });
+        if (fromChat) E.push([fromChat, 'f' + f.id]);          // an AI-written file belongs to the chat that produced it (dangling edge is dropped if that chat isn't among the top-8 nodes)
+        else if (protStep0) E.push(['f' + f.id, protStep0]);   // otherwise it's an uploaded input to the protocol
       });
       (d.chats || []).forEach(function (c) {   // chat threads drive ideation (ph 0)
         N.push({ id: 'c' + c.id, t: 'chat', ph: 0, title: c.title || 'Beszélgetés', m: { Frissítve: String(c.updated_at || '').slice(0, 10) || '—' }, ref: c });
