@@ -5107,12 +5107,19 @@
         h('div', { className: 'pcpit' },
           h('div', { className: 'pcpit-card', style: { gridColumn: 'span 8' } },
             h('h4', null, '🔬 Eddigi eredmények', h('span', { className: 'c' }, (doneStudies.length + doneSR.length) + ' study · ' + doneSteps.length + '/' + steps.length + ' lépés')),
-            (doneSteps.length || doneStudies.length || doneSR.length)
-              ? h('div', null,
-                  doneSteps.slice(0, 3).map(function (s) { var sm = (s.result && (s.result.summary || s.result.note)) || ''; return h('div', { key: 'st' + s.id, className: 'pcpit-find' }, h('span', { className: 'prov' }, 'S' + s.ord), h('span', null, s.title + (sm ? ' — ' + String(sm).slice(0, 130) : ''))); }),
-                  doneSR.slice(0, 2).map(function (j) { return h('div', { key: 'jr' + j.id, className: 'pcpit-find' }, h('span', { className: 'prov' }, 'Review'), h('span', null, srName(j) + ' — kész')); }),
-                  doneStudies.slice(0, 2).map(function (s) { return h('div', { key: 'sd' + s.id, className: 'pcpit-find' }, h('span', { className: 'prov' }, 'Study'), h('span', null, (s.title || 'Irodalom-study') + ' — kész')); }))
-              : h('div', { style: { fontSize: 12.5, color: 'var(--muted)', lineHeight: 1.5 } }, 'Még nincsenek rögzített eredmények — futtass protokoll-lépéseket vagy study-kat, és a kimenetük itt jelenik meg (provenance-szel).')),
+            (function () {
+              // ONE combined list of everything that finished (steps + Elicit reviews + literature studies), so all N
+              // reviews show — not a hard-capped 2. Bounded to MAXD with a "+N további" line to keep the card tidy.
+              var items = []
+                .concat(doneSteps.map(function (s) { var sm = (s.result && (s.result.summary || s.result.note)) || ''; return { key: 'st' + s.id, prov: 'S' + s.ord, txt: s.title + (sm ? ' — ' + String(sm).slice(0, 130) : '') }; }))
+                .concat(doneSR.map(function (j) { return { key: 'jr' + j.id, prov: 'Review', txt: srName(j) + ' — kész' }; }))
+                .concat(doneStudies.map(function (s) { return { key: 'sd' + s.id, prov: 'Study', txt: (s.title || 'Irodalom-study') + ' — kész' }; }));
+              if (!items.length) return h('div', { style: { fontSize: 12.5, color: 'var(--muted)', lineHeight: 1.5 } }, 'Még nincsenek rögzített eredmények — futtass protokoll-lépéseket vagy study-kat, és a kimenetük itt jelenik meg (provenance-szel).');
+              var MAXD = 8, shown = items.slice(0, MAXD);
+              return h('div', null,
+                shown.map(function (it) { return h('div', { key: it.key, className: 'pcpit-find' }, h('span', { className: 'prov' }, it.prov), h('span', null, it.txt)); }),
+                items.length > MAXD ? h('div', { key: 'more', className: 'pcpit-find', style: { color: 'var(--faint)' } }, h('span', { className: 'prov' }, '…'), h('span', null, '+' + (items.length - MAXD) + ' további')) : null);
+            })()),
           h('div', { className: 'pcpit-card', style: { gridColumn: 'span 4' } },
             h('h4', null, '📈 Projekt-állapot'),
             h('div', { className: 'pcpit-metric' }, h('b', null, doneSteps.length + ' / ' + steps.length), h('small', null, 'protokoll-lépés kész')),
