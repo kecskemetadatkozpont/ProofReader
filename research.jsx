@@ -2302,7 +2302,8 @@
     useEffect(function () {
       if (!(props.sources || []).some(function (s) { return s.origin_job_id; })) { setJobTitleById({}); return; }
       sb.from('elicit_jobs').select('id,research_question,result_title').eq('project_id', props.projectId).eq('kind', 'sysreview').then(function (r) {
-        if (r && r.error) return; var m = {}; ((r && r.data) || []).forEach(function (j) { m[j.id] = j.result_title || j.research_question || 'Elicit review'; }); setJobTitleById(m);
+        // research_question is the DISTINCT differentiator; result_title is often just the project name (passed as the title at launch), so it would make every review look identical
+        if (r && r.error) return; var m = {}; ((r && r.data) || []).forEach(function (j) { m[j.id] = j.research_question || j.result_title || 'Elicit review'; }); setJobTitleById(m);
       }, function () { });
     }, [props.projectId, (props.sources || []).length]);
     // ---- Background figure extraction (PRFigureRunner): keeps running across SPA tab/view switches; the Figure Board
