@@ -5749,6 +5749,7 @@
     var cmsgS = useState({}), chatMsgs = cmsgS[0], setChatMsgs = cmsgS[1];   // chat id → [{role,content}]
     var chatMsgsLoading = useRef({}), chatMsgsAt = useRef({});
     var cpvS = useState(null), cpv = cpvS[0], setCpv = cpvS[1];   // full-conversation modal {title, owner, msgs} opened from a chat card
+    var fpvS = useState(null), fpv = fpvS[0], setFpv = fpvS[1];   // file-content preview modal {ref, kind, path} opened by clicking a file node
     function ensureChatMsgs(id, at) {
       if (id == null || chatMsgsLoading.current[id]) return;
       if (chatMsgs[id] != null && chatMsgsAt.current[id] === at) return;   // already have the current version
@@ -6588,7 +6589,9 @@
     function canEnter(n) { var tab = RMAP_TYPE[n.t] && RMAP_TYPE[n.t].tab; return !!(tab && EMBEDDABLE[tab] && props.renderPanel); }
     // ENTER: fly the camera into the card, then mount its real workflow panel in-place (screen-space overlay)
     function enterNode(n) {
-      if (!n) return; var tab = RMAP_TYPE[n.t] && RMAP_TYPE[n.t].tab;
+      if (!n) return;
+      if (n.t === 'file' && n.ref && n.ref.id) { setFpv({ ref: n.ref, kind: fileKind(n.ref.path), path: String(n.ref.path).replace(/^.*\//, '') || 'fájl' }); return; }   // a file node opens a DIRECT content preview modal, not the ideas panel
+      var tab = RMAP_TYPE[n.t] && RMAP_TYPE[n.t].tab;
       if (!tab) return;
       if (!canEnter(n)) { if (props.onGoTab) props.onGoTab(tab); return; }   // non-embeddable → hand off to the classic tab
       stopFollow(); tourStop();
@@ -9055,6 +9058,23 @@
       }
       return k;
     }
+    // Shared file-content preview element — used by BOTH the card rich-tier and the click-to-preview modal.
+    // big=true → actually fetch the content + show a loading label; big=false → only render if already cached.
+    function filePvEl(r, kind, big) {
+      if (kind === 'md' || kind === 'csv' || kind === 'text') {
+        if (big) ensureFileText(r);
+        var txt = fileText[r.id];
+        if (txt == null) return h('div', { className: 'rmap-pv-load' }, big ? '⏳ betöltés…' : '');
+        if (kind === 'md') return h('div', { className: 'rmap-pv-md md', dangerouslySetInnerHTML: { __html: mdHtml(stripFiles(txt)) } });
+        if (kind === 'csv') { var delim = /\.tsv$/i.test(r.path || '') ? '\t' : ','; var rows = String(txt).trim().split(/\r?\n/).slice(0, 200).map(function (rr) { return rr.split(delim); }); return h('div', { className: 'rmap-pv-csv' }, h('table', null, h('thead', null, h('tr', null, (rows[0] || []).map(function (c, ci) { return h('th', { key: ci }, c); }))), h('tbody', null, rows.slice(1).map(function (rr, ri) { return h('tr', { key: ri }, rr.map(function (c, cj) { return h('td', { key: cj }, c); })); })))); }
+        return h('pre', { className: 'rmap-pv-txt' }, txt.slice(0, 20000));
+      }
+      if (kind === 'image' && r.storage_path) { if (big) ensureFigUrls([r]); var iu = figUrls[r.storage_path]; return iu ? h('img', { className: 'rmap-pv-media', src: iu, alt: '', loading: 'lazy' }) : h('div', { className: 'rmap-pv-load' }, big ? '⏳ kép…' : ''); }
+      if (kind === 'video' && r.storage_path) { if (big) ensureFigUrls([r]); var vu = figUrls[r.storage_path]; return vu ? h('video', { className: 'rmap-pv-media', src: vu, controls: true, preload: 'metadata', onMouseDown: function (e) { e.stopPropagation(); } }) : h('div', { className: 'rmap-pv-load' }, big ? '⏳ videó…' : ''); }
+      if (kind === 'audio' && r.storage_path) { if (big) ensureFigUrls([r]); var uu = figUrls[r.storage_path]; return uu ? h('audio', { className: 'rmap-pv-audio', src: uu, controls: true, preload: 'metadata', onMouseDown: function (e) { e.stopPropagation(); } }) : h('div', { className: 'rmap-pv-load' }, big ? '⏳ audió…' : ''); }
+      if (kind === 'pdf' && r.storage_path) { if (big) ensureFigUrls([r]); var pu = figUrls[r.storage_path]; return pu ? h('iframe', { className: 'rmap-pv-pdf', src: pu, title: r.path, onMouseDown: function (e) { e.stopPropagation(); } }) : h('div', { className: 'rmap-pv-load' }, big ? '⏳ PDF…' : ''); }
+      return h('div', { className: 'rmap-pv-icon2' }, '📎');
+    }
     // P1: tier-gated EXTRA content revealed by CSS @container as the card grows (or by the zoom LOD floor).
     // Appended after body(n); each block is display:none by default and shown by a @container/lod rule.
     function richTier(n) {
@@ -9096,31 +9116,11 @@
           return h('button', { key: v, className: 'rmap-pv-sb' + (r.screening === v ? ' on s-' + v : ''), title: 'Szűrés: ' + v, onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); setPaperScreen(r, v); } }, v === 'include' ? '✓ incl' : v === 'maybe' ? '~ maybe' : '✕ excl');
         }))));
       }
-      if (canEnter(n)) out.push(h('div', { key: 'xl', className: 'rmap-t rmap-t-xl' }, h('button', { className: 'rmap-pv-btn pri', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); enterNode(n); } }, '◇ Belépés — teljes panel ↗')));
+      if (canEnter(n)) out.push(h('div', { key: 'xl', className: 'rmap-t rmap-t-xl' }, h('button', { className: 'rmap-pv-btn pri', onMouseDown: function (e) { e.stopPropagation(); }, onClick: function (e) { e.stopPropagation(); enterNode(n); } }, n.t === 'file' ? '👁 Előnézet ↗' : '◇ Belépés — teljes panel ↗')));
       // FILE preview: a big-enough file/section/review card renders its content by type (md/csv/text → lazy content; image/video/audio/pdf → signed URL).
       if ((t === 'file' || t === 'section' || t === 'review') && r.id) {
-        var kind = fileKind(r.path), big = (n._h || 0) >= 150 && (n._w || 0) >= 240, pv;   // fetch only when the card is genuinely large (matches the @container reveal)
-        if (kind === 'md' || kind === 'csv' || kind === 'text') {
-          if (big) ensureFileText(r);
-          var txt = fileText[r.id];
-          if (txt == null) pv = h('div', { className: 'rmap-pv-load' }, big ? '⏳ betöltés…' : '');
-          else if (kind === 'md') pv = h('div', { className: 'rmap-pv-md md', dangerouslySetInnerHTML: { __html: mdHtml(stripFiles(txt)) } });
-          else if (kind === 'csv') { var delim = /\.tsv$/i.test(r.path || '') ? '\t' : ','; var rows = String(txt).trim().split(/\r?\n/).slice(0, 40).map(function (rr) { return rr.split(delim); }); pv = h('div', { className: 'rmap-pv-csv' }, h('table', null, h('thead', null, h('tr', null, (rows[0] || []).map(function (c, ci) { return h('th', { key: ci }, c); }))), h('tbody', null, rows.slice(1).map(function (rr, ri) { return h('tr', { key: ri }, rr.map(function (c, cj) { return h('td', { key: cj }, c); })); })))); }
-          else pv = h('pre', { className: 'rmap-pv-txt' }, txt.slice(0, 6000));
-        } else if (kind === 'image' && r.storage_path) {
-          if (big) ensureFigUrls([r]); var iu = figUrls[r.storage_path];
-          pv = iu ? h('img', { className: 'rmap-pv-media', src: iu, alt: '', loading: 'lazy' }) : h('div', { className: 'rmap-pv-load' }, big ? '⏳ kép…' : '');
-        } else if (kind === 'video' && r.storage_path) {
-          if (big) ensureFigUrls([r]); var vu = figUrls[r.storage_path];
-          pv = vu ? h('video', { className: 'rmap-pv-media', src: vu, controls: true, preload: 'metadata', onMouseDown: function (e) { e.stopPropagation(); } }) : h('div', { className: 'rmap-pv-load' }, big ? '⏳ videó…' : '');
-        } else if (kind === 'audio' && r.storage_path) {
-          if (big) ensureFigUrls([r]); var uu = figUrls[r.storage_path];
-          pv = uu ? h('audio', { className: 'rmap-pv-audio', src: uu, controls: true, preload: 'metadata', onMouseDown: function (e) { e.stopPropagation(); } }) : h('div', { className: 'rmap-pv-load' }, big ? '⏳ audió…' : '');
-        } else if (kind === 'pdf' && r.storage_path) {
-          if (big) ensureFigUrls([r]); var pu = figUrls[r.storage_path];
-          pv = pu ? h('iframe', { className: 'rmap-pv-pdf', src: pu, title: r.path, onMouseDown: function (e) { e.stopPropagation(); } }) : h('div', { className: 'rmap-pv-load' }, big ? '⏳ PDF…' : '');
-        } else { pv = h('div', { className: 'rmap-pv-icon2' }, '📎'); }
-        out.push(h('div', { key: 'fpv', className: 'rmap-t rmap-t-pv', onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); }, onMouseUp: (kind === 'md' || kind === 'text' || kind === 'csv') ? function (e) { pvSelUp(n); } : null, onClick: function (e) { e.stopPropagation(); if (sel !== n.id) { setSelEdge(null); setMsel({}); setSel(n.id); } } }, pv));   // clicking the preview still SELECTS the card (→ attached to the dock chat); mousedown-stop keeps scroll/text-select/media controls working
+        var kind = fileKind(r.path), big = (n._h || 0) >= 150 && (n._w || 0) >= 240;   // fetch only when the card is genuinely large (matches the @container reveal)
+        out.push(h('div', { key: 'fpv', className: 'rmap-t rmap-t-pv', onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); }, onMouseUp: (kind === 'md' || kind === 'text' || kind === 'csv') ? function (e) { pvSelUp(n); } : null, onClick: function (e) { e.stopPropagation(); if (sel !== n.id) { setSelEdge(null); setMsel({}); setSel(n.id); } } }, filePvEl(r, kind, big)));   // clicking the preview still SELECTS the card (→ attached to the dock chat); mousedown-stop keeps scroll/text-select/media controls working
       }
       return out.length ? out : null;
     }
@@ -9771,6 +9771,14 @@
               h('div', { className: 'rmap-cpv-r' }, mm.role === 'assistant' ? 'Publify' : cpv.owner),
               h('div', { className: 'rmap-cpv-t md', dangerouslySetInnerHTML: { __html: mdHtml(stripFiles(String(mm.content || ''))) } }));
           })))) : null,
+      // file-content preview modal opened by clicking a file node — renders the md/csv/text/image/pdf/… directly
+      fpv ? h('div', { className: 'rmap-cpv-scrim', onMouseDown: function (e) { if (e.target === e.currentTarget) setFpv(null); } },
+        h('div', { className: 'rmap-cpv-modal rmap-fpv-modal', onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
+          h('div', { className: 'rmap-cpv-head' },
+            h('span', { className: 'rmap-cpv-title' }, '📄 ' + fpv.path),
+            props.onGoTab ? h('button', { className: 'rmap-fpv-open', title: 'Megnyitás a fájlkezelőben (Ötlet fül)', onClick: function () { setFpv(null); props.onGoTab('ideas'); } }, 'Fájlkezelő ↗') : null,
+            h('button', { className: 'rmap-cpv-x', title: 'Bezárás', onClick: function () { setFpv(null); } }, '✕')),
+          h('div', { className: 'rmap-fpv-body' }, filePvEl(fpv.ref, fpv.kind, true)))) : null,
       // Prezi-mód focus overlay — the card's real workflow panel mounted in-place (screen-space, over the dimmed map)
       focus ? h('div', { className: 'rmap-focus', onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
         h('div', { className: 'rmap-focus-scrim', onClick: function () { (tour ? tourStop : exitFocus)(); } }),
