@@ -3647,12 +3647,12 @@
         })(),
         // ONE-PATH launcher: the selected ideas → start a review each (Elicit primary → auto backup). Replaces the two separate entries.
         (function () {
-          if (!canCreate) return null;
+          if (!canView) return null;   // show the selected-idea launcher to ANY project viewer (was canCreate → hid the cards for non-admin collaborators without the elicit_sysreview entitlement); launch buttons stay canEdit-gated (server enforces the entitlement, with collaboration inheritance)
           var sel = (ideasFull || []).filter(function (i) { return i.status === 'selected'; });
           return h('div', { style: { border: '1px solid var(--line)', borderRadius: 10, padding: '11px 13px', margin: '2px 0 10px', background: 'var(--surface-2)' } },
             h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: sel.length ? 8 : 0, flexWrap: 'wrap' } },
               h('b', { style: { fontSize: 12.5 } }, '🔬 Review indítása a kijelölt ötletekből'),
-              sel.length ? h('button', { className: 'btn pri', style: { padding: '4px 10px', fontSize: 12, marginLeft: 'auto' }, disabled: busy, onClick: function () { runReviewAll(sel); } }, '🔬 Mind a ' + sel.length + '-ből') : null),
+              sel.length ? h('button', { className: 'btn pri', style: { padding: '4px 10px', fontSize: 12, marginLeft: 'auto' }, disabled: busy || !props.canEdit, onClick: function () { runReviewAll(sel); } }, '🔬 Mind a ' + sel.length + '-ből') : null),
             sel.length ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 7 } }, sel.map(function (idea) {
               // UNIFIED launcher row (B): one row per selected idea, enriched with its PICO candidate if generated. Merges
               // the old launcher (idea → ▶ Review) and the "From your Ideas" candidate cards into ONE list.
@@ -3673,7 +3673,7 @@
                   }))
                 : h('div', { style: { fontSize: 10.5, color: 'var(--faint)', display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' } },
                     h('span', null, isGap ? 'Eredet: kutatási rés-elemzés' : 'Eredet: kijelölt ötlet'),
-                    h('button', { className: 'btn', style: { padding: '2px 8px', fontSize: 10, flex: 'none' }, disabled: gen, title: 'PICO-kérdés generálása az ötletekből', onClick: generate }, gen ? '✨…' : '✨ PICO'));
+                    h('button', { className: 'btn', style: { padding: '2px 8px', fontSize: 10, flex: 'none' }, disabled: gen || !props.canEdit, title: 'PICO-kérdés generálása az ötletekből', onClick: generate }, gen ? '✨…' : '✨ PICO'));
               return h('div', { key: idea.id, style: { display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: 12, alignItems: 'center', fontSize: 12, padding: '11px 13px', background: bg, border: '1px solid ' + bd, borderLeft: '3px solid ' + (rs.done ? 'var(--ok, #15803d)' : rs.running ? 'var(--warn, #d9820a)' : (isGap ? '#a23a86' : 'var(--accent, #4f46e5)')), borderRadius: 10 } },
                 h('div', { style: { minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 } },
                   h('div', { style: { display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' } },
@@ -3683,7 +3683,7 @@
                   picoRow),
                 h('div', { style: { display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'stretch', flex: 'none' } },
                   (rs.done || rs.running) ? h('button', { className: 'btn', style: { padding: '4px 11px', fontSize: 11.5, whiteSpace: 'nowrap' }, title: 'Eredmény / részletek megnyitása', onClick: openIt }, 'Megnyitás') : null,
-                  !rs.running ? h('button', { className: 'btn' + (rs.done ? '' : ' pri'), style: { padding: '4px 11px', fontSize: 11.5, whiteSpace: 'nowrap' }, disabled: busy, title: rs.done ? 'Új review futtatása' : 'Review indítása (Elicit → automatikus backup)', onClick: launchIt }, rs.done ? '↻ Újra' : '▶ Review') : null));
+                  !rs.running ? h('button', { className: 'btn' + (rs.done ? '' : ' pri'), style: { padding: '4px 11px', fontSize: 11.5, whiteSpace: 'nowrap' }, disabled: busy || !props.canEdit, title: rs.done ? 'Új review futtatása' : 'Review indítása (Elicit → automatikus backup)', onClick: launchIt }, rs.done ? '↻ Újra' : '▶ Review') : null));
             })) : h('div', { style: { fontSize: 11.5, color: 'var(--muted)' } }, 'Jelölj ki ötleteket az Ötletek fülön („Select"), hogy review-t indíthass belőlük — Elicittel, vagy ha az nem elérhető, a beépített szűréssel.'));
         })(),
         backupEl(),
