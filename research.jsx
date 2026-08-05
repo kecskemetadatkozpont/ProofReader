@@ -4005,18 +4005,6 @@
           h('div', { className: 'ls-planning-t' }, inline ? '✨ Publify tölti ki a mezőket…' : '✨ Publify előkészíti a study-t…'),
           h('div', { className: 'ls-planning-s' }, 'Kulcsszavak, beválogatási kritériumok és szűrők betöltése a kijelölt ötletekből — ez pár másodperc.')));
     }
-    // clear "which ideas entered the pool" list shown before creating the study from selected ideas
-    function lsPoolBox(ideas) {
-      return h('div', { className: 'ls-pool' },
-        h('div', { className: 'ls-pool-h' }, '📥 ' + ideas.length + ' ötlet kerül a study-ba'),
-        h('div', { className: 'ls-pool-list' }, ideas.map(function (i, k) {
-          return h('div', { key: i.id, className: 'ls-pool-item' },
-            h('span', { className: 'ls-pool-n' }, String(k + 1)),
-            h('div', { className: 'ls-pool-body' },
-              h('div', { className: 'ls-pool-q' }, i.question),
-              i.hypothesis ? h('div', { className: 'ls-pool-hy' }, 'H: ' + i.hypothesis) : null));
-        })));
-    }
     // "another user is running this study" lock notice — shown when locked by someone else (blocks modify/re-run)
     function lsLockBox(lk) {
       return h('div', { className: 'ls-lock' },
@@ -4105,13 +4093,10 @@
       if (planning) return h('div', { className: 'panel' }, h('h3', null, '🔬 Literature study'), lsPlanningBox(false));
       var selIdeas = (props.ideas || []).filter(function (i) { return i.status === 'selected'; });
       return h('div', { className: 'panel' }, h('h3', null, '🔬 Literature study'),
-        h('p', { style: { fontSize: 13, color: 'var(--muted)' } }, 'Ez a nézet a keyword-szűrési funnel. A szisztematikus review-t fent, a „🔬 Systematic Review Studio"-ból indítsd (Elicit → automatikus backup, ha az nem elérhető). Alább közvetlenül is indíthatsz beépített szűrést: jelölj ki ötleteket (Select), majd a 4 lépés (gyors-szűrés → absztrakt → full-text → áttekintés) fut — a Publify előtölti a kulcsszavakat/kritériumokat, te finomítod.'),
-        selIdeas.length ? lsPoolBox(selIdeas) : null,
+        h('p', { style: { fontSize: 13, color: 'var(--muted)' } }, 'Ez a nézet a keyword-szűrési funnel: a szűrés részletei (kulcsszavak, kritériumok, találatok lépésről lépésre) itt jelennek meg, amint egy review elindult. A kijelölt ötletekből a review-t FENT, a „1 · Kiindulás & indítás" szakaszban indítsd (Elicit → automatikus backup) — ez a fő folyamat.'),
+        selIdeas.length ? h('div', { style: { fontSize: 12.5, color: 'var(--accent)', background: 'var(--accent-tint)', border: '1px solid color-mix(in srgb, var(--accent) 25%, transparent)', borderRadius: 8, padding: '9px 12px', marginTop: 10, lineHeight: 1.45 } }, '↑ ' + selIdeas.length + ' kijelölt ötleted van — a review-t fent, a „1 · Kiindulás & indítás" szakaszban indítsd belőlük (soronként).') : null,
         props.canEdit ? h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginTop: 10 } },
-          selIdeas.length
-            ? h('button', { className: 'btn pri', disabled: planning, onClick: function () { newStudy(selIdeas); } }, planning ? '✨ Publify tervez…' : ('⚙ Study indítása ' + selIdeas.length + ' ötletből →'))
-            : h('span', { style: { fontSize: 12.5, color: 'var(--warn)' } }, 'Jelölj ki legalább egy ötletet (Select) az Ötlet fülön.'),
-          h('button', { className: 'btn', disabled: planning, onClick: function () { newStudy(null); } }, '+ Üres study')
+          h('button', { className: 'btn', disabled: planning, title: 'Ötletek nélküli, kézi kulcsszó-szűrés indítása', onClick: function () { newStudy(null); } }, '+ Üres study (kézi kulcsszó-szűrés)')
         ) : h('div', { style: { fontSize: 13, color: 'var(--faint)' } }, 'Read-only view.'),
         err ? h('div', { style: { color: 'var(--danger)', fontSize: 12.5, marginTop: 8 } }, err) : null);
     }
