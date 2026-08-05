@@ -146,6 +146,151 @@ async function notifyDone(svc: any, row: any, patch: any, kind: string): Promise
     await svc.from('notifications').insert({ recipient_id: row.user_id, kind: 'job', payload: { title, body, project_id: row.project_id || null, job_id: row.id, job_kind: kind, status: patch.status } });
   } catch (_e) { /* notifications are best-effort — never fail the poll on a notify error */ }
 }
+
+// ---- Elicit systematic-review papers → the project reference Library (research_sources / "Irodalom") ----
+// normalize a DOI to a bare lowercase id (strip scheme/host/doi: prefix) so the SAME paper collapses across
+// OpenAlex ('doi:'+doi ext_id) and Elicit — the whole point of the same-DOI merge.
+function normDoi(s: any): string {
+  return String(s || '').trim().replace(/^https?:\/\/(dx\.)?doi\.org\//i, '').replace(/^doi:\s*/i, '').trim().toLowerCase();
+}
+function metaIdx(cols: string[], kw: string): number {
+  for (let i = 0; i < cols.length; i++) if (String(cols[i]).toLowerCase().indexOf(kw) >= 0) return i;
+  return -1;
+}
+// a row's "Screening judgement" field (present on screen/fulltext stages) → include | exclude | maybe | null
+function judgementOf(r: any): string | null {
+  const f = (r.fields || []).find((x: any) => String(x.name).toLowerCase().indexOf('screening judgement') >= 0);
+  if (!f) return null;
+  const a = String(f.answer || '').toLowerCase();
+  if (a.indexOf('includ') >= 0) return 'include';
+  if (a.indexOf('exclud') >= 0) return 'exclude';
+  return a ? 'maybe' : null;
+}
+// Import EVERY paper an Elicit systematic review found into the project's Library. Widest coverage: merge across
+// stages (search→screen→fulltext→extract) keyed by DOI (else title), later/richer stages augment earlier ones —
+// so a paper that was only searched still lands (screening='unscreened') while an extracted paper carries its
+// screening decision. Merge with existing rows (e.g. an OpenAlex row for the SAME DOI) fills gaps only: never
+// null-over real data, never overwrite a human screening decision, never flip source_api. Columns we omit
+// (abstract/issn/oa_pdf_url) are left untouched by the upsert → OpenAlex-provided abstracts survive.
+// `client` = svc for the server-side auto-import; the caller-JWT sb for the manual action (RLS then enforces write).
+async function importElicitSources(client: any, job: any): Promise<{ imported: number; note?: string }> {
+  if (!job || !job.project_id) return { imported: 0, note: 'no project' };
+  const STAGE_ORDER = ['search', 'screen', 'fulltext', 'extract'];
+  const REACH: Record<string, number> = { search: 0, screen: 1, fulltext: 2, extract: 3 };
+  let stages: any = job.stages || {};
+  let refreshed = false;
+  // presigned stage CSV URLs expire in 7 days → on a fetch failure, refresh the whole review ONCE from Elicit.
+  async function stageText(st: string): Promise<string | null> {
+    let u = stages[st] && stages[st].csv;
+    if (u) { try { const cr = await fetch(u); if (cr.ok) return await cr.text(); } catch (_e) { /* maybe expired */ } }
+    if (!refreshed && job.elicit_id && ELICIT_KEY) {
+      refreshed = true;
+      const g = await elicitCall('/api/v1/systematic-reviews/' + encodeURIComponent(job.elicit_id), 'GET');
+      if (g.ok && g.body?.data) stages = { search: g.body.data.search, screen: g.body.data.screen, fulltext: g.body.data.fulltext, extract: g.body.data.extract };
+      u = stages[st] && stages[st].csv;
+      if (u) { try { const cr2 = await fetch(u); if (cr2.ok) return await cr2.text(); } catch (_e) { /* give up on this stage */ } }
+    }
+    return null;
+  }
+  const parsed: Record<string, any> = {};
+  for (const st of STAGE_ORDER) { const t = await stageText(st); if (t != null) parsed[st] = parseStage(t, false); }
+  // accumulate one merged record per paper, keyed by ext_id ('doi:'+doi else 'elicit:'+job+title)
+  const merged: Record<string, any> = {};
+  for (const st of STAGE_ORDER) {
+    const d = parsed[st]; if (!d || !d.rows) continue;
+    const cols = d.columns || [];
+    const iTitle = metaIdx(cols, 'title'), iAuth = metaIdx(cols, 'author'), iYear = metaIdx(cols, 'year'),
+      iCite = metaIdx(cols, 'citation'), iDoi = metaIdx(cols, 'doi'), iDoiLink = metaIdx(cols, 'doi link'),
+      iVenue = metaIdx(cols, 'venue');
+    for (const r of d.rows) {
+      const doiRaw = (iDoi >= 0 && r.meta[iDoi]) ? r.meta[iDoi] : ((iDoiLink >= 0 && r.meta[iDoiLink]) ? r.meta[iDoiLink] : '');
+      const doi = normDoi(doiRaw);
+      const title = String((iTitle >= 0 ? r.meta[iTitle] : r.meta[0]) || 'Untitled').slice(0, 500);
+      const key = doi ? ('doi:' + doi) : ('elicit:' + job.id + ':' + title.slice(0, 80).toLowerCase());
+      const cur = merged[key] || { _reach: -1, _judge: null };
+      const authors = (iAuth >= 0 && r.meta[iAuth]) ? String(r.meta[iAuth]).split(/[,;]\s*/).map((a: string) => a.trim()).filter(Boolean).slice(0, 25) : null;
+      const year = iYear >= 0 ? (parseInt(String(r.meta[iYear]), 10) || null) : null;
+      const venue = iVenue >= 0 ? (String(r.meta[iVenue] || '').trim() || null) : null;
+      const cited = iCite >= 0 ? (parseInt(String(r.meta[iCite]), 10) || null) : null;
+      const url = (iDoiLink >= 0 && r.meta[iDoiLink]) ? String(r.meta[iDoiLink]).trim() : (doi ? 'https://doi.org/' + doi : null);
+      const j = judgementOf(r);
+      merged[key] = {
+        ext_id: key, doi: doi || cur.doi || null, title: cur.title || title,
+        authors: cur.authors || authors, year: cur.year != null ? cur.year : year,
+        venue: cur.venue || venue, cited_by: cur.cited_by != null ? cur.cited_by : cited, url: cur.url || url,
+        _reach: Math.max(cur._reach, REACH[st]), _judge: j != null ? j : cur._judge,
+      };
+    }
+  }
+  const keys = Object.keys(merged);
+  if (!keys.length) return { imported: 0, note: 'no rows' };
+  // desired state from Elicit: screening = explicit judgement, else extracted → include, else unscreened
+  const want: Record<string, any> = {};
+  keys.forEach((k) => {
+    const m = merged[k];
+    const screening = m._judge || (m._reach >= 3 ? 'include' : 'unscreened');
+    want[k] = { project_id: job.project_id, source_api: 'elicit', ext_id: m.ext_id, origin_job_id: job.id,
+      doi: m.doi, title: m.title, authors: m.authors, year: m.year, venue: m.venue, cited_by: m.cited_by, url: m.url, screening };
+  });
+  // Merge SAME-DOI rows across ext_id schemes. OpenAlex stores ext_id=work-URL, Crossref='crossref:'+doi,
+  // Elicit='doi:'+doi — three keys for one DOI. So an ext_id match alone would spawn a duplicate 'doi:'+doi row
+  // next to the OpenAlex row. Instead: index the WHOLE project library by NORMALIZED doi (primary merge key) and
+  // by ext_id (DOI-less papers) → if a paper's DOI already exists under ANY scheme, UPDATE that row in place
+  // (fill gaps, preserve human screening + provider + abstract/issn, tag provenance); only truly-new papers insert.
+  const CH = 300;
+  const exByDoi: Record<string, any> = {};
+  const exByExt: Record<string, any> = {};
+  const SEL = 'id,ext_id,source_api,screening,origin_job_id,doi,title,authors,year,venue,cited_by,url';
+  for (let off = 0; ; off += 1000) {
+    const { data: page, error } = await client.from('research_sources').select(SEL)
+      .eq('project_id', job.project_id).range(off, off + 999);
+    if (error) return { imported: 0, note: error.message };
+    (page || []).forEach((r: any) => { exByExt[r.ext_id] = r; const dd = normDoi(r.doi); if (dd) exByDoi[dd] = r; });
+    if (!page || page.length < 1000) break;
+  }
+  // resolve each paper to an existing row (merge) or a fresh insert; keyed by the ext_id we upsert under (in-batch dedup)
+  const upMap: Record<string, any> = {};
+  keys.forEach((k) => {
+    const n = want[k];
+    const dd = n.doi ? normDoi(n.doi) : '';
+    const e = (dd && exByDoi[dd]) || exByExt[k] || null;
+    if (!e) { upMap[k] = n; return; }   // new paper → insert under our scheme ('doi:'+doi else 'elicit:'+title)
+    upMap[e.ext_id] = {
+      project_id: job.project_id, ext_id: e.ext_id,
+      source_api: e.source_api || 'elicit',                                       // keep the original provider
+      origin_job_id: e.origin_job_id || job.id,                                   // tag provenance if not already tagged
+      doi: e.doi || n.doi, title: e.title || n.title,
+      authors: (e.authors && e.authors.length) ? e.authors : n.authors,
+      year: e.year != null ? e.year : n.year, venue: e.venue || n.venue,
+      cited_by: e.cited_by != null ? e.cited_by : n.cited_by, url: e.url || n.url,
+      screening: (e.screening && e.screening !== 'unscreened') ? e.screening : n.screening,  // preserve a human decision
+      // abstract/issn/oa_pdf_url intentionally omitted → existing (OpenAlex) values survive the upsert
+    };
+  });
+  const upRows = Object.keys(upMap).map((k) => upMap[k]);
+  let imported = 0, err0: any = null;
+  for (let i = 0; i < upRows.length; i += CH) {
+    const { data: ups, error } = await client.from('research_sources')
+      .upsert(upRows.slice(i, i + CH), { onConflict: 'project_id,ext_id' }).select('id');
+    if (error) { err0 = error; break; }
+    imported += (ups || []).length;
+  }
+  if (err0) return { imported, note: err0.message };
+  return { imported };
+}
+// Auto-import a sysreview's papers into the Library the first time we observe it complete. Idempotent guard
+// (origin_job_id already present → skip) so the cron + foreground pollers don't both re-import. Best-effort:
+// a failure here NEVER breaks the poll that called it.
+async function autoImportOnComplete(svc: any, row: any, patch: any): Promise<void> {
+  try {
+    if (patch?.status !== 'completed' || !row?.project_id) return;
+    const job = { ...row, ...patch };   // patch carries the freshest presigned stage URLs
+    if (!job.stages) return;
+    const { data: seen } = await svc.from('research_sources').select('id').eq('origin_job_id', job.id).limit(1);
+    if (seen && seen.length) return;   // already imported this job
+    await importElicitSources(svc, job);
+  } catch (_e) { /* best-effort — provenance import must not fail the completion poll */ }
+}
 const GET_PATH: Record<string, string> = { report: '/api/v1/reports/', sysreview: '/api/v1/systematic-reviews/' };
 
 // Build the Elicit systematic-review request body from UI/candidate params. Shared by sr.create / sr.request / sr.approve
@@ -242,6 +387,7 @@ Deno.serve(async (req) => {
         const patch = j.kind === 'sysreview' ? srPatch(g.body) : reportPatch(g.body);
         await svc.from('elicit_jobs').update(patch).eq('id', j.id);
         await notifyDone(svc, j, patch, j.kind);   // notify the owner when it just finished — even with no tab open
+        if (j.kind === 'sysreview') await autoImportOnComplete(svc, j, patch);   // sysreview papers → the project Library
         refreshed++; if (patch.status === 'completed') done++;
       }
       return json({ ok: true, refreshed, done });
@@ -405,6 +551,21 @@ Deno.serve(async (req) => {
       return json({ ok: true, stage, ...parseStage(text, body.countOnly === true) });
     }
 
+    // ---- sr.import_sources: manual backfill of a completed review's papers into the project Library ----
+    // (Auto-import runs on the completion poll for NEW reviews; this covers reviews that finished earlier.)
+    if (action === 'sr.import_sources') {
+      const { data: row } = await sb.from('elicit_jobs').select('id,project_id,elicit_id,kind,status,stages,research_question')
+        .eq('id', body.job_id).eq('kind', 'sysreview').maybeSingle();
+      if (!row) return json({ error: 'not found' }, 404);                                  // RLS = own / admin / project reader
+      if (!row.project_id) return json({ error: 'Ez a review nincs projekthez kötve, így nincs hová importálni.' }, 400);
+      if (row.status !== 'completed') return json({ error: 'A review még nem fejeződött be.' }, 409);
+      // Use the caller-JWT client → RLS enforces project-write on the research_sources upsert (no privilege escalation).
+      const res = await importElicitSources(sb, row);
+      if (res.imported === 0 && res.note && /row-level|permission|denied|policy/i.test(res.note))
+        return json({ error: 'Nincs írási jogosultságod ehhez a projekt-irodalomhoz.' }, 403);
+      return json({ ok: true, ...res });
+    }
+
     if (action === 'sr.create') {
       const gate = await assertEntitled(sb, 'elicit_sysreview'); if (gate) return gate;
       // sr.create fires a PAID run directly → ADMIN-ONLY (non-admins must go through sr.request → admin approval).
@@ -554,6 +715,7 @@ Deno.serve(async (req) => {
       const patch = srPatch(g.body);
       await sb.from('elicit_jobs').update(patch).eq('id', row.id);
       await notifyDone(svc, row, patch, 'sysreview');   // in case the foreground poll is the one that observes completion
+      await autoImportOnComplete(svc, row, patch);      // sysreview papers → the project Library (first completion only)
       // Dead-end detection: a review stalls forever at screening_abstract when EVERY abstract is excluded
       // (nothing passes to full-text). Elicit keeps it "processing" with no error → looks hung. Surface it.
       let warning: any = null;

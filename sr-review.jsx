@@ -105,33 +105,17 @@
       if (!f) return true;   // extract/full-text with no explicit judgement column → it's in the included set
       return String(f.answer || '').toLowerCase().indexOf('includ') >= 0;
     }
-    function importToLibrary(stage) {
-      var d = data[stage]; if (!d || !d.rows) return;
+    // Import EVERY paper this review found into the project Library. The upsert (merge same-DOI, preserve
+    // OpenAlex data + human screening, tag provenance) runs SERVER-SIDE in elicit-proxy sr.import_sources so
+    // the ext_id scheme ('doi:'+doi) matches OpenAlex — a client-side 'sr:'+doi upsert would create duplicate rows.
+    function importToLibrary() {
       if (!job.project_id) { setImportMsg('This review is not tied to a project, so there is no Library to import into.'); return; }
-      var cols = d.columns;
-      var iTitle = metaIdx(cols, 'title'), iAuth = metaIdx(cols, 'author'), iYear = metaIdx(cols, 'year'), iCite = metaIdx(cols, 'citation'), iDoi = metaIdx(cols, 'doi'), iDoiLink = metaIdx(cols, 'doi link'), iVenue = metaIdx(cols, 'venue');
-      var inc = d.rows.filter(isIncluded);
-      if (!inc.length) { setImportMsg('No papers met all the criteria in this stage — nothing to import.'); return; }
-      var rows = inc.map(function (r) {
-        var doi = (iDoi >= 0 && r.meta[iDoi]) ? String(r.meta[iDoi]).trim() : ((iDoiLink >= 0 && r.meta[iDoiLink]) ? String(r.meta[iDoiLink]).replace(/^https?:\/\/(dx\.)?doi\.org\//i, '').trim() : '');
-        var title = (iTitle >= 0 ? r.meta[iTitle] : r.meta[0]) || 'Untitled';
-        return {
-          project_id: job.project_id, source_api: 'elicit', ext_id: 'sr:' + (doi || (job.id + ':' + String(title).slice(0, 80))),
-          doi: doi || null, title: String(title).slice(0, 500),
-          authors: (iAuth >= 0 && r.meta[iAuth]) ? String(r.meta[iAuth]).split(/[,;]\s*/).map(function (a) { return a.trim(); }).filter(Boolean).slice(0, 25) : null,
-          year: iYear >= 0 ? (parseInt(r.meta[iYear], 10) || null) : null,
-          venue: iVenue >= 0 ? (r.meta[iVenue] || null) : null,
-          cited_by: iCite >= 0 ? (parseInt(r.meta[iCite], 10) || null) : null,
-          url: (iDoiLink >= 0 && r.meta[iDoiLink]) ? r.meta[iDoiLink] : (doi ? 'https://doi.org/' + doi : null),
-          screening: 'include'
-        };
-      });
       setImporting(true); setImportMsg('');
-      sb.from('research_sources').upsert(rows, { onConflict: 'project_id,ext_id', ignoreDuplicates: true }).select('id').then(function (res) {
+      callElicit({ action: 'sr.import_sources', job_id: job.id }).then(function (res) {
         if (!alive.current) return; setImporting(false);
-        if (res && res.error) { setImportMsg('Import failed: ' + res.error.message); return; }
-        var n = (res && res.data) ? res.data.length : 0, dup = rows.length - n;
-        setImportMsg('✓ Imported ' + n + ' paper' + (n === 1 ? '' : 's') + ' into the project Library as “included”' + (dup > 0 ? ' (' + dup + ' already there)' : '') + '. Open Research → Literature to see them.');
+        if (!res || res.error) { setImportMsg('Import failed: ' + ((res && res.error) || 'unknown error')); return; }
+        var n = res.imported || 0;
+        setImportMsg('✓ Imported ' + n + ' paper' + (n === 1 ? '' : 's') + ' into the project Library. Open Research → Literature to see them.');
       }, function () { if (alive.current) { setImporting(false); setImportMsg('Import failed.'); } });
     }
     function loadStage(stage) {
@@ -204,7 +188,7 @@
             h('button', { className: metFilter === 'all' ? 'on' : '', onClick: function () { setMetFilter('all'); } }, 'All (' + nfmt(d.total) + ')')) : null,
           h('span', { className: 'cnt' }, h('b', null, nfmt(rows.length)), ' shown' + (d.capped ? ' · first 2,000' : '')),
           h('span', { style: { flex: 1 } }),
-          h('button', { className: 'btn', disabled: importing || !job.project_id, title: job.project_id ? 'Add the papers that met all criteria to the project’s reference Library' : 'This review has no linked project', onClick: function () { importToLibrary(stage); } }, importing ? '⏳ Importing…' : ('⤓ Import ' + nfmt(incCount) + ' to Library'))),
+          h('button', { className: 'btn', disabled: importing || !job.project_id, title: job.project_id ? 'Import every paper this review found into the project’s reference Library (merges same-DOI rows; runs automatically on completion too)' : 'This review has no linked project', onClick: function () { importToLibrary(); } }, importing ? '⏳ Importing…' : '⤓ Import to Library')),
         importMsg ? h('div', { style: { fontSize: 12.5, margin: '0 0 10px', color: /^✓/.test(importMsg) ? 'var(--ok)' : 'var(--danger)' } }, importMsg) : null,
         h('div', { className: 'tbl-wrap' }, h('div', { className: 'tbl-scroll' }, h('table', null,
           h('thead', null, h('tr', null, head)),

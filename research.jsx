@@ -2409,7 +2409,8 @@
               var q = libQOf(s);
               return h('tr', { key: s.id, className: studyInc[s.id] ? 'rv-study' : null },
                 h('td', { className: 'rv-ti' }, s.url ? h('a', { href: s.url, target: '_blank' }, s.title) : s.title,
-                  (studyInc[s.id] && studyInc[s.id].length) ? h('span', { className: 'rv-instudy', title: 'Selected in study: ' + studyInc[s.id].join(', ') }, '★ in study') : null),
+                  (studyInc[s.id] && studyInc[s.id].length) ? h('span', { className: 'rv-instudy', title: 'Selected in study: ' + studyInc[s.id].join(', ') }, '★ in study') : null,
+                  (s.origin_job_id || s.source_api === 'elicit') ? h('span', { className: 'rv-elicit', title: 'Egy Elicit szisztematikus review-ból származik' }, '🧪 Elicit') : null),
                 h('td', { className: 'rv-au' }, (s.authors && s.authors.length) ? s.authors.slice(0, 3).join(', ') : '—'),
                 h('td', { className: 'rv-n' }, s.year || '—'),
                 h('td', { className: 'rv-ve' }, s.venue || '—'),
@@ -3267,6 +3268,7 @@
     var smS = useState(function () { try { return localStorage.getItem('pr-sr-mode') || 'elicit'; } catch (e) { return 'elicit'; } }), srMode = smS[0], setSrMode = smS[1];   // 'elicit' (jóváhagyással) | 'openalex' (automatikus)
     var rrS = useState([]), reqReqs = rrS[0], setReqReqs = rrS[1];   // research_review_requests for this project
     var rrFallbackRef = useRef({});   // request ids for which we've already kicked off the OpenAlex fallback (once per session)
+    var impS = useState(''), imp = impS[0], setImp = impS[1];   // job id whose papers are being (manually) imported into the Library
     function pickSrMode(m) { setSrMode(m); try { localStorage.setItem('pr-sr-mode', m); } catch (e) { } }
     function loadReqReqs() {
       sb.from('research_review_requests').select('id,project_id,requested_by,research_question,status,decision_note,job_id,params,created_at').eq('project_id', props.projectId).order('created_at', { ascending: false }).limit(40)
@@ -3558,6 +3560,18 @@
         });
       });
     }
+    // Manual backfill: import a completed review's papers into the project Library (research_sources).
+    // New reviews auto-import on completion server-side; this covers reviews that finished before that landed.
+    function importSources(j) {
+      if (imp) return;
+      setImp(j.id); setErr('');
+      callElicit({ action: 'sr.import_sources', job_id: j.id }).then(function (d) {
+        if (!alive.current) return; setImp('');
+        if (!d || d.error) { setErr('Importálás sikertelen: ' + ((d && d.error) || 'ismeretlen hiba')); return; }
+        setErr('✓ ' + (d.imported || 0) + ' cikk beemelve az Irodalomba (Irodalom fül).');
+        if (props.onChanged) props.onChanged();
+      }, function () { if (alive.current) { setImp(''); setErr('Importálás sikertelen (hálózat).'); } });
+    }
     function card(j) {
       var done = j.status === 'completed', failed = j.status === 'failed', paused = j.status === 'pausedForInsufficientQuota';
       var acts = [];
@@ -3565,6 +3579,7 @@
       acts.push(h('a', { key: 'res', className: 'btn pri', style: { padding: '4px 10px', fontSize: 12, textDecoration: 'none' }, href: 'SRReview.html?job=' + encodeURIComponent(j.id), title: 'Track the pipeline and view the results in Publify' }, (done ? '📊 Open results' : '📊 Track progress')));
       if (done && j.result_body) acts.push(h('button', { key: 'v', className: 'btn', style: { padding: '4px 10px', fontSize: 12 }, onClick: function () { setOpenR(j); } }, 'View full report'));
       if (done) acts.push(h('button', { key: 'rf', className: 'btn', style: { padding: '4px 10px', fontSize: 12 }, title: 'Re-fetch the download links (they expire after 7 days)', onClick: function () { refreshJob(j); } }, '↻ Refresh downloads'));
+      if (done && props.canEdit) acts.push(h('button', { key: 'imp', className: 'btn', style: { padding: '4px 10px', fontSize: 12 }, disabled: !!imp, title: 'A review talált cikkeit beemeli a projekt Irodalom-adatbázisába (a lezáráskor ez automatikusan is megtörténik)', onClick: function () { importSources(j); } }, imp === j.id ? '⏳ Importálás…' : '🧪 Irodalomba'));
       if (paused) acts.push(h('button', { key: 'r', className: 'btn pri', style: { padding: '4px 10px', fontSize: 12 }, onClick: function () { resume(j); } }, 'Resume'));
       if (props.canEdit) acts.push(h('button', { key: 'del', className: 'btn', style: { padding: '4px 10px', fontSize: 12, color: 'var(--danger, #b42318)' }, onClick: function () { delEl(j); } }, '🗑 Törlés'));
       var e = j.exports || {};
@@ -11127,7 +11142,7 @@
         sb.from('research_log').select('id,type,summary,ts,profile_id').eq('project_id', projectId).order('ts', { ascending: false }),
         sb.from('research_todos').select('id,title,status,due,assignee').eq('project_id', projectId).order('sort', { ascending: true }).order('created_at', { ascending: false }),
         sb.from('research_ideas').select('id,source,question,hypothesis,rationale,novelty,status,created_by').eq('project_id', projectId).order('created_at', { ascending: false }),
-        sb.from('research_sources').select('id,source_api,ext_id,doi,title,authors,year,venue,cited_by,url,issn,screening').eq('project_id', projectId).order('cited_by', { ascending: false, nullsFirst: false }),
+        sb.from('research_sources').select('id,source_api,ext_id,doi,title,authors,year,venue,cited_by,url,issn,screening,origin_job_id').eq('project_id', projectId).order('cited_by', { ascending: false, nullsFirst: false }).then(function (r) { return (r && r.error && /origin_job_id/.test(r.error.message || '')) ? sb.from('research_sources').select('id,source_api,ext_id,doi,title,authors,year,venue,cited_by,url,issn,screening').eq('project_id', projectId).order('cited_by', { ascending: false, nullsFirst: false }) : r; }),
         sb.from('research_datasets').select('id,name,source,uri,size_bytes,license,status,local_path').eq('project_id', projectId).order('created_at', { ascending: false }),
         sb.from('research_jobs').select('id,type,title,status,progress,result,result_path,logs,created_at').eq('project_id', projectId).order('created_at', { ascending: false }),
         sb.from('research_studies').select('id,idea_id,title,question,status,cur_step,created_at,running_by,running_at').eq('project_id', projectId).order('created_at', { ascending: false }).then(function (r) { return (r && r.error) ? sb.from('research_studies').select('id,idea_id,title,question,status,cur_step,created_at').eq('project_id', projectId).order('created_at', { ascending: false }) : r; })
