@@ -46,13 +46,13 @@ function csvRows(text: string): string[][] {
 // Elicit stage CSVs pack each extraction question / screening criterion as a quartet of columns:
 //   "<Name>"  ·  Supporting quotes for "<Name>"  ·  Supporting tables for "<Name>"  ·  Reasoning for "<Name>"
 // Group them so the table shows the answer and the drawer unpacks quotes + reasoning per field.
-function parseStage(text: string, countOnly: boolean) {
+function parseStage(text: string, countOnly: boolean, maxRows = 2000) {
   const raw = csvRows(text).filter((r) => !(r.length === 1 && r[0] === ''));
   if (!raw.length) return { columns: [], questions: [], rows: [], total: 0 };
   const header = raw[0].map((h, i) => (i === 0 ? h.replace(/^﻿/, '') : h));
   const total = raw.length - 1;
   if (countOnly) return { columns: [], questions: [], rows: [], total };
-  const MAX = 2000;
+  const MAX = maxRows;   // UI callers keep the 2000 display cap; the Library import passes a high cap so it truly imports ALL found papers
   const idx: Record<string, number> = {}; header.forEach((h, i) => { if (!(h in idx)) idx[h] = i; });
   const questions: any[] = []; const grouped = new Set<number>();
   header.forEach((h, i) => {
@@ -161,10 +161,11 @@ function metaIdx(cols: string[], kw: string): number {
 function judgementOf(r: any): string | null {
   const f = (r.fields || []).find((x: any) => String(x.name).toLowerCase().indexOf('screening judgement') >= 0);
   if (!f) return null;
-  const a = String(f.answer || '').toLowerCase();
+  const a = String(f.answer || '').toLowerCase().trim();
+  if (!a || a === 'n/a' || a === 'na' || a === 'not screened' || a === '-') return null;   // non-decision sentinels → unscreened
+  if (a.indexOf('exclud') >= 0) return 'exclude';   // test exclude FIRST: "Excluded (not included in scope)" must not match 'includ'
   if (a.indexOf('includ') >= 0) return 'include';
-  if (a.indexOf('exclud') >= 0) return 'exclude';
-  return a ? 'maybe' : null;
+  return 'maybe';
 }
 // Import EVERY paper an Elicit systematic review found into the project's Library. Widest coverage: merge across
 // stages (search→screen→fulltext→extract) keyed by DOI (else title), later/richer stages augment earlier ones —
@@ -173,7 +174,9 @@ function judgementOf(r: any): string | null {
 // null-over real data, never overwrite a human screening decision, never flip source_api. Columns we omit
 // (abstract/issn/oa_pdf_url) are left untouched by the upsert → OpenAlex-provided abstracts survive.
 // `client` = svc for the server-side auto-import; the caller-JWT sb for the manual action (RLS then enforces write).
-async function importElicitSources(client: any, job: any): Promise<{ imported: number; note?: string }> {
+// `scope` limits which found papers are written: 'all' (default — the user's decision), 'not_excluded'
+// (drop papers Elicit screened out), or 'screened_in' (only include/maybe — the useful set).
+async function importElicitSources(client: any, job: any, scope = 'all', countOnly = false): Promise<{ imported: number; found?: number; scope?: string; by_screening?: any; note?: string }> {
   if (!job || !job.project_id) return { imported: 0, note: 'no project' };
   const STAGE_ORDER = ['search', 'screen', 'fulltext', 'extract'];
   const REACH: Record<string, number> = { search: 0, screen: 1, fulltext: 2, extract: 3 };
@@ -185,16 +188,32 @@ async function importElicitSources(client: any, job: any): Promise<{ imported: n
     if (u) { try { const cr = await fetch(u); if (cr.ok) return await cr.text(); } catch (_e) { /* maybe expired */ } }
     if (!refreshed && job.elicit_id && ELICIT_KEY) {
       refreshed = true;
-      const g = await elicitCall('/api/v1/systematic-reviews/' + encodeURIComponent(job.elicit_id), 'GET');
-      if (g.ok && g.body?.data) stages = { search: g.body.data.search, screen: g.body.data.screen, fulltext: g.body.data.fulltext, extract: g.body.data.extract };
-      u = stages[st] && stages[st].csv;
-      if (u) { try { const cr2 = await fetch(u); if (cr2.ok) return await cr2.text(); } catch (_e) { /* give up on this stage */ } }
+      try {
+        const g = await elicitCall('/api/v1/systematic-reviews/' + encodeURIComponent(job.elicit_id), 'GET');
+        if (g.ok && g.body?.data) stages = { search: g.body.data.search, screen: g.body.data.screen, fulltext: g.body.data.fulltext, extract: g.body.data.extract };
+        u = stages[st] && stages[st].csv;
+        if (u) { const cr2 = await fetch(u); if (cr2.ok) return await cr2.text(); }
+      } catch (_e) { /* refresh failed (network / Elicit) → give up on this stage, never throw into the poll */ }
     }
     return null;
   }
   const parsed: Record<string, any> = {};
-  for (const st of STAGE_ORDER) { const t = await stageText(st); if (t != null) parsed[st] = parseStage(t, false); }
-  // accumulate one merged record per paper, keyed by ext_id ('doi:'+doi else 'elicit:'+job+title)
+  for (const st of STAGE_ORDER) { const t = await stageText(st); if (t != null) parsed[st] = parseStage(t, false, 20000); }   // high cap → import ALL found papers (UI keeps the 2000 display cap)
+  // Pass 1: title → DOI (first DOI seen for a title in ANY stage). A paper whose DOI is blank in one stage but
+  // present in another then keys consistently by DOI, instead of splitting into a title-row + a doi-row.
+  const titleDoi: Record<string, string> = {};
+  for (const st of STAGE_ORDER) {
+    const d = parsed[st]; if (!d || !d.rows) continue;
+    const cols = d.columns || [];
+    const iTitle = metaIdx(cols, 'title'), iDoi = metaIdx(cols, 'doi'), iDoiLink = metaIdx(cols, 'doi link');
+    for (const r of d.rows) {
+      const dd = normDoi((iDoi >= 0 && r.meta[iDoi]) ? r.meta[iDoi] : ((iDoiLink >= 0 && r.meta[iDoiLink]) ? r.meta[iDoiLink] : ''));
+      if (!dd) continue;
+      const tk = String((iTitle >= 0 ? r.meta[iTitle] : r.meta[0]) || '').slice(0, 80).toLowerCase();
+      if (tk && !titleDoi[tk]) titleDoi[tk] = dd;
+    }
+  }
+  // Pass 2: accumulate one merged record per paper, keyed by ext_id ('doi:'+doi else 'elicit:'+job+title)
   const merged: Record<string, any> = {};
   for (const st of STAGE_ORDER) {
     const d = parsed[st]; if (!d || !d.rows) continue;
@@ -204,11 +223,12 @@ async function importElicitSources(client: any, job: any): Promise<{ imported: n
       iVenue = metaIdx(cols, 'venue');
     for (const r of d.rows) {
       const doiRaw = (iDoi >= 0 && r.meta[iDoi]) ? r.meta[iDoi] : ((iDoiLink >= 0 && r.meta[iDoiLink]) ? r.meta[iDoiLink] : '');
-      const doi = normDoi(doiRaw);
       const title = String((iTitle >= 0 ? r.meta[iTitle] : r.meta[0]) || 'Untitled').slice(0, 500);
-      const key = doi ? ('doi:' + doi) : ('elicit:' + job.id + ':' + title.slice(0, 80).toLowerCase());
+      const tk = title.slice(0, 80).toLowerCase();
+      const doi = normDoi(doiRaw) || titleDoi[tk] || '';   // borrow this title's DOI from another stage if blank here
+      const key = doi ? ('doi:' + doi) : ('elicit:' + job.id + ':' + tk);
       const cur = merged[key] || { _reach: -1, _judge: null };
-      const authors = (iAuth >= 0 && r.meta[iAuth]) ? String(r.meta[iAuth]).split(/[,;]\s*/).map((a: string) => a.trim()).filter(Boolean).slice(0, 25) : null;
+      const authors = (iAuth >= 0 && r.meta[iAuth]) ? String(r.meta[iAuth]).split(/[,;\n]\s*/).map((a: string) => a.trim()).filter(Boolean).slice(0, 25) : null;   // Elicit exports newline-separate authors (also handle , / ;)
       const year = iYear >= 0 ? (parseInt(String(r.meta[iYear]), 10) || null) : null;
       const venue = iVenue >= 0 ? (String(r.meta[iVenue] || '').trim() || null) : null;
       const cited = iCite >= 0 ? (parseInt(String(r.meta[iCite]), 10) || null) : null;
@@ -232,6 +252,12 @@ async function importElicitSources(client: any, job: any): Promise<{ imported: n
     want[k] = { project_id: job.project_id, source_api: 'elicit', ext_id: m.ext_id, origin_job_id: job.id,
       doi: m.doi, title: m.title, authors: m.authors, year: m.year, venue: m.venue, cited_by: m.cited_by, url: m.url, screening };
   });
+  // dry-run: report the screening breakdown (→ how many each scope would write) without touching the DB
+  if (countOnly) {
+    const by: Record<string, number> = { include: 0, maybe: 0, exclude: 0, unscreened: 0 };
+    keys.forEach((k) => { const s = want[k].screening; by[s] = (by[s] || 0) + 1; });
+    return { imported: 0, found: keys.length, scope, by_screening: by, note: 'count_only' };
+  }
   // Merge SAME-DOI rows across ext_id schemes. OpenAlex stores ext_id=work-URL, Crossref='crossref:'+doi,
   // Elicit='doi:'+doi — three keys for one DOI. So an ext_id match alone would spawn a duplicate 'doi:'+doi row
   // next to the OpenAlex row. Instead: index the WHOLE project library by NORMALIZED doi (primary merge key) and
@@ -241,16 +267,23 @@ async function importElicitSources(client: any, job: any): Promise<{ imported: n
   const exByDoi: Record<string, any> = {};
   const exByExt: Record<string, any> = {};
   const SEL = 'id,ext_id,source_api,screening,origin_job_id,doi,title,authors,year,venue,cited_by,url';
-  for (let off = 0; ; off += 1000) {
+  // Advance by the ACTUAL page length and stop only on an empty page — robust even if PostgREST's db-max-rows
+  // caps a window below 1000 (a `length < 1000` break would then stop early and miss the rest of the library →
+  // a missed OpenAlex row would spawn a duplicate 'doi:'+doi insert instead of merging).
+  for (let off = 0; off < 500000; ) {
     const { data: page, error } = await client.from('research_sources').select(SEL)
       .eq('project_id', job.project_id).range(off, off + 999);
     if (error) return { imported: 0, note: error.message };
-    (page || []).forEach((r: any) => { exByExt[r.ext_id] = r; const dd = normDoi(r.doi); if (dd) exByDoi[dd] = r; });
-    if (!page || page.length < 1000) break;
+    if (!page || !page.length) break;   // stop ONLY on an empty page (a short page may just be the server's row-cap, not the end)
+    page.forEach((r: any) => { exByExt[r.ext_id] = r; const dd = normDoi(r.doi); if (dd) exByDoi[dd] = r; });
+    off += page.length;
   }
+  // apply the scope filter (on the FINAL screening decision) → which papers actually get written
+  const inScope = (s: string) => scope === 'all' ? true : scope === 'not_excluded' ? (s !== 'exclude') : (s === 'include' || s === 'maybe');
+  const scopeKeys = keys.filter((k) => inScope(want[k].screening));
   // resolve each paper to an existing row (merge) or a fresh insert; keyed by the ext_id we upsert under (in-batch dedup)
   const upMap: Record<string, any> = {};
-  keys.forEach((k) => {
+  scopeKeys.forEach((k) => {
     const n = want[k];
     const dd = n.doi ? normDoi(n.doi) : '';
     const e = (dd && exByDoi[dd]) || exByExt[k] || null;
@@ -275,8 +308,8 @@ async function importElicitSources(client: any, job: any): Promise<{ imported: n
     if (error) { err0 = error; break; }
     imported += (ups || []).length;
   }
-  if (err0) return { imported, note: err0.message };
-  return { imported };
+  if (err0) return { imported, found: keys.length, scope, note: err0.message };
+  return { imported, found: keys.length, scope };
 }
 // Auto-import a sysreview's papers into the Library the first time we observe it complete. Idempotent guard
 // (origin_job_id already present → skip) so the cron + foreground pollers don't both re-import. Best-effort:
@@ -391,6 +424,20 @@ Deno.serve(async (req) => {
         refreshed++; if (patch.status === 'completed') done++;
       }
       return json({ ok: true, refreshed, done });
+    }
+
+    // ---- admin backfill (service-role-authed): run the SAME importElicitSources the completion poll uses, for a
+    //      given completed project sysreview. Gated on the service-role key — its holder already has full DB access,
+    //      so this adds no privilege; it just seeds the Library from reviews that finished before auto-import shipped. ----
+    if (action === 'sr.import_admin') {
+      const bearer = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
+      if (!bearer || bearer !== Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')) return json({ error: 'forbidden' }, 403);
+      const { data: row } = await svc.from('elicit_jobs').select('id,project_id,elicit_id,kind,status,stages,research_question')
+        .eq('id', body.job_id).eq('kind', 'sysreview').maybeSingle();
+      if (!row) return json({ error: 'not found' }, 404);
+      if (!row.project_id || row.status !== 'completed') return json({ error: 'not a completed project review' }, 409);
+      const res = await importElicitSources(svc, row, String(body.scope || 'all'), body.count_only === true);
+      return json({ ok: true, ...res });
     }
 
     // ---- user path ----
@@ -560,7 +607,7 @@ Deno.serve(async (req) => {
       if (!row.project_id) return json({ error: 'Ez a review nincs projekthez kötve, így nincs hová importálni.' }, 400);
       if (row.status !== 'completed') return json({ error: 'A review még nem fejeződött be.' }, 409);
       // Use the caller-JWT client → RLS enforces project-write on the research_sources upsert (no privilege escalation).
-      const res = await importElicitSources(sb, row);
+      const res = await importElicitSources(sb, row, String(body.scope || 'all'), body.count_only === true);
       if (res.imported === 0 && res.note && /row-level|permission|denied|policy/i.test(res.note))
         return json({ error: 'Nincs írási jogosultságod ehhez a projekt-irodalomhoz.' }, 403);
       return json({ ok: true, ...res });
