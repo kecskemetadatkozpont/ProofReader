@@ -349,7 +349,9 @@ function buildSrBody(body: any): { rq: string; qh: string; srBody: any } | null 
     protocolDetails: body.protocolDetails ? String(body.protocolDetails).slice(0, 4000) : undefined,
     abstractScreening, extraction,
     generateReport: body.generateReport !== false,
-    title: body.title ? String(body.title).slice(0, 200) : undefined,
+    // The review's title = its research question. (Clients pass the PROJECT title here, which Elicit echoes back as
+    // result.title → every review of a project would look identical. The question is the real differentiator.)
+    title: rq.slice(0, 200),
     isPublic: false,
   };
   if (runFT) srBody.fulltextScreening = ftC.length ? { criteria: ftC, reuseAbstractCriteria: false } : { reuseAbstractCriteria: true };
@@ -502,7 +504,7 @@ Deno.serve(async (req) => {
       const qh = hashStr(rq.toLowerCase().replace(/\s+/g, ' '));
       const reqBody = {
         researchQuestion: rq.slice(0, 2000),
-        title: body.title ? String(body.title).slice(0, 200) : undefined,
+        title: rq.slice(0, 200),   // title = the research question, not the passed project title (else every review/report of a project looks identical)
         maxSearchPapers: clampInt(body.maxSearchPapers, 10, 400, 200),
         maxExtractPapers: clampInt(body.maxExtractPapers, 5, 80, 30),   // API max is 80
         isPublic: false,
@@ -649,7 +651,7 @@ Deno.serve(async (req) => {
         abstractScreening,
         extraction,
         generateReport: body.generateReport !== false,
-        title: body.title ? String(body.title).slice(0, 200) : undefined,
+        title: rq.slice(0, 200),   // title = the research question, not the passed project title (else every review/report of a project looks identical)
         isPublic: false,
       };
       if (runFT) srBody.fulltextScreening = ftC.length ? { criteria: ftC, reuseAbstractCriteria: false } : { reuseAbstractCriteria: true };
