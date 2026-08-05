@@ -4683,6 +4683,9 @@
     // Display name for an Elicit review: prefer the research_question (the distinct differentiator). result_title is
     // often just the project title (older reviews were launched with it), so it would make every review look identical.
     function srName(j) { return (j && (j.research_question || j.result_title)) || 'Szisztematikus review'; }
+    // cockpit item preview (clickable results/gaps/studies → a modal with partial results)
+    var pvS = useState(null), pv = pvS[0], setPv = pvS[1];          // {kind:'review'|'study'|'gap'|'step', item}
+    var pvbS = useState({}), pvBody = pvbS[0], setPvBody = pvbS[1];  // cache: 'kind:id' -> {loading}|{...partial}|{error}
     var PST = { todo: ['c-grey', 'To do'], queued: ['c-acc', 'Queued'], running: ['c-warn', 'Running…'], blocked: ['c-warn', '⏸ Needs approval'], done: ['c-ok', '✓ Done'], failed: ['c-danger', '✗ Failed'], skipped: ['c-grey', 'Skipped'] };
     var PROT_CHIP = { draft: 'c-grey', ready: 'c-acc', running: 'c-warn', paused: 'c-grey', done: 'c-ok', failed: 'c-danger' };
     var lp = useState(null), prot = lp[0], setProt = lp[1];
@@ -5078,6 +5081,73 @@
       }, function (e) { setAiBusy(false); window.PRUI.toast('Add failed: ' + e, { kind: 'error' }); });
     }
 
+    // ---- Cockpit item preview: click a result / gap / study → a modal with its PARTIAL results ----
+    function pvKey(kind, id) { return kind + ':' + id; }
+    function openPv(kind, item) {
+      if (!item || !item.id) return;
+      setPv({ kind: kind, item: item });
+      if (kind === 'gap' || kind === 'step') return;   // the partial data is already on the item — no fetch
+      var key = pvKey(kind, item.id), cached = pvBody[key];
+      if (cached && !cached.error && !cached.loading) return;   // already loaded
+      setPvBody(function (p) { var n = Object.assign({}, p); n[key] = { loading: true }; return n; });
+      function put(v) { setPvBody(function (p) { var n = Object.assign({}, p); n[key] = v; return n; }); }
+      if (kind === 'review') {
+        sb.from('elicit_jobs').select('result_summary,result_body,research_question,status').eq('id', item.id).maybeSingle()
+          .then(function (r) { var j = (r && r.data) || {}; put({ summary: j.result_summary || '', body: String(j.result_body || ''), q: j.research_question || '', status: j.status }); }, function () { put({ error: true }); });
+      } else if (kind === 'study') {
+        Promise.all([
+          sb.from('research_study_papers').select('step,decision').eq('study_id', item.id),
+          sb.from('research_studies').select('question,cur_step,status').eq('id', item.id).maybeSingle()
+        ]).then(function (res) {
+          var papers = (res[0] && res[0].data) || [], meta = (res[1] && res[1].data) || {};
+          var byStep = {};
+          papers.forEach(function (p) { var k = p.step; if (!byStep[k]) byStep[k] = { total: 0 }; byStep[k].total++; byStep[k][p.decision] = (byStep[k][p.decision] || 0) + 1; });
+          put({ byStep: byStep, meta: meta, total: papers.length });
+        }, function () { put({ error: true }); });
+      }
+    }
+    function pvSpin() { return h('div', { style: { padding: '18px 4px', color: 'var(--muted)', fontSize: 12.5 } }, '⏳ Részeredmények betöltése…'); }
+    function pvModal() {
+      if (!pv) return null;
+      var it = pv.item, kind = pv.kind, b = pvBody[pvKey(kind, it.id)] || {}, head = '', body = null, link = null;
+      if (kind === 'review') {
+        head = '🔬 ' + srName(it);
+        link = h('a', { className: 'btn', href: 'SRReview.html?job=' + encodeURIComponent(it.id), target: '_blank', style: { marginTop: 10, display: 'inline-flex', textDecoration: 'none' } }, '📊 Teljes eredmény (PRISMA) megnyitása');
+        body = b.loading ? pvSpin() : b.error ? h('div', { style: { color: 'var(--danger,#b42318)', fontSize: 12.5 } }, 'Nem sikerült betölteni.') : h('div', null,
+          b.q ? h('div', { style: { fontSize: 12, color: 'var(--muted)', marginBottom: 8 } }, '❓ ' + b.q) : null,
+          b.summary ? h('div', { style: { fontSize: 13, lineHeight: 1.5, marginBottom: 8, fontWeight: 500 } }, b.summary) : null,
+          b.body ? h('div', { style: { fontSize: 12.5, lineHeight: 1.55, whiteSpace: 'pre-wrap', maxHeight: 300, overflow: 'auto', background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 8, padding: '10px 12px' } }, b.body.slice(0, 1600) + (b.body.length > 1600 ? '…' : ''))
+            : (!b.summary ? h('div', { style: { fontSize: 12.5, color: 'var(--muted)' } }, 'Ehhez a review-hoz nincs szöveges riport — a teljes eredmény (szűrési + kivonatolási táblák) a PRISMA-nézetben látható.') : null));
+      } else if (kind === 'study') {
+        head = '🔎 ' + (it.title || 'Study');
+        body = b.loading ? pvSpin() : b.error ? h('div', { style: { color: 'var(--danger,#b42318)', fontSize: 12.5 } }, 'Nem sikerült betölteni.') : (function () {
+          var bs = b.byStep || {}, NM = { 1: 'Keresés', 2: 'Absztrakt-szűrés', 3: 'Full-text', 4: 'Áttekintés' };
+          var rows = Object.keys(bs).sort().map(function (k) {
+            var c = bs[k], parts = ['include', 'maybe', 'exclude', 'unscreened'].filter(function (d) { return c[d]; }).map(function (d) { return d + ': ' + c[d]; });
+            return h('div', { key: k, style: { display: 'flex', gap: 10, fontSize: 12.5, padding: '5px 0', borderBottom: '1px solid var(--line)' } },
+              h('b', { style: { minWidth: 130, flex: 'none' } }, (NM[k] || ('Lépés ' + k)) + ' (' + (c.total || 0) + ')'), h('span', { style: { color: 'var(--muted)' } }, parts.join(' · ') || '—'));
+          });
+          return h('div', null,
+            h('div', { style: { fontSize: 12, color: 'var(--muted)', marginBottom: 8 } }, 'Állapot: ' + ((b.meta && b.meta.status) || it.status || '?') + ' · lépés ' + ((b.meta && b.meta.cur_step) || it.cur_step || 1) + '/4 · összesen ' + (b.total || 0) + ' cikk'),
+            rows.length ? h('div', null, rows) : h('div', { style: { fontSize: 12.5, color: 'var(--muted)' } }, 'Még nincs szűrési részeredmény.'));
+        })();
+      } else if (kind === 'gap') {
+        head = '🕳️ Kutatási rés';
+        body = h('div', null,
+          h('div', { style: { fontSize: 13.5, fontWeight: 600, lineHeight: 1.4, marginBottom: 10 } }, it.question || 'Rés'),
+          it.rationale ? h('div', { style: { fontSize: 12.5, lineHeight: 1.55, marginBottom: 8 } }, h('b', null, 'Indoklás: '), it.rationale) : null,
+          it.hypothesis ? h('div', { style: { fontSize: 12.5, lineHeight: 1.55, marginBottom: 8 } }, h('b', null, 'Javasolt kérdés: '), it.hypothesis) : null,
+          it.novelty != null ? h('div', { style: { fontSize: 12, color: 'var(--muted)' } }, 'Újdonság: ' + it.novelty + ' / 100') : null);
+      } else {   // step
+        head = 'S' + (it.ord || '') + ' · ' + (it.title || 'Lépés');
+        var res = it.result || {}, txt = (res && (res.summary || res.note)) || (typeof res === 'string' ? res : '');
+        body = h('div', { style: { fontSize: 12.5, lineHeight: 1.55, whiteSpace: 'pre-wrap' } }, txt || 'Nincs rögzített részeredmény ehhez a lépéshez.');
+      }
+      return h('div', { className: 'scrim', onClick: function () { setPv(null); } },
+        h('div', { className: 'modal', style: { width: 620, maxWidth: '94vw' }, onClick: function (e) { e.stopPropagation(); } },
+          h('div', { className: 'modal-h' }, h('h3', { style: { margin: 0, flex: 1, fontSize: 15 } }, head), h('button', { className: 'icon-x', 'aria-label': 'Bezárás', onClick: function () { setPv(null); } }, '✕')),
+          h('div', { style: { padding: 16 } }, body, link)));
+    }
     // ---- Cockpit dashboard (A, phase 1): the comprehensive project-state summary shown atop the Protocol page ----
     function cockpitDashboard() {
       var ideasAll = props.ideas || [], srcs = props.sources || [], studies = props.studies || [];
@@ -5102,7 +5172,8 @@
       var CI = 'var(--accent, #4f46e5)', CG = '#a23a86', CS = 'var(--ok, #15803d)', CR = 'var(--warn, #d9820a)';
       function leg(col, lab) { return h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 5 } }, h('i', { style: { width: 9, height: 9, borderRadius: 2, background: col, display: 'inline-block' } }), lab); }
       var topGaps = gaps.slice().sort(function (a, b) { return (b.novelty || 0) - (a.novelty || 0); }).slice(0, 4);
-      return h('div', null,
+      return h(React.Fragment, null, pvModal(),
+        h('div', null,
         h('div', { className: 'pcpit-hd' }, '🧭 Projekt-áttekintés ', h('span', { className: 'sub' }, '· a kutatás jelenlegi állapota egy helyen')),
         h('div', { className: 'pcpit' },
           h('div', { className: 'pcpit-card', style: { gridColumn: 'span 8' } },
@@ -5111,13 +5182,13 @@
               // ONE combined list of everything that finished (steps + Elicit reviews + literature studies), so all N
               // reviews show — not a hard-capped 2. Bounded to MAXD with a "+N további" line to keep the card tidy.
               var items = []
-                .concat(doneSteps.map(function (s) { var sm = (s.result && (s.result.summary || s.result.note)) || ''; return { key: 'st' + s.id, prov: 'S' + s.ord, txt: s.title + (sm ? ' — ' + String(sm).slice(0, 130) : '') }; }))
-                .concat(doneSR.map(function (j) { return { key: 'jr' + j.id, prov: 'Review', txt: srName(j) + ' — kész' }; }))
-                .concat(doneStudies.map(function (s) { return { key: 'sd' + s.id, prov: 'Study', txt: (s.title || 'Irodalom-study') + ' — kész' }; }));
+                .concat(doneSteps.map(function (s) { var sm = (s.result && (s.result.summary || s.result.note)) || ''; return { key: 'st' + s.id, prov: 'S' + s.ord, txt: s.title + (sm ? ' — ' + String(sm).slice(0, 130) : ''), kind: 'step', ref: s }; }))
+                .concat(doneSR.map(function (j) { return { key: 'jr' + j.id, prov: 'Review', txt: srName(j) + ' — kész', kind: 'review', ref: j }; }))
+                .concat(doneStudies.map(function (s) { return { key: 'sd' + s.id, prov: 'Study', txt: (s.title || 'Irodalom-study') + ' — kész', kind: 'study', ref: s }; }));
               if (!items.length) return h('div', { style: { fontSize: 12.5, color: 'var(--muted)', lineHeight: 1.5 } }, 'Még nincsenek rögzített eredmények — futtass protokoll-lépéseket vagy study-kat, és a kimenetük itt jelenik meg (provenance-szel).');
               var MAXD = 8, shown = items.slice(0, MAXD);
               return h('div', null,
-                shown.map(function (it) { return h('div', { key: it.key, className: 'pcpit-find' }, h('span', { className: 'prov' }, it.prov), h('span', null, it.txt)); }),
+                shown.map(function (it) { return h('div', { key: it.key, className: 'pcpit-find pcpit-clk', title: 'Részeredmények megnyitása', onClick: function () { openPv(it.kind, it.ref); } }, h('span', { className: 'prov' }, it.prov), h('span', null, it.txt)); }),
                 items.length > MAXD ? h('div', { key: 'more', className: 'pcpit-find', style: { color: 'var(--faint)' } }, h('span', { className: 'prov' }, '…'), h('span', null, '+' + (items.length - MAXD) + ' további')) : null);
             })()),
           h('div', { className: 'pcpit-card', style: { gridColumn: 'span 4' } },
@@ -5139,14 +5210,14 @@
             h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 8, fontSize: 10.5, color: 'var(--faint)' } }, leg(CI, 'ötlet'), leg(CG, 'rés'), leg(CS, 'study'), leg(CR, 'forrás'))),
           h('div', { className: 'pcpit-card', style: { gridColumn: 'span 3' } },
             h('h4', null, '🕳️ Top rések'),
-            topGaps.length ? h('div', null, topGaps.map(function (g) { return h('div', { key: g.id, className: 'pcpit-row' }, h('span', { className: 't', title: g.question }, g.question), g.novelty != null ? h('span', { className: 'q' }, g.novelty) : null); })) : h('div', { style: { fontSize: 11.5, color: 'var(--muted)' } }, 'Nincs feltárt rés.')),
+            topGaps.length ? h('div', null, topGaps.map(function (g) { return h('div', { key: g.id, className: 'pcpit-row pcpit-clk', title: 'Rés részletei', onClick: function () { openPv('gap', g); } }, h('span', { className: 't' }, g.question), g.novelty != null ? h('span', { className: 'q' }, g.novelty) : null); })) : h('div', { style: { fontSize: 11.5, color: 'var(--muted)' } }, 'Nincs feltárt rés.')),
           h('div', { className: 'pcpit-card', style: { gridColumn: 'span 3' } },
             h('h4', null, '🔬 Study-k'),
             (studies.length || srJobs.length)
               ? h('div', null,
-                  (srJobs || []).slice(0, 3).map(function (j) { return h('div', { key: 'sj' + j.id, className: 'pcpit-row' }, h('span', { className: 'pcpit-badge', style: badge(j.status === 'completed' ? 'done' : 'run') }, j.status === 'completed' ? '✓' : '⏳'), h('span', { className: 't', title: srName(j) }, srName(j))); }),
-                  studies.slice(0, 2).map(function (s) { var run = PRStudyRunner.isStudyRunning(s.id), dn = s.status === 'done' || s.status === 'completed'; return h('div', { key: 'ss' + s.id, className: 'pcpit-row' }, h('span', { className: 'pcpit-badge', style: badge(dn ? 'done' : run ? 'run' : 'todo') }, dn ? '✓' : run ? '⏳' : '•'), h('span', { className: 't', title: s.title }, s.title || 'Study')); }))
-              : h('div', { style: { fontSize: 11.5, color: 'var(--muted)' } }, 'Nincs study.'))));
+                  (srJobs || []).slice(0, 3).map(function (j) { return h('div', { key: 'sj' + j.id, className: 'pcpit-row pcpit-clk', title: 'Review részeredményei', onClick: function () { openPv('review', j); } }, h('span', { className: 'pcpit-badge', style: badge(j.status === 'completed' ? 'done' : 'run') }, j.status === 'completed' ? '✓' : '⏳'), h('span', { className: 't' }, srName(j))); }),
+                  studies.slice(0, 2).map(function (s) { var run = PRStudyRunner.isStudyRunning(s.id), dn = s.status === 'done' || s.status === 'completed'; return h('div', { key: 'ss' + s.id, className: 'pcpit-row pcpit-clk', title: 'Study részeredményei', onClick: function () { openPv('study', s); } }, h('span', { className: 'pcpit-badge', style: badge(dn ? 'done' : run ? 'run' : 'todo') }, dn ? '✓' : run ? '⏳' : '•'), h('span', { className: 't' }, s.title || 'Study')); }))
+              : h('div', { style: { fontSize: 11.5, color: 'var(--muted)' } }, 'Nincs study.')))));
     }
     // ---- Cockpit chat (A, phase 2): context-aware co-pilot → proposes protocol tasks that land on the board ----
     function cockpitChat() {

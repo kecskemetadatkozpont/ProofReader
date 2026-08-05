@@ -1578,6 +1578,9 @@
     .pcpit-row:first-child { border-top: none; padding-top: 0; }
     .pcpit-row .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .pcpit-row .q { color: var(--faint); font-size: 10.5px; flex: none; }
+    .pcpit-clk { cursor: pointer; border-radius: 6px; margin: 0 -6px; padding-left: 6px; padding-right: 6px; transition: background .12s; }
+    .pcpit-clk:hover { background: var(--surface-2); }
+    .pcpit-clk:hover .t, .pcpit-clk:hover > span:last-child { color: var(--accent); }
     .pcpit-crow { display: flex; align-items: center; gap: 10px; margin-bottom: 9px; }
     .pcpit-crow .who { flex: none; width: 118px; }
     .pcpit-crow .who b { font-size: 12px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1916,9 +1919,9 @@
     html.dark .rmap-genbusy { background: #4f46e5; }
     @media (max-width: 900px) { .rmap-wrap { flex-direction: column; } .rmap-insp { width: auto; } }
   </style>
-  <script src="theme.js?v=1785947202"></script>
-  <script src="nav.js?v=1785947202"></script>
-  <script src="entitlements.js?v=1785947202"></script>
+  <script src="theme.js?v=1785947909"></script>
+  <script src="nav.js?v=1785947909"></script>
+  <script src="entitlements.js?v=1785947909"></script>
 </head>
 
 <body>
@@ -1930,24 +1933,24 @@
   <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
   <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="backend/config.js?v=1785947202"></script>
-  <script src="auth.js?v=1785947202"></script>
-  <script src="backend.js?v=1785947202"></script>
-  <script src="universities.js?v=1785947202"></script>
-  <script src="onboarding.js?v=1785947202"></script>
-  <script src="office.js?v=1785947202"></script>
-  <script src="publications.js?v=1785947202"></script>
+  <script src="backend/config.js?v=1785947909"></script>
+  <script src="auth.js?v=1785947909"></script>
+  <script src="backend.js?v=1785947909"></script>
+  <script src="universities.js?v=1785947909"></script>
+  <script src="onboarding.js?v=1785947909"></script>
+  <script src="office.js?v=1785947909"></script>
+  <script src="publications.js?v=1785947909"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/tus-js-client@4.1.0/dist/tus.min.js"></script>
-  <script type="text/babel" src="canvas.jsx?v=1785947202"></script>
-  <script type="text/babel" src="notes.jsx?v=1785947202"></script>
-  <script src="autopilot-core.js?v=1785947202"></script>
-  <script type="text/babel" src="research.jsx?v=1785947202"></script>
+  <script type="text/babel" src="canvas.jsx?v=1785947909"></script>
+  <script type="text/babel" src="notes.jsx?v=1785947909"></script>
+  <script src="autopilot-core.js?v=1785947909"></script>
+  <script type="text/babel" src="research.jsx?v=1785947909"></script>
 
-  <script src="build.js?v=1785947202"></script>
-  <script src="version-badge.js?v=1785947202"></script>
+  <script src="build.js?v=1785947909"></script>
+  <script src="version-badge.js?v=1785947909"></script>
 </body>
 
 </html>
