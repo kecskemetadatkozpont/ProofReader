@@ -2270,6 +2270,9 @@
     var lsS = useState({ key: 'cites', dir: -1 }), libSort = lsS[0], setLibSort = lsS[1];
     var lfS = useState('all'), libScreen = lfS[0], setLibScreen = lfS[1];   // all|include|maybe|exclude|unscreened
     var lqS = useState(0), libQmax = lqS[0], setLibQmax = lqS[1];           // 0 = any, else max quartile
+    var lsrcS = useState('all'), libSource = lsrcS[0], setLibSource = lsrcS[1];   // all | openalex | elicit | other (provenance filter)
+    var lstS = useState('all'), libStudy = lstS[0], setLibStudy = lstS[1];        // all | 'study:'+id | 'review:'+jobId (which run the paper came from)
+    var jtS = useState({}), jobTitleById = jtS[0], setJobTitleById = jtS[1];      // elicit_job id -> review title (for the Study/review provenance filter)
     useEffect(function () { loadScimago().then(setScimap); }, []);
     // source_ids that were selected in a Study (AI-included in any step, or the user's "Your decision" override) —
     // these float to the top of the Library and are highlighted.
@@ -2295,6 +2298,13 @@
         setStudyInc(m); setStudyOrigin(orig);
       }, function () { });
     }, [(props.studies || []).map(function (s) { return s.id + ':' + (s.title || ''); }).join('|'), (props.sources || []).length]);
+    // Elicit review titles for the Study/review filter (source.origin_job_id → review question/title). Only fetched when the library actually has Elicit-imported rows.
+    useEffect(function () {
+      if (!(props.sources || []).some(function (s) { return s.origin_job_id; })) { setJobTitleById({}); return; }
+      sb.from('elicit_jobs').select('id,research_question,result_title').eq('project_id', props.projectId).eq('kind', 'sysreview').then(function (r) {
+        if (r && r.error) return; var m = {}; ((r && r.data) || []).forEach(function (j) { m[j.id] = j.result_title || j.research_question || 'Elicit review'; }); setJobTitleById(m);
+      }, function () { });
+    }, [props.projectId, (props.sources || []).length]);
     // ---- Background figure extraction (PRFigureRunner): keeps running across SPA tab/view switches; the Figure Board
     //      button pulses yellow while it runs and turns green when done; realtime progress shows the current paper. ----
     var frS = useState(0), setFigTick = frS[1];
@@ -2355,12 +2365,30 @@
     var shown = results ? (scopusMax ? results.filter(function (w) { var qq = scopusQ(scimap, w); return qq != null && qq <= scopusMax; }) : results) : null;
     // ---- Redesigned Library (New design flag): filter sidebar + dense sortable table, wired to the SAME props.sources / setScreen / del ----
     function libScreenOf(s) { return (s.screening === 'include' || s.screening === 'maybe' || s.screening === 'exclude') ? s.screening : 'unscreened'; }
+    // provenance bucket: a paper that came through an Elicit systematic review (origin_job_id set, or source_api='elicit')
+    // vs OpenAlex vs anything else (manual/mtmt/consensus/crossref)
+    function libSourceOf(s) { return (s.origin_job_id || s.source_api === 'elicit') ? 'elicit' : (s.source_api === 'openalex' ? 'openalex' : 'other'); }
     function libQOf(s) { return quartileFromIssn(scimap, s.issn); }   // 1..4 or null (derived from ISSN via SCImago map)
     function libNewBody() {
       var counts = { all: lib.length, include: 0, maybe: 0, exclude: 0, unscreened: 0 };
       lib.forEach(function (s) { counts[libScreenOf(s)]++; });
+      var srcCounts = { all: lib.length, openalex: 0, elicit: 0, other: 0 };
+      lib.forEach(function (s) { srcCounts[libSourceOf(s)]++; });
+      // provenance options present in the library: OpenAlex study runs (studyOrigin) + Elicit reviews (origin_job_id), with a paper count each
+      var provCount = {};   // 'study:'+id / 'review:'+jobId -> {label, n}
+      lib.forEach(function (s) {
+        (studyOrigin[s.id] || []).forEach(function (o) { var k = 'study:' + o.id; (provCount[k] = provCount[k] || { label: '📄 ' + o.title, n: 0 }).n++; });
+        if (s.origin_job_id) { var k = 'review:' + s.origin_job_id; (provCount[k] = provCount[k] || { label: '🧪 ' + (jobTitleById[s.origin_job_id] || 'Elicit review'), n: 0 }).n++; }
+      });
+      var provOptions = Object.keys(provCount).map(function (k) { return { v: k, label: provCount[k].label, n: provCount[k].n }; })
+        .sort(function (a, b) { return b.n - a.n; });
       var rows = lib.filter(function (s) {
         if (libScreen !== 'all' && libScreenOf(s) !== libScreen) return false;
+        if (libSource !== 'all' && libSourceOf(s) !== libSource) return false;
+        if (libStudy !== 'all') {
+          if (libStudy.indexOf('study:') === 0) { var sid = libStudy.slice(6); if (!(studyOrigin[s.id] || []).some(function (o) { return o.id === sid; })) return false; }
+          else if (libStudy.indexOf('review:') === 0) { if (s.origin_job_id !== libStudy.slice(7)) return false; }
+        }
         if (libQmax) { var q = libQOf(s); if (!(q && q <= libQmax)) return false; }
         return true;
       });
@@ -2387,6 +2415,21 @@
             h('div', { className: 'rv-fk' }, 'Decision'),
             FILTERS.map(function (f) { return h('button', { key: f[0], className: 'rv-chk' + (libScreen === f[0] ? ' on' : ''), 'aria-pressed': libScreen === f[0], onClick: function () { setLibScreen(f[0]); } }, h('span', null, f[1]), h('span', { className: 'n' }, String(counts[f[0]]))); })
           ),
+          // Source (provenance) — only when the library actually mixes sources (e.g. OpenAlex + Elicit), else it's noise
+          ([srcCounts.openalex, srcCounts.elicit, srcCounts.other].filter(function (n) { return n > 0; }).length > 1) ? h('div', { className: 'rv-fgrp' },
+            h('div', { className: 'rv-fk' }, 'Source'),
+            [['all', 'All'], ['openalex', 'OpenAlex'], ['elicit', '🧪 Elicit'], ['other', 'Other']].filter(function (o) { return o[0] === 'all' || srcCounts[o[0]] > 0; }).map(function (o) {
+              return h('button', { key: o[0], className: 'rv-chk' + (libSource === o[0] ? ' on' : ''), 'aria-pressed': libSource === o[0], onClick: function () { setLibSource(o[0]); } }, h('span', null, o[1]), h('span', { className: 'n' }, String(srcCounts[o[0]])));
+            })
+          ) : null,
+          // Study / review of origin — which run produced the paper (OpenAlex study funnels + Elicit reviews). Dropdown (titles are long / can be many).
+          provOptions.length ? h('div', { className: 'rv-fgrp' },
+            h('div', { className: 'rv-fk' }, 'Study / review'),
+            h('select', { className: 'rv-fsel', value: libStudy, 'aria-label': 'Filter by study or review of origin', onChange: function (e) { setLibStudy(e.target.value); },
+              style: { width: '100%', fontSize: 12, padding: '5px 7px', borderRadius: 7, border: '1px solid var(--line)', background: 'var(--surface)', color: 'inherit' } },
+              h('option', { value: 'all' }, 'All (' + lib.length + ')'),
+              provOptions.map(function (o) { return h('option', { key: o.v, value: o.v }, o.label + ' (' + o.n + ')'); }))
+          ) : null,
           hasSci ? h('div', { className: 'rv-fgrp' },
             h('div', { className: 'rv-fk' }, 'Journal quartile'),
             [[0, 'Any'], [1, 'Q1'], [2, 'Q1–Q2'], [3, 'Q1–Q3'], [4, 'Q1–Q4']].map(function (o) { return h('button', { key: o[0], className: 'rv-chk' + (libQmax === o[0] ? ' on' : ''), 'aria-pressed': libQmax === o[0], onClick: function () { setLibQmax(o[0]); } }, h('span', null, o[1])); })
@@ -2399,6 +2442,7 @@
               h('th', { className: 'rv-th' }, 'Authors'),
               sortTh('Year', 'year', 'r'),
               h('th', { className: 'rv-th' }, 'Venue'),
+              h('th', { className: 'rv-th' }, 'Source'),
               h('th', { className: 'rv-th' }, 'Study'),
               sortTh('Cites', 'cites', 'r'),
               hasSci ? sortTh('Q', 'q', 'c') : null,
@@ -2415,11 +2459,24 @@
                 h('td', { className: 'rv-n' }, s.year || '—'),
                 h('td', { className: 'rv-ve' }, s.venue || '—'),
                 (function () {
+                  var sr = libSourceOf(s);
+                  var lab = sr === 'elicit' ? 'Elicit' : sr === 'openalex' ? 'OpenAlex' : (s.source_api ? (s.source_api.charAt(0).toUpperCase() + s.source_api.slice(1)) : 'Other');
+                  var col = sr === 'elicit' ? '#7c3aed' : sr === 'openalex' ? 'var(--accent, #4f46e5)' : 'var(--muted)';
+                  return h('td', { className: 'rv-ve' }, h('span', { style: { fontSize: 11.5, fontWeight: 600, color: col }, title: 'Forrás: ' + lab }, lab));
+                })(),
+                (function () {
                   var o = studyOrigin[s.id] || [];
-                  if (!o.length) return h('td', { className: 'rv-ve', style: { color: 'var(--faint)' } }, '—');   // manually added / not from a study run
-                  var first = o[0].title || 'Study';
-                  return h('td', { className: 'rv-ve', title: 'Ebből a study-futtatásból származik: ' + o.map(function (x) { return x.title; }).join(' · ') },
-                    h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 11.5 } }, '🔎 ' + (first.length > 26 ? first.slice(0, 26) + '…' : first) + (o.length > 1 ? ' +' + (o.length - 1) : '')));
+                  if (o.length) {
+                    var first = o[0].title || 'Study';
+                    return h('td', { className: 'rv-ve', title: 'Ebből a study-futtatásból származik: ' + o.map(function (x) { return x.title; }).join(' · ') },
+                      h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 11.5 } }, '🔎 ' + (first.length > 26 ? first.slice(0, 26) + '…' : first) + (o.length > 1 ? ' +' + (o.length - 1) : '')));
+                  }
+                  if (s.origin_job_id) {   // came from an Elicit systematic review
+                    var rt = jobTitleById[s.origin_job_id] || 'Elicit review';
+                    return h('td', { className: 'rv-ve', title: 'Ebből az Elicit review-ból származik: ' + rt },
+                      h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 11.5, color: '#7c3aed' } }, '🔬 ' + (rt.length > 26 ? rt.slice(0, 26) + '…' : rt)));
+                  }
+                  return h('td', { className: 'rv-ve', style: { color: 'var(--faint)' } }, '—');   // manually added / not from a run
                 })(),
                 h('td', { className: 'rv-n' }, s.cited_by != null ? s.cited_by : '–'),
                 hasSci ? h('td', { className: 'rv-qc' }, q ? h('span', { className: 'rv-qb q' + q }, 'Q' + q) : h('span', { className: 'rv-qb q0' }, '–')) : null,
