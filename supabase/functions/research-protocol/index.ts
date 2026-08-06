@@ -50,28 +50,52 @@ Deno.serve(async (req) => {
     if (action === 'generate') {
       const goal = String(body.goal || '').slice(0, 2000);
       const ideaId = body.idea_id || null;
+      // NEW (§5): the user picks WHICH cards the protocol is generated from — sources = [{kind:'idea'|'gap'|'step', id}].
+      const sources = Array.isArray(body.sources) ? body.sources.slice(0, 40) : [];
       // gather context (RLS scopes everything to the caller's project access)
-      const ideasQ = await sb.from('research_ideas').select('id,question,hypothesis,status').eq('project_id', projectId).order('created_at', { ascending: true }).limit(24);
+      const ideasQ = await sb.from('research_ideas').select('id,question,hypothesis,rationale,source,status').eq('project_id', projectId).order('created_at', { ascending: true }).limit(60);
       const ideas = (ideasQ.data || []);
-      let idea: any = ideaId ? ideas.find((x: any) => x.id === ideaId) : (ideas.find((x: any) => x.status === 'selected') || ideas[0]);
-      // a caller-supplied lineage idea_id (Map "generate from this node") may point OUTSIDE the loaded window →
-      // fetch it directly so the protocol's provenance link (idea_id) is never silently severed. Fall back only if truly absent.
-      if (ideaId && !idea) { const iq = await sb.from('research_ideas').select('id,question,hypothesis,status').eq('project_id', projectId).eq('id', ideaId).maybeSingle(); idea = (iq.data as any) || null; }
-      if (!idea) idea = ideas.find((x: any) => x.status === 'selected') || ideas[0];
+      const byId: Record<string, any> = {}; ideas.forEach((x: any) => { byId[x.id] = x; });
+      const wantIdeaIds = sources.filter((s: any) => s && (s.kind === 'idea' || s.kind === 'gap')).map((s: any) => s.id).filter(Boolean);
+      const wantStepIds = sources.filter((s: any) => s && s.kind === 'step').map((s: any) => s.id).filter(Boolean);
+      let selIdeas: any[] = wantIdeaIds.map((id: string) => byId[id]).filter(Boolean);
+      const missing = wantIdeaIds.filter((id: string) => !byId[id]);   // selected id outside the 60-row window → fetch directly
+      if (missing.length) { const mq = await sb.from('research_ideas').select('id,question,hypothesis,rationale,source,status').eq('project_id', projectId).in('id', missing); selIdeas = selIdeas.concat((mq.data as any) || []); }
+      let selSteps: any[] = [];
+      if (wantStepIds.length) { const stq = await sb.from('research_protocol_steps').select('id,title,spec').in('id', wantStepIds); selSteps = (stq.data as any) || []; }
+      // primary idea (research_protocols.idea_id provenance): first non-gap selected idea, else first selected source, else legacy single-idea pick (idea_id / first 'selected' / first idea) — never severed.
+      let idea: any = selIdeas.find((x: any) => x.source !== 'gap') || selIdeas[0] || null;
+      if (!idea) {
+        idea = ideaId ? (byId[ideaId] || null) : (ideas.find((x: any) => x.status === 'selected') || ideas[0]);
+        if (ideaId && !idea) { const iq = await sb.from('research_ideas').select('id,question,hypothesis,rationale,source,status').eq('project_id', projectId).eq('id', ideaId).maybeSingle(); idea = (iq.data as any) || null; }
+        if (!idea) idea = ideas.find((x: any) => x.status === 'selected') || ideas[0];
+      }
+      if (idea && !selIdeas.length) selIdeas = [idea];   // no explicit selection → the legacy single idea is the source
       const srcQ = await sb.from('research_sources').select('title,venue,year,screening').eq('project_id', projectId).limit(200);
       const allSrc = (srcQ.data || []);
       const inc = allSrc.filter((s: any) => s.screening === 'include');
       const lit = (inc.length ? inc : allSrc).slice(0, 25);
       const dsQ = await sb.from('research_datasets').select('name,notes').eq('project_id', projectId).limit(20);
       const datasets = (dsQ.data || []);
+      // SR results are ALWAYS native context (§5): every completed systematic review + the papers it included.
+      const srQ = await sb.from('elicit_jobs').select('id,research_question,result_title').eq('project_id', projectId).eq('kind', 'sysreview').eq('status', 'completed').limit(12);
+      const srJobs = (srQ.data || []);
+      const srBlocks: string[] = [];
+      for (const j of srJobs) {
+        const incP = await sb.from('research_sources').select('title,year').eq('project_id', projectId).eq('origin_job_id', j.id).eq('screening', 'include').limit(8);
+        const titles = ((incP.data as any) || []).map((s: any) => `    • ${s.title}${s.year ? ' (' + s.year + ')' : ''}`).join('\n');
+        srBlocks.push(`- ${j.research_question || j.result_title || 'Systematic review'}\n  Included papers:\n${titles || '    (none passed screening)'}`);
+      }
 
       const litTxt = lit.map((s: any, i: number) => `${i + 1}. ${s.title}${s.venue ? ' — ' + s.venue : ''}${s.year ? ' (' + s.year + ')' : ''}`).join('\n') || '(none yet)';
       const dsTxt = datasets.map((d: any) => `- ${d.name}${d.notes ? ': ' + d.notes : ''}`).join('\n') || '(none registered)';
-      const user = `RESEARCH IDEA:\n${idea ? (idea.question || '') + (idea.hypothesis ? '\nHypothesis: ' + idea.hypothesis : '') : '(no idea recorded)'}\n\n`
-        + (goal ? `GOAL FOR THIS PROTOCOL:\n${goal}\n\n` : '')
-        + `SELECTED LITERATURE (${lit.length}):\n${litTxt}\n\n`
-        + `DATASETS ALREADY REGISTERED:\n${dsTxt}\n\n`
-        + `Plan the executable protocol now.`;
+      const ideasTxt = selIdeas.map((x: any) => `- [${x.source === 'gap' ? 'RESEARCH GAP' : 'IDEA'}] ${x.question || ''}${x.hypothesis ? ' | Hypothesis: ' + x.hypothesis : ''}${x.rationale ? ' | Why: ' + String(x.rationale).slice(0, 300) : ''}`).join('\n') || '(no idea recorded)';
+      const stepsTxt = selSteps.map((x: any) => `- [EXISTING STEP] ${x.title}${x.spec && x.spec.instruction ? ': ' + String(x.spec.instruction).slice(0, 200) : ''}`).join('\n');
+      const user = `RESEARCH SOURCES the protocol must build on (selected by the user):\n${ideasTxt}\n`
+        + (stepsTxt ? `\nEXISTING RESEARCH STEPS to build upon:\n${stepsTxt}\n` : '')
+        + (srBlocks.length ? `\nSYSTEMATIC REVIEW RESULTS (native context — always relevant):\n${srBlocks.join('\n')}\n` : '')
+        + (goal ? `\nGOAL FOR THIS PROTOCOL:\n${goal}\n` : '')
+        + `\nSELECTED LITERATURE (${lit.length}):\n${litTxt}\n\nDATASETS ALREADY REGISTERED:\n${dsTxt}\n\nPlan the executable protocol now, integrating ALL the selected sources and the systematic-review evidence above.`;
 
       const raw = await callClaude(SYS + langDirective(_lang), user, model);
       const m = raw.match(/\{[\s\S]*\}/);
@@ -84,7 +108,10 @@ Deno.serve(async (req) => {
       // collaborator generating in parallel never wipes another user's protocol.
       const ACTIVE = ['draft', 'ready', 'running', 'paused', 'failed'];
       await sb.from('research_protocols').update({ status: 'archived', updated_at: new Date().toISOString() }).eq('project_id', projectId).eq('created_by', ures.user.id).in('status', ACTIVE);
-      const snapshot = { idea: idea ? { id: idea.id, question: idea.question } : null, included_sources: lit.map((s: any) => s.title), datasets: datasets.map((d: any) => d.name), generated_at: new Date().toISOString() };
+      const snapshot = { idea: idea ? { id: idea.id, question: idea.question } : null,
+        sources: selIdeas.map((x: any) => ({ id: x.id, kind: x.source === 'gap' ? 'gap' : 'idea', q: x.question })).concat(selSteps.map((x: any) => ({ id: x.id, kind: 'step', q: x.title }))),
+        reviews: srJobs.map((j: any) => ({ id: j.id, q: j.research_question || j.result_title })),
+        included_sources: lit.map((s: any) => s.title), datasets: datasets.map((d: any) => d.name), generated_at: new Date().toISOString() };
       const newRow = { project_id: projectId, idea_id: idea ? idea.id : null, title: String(parsed.title || 'Research protocol').slice(0, 200), goal: goal || null, status: 'draft', context_snapshot: snapshot, created_by: ures.user.id };
       let protIns = await sb.from('research_protocols').insert(newRow).select('id').single();
       if (protIns.error && /duplicate key|unique|rprot_one_active/i.test(protIns.error.message || '')) {

@@ -4704,6 +4704,7 @@
     var cmS = useState({}), contribMap = cmS[0], setContribMap = cmS[1];   // profiles_public: id → {name,color}
     var srjS = useState([]), srJobs = srjS[0], setSrJobs = srjS[1];        // Elicit SR reviews (studies summary)
     var raS = useState({ rev: {}, std: {} }), resAgg = raS[0], setResAgg = raS[1];   // result aggregates for the rich "Eddigi eredmények" cards
+    var pkS = useState(null), pickSel = pkS[0], setPickSel = pkS[1];   // §5 source picker: {'idea:id':true,...} (null = use default selection)
     var cmsgS = useState([]), chatMsgs = cmsgS[0], setChatMsgs = cmsgS[1]; // cockpit chat transcript [{role:'me'|'ai', content, added?}]
     var cinS = useState(''), chatInput = cinS[0], setChatInput = cinS[1];
     var cbzS = useState(false), chatBusy = cbzS[0], setChatBusy = cbzS[1];
@@ -4924,14 +4925,57 @@
       window.addEventListener('resize', onR);
       return function () { cancelAnimationFrame(raf); window.removeEventListener('resize', onR); };
     }, [cview, steps.length, mapEdges.length, gtkS[0], proposed && proposed.steps ? proposed.steps.length : 0]);
+    // §5 source picker: which idea / gap / research-step cards the protocol is generated from. SR results are always native context (server-side).
+    function pickKey(kind, id) { return kind + ':' + id; }
+    function defaultPick() {
+      var sel = {};
+      (props.ideas || []).forEach(function (i) { if (i.status === 'selected' && i.source !== 'gap') sel[pickKey('idea', i.id)] = true; });
+      if (!Object.keys(sel).length) { var first = (props.ideas || []).filter(function (i) { return i.source !== 'gap' && i.status !== 'rejected'; })[0]; if (first) sel[pickKey('idea', first.id)] = true; }
+      return sel;
+    }
+    function curPick() { return pickSel || defaultPick(); }
+    function togglePick(kind, id) { var k = pickKey(kind, id); setPickSel(function (p) { var n = Object.assign({}, p || defaultPick()); if (n[k]) delete n[k]; else n[k] = true; return n; }); }
     function generate() {
       if (busy) return; setBusy(true);
-      sb.functions.invoke('research-protocol', { body: { action: 'generate', project_id: props.projectId, goal: goal } }).then(function (r) {
+      var sel = curPick();
+      var sources = Object.keys(sel).map(function (k) { var i = k.indexOf(':'); return { kind: k.slice(0, i), id: k.slice(i + 1) }; });
+      sb.functions.invoke('research-protocol', { body: { action: 'generate', project_id: props.projectId, goal: goal, sources: sources } }).then(function (r) {
         setBusy(false);
         var err = (r && r.data && r.data.error) || (r && r.error && r.error.message);
         if (err) { window.PRUI.toast('Generation failed: ' + err, { kind: 'error' }); return; }
-        setGoal(''); load(); if (props.onChanged) props.onChanged();
+        setGoal(''); setPickSel(null); load(); if (props.onChanged) props.onChanged();
       }, function (e) { setBusy(false); window.PRUI.toast('Generation failed: ' + e, { kind: 'error' }); });
+    }
+    // the "Miből generáljunk?" picker (idea/gap/research-step checklists + pinned SR context)
+    function sourcePicker() {
+      var sel = curPick(), nSel = Object.keys(sel).length;
+      var ideasL = (props.ideas || []).filter(function (i) { return i.source !== 'gap' && i.status !== 'rejected'; });
+      var gapsL = (props.ideas || []).filter(function (i) { return i.source === 'gap' && i.status !== 'rejected'; });
+      var stepsL = (steps || []).filter(function (s) { return s.status === 'done'; });
+      var doneSR = (srJobs || []).filter(function (j) { return j.status === 'completed'; });
+      function prow(kind, item, label, q, meta, lcol) {
+        var k = pickKey(kind, item.id), on = !!sel[k];
+        return h('label', { key: k, className: 'psel-row ' + kind + (on ? ' on' : ''), style: lcol ? { borderLeftColor: lcol } : null, onClick: function () { togglePick(kind, item.id); } },
+          h('span', { className: 'psel-ck' }, on ? '✓' : ''),
+          h('span', { className: 'psel-rt' },
+            h('span', { className: 'psel-rl ' + kind, style: lcol ? { background: lcol } : null }, label),
+            h('span', { className: 'psel-rq' }, q || '—'),
+            meta ? h('span', { className: 'psel-rm' }, meta) : null));
+      }
+      return h('div', { className: 'psel' },
+        h('div', { className: 'psel-h' }, h('b', null, '✨ Miből generáljunk?'), h('span', { className: 'psel-sub' }, 'Jelöld ki a kiindulási kártyákat — a szisztematikus review-eredmények mindig beépülnek.')),
+        h('div', { className: 'psel-body' },
+          ideasL.length ? h('div', { className: 'psel-grp' }, h('div', { className: 'psel-gh' }, '💡 Ötletek'), ideasL.map(function (i) { return prow('idea', i, 'Ötlet', i.question, i.hypothesis ? String(i.hypothesis).slice(0, 100) : null, 'var(--accent)'); })) : null,
+          gapsL.length ? h('div', { className: 'psel-grp' }, h('div', { className: 'psel-gh' }, '🕳️ Kutatási rések'), gapsL.map(function (g) { var t = gapType(g.gap_type || 'knowledge'); return prow('gap', g, t.lab, g.question, g.novelty != null ? ('Újdonság ' + g.novelty) : null, t.c); })) : null,
+          stepsL.length ? h('div', { className: 'psel-grp' }, h('div', { className: 'psel-gh' }, '🧩 Kutatási lépések'), stepsL.map(function (s) { return prow('step', s, 'S' + s.ord, s.title, '✓ kész', '#17a34a'); })) : null,
+          doneSR.length ? h('div', { className: 'psel-lock' },
+            h('div', { className: 'psel-lock-h' }, h('span', { className: 'lk' }, '🔒'), ' Szisztematikus review eredmények — kontextus', h('span', { className: 'always' }, 'mindig beépítve')),
+            doneSR.map(function (j) { var a = resAgg.rev[j.id] || { incl: 0, total: 0 }; return h('div', { key: j.id, className: 'psel-srchip' }, h('span', { className: 'ic' }, '🔬'), h('span', { className: 'q' }, srName(j)), h('span', { className: 'm' }, a.incl + ' beválogatott' + (a.total ? ' / ' + a.total : ''))); })) : null),
+        h('div', { className: 'psel-foot' },
+          h('textarea', { className: 'psel-goal', rows: 1, placeholder: 'Opcionális cél / megkötés (pl. „reprodukáld a per-osztály AUROC-ot")', value: goal, disabled: busy, onChange: function (e) { setGoal(e.target.value); } }),
+          h('span', { className: 'psel-cnt' }, h('b', null, nSel), ' forrás' + (doneSR.length ? ' + ' + doneSR.length + ' review' : '')),
+          h('button', { className: 'btn pri', disabled: busy || !nSel, onClick: generate }, busy ? tr(props.lang, '✨ Working…') : '✨ Protokoll generálása')),
+        busy ? h('div', { style: { padding: '0 16px 14px' } }, h(AiThinking, { label: 'A kijelölt forrásokból + a review-eredményekből protokollt tervezek' })) : null);
     }
     // Cockpit chat (phase 2): insert AI-proposed tasks as protocol steps (creating a draft protocol if none exists yet).
     function insertCockpitSteps(newSteps, originRequest, cb) {
@@ -5420,12 +5464,8 @@
 
     if (!prot) return h('div', null, cockpitDashboard(), cockpitChat(), h('div', { className: 'panel' },
       h('h3', { style: { marginTop: 0 } }, '🧪 Protocol'),
-      h('p', { style: { fontSize: 13, color: 'var(--muted)', lineHeight: 1.5 } }, 'Generate an executable research plan — an ordered ToDo list (data → preprocess → baselines → method → evaluation → figures) built from your idea and the literature you selected in Studies. A Claude agent on your dedicated machine can then run it step by step, with your approval on the expensive ones.'),
-      ce ? h('div', null,
-        h('textarea', { className: 'field', rows: 2, style: { width: '100%', boxSizing: 'border-box', marginBottom: 8 }, placeholder: 'Optional goal / constraints (e.g. "reproduce the per-class AUROC + Fisher fusion rescue on nuScenes")', value: goal, disabled: busy, onChange: function (e) { setGoal(e.target.value); } }),
-        h('button', { className: 'btn pri', disabled: busy, onClick: generate }, busy ? tr(props.lang, '✨ Working…') : tr(props.lang, '✨ Generate protocol')),
-        busy ? h('div', { style: { marginTop: 10 } }, h(AiThinking, { label: 'Reading your idea & the selected literature, drafting an executable protocol' })) : null
-      ) : h('div', { className: 'empty' }, tr(props.lang, 'No protocol yet.'))
+      h('p', { style: { fontSize: 13, color: 'var(--muted)', lineHeight: 1.5 } }, 'Generate an executable research plan — an ordered ToDo list (data → preprocess → baselines → method → evaluation → figures). Válaszd ki, mely ötlet / rés / kutatási-lépés kártyák alapján készüljön; a szisztematikus review-eredmények mindig beépülnek. A Claude agent a dedikált gépeden aztán lépésről lépésre lefuttatja.'),
+      ce ? sourcePicker() : h('div', { className: 'empty' }, tr(props.lang, 'No protocol yet.'))
     ));
 
     if (rvMd) return h(ReportViewer, {
@@ -9718,6 +9758,15 @@
           (mapFlags && props.canEdit && !tlOn && !phaseArr) ? h('button', { title: 'A kijelöltek elrejtése a térképről', onClick: groupHide }, '🙈') : null,
           h('button', { title: 'A kijelölés exportálása PNG-be', onClick: exportSelection }, '⤓'),
           (framesCap && props.canEdit) ? h('button', { title: 'Kijelöltek keretbe csoportosítása (⌘/Ctrl+G)', onClick: groupIntoFrame }, '▢+') : null,
+          props.canEdit ? h('button', { className: 'rmap-gb-gen', disabled: genBusy, title: 'Protokoll generálása a kijelölt ötlet / rés / kutatási-lépés kártyákból — a szisztematikus review-eredmények mindig beépülnek', onClick: function () {
+            if (genBusy) return;
+            var CORE = window.PRAutopilotCore; if (!CORE || !CORE.callEdge) { window.PRUI.toast('A generátor nem elérhető (autopilot-core).', { kind: 'error' }); return; }
+            var sources = [];
+            Object.keys(msel).forEach(function (id) { var n = g.by[id]; if (!n || !n.ref || !n.ref.id) return; if (n.t === 'idea') sources.push({ kind: 'idea', id: n.ref.id }); else if (n.t === 'gap') sources.push({ kind: 'gap', id: n.ref.id }); else if (n.t === 'step') sources.push({ kind: 'step', id: n.ref.id }); });
+            if (!sources.length) { window.PRUI.toast('Jelölj ki legalább egy ötlet / rés / lépés kártyát a protokollhoz.', { kind: 'error' }); return; }
+            setGenBusy(true);
+            CORE.callEdge('research-protocol', { action: 'generate', project_id: props.projectId, goal: '', sources: sources }).then(function (d) { if (!alive.current) return; setGenBusy(false); if (d && d.error) { window.PRUI.toast('Hiba: ' + d.error, { kind: 'error' }); return; } window.PRUI.toast('✓ ' + ((d && d.steps) || 0) + ' protokoll-lépés ' + sources.length + ' kártyából', { kind: 'ok' }); setMsel({}); setBump(function (x) { return x + 1; }); }, function () { if (alive.current) { setGenBusy(false); window.PRUI.toast('hálózat', { kind: 'error' }); } });
+          } }, genBusy ? '⏳' : '✨ Protokoll') : null,
           props.canEdit ? h('button', { title: 'A kijelölt kártyák végleges törlése', style: { color: 'var(--danger, #b42318)' }, onClick: function () { nodesDelete(Object.keys(msel).map(function (id) { return g.by[id]; })); } }, '🗑') : null,
           h('button', { title: 'Kijelölés megszüntetése', onClick: function () { setMsel({}); } }, '✕')) : null,
         run && runActive ? h('div', { className: 'rmap-runbar' + (run.status === 'awaiting_approval' ? ' gate' : '') },
