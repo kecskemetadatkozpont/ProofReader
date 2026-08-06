@@ -4705,6 +4705,7 @@
     var srjS = useState([]), srJobs = srjS[0], setSrJobs = srjS[1];        // Elicit SR reviews (studies summary)
     var raS = useState({ rev: {}, std: {} }), resAgg = raS[0], setResAgg = raS[1];   // result aggregates for the rich "Eddigi eredmények" cards
     var pkS = useState(null), pickSel = pkS[0], setPickSel = pkS[1];   // §5 source picker: {'idea:id':true,...} (null = use default selection)
+    var poS = useState(false), pickOpen = poS[0], setPickOpen = poS[1];   // §5: source-picker modal open (generate an ADDITIONAL protocol while one already exists)
     var cmsgS = useState([]), chatMsgs = cmsgS[0], setChatMsgs = cmsgS[1]; // cockpit chat transcript [{role:'me'|'ai', content, added?}]
     var cinS = useState(''), chatInput = cinS[0], setChatInput = cinS[1];
     var cbzS = useState(false), chatBusy = cbzS[0], setChatBusy = cbzS[1];
@@ -4943,7 +4944,7 @@
         setBusy(false);
         var err = (r && r.data && r.data.error) || (r && r.error && r.error.message);
         if (err) { window.PRUI.toast('Generation failed: ' + err, { kind: 'error' }); return; }
-        setGoal(''); setPickSel(null); load(); if (props.onChanged) props.onChanged();
+        setGoal(''); setPickSel(null); setPickOpen(false); load(); if (props.onChanged) props.onChanged();
       }, function (e) { setBusy(false); window.PRUI.toast('Generation failed: ' + e, { kind: 'error' }); });
     }
     // the "Miből generáljunk?" picker (idea/gap/research-step checklists + pinned SR context)
@@ -5662,6 +5663,7 @@
         h('span', { className: 'pcpit-cmd-stats' }, cmdStat(done + '/' + steps.length, 'lépés'), cmdStat(openGapsCount, 'nyitott rés'), cmdStat(studiesCount, 'study'), cmdStat(incCount, 'included')),
         h('span', { className: 'pcpit-cmd-r' },
           (function () { var oids = Object.keys(onlineUsers || {}); if (!oids.length) return null; return h('span', { style: { display: 'inline-flex', alignItems: 'center', marginRight: 4 } }, oids.slice(0, 4).map(function (id, i) { var pf = contribMap[id] || {}; var nm = pf.name || 'Kutató'; var col = pf.color || ['#3a5bd9', '#0e8a6a', '#c67912', '#a23a86'][i % 4]; return h('span', { key: id, title: nm + (id === props.authorId ? ' (te)' : ''), style: { width: 22, height: 22, borderRadius: '50%', background: col, color: '#fff', fontSize: 9, fontWeight: 750, display: 'grid', placeItems: 'center', marginLeft: i ? -6 : 0, border: '2px solid var(--surface)' } }, (nm[0] || '?').toUpperCase()); })); })(),
+          ce ? h('button', { className: 'btn', style: { padding: '6px 11px', fontSize: 12 }, title: 'Új protokoll generálása (a jelenlegit archiválja) — új ötletekből / résekből', onClick: function () { setPickOpen(true); } }, '✨ Új protokoll') : null,
           cmdPrimary())),
       h('div', { className: 'pcpit-tabs2' },
         cmdTab('dash', '📊 Áttekintés'),
@@ -5809,6 +5811,10 @@
         h('button', { className: 'fig-lb-x', 'aria-label': 'Close', onClick: function () { setLb(null); } }, '✕'),
         h('img', { src: lb.src, alt: lb.cap || '', onClick: function (e) { e.stopPropagation(); } }),
         lb.cap ? h('div', { className: 'fig-lb-cap' }, lb.cap) : null), document.body) : null,
+      (pickOpen && ce) ? h('div', { className: 'scrim', onClick: function () { setPickOpen(false); } },
+        h('div', { className: 'modal', style: { width: 640, maxWidth: '94vw', maxHeight: '90vh', overflow: 'auto', padding: 0 }, onClick: function (e) { e.stopPropagation(); } },
+          h('div', { style: { padding: '10px 14px', fontSize: 12, color: 'var(--muted)', borderBottom: '1px solid var(--line)', display: 'flex', alignItems: 'center', gap: 8 } }, h('span', null, '⚠️ Egy új protokoll generálása a jelenlegit archiválja (megmarad az előzményben).'), h('button', { className: 'icon-x', style: { marginLeft: 'auto' }, 'aria-label': 'Bezárás', onClick: function () { setPickOpen(false); } }, '✕')),
+          sourcePicker())) : null,
       editing ? h(TaskEditorModal, { step: editing.step, isNew: editing.isNew, allSteps: steps, projectId: props.projectId, onSave: saveTask, onClose: function () { setEditing(null); } }) : null,
       prevFile ? h(FilePreviewModal, { file: prevFile, onClose: function () { setPrevFile(null); } }) : null,
       intake ? h(FileIntake, { file: intake.file, context: intake.context, onComplete: intakeDone, onClose: function () { setIntake(null); } }) : null
