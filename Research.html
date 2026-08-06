@@ -1581,6 +1581,40 @@
     .pcpit-clk { cursor: pointer; border-radius: 6px; margin: 0 -6px; padding-left: 6px; padding-right: 6px; transition: background .12s; }
     .pcpit-clk:hover { background: var(--surface-2); }
     .pcpit-clk:hover .t, .pcpit-clk:hover > span:last-child { color: var(--accent); }
+    /* §1 rich result cards */
+    .pc-reslist { display: flex; flex-direction: column; gap: 10px; }
+    .pc-gaplist { display: flex; flex-direction: column; gap: 9px; }
+    .pc-res { border: 1px solid var(--line); border-radius: 11px; padding: 11px 13px; background: var(--surface); display: flex; flex-direction: column; gap: 8px; transition: border-color .12s, box-shadow .12s; }
+    .pc-res.pcpit-clk { margin: 0; }
+    .pc-res.pcpit-clk:hover { background: var(--surface); border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); box-shadow: 0 2px 10px -6px rgba(20,25,40,.25); }
+    .pc-res-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .pc-res-ic { font-size: 14px; flex: none; }
+    .pc-res-t { font-weight: 650; font-size: 13px; line-height: 1.35; min-width: 0; flex: 1; }
+    .pc-chip { font-size: 10px; font-weight: 750; border-radius: 999px; padding: 2px 9px; white-space: nowrap; flex: none; }
+    .pc-chip.done { color: var(--ok, #15803d); background: var(--ok-bg, #e7f6ee); }
+    .pc-chip.warnc { color: var(--warn, #b45309); background: color-mix(in srgb, var(--warn, #b45309) 13%, transparent); }
+    .pc-chip.run { color: var(--warn, #b45309); background: color-mix(in srgb, var(--warn, #b45309) 16%, transparent); }
+    .pc-kind { font-size: 9px; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; color: #fff; border-radius: 5px; padding: 2px 7px; flex: none; }
+    .pc-funnel { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+    .pc-fn { padding: 6px 10px; flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; position: relative; }
+    .pc-fn:not(:last-child)::after { content: "▸"; position: absolute; right: -5px; top: 50%; transform: translateY(-50%); color: var(--faint); font-size: 9px; z-index: 2; }
+    .pc-fn .n { font-size: 15px; font-weight: 750; line-height: 1.1; font-variant-numeric: tabular-nums; }
+    .pc-fn .l { font-size: 9px; letter-spacing: .04em; text-transform: uppercase; color: var(--faint); }
+    .pc-fn.found { background: color-mix(in srgb, var(--accent) 8%, var(--surface)); }
+    .pc-fn.excl { background: color-mix(in srgb, var(--danger, #b42318) 7%, var(--surface)); }
+    .pc-fn.incl { background: var(--ok-bg, #e7f6ee); } .pc-fn.incl .n { color: var(--ok, #15803d); }
+    .pc-incl { display: flex; flex-direction: column; gap: 2px; }
+    .pc-incl-h { font-size: 10px; font-weight: 750; color: var(--ok, #15803d); letter-spacing: .02em; }
+    .pc-incl-i { font-size: 11.5px; color: var(--ink); line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pc-incl-more { font-size: 10.5px; color: var(--faint); }
+    .pc-steps { display: flex; flex-direction: column; gap: 3px; }
+    .pc-stprow { display: flex; gap: 8px; font-size: 11.5px; }
+    .pc-stprow .sn { min-width: 96px; flex: none; font-weight: 600; color: var(--muted); }
+    .pc-stprow .v { color: var(--muted); }
+    .pc-stall { font-size: 11px; color: var(--warn, #b45309); background: var(--warn-bg, #fbf1dd); border: 1px solid color-mix(in srgb, var(--warn, #b45309) 30%, transparent); border-radius: 8px; padding: 6px 9px; line-height: 1.4; }
+    .pc-res-sum { font-size: 12px; color: var(--ink); line-height: 1.5; }
+    .pc-acc { font-size: 11px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 12px; } .pc-acc b { color: var(--ok, #15803d); }
+    .pc-more { font-size: 11.5px; color: var(--faint); text-align: center; padding: 4px; }
     .pcpit-crow { display: flex; align-items: center; gap: 10px; margin-bottom: 9px; }
     .pcpit-crow .who { flex: none; width: 118px; }
     .pcpit-crow .who b { font-size: 12px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1919,9 +1953,9 @@
     html.dark .rmap-genbusy { background: #4f46e5; }
     @media (max-width: 900px) { .rmap-wrap { flex-direction: column; } .rmap-insp { width: auto; } }
   </style>
-  <script src="theme.js?v=1785962408"></script>
-  <script src="nav.js?v=1785962408"></script>
-  <script src="entitlements.js?v=1785962408"></script>
+  <script src="theme.js?v=1785994605"></script>
+  <script src="nav.js?v=1785994605"></script>
+  <script src="entitlements.js?v=1785994605"></script>
 </head>
 
 <body>
@@ -1933,24 +1967,24 @@
   <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
   <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="backend/config.js?v=1785962408"></script>
-  <script src="auth.js?v=1785962408"></script>
-  <script src="backend.js?v=1785962408"></script>
-  <script src="universities.js?v=1785962408"></script>
-  <script src="onboarding.js?v=1785962408"></script>
-  <script src="office.js?v=1785962408"></script>
-  <script src="publications.js?v=1785962408"></script>
+  <script src="backend/config.js?v=1785994605"></script>
+  <script src="auth.js?v=1785994605"></script>
+  <script src="backend.js?v=1785994605"></script>
+  <script src="universities.js?v=1785994605"></script>
+  <script src="onboarding.js?v=1785994605"></script>
+  <script src="office.js?v=1785994605"></script>
+  <script src="publications.js?v=1785994605"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/tus-js-client@4.1.0/dist/tus.min.js"></script>
-  <script type="text/babel" src="canvas.jsx?v=1785962408"></script>
-  <script type="text/babel" src="notes.jsx?v=1785962408"></script>
-  <script src="autopilot-core.js?v=1785962408"></script>
-  <script type="text/babel" src="research.jsx?v=1785962408"></script>
+  <script type="text/babel" src="canvas.jsx?v=1785994605"></script>
+  <script type="text/babel" src="notes.jsx?v=1785994605"></script>
+  <script src="autopilot-core.js?v=1785994605"></script>
+  <script type="text/babel" src="research.jsx?v=1785994605"></script>
 
-  <script src="build.js?v=1785962408"></script>
-  <script src="version-badge.js?v=1785962408"></script>
+  <script src="build.js?v=1785994605"></script>
+  <script src="version-badge.js?v=1785994605"></script>
 </body>
 
 </html>

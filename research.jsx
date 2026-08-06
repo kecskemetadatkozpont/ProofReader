@@ -4703,6 +4703,7 @@
     // ---- Cockpit dashboard (A): comprehensive project-state summary — contributor names + the SR reviews ----
     var cmS = useState({}), contribMap = cmS[0], setContribMap = cmS[1];   // profiles_public: id → {name,color}
     var srjS = useState([]), srJobs = srjS[0], setSrJobs = srjS[1];        // Elicit SR reviews (studies summary)
+    var raS = useState({ rev: {}, std: {} }), resAgg = raS[0], setResAgg = raS[1];   // result aggregates for the rich "Eddigi eredmények" cards
     var cmsgS = useState([]), chatMsgs = cmsgS[0], setChatMsgs = cmsgS[1]; // cockpit chat transcript [{role:'me'|'ai', content, added?}]
     var cinS = useState(''), chatInput = cinS[0], setChatInput = cinS[1];
     var cbzS = useState(false), chatBusy = cbzS[0], setChatBusy = cbzS[1];
@@ -4851,6 +4852,36 @@
       if (idl.length) sb.from('profiles_public').select('id,name,color').in('id', idl).then(function (r) { var m = {}; ((r && r.data) || []).forEach(function (x) { m[x.id] = x; }); setContribMap(m); }, function () { });
       sb.from('elicit_jobs').select('id,status,result_title,research_question').eq('project_id', props.projectId).eq('kind', 'sysreview').then(function (r) { setSrJobs((r && r.data) || []); }, function () { });
     }, [props.projectId, (props.ideas || []).length, (props.studies || []).length, (props.sources || []).length]);
+    // cockpit result aggregates: per-review (imported total + included count + top included titles) and per-study
+    // (per-step screening counts + included titles) → drives the info-rich result cards in "Eddigi eredmények".
+    useEffect(function () {
+      var pid = props.projectId; if (!pid) return;
+      sb.from('research_sources').select('origin_job_id,screening,title,year,url').eq('project_id', pid).not('origin_job_id', 'is', null).order('cited_by', { ascending: false, nullsFirst: false }).limit(4000).then(function (r) {
+        var rev = {}; ((r && r.data) || []).forEach(function (s) {
+          var a = rev[s.origin_job_id] || (rev[s.origin_job_id] = { total: 0, incl: 0, titles: [] }); a.total++;
+          if (s.screening === 'include' || s.screening === 'included') { a.incl++; if (a.titles.length < 4) a.titles.push({ id: 'r' + a.total, title: s.title, year: s.year, url: s.url }); }
+        });
+        setResAgg(function (p) { return { rev: rev, std: p.std }; });
+      }, function () { });
+      var sids = (props.studies || []).map(function (s) { return s.id; });
+      if (!sids.length) { setResAgg(function (p) { return { rev: p.rev, std: {} }; }); return; }
+      sb.from('research_study_papers').select('study_id,step,decision,source_id').in('study_id', sids).then(function (r) {
+        var std = {}, incIds = {};
+        ((r && r.data) || []).forEach(function (p) {
+          var a = std[p.study_id] || (std[p.study_id] = { byStep: {}, incl: 0, titles: [] });
+          var st = a.byStep[p.step] || (a.byStep[p.step] = { total: 0 }); st.total++; st[p.decision] = (st[p.decision] || 0) + 1;
+          if (p.decision === 'include' && p.source_id) { a.incl++; (incIds[p.study_id] = incIds[p.study_id] || []).push(p.source_id); }
+        });
+        var allInc = []; Object.keys(incIds).forEach(function (sid) { incIds[sid].slice(0, 4).forEach(function (id) { if (allInc.indexOf(id) < 0) allInc.push(id); }); });
+        allInc = allInc.slice(0, 40);
+        if (!allInc.length) { setResAgg(function (p) { return { rev: p.rev, std: std }; }); return; }
+        sb.from('research_sources').select('id,title,year,url').in('id', allInc).then(function (r2) {
+          var byId = {}; ((r2 && r2.data) || []).forEach(function (s) { byId[s.id] = s; });
+          Object.keys(std).forEach(function (sid) { (incIds[sid] || []).slice(0, 4).forEach(function (id) { if (byId[id]) std[sid].titles.push(byId[id]); }); });
+          setResAgg(function (p) { return { rev: p.rev, std: std }; });
+        }, function () { setResAgg(function (p) { return { rev: p.rev, std: std }; }); });
+      }, function () { });
+    }, [props.projectId, (srJobs || []).length, (props.studies || []).length]);
     useEffect(function () { loadNotes(); }, [prot && prot.id]);
     useEffect(function () { if (!prot || prot.status !== 'running') return; var t = setInterval(function () { load(); loadFiles(); loadNotes(); }, 5000); return function () { clearInterval(t); }; }, [prot && prot.id, prot && prot.status]);
     // cockpit (phase 3): realtime channel — presence (who's on the Protocol page now) + live board updates when ANYONE changes steps
@@ -5192,25 +5223,75 @@
       function badge(kind) { var map = { done: ['var(--ok, #15803d)', 'var(--ok-bg, #e7f6ee)'], run: ['#a16207', 'color-mix(in srgb, var(--warn, #d9820a) 15%, transparent)'], todo: ['var(--faint)', 'var(--surface-2)'] }; var m = map[kind] || map.todo; return { color: m[0], background: m[1] }; }
       var CI = 'var(--accent, #4f46e5)', CG = '#a23a86', CS = 'var(--ok, #15803d)', CR = 'var(--warn, #d9820a)';
       function leg(col, lab) { return h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 5 } }, h('i', { style: { width: 9, height: 9, borderRadius: 2, background: col, display: 'inline-block' } }), lab); }
-      var topGaps = gaps.slice().sort(function (a, b) { return (b.novelty || 0) - (a.novelty || 0); }).slice(0, 4);
+      var topGaps = gaps.slice().sort(function (a, b) { return (b.novelty || 0) - (a.novelty || 0); }).slice(0, 3);
+      // ---- §1 rich result cards ----
+      function resChip(cls, txt) { return h('span', { className: 'pc-chip ' + cls }, txt); }
+      function inclList(titles, n) {
+        if (!titles || !titles.length) return null;
+        return h('div', { className: 'pc-incl' },
+          h('div', { className: 'pc-incl-h' }, '✅ Beválogatott (' + n + ')'),
+          titles.slice(0, 3).map(function (t, i) { return h('div', { key: i, className: 'pc-incl-i', title: t.title }, String(t.title || 'Untitled').slice(0, 74) + (t.year ? ' (' + t.year + ')' : '')); }),
+          n > 3 ? h('div', { className: 'pc-incl-more' }, '+' + (n - 3) + ' további') : null);
+      }
+      function resReviewCard(j) {
+        var a = resAgg.rev[j.id] || { total: 0, incl: 0, titles: [] };
+        return h('div', { key: 'jr' + j.id, className: 'pc-res pcpit-clk', title: 'Részeredmények megnyitása', onClick: function () { openPv('review', j); } },
+          h('div', { className: 'pc-res-top' }, h('span', { className: 'pc-res-ic' }, '🔬'), h('span', { className: 'pc-res-t' }, srName(j)), resChip('done', '✓ Kész')),
+          a.total ? h('div', { className: 'pc-funnel' },
+            h('div', { className: 'pc-fn found' }, h('span', { className: 'n' }, String(a.total)), h('span', { className: 'l' }, 'Beemelve')),
+            h('div', { className: 'pc-fn excl' }, h('span', { className: 'n' }, String(Math.max(0, a.total - a.incl))), h('span', { className: 'l' }, 'Kizárt')),
+            h('div', { className: 'pc-fn incl' }, h('span', { className: 'n' }, String(a.incl)), h('span', { className: 'l' }, 'Beválogatva'))) : null,
+          inclList(a.titles, a.incl));
+      }
+      function resStudyCard(s) {
+        var a = resAgg.std[s.id] || { byStep: {}, incl: 0, titles: [] };
+        var run = PRStudyRunner.isStudyRunning(s.id), dn = s.status === 'done' || s.status === 'completed';
+        var hasData = Object.keys(a.byStep).length > 0, stalled = !dn && !run && hasData && a.incl === 0;
+        var NM = { 1: 'Keresés', 2: 'Absztrakt', 3: 'Full-text', 4: 'Áttekintés' };
+        var rows = Object.keys(a.byStep).sort().map(function (k) {
+          var c = a.byStep[k], tot = c.total || 0;
+          var parts = ['include', 'maybe', 'exclude'].filter(function (d) { return c[d]; }).map(function (d) { return c[d] + ' ' + (d === 'include' ? 'incl' : d === 'maybe' ? 'maybe' : 'excl'); });
+          return h('div', { key: k, className: 'pc-stprow' }, h('span', { className: 'sn' }, (NM[k] || ('L' + k)) + ' · ' + tot), h('span', { className: 'v' }, parts.join(' · ') || '—'));
+        });
+        return h('div', { key: 'sd' + s.id, className: 'pc-res pcpit-clk', title: 'Részeredmények megnyitása', onClick: function () { openPv('study', s); } },
+          h('div', { className: 'pc-res-top' }, h('span', { className: 'pc-res-ic' }, '🔎'), h('span', { className: 'pc-res-t' }, s.title || 'Irodalom-study'),
+            dn ? resChip('done', '✓ Kész') : stalled ? resChip('warnc', '⏳ Elakadt · ' + (s.cur_step || 1) + '/4') : run ? resChip('run', '⏳ Fut') : resChip('warnc', 'Lépés ' + (s.cur_step || 1) + '/4')),
+          rows.length ? h('div', { className: 'pc-steps' }, rows) : null,
+          stalled ? h('div', { className: 'pc-stall' }, '⚠️ 0 beválogatott — a szűrés minden találatot „maybe"-be tett, a funnel csak az „include"-okat lépteti tovább, ezért elakadt.') : inclList(a.titles, a.incl));
+      }
+      function resStepCard(s) {
+        var sm = (s.result && (s.result.summary || s.result.note)) || '', acc = (s.spec && s.spec.acceptance) || [];
+        var KB = { data: '#0e9aa7', preprocess: '#7c5cd6', train: '#17a34a', eval: '#2f66d8', analysis: '#d1810b', figure: '#d6455f', writeup: '#64748b' };
+        return h('div', { key: 'st' + s.id, className: 'pc-res pcpit-clk', title: 'Részeredmény megnyitása', onClick: function () { openPv('step', s); } },
+          h('div', { className: 'pc-res-top' }, h('span', { className: 'pc-res-ic', style: { fontSize: 11, fontWeight: 800, color: 'var(--faint)' } }, 'S' + s.ord), h('span', { className: 'pc-res-t' }, s.title), s.kind ? h('span', { className: 'pc-kind', style: { background: KB[s.kind] || 'var(--faint)' } }, s.kind) : null, resChip('done', '✓')),
+          sm ? h('div', { className: 'pc-res-sum' }, String(sm).slice(0, 220)) : null,
+          acc.length ? h('div', { className: 'pc-acc' }, acc.slice(0, 3).map(function (x, i) { return h('span', { key: i }, h('b', null, '✓ '), String(x).slice(0, 42)); })) : null);
+      }
+      // ---- §2 gap card in cockpit look (.gcard, 2-line clamp → click opens full preview) ----
+      function cockGapCard(g) {
+        var t = gapType(g.gap_type || 'knowledge');
+        return h('div', { key: g.id, className: 'gcard pcpit-clk', style: { borderLeftColor: t.c, padding: '10px 12px' }, title: 'Rés részletei', onClick: function () { openPv('gap', g); } },
+          h('div', { className: 'gcard-top', style: { marginBottom: 5 } }, h('span', { className: 'gbadge', style: { background: t.c } }, t.lab), g.novelty != null ? h('span', { className: 'gnov' }, 'Újdonság ', h('span', { className: 'gnov-bar' }, h('i', { style: { width: g.novelty + '%' } })), ' ' + g.novelty) : null),
+          h('div', { className: 'gstmt', style: { fontSize: 13, marginBottom: g.rationale ? 4 : 0, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' } }, g.question),
+          g.rationale ? h('div', { className: 'gwhy', style: { fontSize: 11.5, marginBottom: 0, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' } }, h('b', null, 'Miért rés? '), g.rationale) : null);
+      }
       return h(React.Fragment, null, pvModal(),
         h('div', null,
         h('div', { className: 'pcpit-hd' }, '🧭 Projekt-áttekintés ', h('span', { className: 'sub' }, '· a kutatás jelenlegi állapota egy helyen')),
         h('div', { className: 'pcpit' },
           h('div', { className: 'pcpit-card', style: { gridColumn: 'span 8' } },
-            h('h4', null, '🔬 Eddigi eredmények', h('span', { className: 'c' }, (doneStudies.length + doneSR.length) + ' study · ' + doneSteps.length + '/' + steps.length + ' lépés')),
+            h('h4', null, '🔬 Eddigi eredmények', h('span', { className: 'c' }, doneSR.length + ' review · ' + doneStudies.length + ' study · ' + doneSteps.length + '/' + steps.length + ' lépés')),
             (function () {
-              // ONE combined list of everything that finished (steps + Elicit reviews + literature studies), so all N
-              // reviews show — not a hard-capped 2. Bounded to MAXD with a "+N további" line to keep the card tidy.
+              // Info-rich result cards: reviews (funnel + included papers), studies (step counts + included), steps (result + acceptance)
               var items = []
-                .concat(doneSteps.map(function (s) { var sm = (s.result && (s.result.summary || s.result.note)) || ''; return { key: 'st' + s.id, prov: 'S' + s.ord, txt: s.title + (sm ? ' — ' + String(sm).slice(0, 130) : ''), kind: 'step', ref: s }; }))
-                .concat(doneSR.map(function (j) { return { key: 'jr' + j.id, prov: 'Review', txt: srName(j) + ' — kész', kind: 'review', ref: j }; }))
-                .concat(doneStudies.map(function (s) { return { key: 'sd' + s.id, prov: 'Study', txt: (s.title || 'Irodalom-study') + ' — kész', kind: 'study', ref: s }; }));
+                .concat(doneSteps.map(function (s) { return { kind: 'step', ref: s }; }))
+                .concat(doneSR.map(function (j) { return { kind: 'review', ref: j }; }))
+                .concat(doneStudies.map(function (s) { return { kind: 'study', ref: s }; }));
               if (!items.length) return h('div', { style: { fontSize: 12.5, color: 'var(--muted)', lineHeight: 1.5 } }, 'Még nincsenek rögzített eredmények — futtass protokoll-lépéseket vagy study-kat, és a kimenetük itt jelenik meg (provenance-szel).');
-              var MAXD = 8, shown = items.slice(0, MAXD);
-              return h('div', null,
-                shown.map(function (it) { return h('div', { key: it.key, className: 'pcpit-find pcpit-clk', title: 'Részeredmények megnyitása', onClick: function () { openPv(it.kind, it.ref); } }, h('span', { className: 'prov' }, it.prov), h('span', null, it.txt)); }),
-                items.length > MAXD ? h('div', { key: 'more', className: 'pcpit-find', style: { color: 'var(--faint)' } }, h('span', { className: 'prov' }, '…'), h('span', null, '+' + (items.length - MAXD) + ' további')) : null);
+              var MAXD = 6, shown = items.slice(0, MAXD);
+              return h('div', { className: 'pc-reslist' },
+                shown.map(function (it) { return it.kind === 'review' ? resReviewCard(it.ref) : it.kind === 'study' ? resStudyCard(it.ref) : resStepCard(it.ref); }),
+                items.length > MAXD ? h('div', { className: 'pc-more' }, '+' + (items.length - MAXD) + ' további eredmény') : null);
             })()),
           h('div', { className: 'pcpit-card', style: { gridColumn: 'span 4' } },
             h('h4', null, '📈 Projekt-állapot'),
@@ -5229,16 +5310,9 @@
                 }))
               : h('div', { style: { fontSize: 12, color: 'var(--muted)' } }, 'Még nincs rögzített hozzájárulás.'),
             h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 8, fontSize: 10.5, color: 'var(--faint)' } }, leg(CI, 'ötlet'), leg(CG, 'rés'), leg(CS, 'study'), leg(CR, 'forrás'))),
-          h('div', { className: 'pcpit-card', style: { gridColumn: 'span 3' } },
-            h('h4', null, '🕳️ Top rések'),
-            topGaps.length ? h('div', null, topGaps.map(function (g) { return h('div', { key: g.id, className: 'pcpit-row pcpit-clk', title: 'Rés részletei', onClick: function () { openPv('gap', g); } }, h('span', { className: 't' }, g.question), g.novelty != null ? h('span', { className: 'q' }, g.novelty) : null); })) : h('div', { style: { fontSize: 11.5, color: 'var(--muted)' } }, 'Nincs feltárt rés.')),
-          h('div', { className: 'pcpit-card', style: { gridColumn: 'span 3' } },
-            h('h4', null, '🔬 Study-k'),
-            (studies.length || srJobs.length)
-              ? h('div', null,
-                  (srJobs || []).slice(0, 3).map(function (j) { return h('div', { key: 'sj' + j.id, className: 'pcpit-row pcpit-clk', title: 'Review részeredményei', onClick: function () { openPv('review', j); } }, h('span', { className: 'pcpit-badge', style: badge(j.status === 'completed' ? 'done' : 'run') }, j.status === 'completed' ? '✓' : '⏳'), h('span', { className: 't' }, srName(j))); }),
-                  studies.slice(0, 2).map(function (s) { var run = PRStudyRunner.isStudyRunning(s.id), dn = s.status === 'done' || s.status === 'completed'; return h('div', { key: 'ss' + s.id, className: 'pcpit-row pcpit-clk', title: 'Study részeredményei', onClick: function () { openPv('study', s); } }, h('span', { className: 'pcpit-badge', style: badge(dn ? 'done' : run ? 'run' : 'todo') }, dn ? '✓' : run ? '⏳' : '•'), h('span', { className: 't' }, s.title || 'Study')); }))
-              : h('div', { style: { fontSize: 11.5, color: 'var(--muted)' } }, 'Nincs study.')))));
+          h('div', { className: 'pcpit-card', style: { gridColumn: 'span 6' } },
+            h('h4', null, '🕳️ Top rések', h('span', { className: 'c' }, gaps.length + ' · ' + openGaps.length + ' nyitva')),
+            topGaps.length ? h('div', { className: 'pc-gaplist' }, topGaps.map(function (g) { return cockGapCard(g); })) : h('div', { style: { fontSize: 11.5, color: 'var(--muted)' } }, 'Nincs feltárt rés.')))));
     }
     // ---- Cockpit chat (A, phase 2): context-aware co-pilot → proposes protocol tasks that land on the board ----
     function cockpitChat() {
