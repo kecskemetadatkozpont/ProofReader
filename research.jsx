@@ -5317,23 +5317,27 @@
     // ---- Cockpit chat (A, phase 2): context-aware co-pilot → proposes protocol tasks that land on the board ----
     function cockpitChat() {
       if (!ce) return null;
-      return h('div', { className: 'pcpit-chat' },
+      // §4 — main-chat look: assistant = full-width markdown prose, user = right indigo bubble, auto-grow textarea composer.
+      return h('div', { className: 'pcpit-chat pcpit-chat2' },
         h('div', { className: 'pcpit-chat-h' }, '💬 Protokoll-építő co-pilot ', h('span', { style: { fontWeight: 500, color: 'var(--faint)', fontSize: 11.5 } }, '· ismeri az állapotot'), h('button', { style: { marginLeft: 'auto', border: 'none', background: 'none', color: 'var(--faint)', cursor: 'pointer', fontSize: 14, fontFamily: 'inherit', lineHeight: 1 }, title: 'Bezárás', onClick: function () { setDockOpen(false); } }, '✕')),
         chatMsgs.length
-          ? h('div', { className: 'pcpit-msgs' }, chatMsgs.map(function (m, i) {
-              return h('div', { key: i, className: 'pcpit-msg ' + (m.role === 'me' ? 'me' : 'ai') },
-                h('div', { className: 'b' }, m.content, m.proposed ? h('span', { className: 'pcpit-taskref' }, '📋 ' + m.proposed + ' javasolt task — hagyd jóvá a 🔗 Gráfon') : null));
+          ? h('div', { className: 'pcpit-msgs2' }, chatMsgs.map(function (m, i) {
+              var ai = m.role !== 'me';
+              return h('div', { key: i, className: 'bubble ' + (ai ? 'ai' : 'user') },
+                ai ? h('div', { className: 'bwho' }, '✦ Publify') : null,
+                ai ? h('div', { className: 'btxt md', dangerouslySetInnerHTML: { __html: mdHtml(m.content || '') } }) : h('div', { className: 'btxt', style: { whiteSpace: 'pre-wrap' } }, m.content),
+                m.proposed ? h('span', { className: 'pcpit-taskref' }, '📋 ' + m.proposed + ' javasolt task — hagyd jóvá a 🔗 Gráfon') : null);
             }))
           : h('div', { className: 'pcpit-msgs-empty' }, 'Pl.: „Csinálj taskokat a legfontosabb nyitott résre, baseline + a mi módszerünk" · „Adj ábra-taskot a DeLong-teszthez".'),
         chatBusy ? h('div', { className: 'pcpit-typing' }, '✦ Publify gépel…') : null,
-        h('div', { className: 'pcpit-compose' },
+        h('div', { className: 'pcpit-compose2' },
           h('div', { className: 'pcpit-presets' },
             ['🕳️ Task a legfontosabb nyitott résre', '📊 Kiértékelő + ábra task az eddigi study-khoz', '➡️ Mi a következő logikus lépés? Vezesd le taskként'].map(function (p, i) {
               return h('button', { key: i, className: 'pcpit-preset', disabled: chatBusy, onClick: function () { sendChat(p); } }, p);
             })),
-          h('div', { className: 'pcpit-inbox' },
-            h('input', { className: 'field', value: chatInput, disabled: chatBusy, placeholder: 'Írd le, mit vizsgáljunk / módosítsunk…', onChange: function (e) { setChatInput(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter') sendChat(chatInput); } }),
-            h('button', { className: 'btn pri', disabled: chatBusy || !chatInput.trim(), onClick: function () { sendChat(chatInput); } }, chatBusy ? '…' : 'Küldés'))));
+          h('div', { className: 'chat-in2' },
+            h('textarea', { className: 'pcpit-ta', rows: 1, value: chatInput, disabled: chatBusy, placeholder: 'Message Publify…  (Enter to send · Shift+Enter newline)', onChange: function (e) { setChatInput(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(chatInput); } } }),
+            h('button', { className: 'btn pri', disabled: chatBusy || !chatInput.trim(), onClick: function () { sendChat(chatInput); } }, chatBusy ? '…' : 'Send'))));
     }
 
     // ---- A redesign helpers: command-header stat/tab, the primary action, and the runner-settings tab ----
