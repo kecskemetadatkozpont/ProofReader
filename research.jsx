@@ -5359,11 +5359,11 @@
             topGaps.length ? h('div', { className: 'pc-gaplist' }, topGaps.map(function (g) { return cockGapCard(g); })) : h('div', { style: { fontSize: 11.5, color: 'var(--muted)' } }, 'Nincs feltárt rés.')))));
     }
     // ---- Cockpit chat (A, phase 2): context-aware co-pilot → proposes protocol tasks that land on the board ----
-    function cockpitChat() {
+    function cockpitChat(inline) {
       if (!ce) return null;
       // §4 — main-chat look: assistant = full-width markdown prose, user = right indigo bubble, auto-grow textarea composer.
-      return h('div', { className: 'pcpit-chat pcpit-chat2' },
-        h('div', { className: 'pcpit-chat-h' }, '💬 Protokoll-építő co-pilot ', h('span', { style: { fontWeight: 500, color: 'var(--faint)', fontSize: 11.5 } }, '· ismeri az állapotot'), h('button', { style: { marginLeft: 'auto', border: 'none', background: 'none', color: 'var(--faint)', cursor: 'pointer', fontSize: 14, fontFamily: 'inherit', lineHeight: 1 }, title: 'Bezárás', onClick: function () { setDockOpen(false); } }, '✕')),
+      return h('div', { className: 'pcpit-chat pcpit-chat2' + (inline ? ' pcpit-chat-inline' : '') },
+        h('div', { className: 'pcpit-chat-h' }, '💬 Protokoll-építő co-pilot ', h('span', { style: { fontWeight: 500, color: 'var(--faint)', fontSize: 11.5 } }, '· ismeri az állapotot, taskokat javasol'), inline ? null : h('button', { style: { marginLeft: 'auto', border: 'none', background: 'none', color: 'var(--faint)', cursor: 'pointer', fontSize: 14, fontFamily: 'inherit', lineHeight: 1 }, title: 'Bezárás', onClick: function () { setDockOpen(false); } }, '✕')),
         chatMsgs.length
           ? h('div', { className: 'pcpit-msgs2' }, chatMsgs.map(function (m, i) {
               var ai = m.role !== 'me';
@@ -5462,7 +5462,7 @@
 
     if (loading) return h('div', { className: 'empty' }, tr(props.lang, 'Loading protocol…'));
 
-    if (!prot) return h('div', null, cockpitDashboard(), cockpitChat(), h('div', { className: 'panel' },
+    if (!prot) return h('div', null, cockpitDashboard(), cockpitChat(true), h('div', { className: 'panel' },
       h('h3', { style: { marginTop: 0 } }, '🧪 Protocol'),
       h('p', { style: { fontSize: 13, color: 'var(--muted)', lineHeight: 1.5 } }, 'Generate an executable research plan — an ordered ToDo list (data → preprocess → baselines → method → evaluation → figures). Válaszd ki, mely ötlet / rés / kutatási-lépés kártyák alapján készüljön; a szisztematikus review-eredmények mindig beépülnek. A Claude agent a dedikált gépeden aztán lépésről lépésre lefuttatja.'),
       ce ? sourcePicker() : h('div', { className: 'empty' }, tr(props.lang, 'No protocol yet.'))
@@ -5662,7 +5662,6 @@
         h('span', { className: 'pcpit-cmd-stats' }, cmdStat(done + '/' + steps.length, 'lépés'), cmdStat(openGapsCount, 'nyitott rés'), cmdStat(studiesCount, 'study'), cmdStat(incCount, 'included')),
         h('span', { className: 'pcpit-cmd-r' },
           (function () { var oids = Object.keys(onlineUsers || {}); if (!oids.length) return null; return h('span', { style: { display: 'inline-flex', alignItems: 'center', marginRight: 4 } }, oids.slice(0, 4).map(function (id, i) { var pf = contribMap[id] || {}; var nm = pf.name || 'Kutató'; var col = pf.color || ['#3a5bd9', '#0e8a6a', '#c67912', '#a23a86'][i % 4]; return h('span', { key: id, title: nm + (id === props.authorId ? ' (te)' : ''), style: { width: 22, height: 22, borderRadius: '50%', background: col, color: '#fff', fontSize: 9, fontWeight: 750, display: 'grid', placeItems: 'center', marginLeft: i ? -6 : 0, border: '2px solid var(--surface)' } }, (nm[0] || '?').toUpperCase()); })); })(),
-          ce ? h('button', { className: 'btn' + (dockOpen ? ' pri' : ''), style: { padding: '6px 11px', fontSize: 12 }, onClick: function () { setDockOpen(!dockOpen); } }, '💬 Co-pilot') : null,
           cmdPrimary())),
       h('div', { className: 'pcpit-tabs2' },
         cmdTab('dash', '📊 Áttekintés'),
@@ -5677,8 +5676,7 @@
           cview === 'graph' ? protocolGraph() : null,
           cview === 'tasks' ? execDashboard() : null,
           cview === 'result' ? (hasResults ? renderOverview() : h('div', { className: 'panel' }, h('div', { className: 'empty', style: { padding: '30px 16px' } }, 'Még nincs eredmény — futtasd a protokoll-lépéseket a „⚙ Futtató" fülről, majd itt jelenik meg a verdikt + a riport.'))) : null,
-          cview === 'runner' ? runnerPanel() : null),
-        dockOpen ? h('div', { className: 'pcpit-body-dock' }, cockpitChat()) : null),
+          cview === 'runner' ? runnerPanel() : null)),
       (!nd() && (!hasResults || pview === 'steps')) ? execDashboard() : null,
       (!nd() && (!hasResults || pview === 'steps')) ? h('div', { className: 'panel' },
         h('h3', null, 'Steps (' + steps.length + ')', ce ? h('span', { style: { marginLeft: 10, fontSize: 10.5, color: 'var(--faint)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 } }, '⤓ drop files on a task to attach') : null, ce ? h('button', { className: 'btn', style: { marginLeft: 'auto', padding: '3px 9px', fontSize: 11.5, flex: 'none' }, onClick: function () { setEditing({ step: {}, isNew: true, after: null }); } }, '+ Add task') : null),
@@ -5806,28 +5804,7 @@
           aiBusy ? h('div', { style: { marginTop: 8 } }, h(AiThinking, { label: aiFiles.length ? 'Drafting a pipeline to process your data' : 'Drafting new tasks from your prompt' })) : null
         ) : null
       ) : null,
-      h('div', { className: 'panel' },
-        h('h3', null, '💬 Protocol chat',
-          h('span', { style: { marginLeft: 8, fontSize: 10.5, fontWeight: 400, color: 'var(--faint)', textTransform: 'none', letterSpacing: 0 } }, 'a live log of what’s happening + ask about any task'),
-          h('button', { className: 'btn', style: { marginLeft: 'auto', padding: '3px 9px', fontSize: 11.5, flex: 'none' }, onClick: function () { setPcOpen(!pcOpen); } }, pcOpen ? '▾ Hide' : '▸ Show')),
-        pcOpen ? h('div', { className: 'chat-msgs', ref: pcScroll, style: { maxHeight: 440, minHeight: 160 } },
-          pcEvents().map(function (e) {
-            return h('div', { key: e.id, style: { display: 'flex', gap: 9, alignItems: 'flex-start', padding: '7px 2px', borderBottom: '1px solid var(--line)' } },
-              h('span', { style: { flex: 'none', fontSize: 13, marginTop: 1 } }, e.icon),
-              h('div', { style: { minWidth: 0, flex: 1 } },
-                h('div', { style: { fontSize: 11.5, fontWeight: 600, color: 'var(--ink)' } }, e.title),
-                h('div', { style: { fontSize: 11.5, color: 'var(--muted)', lineHeight: 1.45, whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, String(e.body || '').slice(0, 600))));
-          }),
-          pcMsgs.length ? h('div', { style: { height: 1, background: 'var(--line)', margin: '4px 0' } }) : null,
-          pcMsgs.map(function (m, i) {
-            return h('div', { key: 'pm' + i, className: 'bubble ' + (m.role === 'assistant' ? 'ai' : 'user') },
-              (m.role === 'assistant') ? h('div', { className: 'btxt md', dangerouslySetInnerHTML: { __html: mdHtml(m.content || '') } }) : h('div', { className: 'btxt' }, m.content));
-          }),
-          pcBusy ? h('div', { className: 'bubble ai' }, h('div', { className: 'btxt', style: { color: 'var(--faint)' } }, 'Publify is thinking…')) : null
-        ) : null,
-        pcOpen ? h('div', { className: 'chat-input', style: { marginTop: 8 } },
-          h('textarea', { value: pcInput, rows: 1, placeholder: 'Ask about your tasks — e.g. “what’s waiting for approval?” or “why did task 3 fail?”', disabled: pcBusy, onChange: function (e) { setPcInput(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); pcSend(); } } }),
-          h('button', { className: 'btn pri', disabled: pcBusy || !pcInput.trim(), onClick: pcSend }, 'Send')) : null),
+      cockpitChat(true),
       lb ? ReactDOM.createPortal(h('div', { className: 'fig-lb', onClick: function () { setLb(null); } },
         h('button', { className: 'fig-lb-x', 'aria-label': 'Close', onClick: function () { setLb(null); } }, '✕'),
         h('img', { src: lb.src, alt: lb.cap || '', onClick: function (e) { e.stopPropagation(); } }),
