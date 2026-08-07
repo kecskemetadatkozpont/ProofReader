@@ -1557,8 +1557,8 @@
     .gp-viewtog button.on { background: var(--accent); color: #fff; }
     .gp-egm { padding: 16px; overflow-x: auto; }
     .gp-egm .egm { border-collapse: separate; border-spacing: 7px; margin: 0 auto; }
-    .gp-egm .egm th { font-size: 11px; font-weight: 700; color: var(--muted); padding: 4px 8px; text-align: center; max-width: 130px; }
-    .gp-egm .egm th.rowh { text-align: right; white-space: nowrap; }
+    .gp-egm .egm th { font-size: 11px; font-weight: 700; color: var(--muted); padding: 4px 8px; text-align: center; max-width: 130px; white-space: normal; overflow-wrap: break-word; line-height: 1.25; vertical-align: bottom; }
+    .gp-egm .egm th.rowh { text-align: right; white-space: normal; overflow-wrap: break-word; line-height: 1.25; max-width: 160px; vertical-align: middle; }
     .egm-cell { min-width: 74px; height: 48px; border-radius: 9px; display: grid; place-items: center; font-family: ui-monospace, monospace; font-size: 15px; font-weight: 800; border: 1px solid var(--line); color: var(--ink); }
     .egm-cell.gapcell { border: 2px dashed #d6455f; background: color-mix(in srgb, #d6455f 10%, transparent); color: #d6455f; }
     .egm-cell.clk { cursor: pointer; transition: background .12s, transform .12s; }
@@ -1570,8 +1570,9 @@
     .gp-heatmap { min-width: 0; }
     .gp-heat-scroll { overflow-x: auto; padding-bottom: 4px; }
     .gp-heatmap .egm { border-collapse: separate; border-spacing: 5px; }
-    .gp-heatmap .egm th { font-size: 10.5px; font-weight: 700; color: var(--muted); padding: 2px 5px; text-align: center; white-space: nowrap; max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
-    .gp-heatmap .egm th.rowh { text-align: right; color: var(--ink); }
+    /* axis labels wrap to their FULL text (no ellipsis) — the LLM caps them at ~22 chars, so 2-3 short lines fit cleanly */
+    .gp-heatmap .egm th { font-size: 10.5px; font-weight: 700; color: var(--muted); padding: 3px 6px; text-align: center; white-space: normal; overflow-wrap: break-word; line-height: 1.25; max-width: 108px; min-width: 62px; vertical-align: bottom; hyphens: auto; }
+    .gp-heatmap .egm th.rowh { text-align: right; color: var(--ink); white-space: normal; overflow-wrap: break-word; line-height: 1.25; max-width: 150px; vertical-align: middle; }
     .gp-heatmap .egm-cell { position: relative; min-width: 60px; height: 50px; border-radius: 9px; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; border: 1.5px solid transparent; transition: transform .08s, box-shadow .12s; font-family: inherit; font-weight: 750; }
     .gp-heatmap .egm-cell:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(20,26,38,.14); }
     .gp-heatmap .egm-cell.sel { border-color: var(--ink); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); }
@@ -2049,9 +2050,9 @@
     html.dark .rmap-genbusy { background: #4f46e5; }
     @media (max-width: 900px) { .rmap-wrap { flex-direction: column; } .rmap-insp { width: auto; } }
   </style>
-  <script src="theme.js?v=1786097886"></script>
-  <script src="nav.js?v=1786097886"></script>
-  <script src="entitlements.js?v=1786097886"></script>
+  <script src="theme.js?v=1786107637"></script>
+  <script src="nav.js?v=1786107637"></script>
+  <script src="entitlements.js?v=1786107637"></script>
 </head>
 
 <body>
@@ -2063,24 +2064,24 @@
   <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
   <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="backend/config.js?v=1786097886"></script>
-  <script src="auth.js?v=1786097886"></script>
-  <script src="backend.js?v=1786097886"></script>
-  <script src="universities.js?v=1786097886"></script>
-  <script src="onboarding.js?v=1786097886"></script>
-  <script src="office.js?v=1786097886"></script>
-  <script src="publications.js?v=1786097886"></script>
+  <script src="backend/config.js?v=1786107637"></script>
+  <script src="auth.js?v=1786107637"></script>
+  <script src="backend.js?v=1786107637"></script>
+  <script src="universities.js?v=1786107637"></script>
+  <script src="onboarding.js?v=1786107637"></script>
+  <script src="office.js?v=1786107637"></script>
+  <script src="publications.js?v=1786107637"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/tus-js-client@4.1.0/dist/tus.min.js"></script>
-  <script type="text/babel" src="canvas.jsx?v=1786097886"></script>
-  <script type="text/babel" src="notes.jsx?v=1786097886"></script>
-  <script src="autopilot-core.js?v=1786097886"></script>
-  <script type="text/babel" src="research.jsx?v=1786097886"></script>
+  <script type="text/babel" src="canvas.jsx?v=1786107637"></script>
+  <script type="text/babel" src="notes.jsx?v=1786107637"></script>
+  <script src="autopilot-core.js?v=1786107637"></script>
+  <script type="text/babel" src="research.jsx?v=1786107637"></script>
 
-  <script src="build.js?v=1786097886"></script>
-  <script src="version-badge.js?v=1786097886"></script>
+  <script src="build.js?v=1786107637"></script>
+  <script src="version-badge.js?v=1786107637"></script>
 </body>
 
 </html>
