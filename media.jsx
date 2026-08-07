@@ -157,6 +157,8 @@
     var textS = useState(''), text = textS[0], setText = textS[1];
     var titleS = useState(''), title = titleS[0], setTitle = titleS[1];
     var fileNameS = useState(''), fileName = fileNameS[0], setFileName = fileNameS[1];
+    var projsS = useState([]), projects = projsS[0], setProjects = projsS[1];     // Research projects (cascade level 1)
+    var projIdS = useState(''), projectId = projIdS[0], setProjectId = projIdS[1];
     var studiesS = useState([]), studies = studiesS[0], setStudies = studiesS[1];
     var studyIdS = useState(''), studyId = studyIdS[0], setStudyId = studyIdS[1];
     var depthS = useState('abstract'), depth = depthS[0], setDepth = depthS[1];   // abstract | summary | fulltext
@@ -177,9 +179,16 @@
     // stop an in-flight generation and restore the idle UI
     function cancelGen() { abortRef.current = true; setBusy(false); setProg(''); setPct(null); }
 
+    // cascade level 1: the user's Research projects (RLS scopes to accessible ones)
     useEffect(function () {
-      props.sb.from('research_studies').select('id,title').order('created_at', { ascending: false }).then(function (r) { setStudies((r && r.data) || []); });
+      props.sb.from('research_projects').select('id,title').order('created_at', { ascending: false }).then(function (r) { setProjects((r && r.data) || []); });
     }, []);
+    // cascade level 2: studies WITHIN the selected project
+    useEffect(function () {
+      setStudies([]); setStudyId(''); setPapers([]); setPicked({});
+      if (!projectId) return;
+      props.sb.from('research_studies').select('id,title').eq('project_id', projectId).order('created_at', { ascending: false }).then(function (r) { setStudies((r && r.data) || []); });
+    }, [projectId]);
     // load the selected study's include-papers (furthest step) so the user can pick WHICH papers to narrate
     useEffect(function () {
       setPapers([]); setPicked({}); if (!studyId) return;
@@ -328,13 +337,15 @@
         fileName ? h('span', { style: { marginLeft: 8, fontSize: 13, color: 'var(--muted)' } }, fileName) : null,
         text ? h('div', { style: { fontSize: 12, color: 'var(--faint)', marginTop: 6 } }, text.length + ' characters — ' + text.slice(0, 160) + '…') : null) : null,
       src === 'study' ? h('div', null,
+        h('div', { className: 'mp-row' }, h('label', null, 'Research project'),
+          h('select', { className: 'field', value: projectId, onChange: function (e) { setProjectId(e.target.value); } }, h('option', { value: '' }, '— válassz projektet —'), projects.map(function (p) { return h('option', { key: p.id, value: p.id }, p.title); }))),
         h('div', { className: 'mp-row' }, h('label', null, 'Study'),
-          h('select', { className: 'field', value: studyId, onChange: function (e) { setStudyId(e.target.value); } }, h('option', { value: '' }, '— select —'), studies.map(function (s) { return h('option', { key: s.id, value: s.id }, s.title); }))),
+          h('select', { className: 'field', value: studyId, disabled: !projectId, onChange: function (e) { setStudyId(e.target.value); } }, h('option', { value: '' }, !projectId ? '— előbb válassz projektet —' : (studies.length ? '— válassz study-t —' : '— nincs study ebben a projektben —')), studies.map(function (s) { return h('option', { key: s.id, value: s.id }, s.title); }))),
         h('div', { className: 'mp-row' }, h('label', null, 'Depth'),
           h('div', { className: 'seg' }, [['abstract', 'Abstract'], ['summary', 'Publify overview'], ['fulltext', 'Full text (PDF)']].map(function (o) { return h('button', { key: o[0], className: depth === o[0] ? 'on' : '', 'aria-pressed': depth === o[0], onClick: function () { setDepth(o[0]); } }, o[1]); })))) : null,
       src === 'study' && studyId ? (papers.length ? h('div', { style: { marginTop: 6, marginBottom: 6 } },
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 } },
-          h('div', { className: 'field-label', style: { margin: 0 } }, 'Papers — ' + papers.filter(function (s) { return picked[s.id]; }).length + '/' + papers.length + ' selected'),
+          h('div', { className: 'field-label', style: { margin: 0 } }, 'Publikációk — ' + papers.filter(function (s) { return picked[s.id]; }).length + '/' + papers.length + ' kiválasztva'),
           h('button', { className: 'btn', style: { padding: '2px 8px', fontSize: 11 }, onClick: function () { var p = {}; papers.forEach(function (s) { p[s.id] = true; }); setPicked(p); } }, 'All'),
           h('button', { className: 'btn', style: { padding: '2px 8px', fontSize: 11 }, onClick: function () { setPicked({}); } }, 'None')),
         h('div', { style: { maxHeight: 190, overflowY: 'auto', border: '1px solid var(--line)', borderRadius: 8, padding: '5px 9px' } },
