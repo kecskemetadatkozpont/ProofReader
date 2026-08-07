@@ -6403,6 +6403,7 @@
     var tourT = useRef(null);   // tour autoplay timer
     var viewRef = useRef(view); viewRef.current = view;   // live mirror of `view` so a tween always starts from the true current camera
     var wheelRef = useRef(null);   // latest wheel handler, called by a NON-passive native listener so preventDefault reliably stops page/modal scroll
+    var stageCbRef = useRef(null); // stable callback ref that wires stageRef + the native wheel listener on mount
     var armedRef = useRef(null);   // the card "armed to enter" at deep zoom (Fázis 3) — Enter dives into it
     var winsS = useState([]), windows = winsS[0], setWindows = winsS[1];   // 5th LOD: embedded screen-space panel windows [{id,tab,t,title,ref,fp,dx,dy,w,h,z}]
     var winDragRef = useRef(null);   // window move/resize lifecycle guard
@@ -7044,12 +7045,16 @@
       setView(function (v) { var nk = Math.min(2.2, Math.max(.3, v.k * factor)); return { tx: mx - (mx - v.tx) * (nk / v.k), ty: my - (my - v.ty) * (nk / v.k), k: nk }; });
     }
     wheelRef.current = onWheel;
-    useEffect(function () {
-      var st = stageRef.current; if (!st) return;
-      var h2 = function (e) { if (wheelRef.current) wheelRef.current(e); };
-      st.addEventListener('wheel', h2, { passive: false });   // non-passive → preventDefault actually blocks the page/modal scroll
-      return function () { st.removeEventListener('wheel', h2); };
-    }, []);
+    // Stable callback ref for the stage: sets stageRef.current AND (de)attaches the NON-passive native wheel listener
+    // exactly when the element mounts/unmounts — robust to loading states / remounts (a useEffect fired too early).
+    if (!stageCbRef.current) {
+      stageCbRef.current = function (el) {
+        var prev = stageRef.current;
+        if (prev && prev !== el && prev.__wheelH) { prev.removeEventListener('wheel', prev.__wheelH); prev.__wheelH = null; }
+        stageRef.current = el;
+        if (el && !el.__wheelH) { var h = function (ev) { if (wheelRef.current) wheelRef.current(ev); }; el.__wheelH = h; el.addEventListener('wheel', h, { passive: false }); }
+      };
+    }
     function zoom(f) { tlPause(); stopFollow(); cancelFly(); tourStop(); setView(function (v) { var nk = Math.min(2.2, Math.max(.3, v.k * f)); return { tx: v.tx, ty: v.ty, k: nk }; }); }
     function setZoomTo(k) { tlPause(); stopFollow(); cancelFly(); tourStop(); var st = stageRef.current, cx = st ? st.clientWidth / 2 : 400, cy = st ? st.clientHeight / 2 : 300; setView(function (v) { return { tx: cx - (cx - v.tx) * (k / v.k), ty: cy - (cy - v.ty) * (k / v.k), k: k }; }); }   // zoom to an exact level around the viewport centre (zoom-menu presets)
     function closeDMenus() { setViewMenu(false); setArrMenu(false); setZoomMenu(false); }
@@ -9701,7 +9706,7 @@
         h('div', { className: 'rmap-exp-head' }, h('span', { className: 'rmap-exp-t' }, '🗂 Fájlok'), h('span', { style: { flex: 1 } }), h('button', { className: 'rmap-exp-x', title: 'Panel összecsukása', onClick: function () { setFbOpen(false); try { localStorage.setItem('pr-rmap-fb', '0'); } catch (e) { } } }, '‹')),
         h('div', { className: 'rmap-exp-body' }, h(SessionFileBrowser, { projectId: props.projectId, version: bump, canEdit: props.canEdit, authorId: props.authorId, onChanged: function () { setBump(function (x) { return x + 1; }); }, onAttach: function (a) { setDAttach(function (p) { return p.concat([a]); }); if (window.PRUI) window.PRUI.toast('📎 Csatolva: ' + String(a.label || a.name || 'fájl').slice(0, 40), { kind: 'ok' }); }, mapNodeId: fileNodeId, onLocate: locateFile, locatedFileId: fbLocatedId }))) : null,
       h('div', { className: 'rmap-stage-col' + (tlOn ? ' rmap-tl-active' : '') },
-      h('div', { className: 'rmap-stage', ref: stageRef, onMouseDown: onDown, onMouseMove: broadcastCursor, onDoubleClick: onStageDbl },
+      h('div', { className: 'rmap-stage', ref: stageCbRef.current, onMouseDown: onDown, onMouseMove: broadcastCursor, onDoubleClick: onStageDbl },
         // empty project: a small non-blocking welcome overlay so work can start from the Map (canvas + dock render normally underneath)
         (!g.N.length) ? h('div', { className: 'rmap-empty-hint', onMouseDown: function (e) { e.stopPropagation(); } },
           h('div', { className: 'rmap-eh-ic' }, '🗺️'),
