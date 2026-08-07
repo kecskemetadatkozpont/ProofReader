@@ -7031,6 +7031,38 @@
         if (!moved) break;
       }
     }
+    // DEFAULT placement = a deterministic LEFT→RIGHT process flow (a simplified Sugiyama layered layout, where the
+    // workflow PHASE already gives the layer/column). For every UN-PINNED, visible card: (1) column x by phase,
+    // left→right; (2) order within the column by the mean y of the cards it links to in earlier columns (barycenter →
+    // connected cards line up, edges read straight, crossings drop); (3) stack vertically by MEASURED height so cards
+    // never overlap. Pinned/saved cards keep their spot and are left out of the flow (obstacles for separateNodes).
+    function flowDefault(N, E, pinned) {
+      var LANE_W = 240, GAPX = 60, GAPY = 24, X0 = 30, Y0 = 40;
+      var un = N.filter(function (n) { return !(pinned && pinned[n.id]) && !n.mapHidden; });
+      if (!un.length) return;
+      var cols = {}; un.forEach(function (n) { var p = (n.ph != null ? n.ph : 0); (cols[p] = cols[p] || []).push(n); });
+      var phs = Object.keys(cols).map(Number).sort(function (a, b) { return a - b; });
+      // undirected adjacency from the provenance edges → barycenter uses whichever endpoints are already placed
+      var adj = {}; (E || []).forEach(function (e) { var a = e[0], b = e[1]; (adj[a] = adj[a] || []).push(b); (adj[b] = adj[b] || []).push(a); });
+      var midY = {};   // node id → vertical centre, once placed (feeds the next column's barycenter)
+      var colX = X0;
+      phs.forEach(function (p) {
+        var arr = cols[p];
+        var maxW = arr.reduce(function (m, n) { return Math.max(m, n._w || 204); }, 204), colW = Math.max(LANE_W, maxW + 36);
+        arr.forEach(function (n) {
+          var ys = (adj[n.id] || []).map(function (id) { return midY[id]; }).filter(function (v) { return v != null; });
+          n._bary = ys.length ? ys.reduce(function (s, v) { return s + v; }, 0) / ys.length : null;
+        });
+        arr.sort(function (a, b) {
+          if (a._bary != null && b._bary != null) { if (a._bary !== b._bary) return a._bary - b._bary; }
+          else if (a._bary != null) return -1; else if (b._bary != null) return 1;
+          return (a.ts || 0) - (b.ts || 0) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);   // stable, deterministic tiebreak
+        });
+        var y = Y0;
+        arr.forEach(function (n) { var w = n._w || 204, hh = n._h || 100; n.x = Math.round(colX + (colW - w) / 2); n.y = Math.round(y); midY[n.id] = n.y + hh / 2; y += hh + GAPY; });
+        colX += colW + GAPX;
+      });
+    }
     function graph() {
       var d = data, N = [], E = [];
       (d.ideas || []).forEach(function (x) {
@@ -7185,14 +7217,13 @@
           if (!ch) break;
         }
       })();
-      // column-less TIMELINE layout: phases seed left→right (ideas → literature → SR → protocol → journal → writing) so
-      // derivation reads as a timeline; cards stack within a phase. Free-drag takes over from here.
-      var cnt = {}, CEN = [{ x: 30, y: 90 }, { x: 350, y: 40 }, { x: 670, y: 150 }, { x: 990, y: 60 }, { x: 1310, y: 170 }, { x: 1630, y: 90 }, { x: 1950, y: 60 }];   // CEN[6] = submission lane (ph 6)
-      N.forEach(function (n) { var o = (cnt[n.ph] = (cnt[n.ph] || 0)); var c = CEN[n.ph] || { x: n.ph * 290, y: 80 }; n.x = c.x + (o % 2) * 234; n.y = c.y + Math.floor(o / 2) * 132; cnt[n.ph] = o + 1; });
-      // free-drag: a saved position overrides the auto-layout and PINS the card; only never-placed cards separate
+      // DEFAULT layout = a deterministic LEFT→RIGHT process flow (phases = columns; ideas → literature → SR → protocol
+      // → journal → writing). A saved/dragged position PINS the card and wins; every un-placed card flows into its
+      // phase column (see flowDefault) so new cards always appear left→right, never overlap, and build like a pipeline.
       var pinned = {};
       N.forEach(function (n) { var s = layout[n.id]; if (s) { n.x = s.x; n.y = s.y; pinned[n.id] = true; n.mapHidden = !!s.hidden; n.mapPinned = !!s.pinned; } if (ndrag.current && ndrag.current.id === n.id) pinned[n.id] = true; });
-      separateNodes(N, pinned);   // ← the no-overlap rule now only tucks in un-placed cards, never the user's own layout
+      flowDefault(N, E, pinned);   // clean columns for the un-pinned cards (never disturbs the user's own layout)
+      separateNodes(N, pinned);    // safety net: only tucks an un-pinned card clear of a pinned obstacle
       // the card under the cursor follows the pointer 1:1 (edges recompute from this via `by`, so they track the drag)
       if (dlive && dlive.id) { for (var q = 0; q < N.length; q++) { if (N[q].id === dlive.id) { N[q].x = dlive.x; N[q].y = dlive.y; break; } } }
       // group drag: every multi-selected card moves together by the same delta from its captured base position
