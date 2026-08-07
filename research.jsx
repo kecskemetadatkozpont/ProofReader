@@ -11816,7 +11816,7 @@
       body = h('div', null, seg,
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', margin: '2px 0 12px' } },
           h('span', { style: { fontSize: 12, color: 'var(--muted)' } }, '🛠️ Admin nézet — szűrj felhasználóra, hogy csak az ő kutatásait lásd.'),
-          h('select', { className: 'field', style: { width: 'auto', height: 30, marginLeft: 'auto' }, value: allOwner, title: 'Szűrés felhasználóra', onChange: function (e) { setAllOwner(e.target.value); } },
+          h('select', { className: 'field', style: { width: 'auto', height: 36, paddingTop: 0, paddingBottom: 0, marginLeft: 'auto' }, value: allOwner, title: 'Szűrés felhasználóra', onChange: function (e) { setAllOwner(e.target.value); } },
             h('option', { value: 'all' }, '👥 Minden felhasználó (' + allProjects.length + ')'),
             ownerOpts.map(function (o) { return h('option', { key: o.id, value: o.id }, '👤 ' + o.name + ' (' + o.n + ')'); }))),
         allSorted.length ? h('div', { className: 'grid' }, allSorted.map(function (p) { return h(ProjectCard, { key: p.id, project: p, meId: meId, studentById: studentById, lastActivity: lastAct[p.id], ownerName: (p.owner_id === meId ? null : (ownerNames[p.owner_id] || '…')), onOpen: props.openProject, apRun: apRuns[p.id], counts: pCounts[p.id], onChanged: props.reloadProjects }); })) : h('div', { className: 'soon' }, 'Nincs projekt ehhez a felhasználóhoz.'));
@@ -11844,7 +11844,7 @@
           (nd() && sel) ? h('div', { className: 'rv-crumb' }, h('b', null, 'Research')) : h('div', null, h('h1', null, sel ? tr(dashLang, 'Project') : (board ? tr(dashLang, 'Protocol tasks') : tr(dashLang, 'Research projects'))), h('div', { className: 'sub' }, board && !sel ? tr(dashLang, 'Every research project’s protocol steps in one board · personal to-dos live in “My tasks”') : sub)),
           h('div', { style: { display: 'flex', gap: 10, alignItems: 'center' } },
             h(NotifBell, null),
-            (sel || board) ? null : h('select', { className: 'field', style: { width: 'auto', height: 32 }, value: srt, title: 'Kártyák rendezése', onChange: function (e) { setSrt(e.target.value); } },
+            (sel || board) ? null : h('select', { className: 'field', style: { width: 'auto', height: 36, paddingTop: 0, paddingBottom: 0 }, value: srt, title: 'Kártyák rendezése', onChange: function (e) { setSrt(e.target.value); } },
               h('option', { value: 'recent' }, '🕒 Legutóbbi aktivitás'),
               h('option', { value: 'created' }, '📅 Létrehozás szerint'),
               h('option', { value: 'name' }, '🔤 Név szerint')),
