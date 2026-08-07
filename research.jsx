@@ -301,26 +301,28 @@
   // ---------- Stage stepper ----------
   function Stepper(props) {
     var cur = props.stage || 0;
+    var nt = props.newTabs || {};
+    function nw(k) { return nt[k] ? h('span', { className: 'step-new', title: 'Új eredmény' }) : null; }   // side-menu highlight dot
     var kids = [];
     STAGES.forEach(function (name, i) {
       if (i > 0) kids.push(h('div', { className: 'step-sep', key: 'sep' + i }));
-      var cls = 'step' + (i === cur ? ' cur' : (i < cur ? ' done' : ''));
+      var cls = 'step' + (i === cur ? ' cur' : (i < cur ? ' done' : '')) + (nt[STAGE_TAB[i]] ? ' has-new' : '');
       kids.push(h('button', {
         key: i, className: cls,
         title: name + ' — open',
         // navigation ONLY — clicking to view never advances the recorded stage (that would silently
         // progress the project + spam the supervisor digest). Setting the stage is the explicit Stage control.
         onClick: function () { if (props.onNav) props.onNav(i); }
-      }, h('span', { className: 'dot', 'aria-hidden': 'true' }, STAGE_ICONS[i] || (i + 1)), tr(props.lang, name)));
+      }, h('span', { className: 'dot', 'aria-hidden': 'true' }, STAGE_ICONS[i] || (i + 1)), tr(props.lang, name), nw(STAGE_TAB[i])));
       // intermediate "Studies" funnel between Idea and Literature — opens the study tab (NOT a lifecycle stage,
       // so it never changes the stored project.stage / shifts indices)
       if (i === 1) {
         kids.push(h('div', { className: 'step-sep', key: 'sep-study' }));
         kids.push(h('button', {
-          key: 'study', className: 'step step-study' + (props.tab === 'study' ? ' cur' : ''),
+          key: 'study', className: 'step step-study' + (props.tab === 'study' ? ' cur' : '') + (nt['study'] ? ' has-new' : ''),
           title: 'Studies — the literature-screening funnel between an idea and your literature',
           onClick: function () { if (props.onStudy) props.onStudy(); }
-        }, h('span', { className: 'dot', 'aria-hidden': 'true' }, svg('M3 4 13 4 9.2 8.8 9.2 12 6.8 13 6.8 8.8Z')), tr(props.lang, 'Studies')));
+        }, h('span', { className: 'dot', 'aria-hidden': 'true' }, svg('M3 4 13 4 9.2 8.8 9.2 12 6.8 13 6.8 8.8Z')), tr(props.lang, 'Studies'), nw('study')));
       }
       // "Rések" — research-gap analysis, after Literature (not a lifecycle stage; never shifts project.stage)
       if (i === 2) {
@@ -332,7 +334,7 @@
         }, h('span', { className: 'dot', 'aria-hidden': 'true' }, '🕳'), tr(props.lang, 'Rések')));
         if (props.hasLib) {   // Literature analyzers (embedded) as sub-tabs after Rések
           kids.push(h('div', { className: 'step-sep', key: 'sep-fb' }));
-          kids.push(h('button', { key: 'figboard', className: 'step step-littool' + (props.tab === 'figboard' ? ' cur' : ''), title: 'Ábra-tábla', onClick: function () { if (props.onFigboard) props.onFigboard(); } }, h('span', { className: 'dot', 'aria-hidden': 'true' }, '🖼'), tr(props.lang, 'Ábrák')));
+          kids.push(h('button', { key: 'figboard', className: 'step step-littool' + (props.tab === 'figboard' ? ' cur' : '') + (nt['figboard'] ? ' has-new' : ''), title: 'Ábra-tábla', onClick: function () { if (props.onFigboard) props.onFigboard(); } }, h('span', { className: 'dot', 'aria-hidden': 'true' }, '🖼'), tr(props.lang, 'Ábrák'), nw('figboard')));
           kids.push(h('div', { className: 'step-sep', key: 'sep-co' }));
           kids.push(h('button', { key: 'citopt', className: 'step step-littool' + (props.tab === 'citopt' ? ' cur' : ''), title: 'Citáció-optimalizáló', onClick: function () { if (props.onCitopt) props.onCitopt(); } }, h('span', { className: 'dot', 'aria-hidden': 'true' }, '🔗'), tr(props.lang, 'Idézetek')));
         }
@@ -3024,6 +3026,30 @@
     if (isNaN(age) || age > STUDY_LOCK_FRESH_MS) return { locked: false, stale: true };
     return { locked: true, by: s.running_by, mine: !!meId && s.running_by === meId };
   }
+  // ---- Background-result signalling: runners that finish while the user is elsewhere in the SPA raise a persisted
+  //      notification (bell + realtime toast) AND a per-project/per-tab "new result" flag so the workflow side-menu
+  //      can highlight the menu item where something landed. Client-only flags; the notification row is the durable part. ----
+  function prNotifySelf(kind, payload) {   // insert a self-addressed notification (RLS nf_insert allows recipient_id = auth.uid())
+    try { var uid = BE && BE.user && BE.user.id; if (!uid || !sb) return; sb.from('notifications').insert({ recipient_id: uid, kind: kind, payload: payload || {} }).then(function () { }, function () { }); } catch (e) { }
+  }
+  var PRSignals = (function () {
+    var flags = {}, subs = [];   // projectId -> { tabKey -> { at, kind, label } }
+    function notify() { for (var i = 0; i < subs.length; i++) { try { subs[i](); } catch (e) { } } }
+    return {
+      subscribe: function (fn) { subs.push(fn); return function () { var i = subs.indexOf(fn); if (i >= 0) subs.splice(i, 1); }; },
+      mark: function (pid, tab, info) { if (!pid || !tab) return; flags[pid] = flags[pid] || {}; flags[pid][tab] = Object.assign({ at: Date.now() }, info || {}); notify(); },
+      forProject: function (pid) { return (pid && flags[pid]) || {}; },
+      clear: function (pid, tab) { if (pid && flags[pid] && flags[pid][tab]) { delete flags[pid][tab]; notify(); } }
+    };
+  })();
+  // popup + persisted notification + side-menu highlight for a finished background run (figures / study / review)
+  function prAnnounce(o) {   // { kind, projectId, tab, toast, toastKind, payload }
+    try {
+      if (o.projectId && o.tab) PRSignals.mark(o.projectId, o.tab, { kind: o.kind, label: o.label || '' });
+      if (o.toast && window.PRUI && window.PRUI.toast) window.PRUI.toast(o.toast, { kind: o.toastKind || 'success', duration: 6500 });
+      prNotifySelf(o.kind, Object.assign({ project_id: o.projectId, tab: o.tab }, o.payload || {}));
+    } catch (e) { }
+  }
   var PRStudyRunner = (function () {
     var runs = {}, subs = [], seq = 0;
     var BK = { setup: 'Study előkészítése', s1: 'Keresés + gyors triage (OpenAlex)', s2: 'Absztrakt-szűrés (Claude)', s3: 'Full-text szűrés (Claude)', review: 'Áttekintés írása (Claude)' };
@@ -3031,7 +3057,16 @@
     function set(id, patch) {
       if (!runs[id]) return; runs[id] = Object.assign({}, runs[id], patch);
       var sid = runs[id].sid;   // keep the server run-lock in sync: clear on a terminal stage, heartbeat on a working stage
-      if (patch.stage === 'done' || patch.stage === 'error') { if (sid) studyLockOff(sid); }
+      if (patch.stage === 'done' || patch.stage === 'error') {
+        if (sid) studyLockOff(sid);
+        if (!runs[id]._announced) {   // announce the finish once — toast + bell + side-menu highlight (survives leaving the Study menu)
+          runs[id]._announced = true;
+          var r = runs[id], ttl = String(r.title || r.rq || 'Study').slice(0, 70), errd = patch.stage === 'error';
+          prAnnounce({ kind: 'study_done', projectId: r.projectId, tab: 'study', label: errd ? 'hiba' : 'kész',
+            toast: (errd ? '⚠️ Study leállt — „' : '✓ Study kész — „') + ttl + '"', toastKind: errd ? 'error' : 'success',
+            payload: { sid: sid || null, title: ttl, status: patch.stage } });
+        }
+      }
       else if (patch.stage && sid) studyLockBeat(sid);
       notify();
     }
@@ -3197,8 +3232,13 @@
       if (!runs[pid]) return;   // cancelled → stop
       if (i >= todo.length) {
         var oc = runs[pid].onChanged;
-        set(pid, { stage: 'done', done: todo.length, curTitle: '', msg: '✓ Kész — ' + runs[pid].added + ' ábra ' + todo.length + ' cikkből' });
+        var added = runs[pid].added;
+        set(pid, { stage: 'done', done: todo.length, curTitle: '', msg: '✓ Kész — ' + added + ' ábra ' + todo.length + ' cikkből' });
         if (oc) try { oc(); } catch (e) { }
+        // announce the finished background run — popup + bell + „Ábrák/Irodalom" side-menu highlight
+        prAnnounce({ kind: 'fig_done', projectId: pid, tab: 'figboard', label: added + ' ábra',
+          toast: '🖼 Ábra-kinyerés kész — ' + added + ' ábra ' + todo.length + ' cikkből.', toastKind: 'success',
+          payload: { count: added, papers: todo.length } });
         return;
       }
       var p = todo[i];
@@ -3264,6 +3304,13 @@
         running.forEach(function (j) {
           callElicit({ action: 'job.status', job_id: j.id }).then(function (d) {
             if (!alive.current || !d || !d.job) return;
+            var ns = d.job.status;
+            if ((ns === 'completed' || ns === 'failed') && j.status !== ns) {   // terminal transition → announce (survives leaving the menu)
+              var ttl = String(d.job.research_question || d.job.result_title || j.research_question || 'Áttekintés').slice(0, 70), failed = ns === 'failed';
+              prAnnounce({ kind: 'review_done', projectId: props.projectId, tab: 'study', label: failed ? 'hiba' : 'kész',
+                toast: (failed ? '⚠️ Elicit áttekintés leállt — „' : '✓ Elicit áttekintés kész — „') + ttl + '"', toastKind: failed ? 'error' : 'success',
+                payload: { job_id: j.id, title: ttl, status: ns } });
+            }
             setJobs(function (list) { return (list || []).map(function (x) { return x.id === j.id ? Object.assign({}, x, d.job) : x; }); });
           });
         });
@@ -10867,6 +10914,11 @@
     var ncS = useState(function () { try { return localStorage.getItem('pr-rv-collapsed') === '1'; } catch (e) { return false; } }), navCollapsed = ncS[0], setNavCollapsed = ncS[1];
     function toggleNav() { setNavCollapsed(function (v) { var n = !v; try { localStorage.setItem('pr-rv-collapsed', n ? '1' : '0'); } catch (e) { } return n; }); }
     var tS = useState(props.initTab || 'overview'), tab = tS[0], setTab = tS[1];   // Memory step deep-link opens the protocol tab
+    // side-menu „new result" highlight: background runners (figures / study / review) mark PRSignals on finish; viewing the tab clears it
+    var sigTickS = useState(0), setSigTick = sigTickS[1];
+    useEffect(function () { return PRSignals.subscribe(function () { setSigTick(function (x) { return x + 1; }); }); }, []);
+    var newTabs = PRSignals.forProject(p.id);
+    useEffect(function () { PRSignals.clear(p.id, tab); }, [tab]);
     var asS = useState(null), autoStudy = asS[0], setAutoStudy = asS[1];   // ideas to auto-create a study from (set by the Ideas "study basis" window → one-click create + Publify pre-fill)
     var agS = useState(0), autoSR = agS[0], setAutoSR = agS[1];   // signal from the Ideas "Study basis" → generate SR-question drafts in the SR studio
     var fsS = useState(null), focusStudy = fsS[0], setFocusStudy = fsS[1];   // a study id to REVEAL in the keyword funnel (clicked a "Study" chip in the SR studio)
@@ -11002,17 +11054,18 @@
     // ---- Two-tier chrome (New design flag, direction B): the project nav moves into a left context panel beside the content (the AppShell sidebar becomes a thin icon rail via CSS). Classic (flag-OFF) return is unchanged below. ----
     function stageNav() {
       var kids = [];
+      function nw(k) { return newTabs[k] ? h('span', { className: 'rv-st-new', title: 'Új eredmény' }) : null; }   // side-menu highlight dot
       STAGES.forEach(function (name, i) {
         var isDone = i < (p.stage || 0);
         var active = STAGE_TAB[i] === tab;
-        kids.push(h('button', { key: i, className: 'rv-st' + (active ? ' cur' : '') + (isDone ? ' done' : '') + (i === (p.stage || 0) ? ' atstage' : ''), 'aria-current': active ? 'page' : null, onClick: function () { setTab(STAGE_TAB[i] || 'overview'); } },
-          h('span', { className: 'rv-st-dot' }, isDone ? '✓' : (i + 1)), h('span', { className: 'rv-st-lbl' }, tr(plang, name))));
-        if (i === 1) kids.push(h('button', { key: 'study', className: 'rv-st sub' + (tab === 'study' ? ' cur' : ''), onClick: function () { setTab('study'); } },
-          h('span', { className: 'rv-st-dot' }, '›'), h('span', { className: 'rv-st-lbl' }, tr(plang, 'Studies'))));
+        kids.push(h('button', { key: i, className: 'rv-st' + (active ? ' cur' : '') + (isDone ? ' done' : '') + (i === (p.stage || 0) ? ' atstage' : '') + (newTabs[STAGE_TAB[i]] ? ' rv-hasnew' : ''), 'aria-current': active ? 'page' : null, onClick: function () { setTab(STAGE_TAB[i] || 'overview'); } },
+          h('span', { className: 'rv-st-dot' }, isDone ? '✓' : (i + 1)), h('span', { className: 'rv-st-lbl' }, tr(plang, name)), nw(STAGE_TAB[i])));
+        if (i === 1) kids.push(h('button', { key: 'study', className: 'rv-st sub' + (tab === 'study' ? ' cur' : '') + (newTabs['study'] ? ' rv-hasnew' : ''), onClick: function () { setTab('study'); } },
+          h('span', { className: 'rv-st-dot' }, '›'), h('span', { className: 'rv-st-lbl' }, tr(plang, 'Studies')), nw('study')));
         if (i === 2) kids.push(h('button', { key: 'gap', className: 'rv-st sub' + (tab === 'gap' ? ' cur' : ''), title: 'Kutatási rés-elemzés', onClick: function () { setTab('gap'); } },
           h('span', { className: 'rv-st-dot' }, '🕳'), h('span', { className: 'rv-st-lbl' }, 'Rések')));
         if (i === 2 && hasLib) {   // Literature analyzers as sub-tabs (embedded via iframe) — only with a library
-          kids.push(h('button', { key: 'figboard', className: 'rv-st sub' + (tab === 'figboard' ? ' cur' : ''), title: 'Ábra-tábla — ábrák kinyerése a szakirodalomból', onClick: function () { setTab('figboard'); } }, h('span', { className: 'rv-st-dot' }, '🖼'), h('span', { className: 'rv-st-lbl' }, 'Ábrák')));
+          kids.push(h('button', { key: 'figboard', className: 'rv-st sub' + (tab === 'figboard' ? ' cur' : '') + (newTabs['figboard'] ? ' rv-hasnew' : ''), title: 'Ábra-tábla — ábrák kinyerése a szakirodalomból', onClick: function () { setTab('figboard'); } }, h('span', { className: 'rv-st-dot' }, '🖼'), h('span', { className: 'rv-st-lbl' }, 'Ábrák'), nw('figboard')));
           kids.push(h('button', { key: 'citopt', className: 'rv-st sub' + (tab === 'citopt' ? ' cur' : ''), title: 'Citáció-optimalizáló — mire hivatkoznak a legidézettebb cikkeid', onClick: function () { setTab('citopt'); } }, h('span', { className: 'rv-st-dot' }, '🔗'), h('span', { className: 'rv-st-lbl' }, 'Idézetek')));
         }
       });
@@ -11078,7 +11131,7 @@
           props.canEdit ? h('button', { className: 'btn', style: { height: 32, flex: 'none' }, title: 'Project base settings (title, field, keywords, goal)', onClick: function () { setEditOpen(true); } }, tr(plang, '✎ Settings')) : null
         )
       ),
-      h(Stepper, { stage: p.stage, tab: tab, lang: plang, canEdit: props.canEdit, onSet: setStage, onStudy: function () { setTab('study'); }, onGap: function () { setTab('gap'); }, hasLib: hasLib, onFigboard: function () { setTab('figboard'); }, onCitopt: function () { setTab('citopt'); }, onNav: function (i) { setTab(STAGE_TAB[i] || 'overview'); } }),
+      h(Stepper, { stage: p.stage, tab: tab, lang: plang, canEdit: props.canEdit, newTabs: newTabs, onSet: setStage, onStudy: function () { setTab('study'); }, onGap: function () { setTab('gap'); }, hasLib: hasLib, onFigboard: function () { setTab('figboard'); }, onCitopt: function () { setTab('citopt'); }, onNav: function (i) { setTab(STAGE_TAB[i] || 'overview'); } }),
       h('div', { className: 'subtabs' }, [['overview', 'Overview', null], ['canvas', 'Canvas', null], ['notes', 'Notes', null], ['log', 'Log', (props.log || []).length], ['tasks', 'Tasks', openTasks]].map(function (nt) {
         return h('button', { key: nt[0], className: tab === nt[0] ? 'on' : '', onClick: function () { setTab(nt[0]); } }, tr(plang, nt[1]), nt[2] ? h('span', { className: 'c' }, nt[2]) : null);
       })),
@@ -11128,6 +11181,16 @@
     if (d < 2592000) { var dy = Math.round(d / 86400); return pre + dy + (hu ? ' napja' : 'd ago'); }
     return pre + new Date(ts).toLocaleDateString(hu ? 'hu-HU' : 'en-US');
   }
+  function pcRel(ts, hu) {   // relative time, no "updated" prefix (for the card timestamp chips)
+    if (!ts) return '—';
+    var d = (Date.now() - new Date(ts).getTime()) / 1000;
+    if (d < 60) return hu ? 'most' : 'now';
+    if (d < 3600) { var mnt = Math.max(1, Math.round(d / 60)); return mnt + (hu ? ' perce' : 'm'); }
+    if (d < 86400) { var hr = Math.round(d / 3600); return hr + (hu ? ' órája' : 'h'); }
+    if (d < 2592000) { var dy = Math.round(d / 86400); return dy + (hu ? ' napja' : 'd'); }
+    return new Date(ts).toLocaleDateString(hu ? 'hu-HU' : 'en-US');
+  }
+  function pcAbs(ts, hu) { if (!ts) return '—'; try { return new Date(ts).toLocaleString(hu ? 'hu-HU' : 'en-US'); } catch (e) { return String(ts); } }
   function ProjectCard(props) {
     var p = props.project;
     // owner-only card actions: rename / settings / delete (the whole card is click-to-open, so these stopPropagation)
@@ -11192,16 +11255,22 @@
         h('div', { className: 'pc-rail' }, segs),
         h('div', { className: 'pc-rlab' }, h('span', null, tr(clang, STAGES[0])), h('span', { className: 'now' }, tr(clang, STAGES[stage]) + ' · ' + (stage + 1) + '/' + nS), h('span', null, tr(clang, STAGES[nS - 1]))),
         h('div', { className: 'pc-metrics tabnum' }, ML.map(function (lab, k) { return h('div', { className: 'pc-m', key: k }, h('span', { className: 'pc-mv' }, MV[k] != null ? MV[k] : '–'), h('span', { className: 'pc-ml' }, lab)); })),
+        h('div', { className: 'pc-times' },
+          h('span', { title: (hu ? 'Létrehozva: ' : 'Created: ') + pcAbs(p.created_at, hu) }, '📅 ' + pcRel(p.created_at, hu)),
+          h('span', { title: (hu ? 'Legutóbbi aktivitás: ' : 'Last activity: ') + pcAbs(props.lastActivity || p.updated_at, hu) }, '🕒 ' + pcRel(props.lastActivity || p.updated_at, hu))),
         h('div', { className: 'pc-foot' },
           h('div', { className: 'pc-kw' }, kws.map(function (k, i) { return h('span', { className: 'pc-kwc', key: i }, k); }), extraKw ? h('span', { className: 'pc-kwc' }, '+' + extraKw) : null, badge),
-          props.apRun ? apRunBadge(props.apRun) : h('span', { className: 'pc-upd' }, pcAgo(p.updated_at, hu))), pcOverlays);
+          props.apRun ? apRunBadge(props.apRun) : h('span', { className: 'pc-upd' }, pcAgo(props.lastActivity || p.updated_at, hu))), pcOverlays);
     }
     // ---- classic card (flag OFF) ----
     return h('div', { className: 'card', onClick: function () { props.onOpen(p); } },
       h('div', { className: 'ch' }, h('div', null, h('b', null, p.title), h('span', null, p.field || '—')), badge),
       p.keywords && p.keywords.length ? h('div', { className: 'tags' }, p.keywords.slice(0, 4).map(function (k, i) { return h('span', { className: 'tag', key: i }, k); })) : null,
       h('div', { className: 'meter' }, h('i', { style: { width: Math.round((p.stage / (STAGES.length - 1)) * 100) + '%' } })),
-      h('div', { className: 'kv' }, h('span', null, 'Stage: ' + STAGES[p.stage || 0]), h('span', { className: 'chip ' + (p.status === 'active' ? 'c-ok' : 'c-grey') }, STATUS_LABEL[p.status] || p.status)), pcOverlays
+      h('div', { className: 'kv' }, h('span', null, 'Stage: ' + STAGES[p.stage || 0]), h('span', { className: 'chip ' + (p.status === 'active' ? 'c-ok' : 'c-grey') }, STATUS_LABEL[p.status] || p.status)),
+      h('div', { className: 'pc-times', style: { marginTop: 6 } },
+        h('span', { title: 'Létrehozva: ' + pcAbs(p.created_at) }, '📅 ' + pcRel(p.created_at)),
+        h('span', { title: 'Legutóbbi aktivitás: ' + pcAbs(props.lastActivity || p.updated_at) }, '🕒 ' + pcRel(props.lastActivity || p.updated_at))), pcOverlays
     );
   }
 
@@ -11240,6 +11309,9 @@
       var p = n.payload || {};
       if (n.kind === 'sr_request') return '🔬 Elicit review kérelem';
       if (n.kind === 'sr_review') return (p.decision === 'rejected') ? '⛔ Review elutasítva' : (p.decision === 'approved_fallback' ? '✓ Jóváhagyva (OpenAlex)' : '✓ Review jóváhagyva');
+      if (n.kind === 'fig_done') return '🖼 Ábra-kinyerés kész';
+      if (n.kind === 'study_done') return (p.status === 'error') ? '⚠️ Study leállt' : '✓ Study kész';
+      if (n.kind === 'review_done') return (p.status === 'failed') ? '⚠️ Áttekintés leállt' : '✓ Áttekintés kész';
       if (p.type === 'research_map_mention') return '💬 Említés a térképen';
       return p.title || p.project_title || n.kind;
     }
@@ -11249,6 +11321,9 @@
       if (n.kind === 'share') return (p.by || 'Valaki') + ' meghívott a(z) „' + (p.title || 'Projekt') + '" projektbe (' + shareRoleLabel(p.role) + ').';
       if (n.kind === 'sr_request') return 'Egy felhasználó Elicit review-t kér — jóváhagyás az Admin felületen: „' + String(p.title || '').slice(0, 90) + '"';
       if (n.kind === 'sr_review') return String(p.title || '').slice(0, 100) + (p.decision === 'rejected' ? ' — elutasítva' : (p.decision === 'approved_fallback' ? ' — Elicit nem elérhető, OpenAlex fut' : ' — elindult'));
+      if (n.kind === 'fig_done') return (p.count != null ? p.count + ' ábra ' : '') + (p.papers != null ? p.papers + ' cikkből' : '') + ' — az Irodalom → Ábrák fülön.';
+      if (n.kind === 'study_done') return '„' + String(p.title || 'Study').slice(0, 90) + '"' + (p.status === 'error' ? ' — hiba a futás során.' : ' — a Study fülön elérhető.');
+      if (n.kind === 'review_done') return '„' + String(p.title || 'Áttekintés').slice(0, 90) + '"' + (p.status === 'failed' ? ' — hiba a futás során.' : ' — a Study fülön elérhető.');
       if (p.type === 'research_map_mention') return (p.from || 'Kolléga') + (p.project_title ? ' — „' + p.project_title + '"' : '') + (p.excerpt ? ': ' + p.excerpt : '');
       return p.body || '';
     }
@@ -11526,7 +11601,7 @@
       }, function () { setSupStudents({ byId: {}, list: [] }); });
     }
     function loadProjects(pid, preview, done) {
-      sb.from('research_projects').select('id,owner_id,student_id,title,field,keywords,stage,status,goal,language,updated_at').order('updated_at', { ascending: false }).then(function (r) {
+      sb.from('research_projects').select('id,owner_id,student_id,title,field,keywords,stage,status,goal,language,created_at,updated_at').order('updated_at', { ascending: false }).then(function (r) {
         var list = (r && r.data) || [];
         if (preview) list = list.filter(function (x) { return x.owner_id === pid; });
         setProjects(list);
@@ -11598,7 +11673,30 @@
       sb.from('profiles_public').select('id,name').in('id', idl).then(function (r) { if (!alive) return; var m = {}; ((r && r.data) || []).forEach(function (x) { m[x.id] = x.name; }); setOwnerNames(m); }, function () { });
       return function () { alive = false; };
     }, [isAdminUser, props.projects.length]);
-    function sharedGrid() { return h('div', { style: { marginTop: mineProjects.length ? 26 : 0 } }, h('div', { className: 'shared-sec-h' }, '👥 Megosztott velem (' + sharedProjects.length + ')'), h('div', { className: 'grid' }, sharedProjects.map(function (p) { return h(ProjectCard, { key: p.id, project: p, meId: meId, studentById: studentById, onOpen: props.openProject, apRun: apRuns[p.id], counts: pCounts[p.id], onChanged: props.reloadProjects, memberRole: myMemberships[p.id] }); }))); }
+    // admin all-view: filter to a single owner's projects
+    var aoS = useState('all'), allOwner = aoS[0], setAllOwner = aoS[1];
+    // card timestamps: most-recent real activity per project (research_log ts; falls back to the project's updated_at)
+    var laS = useState({}), lastAct = laS[0], setLastAct = laS[1];
+    useEffect(function () {
+      var alive = true; var pids = (props.projects || []).map(function (x) { return x.id; });
+      if (!pids.length) { setLastAct({}); return function () { alive = false; }; }
+      sb.from('research_log').select('project_id,ts').in('project_id', pids).order('ts', { ascending: false }).limit(5000).then(function (r) {
+        if (!alive) return; var m = {}; ((r && r.data) || []).forEach(function (x) { if (x.project_id && !m[x.project_id]) m[x.project_id] = x.ts; });   // ordered desc → first per project = most recent
+        setLastAct(m);
+      }, function () { });
+      return function () { alive = false; };
+    }, [props.projects.length]);
+    function lastActOf(p) { return Date.parse((lastAct[p.id]) || p.updated_at || 0) || 0; }
+    // card sorting (recent activity | creation date | name)
+    var srtS = useState('recent'), srt = srtS[0], setSrt = srtS[1];
+    function sortProjects(arr) {
+      var a = (arr || []).slice();
+      if (srt === 'name') a.sort(function (x, y) { var xn = (x.title || '').toLowerCase(), yn = (y.title || '').toLowerCase(); return xn < yn ? -1 : xn > yn ? 1 : 0; });
+      else if (srt === 'created') a.sort(function (x, y) { return (Date.parse(y.created_at || 0) || 0) - (Date.parse(x.created_at || 0) || 0); });
+      else a.sort(function (x, y) { return lastActOf(y) - lastActOf(x); });
+      return a;
+    }
+    function sharedGrid() { return h('div', { style: { marginTop: mineProjects.length ? 26 : 0 } }, h('div', { className: 'shared-sec-h' }, '👥 Megosztott velem (' + sharedProjects.length + ')'), h('div', { className: 'grid' }, sortProjects(sharedProjects).map(function (p) { return h(ProjectCard, { key: p.id, project: p, meId: meId, studentById: studentById, lastActivity: lastAct[p.id], onOpen: props.openProject, apRun: apRuns[p.id], counts: pCounts[p.id], onChanged: props.reloadProjects, memberRole: myMemberships[p.id] }); }))); }
     var isSup = studentList.length > 0 || supProjects.length > 0;
     var vw = useState(props.initStudent ? 'supervised' : 'mine'), view = vw[0], setView = vw[1];
     // (B) load my Autopilot runs → project_id → most-recent run, for the ⚡ status badge on project cards (New design only).
@@ -11651,16 +11749,25 @@
     } else if (board) {
       body = h(GlobalBoard, { projects: props.projects, canEditProject: props.canEdit, onOpenProject: props.openProject });
     } else if (view === 'all' && isAdminUser) {
+      // owner options: distinct owners present in allProjects, with a project count each
+      var ownerOpts = (function () { var m = {}; allProjects.forEach(function (p) { if (p.owner_id) m[p.owner_id] = (m[p.owner_id] || 0) + 1; }); return Object.keys(m).map(function (id) { return { id: id, n: m[id], name: (id === meId ? 'Én' : (ownerNames[id] || id.slice(0, 8))) }; }).sort(function (a, b) { return (a.name || '').localeCompare(b.name || ''); }); })();
+      var allFiltered = allOwner === 'all' ? allProjects : allProjects.filter(function (p) { return p.owner_id === allOwner; });
+      var allSorted = sortProjects(allFiltered);
+      if (allOwner === 'all') allSorted = allSorted.slice().sort(function (a, b) { return (a.owner_id === meId ? -1 : 0) - (b.owner_id === meId ? -1 : 0); });   // keep my own first only in the unfiltered view
       body = h('div', null, seg,
-        h('div', { style: { fontSize: 12, color: 'var(--muted)', margin: '2px 0 12px' } }, '🛠️ Admin nézet — minden felhasználó összes kutatási projektje, tulajdonossal jelölve.'),
-        allProjects.length ? h('div', { className: 'grid' }, allProjects.slice().sort(function (a, b) { return (a.owner_id === meId ? -1 : 0) - (b.owner_id === meId ? -1 : 0); }).map(function (p) { return h(ProjectCard, { key: p.id, project: p, meId: meId, studentById: studentById, ownerName: (p.owner_id === meId ? null : (ownerNames[p.owner_id] || '…')), onOpen: props.openProject, apRun: apRuns[p.id], counts: pCounts[p.id], onChanged: props.reloadProjects }); })) : h('div', { className: 'soon' }, 'Nincs projekt.'));
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', margin: '2px 0 12px' } },
+          h('span', { style: { fontSize: 12, color: 'var(--muted)' } }, '🛠️ Admin nézet — szűrj felhasználóra, hogy csak az ő kutatásait lásd.'),
+          h('select', { className: 'field', style: { width: 'auto', height: 30, marginLeft: 'auto' }, value: allOwner, title: 'Szűrés felhasználóra', onChange: function (e) { setAllOwner(e.target.value); } },
+            h('option', { value: 'all' }, '👥 Minden felhasználó (' + allProjects.length + ')'),
+            ownerOpts.map(function (o) { return h('option', { key: o.id, value: o.id }, '👤 ' + o.name + ' (' + o.n + ')'); }))),
+        allSorted.length ? h('div', { className: 'grid' }, allSorted.map(function (p) { return h(ProjectCard, { key: p.id, project: p, meId: meId, studentById: studentById, lastActivity: lastAct[p.id], ownerName: (p.owner_id === meId ? null : (ownerNames[p.owner_id] || '…')), onOpen: props.openProject, apRun: apRuns[p.id], counts: pCounts[p.id], onChanged: props.reloadProjects }); })) : h('div', { className: 'soon' }, 'Nincs projekt ehhez a felhasználóhoz.'));
     } else if (view === 'supervised') {
       body = h('div', null, seg, h(SupervisedView, { students: props.students, projects: supProjects, studentById: studentById, onOpen: props.openProject }));
     } else if (!mineProjects.length && !sharedProjects.length) {
       body = h('div', null, seg, h('div', { className: 'soon' }, h('b', null, tr(dashLang, 'No research projects yet. ')), tr(dashLang, 'Create one to start tracking a study from idea to submission.'), h('div', { style: { marginTop: 14 } }, h('button', { className: 'btn pri', onClick: function () { setAdding(true); } }, tr(dashLang, '+ New project')))));
     } else {
       body = h('div', null, seg,
-        mineProjects.length ? h('div', { className: 'grid' }, mineProjects.map(function (p) { return h(ProjectCard, { key: p.id, project: p, meId: meId, studentById: studentById, onOpen: props.openProject, apRun: apRuns[p.id], counts: pCounts[p.id], onChanged: props.reloadProjects }); })) : null,
+        mineProjects.length ? h('div', { className: 'grid' }, sortProjects(mineProjects).map(function (p) { return h(ProjectCard, { key: p.id, project: p, meId: meId, studentById: studentById, lastActivity: lastAct[p.id], onOpen: props.openProject, apRun: apRuns[p.id], counts: pCounts[p.id], onChanged: props.reloadProjects }); })) : null,
         sharedProjects.length ? sharedGrid() : null);
     }
 
@@ -11678,6 +11785,10 @@
           (nd() && sel) ? h('div', { className: 'rv-crumb' }, h('b', null, 'Research')) : h('div', null, h('h1', null, sel ? tr(dashLang, 'Project') : (board ? tr(dashLang, 'Protocol tasks') : tr(dashLang, 'Research projects'))), h('div', { className: 'sub' }, board && !sel ? tr(dashLang, 'Every research project’s protocol steps in one board · personal to-dos live in “My tasks”') : sub)),
           h('div', { style: { display: 'flex', gap: 10, alignItems: 'center' } },
             h(NotifBell, null),
+            (sel || board) ? null : h('select', { className: 'field', style: { width: 'auto', height: 32 }, value: srt, title: 'Kártyák rendezése', onChange: function (e) { setSrt(e.target.value); } },
+              h('option', { value: 'recent' }, '🕒 Legutóbbi aktivitás'),
+              h('option', { value: 'created' }, '📅 Létrehozás szerint'),
+              h('option', { value: 'name' }, '🔤 Név szerint')),
             sel ? null : h('button', { className: 'btn' + (board ? ' pri' : ''), onClick: function () { setBoard(!board); }, title: 'Protocol task board — every project’s protocol steps in one Kanban' }, board ? ('☷ ' + tr(dashLang, 'Projects')) : ('🗂️ ' + tr(dashLang, 'Protocol board'))),
             (nd() && !(sel || board || view === 'supervised')) ? h('a', { className: 'btn', href: 'Autopilot.html', style: { textDecoration: 'none' }, title: 'Chat-alapú belépő — állítsd össze a briefet és indítsd az Autopilotot' }, '⚡ Autopilot') : null,
             (sel || board || view === 'supervised') ? null : h('button', { className: 'btn pri', onClick: function () { setAdding(true); } }, tr(dashLang, '+ New project'))
