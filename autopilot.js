@@ -877,6 +877,60 @@
       }));
   }
 
+  // Left sidebar: every Autopilot project I started — briefs (surface='autopilot' chats, reopen into the brief step) AND
+  // launched runs (research_autopilot_runs, reopen the dashboard). This is how a started conversation is recalled.
+  function SideProjects(props) {
+    var rS = useState(null), rows = rS[0], setRows = rS[1];   // null = loading; [] = none
+    var alive = useRef(true);
+    useEffect(function () { return function () { alive.current = false; }; }, []);
+    useEffect(function () {
+      var u = uid();
+      Promise.all([
+        // 'autopilot' (new, marked) OR null-surface (old briefs: startProject used to create a chat with no surface).
+        // Research/Map chats always set surface, so a null-surface chat in MY project = an Autopilot brief. RLS scopes to readable projects.
+        sb.from('research_chats').select('id,project_id,created_at,surface,title').or('surface.eq.autopilot,surface.is.null').order('created_at', { ascending: false }).limit(160),
+        sb.from('research_autopilot_runs').select('id,project_id,status,phase_index,phases,updated_at,started_at').eq('owner_id', u).neq('status', 'cancelled').order('updated_at', { ascending: false }).limit(60)
+      ]).then(function (res) {
+        if (!alive.current) return;
+        // keep autopilot-marked chats + legacy briefs (null surface AND the 'Publify chat' title — the Canvas dock fallback uses a different title)
+        var chats = ((res[0] && res[0].data) || []).filter(function (c) { return c.surface === 'autopilot' || (c.surface == null && c.title === 'Publify chat'); });
+        var runs = (res[1] && res[1].data) || [];
+        var pids = {}; chats.forEach(function (c) { pids[c.project_id] = 1; }); runs.forEach(function (r) { pids[r.project_id] = 1; });
+        var idl = Object.keys(pids); if (!idl.length) { setRows([]); return; }
+        // keep ONLY my own projects (drops null-surface chats living in projects shared with me)
+        sb.from('research_projects').select('id,title,goal,updated_at').eq('owner_id', u).in('id', idl).then(function (pr) {
+          if (!alive.current) return;
+          var pm = {}; ((pr && pr.data) || []).forEach(function (p) { pm[p.id] = p; });
+          var chatBy = {}; chats.forEach(function (c) { if (!chatBy[c.project_id]) chatBy[c.project_id] = c; });   // newest chat per project
+          var runBy = {}; runs.forEach(function (r) { if (!runBy[r.project_id]) runBy[r.project_id] = r; });
+          var list = Object.keys(pm).map(function (pid) {
+            var p = pm[pid], run = runBy[pid] || null, chat = chatBy[pid] || null;
+            return { pid: pid, title: (p.title || 'Névtelen projekt'), goal: (p.goal || ''), chatId: chat ? chat.id : null, run: run,
+              ts: (run && (run.updated_at || run.started_at)) || (p.updated_at) || (chat && chat.created_at) || '' };
+          }).sort(function (a, b) { return String(b.ts || '').localeCompare(String(a.ts || '')); });
+          setRows(list);
+        }, function () { if (alive.current) setRows([]); });
+      }, function () { if (alive.current) setRows([]); });
+    }, [props.reloadKey]);
+    function rel(ts) { if (!ts) return ''; var d = (Date.now() - Date.parse(ts)) / 1000; if (d < 3600) return Math.max(1, Math.round(d / 60)) + ' perce'; if (d < 86400) return Math.round(d / 3600) + ' órája'; if (d < 2592000) return Math.round(d / 86400) + ' napja'; try { return new Date(ts).toLocaleDateString('hu-HU'); } catch (e) { return ''; } }
+    return h('aside', { className: 'ap-side' },
+      h('div', { className: 'ap-side-h' }, 'Projektjeim', rows && rows.length ? h('span', { className: 'ap-side-c' }, rows.length) : null),
+      rows === null ? h('div', { className: 'ap-side-empty' }, h('span', { className: 'spin' })) :
+      !rows.length ? h('div', { className: 'ap-side-empty' }, 'Még nincs megkezdett projekt. Indíts egy beszélgetést jobbra →') :
+      h('div', { className: 'ap-side-list' }, rows.map(function (row) {
+        var run = row.run, eff = run ? apEffectiveStatus(run) : null, st = run ? (AP_STATUS[eff] || AP_STATUS.queued) : null, pr = run ? apProgress(run) : null;
+        return h('button', { key: row.pid, className: 'ap-side-row', title: row.goal || row.title,
+          onClick: function () { if (run) props.onOpenRun(run.id); else props.onOpenBrief(row.pid, row.chatId); } },
+          h('div', { className: 'ap-side-t' }, row.title),
+          row.goal ? h('div', { className: 'ap-side-g' }, row.goal) : null,
+          h('div', { className: 'ap-side-meta' },
+            run ? h('span', { className: 'ap-pill ' + st.cls }, h('span', { className: 'ap-sdot' }), st.t)
+                : h('span', { className: 'ap-pill ap-pill-brief' }, '📝 Piszkozat'),
+            run && pr ? h('span', { className: 'ap-side-pr mono' }, pr.done + '/' + pr.enabled) : null,
+            row.ts ? h('span', { className: 'ap-side-ts' }, rel(row.ts)) : null));
+      })));
+  }
+
   function App() {
     function initRun() { try { return new URLSearchParams(location.search).get('run'); } catch (e) { return null; } }
     var vS = useState(initRun() ? 'dashboard' : 'launcher'), view = vS[0], setView = vS[1];   // ?run=<id> deep-links straight to the dashboard (resume)
@@ -905,7 +959,7 @@
       sb.from('research_projects').insert(payload).select().maybeSingle().then(function (r) {
         if (!r || r.error || !r.data) { setCreating(false); toast('Nem sikerült létrehozni: ' + ((r && r.error && r.error.message) || 'ismeretlen hiba'), false); return; }
         var proj = r.data;
-        sb.from('research_chats').insert({ project_id: proj.id, title: 'Publify chat' }).select('id').maybeSingle().then(function (cr) {
+        sb.from('research_chats').insert({ project_id: proj.id, title: 'Publify chat', owner_id: u, surface: 'autopilot' }).select('id').maybeSingle().then(function (cr) {   // surface tag → the launcher sidebar can list + reopen started briefs
           var cid = cr && cr.data && cr.data.id;
           if (!cr || cr.error || !cid) { abortCreate(proj.id, 'Nem sikerült elindítani a beszélgetést' + ((cr && cr.error) ? ': ' + cr.error.message : '.')); return; }
           uploadFiles(proj.id, staged).then(function (up) {
@@ -984,6 +1038,18 @@
       setRunId(null); setProject(null); setChatId(null); setFiles([]); setIdeasCount(0); setView('launcher');
     }
     function openRun(rid) { try { history.replaceState(null, '', 'Autopilot.html?run=' + encodeURIComponent(rid)); } catch (e) { } setRunId(rid); setView('dashboard'); }
+    // reopen a started-but-not-launched brief from the sidebar: load the project + its brief chat back into the brief step
+    function openBrief(pid, cid) {
+      if (!pid) return;
+      setChatId(cid || null); setFiles([]); setIdeasCount(0);
+      sb.from('research_projects').select('id,title,goal,keywords,student_id,field,status,stage').eq('id', pid).maybeSingle().then(function (r) {
+        var p = r && r.data; if (!p) { toast('A projekt nem elérhető.', false); return; }
+        setProject(p); setView('brief'); refreshFiles(pid); refreshIdeas(pid);
+        if (!cid) sb.from('research_chats').select('id').eq('project_id', pid).eq('surface', 'autopilot').order('created_at', { ascending: false }).limit(1).maybeSingle().then(function (cr) { if (cr && cr.data) setChatId(cr.data.id); });
+      });
+    }
+    // back to the launcher list WITHOUT discarding the current brief (distinct from Discard, which deletes)
+    function backToList() { try { history.replaceState(null, '', 'Autopilot.html'); } catch (e) { } setRunId(null); setProject(null); setChatId(null); setFiles([]); setIdeasCount(0); setView('launcher'); }
     // the dashboard is a full-screen surface (own header + controls) — resumable via ?run=<id>
     if (view === 'dashboard') return h(Dashboard, { runId: runId, onExit: exitToLauncher });
 
@@ -995,7 +1061,9 @@
     }
 
     var body;
-    if (view === 'launcher') body = h('div', null, h(RunsList, { onOpen: openRun }), h(Launcher, { creating: creating, onStart: startProject }));
+    if (view === 'launcher') body = h('div', { className: 'ap-launch-2col' },
+      h(SideProjects, { onOpenBrief: openBrief, onOpenRun: openRun }),
+      h('div', { className: 'ap-launch-main' }, h(Launcher, { creating: creating, onStart: startProject })));
     else if (view === 'brief') body = h('div', { className: 'ap-split' },
       h(Chat, { projectId: project.id, chatId: chatId, projectTitle: project.title, onReply: function () { }, onFilesChanged: function () { refreshFiles(project.id); }, onDiscard: discardProject }),
       h(BriefPanel, {
@@ -1007,6 +1075,7 @@
 
     return h('div', { className: 'ap-wrap' + (view === 'brief' ? ' ap-full' : '') },   // brief step = full-screen split (chat + brief fill the viewport)
       h('div', { className: 'ap-steps' },
+        view !== 'launcher' ? h('button', { className: 'ap-backlist', title: 'Vissza a projektjeimhez (nem veti el a beszélgetést)', onClick: backToList }, '‹ Projektjeim') : null,
         stepBtn(1, 'Beszélgetés & brief', 'brief', false), h('span', { className: 'ap-st-sep' }, '›'),
         stepBtn(2, 'Indítás', 'launch', false), h('span', { className: 'ap-st-sep' }, '›'),
         h('button', { className: 'ap-st', disabled: true, title: 'Az indítás után jelenik meg' }, h('span', { className: 'n' }, '3'), 'Autopilot dashboard')),
