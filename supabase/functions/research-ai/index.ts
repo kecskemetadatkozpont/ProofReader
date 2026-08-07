@@ -121,12 +121,26 @@ Deno.serve(async (req) => {
     }
     // evidence-gap MATRIX (EGM): derive method×domain axes from the library and count coverage per cell (empty cells = gaps).
     if (action === 'gap_matrix') {
+      const force = !!(body && body.force);
+      // stable input order: cited_by desc, then id asc as a tiebreak → the numbered list fed to the model doesn't
+      // reshuffle between loads (a prerequisite for a deterministic, cacheable result).
       const { data: msrc } = await sb.from('research_sources')
-        .select('id,title,year,venue,abstract,screening').eq('project_id', project_id).order('cited_by', { ascending: false, nullsFirst: false }).limit(60);
+        .select('id,title,year,venue,abstract,screening').eq('project_id', project_id)
+        .order('cited_by', { ascending: false, nullsFirst: false }).order('id', { ascending: true }).limit(60);
       const all = msrc || [];
       const inc = all.filter((s: any) => s.screening === 'include' || s.screening === 'included');
       const lib = (inc.length >= 4 ? inc : all);
       if (lib.length < 3) return json({ ok: true, matrix: null, reason: 'too_few' });
+      // fingerprint of everything the matrix depends on → the cache is valid until one of these changes
+      const fp = await sha256Hex([
+        GAP_MATRIX_PROMPT_VERSION, userModel, String(proj.title || ''), String(proj.goal || ''),
+        ((proj.keywords as any[]) || []).join('|'),
+        lib.map((s: any) => s.id + ':' + (s.screening || '')).sort().join(','),
+      ].join('␟'));
+      if (!force) {
+        const { data: cached } = await sb.from('research_gap_matrix').select('matrix,fingerprint,updated_at').eq('project_id', project_id).maybeSingle();
+        if (cached && cached.fingerprint === fp && cached.matrix) return json({ ok: true, matrix: cached.matrix, count: lib.length, cached: true, computed_at: cached.updated_at });
+      }
       const matrix = await askClaudeMatrix(proj, lib, userModel, _lang);
       if (matrix && Array.isArray(matrix.refs)) {
         // map the AI's per-cell library refs (1-based indices into `lib`) → concrete sources, so the client can list the LITERATURE per cell
@@ -134,7 +148,9 @@ Deno.serve(async (req) => {
           (Array.isArray(cell) ? cell : []).map((n: any) => lib[(n | 0) - 1]).filter(Boolean).map((s: any) => ({ id: s.id, title: s.title, year: s.year, screening: s.screening }))));
         delete matrix.refs;
       }
-      return json({ ok: true, matrix: matrix, count: lib.length });
+      // persist so it's returned unchanged next load (best-effort: viewers lack write access → they read an editor's cache)
+      if (matrix) { try { await sb.from('research_gap_matrix').upsert({ project_id, matrix, fingerprint: fp, model: userModel, source_count: lib.length, updated_at: new Date().toISOString() }, { onConflict: 'project_id' }); } catch (_e) { /* cache is best-effort */ } }
+      return json({ ok: true, matrix: matrix, count: lib.length, cached: false });
     }
     // P5.2b — generate ONE typed gap for a specific matrix cell (method×domain). Read-only inputs; inserts one gap.
     if (action === 'gap_cell') {
@@ -332,6 +348,12 @@ Return ONLY a JSON array, no prose. Each item:
 }
 
 // Evidence-gap MATRIX (action='gap_matrix') → {rows:[...], cols:[...], cells:[[int,...],...]} where cells[r][c] = #library items covering rows[r]×cols[c]. Empty cells are the gaps.
+// Bump when the gap-matrix PROMPT changes → invalidates every cached matrix (its fingerprint no longer matches).
+const GAP_MATRIX_PROMPT_VERSION = 'v1';
+async function sha256Hex(s: string): Promise<string> {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
+  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, '0')).join('');
+}
 async function askClaudeMatrix(proj: any, sources: any[], model: string, lang: 'en' | 'hu'): Promise<any> {
   const lib = sources.map((s, i) => `[${i + 1}] ${s.title} (${s.year ?? 'n.d.'})\n${(s.abstract ?? '').slice(0, 300)}`).join('\n\n');
   const prompt =
@@ -352,7 +374,7 @@ Return ONLY JSON, no prose: {"rows":["..."],"cols":["..."],"cells":[[<int>, ...]
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'x-api-key': ANTHROPIC_KEY!, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-    body: JSON.stringify({ model, max_tokens: 1900, messages: [{ role: 'user', content: prompt }] }),
+    body: JSON.stringify({ model, max_tokens: 1900, temperature: 0, messages: [{ role: 'user', content: prompt }] }),   // temp 0 → the least-varying output for a fixed input (paired with the input-fingerprint cache)
   });
   const j = await r.json();
   const text = (j?.content?.[0]?.text) || '';

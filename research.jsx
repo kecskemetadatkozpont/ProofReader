@@ -1587,6 +1587,7 @@
     var mkS = useState(false), mkGap = mkS[0], setMkGap = mkS[1];   // "Rés létrehozása ide" in progress → button spinner (cellBusyRef is a ref, doesn't re-render)
     var mxS = useState(null), matrix = mxS[0], setMatrix = mxS[1];   // null=not loaded; {rows,cols,cells}; 'error'; 'none' (too few sources)
     var mbS = useState(false), mxBusy = mbS[0], setMxBusy = mbS[1];
+    var mmS = useState(null), mxMeta = mmS[0], setMxMeta = mmS[1];   // { cached:bool, at:iso } — was the matrix served from the deterministic cache?
     var isS = useState(false), isSupervisor = isS[0], setIsSupervisor = isS[1];   // P5.4a: can the viewer approve gaps (supervisor)?
     var icS = useState(false), impCap = icS[0], setImpCap = icS[1];   // gap_important column present (migration-84)?
     var aliveR = useRef(true);
@@ -1751,15 +1752,17 @@
         a.href = url; a.download = 'kutatasi-resek.md'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
       } catch (e) { window.PRUI.toast('Export sikertelen', { kind: 'error' }); }
     }
-    // P3 — evidence-gap matrix (EGM): fetched on demand from the edge; empty cells = gaps. Graceful if the edge lacks gap_matrix.
-    function fetchMatrix() {
+    // P3 — evidence-gap matrix (EGM): the edge now returns a CACHED matrix (deterministic, persisted per project) while
+    // the input fingerprint matches; force=true recomputes (temperature 0). Empty cells = gaps.
+    function fetchMatrix(force) {
       if (mxBusy) return;
       setMxBusy(true);
-      sb.functions.invoke('research-ai', { body: { action: 'gap_matrix', project_id: props.projectId } }).then(function (res) {
+      sb.functions.invoke('research-ai', { body: { action: 'gap_matrix', project_id: props.projectId, force: !!force } }).then(function (res) {
         if (!aliveR.current) return; setMxBusy(false);
         var d = res && res.data;
         if ((res && res.error) || !d || d.error) { setMatrix('error'); return; }
         if (!d.matrix || !Array.isArray(d.matrix.rows) || !Array.isArray(d.matrix.cols)) { setMatrix(d.reason === 'too_few' ? 'none' : 'error'); return; }
+        setMxMeta({ cached: !!d.cached, at: d.computed_at || null });
         setMatrix(d.matrix);
       }, function () { if (aliveR.current) { setMxBusy(false); setMatrix('error'); } });
     }
@@ -1862,7 +1865,9 @@
                     h('span', { className: 'egm-lbl' }, isGap ? 'rés' : 'forrás')));
                 }));
             })))),
-        h('div', { className: 'egm-note' }, 'A szín a lefedettség; a rózsaszín cellák a rések (0 forrás), a pötty a study-státusz (⏳/✓). Kattints egy cellára → a lista arra szűr.'));
+        h('div', { className: 'egm-note' }, 'A szín a lefedettség; a rózsaszín cellák a rések (0 forrás), a pötty a study-státusz (⏳/✓). Kattints egy cellára → a lista arra szűr.',
+          mxMeta ? h('span', { style: { marginLeft: 8, color: 'var(--faint)' }, title: 'A mátrix mentve van és nem számolódik újra betöltéskor — csak ha a források változnak, vagy kikényszeríted.' }, mxMeta.cached ? ('· 📌 mentett mátrix' + (mxMeta.at ? ' (' + new Date(mxMeta.at).toLocaleDateString('hu-HU') + ')' : '')) : '· 🔄 most újraszámítva') : null,
+          props.canEdit ? h('button', { className: 'gp-rebtn', style: { marginLeft: 8, padding: '2px 9px', fontSize: 11 }, disabled: mxBusy, title: 'A mátrix determinisztikus újraszámítása (temperature 0) a jelenlegi forrásokból. Enélkül a mentett mátrix marad.', onClick: function () { fetchMatrix(true); } }, '↻ Újraszámítás') : null));
     }
 
     if (gaps === null) return h('div', { className: 'panel gappanel' }, h('div', { className: 'gp-empty' }, '⏳ Rések betöltése…'));
