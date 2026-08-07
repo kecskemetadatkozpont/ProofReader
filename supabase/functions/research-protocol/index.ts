@@ -52,6 +52,13 @@ Deno.serve(async (req) => {
       const ideaId = body.idea_id || null;
       // NEW (§5): the user picks WHICH cards the protocol is generated from — sources = [{kind:'idea'|'gap'|'step', id}].
       const sources = Array.isArray(body.sources) ? body.sources.slice(0, 40) : [];
+      // APPEND mode: add the generated steps to an EXISTING protocol (don't replace it). Fetch its steps so the model complements them.
+      const appendTo = body.append_to ? String(body.append_to) : null;
+      let existingStepsTxt = '';
+      if (appendTo) {
+        const exq = await sb.from('research_protocol_steps').select('ord,title').eq('protocol_id', appendTo).order('ord', { ascending: true });
+        existingStepsTxt = ((exq.data as any) || []).map((s: any) => `- ${s.title}`).join('\n');
+      }
       // gather context (RLS scopes everything to the caller's project access)
       const ideasQ = await sb.from('research_ideas').select('id,question,hypothesis,rationale,source,status').eq('project_id', projectId).order('created_at', { ascending: true }).limit(60);
       const ideas = (ideasQ.data || []);
@@ -95,7 +102,8 @@ Deno.serve(async (req) => {
         + (stepsTxt ? `\nEXISTING RESEARCH STEPS to build upon:\n${stepsTxt}\n` : '')
         + (srBlocks.length ? `\nSYSTEMATIC REVIEW RESULTS (native context — always relevant):\n${srBlocks.join('\n')}\n` : '')
         + (goal ? `\nGOAL FOR THIS PROTOCOL:\n${goal}\n` : '')
-        + `\nSELECTED LITERATURE (${lit.length}):\n${litTxt}\n\nDATASETS ALREADY REGISTERED:\n${dsTxt}\n\nPlan the executable protocol now, integrating ALL the selected sources and the systematic-review evidence above.`;
+        + (appendTo && existingStepsTxt ? `\nSTEPS ALREADY IN THE PROTOCOL (do NOT repeat these — generate NEW, COMPLEMENTARY steps that extend the plan for the newly selected sources):\n${existingStepsTxt}\n` : '')
+        + `\nSELECTED LITERATURE (${lit.length}):\n${litTxt}\n\nDATASETS ALREADY REGISTERED:\n${dsTxt}\n\n${appendTo ? 'Generate the ADDITIONAL executable steps' : 'Plan the executable protocol now'}, integrating ALL the selected sources and the systematic-review evidence above.`;
 
       const raw = await callClaude(SYS + langDirective(_lang), user, model);
       const m = raw.match(/\{[\s\S]*\}/);
@@ -104,33 +112,53 @@ Deno.serve(async (req) => {
       const steps = Array.isArray(parsed.steps) ? parsed.steps : [];
       if (!steps.length) return json({ error: 'no steps generated' }, 502);
 
-      // Per-user active protocol (migration-98): archive ONLY the caller's own previous active protocol, so a
-      // collaborator generating in parallel never wipes another user's protocol.
-      const ACTIVE = ['draft', 'ready', 'running', 'paused', 'failed'];
-      await sb.from('research_protocols').update({ status: 'archived', updated_at: new Date().toISOString() }).eq('project_id', projectId).eq('created_by', ures.user.id).in('status', ACTIVE);
-      const snapshot = { idea: idea ? { id: idea.id, question: idea.question } : null,
-        sources: selIdeas.map((x: any) => ({ id: x.id, kind: x.source === 'gap' ? 'gap' : 'idea', q: x.question })).concat(selSteps.map((x: any) => ({ id: x.id, kind: 'step', q: x.title }))),
-        reviews: srJobs.map((j: any) => ({ id: j.id, q: j.research_question || j.result_title })),
-        included_sources: lit.map((s: any) => s.title), datasets: datasets.map((d: any) => d.name), generated_at: new Date().toISOString() };
-      const newRow = { project_id: projectId, idea_id: idea ? idea.id : null, title: String(parsed.title || 'Research protocol').slice(0, 200), goal: goal || null, status: 'draft', context_snapshot: snapshot, created_by: ures.user.id };
-      let protIns = await sb.from('research_protocols').insert(newRow).select('id').single();
-      if (protIns.error && /duplicate key|unique|rprot_one_active/i.test(protIns.error.message || '')) {
-        // Pre-migration-98 the unique index is still per-PROJECT → another user's active protocol blocks this insert.
-        // Fall back to the legacy project-wide archive (only when the index actually blocks us), then retry once. Safe to deploy before the migration.
-        await sb.from('research_protocols').update({ status: 'archived', updated_at: new Date().toISOString() }).eq('project_id', projectId).in('status', ACTIVE);
-        protIns = await sb.from('research_protocols').insert(newRow).select('id').single();
+      // Provenance labels attached to EVERY generated step → the tasks table shows what each task came from (#1).
+      const origin = {
+        ideas: selIdeas.filter((x: any) => x.source !== 'gap').map((x: any) => String(x.question || '').slice(0, 90)),
+        gaps: selIdeas.filter((x: any) => x.source === 'gap').map((x: any) => String(x.question || '').slice(0, 90)),
+        reviews: srJobs.map((j: any) => String(j.research_question || j.result_title || '').slice(0, 90)),
+      };
+      const provSources = selIdeas.map((x: any) => ({ id: x.id, kind: x.source === 'gap' ? 'gap' : 'idea', q: x.question }))
+        .concat(selSteps.map((x: any) => ({ id: x.id, kind: 'step', q: x.title })));
+      const provReviews = srJobs.map((j: any) => ({ id: j.id, q: j.research_question || j.result_title }));
+      let pid: string, baseOrd = 0;
+      if (appendTo) {
+        // APPEND (#2): keep the existing protocol, add these steps after its last ord — tasks ACCUMULATE, nothing is replaced.
+        const pq = await sb.from('research_protocols').select('id,context_snapshot').eq('id', appendTo).eq('project_id', projectId).maybeSingle();
+        if (!pq.data) return json({ error: 'target protocol not found' }, 404);
+        pid = appendTo;
+        const lastQ = await sb.from('research_protocol_steps').select('ord').eq('protocol_id', pid).order('ord', { ascending: false }).limit(1);
+        baseOrd = (lastQ.data && lastQ.data[0] && Number(lastQ.data[0].ord)) || 0;
+        const snap: any = (pq.data.context_snapshot as any) || {};
+        snap.sources = (Array.isArray(snap.sources) ? snap.sources : []).concat(provSources);
+        snap.reviews = provReviews;
+        snap.appended = (Array.isArray(snap.appended) ? snap.appended : []).concat([{ at: new Date().toISOString(), n: steps.length, origin }]);
+        await sb.from('research_protocols').update({ context_snapshot: snap, updated_at: new Date().toISOString() }).eq('id', pid);
+      } else {
+        // NEW protocol: archive ONLY the caller's own previous active protocol (migration-98), then create a fresh one.
+        const ACTIVE = ['draft', 'ready', 'running', 'paused', 'failed'];
+        await sb.from('research_protocols').update({ status: 'archived', updated_at: new Date().toISOString() }).eq('project_id', projectId).eq('created_by', ures.user.id).in('status', ACTIVE);
+        const snapshot = { idea: idea ? { id: idea.id, question: idea.question } : null, sources: provSources, reviews: provReviews,
+          included_sources: lit.map((s: any) => s.title), datasets: datasets.map((d: any) => d.name), generated_at: new Date().toISOString() };
+        const newRow = { project_id: projectId, idea_id: idea ? idea.id : null, title: String(parsed.title || 'Research protocol').slice(0, 200), goal: goal || null, status: 'draft', context_snapshot: snapshot, created_by: ures.user.id };
+        let protIns = await sb.from('research_protocols').insert(newRow).select('id').single();
+        if (protIns.error && /duplicate key|unique|rprot_one_active/i.test(protIns.error.message || '')) {
+          await sb.from('research_protocols').update({ status: 'archived', updated_at: new Date().toISOString() }).eq('project_id', projectId).in('status', ACTIVE);
+          protIns = await sb.from('research_protocols').insert(newRow).select('id').single();
+        }
+        if (protIns.error || !protIns.data) return json({ error: 'insert protocol failed: ' + (protIns.error && protIns.error.message) }, 500);
+        pid = protIns.data.id;
       }
-      if (protIns.error || !protIns.data) return json({ error: 'insert protocol failed: ' + (protIns.error && protIns.error.message) }, 500);
-      const pid = protIns.data.id;
       const rows = steps.slice(0, 20).map((s: any, i: number) => ({
-        protocol_id: pid, ord: i + 1, title: String(s.title || ('Step ' + (i + 1))).slice(0, 240), kind: String(s.kind || 'custom'),
-        spec: { instruction: s.instruction || '', inputs: s.inputs || [], expected_outputs: s.expected_outputs || [], acceptance: s.acceptance || [], command_hint: s.command_hint || '', est_minutes: Number.isFinite(s.est_minutes) ? s.est_minutes : null },
-        depends_on: (Array.isArray(s.depends_on) ? s.depends_on : []).filter((n: any) => Number.isInteger(n) && n >= 1 && n <= steps.length),
+        protocol_id: pid, ord: baseOrd + i + 1, title: String(s.title || ('Step ' + (i + 1))).slice(0, 240), kind: String(s.kind || 'custom'),
+        spec: { instruction: s.instruction || '', inputs: s.inputs || [], expected_outputs: s.expected_outputs || [], acceptance: s.acceptance || [], command_hint: s.command_hint || '', est_minutes: Number.isFinite(s.est_minutes) ? s.est_minutes : null, origin: origin },
+        // model's depends_on is 1-based within THIS batch → offset by baseOrd so appended steps reference the right ords
+        depends_on: (Array.isArray(s.depends_on) ? s.depends_on : []).filter((n: any) => Number.isInteger(n) && n >= 1 && n <= steps.length).map((n: number) => baseOrd + n),
         needs_approval: !!s.needs_approval,
       }));
       const stepIns = await sb.from('research_protocol_steps').insert(rows);
       if (stepIns.error) return json({ error: 'insert steps failed: ' + stepIns.error.message }, 500);
-      return json({ ok: true, protocol_id: pid, steps: rows.length });
+      return json({ ok: true, protocol_id: pid, steps: rows.length, appended: !!appendTo });
     }
 
     // ---- Cockpit chat (A): a context-aware co-pilot. Knows the WHOLE project state (gaps/studies/literature/existing steps)

@@ -4940,10 +4940,15 @@
       if (busy) return; setBusy(true);
       var sel = curPick();
       var sources = Object.keys(sel).map(function (k) { var i = k.indexOf(':'); return { kind: k.slice(0, i), id: k.slice(i + 1) }; });
-      sb.functions.invoke('research-protocol', { body: { action: 'generate', project_id: props.projectId, goal: goal, sources: sources } }).then(function (r) {
+      // when a protocol already exists, APPEND the generated steps to it (don't replace); the empty-state creates a new one.
+      var body = { action: 'generate', project_id: props.projectId, goal: goal, sources: sources };
+      if (prot && prot.id) body.append_to = prot.id;
+      sb.functions.invoke('research-protocol', { body: body }).then(function (r) {
         setBusy(false);
         var err = (r && r.data && r.data.error) || (r && r.error && r.error.message);
         if (err) { window.PRUI.toast('Generation failed: ' + err, { kind: 'error' }); return; }
+        var n = (r && r.data && r.data.steps) || 0;
+        window.PRUI.toast((body.append_to ? '✓ ' + n + ' új feladat hozzáadva' : '✓ Protokoll létrehozva (' + n + ' lépés)'), { kind: 'ok' });
         setGoal(''); setPickSel(null); setPickOpen(false); load(); if (props.onChanged) props.onChanged();
       }, function (e) { setBusy(false); window.PRUI.toast('Generation failed: ' + e, { kind: 'error' }); });
     }
@@ -4975,7 +4980,7 @@
         h('div', { className: 'psel-foot' },
           h('textarea', { className: 'psel-goal', rows: 1, placeholder: 'Opcionális cél / megkötés (pl. „reprodukáld a per-osztály AUROC-ot")', value: goal, disabled: busy, onChange: function (e) { setGoal(e.target.value); } }),
           h('span', { className: 'psel-cnt' }, h('b', null, nSel), ' forrás' + (doneSR.length ? ' + ' + doneSR.length + ' review' : '')),
-          h('button', { className: 'btn pri', disabled: busy || !nSel, onClick: generate }, busy ? tr(props.lang, '✨ Working…') : '✨ Protokoll generálása')),
+          h('button', { className: 'btn pri', disabled: busy || !nSel, onClick: generate }, busy ? tr(props.lang, '✨ Working…') : (prot ? '➕ Feladatok hozzáadása' : '✨ Protokoll generálása'))),
         busy ? h('div', { style: { padding: '0 16px 14px' } }, h(AiThinking, { label: 'A kijelölt forrásokból + a review-eredményekből protokollt tervezek' })) : null);
     }
     // Cockpit chat (phase 2): insert AI-proposed tasks as protocol steps (creating a draft protocol if none exists yet).
@@ -5556,7 +5561,8 @@
                   s.needs_approval ? h('span', { className: 'chip c-warn', style: { fontSize: 9.5, marginLeft: 6, flex: 'none' } }, '⏸') : null,
                   (sx.origin === 'citation-optimizer') ? h('span', { className: 'chip', style: { fontSize: 9.5, marginLeft: 6, background: 'var(--accent-tint)', color: 'var(--accent)' }, title: 'Added by the Citation Optimizer' }, '🔗') : null,
                   (sx.attachments && sx.attachments.length) ? h('span', { className: 'chip', style: { fontSize: 9.5, marginLeft: 5 }, title: 'Attachments' }, '📎 ' + sx.attachments.length) : null,
-                  (s.depends_on && s.depends_on.length) ? h('span', { className: 'ex-dep' }, 'after ' + s.depends_on.join(',')) : null),
+                  (s.depends_on && s.depends_on.length) ? h('span', { className: 'ex-dep' }, 'after ' + s.depends_on.join(',')) : null,
+                  (function () { var o = sx.origin; if (!o) return null; var p = []; if (o.ideas && o.ideas.length) p.push('💡' + o.ideas.length); if (o.gaps && o.gaps.length) p.push('🕳️' + o.gaps.length); if (o.reviews && o.reviews.length) p.push('🔬' + o.reviews.length); if (!p.length) return null; var tip = 'Ebből a forrásból generálva:' + (o.ideas || []).map(function (x) { return '\n💡 ' + x; }).join('') + (o.gaps || []).map(function (x) { return '\n🕳️ ' + x; }).join('') + (o.reviews || []).map(function (x) { return '\n🔬 ' + x; }).join(''); return h('span', { className: 'ex-origin', title: tip, onClick: function (e) { e.stopPropagation(); setExp(function (pp) { var n = Object.assign({}, pp); n[s.id] = true; return n; }); } }, p.join(' ')); })()),
                 h('td', null, h('span', { className: 'ex-own ' + (ai ? 'ai' : 'hu') }, ai ? 'AI' : 'HUMAN')),
                 h('td', null, h('span', { className: 'chip ' + pst[0], style: { fontSize: 10 } }, pst[1])),
                 h('td', { className: 'r ex-chk' }, a ? (a.pass + '/' + a.total) : '—')
@@ -5566,6 +5572,13 @@
                 var acFails = (a && a.items) ? a.items.filter(function (it) { return !it.ok; }) : [];
                 out.push(h('tr', { key: s.id + '-d', className: 'ex-drow' }, h('td', { colSpan: 5, className: 'ex-detail' },
                   sx.instruction ? h('div', null, sx.instruction) : null,
+                  (function () { var o = sx.origin; if (!o || !((o.ideas && o.ideas.length) || (o.gaps && o.gaps.length) || (o.reviews && o.reviews.length))) return null;
+                    return h('div', { style: { marginTop: 8, fontSize: 11.5, background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 8, padding: '7px 10px' } },
+                      h('b', null, '📋 Miből generálva'),
+                      h('div', { style: { display: 'flex', flexDirection: 'column', gap: 2, marginTop: 4 } },
+                        (o.ideas || []).map(function (x, k) { return h('div', { key: 'i' + k, style: { color: 'var(--accent)' } }, '💡 ' + x); }),
+                        (o.gaps || []).map(function (x, k) { return h('div', { key: 'g' + k, style: { color: '#d1810b' } }, '🕳️ ' + x); }),
+                        (o.reviews || []).map(function (x, k) { return h('div', { key: 'r' + k, style: { color: '#7c3aed' } }, '🔬 ' + x); }))); })(),
                   res.summary ? h('div', { style: { marginTop: 6 } }, h('b', null, 'Result: '), res.summary) : null,
                   res.error ? h('div', { className: 'ex-err', style: { marginTop: 6 } }, h('b', null, '✗ Error: '), String(res.error.message || res.error)) : null,
                   acFails.length ? h('div', { style: { marginTop: 6 } }, h('b', { style: { color: 'var(--danger)' } }, 'Failed checks: '), acFails.map(function (it, k) { return h('div', { key: k, className: 'ex-acfail' }, '• ' + it.crit + (it.reason ? ' — ' + it.reason : '')); })) : null,
@@ -5663,10 +5676,10 @@
         h('span', { className: 'pcpit-cmd-stats' }, cmdStat(done + '/' + steps.length, 'lépés'), cmdStat(openGapsCount, 'nyitott rés'), cmdStat(studiesCount, 'study'), cmdStat(incCount, 'included')),
         h('span', { className: 'pcpit-cmd-r' },
           (function () { var oids = Object.keys(onlineUsers || {}); if (!oids.length) return null; return h('span', { style: { display: 'inline-flex', alignItems: 'center', marginRight: 4 } }, oids.slice(0, 4).map(function (id, i) { var pf = contribMap[id] || {}; var nm = pf.name || 'Kutató'; var col = pf.color || ['#3a5bd9', '#0e8a6a', '#c67912', '#a23a86'][i % 4]; return h('span', { key: id, title: nm + (id === props.authorId ? ' (te)' : ''), style: { width: 22, height: 22, borderRadius: '50%', background: col, color: '#fff', fontSize: 9, fontWeight: 750, display: 'grid', placeItems: 'center', marginLeft: i ? -6 : 0, border: '2px solid var(--surface)' } }, (nm[0] || '?').toUpperCase()); })); })(),
-          ce ? h('button', { className: 'btn' + (pickOpen ? ' pri' : ''), style: { padding: '6px 11px', fontSize: 12 }, title: 'Új protokoll generálása (a jelenlegit archiválja) — jelöld ki lent az ötleteket / tudásréseket', onClick: function () { setPickOpen(!pickOpen); if (!pickOpen) setCview('dash'); } }, pickOpen ? '✕ Új protokoll' : '✨ Új protokoll') : null,
+          ce ? h('button', { className: 'btn' + (pickOpen ? ' pri' : ''), style: { padding: '6px 11px', fontSize: 12 }, title: 'Új feladatok generálása a jelenlegi protokollhoz — jelöld ki lent az ötleteket / tudásréseket (a meglévő feladatok megmaradnak)', onClick: function () { setPickOpen(!pickOpen); if (!pickOpen) setCview('dash'); } }, pickOpen ? '✕ Új feladatok' : '✨ Új feladatok') : null,
           cmdPrimary())),
       (pickOpen && ce) ? h('div', { className: 'psel-inline' },
-        h('div', { className: 'psel-inline-note' }, h('span', null, '⚠️ Egy új protokoll generálása a jelenlegit archiválja (megmarad az előzményben).'), h('button', { className: 'btn', style: { marginLeft: 'auto', padding: '3px 10px', fontSize: 11.5 }, onClick: function () { setPickOpen(false); } }, '✕ Mégse')),
+        h('div', { className: 'psel-inline-note', style: { color: 'var(--accent)', background: 'var(--accent-tint)' } }, h('span', null, '➕ A kijelölt forrásokból generált feladatok a jelenlegi protokollhoz adódnak — a meglévő feladatok megmaradnak.'), h('button', { className: 'btn', style: { marginLeft: 'auto', padding: '3px 10px', fontSize: 11.5 }, onClick: function () { setPickOpen(false); } }, '✕ Mégse')),
         sourcePicker()) : null,
       h('div', { className: 'pcpit-tabs2' },
         cmdTab('dash', '📊 Áttekintés'),
@@ -6952,7 +6965,12 @@
     }
 
     function onMove(e) { var dd = drag.current; if (!dd) return; setView(function (v) { return { tx: dd.tx + (e.clientX - dd.sx), ty: dd.ty + (e.clientY - dd.sy), k: v.k }; }); }
-    function onUp() { drag.current = null; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); }
+    function onUp(e) {
+      var dd = drag.current; drag.current = null;
+      window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp);
+      // a plain click on the empty canvas (no real drag) clears the multi-selection; a PAN keeps it intact
+      if (dd && (!e || (Math.abs(e.clientX - dd.sx) < 4 && Math.abs(e.clientY - dd.sy) < 4))) { setMsel(function (M) { return Object.keys(M).length ? {} : M; }); }
+    }
     function stageXY(e) { var st = stageRef.current; if (!st) return { x: e.clientX, y: e.clientY }; var r = st.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
     // live cursors: a stable per-user color + a throttled broadcast of my world-space cursor + selection
     var CURSOR_PALETTE = ['#e11d48', '#0891b2', '#7c3aed', '#ca8a04', '#059669', '#db2777', '#2563eb', '#ea580c'];
@@ -6989,7 +7007,7 @@
       if (selEdge) setSelEdge(null);   // empty-canvas mousedown clears the edge selection
       // shift + drag on the empty canvas = marquee multi-select; a plain drag pans; a plain click clears the selection
       if (e.shiftKey) { cancelFly(); tourStop(); var p = stageXY(e); mqRef.current = { x0: p.x, y0: p.y }; setMarquee({ x0: p.x, y0: p.y, x1: p.x, y1: p.y }); window.addEventListener('mousemove', onMarqMove); window.addEventListener('mouseup', onMarqUp); window.addEventListener('blur', onMarqCancel); return; }
-      if (Object.keys(msel).length) setMsel({});
+      // NOTE: msel is cleared on mouse-UP only for a plain click (not a pan) — see onUp — so panning keeps the selection.
       stopFollow(); cancelFly(); tourStop(); drag.current = { sx: e.clientX, sy: e.clientY, tx: view.tx, ty: view.ty }; window.addEventListener('mousemove', onMove); window.addEventListener('mouseup', onUp);
     }
     function onWheel(e) { e.preventDefault(); tlPause(); stopFollow(); cancelFly(); tourStop(); var st = stageRef.current; if (!st) return; var r = st.getBoundingClientRect(); var mx = e.clientX - r.left, my = e.clientY - r.top; setView(function (v) { var nk = Math.min(2.2, Math.max(.3, v.k * (e.deltaY < 0 ? 1.12 : 0.89))); return { tx: mx - (mx - v.tx) * (nk / v.k), ty: my - (my - v.ty) * (nk / v.k), k: nk }; }); }
