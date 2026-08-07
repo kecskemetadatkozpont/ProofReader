@@ -771,6 +771,12 @@
       return function () { try { sb.removeChannel(ch); } catch (e) { } };
     }, [props.runId]);
     useEffect(function () { var el = feedRef.current; if (el) el.scrollTop = el.scrollHeight; }, [events.length]);
+    // eager-load the ideas so the graph can FAN them out as parallel branches (not hidden behind a click)
+    useEffect(function () {
+      if (!run || !run.project_id) return;
+      var ip = (run.phases || []).filter(function (x) { return x.key === 'ideas'; })[0];
+      if (ip && (ip.status === 'done' || ip.status === 'running' || ip.status === 'gate')) loadPhaseArts('ideas');
+    }, [run && run.project_id, run && (run.phases || []).filter(function (x) { return x.key === 'ideas'; }).map(function (x) { return x.status; }).join('')]);
 
     // approve/resume/pause must NOT depend on Realtime (research_autopilot_runs isn't in the supabase_realtime publication →
     // postgres_changes never fires). So update the LOCAL run optimistically (UI reacts instantly) and, after the DB write
@@ -875,6 +881,25 @@
       var badge = p.status === 'done' ? '✓ Kész' : p.status === 'running' ? 'Fut…' : p.status === 'gate' ? '⏸ Jóváhagyás' : p.status === 'skipped' ? 'Kihagyva' : 'Vár';
       var sub = p.status === 'done' ? (p.result || 'kész') : p.status === 'running' ? 'dolgozik…' : p.status === 'gate' ? 'jóváhagyásra vár' : p.status === 'skipped' ? (p.result || 'kihagyva') : (p.enabled ? '—' : 'letiltva');
       var open = openPhase === p.key, active = (p.status === 'running' || p.status === 'gate');
+      var conn = last ? null : h('div', { className: 'apg-conn' + (p.status === 'done' ? ' done' : active ? ' run' : '') });
+      // IDEAS phase fans out into its parallel ideas as separate branch cards, so N ideas are visible at once (not 1 card)
+      if (p.key === 'ideas') {
+        var ia = phaseArts.ideas, ideas = (ia && !ia.loading && ia.items) || [];
+        return h('div', { className: 'apg-step apg-step-wide', key: p.key },
+          h('div', { className: 'apg-node ' + p.status + (p.enabled ? '' : ' off'), style: { '--hue': hueOf('ideas') } },
+            h('div', { className: 'apg-hd static' },
+              h('span', { className: 'apg-ic' }, AP_ICON.ideas || '💡'),
+              h('span', { className: 'apg-tx' }, h('span', { className: 'apg-lab' }, p.label + (ideas.length ? ' · ' + ideas.length + ' párhuzamosan' : '')), h('span', { className: 'apg-sub' }, sub)),
+              h('span', { className: 'apg-badge ' + (p.status === 'gate' ? 'gate' : p.status) }, badge))),
+          ideas.length ? h('div', { className: 'apg-fan-conn' }) : null,
+          ideas.length ? h('div', { className: 'apg-fan' }, ideas.map(function (x) {
+            return h('div', { className: 'apg-idea', key: x.id, style: { '--hue': hueOf('ideas') }, title: (x.hypothesis || x.question || '') },
+              h('span', { className: 'apg-idea-h' }, h('span', { className: 'apg-idea-ic' }, '💡'), (x.novelty != null) ? h('span', { className: 'apg-idea-n' }, '★ ' + x.novelty) : null),
+              h('span', { className: 'apg-idea-t' }, x.question || 'Ötlet'));
+          })) : null,
+          (ia && ia.loading) ? h('div', { className: 'ap-pc-dempty' }, h('span', { className: 'spin' })) : null,
+          conn);
+      }
       return h('div', { className: 'apg-step', key: p.key },
         h('div', { className: 'apg-node ' + p.status + (p.enabled ? '' : ' off') + (open ? ' open' : ''), style: { '--hue': hueOf(p.key) } },
           h('button', { className: 'apg-hd', onClick: function () { togglePhase(p); }, title: 'Részeredmények' },
@@ -883,7 +908,7 @@
             h('span', { className: 'apg-badge ' + (p.status === 'gate' ? 'gate' : p.status) }, badge),
             h('span', { className: 'apg-caret' }, open ? '▾' : '▸')),
           open ? h('div', { className: 'apg-detail' }, phaseDetail(p)) : null),
-        last ? null : h('div', { className: 'apg-conn' + (p.status === 'done' ? ' done' : active ? ' run' : '') }));
+        conn);
     }
     function focusPanel() {
       if (run.status === 'awaiting_approval' && run.gate) {
