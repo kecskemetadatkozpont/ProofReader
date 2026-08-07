@@ -3115,27 +3115,34 @@
       else if (patch.stage && sid) studyLockBeat(sid);
       notify();
     }
-    function drive(id, sid, stage, offset, iter) {
+    function drive(id, sid, stage, offset, iter, retry) {
       if (!runs[id]) return;   // dismissed / cancelled → stop the recursion
+      retry = retry || 0; var MAXR = 2;
+      // a transient step failure (edge 5xx / AI hiccup / network) should NOT strand the whole run — retry the same
+      // slice a couple of times with a short backoff before giving up (this is what caused a study to silently die at step 2)
+      function fail(msg) {
+        if (retry < MAXR) { set(id, { stage: stage, msg: (BK[stage] || stage) + ' — átmeneti hiba, újrapróbálás (' + (retry + 1) + '/' + MAXR + ')…', sid: sid }); setTimeout(function () { if (runs[id]) drive(id, sid, stage, offset, iter, retry + 1); }, 2500); return; }
+        set(id, { stage: 'error', msg: msg, sid: sid });
+      }
       if (stage === 'review') {
-        set(id, { stage: 'review', msg: BK.review + '…', sid: sid });
+        set(id, { stage: 'review', msg: BK.review + '…' + (retry ? ' (újra)' : ''), sid: sid });
         callStudy({ action: 'generate_review', study_id: sid }).then(function (d) {
           if (!runs[id]) return; var oc = runs[id].onChanged; if (oc) oc();
-          if (d && d.error) { if (/full-?text|passed|include/i.test(d.error)) set(id, { stage: 'done', msg: 'A szűrés nem talált full-text included cikket, ezért nem készült áttekintés. A szűrési részletekhez: Study fül → nyisd ki a „Keyword screening funnel" panelt, és válaszd ki ezt a study-t.', sid: sid }); else set(id, { stage: 'error', msg: 'Review: ' + d.error, sid: sid }); return; }
+          if (d && d.error) { if (/full-?text|passed|include/i.test(d.error)) { set(id, { stage: 'done', msg: 'A szűrés nem talált full-text included cikket, ezért nem készült áttekintés. A szűrési részletekhez: Study fül → nyisd ki a „Keyword screening funnel" panelt, és válaszd ki ezt a study-t.', sid: sid }); return; } fail('Review: ' + d.error); return; }
           var fp = d && d.file_path;
           set(id, { stage: 'done', msg: '✓ Kész' + (d && d.words ? ' — ~' + d.words + ' szó' : '') + ' — a Study fülön a „Keyword screening funnel" panelben is elérhető.', sid: sid, filePath: fp });
-        }, function () { set(id, { stage: 'error', msg: 'A review-hívás nem sikerült.', sid: sid }); });
+        }, function () { fail('A review-hívás nem sikerült.'); });
         return;
       }
-      set(id, { stage: stage, msg: (BK[stage] || stage) + '…', sid: sid });
+      set(id, { stage: stage, msg: (BK[stage] || stage) + '…' + (retry ? ' (újra)' : ''), sid: sid });
       var act = stage === 's1' ? { action: 'search_step1', study_id: sid, step: 1, offset: offset } : { action: 'screen_batch', study_id: sid, step: (stage === 's2' ? 2 : 3), offset: offset };
       callStudy(act).then(function (d) {
         if (!runs[id]) return;
-        if (d && d.error) { set(id, { stage: 'error', msg: (BK[stage] || stage) + ': ' + d.error, sid: sid }); return; }
+        if (d && d.error) { fail((BK[stage] || stage) + ': ' + d.error); return; }
         var dflt = stage === 's1' ? 20 : (stage === 's2' ? 8 : 3), ni = iter + 1;
-        if (d.done || ni > 40) drive(id, sid, stage === 's1' ? 's2' : stage === 's2' ? 's3' : 'review', 0, 0);
-        else drive(id, sid, stage, (d.next_offset != null ? d.next_offset : offset + dflt), ni);
-      }, function () { set(id, { stage: 'error', msg: 'Hálózati hiba a szűrés közben.', sid: sid }); });
+        if (d.done || ni > 40) drive(id, sid, stage === 's1' ? 's2' : stage === 's2' ? 's3' : 'review', 0, 0, 0);   // advance → reset retry
+        else drive(id, sid, stage, (d.next_offset != null ? d.next_offset : offset + dflt), ni, 0);               // next page → reset retry
+      }, function () { fail('Hálózati hiba a szűrés közben.'); });
     }
     return {
       runs: function () { return runs; },
