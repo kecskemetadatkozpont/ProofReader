@@ -11333,8 +11333,17 @@
         update: function (n) { setNotes(function (l) { return l.map(function (x) { return x.id === n.id ? Object.assign({}, x, n) : x; }); }); }
       });
     }, []);
-    function markRead(n) { if (n.read_at) return; sb.from('notifications').update({ read_at: new Date().toISOString() }).eq('id', n.id).then(function () { setNotes(function (l) { return l.map(function (x) { return x.id === n.id ? Object.assign({}, x, { read_at: 'now' }) : x; }); }); }); }
-    function markAll() { var ids = notes.filter(function (n) { return !n.read_at; }).map(function (n) { return n.id; }); if (!ids.length) return; sb.from('notifications').update({ read_at: new Date().toISOString() }).in('id', ids).then(load); }
+    function markRead(n) { if (n.read_at) return; setNotes(function (l) { return l.map(function (x) { return x.id === n.id ? Object.assign({}, x, { read_at: 'now' }) : x; }); }); sb.from('notifications').update({ read_at: new Date().toISOString() }).eq('id', n.id).then(function () { }, function () { }); }
+    function markAll() {   // optimistic: clear the unread state locally at once, then persist (don't wait on a reload)
+      var ids = notes.filter(function (n) { return !n.read_at; }).map(function (n) { return n.id; });
+      setNotes(function (l) { return l.map(function (x) { return x.read_at ? x : Object.assign({}, x, { read_at: 'now' }); }); });
+      if (!ids.length) return;
+      sb.from('notifications').update({ read_at: new Date().toISOString() }).in('id', ids).then(function () { }, function () { });
+    }
+    function dismiss(n) {   // remove a notification from the list entirely (click-to-clear)
+      setNotes(function (l) { return l.filter(function (x) { return x.id !== n.id; }); });
+      sb.from('notifications').delete().eq('id', n.id).then(function () { }, function () { });
+    }
     var SHARE_ROLES = { owner: 'Tulajdonos', editor: 'Szerkesztő', commenter: 'Kommentelő', viewer: 'Megfigyelő' };
     function shareRoleLabel(r) { return SHARE_ROLES[r] || r || 'Megfigyelő'; }
     function acceptShare(n) {   // invitee accepts their own pending membership (RPC, migration-74) → dismiss the notification + jump to the project
@@ -11381,7 +11390,12 @@
         h('div', { className: 'nh' }, 'Notifications', unread ? h('button', { className: 'back-btn', style: { margin: 0 }, onClick: markAll }, 'Mark all read') : null),
         notes.length ? notes.map(function (n) {
           var p = n.payload || {};
-          return h('div', { key: n.id, className: 'notif-item' + (n.read_at ? '' : ' unread'), onClick: function () { markRead(n); setExpanded(expanded === n.id ? null : n.id); } },
+          return h('div', { key: n.id, className: 'notif-item' + (n.read_at ? '' : ' unread'), onClick: function () {
+              if (n.kind === 'share') { markRead(n); return; }   // keep the invite (accept with the button, or ✕ to dismiss)
+              if (n.kind === 'digest') { markRead(n); setExpanded(expanded === n.id ? null : n.id); return; }   // digest: click expands the detail
+              dismiss(n);   // informational (figures / study / review / …) → clicking clears it from the list
+            } },
+            h('button', { className: 'notif-x', 'aria-label': 'Elvetés', title: 'Elvetés', onClick: function (e) { e.stopPropagation(); dismiss(n); } }, '×'),
             h('b', null, title(n)), h('div', { className: 'nx' }, summ(n)),
             n.kind === 'share' ? h('div', { style: { marginTop: 8 } },
               h('button', { className: 'btn pri', style: { fontSize: 12, padding: '4px 12px' }, onClick: function (e) { e.stopPropagation(); acceptShare(n); } }, 'Elfogadom')) : null,

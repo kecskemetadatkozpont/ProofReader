@@ -40,7 +40,7 @@
     .side-foot a.exit { font-size: 12px; color: var(--muted); text-decoration: none; font-weight: 600; }
     .side-foot a.exit:hover { color: var(--accent); }
     .main { flex: 1; min-width: 0; padding: 26px 32px; }
-    .head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 22px; }
+    .head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 22px; }
     .head h1 { font-size: 21px; margin: 0; letter-spacing: -.3px; }
     .head .sub { font-size: 13px; color: var(--muted); margin-top: 3px; }
     .badge { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 6px; font-size: 11px; font-weight: 700; background: var(--soft); color: var(--muted); }
@@ -97,7 +97,7 @@
     .card .ch > div:first-child { flex: 1; min-width: 0; }
     .author-badge { flex: none; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     /* supervisor "Diákjaim kutatása" surface */
-    .segctl { display: inline-flex; gap: 4px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 3px; margin-bottom: 16px; }
+    .segctl { display: inline-flex; flex-wrap: wrap; max-width: 100%; gap: 4px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 3px; margin-bottom: 16px; }
     .segctl button { border: 0; background: transparent; color: var(--muted); font-family: inherit; font-size: 13px; font-weight: 600; padding: 6px 14px; border-radius: 7px; cursor: pointer; }
     .segctl button.on { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgba(20,24,40,.08); }
     .sup-student { margin-bottom: 22px; }
@@ -287,10 +287,12 @@
     .bell .nb { position: absolute; top: -6px; right: -6px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px; background: var(--danger); color: #fff; font-size: 10px; font-weight: 700; display: grid; place-items: center; }
     .notif-pop { position: absolute; right: 0; top: 46px; width: 370px; max-width: 86vw; max-height: 460px; overflow: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 18px 50px rgba(20,24,40,.16); z-index: 40; }
     .notif-pop .nh { padding: 12px 14px; border-bottom: 1px solid var(--line); font-weight: 700; font-size: 13px; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; background: var(--surface); }
-    .notif-item { padding: 11px 14px; border-bottom: 1px solid var(--soft); cursor: pointer; }
+    .notif-item { position: relative; padding: 11px 32px 11px 14px; border-bottom: 1px solid var(--soft); cursor: pointer; }
     .notif-item:hover { background: var(--softer); }
     .notif-item.unread { background: var(--surface-2); }
     .notif-item b { font-size: 13px; } .notif-item .nx { font-size: 12px; color: var(--muted); margin-top: 3px; }
+    .notif-x { position: absolute; top: 8px; right: 8px; width: 20px; height: 20px; border: 0; background: transparent; color: var(--faint); font-size: 16px; line-height: 1; cursor: pointer; border-radius: 6px; display: grid; place-items: center; }
+    .notif-x:hover { background: var(--soft); color: var(--danger, #b42318); }
     /* detail tabs + ideas + sources (R1) */
     .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 16px; flex-wrap: wrap; }
     .tabs button { border: 0; background: transparent; font-family: inherit; font-size: 13.5px; font-weight: 600; color: var(--muted); padding: 9px 13px; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
@@ -2037,9 +2039,9 @@
     html.dark .rmap-genbusy { background: #4f46e5; }
     @media (max-width: 900px) { .rmap-wrap { flex-direction: column; } .rmap-insp { width: auto; } }
   </style>
-  <script src="theme.js?v=1786089776"></script>
-  <script src="nav.js?v=1786089776"></script>
-  <script src="entitlements.js?v=1786089776"></script>
+  <script src="theme.js?v=1786090209"></script>
+  <script src="nav.js?v=1786090209"></script>
+  <script src="entitlements.js?v=1786090209"></script>
 </head>
 
 <body>
@@ -2051,24 +2053,24 @@
   <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
   <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="backend/config.js?v=1786089776"></script>
-  <script src="auth.js?v=1786089776"></script>
-  <script src="backend.js?v=1786089776"></script>
-  <script src="universities.js?v=1786089776"></script>
-  <script src="onboarding.js?v=1786089776"></script>
-  <script src="office.js?v=1786089776"></script>
-  <script src="publications.js?v=1786089776"></script>
+  <script src="backend/config.js?v=1786090209"></script>
+  <script src="auth.js?v=1786090209"></script>
+  <script src="backend.js?v=1786090209"></script>
+  <script src="universities.js?v=1786090209"></script>
+  <script src="onboarding.js?v=1786090209"></script>
+  <script src="office.js?v=1786090209"></script>
+  <script src="publications.js?v=1786090209"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/tus-js-client@4.1.0/dist/tus.min.js"></script>
-  <script type="text/babel" src="canvas.jsx?v=1786089776"></script>
-  <script type="text/babel" src="notes.jsx?v=1786089776"></script>
-  <script src="autopilot-core.js?v=1786089776"></script>
-  <script type="text/babel" src="research.jsx?v=1786089776"></script>
+  <script type="text/babel" src="canvas.jsx?v=1786090209"></script>
+  <script type="text/babel" src="notes.jsx?v=1786090209"></script>
+  <script src="autopilot-core.js?v=1786090209"></script>
+  <script type="text/babel" src="research.jsx?v=1786090209"></script>
 
-  <script src="build.js?v=1786089776"></script>
-  <script src="version-badge.js?v=1786089776"></script>
+  <script src="build.js?v=1786090209"></script>
+  <script src="version-badge.js?v=1786090209"></script>
 </body>
 
 </html>
