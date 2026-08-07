@@ -3171,6 +3171,20 @@
           });
         });
         return id;
+      },
+      // Run an EXISTING study through the REMAINING steps in the background — auto-advances s1→s2→s3→review, survives
+      // SPA tab/menu switches (module singleton, like the figure runner). fromStage = 's1'|'s2'|'s3'|'review'
+      // (compute it from the first not-done step so completed steps aren't re-run). onChanged refreshes the app.
+      runExisting: function (ctx) {
+        if (!ctx || !ctx.sid || !ctx.projectId) return null;
+        for (var k in runs) { if (runs[k].sid === ctx.sid && runs[k].stage !== 'done' && runs[k].stage !== 'error') return runs[k].id; }   // already running → no double-start
+        var id = 'run' + (++seq);
+        var startStage = ctx.fromStage || 's1';
+        runs[id] = { id: id, projectId: ctx.projectId, sid: ctx.sid, onChanged: ctx.onChanged, title: String(ctx.title || 'Study').slice(0, 90), rq: ctx.title || null, stage: startStage, msg: 'Indítás…' };
+        notify();
+        studyLockOn(ctx.sid, ctx.authorId || null);
+        drive(id, ctx.sid, startStage, 0, 0, 0);   // existing study already has step configs → no re-plan
+        return id;
       }
     };
   })();
@@ -4289,6 +4303,15 @@
     }
     useEffect(function () { if (selId) setPapersLoading(true); loadStudy(selId); }, [selId]);
     function stepRow(n) { return steps.filter(function (x) { return x.step === n; })[0]; }
+    // first step that isn't done yet → the stage the background auto-runner should resume from (so completed steps aren't re-run)
+    function firstPendingStage() { for (var n = 1; n <= 4; n++) { var sr = stepRow(n); if (!sr || sr.status !== 'done') return n === 1 ? 's1' : n === 2 ? 's2' : n === 3 ? 's3' : 'review'; } return 'review'; }
+    // ▶ hand the WHOLE remaining pipeline to the background runner (PRStudyRunner) → auto-advances all 4 steps, survives
+    //   leaving the Study tab/menu, and lights the Studies side-menu item yellow (→ green when done)
+    function startBgRun() {
+      if (!selId || PRStudyRunner.isStudyRunning(selId)) return;
+      PRStudyRunner.runExisting({ sid: selId, projectId: props.projectId, authorId: props.authorId, title: (sel && (sel.title || sel.question)) || 'Study', fromStage: firstPendingStage(), onChanged: props.onChanged });
+      if (window.PRUI) window.PRUI.toast('▶ Háttérfuttatás elindult — a „Studies" menüpont sárgán jelzi, amíg fut (zöld = kész). Nyugodtan elhagyhatod a fület.', { kind: 'info' });
+    }
     function viewStep(n) { setCurStep(n); var cs = stepRow(n); setCfg((cs && cs.config) || lsDefaultConfig(n, props.project)); }
     function incCount(n) { return papers.filter(function (p) { return p.step === n && p.decision === 'include'; }).length; }
 
@@ -4534,6 +4557,8 @@
         curStep === 3 ? h('div', { style: { fontSize: 12, color: 'var(--muted)', marginTop: 8, lineHeight: 1.45, background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 8, padding: '7px 10px' } }, '📄 Full-text screening runs on step 2’s “include” papers: it downloads the available open access (OA) PDFs and screens on the full text; where no PDF is downloadable, it falls back to the abstract. This is therefore slower (3–4 papers per batch) — in the table below you can see live which paper got “📄 full text” and which got “📝 abstract only”, and the download ratio in the header.') : null,
         props.canEdit ? h('div', { className: 'runbar' },
           h('button', { className: 'btn pri', disabled: running || lockedByOther || (curStep > 1 && incCount(curStep - 1) === 0), title: lockedByOther ? (lockNameOf(lock.by) + ' éppen futtatja') : null, onClick: function () { runStep(curStep); } }, lockedByOther ? '🔒 Fut (' + lockNameOf(lock.by) + ')' : running ? 'Running…' : ((cur.status === 'done' ? 'Rerun: ' : 'Run: ') + LS_STEPS[curStep - 1].label)),
+          // ▶ background auto-run: hand the WHOLE remaining pipeline to PRStudyRunner (all 4 steps, survives leaving the tab, Studies menu turns yellow)
+          h('button', { className: 'btn', disabled: running || lockedByOther || PRStudyRunner.isStudyRunning(selId), title: 'A hátralévő lépések automatikus végigfuttatása a háttérben (mind a 4 lépés) — elhagyhatod a fület; a „Studies" menüpont sárgán jelzi, amíg fut', onClick: startBgRun }, PRStudyRunner.isStudyRunning(selId) ? '⏳ Háttérben fut…' : '▶ Háttérfuttatás (mind a 4 lépés)'),
           running ? h('button', { className: 'btn', onClick: function () { stop.current = true; } }, 'Cancel') : null,
           (cur.status === 'done' && curStep < 4) ? h('span', { style: { fontSize: 11.5, color: 'var(--warn)' } }, 'Rerunning deletes the later steps.') : null,
           prog ? (function () {
@@ -4561,7 +4586,9 @@
       ) : h('div', { className: 'panel', style: { marginTop: 10 } },
         h('h3', null, '4. Review paper'),
         h('p', { style: { fontSize: 13, color: 'var(--muted)' } }, 'We generate a structured review from the ' + incCount(3) + ' paper(s) “include”-d in step 3 (also saved to Files). Consensus grounding if the token is connected.'),
-        props.canEdit ? h('div', { className: 'runbar' }, lockedByOther ? lsLockBox(lock) : null, h('button', { className: 'btn pri', disabled: running || lockedByOther || incCount(3) === 0, onClick: function () { runStep(4); } }, lockedByOther ? '🔒 Fut (' + lockNameOf(lock.by) + ')' : running ? 'Generating…' : (review ? '🔄 Regenerate review' : 'Generate review')), (stepRow(4) || {}).status === 'done' ? h('span', { className: 'chip c-ok' }, '✓ Done · saved to Files') : null) : null,
+        props.canEdit ? h('div', { className: 'runbar' }, lockedByOther ? lsLockBox(lock) : null, h('button', { className: 'btn pri', disabled: running || lockedByOther || incCount(3) === 0, onClick: function () { runStep(4); } }, lockedByOther ? '🔒 Fut (' + lockNameOf(lock.by) + ')' : running ? 'Generating…' : (review ? '🔄 Regenerate review' : 'Generate review')),
+          h('button', { className: 'btn', disabled: running || lockedByOther || incCount(3) === 0 || PRStudyRunner.isStudyRunning(selId), title: 'Az áttekintés legenerálása a háttérben — elhagyhatod a fület', onClick: startBgRun }, PRStudyRunner.isStudyRunning(selId) ? '⏳ Háttérben fut…' : '▶ Háttérben'),
+          (stepRow(4) || {}).status === 'done' ? h('span', { className: 'chip c-ok' }, '✓ Done · saved to Files') : null) : null,
         running ? h('div', { style: { marginTop: 10 } }, h(AiThinking, { label: 'Synthesizing the review from the included papers' })) : null,
         err ? h('div', { style: { color: 'var(--danger)', fontSize: 12.5, marginTop: 6 } }, err) : null,
         review ? h('div', { style: { marginTop: 12 } },
