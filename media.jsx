@@ -145,7 +145,7 @@
             r.language ? h('span', { className: 'chip' }, (r.translated ? '🌐 ' : '') + r.language) : null,
             r.voice_name ? h('span', { className: 'chip' }, '🗣 ' + r.voice_name) : null,
             h('span', { className: 'chip' }, '⏱ ' + fmtT(r.duration_sec)),
-            h('span', { className: 'chip' }, ({ study: 'Study', upload: 'Upload', text: 'Text' })[r.source_kind] || r.source_kind))),
+            h('span', { className: 'chip' }, ({ study: 'Research Project', upload: 'Upload', text: 'Text' })[r.source_kind] || r.source_kind))),
         h('div', { style: { display: 'flex', gap: 6, flex: 'none' } },
           h('button', { className: 'btn', onClick: function () { props.onOpen(r); } }, '▶ Play'),
           h('button', { className: 'icon-x', title: 'Delete', 'aria-label': 'Delete audiobook', onClick: function () { props.onDelete(r); } }, '✕')));
@@ -183,24 +183,36 @@
     useEffect(function () {
       props.sb.from('research_projects').select('id,title').order('created_at', { ascending: false }).then(function (r) { setProjects((r && r.data) || []); });
     }, []);
-    // cascade level 2: studies WITHIN the selected project
+    // cascade level 2: everything that "ran" in the project — literature studies (research_studies) AND completed
+    // systematic reviews (elicit_jobs). Composite id 'study:<id>' / 'review:<id>' so level 3 knows where to read papers.
     useEffect(function () {
       setStudies([]); setStudyId(''); setPapers([]); setPicked({});
       if (!projectId) return;
-      props.sb.from('research_studies').select('id,title').eq('project_id', projectId).order('created_at', { ascending: false }).then(function (r) { setStudies((r && r.data) || []); });
+      Promise.all([
+        props.sb.from('research_studies').select('id,title,created_at').eq('project_id', projectId).order('created_at', { ascending: false }),
+        props.sb.from('elicit_jobs').select('id,research_question,result_title,status,created_at').eq('project_id', projectId).eq('kind', 'sysreview').order('created_at', { ascending: false })
+      ]).then(function (res) {
+        var st = ((res[0] && res[0].data) || []).map(function (s) { return { id: 'study:' + s.id, kind: 'study', title: (s.title || 'Study') }; });
+        var rv = ((res[1] && res[1].data) || []).filter(function (j) { return j.status === 'completed'; }).map(function (j) { return { id: 'review:' + j.id, kind: 'review', title: (j.research_question || j.result_title || 'Áttekintés') }; });
+        setStudies(rv.concat(st));   // reviews first, then literature studies
+      }, function () { setStudies([]); });
     }, [projectId]);
-    // load the selected study's include-papers (furthest step) so the user can pick WHICH papers to narrate
+    // cascade level 3: the selected study's / review's included publications → the user picks WHICH to narrate
+    function setPapersFrom(srcs) { srcs = srcs || []; setPapers(srcs); var p = {}; srcs.forEach(function (s) { p[s.id] = true; }); setPicked(p); }
     useEffect(function () {
       setPapers([]); setPicked({}); if (!studyId) return;
-      props.sb.from('research_study_papers').select('source_id,step').eq('study_id', studyId).eq('decision', 'include').then(function (r) {
-        var rows = (r && r.data) || []; var maxStep = rows.reduce(function (a, b) { return Math.max(a, b.step); }, 0);
-        var ids = rows.filter(function (x) { return x.step === maxStep; }).map(function (x) { return x.source_id; });
-        if (!ids.length) return;
-        props.sb.from('research_sources').select('id,title,abstract,oa_pdf_url').in('id', ids).then(function (sr) {
-          var srcs = (sr && sr.data) || []; setPapers(srcs);
-          var p = {}; srcs.forEach(function (s) { p[s.id] = true; }); setPicked(p);
+      var i = studyId.indexOf(':'), kind = i < 0 ? 'study' : studyId.slice(0, i), id = i < 0 ? studyId : studyId.slice(i + 1);
+      if (kind === 'review') {
+        // an Elicit review's included publications = research_sources imported from it (origin_job_id) with screening=include
+        props.sb.from('research_sources').select('id,title,abstract,oa_pdf_url').eq('origin_job_id', id).eq('screening', 'include').limit(200).then(function (sr) { setPapersFrom((sr && sr.data) || []); });
+      } else {
+        props.sb.from('research_study_papers').select('source_id,step').eq('study_id', id).eq('decision', 'include').then(function (r) {
+          var rows = (r && r.data) || []; var maxStep = rows.reduce(function (a, b) { return Math.max(a, b.step); }, 0);
+          var ids = rows.filter(function (x) { return x.step === maxStep; }).map(function (x) { return x.source_id; });
+          if (!ids.length) { setPapersFrom([]); return; }
+          props.sb.from('research_sources').select('id,title,abstract,oa_pdf_url').in('id', ids).then(function (sr) { setPapersFrom((sr && sr.data) || []); });
         });
-      });
+      }
     }, [studyId]);
 
     function onFile(e) {
@@ -329,7 +341,7 @@
       h('h3', null, 'New audiobook'),
       h('div', { className: 'mp-row' },
         h('label', null, 'Source'),
-        h('div', { className: 'seg' }, [['text', '📝 Text'], ['upload', '📄 Upload'], ['study', '🔬 Study']].map(function (o) { return h('button', { key: o[0], className: src === o[0] ? 'on' : '', 'aria-pressed': src === o[0], onClick: function () { setSrc(o[0]); } }, o[1]); }))),
+        h('div', { className: 'seg' }, [['text', '📝 Text'], ['upload', '📄 Upload'], ['study', '🔬 Research Project']].map(function (o) { return h('button', { key: o[0], className: src === o[0] ? 'on' : '', 'aria-pressed': src === o[0], onClick: function () { setSrc(o[0]); } }, o[1]); }))),
       src === 'text' ? h('textarea', { className: 'field', rows: 7, style: { width: '100%', boxSizing: 'border-box' }, placeholder: 'Paste the text to narrate…', value: text, onChange: function (e) { setText(e.target.value); } }) : null,
       src === 'upload' ? h('div', null,
         h('input', { ref: fileRef, type: 'file', accept: '.pdf,.docx,.pptx,.txt,.md', style: { display: 'none' }, onChange: onFile }),
@@ -340,7 +352,7 @@
         h('div', { className: 'mp-row' }, h('label', null, 'Research project'),
           h('select', { className: 'field', value: projectId, onChange: function (e) { setProjectId(e.target.value); } }, h('option', { value: '' }, '— válassz projektet —'), projects.map(function (p) { return h('option', { key: p.id, value: p.id }, p.title); }))),
         h('div', { className: 'mp-row' }, h('label', null, 'Study'),
-          h('select', { className: 'field', value: studyId, disabled: !projectId, onChange: function (e) { setStudyId(e.target.value); } }, h('option', { value: '' }, !projectId ? '— előbb válassz projektet —' : (studies.length ? '— válassz study-t —' : '— nincs study ebben a projektben —')), studies.map(function (s) { return h('option', { key: s.id, value: s.id }, s.title); }))),
+          h('select', { className: 'field', value: studyId, disabled: !projectId, onChange: function (e) { setStudyId(e.target.value); } }, h('option', { value: '' }, !projectId ? '— előbb válassz projektet —' : (studies.length ? '— válassz study-t / review-t —' : '— nincs study/review ebben a projektben —')), studies.map(function (s) { return h('option', { key: s.id, value: s.id }, (s.kind === 'review' ? '🔬 ' : '🔎 ') + s.title); }))),
         h('div', { className: 'mp-row' }, h('label', null, 'Depth'),
           h('div', { className: 'seg' }, [['abstract', 'Abstract'], ['summary', 'Publify overview'], ['fulltext', 'Full text (PDF)']].map(function (o) { return h('button', { key: o[0], className: depth === o[0] ? 'on' : '', 'aria-pressed': depth === o[0], onClick: function () { setDepth(o[0]); } }, o[1]); })))) : null,
       src === 'study' && studyId ? (papers.length ? h('div', { style: { marginTop: 6, marginBottom: 6 } },
