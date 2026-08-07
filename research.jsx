@@ -4721,6 +4721,7 @@
     var graphRef = useRef(null);
     var ppS = useState(null), proposed = ppS[0], setProposed = ppS[1];      // pending chat-proposed tasks {steps, request} → shown as animated proposed cards in the graph
     var epS = useState(null), editProp = epS[0], setEditProp = epS[1];      // index of the proposed task being edited before accept (or null)
+    var ssS = useState(null), selSrc = ssS[0], setSelSrc = ssS[1];          // graph: clicked source nid → highlight its tasks, dim the rest
     var lkoS = useState(false), linkOpen = lkoS[0], setLinkOpen = lkoS[1];
     var lkuS = useState(''), linkUrl = lkuS[0], setLinkUrl = lkuS[1];
     var pcmS = useState([]), pcMsgs = pcmS[0], setPcMsgs = pcmS[1];   // protocol-wide chat (ephemeral)
@@ -5452,12 +5453,14 @@
           h('div', { className: 'pcg-col' },
             h('div', { className: 'pcg-colh' }, 'Források — eredmények · study-k · ötletek · rések'),
             h('div', { className: 'pcg-stack' },
-              hasProp ? h('div', { key: 'reqp', className: 'pcg-src req pcg-prop-card', 'data-nid': 'req-pending' }, h('span', { className: 'pcg-nt' }, '🗣️ Kérés (chat) · új'), h('div', { className: 'pcg-ttl' }, proposed.request)) : null,
+              hasProp ? h('div', { key: 'reqp', className: 'pcg-src req pcg-prop-card' + (selSrc === 'req-pending' ? ' sel' : (selSrc ? ' pcg-dim' : '')), 'data-nid': 'req-pending', style: { cursor: 'pointer' }, onClick: function () { setSelSrc(selSrc === 'req-pending' ? null : 'req-pending'); } }, h('span', { className: 'pcg-nt' }, '🗣️ Kérés (chat) · új'), h('div', { className: 'pcg-ttl' }, proposed.request)) : null,
               srcs.length ? srcs.map(function (s) {
-                return h('div', { key: s.nid, className: 'pcg-src ' + s.cls, 'data-nid': s.nid }, h('span', { className: 'pcg-nt' }, s.nt), h('div', { className: 'pcg-ttl' }, s.title), s.sum ? h('div', { className: 'pcg-sum' }, s.sum) : null);
+                var n = (steps.filter(function (x) { return stepSrc(x) === s.nid; }).length);
+                return h('div', { key: s.nid, className: 'pcg-src ' + s.cls + (selSrc === s.nid ? ' sel' : (selSrc ? ' pcg-dim' : '')), 'data-nid': s.nid, style: { cursor: 'pointer' }, title: 'Kattints — a hozzá tartozó ' + n + ' feladat kiemelése', onClick: function () { setSelSrc(selSrc === s.nid ? null : s.nid); } }, h('span', { className: 'pcg-nt' }, s.nt), h('div', { className: 'pcg-ttl' }, s.title), s.sum ? h('div', { className: 'pcg-sum' }, s.sum) : null, n ? h('span', { className: 'pcg-srcn' }, n + ' feladat') : null);
               }) : (hasProp ? null : h('div', { className: 'muted', style: { fontSize: 12, padding: '8px 2px' } }, 'Nincs forrás — a protokoll még nincs ötlethez/réshez kötve.')))),
           h('div', { className: 'pcg-col' },
-            h('div', { className: 'pcg-colh' }, 'Taskok — protokoll-lépések'),
+            h('div', { className: 'pcg-colh' }, 'Taskok — protokoll-lépések',
+              selSrc ? h('button', { className: 'pcg-clear', onClick: function () { setSelSrc(null); } }, '✕ kiemelés vége') : null),
             h('div', { className: 'pcg-stack' },
               hasProp ? h('div', { key: 'propbar', className: 'pcg-prop-bar' },
                 h('b', null, '📝 ' + proposed.steps.length + ' javasolt feladat'), h('span', { className: 'pcg-prop-hint' }, '— szerkeszd / töröld, majd hozd létre'),
@@ -5466,7 +5469,7 @@
                   h('button', { className: 'pcg-dismiss', onClick: dismissProposed }, '✕ Elvetés'))) : null,
               hasProp ? proposed.steps.map(function (ps, i) {
                 var editing = editProp === i;
-                return h('div', { key: 'prop' + i, className: 'pcg-task pcg-prop' + (editing ? ' editing' : ''), 'data-tid': 'prop' + i, 'data-src': 'req-pending' },
+                return h('div', { key: 'prop' + i, className: 'pcg-task pcg-prop' + (editing ? ' editing' : '') + (selSrc ? (selSrc === 'req-pending' ? ' pcg-hi' : ' pcg-dim') : ''), 'data-tid': 'prop' + i, 'data-src': 'req-pending' },
                   h('div', { className: 'pcg-prop-top' }, h('span', { className: 'pcg-kind' }, ps.kind || 'custom'),
                     h('span', { className: 'pcg-prop-mini' },
                       h('button', { className: 'pcg-mini', title: editing ? 'Kész' : 'Szerkesztés', onClick: function () { setEditProp(editing ? null : i); } }, editing ? '✓' : '✎'),
@@ -5480,7 +5483,8 @@
               }) : null,
               steps.length ? steps.map(function (s) {
                 var sx = s.spec || {};
-                return h('div', { key: s.id, className: 'pcg-task' + (s.status === 'done' ? ' done' : (s.status === 'running' ? ' run' : '')), 'data-tid': 'r' + s.id, 'data-src': stepSrc(s) || '', title: 'Ugrás a Feladatok listára', onClick: function () { setCview('tasks'); } },
+                var _ssrc = stepSrc(s) || '';
+                return h('div', { key: s.id, className: 'pcg-task' + (s.status === 'done' ? ' done' : (s.status === 'running' ? ' run' : '')) + (selSrc ? (_ssrc === selSrc ? ' pcg-hi' : ' pcg-dim') : ''), 'data-tid': 'r' + s.id, 'data-src': _ssrc, title: 'Ugrás a Feladatok listára', onClick: function () { setCview('tasks'); } },
                   h('span', { className: 'pcg-kind' }, s.kind || 'custom'), h('div', { className: 'pcg-ttl' }, s.title),
                   sx.instruction ? h('div', { className: 'pcg-sum' }, String(sx.instruction).slice(0, 90)) : null,
                   h('div', { className: 'pcg-foot' }, (PST[s.status] || PST.todo)[1] + (s.needs_approval && s.status === 'todo' ? ' · ⏸ jóváhagyás' : '')));
