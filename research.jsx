@@ -334,7 +334,7 @@
         }, h('span', { className: 'dot', 'aria-hidden': 'true' }, '🕳'), tr(props.lang, 'Rések')));
         if (props.hasLib) {   // Literature analyzers (embedded) as sub-tabs after Rések
           kids.push(h('div', { className: 'step-sep', key: 'sep-fb' }));
-          kids.push(h('button', { key: 'figboard', className: 'step step-littool' + (props.tab === 'figboard' ? ' cur' : '') + (nt['figboard'] ? ' has-new' : ''), title: 'Ábra-tábla', onClick: function () { if (props.onFigboard) props.onFigboard(); } }, h('span', { className: 'dot', 'aria-hidden': 'true' }, '🖼'), tr(props.lang, 'Ábrák'), nw('figboard')));
+          kids.push(h('button', { key: 'figboard', className: 'step step-littool' + (props.tab === 'figboard' ? ' cur' : '') + (props.figState === 'running' ? ' figrun' : props.figState === 'done' ? ' figdone' : '') + (!props.figState && nt['figboard'] ? ' has-new' : ''), title: props.figState === 'running' ? 'Ábra-kinyerés fut a háttérben…' : props.figState === 'done' ? 'Ábra-kinyerés kész' : 'Ábra-tábla', onClick: function () { if (props.onFigboard) props.onFigboard(); } }, h('span', { className: 'dot', 'aria-hidden': 'true' }, props.figState === 'running' ? '⏳' : props.figState === 'done' ? '✓' : '🖼'), tr(props.lang, 'Ábrák'), (!props.figState ? nw('figboard') : null)));
           kids.push(h('div', { className: 'step-sep', key: 'sep-co' }));
           kids.push(h('button', { key: 'citopt', className: 'step step-littool' + (props.tab === 'citopt' ? ' cur' : ''), title: 'Citáció-optimalizáló', onClick: function () { if (props.onCitopt) props.onCitopt(); } }, h('span', { className: 'dot', 'aria-hidden': 'true' }, '🔗'), tr(props.lang, 'Idézetek')));
         }
@@ -3316,6 +3316,34 @@
         return runs[pid];
       }
     };
+  })();
+
+  // The Figure Board (FigureBoard.html iframe) delegates its „Extract figures" run to the PARENT here, so it keeps
+  // going after the user leaves the Ábrák tab (the iframe would be torn down). We start PRFigureRunner and relay live
+  // status back to the iframe(s) via 'pr-figstatus'. The side-menu highlight (yellow→green) is driven by PRFigureRunner.
+  (function () {
+    if (window.__prFigBridge) return; window.__prFigBridge = true;
+    window.addEventListener('message', function (e) {
+      if (e.origin && e.origin !== window.location.origin) return;   // same-origin iframe only (FigureBoard.html)
+      var d = e.data; if (!d || d.type !== 'pr-figextract' || !d.projectId || !Array.isArray(d.papers)) return;
+      var papers = d.papers.filter(function (p) { return p && p.id && p.doi; });
+      if (!papers.length) return;
+      if (PRFigureRunner.isRunning(d.projectId)) return;   // already extracting for this project
+      function relay() {
+        var st = PRFigureRunner.status(d.projectId); if (!st) return;
+        try {
+          var frames = document.querySelectorAll('iframe');
+          for (var i = 0; i < frames.length; i++) { try { frames[i].contentWindow.postMessage({ type: 'pr-figstatus', pid: d.projectId, stage: st.stage, done: st.done, total: st.total, added: st.added }, '*'); } catch (er) { } }
+        } catch (er) { }
+      }
+      var unsub = PRFigureRunner.subscribe(function () {
+        var st = PRFigureRunner.status(d.projectId); if (!st) return;
+        relay();
+        if (st.stage === 'done' || st.stage === 'error') { try { unsub(); } catch (er) { } }
+      });
+      PRFigureRunner.start(d.projectId, papers, null);
+      relay();
+    });
   })();
 
   // ---- Elicit automated reports (Phase 2) — calls the elicit-proxy edge function ----
@@ -10961,9 +10989,15 @@
     var tS = useState(props.initTab || 'overview'), tab = tS[0], setTab = tS[1];   // Memory step deep-link opens the protocol tab
     // side-menu „new result" highlight: background runners (figures / study / review) mark PRSignals on finish; viewing the tab clears it
     var sigTickS = useState(0), setSigTick = sigTickS[1];
-    useEffect(function () { return PRSignals.subscribe(function () { setSigTick(function (x) { return x + 1; }); }); }, []);
+    useEffect(function () {
+      var u1 = PRSignals.subscribe(function () { setSigTick(function (x) { return x + 1; }); });
+      var u2 = PRFigureRunner.subscribe(function () { setSigTick(function (x) { return x + 1; }); });   // live figboard menu state (yellow→green)
+      return function () { u1(); u2(); };
+    }, []);
     var newTabs = PRSignals.forProject(p.id);
-    useEffect(function () { PRSignals.clear(p.id, tab); }, [tab]);
+    var _figSt = PRFigureRunner.status(p.id);   // background figure extraction: running → yellow, done → green on the „Ábrák" menu item
+    var figState = _figSt ? (_figSt.stage === 'running' ? 'running' : _figSt.stage === 'done' ? 'done' : _figSt.stage === 'error' ? 'error' : null) : null;
+    useEffect(function () { PRSignals.clear(p.id, tab); if (tab === 'figboard') PRFigureRunner.dismiss(p.id); }, [tab]);   // opening the Ábrák tab clears the green (dismiss no-ops while still running)
     var asS = useState(null), autoStudy = asS[0], setAutoStudy = asS[1];   // ideas to auto-create a study from (set by the Ideas "study basis" window → one-click create + Publify pre-fill)
     var agS = useState(0), autoSR = agS[0], setAutoSR = agS[1];   // signal from the Ideas "Study basis" → generate SR-question drafts in the SR studio
     var fsS = useState(null), focusStudy = fsS[0], setFocusStudy = fsS[1];   // a study id to REVEAL in the keyword funnel (clicked a "Study" chip in the SR studio)
@@ -11110,7 +11144,7 @@
         if (i === 2) kids.push(h('button', { key: 'gap', className: 'rv-st sub' + (tab === 'gap' ? ' cur' : ''), title: 'Kutatási rés-elemzés', onClick: function () { setTab('gap'); } },
           h('span', { className: 'rv-st-dot' }, '🕳'), h('span', { className: 'rv-st-lbl' }, 'Rések')));
         if (i === 2 && hasLib) {   // Literature analyzers as sub-tabs (embedded via iframe) — only with a library
-          kids.push(h('button', { key: 'figboard', className: 'rv-st sub' + (tab === 'figboard' ? ' cur' : '') + (newTabs['figboard'] ? ' rv-hasnew' : ''), title: 'Ábra-tábla — ábrák kinyerése a szakirodalomból', onClick: function () { setTab('figboard'); } }, h('span', { className: 'rv-st-dot' }, '🖼'), h('span', { className: 'rv-st-lbl' }, 'Ábrák'), nw('figboard')));
+          kids.push(h('button', { key: 'figboard', className: 'rv-st sub' + (tab === 'figboard' ? ' cur' : '') + (figState === 'running' ? ' rv-figrun' : figState === 'done' ? ' rv-figdone' : '') + (!figState && newTabs['figboard'] ? ' rv-hasnew' : ''), title: figState === 'running' ? 'Ábra-kinyerés fut a háttérben…' : figState === 'done' ? 'Ábra-kinyerés kész — kattints a megtekintéshez' : 'Ábra-tábla — ábrák kinyerése a szakirodalomból', onClick: function () { setTab('figboard'); } }, h('span', { className: 'rv-st-dot' }, figState === 'running' ? '⏳' : figState === 'done' ? '✓' : '🖼'), h('span', { className: 'rv-st-lbl' }, 'Ábrák'), (!figState ? nw('figboard') : null)));
           kids.push(h('button', { key: 'citopt', className: 'rv-st sub' + (tab === 'citopt' ? ' cur' : ''), title: 'Citáció-optimalizáló — mire hivatkoznak a legidézettebb cikkeid', onClick: function () { setTab('citopt'); } }, h('span', { className: 'rv-st-dot' }, '🔗'), h('span', { className: 'rv-st-lbl' }, 'Idézetek')));
         }
       });
@@ -11176,7 +11210,7 @@
           props.canEdit ? h('button', { className: 'btn', style: { height: 32, flex: 'none' }, title: 'Project base settings (title, field, keywords, goal)', onClick: function () { setEditOpen(true); } }, tr(plang, '✎ Settings')) : null
         )
       ),
-      h(Stepper, { stage: p.stage, tab: tab, lang: plang, canEdit: props.canEdit, newTabs: newTabs, onSet: setStage, onStudy: function () { setTab('study'); }, onGap: function () { setTab('gap'); }, hasLib: hasLib, onFigboard: function () { setTab('figboard'); }, onCitopt: function () { setTab('citopt'); }, onNav: function (i) { setTab(STAGE_TAB[i] || 'overview'); } }),
+      h(Stepper, { stage: p.stage, tab: tab, lang: plang, canEdit: props.canEdit, newTabs: newTabs, figState: figState, onSet: setStage, onStudy: function () { setTab('study'); }, onGap: function () { setTab('gap'); }, hasLib: hasLib, onFigboard: function () { setTab('figboard'); }, onCitopt: function () { setTab('citopt'); }, onNav: function (i) { setTab(STAGE_TAB[i] || 'overview'); } }),
       h('div', { className: 'subtabs' }, [['overview', 'Overview', null], ['canvas', 'Canvas', null], ['notes', 'Notes', null], ['log', 'Log', (props.log || []).length], ['tasks', 'Tasks', openTasks]].map(function (nt) {
         return h('button', { key: nt[0], className: tab === nt[0] ? 'on' : '', onClick: function () { setTab(nt[0]); } }, tr(plang, nt[1]), nt[2] ? h('span', { className: 'c' }, nt[2]) : null);
       })),

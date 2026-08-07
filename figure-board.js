@@ -411,12 +411,28 @@
     if (th) { th.classList.toggle('on', S.showHidden); th.textContent = S.showHidden ? 'Hide hidden' : ('Show hidden' + (S.hiddenCount ? ' (' + S.hiddenCount + ')' : '')); th.style.display = (S.showHidden || S.hiddenCount) ? '' : 'none'; }
   }
 
-  var extracting = false;
+  var extracting = false, delegated = false, lastAdded = -1, lastFigReload = 0;
   function figTerminal(st) { return st === 'ok' || st === 'no_oa' || st === 'no_figs'; }   // attempted with a terminal result → skip (migration-64)
+  function inIframe() { try { return window.self !== window.top; } catch (e) { return true; } }
   function extractAll() {
-    if (extracting) return; extracting = true;
+    if (extracting || delegated) return;
     var todo = scopedPapers().filter(function (p) { return p.doi && !(S.byPaper[p.id] || []).length && !figTerminal(p.fig_status); });
-    if (!todo.length) { progEl.innerHTML = 'All papers with a DOI in this scope are already extracted.'; extracting = false; return; }
+    if (!todo.length) { progEl.innerHTML = 'All papers with a DOI in this scope are already extracted.'; return; }
+    // Inside the workflow (iframe): hand the run to the PARENT app's background figure runner so it survives leaving
+    // this tab (the iframe would be torn down). The parent relays progress back via 'pr-figstatus' and lights the
+    // „Ábrák" side-menu item (yellow while running → green when done).
+    if (inIframe()) {
+      try {
+        window.parent.postMessage({ type: 'pr-figextract', projectId: projId(), papers: todo.map(function (p) { return { id: p.id, doi: p.doi, title: p.title }; }) }, '*');
+        delegated = true; lastAdded = -1;
+        progEl.innerHTML = '⏳ A kinyerés a háttérben elindult (' + todo.length + ' cikk) — nyugodtan elhagyhatod az oldalt. A Munkafolyamat menü „Ábrák" pontja sárgán jelzi, amíg fut, és zöldre vált, ha kész.';
+        return;
+      } catch (e) { /* fall through to a local run */ }
+    }
+    runLocal(todo);
+  }
+  function runLocal(todo) {
+    extracting = true;
     var i = 0, added = 0;
     function next() {
       if (i >= todo.length) {
@@ -435,6 +451,22 @@
     }
     next();
   }
+  // progress relayed from the parent's background runner (delegated extraction) → refresh the board as figures land
+  window.addEventListener('message', function (e) {
+    if (e.origin && e.origin !== window.location.origin) return;   // parent app only
+    var d = e.data; if (!d || d.type !== 'pr-figstatus' || d.pid !== projId()) return;
+    if (!progEl) return;
+    if (d.stage === 'running') {
+      var pct = d.total ? Math.round((d.done || 0) / d.total * 100) : 0;
+      progEl.innerHTML = '<div class="pbar"><i style="width:' + pct + '%"></i></div><div class="prow"><span>Háttérben fut…</span><span>' + (d.done || 0) + '/' + (d.total || 0) + ' · ' + (d.added || 0) + ' ábra</span></div>';
+      var now = Date.now();
+      if (d.added !== lastAdded && now - lastFigReload > 4000) { lastAdded = d.added; lastFigReload = now; load().then(function () { sidebar(); render(); }); }   // reload when new figures land, throttled to ≤1/4s
+    } else if (d.stage === 'done' || d.stage === 'error') {
+      delegated = false; lastAdded = -1;
+      progEl.innerHTML = d.stage === 'done' ? ('✓ Kész — ' + (d.added || 0) + ' ábra ' + (d.total || 0) + ' cikkből.') : '✗ Hiba a kinyerés közben.';
+      load().then(function () { sidebar(); render(); });
+    }
+  });
 
   function flyTo(pid) {
     var c = world.querySelector('.cluster[data-pid="' + pid + '"]') || world.querySelector('.gcard[data-pid="' + pid + '"]');

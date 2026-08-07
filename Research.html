@@ -930,7 +930,17 @@
     .step .step-new { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); display: inline-block; margin-left: 3px; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); animation: rvNewPulse 1.6s ease-in-out infinite; }
     .step.has-new { color: var(--accent); }
     @keyframes rvNewPulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
-    @media (prefers-reduced-motion: reduce) { .rv-st-new, .step-new { animation: none; } }
+    /* background figure-extraction state on the „Ábrák" side-menu item: yellow pulsing while running → green when done */
+    html.newdesign .rv-st.rv-figrun { color: #a16207; font-weight: 800; }
+    html.newdesign .rv-st.rv-figrun .rv-st-dot { background: #fde68a; border-color: #eab308; color: #7c5e10; animation: rvFigPulse 1.1s ease-in-out infinite; }
+    html.newdesign .rv-st.rv-figdone { color: #15803d; font-weight: 800; }
+    html.newdesign .rv-st.rv-figdone .rv-st-dot { background: #16a34a; border-color: #16a34a; color: #fff; animation: none; }
+    .step.figrun { color: #a16207; }
+    .step.figrun .dot { background: #fde68a; color: #7c5e10; animation: rvFigPulse 1.1s ease-in-out infinite; }
+    .step.figdone { color: #15803d; }
+    .step.figdone .dot { background: #16a34a; color: #fff; }
+    @keyframes rvFigPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(234,179,8,.6); } 50% { box-shadow: 0 0 0 6px rgba(234,179,8,0); } }
+    @media (prefers-reduced-motion: reduce) { .rv-st-new, .step-new, .rv-st.rv-figrun .rv-st-dot, .step.figrun .dot { animation: none; } }
     html.newdesign .rv-sub-c { margin-left: auto; font-size: 11px; font-weight: 800; color: var(--faint); background: var(--surface-2); border: 1px solid var(--line); border-radius: 999px; padding: 0 7px; }
     html.newdesign .rv-sub.on .rv-sub-c { color: var(--accent); }
     html.newdesign .rv-cmain { min-width: 0; }
@@ -2039,9 +2049,9 @@
     html.dark .rmap-genbusy { background: #4f46e5; }
     @media (max-width: 900px) { .rmap-wrap { flex-direction: column; } .rmap-insp { width: auto; } }
   </style>
-  <script src="theme.js?v=1786093183"></script>
-  <script src="nav.js?v=1786093183"></script>
-  <script src="entitlements.js?v=1786093183"></script>
+  <script src="theme.js?v=1786093914"></script>
+  <script src="nav.js?v=1786093914"></script>
+  <script src="entitlements.js?v=1786093914"></script>
 </head>
 
 <body>
@@ -2053,24 +2063,24 @@
   <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
   <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="backend/config.js?v=1786093183"></script>
-  <script src="auth.js?v=1786093183"></script>
-  <script src="backend.js?v=1786093183"></script>
-  <script src="universities.js?v=1786093183"></script>
-  <script src="onboarding.js?v=1786093183"></script>
-  <script src="office.js?v=1786093183"></script>
-  <script src="publications.js?v=1786093183"></script>
+  <script src="backend/config.js?v=1786093914"></script>
+  <script src="auth.js?v=1786093914"></script>
+  <script src="backend.js?v=1786093914"></script>
+  <script src="universities.js?v=1786093914"></script>
+  <script src="onboarding.js?v=1786093914"></script>
+  <script src="office.js?v=1786093914"></script>
+  <script src="publications.js?v=1786093914"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/tus-js-client@4.1.0/dist/tus.min.js"></script>
-  <script type="text/babel" src="canvas.jsx?v=1786093183"></script>
-  <script type="text/babel" src="notes.jsx?v=1786093183"></script>
-  <script src="autopilot-core.js?v=1786093183"></script>
-  <script type="text/babel" src="research.jsx?v=1786093183"></script>
+  <script type="text/babel" src="canvas.jsx?v=1786093914"></script>
+  <script type="text/babel" src="notes.jsx?v=1786093914"></script>
+  <script src="autopilot-core.js?v=1786093914"></script>
+  <script type="text/babel" src="research.jsx?v=1786093914"></script>
 
-  <script src="build.js?v=1786093183"></script>
-  <script src="version-badge.js?v=1786093183"></script>
+  <script src="build.js?v=1786093914"></script>
+  <script src="version-badge.js?v=1786093914"></script>
 </body>
 
 </html>
