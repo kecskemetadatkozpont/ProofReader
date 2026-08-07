@@ -11669,12 +11669,28 @@
       });
     }
     function reloadProjects() { loadProjects(me.id, !!me._preview); }
+    // PostgREST caps one select at 1000 rows; a big library (2853 sources) was truncated → the Library, the included
+    // count and the figure-extraction scope all silently dropped most papers. Page through with .range() to load all.
+    function fetchAllSources(projectId) {
+      var COLS = 'id,source_api,ext_id,doi,title,authors,year,venue,cited_by,url,issn,screening,origin_job_id';
+      var COLS2 = 'id,source_api,ext_id,doi,title,authors,year,venue,cited_by,url,issn,screening';
+      var PAGE = 1000, all = [], from = 0, cols = COLS;
+      function page() {
+        return sb.from('research_sources').select(cols).eq('project_id', projectId).order('cited_by', { ascending: false, nullsFirst: false }).range(from, from + PAGE - 1).then(function (r) {
+          if (r && r.error && /origin_job_id/.test(r.error.message || '') && cols === COLS) { cols = COLS2; return page(); }   // older DB without the column → retry lean
+          var rows = (r && r.data) || []; all = all.concat(rows);
+          if (rows.length < PAGE) return { data: all };
+          from += PAGE; return page();
+        });
+      }
+      return page();
+    }
     function loadDetail(projectId) {
       Promise.all([
         sb.from('research_log').select('id,type,summary,ts,profile_id').eq('project_id', projectId).order('ts', { ascending: false }),
         sb.from('research_todos').select('id,title,status,due,assignee').eq('project_id', projectId).order('sort', { ascending: true }).order('created_at', { ascending: false }),
         sb.from('research_ideas').select('id,source,question,hypothesis,rationale,novelty,status,created_by').eq('project_id', projectId).order('created_at', { ascending: false }),
-        sb.from('research_sources').select('id,source_api,ext_id,doi,title,authors,year,venue,cited_by,url,issn,screening,origin_job_id').eq('project_id', projectId).order('cited_by', { ascending: false, nullsFirst: false }).then(function (r) { return (r && r.error && /origin_job_id/.test(r.error.message || '')) ? sb.from('research_sources').select('id,source_api,ext_id,doi,title,authors,year,venue,cited_by,url,issn,screening').eq('project_id', projectId).order('cited_by', { ascending: false, nullsFirst: false }) : r; }),
+        fetchAllSources(projectId),
         sb.from('research_datasets').select('id,name,source,uri,size_bytes,license,status,local_path').eq('project_id', projectId).order('created_at', { ascending: false }),
         sb.from('research_jobs').select('id,type,title,status,progress,result,result_path,logs,created_at').eq('project_id', projectId).order('created_at', { ascending: false }),
         sb.from('research_studies').select('id,idea_id,title,question,status,cur_step,created_at,running_by,running_at').eq('project_id', projectId).order('created_at', { ascending: false }).then(function (r) { return (r && r.error) ? sb.from('research_studies').select('id,idea_id,title,question,status,cur_step,created_at').eq('project_id', projectId).order('created_at', { ascending: false }) : r; })

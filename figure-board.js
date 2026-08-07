@@ -110,17 +110,31 @@
   function nd() { return !!(window.PRDesign && window.PRDesign.isNew()); }   // "New design" flag
   function uid() { return 'n' + Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-4); }
   function toast(msg, ok) { var t = el('div', 'fb-toast' + (ok === false ? ' err' : '')); t.textContent = msg; document.body.appendChild(t); requestAnimationFrame(function () { t.classList.add('show'); }); setTimeout(function () { t.classList.remove('show'); setTimeout(function () { if (t.parentNode) t.parentNode.removeChild(t); }, 260); }, 2400); }
+  // PostgREST caps a single select at 1000 rows. A big library (e.g. 2853 sources) was silently truncated to the
+  // newest 1000 by year → most "included" papers (older years) fell out of scope, so the board showed only a few.
+  // Page through with .range() so the WHOLE library (and every included/study paper) is loaded.
+  function allSources(pid) {
+    var PAGE = 1000, all = [], from = 0;
+    function next() {
+      return sb.from('research_sources').select('*').eq('project_id', pid).order('year', { ascending: false, nullsFirst: false }).range(from, from + PAGE - 1).then(function (r) {
+        var rows = (r && r.data) || []; all = all.concat(rows);
+        if (rows.length < PAGE) return all;
+        from += PAGE; return next();
+      }, function () { return all; });
+    }
+    return next();
+  }
   function load() {
     var pid = projId(); if (!pid) return Promise.reject('no project');
     var figQ = sb.from('research_figures').select('*').eq('project_id', pid).order('ord', { ascending: true });
     if (!S.showHidden) figQ = figQ.eq('hidden', false);
     return Promise.all([
-      sb.from('research_sources').select('*').eq('project_id', pid).order('year', { ascending: false, nullsFirst: false }),
+      allSources(pid),
       figQ,
       sb.from('research_figures').select('id', { count: 'exact', head: true }).eq('project_id', pid).eq('hidden', true),
       sb.from('research_studies').select('id,title').eq('project_id', pid).order('created_at', { ascending: false })
     ]).then(function (r) {
-      S.papers = (r[0] && r[0].data) || [];
+      S.papers = r[0] || [];
       S.figs = (r[1] && r[1].data) || [];
       S.hiddenCount = (r[2] && r[2].count) || 0;
       S.studies = (r[3] && r[3].data) || [];
