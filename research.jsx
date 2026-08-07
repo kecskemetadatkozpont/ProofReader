@@ -4718,6 +4718,7 @@
     var gtkS = useState(0), setGraphTick = gtkS[1];                          // resize/relayout → recompute edges
     var graphRef = useRef(null);
     var ppS = useState(null), proposed = ppS[0], setProposed = ppS[1];      // pending chat-proposed tasks {steps, request} → shown as animated proposed cards in the graph
+    var epS = useState(null), editProp = epS[0], setEditProp = epS[1];      // index of the proposed task being edited before accept (or null)
     var lkoS = useState(false), linkOpen = lkoS[0], setLinkOpen = lkoS[1];
     var lkuS = useState(''), linkUrl = lkuS[0], setLinkUrl = lkuS[1];
     var pcmS = useState([]), pcMsgs = pcmS[0], setPcMsgs = pcmS[1];   // protocol-wide chat (ephemeral)
@@ -4987,7 +4988,7 @@
     function insertCockpitSteps(newSteps, originRequest, cb) {
       if (!newSteps || !newSteps.length) { if (cb) cb([]); return; }
       function ins(pid, baseOrd) {
-        var rows = newSteps.map(function (s, i) { return { protocol_id: pid, ord: baseOrd + i + 1, title: String(s.title || 'Task').slice(0, 240), kind: String(s.kind || 'custom'), spec: { instruction: s.instruction || '', inputs: s.inputs || [], expected_outputs: s.expected_outputs || [], acceptance: s.acceptance || [], command_hint: s.command_hint || '', est_minutes: Number.isFinite(s.est_minutes) ? s.est_minutes : null, origin_request: originRequest || null }, depends_on: [], needs_approval: !!s.needs_approval }; });
+        var rows = newSteps.map(function (s, i) { return { protocol_id: pid, ord: baseOrd + i + 1, title: String(s.title || 'Task').slice(0, 240), kind: String(s.kind || 'custom'), spec: { instruction: s.instruction || '', inputs: s.inputs || [], expected_outputs: s.expected_outputs || [], acceptance: s.acceptance || [], command_hint: s.command_hint || '', est_minutes: Number.isFinite(s.est_minutes) ? s.est_minutes : null, origin_request: originRequest || null, origin: (s.origin || (originRequest ? { chat: [String(originRequest).slice(0, 90)] } : null)) }, depends_on: [], needs_approval: !!s.needs_approval }; });
         sb.from('research_protocol_steps').insert(rows).select('id').then(function (r) { if (r && r.error) { window.PRUI.toast('Task mentés hiba: ' + r.error.message, { kind: 'error' }); } var ids = ((r && r.data) || []).map(function (x) { return x.id; }); load(); if (props.onChanged) props.onChanged(); if (cb) cb(ids); });
       }
       if (prot) { var baseOrd = steps.reduce(function (m, s) { return Math.max(m, s.ord || 0); }, 0); ins(prot.id, baseOrd); }
@@ -5012,7 +5013,10 @@
         if (window.PRUI) window.PRUI.toast('✓ ' + ((ids && ids.length) || 0) + ' task hozzáadva — becsúszott + felkerült a Map-re.', { kind: 'success' });
       });
     }
-    function dismissProposed() { setProposed(null); if (window.PRUI) window.PRUI.toast('Javaslat elvetve.', { kind: 'info' }); }
+    function dismissProposed() { setProposed(null); setEditProp(null); if (window.PRUI) window.PRUI.toast('Javaslat elvetve.', { kind: 'info' }); }
+    // edit / remove a single proposed task BEFORE accepting (so tasks can be created selectively + tweaked)
+    function propEdit(i, field, val) { setProposed(function (p) { if (!p) return p; var st = p.steps.slice(); st[i] = Object.assign({}, st[i]); st[i][field] = val; return Object.assign({}, p, { steps: st }); }); }
+    function propRemove(i) { if (editProp === i) setEditProp(null); setProposed(function (p) { if (!p) return p; var st = p.steps.slice(); st.splice(i, 1); return st.length ? Object.assign({}, p, { steps: st }) : null; }); }
     function sendChat(text) {
       var msg = String(text || '').trim(); if (!msg || chatBusy) return;
       var hist = chatMsgs.slice();
@@ -5451,11 +5455,24 @@
           h('div', { className: 'pcg-col' },
             h('div', { className: 'pcg-colh' }, 'Taskok — protokoll-lépések'),
             h('div', { className: 'pcg-stack' },
+              hasProp ? h('div', { key: 'propbar', className: 'pcg-prop-bar' },
+                h('b', null, '📝 ' + proposed.steps.length + ' javasolt feladat'), h('span', { className: 'pcg-prop-hint' }, '— szerkeszd / töröld, majd hozd létre'),
+                h('div', { style: { display: 'flex', gap: 6, marginTop: 6 } },
+                  h('button', { className: 'pcg-approve', disabled: !proposed.steps.length, onClick: approveProposed }, '✓ Létrehozás (' + proposed.steps.length + ')'),
+                  h('button', { className: 'pcg-dismiss', onClick: dismissProposed }, '✕ Elvetés'))) : null,
               hasProp ? proposed.steps.map(function (ps, i) {
-                return h('div', { key: 'prop' + i, className: 'pcg-task pcg-prop', 'data-tid': 'prop' + i, 'data-src': 'req-pending' },
-                  h('span', { className: 'pcg-kind' }, ps.kind || 'custom'), h('div', { className: 'pcg-ttl' }, ps.title),
-                  ps.instruction ? h('div', { className: 'pcg-sum' }, String(ps.instruction).slice(0, 90)) : null,
-                  i === 0 ? h('div', { className: 'pcg-prop-acts' }, h('button', { className: 'pcg-approve', onClick: approveProposed }, '✓ Approve → becsúszik (' + proposed.steps.length + ')'), h('button', { className: 'pcg-dismiss', onClick: dismissProposed }, '✕ Elvetés')) : null);
+                var editing = editProp === i;
+                return h('div', { key: 'prop' + i, className: 'pcg-task pcg-prop' + (editing ? ' editing' : ''), 'data-tid': 'prop' + i, 'data-src': 'req-pending' },
+                  h('div', { className: 'pcg-prop-top' }, h('span', { className: 'pcg-kind' }, ps.kind || 'custom'),
+                    h('span', { className: 'pcg-prop-mini' },
+                      h('button', { className: 'pcg-mini', title: editing ? 'Kész' : 'Szerkesztés', onClick: function () { setEditProp(editing ? null : i); } }, editing ? '✓' : '✎'),
+                      h('button', { className: 'pcg-mini', title: 'Eltávolítás', onClick: function () { propRemove(i); } }, '✕'))),
+                  editing ? h('div', { className: 'pcg-prop-edit' },
+                      h('input', { className: 'field', value: ps.title || '', placeholder: 'Feladat címe', onChange: function (e) { propEdit(i, 'title', e.target.value); } }),
+                      h('textarea', { className: 'field', rows: 3, value: ps.instruction || '', placeholder: 'Utasítás (mit csináljon az agent)', onChange: function (e) { propEdit(i, 'instruction', e.target.value); } }))
+                    : h(React.Fragment, null,
+                      h('div', { className: 'pcg-ttl' }, ps.title || '(névtelen feladat)'),
+                      ps.instruction ? h('div', { className: 'pcg-sum' }, String(ps.instruction).slice(0, 90)) : null));
               }) : null,
               steps.length ? steps.map(function (s) {
                 var sx = s.spec || {};
@@ -5562,7 +5579,7 @@
                   (sx.origin === 'citation-optimizer') ? h('span', { className: 'chip', style: { fontSize: 9.5, marginLeft: 6, background: 'var(--accent-tint)', color: 'var(--accent)' }, title: 'Added by the Citation Optimizer' }, '🔗') : null,
                   (sx.attachments && sx.attachments.length) ? h('span', { className: 'chip', style: { fontSize: 9.5, marginLeft: 5 }, title: 'Attachments' }, '📎 ' + sx.attachments.length) : null,
                   (s.depends_on && s.depends_on.length) ? h('span', { className: 'ex-dep' }, 'after ' + s.depends_on.join(',')) : null,
-                  (function () { var o = sx.origin; if (!o) return null; var p = []; if (o.ideas && o.ideas.length) p.push('💡' + o.ideas.length); if (o.gaps && o.gaps.length) p.push('🕳️' + o.gaps.length); if (o.reviews && o.reviews.length) p.push('🔬' + o.reviews.length); if (!p.length) return null; var tip = 'Ebből a forrásból generálva:' + (o.ideas || []).map(function (x) { return '\n💡 ' + x; }).join('') + (o.gaps || []).map(function (x) { return '\n🕳️ ' + x; }).join('') + (o.reviews || []).map(function (x) { return '\n🔬 ' + x; }).join(''); return h('span', { className: 'ex-origin', title: tip, onClick: function (e) { e.stopPropagation(); setExp(function (pp) { var n = Object.assign({}, pp); n[s.id] = true; return n; }); } }, p.join(' ')); })()),
+                  (function () { var o = sx.origin; if (!o) return null; var p = []; if (o.ideas && o.ideas.length) p.push('💡' + o.ideas.length); if (o.gaps && o.gaps.length) p.push('🕳️' + o.gaps.length); if (o.reviews && o.reviews.length) p.push('🔬' + o.reviews.length); if (o.chat && o.chat.length) p.push('💬'); if (!p.length) return null; var tip = 'Ebből a forrásból generálva:' + (o.ideas || []).map(function (x) { return '\n💡 ' + x; }).join('') + (o.gaps || []).map(function (x) { return '\n🕳️ ' + x; }).join('') + (o.reviews || []).map(function (x) { return '\n🔬 ' + x; }).join('') + (o.chat || []).map(function (x) { return '\n💬 ' + x; }).join(''); return h('span', { className: 'ex-origin', title: tip, onClick: function (e) { e.stopPropagation(); setExp(function (pp) { var n = Object.assign({}, pp); n[s.id] = true; return n; }); } }, p.join(' ')); })()),
                 h('td', null, h('span', { className: 'ex-own ' + (ai ? 'ai' : 'hu') }, ai ? 'AI' : 'HUMAN')),
                 h('td', null, h('span', { className: 'chip ' + pst[0], style: { fontSize: 10 } }, pst[1])),
                 h('td', { className: 'r ex-chk' }, a ? (a.pass + '/' + a.total) : '—')
@@ -5572,13 +5589,14 @@
                 var acFails = (a && a.items) ? a.items.filter(function (it) { return !it.ok; }) : [];
                 out.push(h('tr', { key: s.id + '-d', className: 'ex-drow' }, h('td', { colSpan: 5, className: 'ex-detail' },
                   sx.instruction ? h('div', null, sx.instruction) : null,
-                  (function () { var o = sx.origin; if (!o || !((o.ideas && o.ideas.length) || (o.gaps && o.gaps.length) || (o.reviews && o.reviews.length))) return null;
+                  (function () { var o = sx.origin; if (!o || !((o.ideas && o.ideas.length) || (o.gaps && o.gaps.length) || (o.reviews && o.reviews.length) || (o.chat && o.chat.length))) return null;
                     return h('div', { style: { marginTop: 8, fontSize: 11.5, background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 8, padding: '7px 10px' } },
                       h('b', null, '📋 Miből generálva'),
                       h('div', { style: { display: 'flex', flexDirection: 'column', gap: 2, marginTop: 4 } },
                         (o.ideas || []).map(function (x, k) { return h('div', { key: 'i' + k, style: { color: 'var(--accent)' } }, '💡 ' + x); }),
                         (o.gaps || []).map(function (x, k) { return h('div', { key: 'g' + k, style: { color: '#d1810b' } }, '🕳️ ' + x); }),
-                        (o.reviews || []).map(function (x, k) { return h('div', { key: 'r' + k, style: { color: '#7c3aed' } }, '🔬 ' + x); }))); })(),
+                        (o.reviews || []).map(function (x, k) { return h('div', { key: 'r' + k, style: { color: '#7c3aed' } }, '🔬 ' + x); }),
+                        (o.chat || []).map(function (x, k) { return h('div', { key: 'c' + k, style: { color: 'var(--muted)' } }, '💬 ' + x); }))); })(),
                   res.summary ? h('div', { style: { marginTop: 6 } }, h('b', null, 'Result: '), res.summary) : null,
                   res.error ? h('div', { className: 'ex-err', style: { marginTop: 6 } }, h('b', null, '✗ Error: '), String(res.error.message || res.error)) : null,
                   acFails.length ? h('div', { style: { marginTop: 6 } }, h('b', { style: { color: 'var(--danger)' } }, 'Failed checks: '), acFails.map(function (it, k) { return h('div', { key: k, className: 'ex-acfail' }, '• ' + it.crit + (it.reason ? ' — ' + it.reason : '')); })) : null,
