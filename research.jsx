@@ -319,10 +319,10 @@
       if (i === 1) {
         kids.push(h('div', { className: 'step-sep', key: 'sep-study' }));
         kids.push(h('button', {
-          key: 'study', className: 'step step-study' + (props.tab === 'study' ? ' cur' : '') + (nt['study'] ? ' has-new' : ''),
-          title: 'Studies — the literature-screening funnel between an idea and your literature',
+          key: 'study', className: 'step step-study' + (props.tab === 'study' ? ' cur' : '') + (props.studyState === 'running' ? ' figrun' : props.studyState === 'done' ? ' figdone' : '') + (!props.studyState && nt['study'] ? ' has-new' : ''),
+          title: props.studyState === 'running' ? 'Study-futás a háttérben…' : props.studyState === 'done' ? 'Study / áttekintés kész' : 'Studies — the literature-screening funnel between an idea and your literature',
           onClick: function () { if (props.onStudy) props.onStudy(); }
-        }, h('span', { className: 'dot', 'aria-hidden': 'true' }, svg('M3 4 13 4 9.2 8.8 9.2 12 6.8 13 6.8 8.8Z')), tr(props.lang, 'Studies'), nw('study')));
+        }, h('span', { className: 'dot', 'aria-hidden': 'true' }, props.studyState === 'running' ? '⏳' : props.studyState === 'done' ? '✓' : svg('M3 4 13 4 9.2 8.8 9.2 12 6.8 13 6.8 8.8Z')), tr(props.lang, 'Studies'), (!props.studyState ? nw('study') : null)));
       }
       // "Rések" — research-gap analysis, after Literature (not a lifecycle stage; never shifts project.stage)
       if (i === 2) {
@@ -10992,11 +10992,19 @@
     useEffect(function () {
       var u1 = PRSignals.subscribe(function () { setSigTick(function (x) { return x + 1; }); });
       var u2 = PRFigureRunner.subscribe(function () { setSigTick(function (x) { return x + 1; }); });   // live figboard menu state (yellow→green)
-      return function () { u1(); u2(); };
+      var u3 = PRStudyRunner.subscribe(function () { setSigTick(function (x) { return x + 1; }); });     // live Studies menu state (yellow→green)
+      return function () { u1(); u2(); u3(); };
     }, []);
     var newTabs = PRSignals.forProject(p.id);
     var _figSt = PRFigureRunner.status(p.id);   // background figure extraction: running → yellow, done → green on the „Ábrák" menu item
     var figState = _figSt ? (_figSt.stage === 'running' ? 'running' : _figSt.stage === 'done' ? 'done' : _figSt.stage === 'error' ? 'error' : null) : null;
+    // Studies menu state: yellow while ANY native study run (PRStudyRunner) is active for this project; green when a
+    // study/review just finished (PRSignals 'study', set by prAnnounce for both native funnels and Elicit reviews).
+    var studyState = (function () {
+      var rmap = PRStudyRunner.runs();
+      for (var k in rmap) { if (rmap[k] && rmap[k].projectId === p.id && rmap[k].stage !== 'done' && rmap[k].stage !== 'error') return 'running'; }
+      return newTabs['study'] ? 'done' : null;
+    })();
     useEffect(function () { PRSignals.clear(p.id, tab); if (tab === 'figboard') PRFigureRunner.dismiss(p.id); }, [tab]);   // opening the Ábrák tab clears the green (dismiss no-ops while still running)
     var asS = useState(null), autoStudy = asS[0], setAutoStudy = asS[1];   // ideas to auto-create a study from (set by the Ideas "study basis" window → one-click create + Publify pre-fill)
     var agS = useState(0), autoSR = agS[0], setAutoSR = agS[1];   // signal from the Ideas "Study basis" → generate SR-question drafts in the SR studio
@@ -11139,8 +11147,8 @@
         var active = STAGE_TAB[i] === tab;
         kids.push(h('button', { key: i, className: 'rv-st' + (active ? ' cur' : '') + (isDone ? ' done' : '') + (i === (p.stage || 0) ? ' atstage' : '') + (newTabs[STAGE_TAB[i]] ? ' rv-hasnew' : ''), 'aria-current': active ? 'page' : null, onClick: function () { setTab(STAGE_TAB[i] || 'overview'); } },
           h('span', { className: 'rv-st-dot' }, isDone ? '✓' : (i + 1)), h('span', { className: 'rv-st-lbl' }, tr(plang, name)), nw(STAGE_TAB[i])));
-        if (i === 1) kids.push(h('button', { key: 'study', className: 'rv-st sub' + (tab === 'study' ? ' cur' : '') + (newTabs['study'] ? ' rv-hasnew' : ''), onClick: function () { setTab('study'); } },
-          h('span', { className: 'rv-st-dot' }, '›'), h('span', { className: 'rv-st-lbl' }, tr(plang, 'Studies')), nw('study')));
+        if (i === 1) kids.push(h('button', { key: 'study', className: 'rv-st sub' + (tab === 'study' ? ' cur' : '') + (studyState === 'running' ? ' rv-figrun' : studyState === 'done' ? ' rv-figdone' : '') + (!studyState && newTabs['study'] ? ' rv-hasnew' : ''), title: studyState === 'running' ? 'Study-futás a háttérben…' : studyState === 'done' ? 'Study / áttekintés kész — kattints a megtekintéshez' : null, onClick: function () { setTab('study'); } },
+          h('span', { className: 'rv-st-dot' }, studyState === 'running' ? '⏳' : studyState === 'done' ? '✓' : '›'), h('span', { className: 'rv-st-lbl' }, tr(plang, 'Studies')), (!studyState ? nw('study') : null)));
         if (i === 2) kids.push(h('button', { key: 'gap', className: 'rv-st sub' + (tab === 'gap' ? ' cur' : ''), title: 'Kutatási rés-elemzés', onClick: function () { setTab('gap'); } },
           h('span', { className: 'rv-st-dot' }, '🕳'), h('span', { className: 'rv-st-lbl' }, 'Rések')));
         if (i === 2 && hasLib) {   // Literature analyzers as sub-tabs (embedded via iframe) — only with a library
@@ -11210,7 +11218,7 @@
           props.canEdit ? h('button', { className: 'btn', style: { height: 32, flex: 'none' }, title: 'Project base settings (title, field, keywords, goal)', onClick: function () { setEditOpen(true); } }, tr(plang, '✎ Settings')) : null
         )
       ),
-      h(Stepper, { stage: p.stage, tab: tab, lang: plang, canEdit: props.canEdit, newTabs: newTabs, figState: figState, onSet: setStage, onStudy: function () { setTab('study'); }, onGap: function () { setTab('gap'); }, hasLib: hasLib, onFigboard: function () { setTab('figboard'); }, onCitopt: function () { setTab('citopt'); }, onNav: function (i) { setTab(STAGE_TAB[i] || 'overview'); } }),
+      h(Stepper, { stage: p.stage, tab: tab, lang: plang, canEdit: props.canEdit, newTabs: newTabs, figState: figState, studyState: studyState, onSet: setStage, onStudy: function () { setTab('study'); }, onGap: function () { setTab('gap'); }, hasLib: hasLib, onFigboard: function () { setTab('figboard'); }, onCitopt: function () { setTab('citopt'); }, onNav: function (i) { setTab(STAGE_TAB[i] || 'overview'); } }),
       h('div', { className: 'subtabs' }, [['overview', 'Overview', null], ['canvas', 'Canvas', null], ['notes', 'Notes', null], ['log', 'Log', (props.log || []).length], ['tasks', 'Tasks', openTasks]].map(function (nt) {
         return h('button', { key: nt[0], className: tab === nt[0] ? 'on' : '', onClick: function () { setTab(nt[0]); } }, tr(plang, nt[1]), nt[2] ? h('span', { className: 'c' }, nt[2]) : null);
       })),
