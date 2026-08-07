@@ -766,7 +766,18 @@
     }, [props.runId]);
     useEffect(function () { var el = feedRef.current; if (el) el.scrollTop = el.scrollHeight; }, [events.length]);
 
-    function setStatus(patch) { if (!run) return; sb.from('research_autopilot_runs').update(Object.assign({ updated_at: nowIso() }, patch)).eq('id', run.id); }
+    // approve/resume/pause must NOT depend on Realtime (research_autopilot_runs isn't in the supabase_realtime publication →
+    // postgres_changes never fires). So update the LOCAL run optimistically (UI reacts instantly) and, after the DB write
+    // confirms, restart the driver locally — otherwise pressing „Jóváhagyás" did nothing (DB changed, nothing reacted).
+    function setStatus(patch) {
+      if (!run) return;
+      var prev = run, next = Object.assign({}, run, { updated_at: nowIso() }, patch);
+      setRun(next);
+      sb.from('research_autopilot_runs').update(Object.assign({ updated_at: nowIso() }, patch)).eq('id', run.id).then(function (r) {
+        if (r && r.error) { if (alive.current) setRun(prev); toast('Nem sikerült: ' + r.error.message, false); return; }
+        ensureDrive(next);   // resume the pipeline after approve/resume (Realtime won't call ensureDrive for us)
+      }, function () { if (alive.current) setRun(prev); toast('Hálózati hiba — próbáld újra.', false); });
+    }
     function pause() { setStatus({ status: 'paused' }); }
     function resume() { setStatus({ status: 'running', started_at: (run && run.started_at) || nowIso() }); }
     function stop() {
