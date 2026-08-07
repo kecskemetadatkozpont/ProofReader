@@ -705,6 +705,8 @@
     var evS = useState([]), events = evS[0], setEvents = evS[1];
     var tS = useState(0), tick = tS[0], setTick = tS[1];
     var nfS = useState(false), notFound = nfS[0], setNotFound = nfS[1];
+    var opS = useState(null), openPhase = opS[0], setOpenPhase = opS[1];   // which phase card is expanded to show its real artifacts
+    var paS = useState({}), phaseArts = paS[0], setPhaseArts = paS[1];     // phase key → { loading, items, total } (lazy-fetched)
     var driving = useRef(false), alive = useRef(true), projRef = useRef(null), feedRef = useRef(null), myDriver = useRef(null);
     if (!myDriver.current) myDriver.current = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : ('00000000-0000-4000-8000-' + String(Date.now()).slice(-12).padStart(12, '0'));   // per-tab lease id
     useEffect(function () { return function () { alive.current = false; driving.current = false; }; }, []);
@@ -803,15 +805,55 @@
     var elMin = Math.floor(elapsed / 60), elSec = elapsed % 60;
     var runningIdx = phases.findIndex ? phases.findIndex(function (p) { return p.status === 'running'; }) : -1;
 
+    // lazy per-phase artifacts → the phase card expands to show what was actually produced (ideas list, included sources, …)
+    function loadPhaseArts(key) {
+      if (phaseArts[key] && !phaseArts[key].loading) return;   // cached
+      var pid = run.project_id;
+      function put(v) { setPhaseArts(function (m) { var n = Object.assign({}, m); n[key] = v; return n; }); }
+      put({ loading: true });
+      if (key === 'ideas') {
+        sb.from('research_ideas').select('id,question,hypothesis,novelty,source').eq('project_id', pid).neq('status', 'rejected').order('created_at', { ascending: false }).limit(15)
+          .then(function (r) { if (alive.current) put({ items: (r && r.data) || [] }); }, function () { if (alive.current) put({ items: [] }); });
+      } else if (key === 'literature') {
+        Promise.all([
+          sb.from('research_sources').select('id', { count: 'exact', head: true }).eq('project_id', pid),
+          sb.from('research_sources').select('id,title,year,url,screening').eq('project_id', pid).eq('screening', 'include').order('cited_by', { ascending: false, nullsFirst: false }).limit(15)
+        ]).then(function (res) { if (alive.current) put({ total: (res[0] && res[0].count) || 0, items: (res[1] && res[1].data) || [] }); }, function () { if (alive.current) put({ items: [] }); });
+      } else { put({ items: [] }); }   // other phases: the detail shows a Research deep-link instead of a list
+    }
+    function togglePhase(p) { if (openPhase === p.key) { setOpenPhase(null); return; } setOpenPhase(p.key); loadPhaseArts(p.key); }
+    function phaseDetail(p) {
+      var a = phaseArts[p.key];
+      if (!a || a.loading) return h('div', { className: 'ap-pc-dempty' }, h('span', { className: 'spin' }));
+      if (p.key === 'ideas') {
+        var items = a.items || [];
+        return items.length ? h('div', { className: 'ap-pc-list' }, items.map(function (x) {
+          return h('div', { className: 'ap-pc-li', key: x.id }, h('span', { className: 'ap-pc-li-t' }, x.question || 'Ötlet'), (x.novelty != null) ? h('span', { className: 'ap-pc-li-n' }, '★ ' + x.novelty) : null);
+        })) : h('div', { className: 'ap-pc-dempty' }, 'Még nincs ötlet.');
+      }
+      if (p.key === 'literature') {
+        var its = a.items || [];
+        return h('div', null,
+          (a.total != null) ? h('div', { className: 'ap-pc-dmeta' }, a.total + ' forrás · ' + its.length + ' included (top)') : null,
+          its.length ? h('div', { className: 'ap-pc-list' }, its.map(function (x) {
+            return h('div', { className: 'ap-pc-li', key: x.id }, x.url ? h('a', { className: 'ap-pc-li-t', href: x.url, target: '_blank', rel: 'noopener' }, x.title || 'Forrás') : h('span', { className: 'ap-pc-li-t' }, x.title || 'Forrás'), x.year ? h('span', { className: 'ap-pc-li-n' }, String(x.year)) : null);
+          })) : h('div', { className: 'ap-pc-dempty' }, 'Nincs included forrás.'));
+      }
+      return h('a', { className: 'btn sm', href: 'Research.html?project=' + encodeURIComponent(run.project_id), target: '_blank', rel: 'noopener' }, 'Megnyitás a Research-ben ↗');
+    }
     function phaseCard(p, i) {
       var badge = p.status === 'done' ? '✓ Kész' : p.status === 'running' ? 'Fut…' : p.status === 'gate' ? '⏸ Jóváhagyás' : p.status === 'skipped' ? 'Kihagyva' : 'Vár';
       var sub = p.status === 'done' ? (p.result || 'kész') : p.status === 'running' ? 'dolgozik…' : p.status === 'gate' ? 'jóváhagyásra vár' : p.status === 'skipped' ? (p.result || 'kihagyva') : (p.enabled ? '—' : 'letiltva');
-      return h('div', { key: p.key, className: 'ap-pcard ' + p.status + (p.enabled ? '' : ' off') },
-        h('div', { className: 'ap-pc-ic' }, AP_ICON[p.key] || '•'),
-        h('div', { className: 'ap-pc-b' },
-          h('div', { className: 'ap-pc-top' }, h('span', { className: 'ap-pc-n' }, p.label), h('span', { className: 'ap-pc-badge ' + p.status }, badge)),
-          h('div', { className: 'ap-pc-sub' }, sub),
-          p.status === 'running' ? h('div', { className: 'ap-pc-mini' }, h('i')) : null));
+      var open = openPhase === p.key;
+      return h('div', { key: p.key, className: 'ap-pcard ' + p.status + (p.enabled ? '' : ' off') + (open ? ' open' : '') },
+        h('button', { className: 'ap-pc-hd', onClick: function () { togglePhase(p); }, title: 'Részeredmények megnyitása' },
+          h('div', { className: 'ap-pc-ic' }, AP_ICON[p.key] || '•'),
+          h('div', { className: 'ap-pc-b' },
+            h('div', { className: 'ap-pc-top' }, h('span', { className: 'ap-pc-n' }, p.label), h('span', { className: 'ap-pc-badge ' + p.status }, badge)),
+            h('div', { className: 'ap-pc-sub' }, sub),
+            p.status === 'running' ? h('div', { className: 'ap-pc-mini' }, h('i')) : null),
+          h('span', { className: 'ap-pc-caret' }, open ? '▾' : '▸')),
+        open ? h('div', { className: 'ap-pc-detail' }, phaseDetail(p)) : null);
     }
     function focusPanel() {
       if (run.status === 'awaiting_approval' && run.gate) {
