@@ -190,7 +190,12 @@
     var cur = (run.phases[run.phase_index] || {}).cursor || {};
     var maxP = parseInt(run.config && run.config.max_papers, 10) || 150;
     if (!cur.stage) {
-      return sb.from('research_ideas').select('id,question,hypothesis').eq('project_id', project.id).neq('status', 'rejected').order('created_at', { ascending: false }).limit(1).maybeSingle().then(function (ir) {
+      // the user picks WHICH idea to develop (config.develop_idea_id from the graph); default = most recent
+      var chosen = run.config && run.config.develop_idea_id;
+      var ideaQ = chosen
+        ? sb.from('research_ideas').select('id,question,hypothesis').eq('id', chosen).maybeSingle()
+        : sb.from('research_ideas').select('id,question,hypothesis').eq('project_id', project.id).neq('status', 'rejected').order('created_at', { ascending: false }).limit(1).maybeSingle();
+      return ideaQ.then(function (ir) {
         var idea = ir && ir.data;
         var q = (idea && idea.question) || project.goal || project.title || 'literature';
         var title = String((idea && idea.question) || (project.title + ' — literature')).slice(0, 80);
@@ -711,6 +716,7 @@
     var opS = useState(null), openPhase = opS[0], setOpenPhase = opS[1];   // which phase card is expanded to show its real artifacts
     var paS = useState({}), phaseArts = paS[0], setPhaseArts = paS[1];     // phase key → { loading, items, total } (lazy-fetched)
     var pvS = useState(null), preview = pvS[0], setPreview = pvS[1];        // { title, content } → the readable review preview modal
+    var swS = useState(false), switching = swS[0], setSwitching = swS[1];   // guard while re-targeting the pipeline to a chosen idea
     var driving = useRef(false), alive = useRef(true), projRef = useRef(null), feedRef = useRef(null), myDriver = useRef(null);
     if (!myDriver.current) myDriver.current = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : ('00000000-0000-4000-8000-' + String(Date.now()).slice(-12).padStart(12, '0'));   // per-tab lease id
     useEffect(function () { return function () { alive.current = false; driving.current = false; }; }, []);
@@ -798,6 +804,25 @@
       else go(window.confirm('Leállítod az Autopilotot? A már elkészült eredmények megmaradnak.'));
     }
     function approve() { setStatus({ status: 'running', gate: null }); }
+    // Re-target the pipeline to a chosen idea: the downstream phases (literature → …) restart for THAT idea.
+    var DOWN = ['literature', 'sr', 'protocol', 'journal', 'writing', 'submission'];
+    function switchIdea(ideaId) {
+      if (switching || !ideaId || !run) return;
+      setSwitching(true);
+      var ph = (run.phases || []).map(function (p) { return DOWN.indexOf(p.key) >= 0 ? Object.assign({}, p, { status: p.enabled ? 'wait' : 'skipped', cursor: null, result: null }) : p; });
+      var litIdx = -1; ph.forEach(function (p, k) { if (p.key === 'literature' && litIdx < 0) litIdx = k; });
+      var cfg = Object.assign({}, run.config || {}, { develop_idea_id: ideaId });
+      var patch = { config: cfg, phases: ph, phase_index: litIdx >= 0 ? litIdx : run.phase_index, status: 'running', gate: null };
+      var prev = run, next = Object.assign({}, run, { updated_at: nowIso() }, patch);
+      setRun(next); setOpenPhase(null);
+      sb.from('research_autopilot_runs').update(Object.assign({ updated_at: nowIso() }, patch)).eq('id', run.id).then(function (r) {
+        setSwitching(false);
+        if (r && r.error) { if (alive.current) setRun(prev); toast('Nem sikerült: ' + r.error.message, false); return; }
+        setPhaseArts(function (m) { var n = Object.assign({}, m); DOWN.forEach(function (k) { delete n[k]; }); return n; });   // stale downstream artifacts → reload for the new idea
+        ensureDrive(next);
+        toast('▶ Átváltva erre az ötletre — az irodalom újraindul.', true);
+      }, function () { setSwitching(false); if (alive.current) setRun(prev); toast('Hálózati hiba — próbáld újra.', false); });
+    }
 
     if (notFound) return h('div', { className: 'ap-wrap' }, h('div', { className: 'center' }, h('div', { className: 'box' }, h('div', { className: 'mk' }, h('i')), h('h1', null, 'Nincs ilyen futás'), h('p', null, 'Ez az Autopilot-futás nem létezik, vagy nincs hozzáférésed.'), h('button', { className: 'btn', onClick: props.onExit }, '‹ Vissza az Autopilothoz'))));
     if (!run) return h('div', { className: 'ap-wrap' }, h('div', { className: 'center' }, h('div', { className: 'box' }, h('span', { className: 'spin' }), h('p', null, 'Autopilot betöltése…'))));
@@ -882,20 +907,25 @@
       var sub = p.status === 'done' ? (p.result || 'kész') : p.status === 'running' ? 'dolgozik…' : p.status === 'gate' ? 'jóváhagyásra vár' : p.status === 'skipped' ? (p.result || 'kihagyva') : (p.enabled ? '—' : 'letiltva');
       var open = openPhase === p.key, active = (p.status === 'running' || p.status === 'gate');
       var conn = last ? null : h('div', { className: 'apg-conn' + (p.status === 'done' ? ' done' : active ? ' run' : '') });
-      // IDEAS phase fans out into its parallel ideas as separate branch cards, so N ideas are visible at once (not 1 card)
+      // IDEAS phase = parallel columns; the user PICKS which idea the pipeline develops (config.develop_idea_id).
+      // The active idea flows down into the shared downstream (literature → review → …); the others offer „Ezt dolgozd ki".
       if (p.key === 'ideas') {
         var ia = phaseArts.ideas, ideas = (ia && !ia.loading && ia.items) || [];
+        var activeId = (run.config && run.config.develop_idea_id) || (ideas[0] && ideas[0].id);
         return h('div', { className: 'apg-step apg-step-wide', key: p.key },
           h('div', { className: 'apg-node ' + p.status + (p.enabled ? '' : ' off'), style: { '--hue': hueOf('ideas') } },
             h('div', { className: 'apg-hd static' },
               h('span', { className: 'apg-ic' }, AP_ICON.ideas || '💡'),
-              h('span', { className: 'apg-tx' }, h('span', { className: 'apg-lab' }, p.label + (ideas.length ? ' · ' + ideas.length + ' párhuzamosan' : '')), h('span', { className: 'apg-sub' }, sub)),
+              h('span', { className: 'apg-tx' }, h('span', { className: 'apg-lab' }, p.label + (ideas.length ? ' · ' + ideas.length + ' párhuzamosan' : '')), h('span', { className: 'apg-sub' }, ideas.length ? 'válaszd ki, melyiket dolgozza ki az Autopilot →' : sub)),
               h('span', { className: 'apg-badge ' + (p.status === 'gate' ? 'gate' : p.status) }, badge))),
           ideas.length ? h('div', { className: 'apg-fan-conn' }) : null,
           ideas.length ? h('div', { className: 'apg-fan' }, ideas.map(function (x) {
-            return h('div', { className: 'apg-idea', key: x.id, style: { '--hue': hueOf('ideas') }, title: (x.hypothesis || x.question || '') },
+            var on = x.id === activeId;
+            return h('div', { className: 'apg-idea' + (on ? ' active' : ''), key: x.id, style: { '--hue': hueOf('ideas') }, title: (x.hypothesis || x.question || '') },
               h('span', { className: 'apg-idea-h' }, h('span', { className: 'apg-idea-ic' }, '💡'), (x.novelty != null) ? h('span', { className: 'apg-idea-n' }, '★ ' + x.novelty) : null),
-              h('span', { className: 'apg-idea-t' }, x.question || 'Ötlet'));
+              h('span', { className: 'apg-idea-t' }, x.question || 'Ötlet'),
+              on ? h('span', { className: 'apg-idea-badge' }, '◉ Kidolgozás alatt')
+                 : h('button', { className: 'apg-idea-btn', disabled: switching, onClick: function () { switchIdea(x.id); } }, switching ? '…' : '▶ Ezt dolgozd ki'));
           })) : null,
           (ia && ia.loading) ? h('div', { className: 'ap-pc-dempty' }, h('span', { className: 'spin' })) : null,
           conn);
