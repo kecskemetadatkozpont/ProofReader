@@ -1004,6 +1004,9 @@
     var pkS = useState(false), picker = pkS[0], setPicker = pkS[1];
     var enS = useState(false), enhancing = enS[0], setEnhancing = enS[1];   // #6: prompt enhancement in flight
     var firstLoad = useRef(true), animated = useRef({}), alive = useRef(true), scrollRef = useRef(null), taRef = useRef(null), justStreamed = useRef(false), lastLog = useRef(0);
+    var abortRef = useRef(null), qRef = useRef([]);   // abortRef: AbortController for the live stream (Stop button); qRef: messages queued while busy
+    var qoS = useState([]), queued = qoS[0], setQueued = qoS[1];   // pending queued messages (shown as chips above the composer)
+    var mpS = useState(null), mdPrev = mpS[0], setMdPrev = mpS[1];   // { path, content, loading } — preview of an AI-generated .md file, opened from a message chip
     var atBottom = useRef(true);   // only auto-follow the stream while the user is at the bottom; if they scroll up, stay put
     var sgS = useState(''), sgMsg = sgS[0], setSgMsg = sgS[1];
     var sgB = useState(false), sgBusy = sgB[0], setSgBusy = sgB[1];
@@ -1230,24 +1233,26 @@
       var mm = CHAT_MODES[chatMode] || CHAT_MODES.balanced;   // → effort + thinking; the server gates them by model, so an unsupported model just ignores them
       sb.auth.getSession().then(function (s) {
         var token = (s && s.data && s.data.session && s.data.session.access_token) || CFG.supabaseAnonKey;
+        var ac = new AbortController(); abortRef.current = ac;   // Stop button aborts this
         fetch(CFG.supabaseUrl + '/functions/v1/research-chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'apikey': CFG.supabaseAnonKey, 'Authorization': 'Bearer ' + token },
-          body: JSON.stringify({ chat_id: cid, stream: true, effort: mm.effort, think: mm.think, web: webOn })
+          body: JSON.stringify({ chat_id: cid, stream: true, effort: mm.effort, think: mm.think, web: webOn }),
+          signal: ac.signal
         }).then(function (resp) {
-          if (!resp.ok || !resp.body || !resp.body.getReader) { setBusy(false); setErr('AI connection pending — deploy the research-chat Edge function and set ANTHROPIC_API_KEY.'); return; }
+          if (!resp.ok || !resp.body || !resp.body.getReader) { abortRef.current = null; setBusy(false); setErr('AI connection pending — deploy the research-chat Edge function and set ANTHROPIC_API_KEY.'); return; }
           var reader = resp.body.getReader(), dec = new TextDecoder(), acc = '';
           setStreaming({ text: '' });
           (function pump() {
             reader.read().then(function (r) {
               if (!alive.current) return;
-              if (r.done) { setStreaming(null); setBusy(false); justStreamed.current = true; saveAiFiles(parseStatus(acc).text, cid); loadMsgs(cid); loadRail(); return; }
+              if (r.done) { abortRef.current = null; setStreaming(null); setBusy(false); justStreamed.current = true; saveAiFiles(parseStatus(acc).text, cid); loadMsgs(cid); loadRail(); drainQueue(); return; }
               acc += dec.decode(r.value, { stream: true });
               var ps = parseStatus(acc); setStreaming({ text: ps.text, statuses: ps.statuses });
               pump();
-            }, function () { setStreaming(null); setBusy(false); loadMsgs(cid); });
+            }, function (e) { if (e && e.name === 'AbortError') return; abortRef.current = null; setStreaming(null); setBusy(false); loadMsgs(cid); });   // abort → stopGen already reset state
           })();
-        }, function () { setBusy(false); setErr('AI connection pending — deploy the research-chat Edge function.'); });
+        }, function (e) { if (e && e.name === 'AbortError') return; abortRef.current = null; setBusy(false); setErr('AI connection pending — deploy the research-chat Edge function.'); });
       });
     }
     // 🤖 Ágens-mód: több párhuzamos ágenst hajt a research-agents edge fn, NDJSON eseményekkel. Minden ágens
@@ -1257,12 +1262,14 @@
       if (!CFG.supabaseUrl) { setBusy(false); setErr('Missing backend config.'); return; }
       sb.auth.getSession().then(function (s) {
         var token = (s && s.data && s.data.session && s.data.session.access_token) || CFG.supabaseAnonKey;
+        var ac = new AbortController(); abortRef.current = ac;   // Stop button aborts this
         fetch(CFG.supabaseUrl + '/functions/v1/research-agents', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'apikey': CFG.supabaseAnonKey, 'Authorization': 'Bearer ' + token },
-          body: JSON.stringify({ chat_id: cid, web: webOn })
+          body: JSON.stringify({ chat_id: cid, web: webOn }),
+          signal: ac.signal
         }).then(function (resp) {
-          if (!resp.ok || !resp.body || !resp.body.getReader) { setBusy(false); setErr('Ágens-mód nem elérhető — telepítsd a research-agents Edge functiont, vagy nincs hozzá jogosultságod (research_agents).'); return; }
+          if (!resp.ok || !resp.body || !resp.body.getReader) { abortRef.current = null; setBusy(false); setErr('Ágens-mód nem elérhető — telepítsd a research-agents Edge functiont, vagy nincs hozzá jogosultságod (research_agents).'); return; }
           var reader = resp.body.getReader(), dec = new TextDecoder(), buf = '', answer = '';
           var lanes = [{ id: 'plan', role: 'planner', label: 'Tervezés', state: 'run', status: '' }], laneById = { plan: lanes[0] };
           function upd() { setStreaming({ text: answer, lanes: lanes.slice() }); }
@@ -1270,7 +1277,7 @@
           (function pump() {
             reader.read().then(function (r) {
               if (!alive.current) return;
-              if (r.done) { setStreaming(null); setBusy(false); justStreamed.current = true; loadMsgs(cid); loadRail(); return; }
+              if (r.done) { abortRef.current = null; setStreaming(null); setBusy(false); justStreamed.current = true; loadMsgs(cid); loadRail(); drainQueue(); return; }
               buf += dec.decode(r.value, { stream: true });
               var nl;
               while ((nl = buf.indexOf('\n')) >= 0) {
@@ -1288,23 +1295,19 @@
                 else if (ev.t === 'err') { setErr('Ágens-hiba: ' + (ev.m || 'ismeretlen')); }
               }
               pump();
-            }, function () { setStreaming(null); setBusy(false); loadMsgs(cid); });
+            }, function (e) { if (e && e.name === 'AbortError') return; abortRef.current = null; setStreaming(null); setBusy(false); loadMsgs(cid); });
           })();
-        }, function () { setBusy(false); setErr('Ágens-mód nem elérhető.'); });
+        }, function (e) { if (e && e.name === 'AbortError') return; abortRef.current = null; setBusy(false); setErr('Ágens-mód nem elérhető.'); });
       });
     }
-    function sendText(raw) {
-      var txt = (raw || '').trim();
-      if (!txt || busy || peek) return;   // peeking is read-only → never write into a colleague's thread
+    function doSend(txt, atts) {
       atBottom.current = true;   // sending → jump back to the live conversation
-      var atts = attach;
-      setBusy(true); setErr(''); setInput(''); setAttach([]);
-      if (taRef.current) taRef.current.style.height = 'auto';
+      setBusy(true); setErr('');
       ensureChat().then(function (cid) {
         if (!cid) { setBusy(false); setErr('Could not start a chat.'); return; }
-        var payload = { chat_id: cid, role: 'user', content: txt }; if (atts.length) payload.attachments = atts;   // omit the column when unused (works pre-migration-17)
+        var payload = { chat_id: cid, role: 'user', content: txt }; if (atts && atts.length) payload.attachments = atts;   // omit the column when unused (works pre-migration-17)
         sb.from('research_messages').insert(payload).then(function (ins) {
-          if (ins && ins.error) { setBusy(false); setErr(atts.length ? 'Attachments need migration-17 + a research-chat redeploy — ' + ins.error.message : ins.error.message); return; }
+          if (ins && ins.error) { setBusy(false); setErr((atts && atts.length) ? 'Attachments need migration-17 + a research-chat redeploy — ' + ins.error.message : ins.error.message); return; }
           loadMsgs(cid);
           if (agentsOn) streamAgents(cid); else streamReply(cid);   // 🤖 ágens-swarm vagy egy-ágenses token-stream → persisted + reloaded on completion
           // surface chat activity in the Áttekintő "Ki mit csinált" feed (research_log). Throttled so a fast
@@ -1317,7 +1320,22 @@
         });
       });
     }
+    // start the next queued message after a stream finishes NATURALLY (Stop drops the queue instead of draining it)
+    function drainQueue() { if (!alive.current || !qRef.current.length) return; var next = qRef.current.shift(); setQueued(qRef.current.map(function (x) { return x.txt; })); doSend(next.txt, next.atts); }
+    function sendText(raw) {
+      var txt = (raw || '').trim();
+      if (!txt || peek) return;   // peeking is read-only → never write into a colleague's thread
+      var atts = attach;
+      setInput(''); setAttach([]); if (taRef.current) taRef.current.style.height = 'auto';
+      if (busy) { qRef.current.push({ txt: txt, atts: atts }); setQueued(qRef.current.map(function (x) { return x.txt; })); return; }   // busy → schedule as the next request
+      doSend(txt, atts);
+    }
     function send() { sendText(input); }
+    function stopGen() {   // ◼ Stop: abort the live stream + drop any queued messages → back to idle
+      try { if (abortRef.current) abortRef.current.abort(); } catch (e) { }
+      abortRef.current = null; qRef.current = []; setQueued([]); setStreaming(null); setBusy(false);
+    }
+    function unqueue(i) { qRef.current.splice(i, 1); setQueued(qRef.current.map(function (x) { return x.txt; })); }   // remove a still-pending queued message
     // #6 — rewrite the current input into a clearer, more specific prompt via research-ai (action: enhance)
     function enhance() {
       var txt = (input || '').trim(); if (!txt || enhancing || busy) return;
@@ -1330,6 +1348,14 @@
       }, function () { setEnhancing(false); setErr('Prompt enhancement is unavailable.'); });
     }
     function copy(m) { try { navigator.clipboard.writeText(m.content || ''); } catch (e) { } }
+    // open an AI-generated file (```file:…``` block) in a preview — prefer the current saved copy (may have been edited), fall back to the message text
+    function openMd(f) {
+      setMdPrev({ path: f.path, content: f.content, loading: true });
+      sb.from('research_files').select('content').eq('project_id', props.projectId).eq('path', f.path).maybeSingle().then(function (r) {
+        if (!alive.current) return; var row = r && r.data;
+        setMdPrev({ path: f.path, content: (row && row.content != null) ? row.content : f.content, loading: false });
+      }, function () { if (alive.current) setMdPrev({ path: f.path, content: f.content, loading: false }); });
+    }
     // expand the "📄 N forrás" badge → the actual cited passages (Consensus evidence AND uploaded-doc citations both land in research_evidence)
     function toggleEv(mid) {
       if (openEv === mid) { setOpenEv(null); return; }
@@ -1429,6 +1455,12 @@
           var qs = (ai && !isTyping && props.canEdit && !peek && msgs.length && msgs[msgs.length - 1].id === m.id) ? extractQuestions(m.content) : [];
           return h('div', { key: m.id, className: 'bubble ' + (ai ? 'ai' : 'user') },
             body,
+            (ai && !isTyping) ? (function () {
+              var fls = extractFiles(m.content);   // ```file:PATH``` blocks the AI wrote → clickable preview links
+              return fls.length ? h('div', { className: 'chat-files' }, fls.map(function (f, fi) {
+                return h('button', { className: 'chat-file-chip', key: fi, title: 'Előnézet: ' + f.path, onClick: function () { openMd(f); } }, '📄 ', h('span', { className: 'nm' }, f.path));
+              })) : null;
+            })() : null,
             qs.length ? (function () {
               var totalSel = qs.reduce(function (a, qq, qi) { return a + (qSel[m.id + ':' + qi] || []).length; }, 0);
               var note = qNote[m.id] || '';
@@ -1493,6 +1525,9 @@
         h('span', null, '🔒 ' + peek.name + (peek.legacy ? ' — közös szál (olvasás)' : ' fonalát olvasod')),
         h('button', { className: 'btn', style: { padding: '3px 9px', fontSize: 11.5 }, onClick: openMine }, '← Vissza a sajátomhoz'))
       : (props.canEdit ? h('div', null,
+        queued.length ? h('div', { className: 'chat-queue' },
+          h('span', { className: 'chat-queue-lbl' }, '⏳ ' + queued.length + ' ütemezett üzenet a generálás után:'),
+          queued.map(function (t, i) { return h('span', { className: 'chat-queue-chip', key: i, title: t }, (t.length > 40 ? t.slice(0, 40) + '…' : t), h('button', { 'aria-label': 'Eltávolítás a sorból', title: 'Eltávolítás', onClick: function () { unqueue(i); } }, '×')); })) : null,
         attach.length ? h('div', { className: 'attach-chips' }, attach.map(function (a, i) {
           return h('span', { className: 'attach-chip', key: i }, (a.kind === 'source' ? '📄 ' : '📎 ') + (a.label || a.name || a.title || 'attachment'),
             h('button', { 'aria-label': 'Remove attachment', title: 'Remove', onClick: function () { setAttach(attach.filter(function (_, j) { return j !== i; })); } }, '×'));
@@ -1500,15 +1535,25 @@
         h('div', { className: 'chat-input' },
           h('button', { className: 'attach-btn', 'aria-label': 'Attach a library source, publication or file', title: 'Attach a library source, publication or file', disabled: busy, onClick: function () { setPicker(true); } }, '📎'),
           h('button', { className: 'attach-btn', 'aria-label': 'Enhance the prompt with AI', title: 'Enhance the prompt (AI) — makes the text you entered clearer and more specific', disabled: busy || enhancing || !input.trim(), onClick: enhance }, enhancing ? '⏳' : '✨'),
-          h('textarea', { ref: taRef, value: input, rows: 1, placeholder: 'Message Publify…  (Enter to send · Shift+Enter newline)', disabled: busy, onChange: onTaInput, onKeyDown: onTaKey }),
-          h('button', { className: 'btn pri', disabled: busy, onClick: send }, 'Send')
+          h('textarea', { ref: taRef, value: input, rows: 1, placeholder: busy ? 'Írj egy üzenetet — a generálás után elküldöm (Enter)…' : 'Message Publify…  (Enter to send · Shift+Enter newline)', onChange: onTaInput, onKeyDown: onTaKey }),
+          busy
+            ? h('button', { className: 'btn', style: { background: 'var(--danger,#b42318)', color: '#fff', borderColor: 'transparent' }, title: 'Generálás leállítása (a sorba tett üzenetek is törlődnek)', onClick: stopGen }, '◼ Stop')
+            : h('button', { className: 'btn pri', disabled: !input.trim() && !queued.length, onClick: send }, 'Send')
         )
       ) : null)
       ),
       filesCollapsed ? null : h('div', { className: 'fb-resizer', onMouseDown: startResize, title: 'Drag to resize the panels' }),
       h(SessionFileBrowser, { projectId: props.projectId, authorId: props.authorId, canEdit: props.canEdit, version: filesVersion, width: filesCollapsed ? 46 : fbWidth, collapsed: filesCollapsed, onToggleCollapse: toggleFiles, onAttach: function (a) { setAttach(function (p) { return p.concat([a]); }); }, onAddIdea: function (text) { saveIdeaText(text); } }),
       selPop ? h('button', { className: 'sel-idea-btn', style: { position: 'fixed', left: selPop.x, top: selPop.y - 40, transform: 'translateX(-50%)', zIndex: 60 }, onMouseDown: function (e) { e.preventDefault(); }, onClick: function () { saveIdeaText(selPop.text); setSelPop(null); try { window.getSelection().removeAllRanges(); } catch (e) { } } }, '✚ To idea') : null,
-      picker ? h(AttachModal, { projectId: props.projectId, authorId: props.authorId, fileOwnerId: props.fileOwnerId, sources: props.sources, onPick: function (a) { setAttach(function (p) { return p.concat([a]); }); }, onClose: function () { setPicker(false); } }) : null
+      picker ? h(AttachModal, { projectId: props.projectId, authorId: props.authorId, fileOwnerId: props.fileOwnerId, sources: props.sources, onPick: function (a) { setAttach(function (p) { return p.concat([a]); }); }, onClose: function () { setPicker(false); } }) : null,
+      mdPrev ? h('div', { className: 'scrim', onClick: function () { setMdPrev(null); } },
+        h('div', { className: 'modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Fájl előnézet', style: { width: 780, maxWidth: '100%' }, onClick: function (e) { e.stopPropagation(); } },
+          h('div', { className: 'modal-h' }, h('b', { style: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, '📄 ' + mdPrev.path), h('button', { className: 'x', 'aria-label': 'Bezárás', onClick: function () { setMdPrev(null); } }, '×')),
+          h('div', { className: 'modal-b', style: { maxHeight: '68vh', overflowY: 'auto' } }, mdPrev.loading ? h('div', { style: { color: 'var(--faint)', fontSize: 13 } }, 'Betöltés…') : h('article', { className: 'report-doc', style: { padding: 4 }, dangerouslySetInnerHTML: { __html: mdReport(mdPrev.content || '') } })),
+          h('div', { className: 'modal-foot' },
+            h('button', { className: 'btn', onClick: function () { try { navigator.clipboard.writeText(mdPrev.content || ''); if (window.PRUI) window.PRUI.toast('Vágólapra másolva', { kind: 'ok' }); } catch (e) { } } }, 'Másolás (Markdown)'),
+            h('button', { className: 'btn pri', onClick: function () { setMdPrev(null); } }, 'Bezárás'))))
+        : null
     );
   }
 

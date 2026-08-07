@@ -371,6 +371,14 @@
     .attach-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
     .attach-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 260px; font-size: 11.5px; font-weight: 600; padding: 4px 9px; border-radius: 999px; background: var(--accent-tint); color: var(--accent); overflow: hidden; }
     .attach-chip button { border: 0; background: transparent; color: var(--accent); cursor: pointer; font-size: 14px; line-height: 1; padding: 0; }
+    .chat-queue { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 8px; }
+    .chat-queue-lbl { font-size: 11.5px; font-weight: 700; color: var(--muted); }
+    .chat-queue-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 300px; font-size: 11.5px; font-weight: 600; padding: 4px 9px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 12%, transparent); border: 1px dashed var(--accent); color: var(--accent); overflow: hidden; white-space: nowrap; }
+    .chat-queue-chip button { border: 0; background: transparent; color: inherit; cursor: pointer; font-size: 14px; line-height: 1; padding: 0; }
+    .chat-files { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .chat-file-chip { display: inline-flex; align-items: center; gap: 5px; max-width: 320px; font-size: 12px; font-weight: 600; padding: 5px 10px; border-radius: 8px; background: var(--surface-2); border: 1px solid var(--line); color: var(--accent); cursor: pointer; font-family: inherit; }
+    .chat-file-chip:hover { border-color: var(--accent); background: var(--accent-tint); }
+    .chat-file-chip .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .sec-t { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; color: var(--faint); margin: 14px 0 6px; }
     /* markdown in assistant bubbles */
     .bubble .btxt.md { white-space: normal; }
@@ -2029,9 +2037,9 @@
     html.dark .rmap-genbusy { background: #4f46e5; }
     @media (max-width: 900px) { .rmap-wrap { flex-direction: column; } .rmap-insp { width: auto; } }
   </style>
-  <script src="theme.js?v=1786089238"></script>
-  <script src="nav.js?v=1786089238"></script>
-  <script src="entitlements.js?v=1786089238"></script>
+  <script src="theme.js?v=1786089776"></script>
+  <script src="nav.js?v=1786089776"></script>
+  <script src="entitlements.js?v=1786089776"></script>
 </head>
 
 <body>
@@ -2043,24 +2051,24 @@
   <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
   <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="backend/config.js?v=1786089238"></script>
-  <script src="auth.js?v=1786089238"></script>
-  <script src="backend.js?v=1786089238"></script>
-  <script src="universities.js?v=1786089238"></script>
-  <script src="onboarding.js?v=1786089238"></script>
-  <script src="office.js?v=1786089238"></script>
-  <script src="publications.js?v=1786089238"></script>
+  <script src="backend/config.js?v=1786089776"></script>
+  <script src="auth.js?v=1786089776"></script>
+  <script src="backend.js?v=1786089776"></script>
+  <script src="universities.js?v=1786089776"></script>
+  <script src="onboarding.js?v=1786089776"></script>
+  <script src="office.js?v=1786089776"></script>
+  <script src="publications.js?v=1786089776"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/tus-js-client@4.1.0/dist/tus.min.js"></script>
-  <script type="text/babel" src="canvas.jsx?v=1786089238"></script>
-  <script type="text/babel" src="notes.jsx?v=1786089238"></script>
-  <script src="autopilot-core.js?v=1786089238"></script>
-  <script type="text/babel" src="research.jsx?v=1786089238"></script>
+  <script type="text/babel" src="canvas.jsx?v=1786089776"></script>
+  <script type="text/babel" src="notes.jsx?v=1786089776"></script>
+  <script src="autopilot-core.js?v=1786089776"></script>
+  <script type="text/babel" src="research.jsx?v=1786089776"></script>
 
-  <script src="build.js?v=1786089238"></script>
-  <script src="version-badge.js?v=1786089238"></script>
+  <script src="build.js?v=1786089776"></script>
+  <script src="version-badge.js?v=1786089776"></script>
 </body>
 
 </html>
