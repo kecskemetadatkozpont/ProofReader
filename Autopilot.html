@@ -14,6 +14,8 @@
       --accent:#4f46e5; --accent-d:#4338ca; --ink:#141a28; --muted:#556074; --faint:#8b93a6; --line:#e4e7f1; --line-2:#d6dbe9;
       --ok:#0f7a4a; --ok-bg:#e3f5ec; --warn:#8f5407; --warn-bg:#fbefdb; --danger:#c0355e; --danger-bg:#fce9ef;
       --shadow:0 1px 2px rgba(20,26,40,.05), 0 10px 30px -22px rgba(20,26,40,.45);
+      /* process-graph phase spectrum */
+      --h-brief:#5a6379; --h-idea:#d8912f; --h-lit:#3f7fe6; --h-rev:#159e8f; --h-proto:#8b6ff0; --h-jrnl:#c99017; --h-write:#2fa869; --h-sub:#1aa6b3;
     }
     * { box-sizing:border-box; }
     html,body { margin:0; min-height:100%; }
@@ -33,7 +35,8 @@
     html.dark .btn.pri { background:#4f46e5; border-color:#4f46e5; }
     /* dark tokens theme.js does not set for this page + white-on-accent fix: theme.js dark --accent (~#8b93f8) drops
        white text below 4.5:1, so pin every white-on-accent surface to the darker #4f46e5 (≈6.3:1), matching the .me bubble. */
-    html.dark { --line-2:#333c52; --ok:#43b483; --ok-bg:#173a2b; --warn:#d69a3f; --warn-bg:#3a2c14; --danger:#e8688c; --danger-bg:#3a1622; }
+    html.dark { --line-2:#333c52; --ok:#43b483; --ok-bg:#173a2b; --warn:#d69a3f; --warn-bg:#3a2c14; --danger:#e8688c; --danger-bg:#3a1622;
+      --h-brief:#8892ac; --h-idea:#e6a94e; --h-lit:#6ba4ff; --h-rev:#3fc7b6; --h-proto:#a993f7; --h-jrnl:#e0b048; --h-write:#54c78a; --h-sub:#3fc9d6; }
     html.dark .ap-gobtn, html.dark .ap-csend, html.dark .ap-launch, html.dark .ap-st.on .n, html.dark .ap-sw.on { background:#4f46e5; border-color:#4f46e5; }
     html.dark .ap-gobtn:hover, html.dark .ap-csend:hover, html.dark .ap-launch:hover { background:#4338ca; }
     .btn.sm { height:30px; padding:0 11px; font-size:12px; border-radius:9px; }
@@ -226,6 +229,30 @@
     .ap-dgrid { display:grid; grid-template-columns:1fr 360px; gap:16px; align-items:start; }
     @media (max-width:900px){ .ap-dgrid { grid-template-columns:1fr; } }
     .ap-pcards { display:flex; flex-direction:column; gap:10px; }
+    /* ===== PROCESS GRAPH (top-to-bottom flow: brief → ideas → literature → review → …) ===== */
+    .apg-flow { display:flex; flex-direction:column; align-items:center; }
+    .apg-step { display:flex; flex-direction:column; align-items:center; width:100%; max-width:480px; }
+    .apg-conn { width:3px; height:24px; border-radius:3px; background:var(--line-2); }
+    .apg-conn.done { background:color-mix(in srgb,var(--ok) 55%,var(--line-2)); }
+    .apg-conn.run { background-image:linear-gradient(var(--run) 45%,transparent 45%); background-size:100% 9px; background-repeat:repeat-y; animation:apgflow 1s linear infinite; }
+    @keyframes apgflow { to { background-position:0 9px; } }
+    @media (prefers-reduced-motion:reduce){ .apg-conn.run { animation:none; background:var(--run); } }
+    .apg-node { width:100%; background:var(--surface); border:1px solid var(--line); border-top:3px solid var(--hue,var(--accent)); border-radius:14px; box-shadow:var(--shadow); overflow:hidden; transition:box-shadow .15s; }
+    .apg-node.running, .apg-node.gate { box-shadow:0 0 0 3px color-mix(in srgb,var(--run) 22%,transparent), var(--shadow); }
+    .apg-node.wait { opacity:.72; } .apg-node.off { opacity:.5; }
+    .apg-hd { display:flex; align-items:center; gap:12px; width:100%; padding:13px 15px; background:transparent; border:0; font-family:inherit; text-align:left; cursor:pointer; }
+    .apg-hd.static { cursor:default; }
+    .apg-hd:not(.static):hover { background:var(--surface-2); }
+    .apg-ic { width:38px; height:38px; flex:none; border-radius:11px; display:grid; place-items:center; font-size:19px; background:color-mix(in srgb,var(--hue,var(--accent)) 15%,transparent); border:1px solid color-mix(in srgb,var(--hue,var(--accent)) 38%,transparent); }
+    .apg-tx { flex:1; min-width:0; display:flex; flex-direction:column; }
+    .apg-lab { font-size:14px; font-weight:700; color:var(--ink); }
+    .apg-sub { font-size:12px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .apg-badge { flex:none; font-size:10.5px; font-weight:800; letter-spacing:.03em; padding:3px 9px; border-radius:999px; background:var(--surface-3); color:var(--muted); white-space:nowrap; }
+    .apg-badge.running { background:color-mix(in srgb,var(--run) 18%,transparent); color:var(--run); }
+    .apg-badge.done { background:var(--ok-bg); color:var(--ok); }
+    .apg-badge.gate { background:var(--warn-bg); color:var(--warn); }
+    .apg-caret { flex:none; color:var(--faint); font-size:12px; }
+    .apg-detail { padding:2px 15px 14px; border-top:1px solid var(--line); }
     .ap-pcard { display:flex; flex-direction:column; background:var(--surface); border:1px solid var(--line); border-radius:14px; box-shadow:var(--shadow); transition:border-color .15s; overflow:hidden; }
     .ap-pcard.running { border-color:var(--accent); }
     .ap-pcard.done { opacity:.92; } .ap-pcard.off { opacity:.5; } .ap-pcard.open { opacity:1; }
@@ -283,9 +310,9 @@
     .ap-toast.show { opacity:1; transform:translate(-50%,0); } .ap-toast.err { background:#8a1a12; }
     @media (prefers-reduced-motion:reduce){ .ap-toast { transition:none; } }
   </style>
-  <script src="theme.js?v=1786133100"></script>
-  <script src="nav.js?v=1786133100"></script>
-  <script src="entitlements.js?v=1786133100"></script>
+  <script src="theme.js?v=1786134267"></script>
+  <script src="nav.js?v=1786134267"></script>
+  <script src="entitlements.js?v=1786134267"></script>
 </head>
 
 <body>
@@ -298,13 +325,13 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
-  <script src="backend/config.js?v=1786133100"></script>
-  <script src="auth.js?v=1786133100"></script>
-  <script src="backend.js?v=1786133100"></script>
-  <script src="autopilot.js?v=1786133100"></script>
+  <script src="backend/config.js?v=1786134267"></script>
+  <script src="auth.js?v=1786134267"></script>
+  <script src="backend.js?v=1786134267"></script>
+  <script src="autopilot.js?v=1786134267"></script>
 
-  <script src="build.js?v=1786133100"></script>
-  <script src="version-badge.js?v=1786133100"></script>
+  <script src="build.js?v=1786134267"></script>
+  <script src="version-badge.js?v=1786134267"></script>
 </body>
 
 </html>

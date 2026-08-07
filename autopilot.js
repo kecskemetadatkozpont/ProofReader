@@ -120,6 +120,9 @@
     { key: 'submission', label: 'Submission', ic: '📤', sub: 'csomagolás' }
   ];
   var AP_ICON = {}; AP_PHASES.forEach(function (p) { AP_ICON[p.key] = p.ic; });
+  // per-phase hue for the process-graph view (each stage owns a colour → the top-to-bottom flow reads as a spectrum)
+  var AP_HUE = { ideas: 'var(--h-idea)', literature: 'var(--h-lit)', sr: 'var(--h-rev)', protocol: 'var(--h-proto)', journal: 'var(--h-jrnl)', writing: 'var(--h-write)', submission: 'var(--h-sub)' };
+  function hueOf(k) { return AP_HUE[k] || 'var(--accent)'; }
   // a 'running' run that no browser tab has driven for >60s reads as 'stalled' (honest: nothing is advancing it) — resume to continue
   function apEffectiveStatus(run) {
     if (run && run.status === 'running') { var u = run.updated_at ? new Date(run.updated_at).getTime() : 0; if (u && (Date.now() - u) > 60000) return 'stalled'; }
@@ -858,19 +861,29 @@
       }
       return h('a', { className: 'btn sm', href: 'Research.html?project=' + encodeURIComponent(run.project_id), target: '_blank', rel: 'noopener' }, 'Megnyitás a Research-ben ↗');
     }
-    function phaseCard(p, i) {
+    // ── Process-graph node (top-to-bottom flow) — the seed brief, then one node per phase, joined by hued connectors.
+    // Each node shows its status (vár/fut/kész) and expands to its real partial results (ideas list, sources, review).
+    function briefNode() {
+      return h('div', { className: 'apg-step', key: '__brief' },
+        h('div', { className: 'apg-node brief', style: { '--hue': 'var(--h-brief)' } },
+          h('div', { className: 'apg-hd static' },
+            h('span', { className: 'apg-ic' }, '🎯'),
+            h('span', { className: 'apg-tx' }, h('span', { className: 'apg-lab' }, 'Brief'), h('span', { className: 'apg-sub' }, (project && (project.goal || project.title)) || '…')))),
+        h('div', { className: 'apg-conn done' }));
+    }
+    function phaseNode(p, i, last) {
       var badge = p.status === 'done' ? '✓ Kész' : p.status === 'running' ? 'Fut…' : p.status === 'gate' ? '⏸ Jóváhagyás' : p.status === 'skipped' ? 'Kihagyva' : 'Vár';
       var sub = p.status === 'done' ? (p.result || 'kész') : p.status === 'running' ? 'dolgozik…' : p.status === 'gate' ? 'jóváhagyásra vár' : p.status === 'skipped' ? (p.result || 'kihagyva') : (p.enabled ? '—' : 'letiltva');
-      var open = openPhase === p.key;
-      return h('div', { key: p.key, className: 'ap-pcard ' + p.status + (p.enabled ? '' : ' off') + (open ? ' open' : '') },
-        h('button', { className: 'ap-pc-hd', onClick: function () { togglePhase(p); }, title: 'Részeredmények megnyitása' },
-          h('div', { className: 'ap-pc-ic' }, AP_ICON[p.key] || '•'),
-          h('div', { className: 'ap-pc-b' },
-            h('div', { className: 'ap-pc-top' }, h('span', { className: 'ap-pc-n' }, p.label), h('span', { className: 'ap-pc-badge ' + p.status }, badge)),
-            h('div', { className: 'ap-pc-sub' }, sub),
-            p.status === 'running' ? h('div', { className: 'ap-pc-mini' }, h('i')) : null),
-          h('span', { className: 'ap-pc-caret' }, open ? '▾' : '▸')),
-        open ? h('div', { className: 'ap-pc-detail' }, phaseDetail(p)) : null);
+      var open = openPhase === p.key, active = (p.status === 'running' || p.status === 'gate');
+      return h('div', { className: 'apg-step', key: p.key },
+        h('div', { className: 'apg-node ' + p.status + (p.enabled ? '' : ' off') + (open ? ' open' : ''), style: { '--hue': hueOf(p.key) } },
+          h('button', { className: 'apg-hd', onClick: function () { togglePhase(p); }, title: 'Részeredmények' },
+            h('span', { className: 'apg-ic' }, AP_ICON[p.key] || '•'),
+            h('span', { className: 'apg-tx' }, h('span', { className: 'apg-lab' }, p.label), h('span', { className: 'apg-sub' }, sub)),
+            h('span', { className: 'apg-badge ' + (p.status === 'gate' ? 'gate' : p.status) }, badge),
+            h('span', { className: 'apg-caret' }, open ? '▾' : '▸')),
+          open ? h('div', { className: 'apg-detail' }, phaseDetail(p)) : null),
+        last ? null : h('div', { className: 'apg-conn' + (p.status === 'done' ? ' done' : active ? ' run' : '') }));
     }
     function focusPanel() {
       if (run.status === 'awaiting_approval' && run.gate) {
@@ -901,7 +914,7 @@
           (run.status === 'running' || run.status === 'paused' || run.status === 'awaiting_approval') ? h('button', { className: 'btn sm', onClick: stop }, '⏹ Leállítás') : null)),
       h('div', { className: 'ap-card ap-dov' }, h('div', { className: 'ap-dl' }, 'Fázis ', h('b', null, Math.min(enabledN, doneN + (run.status === 'done' ? 0 : 1))), ' / ', h('b', null, enabledN)), h('div', { className: 'ap-dtrack' }, h('i', { style: { width: pct + '%' } })), h('div', { className: 'ap-dpct mono' }, pct + '%')),
       h('div', { className: 'ap-dgrid' },
-        h('div', { className: 'ap-pcards' }, phases.map(phaseCard)),
+        h('div', { className: 'apg-flow' }, briefNode(), phases.map(function (p, i) { return phaseNode(p, i, i === phases.length - 1); })),
         h('div', { className: 'ap-dside' },
           focusPanel(),
           h('div', { className: 'ap-card ap-feed' }, h('h3', null, 'Activity'),
