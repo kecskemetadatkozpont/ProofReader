@@ -717,7 +717,10 @@
     var paS = useState({}), phaseArts = paS[0], setPhaseArts = paS[1];     // phase key → { loading, items, total } (lazy-fetched)
     var pvS = useState(null), preview = pvS[0], setPreview = pvS[1];        // { title, content } → the readable review preview modal
     var swS = useState(false), switching = swS[0], setSwitching = swS[1];   // guard while re-targeting the pipeline to a chosen idea
+    var brS = useState([]), branchRuns = brS[0], setBranchRuns = brS[1];    // parallel per-idea branch runs (siblings of the primary run in the same group)
+    var selS = useState({}), selIdeas = selS[0], setSelIdeas = selS[1];     // idea_id → true : ideas ticked for parallel development
     var driving = useRef(false), alive = useRef(true), projRef = useRef(null), feedRef = useRef(null), myDriver = useRef(null);
+    var bDriving = useRef({});   // per-branch-run driving flags (additive; the primary driver above is untouched)
     if (!myDriver.current) myDriver.current = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : ('00000000-0000-4000-8000-' + String(Date.now()).slice(-12).padStart(12, '0'));   // per-tab lease id
     useEffect(function () { return function () { alive.current = false; driving.current = false; }; }, []);
     // live clock while running
@@ -784,6 +787,50 @@
       if (ip && (ip.status === 'done' || ip.status === 'running' || ip.status === 'gate')) loadPhaseArts('ideas');
     }, [run && run.project_id, run && (run.phases || []).filter(function (x) { return x.key === 'ideas'; }).map(function (x) { return x.status; }).join('')]);
 
+    // ── PARALLEL BRANCHES: each extra chosen idea is a sibling run in the same group, driven ADDITIVELY (the primary
+    //    driver above is untouched). Branch runs auto-run (gates:false) so several ideas develop at once.
+    function groupOf(r) { return (r && r.config && r.config.group_id) || (r && r.id); }
+    function setBranchRow(row) { if (!row) return; setBranchRuns(function (list) { var found = false, out = (list || []).map(function (x) { if (x.id === row.id) { found = true; return row; } return x; }); if (!found) out.push(row); return out; }); }
+    function ensureBranchDrive(r) { if (r && r.status === 'running' && r.owner_id === uid() && !bDriving.current[r.id]) { bDriving.current[r.id] = true; driveBranch(r.id); } }
+    function driveBranch(rid) {
+      if (!alive.current || !bDriving.current[rid]) { bDriving.current[rid] = false; return; }
+      var stale = new Date(Date.now() - 30000).toISOString();
+      sb.from('research_autopilot_runs').update({ driver_token: myDriver.current, driver_beat: nowIso() }).eq('id', rid).eq('status', 'running')
+        .or('driver_token.is.null,driver_token.eq.' + myDriver.current + ',driver_beat.lt.' + stale).select('*').then(function (rr) {
+          var r = rr && rr.data && rr.data[0];
+          if (!alive.current || !bDriving.current[rid]) { bDriving.current[rid] = false; return; }
+          if (!r) { bDriving.current[rid] = false; sb.from('research_autopilot_runs').select('*').eq('id', rid).maybeSingle().then(function (x) { if (alive.current && x && x.data) setBranchRow(x.data); }); return; }
+          ensureProject(r.project_id).then(function (proj) {
+            if (!alive.current || !bDriving.current[rid]) { bDriving.current[rid] = false; return; }
+            if (!proj) { bDriving.current[rid] = false; return; }
+            apStep(r, proj).then(function (res) {
+              if (!alive.current) { bDriving.current[rid] = false; return; }
+              setBranchRow(Object.assign({}, r, res.patch || {}));   // reflect progress in the branch column
+              emit(r, res.events).then(function () {
+                sb.from('research_autopilot_runs').update(Object.assign({ updated_at: nowIso(), driver_beat: nowIso() }, res.patch || {})).eq('id', r.id).eq('driver_token', myDriver.current).then(function () {
+                  if (res.patch && res.patch.status && res.patch.status !== 'running') bDriving.current[rid] = false;   // done/failed/gate → stop this branch loop
+                  else setTimeout(function () { driveBranch(rid); }, 1100);
+                });
+              });
+            }, function (err) {
+              emit(r, [{ phase: (r.phases[r.phase_index] || {}).key, level: 'error', message: 'Hiba: ' + ((err && err.message) || err) }]).then(function () {
+                sb.from('research_autopilot_runs').update({ status: 'failed', error: String((err && err.message) || err), updated_at: nowIso() }).eq('id', r.id).then(function () { bDriving.current[rid] = false; setBranchRow(Object.assign({}, r, { status: 'failed' })); });
+              });
+            });
+          });
+        }, function () { bDriving.current[rid] = false; });
+    }
+    function loadBranches(primary) {
+      if (!primary || !primary.project_id) return;
+      var grp = groupOf(primary);
+      sb.from('research_autopilot_runs').select('*').eq('project_id', primary.project_id).eq('owner_id', uid()).neq('status', 'cancelled').then(function (r) {
+        if (!alive.current) return;
+        var sibs = ((r && r.data) || []).filter(function (x) { return x.id !== primary.id && groupOf(x) === grp; });
+        setBranchRuns(sibs); sibs.forEach(ensureBranchDrive);
+      });
+    }
+    useEffect(function () { if (run && run.id) loadBranches(run); }, [run && run.id, run && groupOf(run)]);
+
     // approve/resume/pause must NOT depend on Realtime (research_autopilot_runs isn't in the supabase_realtime publication →
     // postgres_changes never fires). So update the LOCAL run optimistically (UI reacts instantly) and, after the DB write
     // confirms, restart the driver locally — otherwise pressing „Jóváhagyás" did nothing (DB changed, nothing reacted).
@@ -822,6 +869,32 @@
         ensureDrive(next);
         toast('▶ Átváltva erre az ötletre — az irodalom újraindul.', true);
       }, function () { setSwitching(false); if (alive.current) setRun(prev); toast('Hálózati hiba — próbáld újra.', false); });
+    }
+    function toggleSel(id) { setSelIdeas(function (m) { var n = Object.assign({}, m); if (n[id]) delete n[id]; else n[id] = true; return n; }); }
+    // ADD the ticked ideas as PARALLEL branch runs (non-destructive): the primary keeps developing its idea, and each
+    // ticked idea spawns its own sibling run (gates off) that auto-runs its downstream (literature → review → …).
+    function startBranches() {
+      var ids = Object.keys(selIdeas).filter(function (id) { return selIdeas[id]; });
+      if (!ids.length || switching || !run) return;
+      setSwitching(true);
+      var grp = groupOf(run), prev = run;
+      var ideas0 = (phaseArts.ideas && phaseArts.ideas.items) || [];
+      function spawn() {
+        var litIdx = -1; (prev.phases || []).forEach(function (p, k) { if (p.key === 'literature' && litIdx < 0) litIdx = k; });
+        var mkPhases = function () { return (prev.phases || []).map(function (p) { return p.key === 'ideas' ? Object.assign({}, p, { status: 'done', result: 'kiválasztva' }) : (p.enabled ? Object.assign({}, p, { status: 'wait', cursor: null, result: null }) : Object.assign({}, p, { status: 'skipped' })); }); };
+        var inserts = ids.map(function (ideaId) { return { project_id: prev.project_id, owner_id: uid(), status: 'running', started_at: nowIso(), phase_index: litIdx >= 0 ? litIdx : 0, phases: mkPhases(), config: Object.assign({}, prev.config || {}, { develop_idea_id: ideaId, group_id: grp, gates: false }) }; });
+        sb.from('research_autopilot_runs').insert(inserts).select('*').then(function (ir) {
+          setSwitching(false); setSelIdeas({});
+          var created = (ir && ir.data) || []; setBranchRuns(function (l) { return (l || []).concat(created); }); created.forEach(ensureBranchDrive);
+          toast('▶ ' + ids.length + ' ötlet párhuzamos kidolgozása elindult.', true);
+        }, function () { setSwitching(false); toast('Nem sikerült elindítani a szálakat.', false); });
+      }
+      // stamp the primary with a stable group + its own idea (default = most recent) so it renders as a proper column
+      if (!(run.config && run.config.group_id)) {
+        var cfgP = Object.assign({}, run.config || {}, { group_id: grp, develop_idea_id: (run.config && run.config.develop_idea_id) || (ideas0[0] && ideas0[0].id) || null });
+        setRun(Object.assign({}, run, { config: cfgP }));
+        sb.from('research_autopilot_runs').update({ config: cfgP }).eq('id', run.id).then(spawn, spawn);
+      } else spawn();
     }
 
     if (notFound) return h('div', { className: 'ap-wrap' }, h('div', { className: 'center' }, h('div', { className: 'box' }, h('div', { className: 'mk' }, h('i')), h('h1', null, 'Nincs ilyen futás'), h('p', null, 'Ez az Autopilot-futás nem létezik, vagy nincs hozzáférésed.'), h('button', { className: 'btn', onClick: props.onExit }, '‹ Vissza az Autopilothoz'))));
@@ -911,23 +984,26 @@
       // The active idea flows down into the shared downstream (literature → review → …); the others offer „Ezt dolgozd ki".
       if (p.key === 'ideas') {
         var ia = phaseArts.ideas, ideas = (ia && !ia.loading && ia.items) || [];
-        var activeId = (run.config && run.config.develop_idea_id) || (ideas[0] && ideas[0].id);
+        var developing = {}; [run].concat(branchRuns || []).forEach(function (rr) { var did = rr && rr.config && rr.config.develop_idea_id; if (did) developing[did] = rr; });
+        if (!Object.keys(developing).length && ideas[0]) developing[ideas[0].id] = run;   // default: primary develops the most recent
+        var selCount = Object.keys(selIdeas).filter(function (id) { return selIdeas[id]; }).length;
         return h('div', { className: 'apg-step apg-step-wide', key: p.key },
           h('div', { className: 'apg-node ' + p.status + (p.enabled ? '' : ' off'), style: { '--hue': hueOf('ideas') } },
             h('div', { className: 'apg-hd static' },
               h('span', { className: 'apg-ic' }, AP_ICON.ideas || '💡'),
-              h('span', { className: 'apg-tx' }, h('span', { className: 'apg-lab' }, p.label + (ideas.length ? ' · ' + ideas.length + ' párhuzamosan' : '')), h('span', { className: 'apg-sub' }, ideas.length ? 'válaszd ki, melyiket dolgozza ki az Autopilot →' : sub)),
+              h('span', { className: 'apg-tx' }, h('span', { className: 'apg-lab' }, p.label + (ideas.length ? ' · ' + ideas.length : '')), h('span', { className: 'apg-sub' }, ideas.length ? 'pipáld ki, melyeket dolgozzon ki párhuzamosan az Autopilot' : sub)),
               h('span', { className: 'apg-badge ' + (p.status === 'gate' ? 'gate' : p.status) }, badge))),
           ideas.length ? h('div', { className: 'apg-fan-conn' }) : null,
           ideas.length ? h('div', { className: 'apg-fan' }, ideas.map(function (x) {
-            var on = x.id === activeId;
-            return h('div', { className: 'apg-idea' + (on ? ' active' : ''), key: x.id, style: { '--hue': hueOf('ideas') }, title: (x.hypothesis || x.question || '') },
+            var dev = !!developing[x.id], sel = !!selIdeas[x.id];
+            return h('div', { className: 'apg-idea' + (dev ? ' active' : '') + (sel ? ' sel' : ''), key: x.id, style: { '--hue': hueOf('ideas') }, title: (x.hypothesis || x.question || '') },
               h('span', { className: 'apg-idea-h' }, h('span', { className: 'apg-idea-ic' }, '💡'), (x.novelty != null) ? h('span', { className: 'apg-idea-n' }, '★ ' + x.novelty) : null),
               h('span', { className: 'apg-idea-t' }, x.question || 'Ötlet'),
-              on ? h('span', { className: 'apg-idea-badge' }, '◉ Kidolgozás alatt')
-                 : h('button', { className: 'apg-idea-btn', disabled: switching, onClick: function () { switchIdea(x.id); } }, switching ? '…' : '▶ Ezt dolgozd ki'));
+              dev ? h('span', { className: 'apg-idea-badge' }, '◉ Fejlesztés alatt')
+                  : h('label', { className: 'apg-idea-pick' }, h('input', { type: 'checkbox', checked: sel, disabled: switching, onChange: function () { toggleSel(x.id); } }), ' Kidolgozásra jelöl'));
           })) : null,
           (ia && ia.loading) ? h('div', { className: 'ap-pc-dempty' }, h('span', { className: 'spin' })) : null,
+          selCount ? h('div', { className: 'apg-develop' }, h('button', { className: 'btn pri sm', disabled: switching, onClick: startBranches }, switching ? '⏳ Indítás…' : ('▶ Kidolgozás — ' + selCount + ' szál párhuzamosan'))) : null,
           conn);
       }
       return h('div', { className: 'apg-step', key: p.key },
@@ -939,6 +1015,42 @@
             h('span', { className: 'apg-caret' }, open ? '▾' : '▸')),
           open ? h('div', { className: 'apg-detail' }, phaseDetail(p)) : null),
         conn);
+    }
+    // ── Parallel branch columns: one compact downstream mini-chain per developing idea (primary + branch runs).
+    function openReviewPreview(prun) {
+      var pid = (prun && prun.project_id) || run.project_id;
+      sb.from('research_files').select('path,content').eq('project_id', pid).ilike('path', 'studies/%').order('updated_at', { ascending: false }).limit(8).then(function (r) {
+        var f = ((r && r.data) || []).filter(function (x) { return /\.md$/i.test(x.path) && x.content != null; })[0];
+        if (f) setPreview({ title: String(f.path).split('/').pop(), content: f.content }); else toast('Nincs elérhető áttekintés-fájl.', false);
+      });
+    }
+    function downMini(prun, p, last) {
+      var st = p.status, isRev = p.key === 'sr', revDone = isRev && st === 'done';
+      var bd = st === 'done' ? '✓' : st === 'running' ? 'fut' : st === 'gate' ? '⏸' : st === 'skipped' ? '–' : '·';
+      return h('div', { className: 'apg-mini-wrap', key: p.key },
+        h('div', { className: 'apg-mini ' + st, style: { '--hue': hueOf(p.key) } },
+          h('span', { className: 'apg-mini-ic' }, AP_ICON[p.key] || '•'),
+          h('span', { className: 'apg-mini-lab' }, p.label),
+          revDone ? h('button', { className: 'apg-mini-read', onClick: function () { openReviewPreview(prun); } }, 'Olvasás') : h('span', { className: 'apg-mini-badge ' + (st === 'gate' ? 'gate' : st) }, bd)),
+        last ? null : h('div', { className: 'apg-conn' + (st === 'done' ? ' done' : (st === 'running' || st === 'gate') ? ' run' : '') }));
+    }
+    function branchColumn(prun) {
+      var isPrimary = prun.id === run.id;
+      var ideas0 = (phaseArts.ideas && phaseArts.ideas.items) || [];
+      var ideaId = (prun.config && prun.config.develop_idea_id) || (isPrimary && ideas0[0] ? ideas0[0].id : null);
+      var idea = ideas0.filter(function (x) { return x.id === ideaId; })[0];
+      var down = (prun.phases || []).filter(function (p) { return DOWN.indexOf(p.key) >= 0 && p.enabled; });
+      return h('div', { className: 'apg-col' + (isPrimary ? ' primary' : ''), key: prun.id },
+        h('div', { className: 'apg-col-h' },
+          h('span', { className: 'apg-col-ic' }, '💡'),
+          h('span', { className: 'apg-col-t', title: (idea && idea.question) || '' }, (idea && idea.question) || (isPrimary ? 'Fő szál' : 'Ötlet')),
+          isPrimary ? h('span', { className: 'apg-col-tag' }, 'fő') : null),
+        h('div', { className: 'apg-fan-conn' }),
+        h('div', { className: 'apg-col-chain' }, down.map(function (p, i) { return downMini(prun, p, i === down.length - 1); })));
+    }
+    function branchesRow() {
+      var cols = [run].concat((branchRuns || []).filter(function (r) { return r && r.config && r.config.develop_idea_id; }));   // primary always + each branch
+      return h('div', { className: 'apg-branches' + (cols.length > 1 ? ' multi' : '') }, cols.map(branchColumn));
     }
     function focusPanel() {
       if (run.status === 'awaiting_approval' && run.gate) {
@@ -969,7 +1081,9 @@
           (run.status === 'running' || run.status === 'paused' || run.status === 'awaiting_approval') ? h('button', { className: 'btn sm', onClick: stop }, '⏹ Leállítás') : null)),
       h('div', { className: 'ap-card ap-dov' }, h('div', { className: 'ap-dl' }, 'Fázis ', h('b', null, Math.min(enabledN, doneN + (run.status === 'done' ? 0 : 1))), ' / ', h('b', null, enabledN)), h('div', { className: 'ap-dtrack' }, h('i', { style: { width: pct + '%' } })), h('div', { className: 'ap-dpct mono' }, pct + '%')),
       h('div', { className: 'ap-dgrid' },
-        h('div', { className: 'apg-flow' }, briefNode(), phases.map(function (p, i) { return phaseNode(p, i, i === phases.length - 1); })),
+        h('div', { className: 'apg-flow' }, briefNode(),
+          phaseNode((phases.filter(function (p) { return p.key === 'ideas'; })[0]) || phases[0], 0, false),   // ideas fan (multi-select)
+          branchesRow()),   // parallel downstream columns — one per developing idea (primary + branches)
         h('div', { className: 'ap-dside' },
           focusPanel(),
           h('div', { className: 'ap-card ap-feed' }, h('h3', null, 'Activity'),
