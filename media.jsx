@@ -84,6 +84,13 @@
       sb.from('audiobooks').select('id,title,language,translated,voice_name,model,duration_sec,chars,audio_path,segments,settings,status,created_at,source_kind').eq('owner_id', uid).order('created_at', { ascending: false }).then(function (r) { setLibrary((r && r.data) || []); setLibLoading(false); });
     }
 
+    // Irodalom → Hangoskönyv handoff: the Literature panel writes a request to localStorage then opens Media.html.
+    // If one is waiting, open the „New audiobook" tab so the Creator mounts and consumes it.
+    useEffect(function () {
+      var has = false; try { has = !!localStorage.getItem('pr-audiobook-req'); } catch (e) { }
+      if (has) setView('create');
+    }, []);
+
     function openAudiobook(row) {
       if (!row.audio_path) { window.PRUI.toast('This audiobook has no audio file (it failed to save) — please delete it and regenerate.', { kind: 'error', duration: 6000 }); return; }
       // signed URL for the saved MP3 → play without regenerating
@@ -111,7 +118,9 @@
           h('button', { className: 'btn' + (view === 'create' ? ' pri' : ''), onClick: function () { setView('create'); } }, '＋ New audiobook'))),
       !hasKey ? h(KeyPanel, { onSaved: function () { setHasKey(true); if (E) E.listAccountVoices().then(function (vs) { setVoices((E.voices || []).concat(vs || [])); }, function () { }); } }) : null,
       view === 'library' ? h(Library, { rows: library, loading: libLoading, onOpen: openAudiobook, onDelete: delAudiobook, onNew: function () { setView('create'); } }) : null,
-      view === 'create' ? h(Creator, { me: me, sb: sb, voices: voices, hasKey: hasKey, onCreated: function (row) { loadLibrary(me.id); openAudiobook(row); } }) : null,
+      view === 'create' ? h(Creator, { me: me, sb: sb, voices: voices, hasKey: hasKey,
+        onCreated: function (row, queued) { loadLibrary(me.id); if (!queued) openAudiobook(row); },   // queued = part of an Irodalom batch → don't yank to the player mid-run
+        onBatchDone: function () { loadLibrary(me.id); setView('library'); if (window.PRUI && window.PRUI.toast) window.PRUI.toast('A hangoskönyvek elkészültek — lásd „Saját hangoskönyvek".', { kind: 'success' }); } }) : null,
       view === 'player' && current ? h(Player, { item: current, onBack: function () { setView('library'); } }) : null
     );
   }
@@ -179,6 +188,50 @@
     // stop an in-flight generation and restore the idle UI
     function cancelGen() { abortRef.current = true; setBusy(false); setProg(''); setPct(null); }
 
+    // Irodalom → Hangoskönyv handoff. The Literature panel writes { ids, content, combine, lang, translate }
+    // to localStorage and opens Media.html; here we consume it once the ElevenLabs key is present, re-fetch the
+    // rows (so oa_pdf_url is always present for full text), and generate. Everything is passed to generate() as
+    // explicit overrides because React state (src/depth/lang) is async and wouldn't be applied in time.
+    useEffect(function () {
+      if (!props.hasKey || !E) return;   // wait for the key; the request stays queued until then
+      var raw = null; try { raw = localStorage.getItem('pr-audiobook-req'); } catch (e) { }
+      if (!raw) return;
+      try { localStorage.removeItem('pr-audiobook-req'); } catch (e) { }
+      var req = null; try { req = JSON.parse(raw); } catch (e) { }
+      if (!req) return;
+      var ids = ((req.ids && req.ids.length) ? req.ids : (req.papers || []).map(function (p) { return p && p.id; })).filter(Boolean);
+      if (!ids.length) return;
+      var content = req.content === 'fulltext' ? 'fulltext' : 'abstract';
+      var combineSummary = ids.length > 1 && req.combine === 'summary';   // one overview book vs. separate books
+      var lng = req.lang || 'Magyar';
+      var tr = (typeof req.translate === 'boolean') ? req.translate : true;
+      setSrc('study'); setLang(lng); setTranslate(tr);   // cosmetic: reflect the run in the UI (generate() carries explicit overrides)
+      setErr(''); setProg('Publikációk betöltése…');
+      props.sb.from('research_sources').select('id,title,abstract,oa_pdf_url').in('id', ids).then(function (r) {
+        var byId = {}; ((r && r.data) || []).forEach(function (x) { byId[x.id] = x; });
+        var paps = ids.map(function (id) { return byId[id]; }).filter(Boolean);   // preserve the selection order
+        if (!paps.length) { setProg(''); setErr('A kijelölt publikációk nem elérhetők.'); return; }
+        if (!combineSummary) {
+          setDepth(content);
+          var qi = 0;
+          var runNext = function () {
+            if (qi >= paps.length) {
+              if (paps.length > 1) { setProg(paps.length + ' hangoskönyv elkészült.'); if (props.onBatchDone) props.onBatchDone(); }
+              return;
+            }
+            var p = paps[qi]; qi++;
+            generate({ sources: [p], title: (p.title || 'Publikáció'), depth: content, translate: tr, lang: lng, onDone: function () { runNext(); } });
+          };
+          runNext();
+        } else {
+          var sdepth = content === 'fulltext' ? 'fulltext' : 'summary';   // combined book: full texts joined, or a Publify overview from abstracts
+          setDepth(sdepth);
+          var ttl = (paps[0].title || 'Irodalom') + (paps.length > 1 ? ' + ' + (paps.length - 1) + ' további' : '');
+          generate({ sources: paps, title: ttl, depth: sdepth, translate: tr, lang: lng });
+        }
+      }, function () { setProg(''); setErr('A kijelölt publikációk betöltése sikertelen.'); });
+    }, [props.hasKey]);
+
     // cascade level 1: the user's Research projects (RLS scopes to accessible ones)
     useEffect(function () {
       props.sb.from('research_projects').select('id,title').order('created_at', { ascending: false }).then(function (r) { setProjects((r && r.data) || []); });
@@ -230,8 +283,13 @@
     }
 
     // build the source text from the SELECTED study papers (abstracts | Publify overview | full text from OA PDFs)
-    function studyText() {
-      var srcs = papers.filter(function (s) { return picked[s.id]; });
+    // cfgArg lets the Irodalom handoff pass depth/translate/lang explicitly (React state is async, so we can't rely on it)
+    function studyText(srcsArg, cfgArg) {
+      var cfg = cfgArg || {};
+      var depth = cfg.depth || depthS[0];
+      var translate = (typeof cfg.translate === 'boolean') ? cfg.translate : translS[0];
+      var lang = cfg.lang || langS[0];
+      var srcs = srcsArg || papers.filter(function (s) { return picked[s.id]; });
       var st = (studies.filter(function (s) { return s.id === studyId; })[0] || {}).title || 'Study';
       if (!srcs.length) return Promise.resolve({ title: '', text: '', preTranslated: false });
       if (depth === 'summary') {
@@ -263,21 +321,26 @@
       return Promise.resolve({ title: st, text: body, preTranslated: false });
     }
 
-    function generate() {
-      if (busy) return; if (!props.hasKey || !E) { setErr('Please enter the ElevenLabs key first (above).'); return; }
+    function generate(ov) {
+      ov = ov || {};
+      var done = ov.onDone || null;   // queue callback: (ok:bool) => void
+      var useStudy = ov.sources ? true : (src === 'study');   // handoff passes explicit sources → force the study path
+      var lng = ov.lang || lang;
+      var doTrOv = (typeof ov.translate === 'boolean') ? ov.translate : translate;
+      if (busy && !done) return; if (!props.hasKey || !E) { setErr('Please enter the ElevenLabs key first (above).'); if (done) done(false); return; }
       abortRef.current = false; setErr(''); setBusy(true); setProg('Preparing source text…'); setPct(null);
-      var prep = src === 'study' ? studyText() : Promise.resolve({ title: title || (fileName || 'Audiobook'), text: text, preTranslated: false });
+      var prep = useStudy ? studyText(ov.sources, { depth: ov.depth, translate: doTrOv, lang: lng }) : Promise.resolve({ title: title || (fileName || 'Audiobook'), text: text, preTranslated: false });
       prep.then(function (s) {
-        if (abortRef.current) return;   // cancelled during prep
-        var srcText = (s.text || '').trim(); var ttl = (title || s.title || 'Audiobook').slice(0, 120);
-        if (!srcText) { setBusy(false); setErr('No text to narrate.'); return; }
+        if (abortRef.current) { if (done) done(false); return; }   // cancelled during prep
+        var srcText = (s.text || '').trim(); var ttl = (ov.title || title || s.title || 'Audiobook').slice(0, 120);
+        if (!srcText) { setBusy(false); setErr('No text to narrate.'); if (done) done(false); return; }
         var segs = toSegments(srcText);
-        if (!segs.length) { setBusy(false); setErr('Could not form sentences from the text.'); return; }
-        if (segs.length > 600) { setBusy(false); setErr('Too long (' + segs.length + ' segments). Shorten it, or choose abstract/overview depth.'); return; }
+        if (!segs.length) { setBusy(false); setErr('Could not form sentences from the text.'); if (done) done(false); return; }
+        if (segs.length > 600) { setBusy(false); setErr('Too long (' + segs.length + ' segments). Shorten it, or choose abstract/overview depth.'); if (done) done(false); return; }
         // optional translation — but the "summary" overview is already written in the target language (preTranslated)
-        var doTr = (translate && !s.preTranslated) ? translateSegs(segs, lang) : Promise.resolve(segs);
-        doTr.then(function (segs2) { synth(ttl, segs2); }, function (e) { setBusy(false); setErr('Translation failed: ' + e); });
-      }, function () { setBusy(false); setErr('Failed to load the source.'); });
+        var doTr = (doTrOv && !s.preTranslated) ? translateSegs(segs, lng) : Promise.resolve(segs);
+        doTr.then(function (segs2) { synth(ttl, segs2, done); }, function (e) { setBusy(false); setErr('Translation failed: ' + e); if (done) done(false); });
+      }, function () { setBusy(false); setErr('Failed to load the source.'); if (done) done(false); });
     }
 
     function translateSegs(segs, target) {
@@ -300,29 +363,29 @@
       });
     }
 
-    function synth(ttl, segs) {
+    function synth(ttl, segs, onDone) {
       var cfg = { elevenVoice: voice, model: model, stability: 50, similarity: 75 };
       var blobs = []; var meta = []; var t = 0; var idx = 0;
       function next() {
-        if (abortRef.current) return;   // cancelled — drop everything, idle UI already restored by cancelGen
-        if (idx >= segs.length) return finalize(ttl, segs, blobs, meta);
+        if (abortRef.current) { if (onDone) onDone(false); return; }   // cancelled — drop everything, idle UI already restored by cancelGen
+        if (idx >= segs.length) return finalize(ttl, segs, blobs, meta, onDone);
         setProg('Voice synthesis ' + (idx + 1) + '/' + segs.length + '…'); setPct(Math.round(idx / segs.length * 100));
         E.getBlob(segs[idx], cfg, props.me.id, null).then(function (blob) {
-          if (abortRef.current) return;   // cancelled while a segment was synthesizing
+          if (abortRef.current) { if (onDone) onDone(false); return; }   // cancelled while a segment was synthesizing
           if (!blob) { idx++; return next(); }
           return blobDuration(blob).then(function (d) { blobs.push(blob); meta.push({ text: segs[idx], start: t, dur: d, kind: 'sentence' }); t += d; idx++; return next(); });
-        }, function () { if (abortRef.current) return; setBusy(false); setErr('Voice synthesis failed (segment ' + (idx + 1) + '). Check your ElevenLabs key/quota.'); });
+        }, function () { if (abortRef.current) { if (onDone) onDone(false); return; } setBusy(false); setErr('Voice synthesis failed (segment ' + (idx + 1) + '). Check your ElevenLabs key/quota.'); if (onDone) onDone(false); });
       }
       next();
     }
 
-    function finalize(ttl, segs, blobs, meta) {
-      if (!blobs.length) { setBusy(false); setErr('No audio was produced.'); return; }
+    function finalize(ttl, segs, blobs, meta, onDone) {
+      if (!blobs.length) { setBusy(false); setErr('No audio was produced.'); if (onDone) onDone(false); return; }
       setProg('Assembling audio file + saving…'); setPct(null);
       var path = props.me.id + '/' + uuid() + '.mp3';
       E.concatMp3(blobs).then(function (mp3) {   // concatMp3 is async — uploading the Promise produced a 16-byte "[object Promise]" file
       props.sb.storage.from('audiobooks').upload(path, mp3, { contentType: 'audio/mpeg', upsert: false }).then(function (up) {
-        if (up && up.error) { setBusy(false); setErr('Save failed: ' + up.error.message); return; }
+        if (up && up.error) { setBusy(false); setErr('Save failed: ' + up.error.message); if (onDone) onDone(false); return; }
         var chars = segs.reduce(function (a, s) { return a + s.length; }, 0);
         props.sb.from('audiobooks').insert({
           owner_id: props.me.id, project_id: null, audio_path: path, title: ttl, source_kind: src, source_ref: src === 'study' ? studyId : (fileName || null),
@@ -330,11 +393,12 @@
           model: model, settings: { rate: rate, stability: 50, similarity: 75 }, segments: meta, duration_sec: Math.round(meta.reduce(function (a, m) { return a + (m.dur || 0); }, 0)), chars: chars, status: 'ready'
         }).select('*').maybeSingle().then(function (r) {
           setBusy(false); setProg(''); setPct(null);
-          if (r && r.error) { setErr('Database save failed: ' + r.error.message); return; }
-          props.onCreated(r.data);
+          if (r && r.error) { setErr('Database save failed: ' + r.error.message); if (onDone) onDone(false); return; }
+          props.onCreated(r.data, !!onDone);   // queued (batch) → App keeps us on „create" so the queue can continue
+          if (onDone) onDone(true);
         });
       });
-      }).catch(function (e) { setBusy(false); setErr('Audio assembly failed: ' + e); });
+      }).catch(function (e) { setBusy(false); setErr('Audio assembly failed: ' + e); if (onDone) onDone(false); });
     }
 
     return h('div', { className: 'mp-card' },

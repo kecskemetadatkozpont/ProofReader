@@ -2273,6 +2273,23 @@
     var lsrcS = useState('all'), libSource = lsrcS[0], setLibSource = lsrcS[1];   // all | openalex | elicit | other (provenance filter)
     var lstS = useState('all'), libStudy = lstS[0], setLibStudy = lstS[1];        // all | 'study:'+id | 'review:'+jobId (which run the paper came from)
     var jtS = useState({}), jobTitleById = jtS[0], setJobTitleById = jtS[1];      // elicit_job id -> review title (for the Study/review provenance filter)
+    // ---- Audiobook (Irodalom → Hangoskönyv): pick publications, hand off to the Media player which synthesizes them ----
+    var abS = useState({}), abSel = abS[0], setAbSel = abS[1];        // source_id -> bool (which publications to narrate)
+    var abmS = useState(null), abModal = abmS[0], setAbModal = abmS[1];   // null | { ids:[...] } → the config dialog
+    var abcS = useState('abstract'), abContent = abcS[0], setAbContent = abcS[1];   // abstract | fulltext
+    var abkS = useState('separate'), abCombine = abkS[0], setAbCombine = abkS[1];   // separate (N books) | summary (1 book)
+    var ablS = useState('Magyar'), abLang = ablS[0], setAbLang = ablS[1];
+    var abtS = useState(true), abTranslate = abtS[0], setAbTranslate = abtS[1];
+    var abIds = Object.keys(abSel).filter(function (id) { return abSel[id]; });
+    function toggleAb(id) { setAbSel(function (m) { var n = Object.assign({}, m); if (n[id]) delete n[id]; else n[id] = true; return n; }); }
+    function openAbModal(ids) { if (!ids || !ids.length) return; setAbContent('abstract'); setAbCombine('separate'); setAbLang('Magyar'); setAbTranslate(true); setAbModal({ ids: ids }); }
+    function startAb() {
+      if (!abModal || !abModal.ids.length) return;
+      try { localStorage.setItem('pr-audiobook-req', JSON.stringify({ ids: abModal.ids, content: abContent, combine: abCombine, lang: abLang, translate: abTranslate })); } catch (e) { }
+      setAbModal(null); setAbSel({});
+      window.open('Media.html', '_blank');   // Media consumes the localStorage request on mount → generates → „Saját hangoskönyvek"
+    }
+    var AB_LANGS = ['Magyar', 'English', 'German', 'French', 'Spanish', 'Italian', 'Portuguese', 'Dutch', 'Polish', 'Romanian', 'Czech', 'Slovak', 'Russian', 'Ukrainian', 'Turkish', 'Arabic', 'Chinese', 'Japanese', 'Korean'];
     useEffect(function () { loadScimago().then(setScimap); }, []);
     // source_ids that were selected in a Study (AI-included in any step, or the user's "Your decision" override) —
     // these float to the top of the Library and are highlighted.
@@ -2439,6 +2456,7 @@
         h('div', { className: 'rv-lib-main' },
           rows.length ? h('div', { className: 'rv-tblwrap' }, h('table', { className: 'rv-ltable' },
             h('thead', null, h('tr', null,
+              h('th', { className: 'rv-th c', title: 'Hangoskönyvhöz kijelölés' }, '🎧'),
               sortTh('Title', 'title', 'l'),
               h('th', { className: 'rv-th' }, 'Authors'),
               sortTh('Year', 'year', 'r'),
@@ -2452,7 +2470,10 @@
             )),
             h('tbody', null, rows.map(function (s) {
               var q = libQOf(s);
-              return h('tr', { key: s.id, className: studyInc[s.id] ? 'rv-study' : null },
+              return h('tr', { key: s.id, className: (studyInc[s.id] ? 'rv-study' : '') + (abSel[s.id] ? ' rv-absel' : '') },
+                h('td', { className: 'rv-c', style: { whiteSpace: 'nowrap' } },
+                  h('input', { type: 'checkbox', 'aria-label': 'Kijelölés hangoskönyvhöz', checked: !!abSel[s.id], onChange: function () { toggleAb(s.id); } }),
+                  h('button', { className: 'icon-x', title: 'Hangoskönyv ebből a publikációból', style: { color: 'var(--accent)', marginLeft: 2 }, onClick: function () { openAbModal([s.id]); } }, '🎧')),
                 h('td', { className: 'rv-ti' }, s.url ? h('a', { href: s.url, target: '_blank' }, s.title) : s.title,
                   (studyInc[s.id] && studyInc[s.id].length) ? h('span', { className: 'rv-instudy', title: 'Selected in study: ' + studyInc[s.id].join(', ') }, '★ in study') : null,
                   (s.origin_job_id || s.source_api === 'elicit') ? h('span', { className: 'rv-elicit', title: 'Egy Elicit szisztematikus review-ból származik' }, '🧪 Elicit') : null),
@@ -2542,6 +2563,10 @@
             running ? h('button', { className: 'btn', style: { padding: '2px 9px', fontSize: 11, flex: 'none' }, onClick: function () { PRFigureRunner.cancel(props.projectId); }, title: 'Kinyerés leállítása' }, 'Leállítás')
               : h('button', { className: 'btn', style: { padding: '2px 9px', fontSize: 11, flex: 'none' }, onClick: function () { PRFigureRunner.dismiss(props.projectId); setFigTick(function (x) { return x + 1; }); } }, '✕'));
         })(),
+        abIds.length ? h('div', { style: { display: 'flex', alignItems: 'center', gap: 10, margin: '2px 0 10px', padding: '7px 11px', borderRadius: 8, background: 'var(--surface-2)', border: '1px solid var(--accent)' } },
+          h('span', { style: { minWidth: 0, flex: 1, fontSize: 12.5, fontWeight: 600, color: 'var(--accent)' } }, '🎧 ' + abIds.length + ' publikáció kijelölve hangoskönyvhöz'),
+          h('button', { className: 'btn pri', style: { padding: '4px 12px', fontSize: 12, flex: 'none' }, onClick: function () { openAbModal(abIds); } }, 'Hangoskönyv készítése'),
+          h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12, flex: 'none' }, onClick: function () { setAbSel({}); } }, 'Kijelölés törlése')) : null,
         nd() ? libNewBody() : (lib.length ? lib.map(function (s) {
           return h('div', { className: 'src' + (studyInc[s.id] ? ' src-study' : ''), style: { alignItems: 'flex-start' }, key: s.id },
             h('div', { style: { flex: 1, minWidth: 0 } },
@@ -2551,11 +2576,40 @@
               metricTags({ journal: s.venue, year: s.year, cites: s.cited_by })
             ),
             props.canEdit ? h('div', { className: 'seg', role: 'group', 'aria-label': 'Screening decision', style: { flex: 'none' } }, ['include', 'maybe', 'exclude'].map(function (v) { return h('button', { key: v, className: s.screening === v ? 'on' : '', 'aria-pressed': s.screening === v, 'aria-label': v, onClick: function () { setScreen(s, v); } }, v); })) : h('span', { className: 'chip c-grey' }, s.screening),
+            h('label', { className: 'chip' + (abSel[s.id] ? ' c-acc' : ' c-grey'), style: { flex: 'none', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4 }, title: 'Kijelölés hangoskönyvhöz' },
+              h('input', { type: 'checkbox', 'aria-label': 'Kijelölés hangoskönyvhöz', checked: !!abSel[s.id], style: { margin: 0 }, onChange: function () { toggleAb(s.id); } }), '🎧'),
+            h('button', { className: 'icon-x', 'aria-label': 'Hangoskönyv ebből a publikációból', title: 'Hangoskönyv ebből a publikációból', style: { flex: 'none', color: 'var(--accent)' }, onClick: function () { openAbModal([s.id]); } }, '🎧'),
             props.canEdit ? h('button', { className: 'icon-x', 'aria-label': 'Delete source', style: { flex: 'none' }, onClick: function () { del(s); } }, '✕') : null
           );
         }) : h('div', { style: { fontSize: 13, color: 'var(--faint)', padding: '8px 0' } }, 'No sources saved yet — search above and Add.'))
       ),
-      pubsOpen ? h(MyPubsModal, { pubs: myPubs, saved: saved, onAdd: addPub, onClose: function () { setPubsOpen(false); } }) : null
+      pubsOpen ? h(MyPubsModal, { pubs: myPubs, saved: saved, onAdd: addPub, onClose: function () { setPubsOpen(false); } }) : null,
+      abModal ? (function () {
+        var n = abModal.ids.length, multi = n > 1;
+        return h('div', { className: 'scrim', onClick: function () { setAbModal(null); } },
+          h('div', { className: 'modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Hangoskönyv készítése', style: { width: 460, maxWidth: '100%' }, onClick: function (e) { e.stopPropagation(); } },
+            h('div', { className: 'modal-h' }, h('b', null, '🎧 Hangoskönyv készítése'), h('span', { style: { fontSize: 12, color: 'var(--faint)' } }, n + ' publikáció'), h('button', { className: 'x', 'aria-label': 'Bezárás', onClick: function () { setAbModal(null); } }, '×')),
+            h('div', { className: 'modal-b' },
+              h('div', { style: { fontSize: 12.5, fontWeight: 600, marginBottom: 5 } }, 'Miből készüljön?'),
+              h('div', { className: 'seg', style: { marginBottom: 14 } },
+                h('button', { className: abContent === 'abstract' ? 'on' : '', 'aria-pressed': abContent === 'abstract', onClick: function () { setAbContent('abstract'); } }, 'Csak az absztraktból'),
+                h('button', { className: abContent === 'fulltext' ? 'on' : '', 'aria-pressed': abContent === 'fulltext', onClick: function () { setAbContent('fulltext'); } }, 'Teljes szövegből (PDF)')),
+              abContent === 'fulltext' ? h('div', { style: { fontSize: 11.5, color: 'var(--muted)', margin: '-8px 0 14px' } }, '⏳ A teljes szöveget a nyílt hozzáférésű PDF-ekből építjük (lassabb, ~1 perc/cikk; nagy PDF-nél az absztrakt lép be).') : null,
+              multi ? h('div', null,
+                h('div', { style: { fontSize: 12.5, fontWeight: 600, marginBottom: 5 } }, 'Több kijelölt publikáció esetén'),
+                h('div', { className: 'seg', style: { marginBottom: 14 } },
+                  h('button', { className: abCombine === 'separate' ? 'on' : '', 'aria-pressed': abCombine === 'separate', onClick: function () { setAbCombine('separate'); } }, 'Külön-külön (' + n + ' hangoskönyv)'),
+                  h('button', { className: abCombine === 'summary' ? 'on' : '', 'aria-pressed': abCombine === 'summary', onClick: function () { setAbCombine('summary'); } }, 'Egy összefoglaló'))) : null,
+              multi && abCombine === 'summary' ? h('div', { style: { fontSize: 11.5, color: 'var(--muted)', margin: '-8px 0 14px' } }, abContent === 'fulltext' ? 'A cikkek teljes szövege egyetlen hangoskönyvbe fűzve.' : 'A Publify egy folyamatos, összefüggő összefoglalót ír a kijelölt cikkek absztraktjaiból.') : null,
+              h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 } },
+                h('span', { style: { fontSize: 12.5, fontWeight: 600 } }, 'Nyelv'),
+                h('select', { className: 'field', style: { flex: 1 }, value: abLang, onChange: function (e) { setAbLang(e.target.value); } }, AB_LANGS.map(function (l) { return h('option', { key: l, value: l }, l); }))),
+              h('label', { style: { display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, marginTop: 4 } },
+                h('input', { type: 'checkbox', checked: abTranslate, onChange: function (e) { setAbTranslate(e.target.checked); } }), 'Fordítás erre a nyelvre (Publify)')),
+            h('div', { className: 'modal-foot' },
+              h('button', { className: 'btn', onClick: function () { setAbModal(null); } }, 'Mégse'),
+              h('button', { className: 'btn pri', onClick: startAb }, '🎧 Létrehozás — megnyitás a Médialejátszóban'))));
+      })() : null
     );
   }
 
@@ -11117,6 +11171,7 @@
     // explicit author attribution so a student's (or a test's) project can never read as the viewer's own
     var badge;
     if (props.meId && p.owner_id === props.meId) badge = h('span', { className: 'chip c-grey author-badge' }, 'Mine');
+    else if (props.ownerName) badge = h('span', { className: 'chip c-acc author-badge', title: 'Tulajdonos: ' + props.ownerName }, '👤 ' + props.ownerName);
     else if (props.memberRole) { var _rl = { owner: 'Tulajdonos', editor: 'Szerkesztő', commenter: 'Kommentelő', viewer: 'Megfigyelő' }; badge = h('span', { className: 'chip c-acc author-badge' }, '👥 ' + (_rl[props.memberRole] || props.memberRole)); }
     else { var st = props.studentById && props.studentById[p.student_id]; badge = h('span', { className: 'chip ' + (st ? 'c-acc' : 'c-warn') + ' author-badge' }, st ? 'Student: ' + st.name : 'Student’s work'); }
     if (nd()) {
@@ -11533,6 +11588,16 @@
     var myMemberships = props.myMemberships || {};
     var supProjects = props.projects.filter(function (p) { return p.owner_id !== meId && !myMemberships[p.id]; });   // supervised-student projects — exclude my OWN collaborations (they go to "Megosztott velem", not "My students' research")
     var sharedProjects = props.projects.filter(function (p) { return p.owner_id !== meId && myMemberships[p.id]; });   // projects shared WITH me (accepted member, not owner) — distinct from supervised-student projects
+    var isAdminUser = !!(me && me.role === 'admin');   // admin RLS (rp_read is_admin()) returns EVERY project → the "Minden felhasználó" view
+    var allProjects = props.projects;
+    var ownS = useState({}), ownerNames = ownS[0], setOwnerNames = ownS[1];   // owner_id → name (admin all-view badges)
+    useEffect(function () {
+      if (!isAdminUser) return; var alive = true;
+      var ids = {}; (props.projects || []).forEach(function (p) { if (p.owner_id) ids[p.owner_id] = 1; });
+      var idl = Object.keys(ids); if (!idl.length) return function () { alive = false; };
+      sb.from('profiles_public').select('id,name').in('id', idl).then(function (r) { if (!alive) return; var m = {}; ((r && r.data) || []).forEach(function (x) { m[x.id] = x.name; }); setOwnerNames(m); }, function () { });
+      return function () { alive = false; };
+    }, [isAdminUser, props.projects.length]);
     function sharedGrid() { return h('div', { style: { marginTop: mineProjects.length ? 26 : 0 } }, h('div', { className: 'shared-sec-h' }, '👥 Megosztott velem (' + sharedProjects.length + ')'), h('div', { className: 'grid' }, sharedProjects.map(function (p) { return h(ProjectCard, { key: p.id, project: p, meId: meId, studentById: studentById, onOpen: props.openProject, apRun: apRuns[p.id], counts: pCounts[p.id], onChanged: props.reloadProjects, memberRole: myMemberships[p.id] }); }))); }
     var isSup = studentList.length > 0 || supProjects.length > 0;
     var vw = useState(props.initStudent ? 'supervised' : 'mine'), view = vw[0], setView = vw[1];
@@ -11574,9 +11639,10 @@
     var dashLang = (function () { try { if (String(navigator.language || '').toLowerCase().indexOf('hu') === 0) return 'hu'; if ((props.projects || []).some(function (p) { return p.language === 'hu'; })) return 'hu'; return 'en'; } catch (e) { return 'en'; } })();
     var sub = sel ? (tr(dashLang, STAGES[sel.stage || 0]) + ' ' + tr(dashLang, 'stage')) : (view === 'supervised' ? (studentList.length + ' ' + tr(dashLang, studentList.length === 1 ? 'student' : 'students')) : (mineProjects.length + ' ' + tr(dashLang, mineProjects.length === 1 ? 'project' : 'projects')));
 
-    var seg = (isSup && !sel) ? h('div', { className: 'segctl', role: 'group', 'aria-label': 'Research view' },
+    var seg = ((isSup || isAdminUser) && !sel) ? h('div', { className: 'segctl', role: 'group', 'aria-label': 'Research view' },
       h('button', { className: view === 'mine' ? 'on' : '', 'aria-pressed': view === 'mine', onClick: function () { setView('mine'); } }, tr(dashLang, 'My research') + ' (' + mineProjects.length + ')'),
-      h('button', { className: view === 'supervised' ? 'on' : '', 'aria-pressed': view === 'supervised', onClick: function () { setView('supervised'); } }, tr(dashLang, 'My students’ research') + ' (' + supProjects.length + ')')
+      isSup ? h('button', { className: view === 'supervised' ? 'on' : '', 'aria-pressed': view === 'supervised', onClick: function () { setView('supervised'); } }, tr(dashLang, 'My students’ research') + ' (' + supProjects.length + ')') : null,
+      isAdminUser ? h('button', { className: view === 'all' ? 'on' : '', 'aria-pressed': view === 'all', title: 'Adminként minden felhasználó összes kutatási projektje', onClick: function () { setView('all'); } }, '🛠️ Minden felhasználó (' + allProjects.length + ')') : null
     ) : null;
     var body;
     if (sel) {
@@ -11584,6 +11650,10 @@
       body = h(ProjectDetail, { project: sel, initTab: initTab, me: me, log: props.detail.log, tasks: props.detail.tasks, ideas: props.detail.ideas, sources: props.detail.sources, datasets: props.detail.datasets, jobs: props.detail.jobs, studies: props.detail.studies, loading: props.detail.loading, canEdit: props.canEdit(sel), viewerId: meId, fileOwnerId: meId, studentName: (studentById[sel.student_id] && studentById[sel.student_id].name) || null, authorId: props.authorId, myEmail: props.me.email, onBack: props.onBack, onChanged: props.refreshAll });
     } else if (board) {
       body = h(GlobalBoard, { projects: props.projects, canEditProject: props.canEdit, onOpenProject: props.openProject });
+    } else if (view === 'all' && isAdminUser) {
+      body = h('div', null, seg,
+        h('div', { style: { fontSize: 12, color: 'var(--muted)', margin: '2px 0 12px' } }, '🛠️ Admin nézet — minden felhasználó összes kutatási projektje, tulajdonossal jelölve.'),
+        allProjects.length ? h('div', { className: 'grid' }, allProjects.slice().sort(function (a, b) { return (a.owner_id === meId ? -1 : 0) - (b.owner_id === meId ? -1 : 0); }).map(function (p) { return h(ProjectCard, { key: p.id, project: p, meId: meId, studentById: studentById, ownerName: (p.owner_id === meId ? null : (ownerNames[p.owner_id] || '…')), onOpen: props.openProject, apRun: apRuns[p.id], counts: pCounts[p.id], onChanged: props.reloadProjects }); })) : h('div', { className: 'soon' }, 'Nincs projekt.'));
     } else if (view === 'supervised') {
       body = h('div', null, seg, h(SupervisedView, { students: props.students, projects: supProjects, studentById: studentById, onOpen: props.openProject }));
     } else if (!mineProjects.length && !sharedProjects.length) {
