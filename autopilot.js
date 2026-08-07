@@ -323,9 +323,7 @@
     var bS = useState(false), busy = bS[0], setBusy = bS[1];
     var iS = useState(''), input = iS[0], setInput = iS[1];
     var eS = useState(''), err = eS[0], setErr = eS[1];
-    // 🌐 web search + 🤖 multi-agent mode — same contract as the Ideas ChatPanel; server gates both by entitlement. Persistent.
-    var wsS = useState(function () { try { return localStorage.getItem('pr-chat-web') === '1'; } catch (e) { return false; } }), webOn = wsS[0], setWebOn = wsS[1];
-    var agS = useState(function () { try { return localStorage.getItem('pr-chat-agents') === '1'; } catch (e) { return false; } }), agentsOn = agS[0], setAgentsOn = agS[1];
+    // 🌐 web search + 🤖 multi-agent mode are ALWAYS ON in the Autopilot chat (no toggle) — a single-agent fallback runs if research-agents is unavailable.
     var qsS = useState({}), qSel = qsS[0], setQSel = qsS[1];   // (msgId:qIdx) → [selected options]
     var qnS = useState({}), qNote = qnS[0], setQNote = qnS[1]; // (msgId) → optional free-text note
     function toggleQ(key, o, multi) {
@@ -380,7 +378,7 @@
         var token = (s && s.data && s.data.session && s.data.session.access_token) || CFG.supabaseAnonKey;
         fetch(CFG.supabaseUrl + '/functions/v1/research-chat', {
           method: 'POST', headers: { 'Content-Type': 'application/json', 'apikey': CFG.supabaseAnonKey, 'Authorization': 'Bearer ' + token },
-          body: JSON.stringify({ chat_id: cid, stream: true, web: webOn })   // 🌐 web search (server gates by entitlement)
+          body: JSON.stringify({ chat_id: cid, stream: true, web: true })   // 🌐 web search always on
         }).then(function (resp) {
           if (!resp.ok || !resp.body || !resp.body.getReader) { setErr('AI-kapcsolat függőben — telepítsd a research-chat Edge függvényt és állítsd be az ANTHROPIC_API_KEY-t.'); endStream(false); return; }
           var reader = resp.body.getReader(), dec = new TextDecoder(), acc = '';
@@ -406,9 +404,9 @@
         var token = (s && s.data && s.data.session && s.data.session.access_token) || CFG.supabaseAnonKey;
         fetch(CFG.supabaseUrl + '/functions/v1/research-agents', {
           method: 'POST', headers: { 'Content-Type': 'application/json', 'apikey': CFG.supabaseAnonKey, 'Authorization': 'Bearer ' + token },
-          body: JSON.stringify({ chat_id: cid, web: webOn })
+          body: JSON.stringify({ chat_id: cid, web: true })
         }).then(function (resp) {
-          if (!resp.ok || !resp.body || !resp.body.getReader) { setErr('Ágens-mód nem elérhető — telepítsd a research-agents Edge functiont, vagy nincs hozzá jogosultságod (research_agents).'); endStream(false); return; }
+          if (!resp.ok || !resp.body || !resp.body.getReader) { endStream(false); streamReply(cid); return; }   // agents unavailable → graceful single-agent (web) fallback, not an error
           var reader = resp.body.getReader(), dec = new TextDecoder(), buf = '', answer = '';
           var lanes = [{ id: 'plan', role: 'planner', label: 'Tervezés', state: 'run', status: '' }], laneById = { plan: lanes[0] };
           function upd() { setStreaming({ text: answer, lanes: lanes.slice() }); }
@@ -436,10 +434,10 @@
               pump();
             }, function () { endStream(true); });
           })();
-        }, function () { setErr('Ágens-mód nem elérhető.'); endStream(false); });
+        }, function () { endStream(false); streamReply(cid); });   // network error on agents → single-agent fallback
       }, function () { setErr('Nem sikerült a munkamenet lekérése.'); endStream(false); });
     }
-    function replyNow(cid) { if (agentsOn) streamAgents(cid); else streamReply(cid); }   // route by the 🤖 toggle
+    function replyNow(cid) { streamAgents(cid); }   // Autopilot chat = multi-agent + web ALWAYS (streamAgents falls back to single-agent if unavailable)
     function sendText(raw) {
       var txt = (raw || '').trim(); if (!txt || busy) return;
       setBusy(true); setErr(''); setInput(''); if (taRef.current) taRef.current.style.height = 'auto';
@@ -520,9 +518,6 @@
             (streaming.text || !(streaming.lanes && streaming.lanes.length)) ? h('div', { className: 'ap-bub', dangerouslySetInnerHTML: { __html: mdSafe(apHideJson(streaming.text || '')) } }) : null)) : null,
         (busy && !streaming) ? h('div', { className: 'ap-turn ai', key: 'typing' }, h('span', { className: 'ap-av ai' }, 'AI'), h('div', { className: 'ap-typing' }, h('i'), h('i'), h('i'))) : null),
       err ? h('div', { className: 'ap-cerr' }, err) : null,
-      h('div', { className: 'ap-tools' },
-        h('button', { className: 'ap-tool' + (webOn ? ' on' : ''), 'aria-pressed': webOn, disabled: busy, title: 'Webkeresés — a Publify valós idejű internetes forrásokból is meríthet és idézi őket (a modell dönti el, mikor keres). Jogosultsághoz kötött.', onClick: function () { setWebOn(function (v) { var n = !v; try { localStorage.setItem('pr-chat-web', n ? '1' : '0'); } catch (e) { } return n; }); } }, webOn ? '🌐 Web: be' : '🌐 Web: ki'),
-        h('button', { className: 'ap-tool' + (agentsOn ? ' on' : ''), 'aria-pressed': agentsOn, disabled: busy, title: 'Ágens-mód (kutató-csapat) — több párhuzamos ágens (Kutató/Reviewer/Szintetizáló) dolgozik a kérdéseden, mindegyik élő sávban mutatja, mit csinál. Alaposabb, de lassabb és költségesebb; jogosultsághoz kötött.', onClick: function () { setAgentsOn(function (v) { var n = !v; try { localStorage.setItem('pr-chat-agents', n ? '1' : '0'); } catch (e) { } return n; }); } }, agentsOn ? '🤖 Ágensek: be' : '🤖 Ágensek: ki')),
       h('div', { className: 'ap-cbar' },
         h('input', { type: 'file', ref: fileRef, multiple: true, style: { display: 'none' }, onChange: onFile }),
         h('button', { className: 'ap-cicon', title: 'Fájl feltöltése', onClick: pickFile, disabled: busy }, '📎'),
