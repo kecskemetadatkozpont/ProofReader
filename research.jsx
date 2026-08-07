@@ -719,16 +719,27 @@
   // The 2nd replace drops an UNTERMINATED trailing fence so the raw JSON never flashes mid-stream.
   function stripQuestions(text) {
     if (!text) return text;
-    return String(text).replace(/^```publify-questions[\s\S]*?```/gim, '').replace(/^```publify-questions[\s\S]*$/im, '').trim();
+    var t = String(text).replace(/```publify-questions[\s\S]*?```/gi, '').replace(/```publify-questions[\s\S]*$/i, '').trim();
+    // also hide a BARE questions JSON array (the model sometimes omits the fence) — partial or complete, so it never flashes mid-stream
+    var i = t.search(/\[\s*\{[\s\S]*?"q"\s*:/);
+    if (i >= 0 && t.indexOf('"options"', i) >= 0) t = t.slice(0, i).trim();
+    return t;
   }
   function extractQuestions(text) {
     if (!text) return [];
-    var m = /^```publify-questions\s*([\s\S]*?)```/im.exec(String(text));
-    if (!m) return [];
-    var arr; try { arr = JSON.parse(m[1].trim()); } catch (e) { return []; }
+    var raw = String(text), jsonStr = null;
+    var m = /```publify-questions\s*([\s\S]*?)```/i.exec(raw);
+    if (m) jsonStr = m[1].trim();
+    else {   // bare JSON array of question objects (no fence)
+      var whole = raw.trim();
+      if (/^\[\s*\{[\s\S]*\}\s*\]$/.test(whole) && whole.indexOf('"options"') >= 0) jsonStr = whole;
+      else { var mb = /\[\s*\{[\s\S]*?"options"[\s\S]*\}\s*\]/.exec(raw); if (mb) jsonStr = mb[0]; }
+    }
+    if (!jsonStr) return [];
+    var arr; try { arr = JSON.parse(jsonStr); } catch (e) { return []; }
     if (!Array.isArray(arr)) return [];
-    return arr.filter(function (x) { return x && x.q; }).slice(0, 3).map(function (x) {
-      return { q: String(x.q).slice(0, 300), options: (Array.isArray(x.options) ? x.options : []).map(String).map(function (s) { return s.slice(0, 90); }).slice(0, 4), multi: !!x.multi };
+    return arr.filter(function (x) { return x && x.q; }).slice(0, 4).map(function (x) {
+      return { q: String(x.q).slice(0, 400), options: (Array.isArray(x.options) ? x.options : []).map(String).map(function (s) { return s.slice(0, 160); }).slice(0, 6), multi: !!x.multi };
     }).filter(function (x) { return x.options.length; });
   }
   // Live activity frames: the research-chat stream interleaves ␟{"s":"…"}␟ status markers (what the model

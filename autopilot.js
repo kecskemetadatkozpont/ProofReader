@@ -323,6 +323,9 @@
     var bS = useState(false), busy = bS[0], setBusy = bS[1];
     var iS = useState(''), input = iS[0], setInput = iS[1];
     var eS = useState(''), err = eS[0], setErr = eS[1];
+    // 🌐 web search + 🤖 multi-agent mode — same contract as the Ideas ChatPanel; server gates both by entitlement. Persistent.
+    var wsS = useState(function () { try { return localStorage.getItem('pr-chat-web') === '1'; } catch (e) { return false; } }), webOn = wsS[0], setWebOn = wsS[1];
+    var agS = useState(function () { try { return localStorage.getItem('pr-chat-agents') === '1'; } catch (e) { return false; } }), agentsOn = agS[0], setAgentsOn = agS[1];
     var qsS = useState({}), qSel = qsS[0], setQSel = qsS[1];   // (msgId:qIdx) → [selected options]
     var qnS = useState({}), qNote = qnS[0], setQNote = qnS[1]; // (msgId) → optional free-text note
     function toggleQ(key, o, multi) {
@@ -356,7 +359,7 @@
       loadMsgs(props.chatId).then(function (data) {
         // seed reply: the newest persisted message is the user's opener with no AI answer yet → stream one reply (once per mount)
         var last = data[data.length - 1];
-        if (!autoStreamed.current && last && last.role === 'user') { autoStreamed.current = true; streamReply(props.chatId); }
+        if (!autoStreamed.current && last && last.role === 'user') { autoStreamed.current = true; replyNow(props.chatId); }
       });
     }, [props.chatId]);
     useEffect(function () { var el = scrollRef.current; if (el && atBottom.current) el.scrollTop = el.scrollHeight; }, [msgs.length, streaming, busy]);
@@ -377,7 +380,7 @@
         var token = (s && s.data && s.data.session && s.data.session.access_token) || CFG.supabaseAnonKey;
         fetch(CFG.supabaseUrl + '/functions/v1/research-chat', {
           method: 'POST', headers: { 'Content-Type': 'application/json', 'apikey': CFG.supabaseAnonKey, 'Authorization': 'Bearer ' + token },
-          body: JSON.stringify({ chat_id: cid, stream: true })
+          body: JSON.stringify({ chat_id: cid, stream: true, web: webOn })   // 🌐 web search (server gates by entitlement)
         }).then(function (resp) {
           if (!resp.ok || !resp.body || !resp.body.getReader) { setErr('AI-kapcsolat függőben — telepítsd a research-chat Edge függvényt és állítsd be az ANTHROPIC_API_KEY-t.'); endStream(false); return; }
           var reader = resp.body.getReader(), dec = new TextDecoder(), acc = '';
@@ -392,12 +395,57 @@
         }, function () { setErr('AI-kapcsolat függőben — telepítsd a research-chat Edge függvényt.'); endStream(false); });
       }, function () { setErr('Nem sikerült a munkamenet lekérése.'); endStream(false); });
     }
+    // 🤖 Multi-agent mode: several parallel agents (Kutató/Reviewer/Szintetizáló) via research-agents (NDJSON events);
+    // each shows a live lane, the synthesizer's answer streams into the bubble. Ported from the Ideas ChatPanel.
+    function streamAgents(cid) {
+      if (streamingRef.current) return;
+      if (!CFG.supabaseUrl) { setErr('Hiányzó backend konfiguráció.'); return; }
+      streamingRef.current = true; setBusy(true); setErr(''); atBottom.current = true;
+      function endStream(reload) { streamingRef.current = false; if (!alive.current) return; setBusy(false); if (reload) loadMsgs(cid).then(function () { if (alive.current) setStreaming(null); }); else setStreaming(null); }
+      sb.auth.getSession().then(function (s) {
+        var token = (s && s.data && s.data.session && s.data.session.access_token) || CFG.supabaseAnonKey;
+        fetch(CFG.supabaseUrl + '/functions/v1/research-agents', {
+          method: 'POST', headers: { 'Content-Type': 'application/json', 'apikey': CFG.supabaseAnonKey, 'Authorization': 'Bearer ' + token },
+          body: JSON.stringify({ chat_id: cid, web: webOn })
+        }).then(function (resp) {
+          if (!resp.ok || !resp.body || !resp.body.getReader) { setErr('Ágens-mód nem elérhető — telepítsd a research-agents Edge functiont, vagy nincs hozzá jogosultságod (research_agents).'); endStream(false); return; }
+          var reader = resp.body.getReader(), dec = new TextDecoder(), buf = '', answer = '';
+          var lanes = [{ id: 'plan', role: 'planner', label: 'Tervezés', state: 'run', status: '' }], laneById = { plan: lanes[0] };
+          function upd() { setStreaming({ text: answer, lanes: lanes.slice() }); }
+          upd();
+          (function pump() {
+            reader.read().then(function (rr) {
+              if (!alive.current) { streamingRef.current = false; return; }
+              if (rr.done) { if (props.onReply) props.onReply(); endStream(true); return; }
+              buf += dec.decode(rr.value, { stream: true });
+              var nl;
+              while ((nl = buf.indexOf('\n')) >= 0) {
+                var line = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1);
+                if (!line) continue;
+                var ev; try { ev = JSON.parse(line); } catch (e) { continue; }
+                if (ev.t === 'plan' && Array.isArray(ev.items)) {
+                  if (laneById.plan) laneById.plan.state = 'done';
+                  lanes = [laneById.plan].concat(ev.items.map(function (it) { return { id: it.id, role: it.role, label: it.label, state: 'wait', status: '' }; }));
+                  laneById = {}; lanes.forEach(function (l) { laneById[l.id] = l; }); upd();
+                } else if (ev.t === 'start') { var la = laneById[ev.a]; if (la) { la.state = 'run'; upd(); } }
+                else if (ev.t === 'status') { var lb = laneById[ev.a]; if (lb) { lb.state = 'run'; lb.status = ev.s || ''; upd(); } }
+                else if (ev.t === 'done') { var lc = laneById[ev.a]; if (lc) { lc.state = 'done'; lc.status = ev.s || lc.status; upd(); } }
+                else if (ev.t === 'tok') { answer += (ev.d || ''); upd(); }
+                else if (ev.t === 'err') { setErr('Ágens-hiba: ' + (ev.m || 'ismeretlen')); }
+              }
+              pump();
+            }, function () { endStream(true); });
+          })();
+        }, function () { setErr('Ágens-mód nem elérhető.'); endStream(false); });
+      }, function () { setErr('Nem sikerült a munkamenet lekérése.'); endStream(false); });
+    }
+    function replyNow(cid) { if (agentsOn) streamAgents(cid); else streamReply(cid); }   // route by the 🤖 toggle
     function sendText(raw) {
       var txt = (raw || '').trim(); if (!txt || busy) return;
       setBusy(true); setErr(''); setInput(''); if (taRef.current) taRef.current.style.height = 'auto';
       sb.from('research_messages').insert({ chat_id: props.chatId, role: 'user', content: txt }).then(function (ins) {
         if (ins && ins.error) { setBusy(false); setErr(ins.error.message); return; }
-        loadMsgs(props.chatId); streamReply(props.chatId);
+        loadMsgs(props.chatId); replyNow(props.chatId);
       });
     }
     function onKey(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendText(input); } }
@@ -415,7 +463,7 @@
           var names = okd.map(function (x) { return x.name; }).join(', ');
           if (!names) { setBusy(false); toast('A fájl feltöltése nem sikerült.', false); return; }
           sb.from('research_messages').insert({ chat_id: props.chatId, role: 'user', content: 'Feltöltöttem: ' + names }).then(function () {
-            loadMsgs(props.chatId); streamReply(props.chatId);
+            loadMsgs(props.chatId); replyNow(props.chatId);
           });
         });
       });
@@ -459,9 +507,22 @@
         props.onDiscard ? h('button', { className: 'ap-discard', title: 'A projekt, a beszélgetés és a fájlok elvetése', onClick: props.onDiscard }, 'Elvetés') : null),
       h('div', { className: 'ap-thread', ref: scrollRef, onScroll: onScroll },
         msgs.map(function (m, i) { return turn(m, i === msgs.length - 1); }),
-        streaming ? h('div', { className: 'ap-turn ai', key: 'stream' }, h('span', { className: 'ap-av ai' }, 'AI'), h('div', { className: 'ap-bub', dangerouslySetInnerHTML: { __html: mdSafe(apHideJson(streaming.text || '')) } })) : null,
+        streaming ? h('div', { className: 'ap-turn ai', key: 'stream' }, h('span', { className: 'ap-av ai' }, 'AI'),
+          h('div', { style: { minWidth: 0, flex: 1 } },
+            (streaming.lanes && streaming.lanes.length) ? h('div', { className: 'ap-agents' }, streaming.lanes.map(function (l) {
+              var ic = l.role === 'researcher' ? '🔬' : l.role === 'reviewer' ? '🧐' : l.role === 'synth' ? '🧩' : l.role === 'planner' ? '🧭' : '•';
+              return h('div', { key: l.id, className: 'ap-lane ' + l.state },
+                h('span', { className: 'ap-lane-ic' }, ic),
+                h('span', { className: 'ap-lane-lab' }, l.label),
+                l.state === 'run' ? h('span', { className: 'spin', style: { width: 12, height: 12 } }) : l.state === 'done' ? h('span', { className: 'ap-lane-ok' }, '✓') : h('span', { className: 'ap-lane-wait' }, '…'),
+                l.status ? h('span', { className: 'ap-lane-st' }, l.status) : null);
+            })) : null,
+            (streaming.text || !(streaming.lanes && streaming.lanes.length)) ? h('div', { className: 'ap-bub', dangerouslySetInnerHTML: { __html: mdSafe(apHideJson(streaming.text || '')) } }) : null)) : null,
         (busy && !streaming) ? h('div', { className: 'ap-turn ai', key: 'typing' }, h('span', { className: 'ap-av ai' }, 'AI'), h('div', { className: 'ap-typing' }, h('i'), h('i'), h('i'))) : null),
       err ? h('div', { className: 'ap-cerr' }, err) : null,
+      h('div', { className: 'ap-tools' },
+        h('button', { className: 'ap-tool' + (webOn ? ' on' : ''), 'aria-pressed': webOn, disabled: busy, title: 'Webkeresés — a Publify valós idejű internetes forrásokból is meríthet és idézi őket (a modell dönti el, mikor keres). Jogosultsághoz kötött.', onClick: function () { setWebOn(function (v) { var n = !v; try { localStorage.setItem('pr-chat-web', n ? '1' : '0'); } catch (e) { } return n; }); } }, webOn ? '🌐 Web: be' : '🌐 Web: ki'),
+        h('button', { className: 'ap-tool' + (agentsOn ? ' on' : ''), 'aria-pressed': agentsOn, disabled: busy, title: 'Ágens-mód (kutató-csapat) — több párhuzamos ágens (Kutató/Reviewer/Szintetizáló) dolgozik a kérdéseden, mindegyik élő sávban mutatja, mit csinál. Alaposabb, de lassabb és költségesebb; jogosultsághoz kötött.', onClick: function () { setAgentsOn(function (v) { var n = !v; try { localStorage.setItem('pr-chat-agents', n ? '1' : '0'); } catch (e) { } return n; }); } }, agentsOn ? '🤖 Ágensek: be' : '🤖 Ágensek: ki')),
       h('div', { className: 'ap-cbar' },
         h('input', { type: 'file', ref: fileRef, multiple: true, style: { display: 'none' }, onChange: onFile }),
         h('button', { className: 'ap-cicon', title: 'Fájl feltöltése', onClick: pickFile, disabled: busy }, '📎'),
