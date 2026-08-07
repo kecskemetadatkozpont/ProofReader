@@ -1005,7 +1005,7 @@
       }));
     else body = h(LaunchView, { project: project, files: files, cfg: cfg, setCfg: setCfg, launching: launching, onBack: function () { setView('brief'); }, onLaunch: doLaunch });
 
-    return h('div', { className: 'ap-wrap' },
+    return h('div', { className: 'ap-wrap' + (view === 'brief' ? ' ap-full' : '') },   // brief step = full-screen split (chat + brief fill the viewport)
       h('div', { className: 'ap-steps' },
         stepBtn(1, 'Beszélgetés & brief', 'brief', false), h('span', { className: 'ap-st-sep' }, '›'),
         stepBtn(2, 'Indítás', 'launch', false), h('span', { className: 'ap-st-sep' }, '›'),

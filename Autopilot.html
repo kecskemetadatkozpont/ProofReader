@@ -86,6 +86,13 @@
     /* ===== BRIEF (chat + live brief) ===== */
     .ap-split { display:grid; grid-template-columns:1fr 380px; gap:16px; align-items:stretch; }
     @media (max-width:900px){ .ap-split { grid-template-columns:1fr; } }
+    /* FULL-SCREEN brief step: the wrap becomes a viewport-tall flex column so both panels fill the available space */
+    .ap-wrap.ap-full { max-width:none; height:100vh; padding:14px 20px 18px; display:flex; flex-direction:column; gap:12px; }
+    .ap-wrap.ap-full .ap-steps { margin:0; flex:none; }
+    .ap-wrap.ap-full .ap-split { flex:1; min-height:0; grid-template-columns:1fr minmax(360px, 30%); }
+    .ap-wrap.ap-full .ap-chat { min-height:0; max-height:none; height:100%; }
+    .ap-wrap.ap-full .ap-brief { align-self:stretch; position:static; top:auto; height:100%; overflow-y:auto; }
+    @media (max-width:900px){ .ap-wrap.ap-full { height:auto; } .ap-wrap.ap-full .ap-split { grid-template-columns:1fr; } .ap-wrap.ap-full .ap-chat { height:72vh; } .ap-wrap.ap-full .ap-brief { height:auto; } }
     .ap-card { background:var(--surface); border:1px solid var(--line); border-radius:16px; box-shadow:var(--shadow); }
     .ap-chat { display:flex; flex-direction:column; min-height:560px; max-height:calc(100vh - 210px); }
     .ap-chat-h { display:flex; align-items:center; gap:10px; padding:14px 16px; border-bottom:1px solid var(--line); }
@@ -233,9 +240,9 @@
     .ap-toast.show { opacity:1; transform:translate(-50%,0); } .ap-toast.err { background:#8a1a12; }
     @media (prefers-reduced-motion:reduce){ .ap-toast { transition:none; } }
   </style>
-  <script src="theme.js?v=1786109836"></script>
-  <script src="nav.js?v=1786109836"></script>
-  <script src="entitlements.js?v=1786109836"></script>
+  <script src="theme.js?v=1786127972"></script>
+  <script src="nav.js?v=1786127972"></script>
+  <script src="entitlements.js?v=1786127972"></script>
 </head>
 
 <body>
@@ -248,13 +255,13 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
-  <script src="backend/config.js?v=1786109836"></script>
-  <script src="auth.js?v=1786109836"></script>
-  <script src="backend.js?v=1786109836"></script>
-  <script src="autopilot.js?v=1786109836"></script>
+  <script src="backend/config.js?v=1786127972"></script>
+  <script src="auth.js?v=1786127972"></script>
+  <script src="backend.js?v=1786127972"></script>
+  <script src="autopilot.js?v=1786127972"></script>
 
-  <script src="build.js?v=1786109836"></script>
-  <script src="version-badge.js?v=1786109836"></script>
+  <script src="build.js?v=1786127972"></script>
+  <script src="version-badge.js?v=1786127972"></script>
 </body>
 
 </html>
