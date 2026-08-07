@@ -4706,7 +4706,9 @@
     var raS = useState({ rev: {}, std: {} }), resAgg = raS[0], setResAgg = raS[1];   // result aggregates for the rich "Eddigi eredmények" cards
     var pkS = useState(null), pickSel = pkS[0], setPickSel = pkS[1];   // §5 source picker: {'idea:id':true,...} (null = use default selection)
     var poS = useState(false), pickOpen = poS[0], setPickOpen = poS[1];   // §5: source-picker modal open (generate an ADDITIONAL protocol while one already exists)
-    var cmsgS = useState([]), chatMsgs = cmsgS[0], setChatMsgs = cmsgS[1]; // cockpit chat transcript [{role:'me'|'ai', content, added?}]
+    // cockpit chat transcript [{role:'me'|'ai', content, added?}] — persisted per project so it survives tab-switches / reloads
+    var cmsgS = useState(function () { try { return JSON.parse(localStorage.getItem('pr-cockpit-chat-' + props.projectId) || '[]') || []; } catch (e) { return []; } }), chatMsgs = cmsgS[0], setChatMsgs = cmsgS[1];
+    useEffect(function () { try { localStorage.setItem('pr-cockpit-chat-' + props.projectId, JSON.stringify((chatMsgs || []).slice(-40))); } catch (e) { } }, [chatMsgs, props.projectId]);
     var cinS = useState(''), chatInput = cinS[0], setChatInput = cinS[1];
     var cbzS = useState(false), chatBusy = cbzS[0], setChatBusy = cbzS[1];
     var onS = useState({}), onlineUsers = onS[0], setOnlineUsers = onS[1];   // presence: id → true (who's on the Protocol page now)
@@ -5373,7 +5375,9 @@
       if (!ce) return null;
       // §4 — main-chat look: assistant = full-width markdown prose, user = right indigo bubble, auto-grow textarea composer.
       return h('div', { className: 'pcpit-chat pcpit-chat2' + (inline ? ' pcpit-chat-inline' : '') },
-        h('div', { className: 'pcpit-chat-h' }, '💬 Protokoll-építő co-pilot ', h('span', { style: { fontWeight: 500, color: 'var(--faint)', fontSize: 11.5 } }, '· ismeri az állapotot, taskokat javasol'), inline ? null : h('button', { style: { marginLeft: 'auto', border: 'none', background: 'none', color: 'var(--faint)', cursor: 'pointer', fontSize: 14, fontFamily: 'inherit', lineHeight: 1 }, title: 'Bezárás', onClick: function () { setDockOpen(false); } }, '✕')),
+        h('div', { className: 'pcpit-chat-h' }, '💬 Protokoll-építő co-pilot ', h('span', { style: { fontWeight: 500, color: 'var(--faint)', fontSize: 11.5 } }, '· ismeri az állapotot, taskokat javasol'),
+          chatMsgs.length ? h('button', { style: { marginLeft: 'auto', border: '1px solid var(--line)', background: 'var(--surface)', color: 'var(--muted)', cursor: 'pointer', fontSize: 11, fontFamily: 'inherit', lineHeight: 1.4, borderRadius: 6, padding: '2px 8px', flex: 'none' }, title: 'Új beszélgetés — az előzmény törlése', onClick: function () { setChatMsgs([]); setProposed(null); try { localStorage.removeItem('pr-cockpit-chat-' + props.projectId); } catch (e) { } } }, '🗑 Új') : null,
+          inline ? null : h('button', { style: { marginLeft: chatMsgs.length ? 6 : 'auto', border: 'none', background: 'none', color: 'var(--faint)', cursor: 'pointer', fontSize: 14, fontFamily: 'inherit', lineHeight: 1 }, title: 'Bezárás', onClick: function () { setDockOpen(false); } }, '✕')),
         chatMsgs.length
           ? h('div', { className: 'pcpit-msgs2' }, chatMsgs.map(function (m, i) {
               var ai = m.role !== 'me';
