@@ -721,6 +721,7 @@
     var selS = useState({}), selIdeas = selS[0], setSelIdeas = selS[1];     // idea_id → true : ideas ticked for parallel development
     var driving = useRef(false), alive = useRef(true), projRef = useRef(null), feedRef = useRef(null), myDriver = useRef(null);
     var bDriving = useRef({});   // per-branch-run driving flags (additive; the primary driver above is untouched)
+    var branchRunsRef = useRef([]), activeRef = useRef(false);   // live mirrors for the event poller (avoids stale closures)
     if (!myDriver.current) myDriver.current = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : ('00000000-0000-4000-8000-' + String(Date.now()).slice(-12).padStart(12, '0'));   // per-tab lease id
     useEffect(function () { return function () { alive.current = false; driving.current = false; }; }, []);
     // live clock while running
@@ -772,7 +773,6 @@
     }
     useEffect(function () {
       sb.from('research_autopilot_runs').select('*').eq('id', props.runId).maybeSingle().then(function (rr) { var r = rr && rr.data; if (!alive.current) return; if (!r) { setNotFound(true); return; } setRun(r); ensureProject(r.project_id); ensureDrive(r); });
-      sb.from('research_autopilot_events').select('*').eq('run_id', props.runId).order('id', { ascending: true }).limit(400).then(function (r) { if (alive.current) setEvents((r && r.data) || []); });
       var ch = sb.channel('ap:' + props.runId)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'research_autopilot_runs', filter: 'id=eq.' + props.runId }, function (p) { if (!alive.current) return; setRun(p.new); ensureDrive(p.new); })
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'research_autopilot_events', filter: 'run_id=eq.' + props.runId }, function (p) { if (!alive.current) return; setEvents(function (e) { return e.some(function (x) { return x.id === p.new.id; }) ? e : e.concat([p.new]); }); })
@@ -830,6 +830,20 @@
       });
     }
     useEffect(function () { if (run && run.id) loadBranches(run); }, [run && run.id, run && groupOf(run)]);
+    // live mirrors (read by the interval poller below without re-subscribing)
+    branchRunsRef.current = branchRuns;
+    activeRef.current = !!((run && run.status === 'running') || (branchRuns || []).some(function (b) { return b && b.status === 'running'; }));
+    // Activity across ALL parallel threads: load every group run's events (primary + branches) and POLL, since Realtime
+    // isn't wired — so the feed shows, continuously, what each thread is doing right now.
+    function loadEvents() {
+      var ids = [props.runId].concat((branchRunsRef.current || []).map(function (b) { return b.id; }).filter(Boolean));
+      sb.from('research_autopilot_events').select('*').in('run_id', ids).order('id', { ascending: true }).limit(700).then(function (r) { if (alive.current) setEvents((r && r.data) || []); });
+    }
+    useEffect(function () {
+      loadEvents();
+      var iv = setInterval(function () { if (activeRef.current) loadEvents(); }, 3000);
+      return function () { clearInterval(iv); };
+    }, [props.runId, (branchRuns || []).map(function (b) { return b.id; }).join(',')]);
 
     // approve/resume/pause must NOT depend on Realtime (research_autopilot_runs isn't in the supabase_realtime publication →
     // postgres_changes never fires). So update the LOCAL run optimistically (UI reacts instantly) and, after the DB write
@@ -1052,6 +1066,14 @@
       var cols = [run].concat((branchRuns || []).filter(function (r) { return r && r.config && r.config.develop_idea_id; }));   // primary always + each branch
       return h('div', { className: 'apg-branches' + (cols.length > 1 ? ' multi' : '') }, cols.map(branchColumn));
     }
+    // which thread (idea) an activity event belongs to → shown as a chip in the feed when parallel threads run
+    function threadLabel(runId) {
+      var rr = ([run].concat(branchRuns || [])).filter(function (x) { return x && x.id === runId; })[0];
+      if (!rr) return null;
+      var did = rr.config && rr.config.develop_idea_id;
+      var idea = ((phaseArts.ideas && phaseArts.ideas.items) || []).filter(function (x) { return x.id === did; })[0];
+      return (idea && idea.question) ? idea.question : (rr.id === run.id ? 'Fő szál' : 'Ág');
+    }
     function focusPanel() {
       if (run.status === 'awaiting_approval' && run.gate) {
         return h('div', { className: 'ap-focus gate' },
@@ -1086,9 +1108,12 @@
           branchesRow()),   // parallel downstream columns — one per developing idea (primary + branches)
         h('div', { className: 'ap-dside' },
           focusPanel(),
-          h('div', { className: 'ap-card ap-feed' }, h('h3', null, 'Activity'),
+          h('div', { className: 'ap-card ap-feed' }, h('h3', null, 'Activity', ((branchRuns || []).length ? h('span', { className: 'ap-feed-live' }, '● ' + (1 + (branchRuns || []).length) + ' szál') : null)),
             h('div', { className: 'ap-feed-list', ref: feedRef }, events.length ? events.map(function (e) {
-              return h('div', { className: 'ap-feed-row ' + (e.level || 'run'), key: e.id }, h('span', { className: 'ap-fi' }, EV_ICON[e.level] || '•'), h('span', { className: 'ap-ft' }, e.message));
+              var multi = (branchRuns || []).length > 0, tag = multi ? threadLabel(e.run_id) : null;
+              return h('div', { className: 'ap-feed-row ' + (e.level || 'run'), key: e.id },
+                h('span', { className: 'ap-fi' }, EV_ICON[e.level] || '•'),
+                h('span', { className: 'ap-ft' }, tag ? h('span', { className: 'ap-fthread', title: tag }, tag.length > 24 ? tag.slice(0, 24) + '…' : tag) : null, e.message));
             }) : h('div', { className: 'ap-feed-empty' }, 'Még nincs esemény…'))))),
       h('div', { className: 'ap-dacts' },
         h('a', { className: 'btn sm', href: 'Research.html?project=' + encodeURIComponent(run.project_id) }, 'Megnyitás a Research-ben ↗'),
