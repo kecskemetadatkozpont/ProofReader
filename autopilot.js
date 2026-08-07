@@ -707,6 +707,7 @@
     var nfS = useState(false), notFound = nfS[0], setNotFound = nfS[1];
     var opS = useState(null), openPhase = opS[0], setOpenPhase = opS[1];   // which phase card is expanded to show its real artifacts
     var paS = useState({}), phaseArts = paS[0], setPhaseArts = paS[1];     // phase key → { loading, items, total } (lazy-fetched)
+    var pvS = useState(null), preview = pvS[0], setPreview = pvS[1];        // { title, content } → the readable review preview modal
     var driving = useRef(false), alive = useRef(true), projRef = useRef(null), feedRef = useRef(null), myDriver = useRef(null);
     if (!myDriver.current) myDriver.current = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : ('00000000-0000-4000-8000-' + String(Date.now()).slice(-12).padStart(12, '0'));   // per-tab lease id
     useEffect(function () { return function () { alive.current = false; driving.current = false; }; }, []);
@@ -819,6 +820,10 @@
           sb.from('research_sources').select('id', { count: 'exact', head: true }).eq('project_id', pid),
           sb.from('research_sources').select('id,title,year,url,screening').eq('project_id', pid).eq('screening', 'include').order('cited_by', { ascending: false, nullsFirst: false }).limit(15)
         ]).then(function (res) { if (alive.current) put({ total: (res[0] && res[0].count) || 0, items: (res[1] && res[1].data) || [] }); }, function () { if (alive.current) put({ items: [] }); });
+      } else if (key === 'sr') {
+        // the generated systematic review is a markdown file in research_files (studies/…-review.md)
+        sb.from('research_files').select('id,path,content,updated_at').eq('project_id', pid).ilike('path', 'studies/%').order('updated_at', { ascending: false }).limit(8)
+          .then(function (r) { if (alive.current) put({ files: ((r && r.data) || []).filter(function (f) { return /\.md$/i.test(f.path); }) }); }, function () { if (alive.current) put({ files: [] }); });
       } else { put({ items: [] }); }   // other phases: the detail shows a Research deep-link instead of a list
     }
     function togglePhase(p) { if (openPhase === p.key) { setOpenPhase(null); return; } setOpenPhase(p.key); loadPhaseArts(p.key); }
@@ -838,6 +843,18 @@
           its.length ? h('div', { className: 'ap-pc-list' }, its.map(function (x) {
             return h('div', { className: 'ap-pc-li', key: x.id }, x.url ? h('a', { className: 'ap-pc-li-t', href: x.url, target: '_blank', rel: 'noopener' }, x.title || 'Forrás') : h('span', { className: 'ap-pc-li-t' }, x.title || 'Forrás'), x.year ? h('span', { className: 'ap-pc-li-n' }, String(x.year)) : null);
           })) : h('div', { className: 'ap-pc-dempty' }, 'Nincs included forrás.'));
+      }
+      if (p.key === 'sr') {
+        var files = a.files || [];
+        if (!files.length) return h('div', { className: 'ap-pc-dempty' }, 'Még nincs elkészült áttekintés.');
+        return h('div', { className: 'ap-pc-list' }, files.map(function (f) {
+          var name = String(f.path || '').split('/').pop();
+          return h('div', { className: 'ap-pc-li', key: f.id },
+            h('span', { className: 'ap-pc-li-t' }, '📄 ' + name),
+            (f.content != null)
+              ? h('button', { className: 'btn sm', onClick: function () { setPreview({ title: name, content: f.content }); } }, 'Olvasás →')
+              : h('a', { className: 'btn sm', href: 'Research.html?project=' + encodeURIComponent(run.project_id), target: '_blank', rel: 'noopener' }, 'Megnyitás ↗'));
+        }));
       }
       return h('a', { className: 'btn sm', href: 'Research.html?project=' + encodeURIComponent(run.project_id), target: '_blank', rel: 'noopener' }, 'Megnyitás a Research-ben ↗');
     }
@@ -893,7 +910,14 @@
             }) : h('div', { className: 'ap-feed-empty' }, 'Még nincs esemény…'))))),
       h('div', { className: 'ap-dacts' },
         h('a', { className: 'btn sm', href: 'Research.html?project=' + encodeURIComponent(run.project_id) }, 'Megnyitás a Research-ben ↗'),
-        h('button', { className: 'btn sm', onClick: props.onExit }, '‹ Új kutatás')));
+        h('button', { className: 'btn sm', onClick: props.onExit }, '‹ Új kutatás')),
+      preview ? h('div', { className: 'ap-pv-scrim', onClick: function () { setPreview(null); } },
+        h('div', { className: 'ap-pv', onClick: function (e) { e.stopPropagation(); } },
+          h('div', { className: 'ap-pv-h' }, h('b', null, '🔬 ' + (preview.title || 'Áttekintés')), h('button', { className: 'ap-pv-x', 'aria-label': 'Bezárás', onClick: function () { setPreview(null); } }, '×')),
+          h('div', { className: 'ap-pv-b report-doc', dangerouslySetInnerHTML: { __html: mdSafe(preview.content || '') } }),
+          h('div', { className: 'ap-pv-f' },
+            h('button', { className: 'btn sm', onClick: function () { try { navigator.clipboard.writeText(preview.content || ''); toast('Vágólapra másolva', true); } catch (e) { } } }, 'Másolás (Markdown)'),
+            h('button', { className: 'btn pri sm', onClick: function () { setPreview(null); } }, 'Bezárás')))) : null);
   }
 
   // (A) the user's running + previous Autopilots — surfaced above the Launcher so a closed run is always findable
