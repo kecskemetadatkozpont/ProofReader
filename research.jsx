@@ -6402,6 +6402,7 @@
     var tourS = useState(null), tour = tourS[0], setTour = tourS[1];   // {list:[pages], i, playing} guided-tour state (Lap-based in Fázis 1)
     var tourT = useRef(null);   // tour autoplay timer
     var viewRef = useRef(view); viewRef.current = view;   // live mirror of `view` so a tween always starts from the true current camera
+    var wheelRef = useRef(null);   // latest wheel handler, called by a NON-passive native listener so preventDefault reliably stops page/modal scroll
     var armedRef = useRef(null);   // the card "armed to enter" at deep zoom (Fázis 3) — Enter dives into it
     var winsS = useState([]), windows = winsS[0], setWindows = winsS[1];   // 5th LOD: embedded screen-space panel windows [{id,tab,t,title,ref,fp,dx,dy,w,h,z}]
     var winDragRef = useRef(null);   // window move/resize lifecycle guard
@@ -7032,7 +7033,23 @@
       // NOTE: msel is cleared on mouse-UP only for a plain click (not a pan) — see onUp — so panning keeps the selection.
       stopFollow(); cancelFly(); tourStop(); drag.current = { sx: e.clientX, sy: e.clientY, tx: view.tx, ty: view.ty }; window.addEventListener('mousemove', onMove); window.addEventListener('mouseup', onUp);
     }
-    function onWheel(e) { e.preventDefault(); tlPause(); stopFollow(); cancelFly(); tourStop(); var st = stageRef.current; if (!st) return; var r = st.getBoundingClientRect(); var mx = e.clientX - r.left, my = e.clientY - r.top; setView(function (v) { var nk = Math.min(2.2, Math.max(.3, v.k * (e.deltaY < 0 ? 1.12 : 0.89))); return { tx: mx - (mx - v.tx) * (nk / v.k), ty: my - (my - v.ty) * (nk / v.k), k: nk }; }); }
+    function onWheel(e) {
+      // scrolling INSIDE an internal panel (card preview, inspector, dock menu, bars) must scroll that panel, not zoom the map
+      if (e.target && e.target.closest && e.target.closest('.rmap-t-pv, .rmap-einsp, .rmap-chatpv, .rmap-dmenu, .rmap-pagebar, .rmap-presence, .rmap-groupbar, .rmap-nozoom')) return;
+      e.preventDefault();   // reliable now — the native listener is non-passive → the page/modal never scrolls under the map
+      tlPause(); stopFollow(); cancelFly(); tourStop();
+      var st = stageRef.current; if (!st) return; var r = st.getBoundingClientRect(); var mx = e.clientX - r.left, my = e.clientY - r.top;
+      // trackpad pinch (ctrlKey) is a finer step; anchor the zoom on the cursor so the point under it stays put
+      var factor = e.deltaY < 0 ? (e.ctrlKey ? 1.06 : 1.12) : (e.ctrlKey ? 0.945 : 0.89);
+      setView(function (v) { var nk = Math.min(2.2, Math.max(.3, v.k * factor)); return { tx: mx - (mx - v.tx) * (nk / v.k), ty: my - (my - v.ty) * (nk / v.k), k: nk }; });
+    }
+    wheelRef.current = onWheel;
+    useEffect(function () {
+      var st = stageRef.current; if (!st) return;
+      var h2 = function (e) { if (wheelRef.current) wheelRef.current(e); };
+      st.addEventListener('wheel', h2, { passive: false });   // non-passive → preventDefault actually blocks the page/modal scroll
+      return function () { st.removeEventListener('wheel', h2); };
+    }, []);
     function zoom(f) { tlPause(); stopFollow(); cancelFly(); tourStop(); setView(function (v) { var nk = Math.min(2.2, Math.max(.3, v.k * f)); return { tx: v.tx, ty: v.ty, k: nk }; }); }
     function setZoomTo(k) { tlPause(); stopFollow(); cancelFly(); tourStop(); var st = stageRef.current, cx = st ? st.clientWidth / 2 : 400, cy = st ? st.clientHeight / 2 : 300; setView(function (v) { return { tx: cx - (cx - v.tx) * (k / v.k), ty: cy - (cy - v.ty) * (k / v.k), k: k }; }); }   // zoom to an exact level around the viewport centre (zoom-menu presets)
     function closeDMenus() { setViewMenu(false); setArrMenu(false); setZoomMenu(false); }
@@ -9684,7 +9701,7 @@
         h('div', { className: 'rmap-exp-head' }, h('span', { className: 'rmap-exp-t' }, '🗂 Fájlok'), h('span', { style: { flex: 1 } }), h('button', { className: 'rmap-exp-x', title: 'Panel összecsukása', onClick: function () { setFbOpen(false); try { localStorage.setItem('pr-rmap-fb', '0'); } catch (e) { } } }, '‹')),
         h('div', { className: 'rmap-exp-body' }, h(SessionFileBrowser, { projectId: props.projectId, version: bump, canEdit: props.canEdit, authorId: props.authorId, onChanged: function () { setBump(function (x) { return x + 1; }); }, onAttach: function (a) { setDAttach(function (p) { return p.concat([a]); }); if (window.PRUI) window.PRUI.toast('📎 Csatolva: ' + String(a.label || a.name || 'fájl').slice(0, 40), { kind: 'ok' }); }, mapNodeId: fileNodeId, onLocate: locateFile, locatedFileId: fbLocatedId }))) : null,
       h('div', { className: 'rmap-stage-col' + (tlOn ? ' rmap-tl-active' : '') },
-      h('div', { className: 'rmap-stage', ref: stageRef, onMouseDown: onDown, onWheel: onWheel, onMouseMove: broadcastCursor, onDoubleClick: onStageDbl },
+      h('div', { className: 'rmap-stage', ref: stageRef, onMouseDown: onDown, onMouseMove: broadcastCursor, onDoubleClick: onStageDbl },
         // empty project: a small non-blocking welcome overlay so work can start from the Map (canvas + dock render normally underneath)
         (!g.N.length) ? h('div', { className: 'rmap-empty-hint', onMouseDown: function (e) { e.stopPropagation(); } },
           h('div', { className: 'rmap-eh-ic' }, '🗺️'),
@@ -9864,7 +9881,7 @@
                 h('button', { className: 'rmap-tl-rbtn exit', title: 'Vissza a szabad elrendezéshez (Esc)', onClick: tlExit }, '✕ Kilépés'));
             })())) : null,
         // "hidden figures" restore panel — bring Map-removed figures (on_map=false) back onto the Map
-        (restoreOpen && data && data.hiddenFigs) ? h('div', { style: { position: 'absolute', left: '50%', bottom: 74, transform: 'translateX(-50%)', zIndex: 14, width: 264, maxHeight: '58%', overflowY: 'auto', background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 12, boxShadow: '0 18px 50px -20px rgba(20,26,40,.55)', padding: 12 }, onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
+        (restoreOpen && data && data.hiddenFigs) ? h('div', { className: 'rmap-nozoom', style: { position: 'absolute', left: '50%', bottom: 74, transform: 'translateX(-50%)', zIndex: 14, width: 264, maxHeight: '58%', overflowY: 'auto', background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 12, boxShadow: '0 18px 50px -20px rgba(20,26,40,.55)', padding: 12 }, onMouseDown: function (e) { e.stopPropagation(); }, onWheel: function (e) { e.stopPropagation(); } },
           (function () { ensureFigUrls(data.hiddenFigs); return null; })(),
           h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 9 } }, h('b', { style: { fontSize: 12.5 } }, '🖼 Rejtett ábrák (' + data.hiddenFigs.length + ')'), h('button', { style: { border: 'none', background: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: 16, lineHeight: 1 }, onClick: function () { setRestoreOpen(false); } }, '×')),
           data.hiddenFigs.length ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 7 } }, data.hiddenFigs.map(function (f) {
