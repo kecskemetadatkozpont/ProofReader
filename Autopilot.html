@@ -100,6 +100,21 @@
     html.dark .ap-turn.me .ap-bub { background:#4f46e5; border-color:#4f46e5; }
     .ap-bub p { margin:0 0 8px; } .ap-bub p:last-child { margin:0; } .ap-bub ul,.ap-bub ol { margin:6px 0; padding-left:20px; } .ap-bub code { font-family:ui-monospace,Menlo,monospace; font-size:12px; background:var(--surface-3); padding:1px 4px; border-radius:5px; }
     .ap-turn.me .ap-bub code { background:rgba(255,255,255,.18); }
+    /* multiple-choice clarifying questions (rendered from a publify-questions fence OR a bare JSON array) */
+    .ap-qs { max-width:82%; margin-top:8px; display:flex; flex-direction:column; gap:12px; background:var(--surface-2); border:1px solid var(--line); border-radius:13px; padding:12px 14px; }
+    .ap-q { display:flex; flex-direction:column; gap:7px; }
+    .ap-q-label { font-size:13px; font-weight:650; color:var(--ink); line-height:1.4; }
+    .ap-q-multi { margin-left:7px; font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; color:var(--accent); background:var(--accent-tint); border-radius:6px; padding:1px 6px; }
+    .ap-q-opts { display:flex; flex-wrap:wrap; gap:7px; }
+    .ap-q-opt { text-align:left; font-family:inherit; font-size:12.5px; line-height:1.35; color:var(--ink); background:var(--surface); border:1.5px solid var(--line-2); border-radius:10px; padding:7px 11px; cursor:pointer; transition:border-color .12s, background .12s; max-width:100%; }
+    .ap-q-opt:hover { border-color:var(--accent); }
+    .ap-q-opt.on { border-color:var(--accent); background:var(--accent-tint); color:var(--accent-d); font-weight:600; }
+    html.dark .ap-q-opt.on { color:#fff; background:#4f46e5; border-color:#4f46e5; }
+    .ap-q-note { width:100%; box-sizing:border-box; font-family:inherit; font-size:12.5px; color:var(--ink); background:var(--surface); border:1px solid var(--line-2); border-radius:9px; padding:7px 10px; resize:vertical; min-height:34px; }
+    .ap-q-send { display:flex; align-items:center; gap:10px; }
+    .ap-q-hint { font-size:11.5px; color:var(--faint); flex:1; }
+    .ap-q-send .ap-csend { flex:none; }
+    .ap-q-send .ap-csend:disabled { opacity:.5; cursor:default; }
     .ap-typing { display:inline-flex; gap:4px; padding:12px 13px; } .ap-typing i { width:6px; height:6px; border-radius:50%; background:var(--faint); animation:tb 1s infinite; } .ap-typing i:nth-child(2){ animation-delay:.15s; } .ap-typing i:nth-child(3){ animation-delay:.3s; }
     @keyframes tb { 0%,60%,100%{ opacity:.3; transform:translateY(0);} 30%{ opacity:1; transform:translateY(-3px);} }
     @media (prefers-reduced-motion:reduce){ .ap-typing i { animation:none; } }
@@ -204,9 +219,9 @@
     .ap-toast.show { opacity:1; transform:translate(-50%,0); } .ap-toast.err { background:#8a1a12; }
     @media (prefers-reduced-motion:reduce){ .ap-toast { transition:none; } }
   </style>
-  <script src="theme.js?v=1786108075"></script>
-  <script src="nav.js?v=1786108075"></script>
-  <script src="entitlements.js?v=1786108075"></script>
+  <script src="theme.js?v=1786109246"></script>
+  <script src="nav.js?v=1786109246"></script>
+  <script src="entitlements.js?v=1786109246"></script>
 </head>
 
 <body>
@@ -219,13 +234,13 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
-  <script src="backend/config.js?v=1786108075"></script>
-  <script src="auth.js?v=1786108075"></script>
-  <script src="backend.js?v=1786108075"></script>
-  <script src="autopilot.js?v=1786108075"></script>
+  <script src="backend/config.js?v=1786109246"></script>
+  <script src="auth.js?v=1786109246"></script>
+  <script src="backend.js?v=1786109246"></script>
+  <script src="autopilot.js?v=1786109246"></script>
 
-  <script src="build.js?v=1786108075"></script>
-  <script src="version-badge.js?v=1786108075"></script>
+  <script src="build.js?v=1786109246"></script>
+  <script src="version-badge.js?v=1786109246"></script>
 </body>
 
 </html>

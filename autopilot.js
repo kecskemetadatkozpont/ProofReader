@@ -14,6 +14,32 @@
 
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (x) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[x]; }); }
   function mdSafe(md) { try { return DOMPurify.sanitize(marked.parse(String(md || ''))); } catch (e) { return esc(md || ''); } }
+  // Feleletválasztós tisztázó kérdések. The model may emit them as a ```publify-questions fence OR (as the Autopilot
+  // brief model often does) a BARE JSON array [{q, options[], multi}]. Parse either, render as pills, hide the raw JSON.
+  function apParseQuestions(text) {
+    if (!text) return { qs: [], clean: text || '' };
+    var raw = String(text), jsonStr = null, fence = false;
+    var mf = /```publify-questions\s*([\s\S]*?)```/i.exec(raw);
+    if (mf) { jsonStr = mf[1].trim(); fence = true; }
+    else {
+      var whole = raw.trim();
+      if (/^\[\s*\{[\s\S]*\}\s*\]$/.test(whole) && whole.indexOf('"options"') >= 0) jsonStr = whole;   // the whole message IS the JSON
+      else { var mb = /\[\s*\{[\s\S]*?"options"[\s\S]*\}\s*\]/.exec(raw); if (mb) jsonStr = mb[0]; }     // an embedded array
+    }
+    if (!jsonStr) return { qs: [], clean: raw.trim() };
+    var arr; try { arr = JSON.parse(jsonStr); } catch (e) { return { qs: [], clean: raw.trim() }; }
+    if (!Array.isArray(arr)) return { qs: [], clean: raw.trim() };
+    var qs = arr.filter(function (x) { return x && x.q && Array.isArray(x.options) && x.options.length; }).slice(0, 5).map(function (x) {
+      return { q: String(x.q).slice(0, 400), options: x.options.map(String).map(function (s) { return s.slice(0, 220); }).slice(0, 8), multi: !!x.multi };
+    });
+    if (!qs.length) return { qs: [], clean: raw.trim() };
+    var clean = fence
+      ? raw.replace(/```publify-questions[\s\S]*?```/gi, '').replace(/```publify-questions[\s\S]*$/i, '').trim()
+      : raw.split(jsonStr).join('').trim();
+    return { qs: qs, clean: clean };
+  }
+  // hide a (partial or complete) bare questions JSON array from the LIVE stream so the raw JSON never flashes mid-answer
+  function apHideJson(text) { var t = String(text || ''); var i = t.search(/```publify-questions|\[\s*\{[\s\S]*?"q"\s*:/); return i >= 0 ? t.slice(0, i).trim() : t; }
   function nowIso() { return new Date().toISOString(); }
   function uid() { return (BE.user && BE.user.id) || null; }
   function fmtSize(n) { n = +n || 0; return n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(0) + ' KB' : (n / 1048576).toFixed(1) + ' MB'; }
@@ -297,6 +323,24 @@
     var bS = useState(false), busy = bS[0], setBusy = bS[1];
     var iS = useState(''), input = iS[0], setInput = iS[1];
     var eS = useState(''), err = eS[0], setErr = eS[1];
+    var qsS = useState({}), qSel = qsS[0], setQSel = qsS[1];   // (msgId:qIdx) → [selected options]
+    var qnS = useState({}), qNote = qnS[0], setQNote = qnS[1]; // (msgId) → optional free-text note
+    function toggleQ(key, o, multi) {
+      setQSel(function (p) { var n = Object.assign({}, p); var cur = (n[key] || []).slice(); var ix = cur.indexOf(o);
+        if (multi) { if (ix >= 0) cur.splice(ix, 1); else cur.push(o); } else { cur = (ix >= 0) ? [] : [o]; }   // single-choice = replace
+        n[key] = cur; return n; });
+    }
+    function setNote(mid, v) { setQNote(function (p) { var n = Object.assign({}, p); n[mid] = v; return n; }); }
+    // gather ALL of a message's picks (+ any note) and send them back as ONE user turn
+    function sendQBlock(mid, qlist) {
+      var lines = [];
+      qlist.forEach(function (qq, qi) { var sel = qSel[mid + ':' + qi] || []; if (sel.length) lines.push(qq.q + ' → ' + sel.join('; ')); });
+      var note = (qNote[mid] || '').trim(); if (note) lines.push('Egyéb: ' + note);
+      if (!lines.length) return;
+      sendText(lines.join('\n'));
+      setQSel(function (p) { var n = Object.assign({}, p); Object.keys(n).forEach(function (k) { if (k.indexOf(mid + ':') === 0) delete n[k]; }); return n; });
+      setNote(mid, '');
+    }
     var alive = useRef(true), scrollRef = useRef(null), taRef = useRef(null), autoStreamed = useRef(false), atBottom = useRef(true), streamingRef = useRef(false);
     useEffect(function () { return function () { alive.current = false; }; }, []);
 
@@ -378,21 +422,44 @@
       e.target.value = '';
     }
 
-    function turn(m) {
+    function turn(m, isLast) {
       var isAI = m.role === 'assistant';
-      return h('div', { key: m.id, className: 'ap-turn ' + (isAI ? 'ai' : 'me') },
-        h('span', { className: 'ap-av ' + (isAI ? 'ai' : 'me') }, isAI ? 'AI' : 'Te'),
-        isAI
-          ? h('div', { className: 'ap-bub', dangerouslySetInnerHTML: { __html: mdSafe(m.content) } })
-          : h('div', { className: 'ap-bub' }, String(m.content || '')));
+      if (!isAI) return h('div', { key: m.id, className: 'ap-turn me' }, h('span', { className: 'ap-av me' }, 'Te'), h('div', { className: 'ap-bub' }, String(m.content || '')));
+      // multiple-choice clarifying questions: parse (fence OR bare JSON), render as pills on the LAST assistant turn
+      var pq = apParseQuestions(m.content);
+      var showQ = isLast && !busy && pq.qs.length;
+      var bodyHtml = mdSafe(pq.clean || (pq.qs.length ? '' : m.content));
+      return h('div', { key: m.id, className: 'ap-turn ai' },
+        h('span', { className: 'ap-av ai' }, 'AI'),
+        h('div', { style: { minWidth: 0, flex: 1 } },
+          (pq.clean || !pq.qs.length) ? h('div', { className: 'ap-bub', dangerouslySetInnerHTML: { __html: bodyHtml } }) : null,
+          showQ ? (function () {
+            var totalSel = pq.qs.reduce(function (a, qq, qi) { return a + (qSel[m.id + ':' + qi] || []).length; }, 0);
+            var note = qNote[m.id] || '';
+            var canSend = totalSel > 0 || note.trim().length > 0;
+            return h('div', { className: 'ap-qs' },
+              pq.qs.map(function (qq, qi) {
+                var qk = m.id + ':' + qi, sel = qSel[qk] || [];
+                return h('div', { className: 'ap-q', key: qi },
+                  h('div', { className: 'ap-q-label' }, (pq.qs.length > 1 ? ((qi + 1) + '. ') : '') + qq.q, qq.multi ? h('span', { className: 'ap-q-multi' }, 'több is választható') : null),
+                  h('div', { className: 'ap-q-opts' }, qq.options.map(function (o, oi) {
+                    var on = sel.indexOf(o) >= 0;
+                    return h('button', { className: 'ap-q-opt' + (on ? ' on' : ''), key: oi, 'aria-pressed': on, onClick: function () { toggleQ(qk, o, qq.multi); } }, (on ? '✓ ' : '') + o);
+                  })));
+              }),
+              h('textarea', { className: 'ap-q-note', rows: 1, value: note, placeholder: 'Egyéb / pontosítás (opcionális)…', onChange: function (e) { setNote(m.id, e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); if (canSend) sendQBlock(m.id, pq.qs); } } }),
+              h('div', { className: 'ap-q-send' },
+                h('span', { className: 'ap-q-hint' }, totalSel ? (totalSel + ' kiválasztva') : (note.trim() ? 'saját válasz' : 'Válassz — nyugodtan gondold át')),
+                h('button', { className: 'ap-csend', disabled: !canSend, onClick: function () { sendQBlock(m.id, pq.qs); } }, 'Küldés' + (totalSel ? (' (' + totalSel + ')') : ''))));
+          })() : null));
     }
 
     return h('div', { className: 'ap-card ap-chat' },
       h('div', { className: 'ap-chat-h' }, h('span', { className: 'ap-av ai' }, 'AI'), h('b', null, 'Kutatási asszisztens'), h('span', { className: 'prj' }, props.projectTitle || ''),
         props.onDiscard ? h('button', { className: 'ap-discard', title: 'A projekt, a beszélgetés és a fájlok elvetése', onClick: props.onDiscard }, 'Elvetés') : null),
       h('div', { className: 'ap-thread', ref: scrollRef, onScroll: onScroll },
-        msgs.map(turn),
-        streaming ? h('div', { className: 'ap-turn ai', key: 'stream' }, h('span', { className: 'ap-av ai' }, 'AI'), h('div', { className: 'ap-bub', dangerouslySetInnerHTML: { __html: mdSafe(streaming.text || '') } })) : null,
+        msgs.map(function (m, i) { return turn(m, i === msgs.length - 1); }),
+        streaming ? h('div', { className: 'ap-turn ai', key: 'stream' }, h('span', { className: 'ap-av ai' }, 'AI'), h('div', { className: 'ap-bub', dangerouslySetInnerHTML: { __html: mdSafe(apHideJson(streaming.text || '')) } })) : null,
         (busy && !streaming) ? h('div', { className: 'ap-turn ai', key: 'typing' }, h('span', { className: 'ap-av ai' }, 'AI'), h('div', { className: 'ap-typing' }, h('i'), h('i'), h('i'))) : null),
       err ? h('div', { className: 'ap-cerr' }, err) : null,
       h('div', { className: 'ap-cbar' },
