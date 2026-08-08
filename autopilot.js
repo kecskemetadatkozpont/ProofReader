@@ -743,6 +743,7 @@
     var paS = useState({}), phaseArts = paS[0], setPhaseArts = paS[1];     // phase key → { loading, items, total } (lazy-fetched)
     var pvS = useState(null), preview = pvS[0], setPreview = pvS[1];        // { title, content } → the readable review preview modal
     var ppvS = useState(null), protoPv = ppvS[0], setProtoPv = ppvS[1];    // { title, goal, steps:[...] } → the protocol task-cards modal
+    var lrS = useState(null), litRev = lrS[0], setLitRev = lrS[1];         // { prun, studyId, loading, order:[srcId], sources, eff:{srcId:decision}, meta, dirty } → the side screening-review drawer
     var swS = useState(false), switching = swS[0], setSwitching = swS[1];   // guard while re-targeting the pipeline to a chosen idea
     var brS = useState([]), branchRuns = brS[0], setBranchRuns = brS[1];    // parallel per-idea branch runs (siblings of the primary run in the same group)
     var selS = useState({}), selIdeas = selS[0], setSelIdeas = selS[1];     // idea_id → true : ideas ticked for parallel development
@@ -1126,6 +1127,58 @@
         if (f && f.content != null) setPreview({ title: 'Research Gap ellenőrzés', content: f.content }); else toast('Nincs elérhető gap-jelentés.', false);
       });
     }
+    // ── Screening-review DRAWER: reopen a study's screened papers, override the AI decisions (e.g. rescue papers when
+    //    a step excluded everything, or push "maybe" papers through), then continue the run with the chosen set.
+    var SR_STEP = 3;   // generate_review (the SR phase) reads step-3 includes → every manual include is written here so it reaches the review
+    function openLitReview(prun) {
+      var sid = prun && prun.study_id;
+      if (!sid) { toast('Ehhez a szálhoz még nincs literatúra-study.', false); return; }
+      setLitRev({ prun: prun, studyId: sid, loading: true, order: [], sources: {}, eff: {}, meta: {}, dirty: false });
+      sb.from('research_study_papers').select('source_id,step,decision,reason,score,signals,overridden').eq('study_id', sid).then(function (pr) {
+        var rows = (pr && pr.data) || [];
+        // meaningful set = papers that reached step ≥2 (passed the quick triage); show each source at its DEEPEST decision
+        var deepest = {};
+        rows.forEach(function (r) { if ((r.step || 0) < 2) return; var c = deepest[r.source_id]; if (!c || (r.step || 0) > (c.step || 0)) deepest[r.source_id] = r; });
+        var ids = Object.keys(deepest);
+        var eff = {}, meta = {};
+        ids.forEach(function (id) { var r = deepest[id]; eff[id] = r.decision; meta[id] = { reason: r.reason, score: r.score, step: r.step, signals: r.signals, overridden: r.overridden }; });
+        if (!ids.length) { if (alive.current) setLitRev(function (p) { return p && Object.assign({}, p, { loading: false, order: [], sources: {}, eff: {}, meta: {} }); }); return; }
+        sb.from('research_sources').select('id,title,year,url,cited_by,venue').in('id', ids).then(function (sr) {
+          if (!alive.current) return;
+          var sources = {}; ((sr && sr.data) || []).forEach(function (s) { sources[s.id] = s; });
+          // order: include → maybe → exclude, then by score desc
+          var DORD = { include: 0, maybe: 1, exclude: 2, unscreened: 3 };
+          ids.sort(function (a, b) { return (DORD[eff[a]] - DORD[eff[b]]) || ((meta[b].score || 0) - (meta[a].score || 0)); });
+          setLitRev(function (p) { return p && Object.assign({}, p, { loading: false, order: ids, sources: sources, eff: eff, meta: meta }); });
+        });
+      });
+    }
+    function overrideDec(srcId, dec) {   // write the override at the SR-feeding step (3) with overridden=true so the pipeline keeps it
+      var lr = litRev; if (!lr) return;
+      setLitRev(function (p) { if (!p) return p; var eff = Object.assign({}, p.eff); eff[srcId] = dec; return Object.assign({}, p, { eff: eff, dirty: true }); });
+      sb.from('research_study_papers').upsert({ study_id: lr.studyId, source_id: srcId, step: SR_STEP, decision: dec, overridden: true }, { onConflict: 'study_id,source_id,step' }).then(function (r) { if (r && r.error) toast('Mentés hiba: ' + r.error.message, false); });
+    }
+    function bulkPromote(fromDec) {   // promote every paper currently in `fromDec` → include
+      var lr = litRev; if (!lr) return;
+      lr.order.forEach(function (id) { if (lr.eff[id] === fromDec) overrideDec(id, 'include'); });
+    }
+    function continueLitReview() {   // "only overridden stays": advance the run to the phase after literature with the chosen includes
+      var lr = litRev; if (!lr) return;
+      var prun = lr.prun, incl = lr.order.filter(function (id) { return lr.eff[id] === 'include'; });
+      if (!incl.length) { toast('Jelölj ki legalább egy included cikket a folytatáshoz.', false); return; }
+      var phases = (prun.phases || []).slice(), litIdx = -1;
+      for (var i = 0; i < phases.length; i++) { if (phases[i].key === 'literature') { litIdx = i; break; } }
+      if (litIdx < 0) { toast('Nincs literature-fázis ebben a futásban.', false); return; }
+      phases[litIdx] = Object.assign({}, phases[litIdx], { status: 'done', result: incl.length + ' included (kézi felülbírálás)' });
+      for (var j = litIdx + 1; j < phases.length; j++) { if (phases[j].enabled) phases[j] = Object.assign({}, phases[j], { status: 'wait', cursor: null, result: null }); }
+      var ni = apNextIndex(phases, litIdx); if (ni === -1) ni = litIdx;
+      var patch = { phases: phases, phase_index: ni, status: 'running', gate: null, error: null, study_id: lr.studyId };
+      retryRef.current[prun.id] = 0;
+      if (prun.id === run.id) { setStatus(patch); }
+      else { var nx = Object.assign({}, prun, patch); setBranchRow(nx); sb.from('research_autopilot_runs').update(Object.assign({ updated_at: nowIso() }, patch)).eq('id', prun.id).then(function (r) { if (r && r.error) { toast('Nem sikerült: ' + r.error.message, false); return; } ensureBranchDrive(nx); }); }
+      setLitRev(null);
+      toast('▶ Folytatás ' + incl.length + ' included cikkel…', true);
+    }
     function openProtocolPreview(prun) {   // load the generated protocol's steps → the task-card modal
       var pid = (prun && prun.project_id) || run.project_id, pidProto = prun && prun.protocol_id;
       setProtoPv({ loading: true, title: 'Protokoll-feladatok', steps: [] });
@@ -1170,6 +1223,18 @@
     function downMini(prun, p, last) {
       var st = p.status;
       var bd = st === 'done' ? '✓' : st === 'running' ? 'fut' : st === 'gate' ? '⏸' : st === 'skipped' ? '–' : '·';
+      var conn = last ? null : h('div', { className: 'apg-conn' + (st === 'done' ? ' done' : (st === 'running' || st === 'gate') ? ' run' : '') });
+      // Literature card is CLICKABLE → the screening-review drawer (override decisions / push maybe forward / continue)
+      if (p.key === 'literature') {
+        var clickable = !!prun.study_id;
+        return h('div', { className: 'apg-mini-wrap', key: p.key },
+          h('div', { className: 'apg-mini ' + st + (clickable ? ' clickable' : ''), style: { '--hue': hueOf(p.key) }, onClick: clickable ? function () { openLitReview(prun); } : null, title: clickable ? 'Bírálatok megnyitása és felülbírálása' : null },
+            h('span', { className: 'apg-mini-ic' }, AP_ICON[p.key] || '•'),
+            h('span', { className: 'apg-mini-lab' }, p.label),
+            clickable ? h('span', { className: 'apg-mini-open' }, 'Bírálat ›') : h('span', { className: 'apg-mini-badge ' + (st === 'gate' ? 'gate' : st) }, bd)),
+          litMini(prun, st),
+          conn);
+      }
       var action;   // some phases expose a preview affordance once they have output; others just show a status badge
       if (p.key === 'sr' && st === 'done') action = h('button', { className: 'apg-mini-read', onClick: function () { openReviewPreview(prun); } }, 'Olvasás');
       else if (p.key === 'gap' && st === 'done') action = h('button', { className: 'apg-mini-read gap', onClick: function () { openGapPreview(prun); } }, 'Rések');
@@ -1180,8 +1245,7 @@
           h('span', { className: 'apg-mini-ic' }, AP_ICON[p.key] || '•'),
           h('span', { className: 'apg-mini-lab' }, p.label),
           action),
-        p.key === 'literature' ? litMini(prun, st) : null,
-        last ? null : h('div', { className: 'apg-conn' + (st === 'done' ? ' done' : (st === 'running' || st === 'gate') ? ' run' : '') }));
+        conn);
     }
     function branchColumn(prun) {
       var isPrimary = prun.id === run.id;
@@ -1292,7 +1356,52 @@
                 : h('div', { className: 'ap-pc-dempty' }, 'Ehhez a szálhoz még nincs generált protokoll-feladat.')),
           h('div', { className: 'ap-pv-f' },
             h('a', { className: 'btn sm', href: 'Research.html?project=' + encodeURIComponent(run.project_id), target: '_blank', rel: 'noopener' }, 'Protocol-fül megnyitása ↗'),
-            h('button', { className: 'btn pri sm', onClick: function () { setProtoPv(null); } }, 'Bezárás')))) : null);
+            h('button', { className: 'btn pri sm', onClick: function () { setProtoPv(null); } }, 'Bezárás')))) : null,
+      // Screening-review DRAWER (right side): override the AI screening decisions, then continue the run.
+      litRev ? (function () {
+        var cnt = { include: 0, maybe: 0, exclude: 0 };
+        (litRev.order || []).forEach(function (id) { var d = litRev.eff[id]; if (cnt[d] != null) cnt[d]++; });
+        return h('div', { className: 'ap-dw-scrim', onClick: function () { setLitRev(null); } },
+          h('div', { className: 'ap-dw', onClick: function (e) { e.stopPropagation(); } },
+            h('div', { className: 'ap-dw-h' },
+              h('div', null, h('b', null, '📚 Bírálat felülbírálása'), h('div', { className: 'ap-dw-sub' }, 'A szűrés döntéseit itt kézzel átírhatod, majd folytathatod a folyamatot.')),
+              h('button', { className: 'ap-pv-x', 'aria-label': 'Bezárás', onClick: function () { setLitRev(null); } }, '×')),
+            litRev.loading
+              ? h('div', { className: 'ap-dw-b', style: { textAlign: 'center', padding: '40px' } }, h('span', { className: 'spin' }))
+              : h('div', { className: 'ap-dw-b' },
+                h('div', { className: 'ap-dw-summ' },
+                  h('span', { className: 'ap-dw-cc inc' }, '✓ ' + cnt.include + ' included'),
+                  h('span', { className: 'ap-dw-cc may' }, '? ' + cnt.maybe + ' maybe'),
+                  h('span', { className: 'ap-dw-cc exc' }, '✕ ' + cnt.exclude + ' kizárt')),
+                (cnt.maybe || cnt.exclude) ? h('div', { className: 'ap-dw-bulk' },
+                  cnt.maybe ? h('button', { className: 'btn sm', onClick: function () { bulkPromote('maybe'); } }, '↑ Összes maybe → included') : null,
+                  cnt.exclude ? h('button', { className: 'btn sm', onClick: function () { bulkPromote('exclude'); } }, '↑ Összes kizárt → included') : null) : null,
+                (litRev.order || []).length
+                  ? h('div', { className: 'ap-dw-list' }, litRev.order.map(function (id) {
+                    var s = litRev.sources[id] || {}, m = litRev.meta[id] || {}, dec = litRev.eff[id];
+                    var sig = m.signals || {};
+                    return h('div', { className: 'ap-dw-row ' + dec, key: id },
+                      h('div', { className: 'ap-dw-main' },
+                        h('div', { className: 'ap-dw-t' }, s.url ? h('a', { href: s.url, target: '_blank', rel: 'noopener' }, s.title || 'Forrás') : (s.title || 'Forrás')),
+                        h('div', { className: 'ap-dw-rmeta' },
+                          s.year ? h('span', null, String(s.year)) : null,
+                          s.venue ? h('span', { className: 'ap-dw-venue', title: s.venue }, s.venue) : null,
+                          (m.score != null) ? h('span', { className: 'ap-dw-score' }, 'score ' + m.score) : null,
+                          sig.has_github ? h('span', { className: 'ap-dw-sig' }, '⌥ kód') : null,
+                          sig.has_dataset ? h('span', { className: 'ap-dw-sig' }, '⛁ adat') : null,
+                          m.overridden ? h('span', { className: 'ap-dw-man' }, 'kézi') : null),
+                        m.reason ? h('div', { className: 'ap-dw-reason' }, m.reason) : null),
+                      h('div', { className: 'ap-dw-seg', role: 'group', 'aria-label': 'Döntés felülbírálása' }, ['include', 'maybe', 'exclude'].map(function (v) {
+                        return h('button', { key: v, className: (dec === v ? 'on ' + v : ''), title: v, 'aria-pressed': dec === v, onClick: function () { overrideDec(id, v); } }, v === 'include' ? '✓' : v === 'maybe' ? '?' : '✕');
+                      })));
+                  }))
+                  : h('div', { className: 'ap-pc-dempty', style: { padding: '30px 0' } }, 'Ehhez a szálhoz még nincs leszűrt (step ≥ 2) publikáció. Előbb fusson le a Literature keresés + absztrakt-szűrés.')),
+            h('div', { className: 'ap-dw-f' },
+              h('div', { className: 'ap-dw-fnote' }, cnt.include ? (cnt.include + ' included cikkel folytatódik → Systematic review') : 'Jelölj ki legalább egy included cikket.'),
+              h('div', { style: { display: 'flex', gap: 8 } },
+                h('button', { className: 'btn sm', onClick: function () { setLitRev(null); } }, 'Mégse'),
+                h('button', { className: 'btn pri sm', disabled: !cnt.include, onClick: continueLitReview }, '▶ Folytatás')))));
+      })() : null);
   }
 
   // (A) the user's running + previous Autopilots — surfaced above the Launcher so a closed run is always findable

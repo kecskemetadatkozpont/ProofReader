@@ -364,6 +364,42 @@
     .apg-mini-read.gap:hover { background:color-mix(in srgb,var(--h-gap) 24%,transparent); }
     .apg-mini-read.proto { color:var(--h-proto); background:color-mix(in srgb,var(--h-proto) 14%,transparent); }
     .apg-mini-read.proto:hover { background:color-mix(in srgb,var(--h-proto) 24%,transparent); }
+    /* Literature card = clickable → screening-review drawer */
+    .apg-mini.clickable { cursor:pointer; }
+    .apg-mini.clickable:hover { border-color:color-mix(in srgb,var(--h-lit) 45%,var(--line)); background:color-mix(in srgb,var(--h-lit) 5%,var(--surface)); }
+    .apg-mini-open { flex:none; font-size:10.5px; font-weight:800; color:var(--h-lit); background:color-mix(in srgb,var(--h-lit) 13%,transparent); border-radius:7px; padding:3px 8px; white-space:nowrap; }
+    /* Screening-review drawer (slides in from the right) */
+    .ap-dw-scrim { position:fixed; inset:0; background:rgba(15,20,35,.44); z-index:110; display:flex; justify-content:flex-end; }
+    .ap-dw { width:560px; max-width:100%; height:100%; background:var(--surface); border-left:1px solid var(--line); box-shadow:-20px 0 50px rgba(0,0,0,.22); display:flex; flex-direction:column; animation:apdwin .22s cubic-bezier(.2,.8,.2,1); }
+    @keyframes apdwin { from { transform:translateX(40px); opacity:.4; } to { transform:translateX(0); opacity:1; } }
+    @media (prefers-reduced-motion:reduce){ .ap-dw { animation:none; } }
+    .ap-dw-h { display:flex; align-items:flex-start; gap:12px; padding:16px 20px; border-bottom:1px solid var(--line); flex:none; }
+    .ap-dw-h b { font-size:15px; } .ap-dw-sub { font-size:12px; color:var(--muted); margin-top:3px; line-height:1.45; }
+    .ap-dw-h .ap-pv-x { margin-left:auto; }
+    .ap-dw-b { flex:1; overflow-y:auto; padding:16px 20px; }
+    .ap-dw-summ { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
+    .ap-dw-cc { font-size:12px; font-weight:800; font-variant-numeric:tabular-nums; border-radius:8px; padding:5px 10px; }
+    .ap-dw-cc.inc { color:var(--ok); background:var(--ok-bg); } .ap-dw-cc.may { color:var(--warn); background:var(--warn-bg); } .ap-dw-cc.exc { color:var(--danger); background:var(--danger-bg); }
+    .ap-dw-bulk { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
+    .ap-dw-list { display:flex; flex-direction:column; gap:9px; }
+    .ap-dw-row { display:flex; align-items:flex-start; gap:11px; padding:11px 12px; border:1px solid var(--line); border-left:3px solid var(--faint); border-radius:11px; background:var(--surface); }
+    .ap-dw-row.include { border-left-color:var(--ok); background:color-mix(in srgb,var(--ok) 5%,var(--surface)); }
+    .ap-dw-row.maybe { border-left-color:var(--warn); } .ap-dw-row.exclude { border-left-color:var(--danger); opacity:.82; }
+    .ap-dw-main { flex:1; min-width:0; }
+    .ap-dw-t { font-size:13px; font-weight:650; line-height:1.4; color:var(--ink); } .ap-dw-t a { color:var(--ink); } .ap-dw-t a:hover { color:var(--accent); text-decoration:underline; }
+    .ap-dw-rmeta { display:flex; flex-wrap:wrap; align-items:center; gap:7px; margin-top:5px; font-size:11px; color:var(--muted); font-variant-numeric:tabular-nums; }
+    .ap-dw-venue { max-width:170px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-style:italic; }
+    .ap-dw-score { font-weight:700; } .ap-dw-sig { color:var(--h-write); font-weight:700; }
+    .ap-dw-man { font-size:10px; font-weight:800; text-transform:uppercase; color:var(--accent); background:var(--accent-tint); border-radius:5px; padding:1px 5px; }
+    .ap-dw-reason { font-size:11.5px; color:var(--muted); line-height:1.5; margin-top:5px; }
+    .ap-dw-seg { flex:none; display:inline-flex; border:1px solid var(--line); border-radius:9px; overflow:hidden; }
+    .ap-dw-seg button { border:0; background:var(--surface); color:var(--muted); font-family:inherit; font-size:13px; font-weight:800; width:32px; height:30px; cursor:pointer; border-right:1px solid var(--line); }
+    .ap-dw-seg button:last-child { border-right:0; }
+    .ap-dw-seg button.on.include { background:var(--ok); color:#fff; } .ap-dw-seg button.on.maybe { background:var(--warn); color:#fff; } .ap-dw-seg button.on.exclude { background:var(--danger); color:#fff; }
+    .ap-dw-seg button:hover:not(.on) { background:var(--surface-2); color:var(--ink); }
+    .ap-dw-f { flex:none; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:13px 20px; border-top:1px solid var(--line); }
+    .ap-dw-fnote { font-size:11.5px; color:var(--muted); flex:1; min-width:0; }
+    @media (max-width:560px){ .ap-dw { width:100%; } }
     .ap-pc-ic { font-size:20px; width:26px; text-align:center; flex:none; }
     .ap-pc-b { flex:1; min-width:0; }
     .ap-pc-top { display:flex; align-items:center; gap:10px; } .ap-pc-n { font-size:14px; font-weight:700; flex:1; }
@@ -396,9 +432,9 @@
     .ap-toast.show { opacity:1; transform:translate(-50%,0); } .ap-toast.err { background:#8a1a12; }
     @media (prefers-reduced-motion:reduce){ .ap-toast { transition:none; } }
   </style>
-  <script src="theme.js?v=1786169918"></script>
-  <script src="nav.js?v=1786169918"></script>
-  <script src="entitlements.js?v=1786169918"></script>
+  <script src="theme.js?v=1786180081"></script>
+  <script src="nav.js?v=1786180081"></script>
+  <script src="entitlements.js?v=1786180081"></script>
 </head>
 
 <body>
@@ -411,13 +447,13 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
-  <script src="backend/config.js?v=1786169918"></script>
-  <script src="auth.js?v=1786169918"></script>
-  <script src="backend.js?v=1786169918"></script>
-  <script src="autopilot.js?v=1786169918"></script>
+  <script src="backend/config.js?v=1786180081"></script>
+  <script src="auth.js?v=1786180081"></script>
+  <script src="backend.js?v=1786180081"></script>
+  <script src="autopilot.js?v=1786180081"></script>
 
-  <script src="build.js?v=1786169918"></script>
-  <script src="version-badge.js?v=1786169918"></script>
+  <script src="build.js?v=1786180081"></script>
+  <script src="version-badge.js?v=1786180081"></script>
 </body>
 
 </html>
