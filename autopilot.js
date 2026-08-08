@@ -112,9 +112,9 @@
   // per-phase cursor) lives entirely in the run row, so a refresh/re-open resumes exactly where it left off.
   var AP_PHASES = [
     { key: 'ideas', label: 'Ideas', ic: '💡', sub: 'ötletek + gap' },
-    { key: 'literature', label: 'Literature', ic: '📚', sub: 'keresés + screening' },
+    { key: 'literature', label: 'Systematic Review', ic: '🔬', sub: 'keresés + szűrés → könyvtár' },
     { key: 'gap', label: 'Research Gap', ic: '🧭', sub: 'gap-ellenőrzés' },
-    { key: 'sr', label: 'Systematic review', ic: '🔬', sub: 'áttekintés' },
+    { key: 'sr', label: 'Literature', ic: '📚', sub: 'irodalmi áttekintés' },
     { key: 'protocol', label: 'Protocol', ic: '🧪', sub: 'lépések' },
     { key: 'journal', label: 'Journal', ic: '🎯', sub: 'venue-ajánló' },
     { key: 'writing', label: 'Writing', ic: '✍️', sub: 'draft szekciók' },
@@ -633,7 +633,7 @@
 
   // ======================================================================= LAUNCH (clarify)
   var PHASES = [
-    ['💡', 'Ideas', 'ötletek + PICO'], ['📚', 'Literature', 'keresés + screening'], ['🧭', 'Research Gap', 'gap-ellenőrzés'], ['🔬', 'Systematic review', 'Elicit'],
+    ['💡', 'Ideas', 'ötletek + PICO'], ['🔬', 'Systematic Review', 'keresés + szűrés'], ['🧭', 'Research Gap', 'gap-ellenőrzés'], ['📚', 'Literature', 'irodalmi áttekintés'],
     ['🧪', 'Protocol', 'lépések generálása'], ['🎯', 'Journal', 'venue-ajánló'], ['✍️', 'Writing', 'draft szekciók'], ['📤', 'Submission', 'csomagolás']
   ];
   var TIERS = ['Top-tier (Q1)', 'Open access', 'Gyors döntés'];
@@ -748,6 +748,7 @@
     var brS = useState([]), branchRuns = brS[0], setBranchRuns = brS[1];    // parallel per-idea branch runs (siblings of the primary run in the same group)
     var selS = useState({}), selIdeas = selS[0], setSelIdeas = selS[1];     // idea_id → true : ideas ticked for parallel development
     var ltS = useState({}), litProg = ltS[0], setLitProg = ltS[1];          // run_id → { study_id, steps:[{step,kind,status,cursor,total,counts}], ts } : LIVE literature screening numbers
+    var ptaS = useState({}), protoArts = ptaS[0], setProtoArts = ptaS[1];   // run_id → [protocol steps] : inline task cards shown under the Protocol card in the graph
     var driving = useRef(false), alive = useRef(true), projRef = useRef(null), feedRef = useRef(null), myDriver = useRef(null);
     var bDriving = useRef({});   // per-branch-run driving flags (additive; the primary driver above is untouched)
     var branchRunsRef = useRef([]), activeRef = useRef(false);   // live mirrors for the event poller (avoids stale closures)
@@ -911,10 +912,16 @@
       sb.from('research_study_steps').select('study_id,step,kind,status,cursor,total,counts').in('study_id', sids).then(function (res) {
         if (!alive.current) return;
         var byStudy = {}; ((res && res.data) || []).forEach(function (s) { (byStudy[s.study_id] = byStudy[s.study_id] || []).push(s); });
-        setLitProg(function (prev) {
-          var next = Object.assign({}, prev);
-          Object.keys(sidToRun).forEach(function (sid) { if (byStudy[sid]) next[sidToRun[sid]] = { study_id: sid, steps: byStudy[sid], ts: Date.now() }; });
-          return next;
+        // the FINAL included count is the source-of-truth from research_study_papers step-3 (reflects MANUAL overrides too,
+        // which the step counts do NOT) — so the card's included figure changes after the user rescues papers in the drawer
+        sb.from('research_study_papers').select('study_id,decision').in('study_id', sids).eq('step', 3).then(function (pr) {
+          if (!alive.current) return;
+          var incl3 = {}; ((pr && pr.data) || []).forEach(function (p) { if (p.decision === 'include') incl3[p.study_id] = (incl3[p.study_id] || 0) + 1; });
+          setLitProg(function (prev) {
+            var next = Object.assign({}, prev);
+            Object.keys(sidToRun).forEach(function (sid) { if (byStudy[sid]) next[sidToRun[sid]] = { study_id: sid, steps: byStudy[sid], finalIncluded: (incl3[sid] || 0), ts: Date.now() }; });
+            return next;
+          });
         });
       });
     }
@@ -926,6 +933,21 @@
       var iv = setInterval(function () { if (activeRef.current) loadLitProg(); }, 2500);
       return function () { clearInterval(iv); };
     }, [litSig]);
+    // Inline PROTOCOL tasks: once a group run's protocol phase has generated steps, fetch them so the graph shows the
+    // task cards directly under the Protocol card (not only in the click-through modal). Loaded once per state change.
+    function loadProtoArts() {
+      var runs = [run].concat(branchRunsRef.current || []).filter(Boolean);
+      var pidToRun = {}, pids = [];
+      runs.forEach(function (r) { var pp = (r.phases || []).filter(function (p) { return p.key === 'protocol'; })[0]; if (r.protocol_id && pp && (pp.status === 'done' || pp.status === 'gate' || pp.status === 'running')) { pidToRun[r.protocol_id] = r.id; pids.push(r.protocol_id); } });
+      if (!pids.length) return;
+      sb.from('research_protocol_steps').select('id,protocol_id,ord,title,kind,needs_approval,status,spec').in('protocol_id', pids).order('ord', { ascending: true }).then(function (res) {
+        if (!alive.current) return;
+        var byProto = {}; ((res && res.data) || []).forEach(function (s) { (byProto[s.protocol_id] = byProto[s.protocol_id] || []).push(s); });
+        setProtoArts(function (prev) { var next = Object.assign({}, prev); Object.keys(pidToRun).forEach(function (pid) { if (byProto[pid]) next[pidToRun[pid]] = byProto[pid]; }); return next; });
+      });
+    }
+    var protoSig = [run].concat(branchRuns || []).filter(Boolean).map(function (r) { var pp = (r.phases || []).filter(function (p) { return p.key === 'protocol'; })[0]; return r.id + ':' + (r.protocol_id || '') + ':' + ((pp && pp.status) || ''); }).join('|');
+    useEffect(function () { loadProtoArts(); }, [protoSig]);
 
     // approve/resume/pause must NOT depend on Realtime (research_autopilot_runs isn't in the supabase_realtime publication →
     // postgres_changes never fires). So update the LOCAL run optimistically (UI reacts instantly) and, after the DB write
@@ -1155,7 +1177,11 @@
     }
     function overrideDec(srcId, dec) {   // write the override at the SR-feeding step (3) with overridden=true so the pipeline keeps it
       var lr = litRev; if (!lr) return;
-      setLitRev(function (p) { if (!p) return p; var eff = Object.assign({}, p.eff); eff[srcId] = dec; return Object.assign({}, p, { eff: eff, dirty: true }); });
+      var eff = Object.assign({}, lr.eff); eff[srcId] = dec;
+      setLitRev(function (p) { return p && Object.assign({}, p, { eff: eff, dirty: true }); });
+      // reflect the new included count on the graph's Literature card immediately (before any poll)
+      var inc = Object.keys(eff).filter(function (id) { return eff[id] === 'include'; }).length;
+      setLitProg(function (prev) { var lp = prev[lr.prun.id]; if (!lp) return prev; var n = Object.assign({}, prev); n[lr.prun.id] = Object.assign({}, lp, { finalIncluded: inc }); return n; });
       sb.from('research_study_papers').upsert({ study_id: lr.studyId, source_id: srcId, step: SR_STEP, decision: dec, overridden: true }, { onConflict: 'study_id,source_id,step' }).then(function (r) { if (r && r.error) toast('Mentés hiba: ' + r.error.message, false); });
     }
     function bulkPromote(fromDec) {   // promote every paper currently in `fromDec` → include
@@ -1172,12 +1198,15 @@
       phases[litIdx] = Object.assign({}, phases[litIdx], { status: 'done', result: incl.length + ' included (kézi felülbírálás)' });
       for (var j = litIdx + 1; j < phases.length; j++) { if (phases[j].enabled) phases[j] = Object.assign({}, phases[j], { status: 'wait', cursor: null, result: null }); }
       var ni = apNextIndex(phases, litIdx); if (ni === -1) ni = litIdx;
+      var nextLabel = (phases[ni] && phases[ni].label) || 'a következő fázis';
       var patch = { phases: phases, phase_index: ni, status: 'running', gate: null, error: null, study_id: lr.studyId };
       retryRef.current[prun.id] = 0;
+      // visible confirmation in the Activity feed (the advancing phase also pulses yellow now)
+      emit(prun, [{ phase: 'literature', level: 'ok', message: '✅ ' + incl.length + ' cikk kézzel included — folytatás: ' + nextLabel }]);
       if (prun.id === run.id) { setStatus(patch); }
       else { var nx = Object.assign({}, prun, patch); setBranchRow(nx); sb.from('research_autopilot_runs').update(Object.assign({ updated_at: nowIso() }, patch)).eq('id', prun.id).then(function (r) { if (r && r.error) { toast('Nem sikerült: ' + r.error.message, false); return; } ensureBranchDrive(nx); }); }
       setLitRev(null);
-      toast('▶ Folytatás ' + incl.length + ' included cikkel…', true);
+      toast('▶ Folytatás ' + incl.length + ' included cikkel → ' + nextLabel, true);
     }
     function openProtocolPreview(prun) {   // load the generated protocol's steps → the task-card modal
       var pid = (prun && prun.project_id) || run.project_id, pidProto = prun && prun.protocol_id;
@@ -1208,7 +1237,8 @@
       var deepest = doneScreen.length ? doneScreen[doneScreen.length - 1] : null;
       var c = (act && act.counts) || {}, cur = (act && act.cursor) || 0, tot = (act && act.total) || 0;
       var pctB = tot ? Math.round(cur / tot * 100) : 0;
-      var inclNow = (act && c.include != null) ? c.include : (deepest ? deepest.counts.include : null);
+      // idle/done → prefer finalIncluded (step-3 includes incl. manual overrides); while a step runs → its live include count
+      var inclNow = (act && c.include != null) ? c.include : (lp.finalIncluded != null ? lp.finalIncluded : (deepest ? deepest.counts.include : null));
       return h('div', { className: 'apg-lit' + (act ? ' live' : '') },
         act ? h('div', { className: 'apg-lit-top' },
           h('span', { className: 'apg-lit-step' }, h('span', { className: 'apg-lit-dot' }), LIT_KIND_LAB[act.kind] || 'Szűrés'),
@@ -1219,6 +1249,23 @@
           (inclNow != null) ? h('span', { className: 'apg-lit-chip inc', title: 'Beválasztva' }, '✓ ' + inclNow) : null,
           (act && c.maybe != null) ? h('span', { className: 'apg-lit-chip may', title: 'Bizonytalan' }, '~ ' + c.maybe) : null,
           (act && c.exclude != null) ? h('span', { className: 'apg-lit-chip exc', title: 'Kizárva' }, '✕ ' + c.exclude) : null));
+    }
+    // Inline protocol task list under the Protocol card (compact rows; „mind" opens the full task-card modal)
+    function protoMini(prun) {
+      var steps = protoArts[prun.id];
+      if (!steps || !steps.length) return null;
+      var shown = steps.slice(0, 7);
+      return h('div', { className: 'apg-ptasks' },
+        h('div', { className: 'apg-ptasks-h' }, '🧪 ' + steps.length + ' feladat'),
+        shown.map(function (s) {
+          var kd = PROTO_KIND[s.kind] || { ic: '•', lab: s.kind || '' };
+          return h('div', { className: 'apg-ptask ' + (s.status || 'todo'), key: s.id, title: (s.title || '') + (s.kind ? (' · ' + kd.lab) : '') },
+            h('span', { className: 'apg-ptask-ord' }, s.ord),
+            h('span', { className: 'apg-ptask-ic' }, kd.ic),
+            h('span', { className: 'apg-ptask-t' }, s.title || 'Feladat'),
+            s.needs_approval ? h('span', { className: 'apg-ptask-appr', title: 'jóváhagyás kell' }, '⏸') : null);
+        }),
+        h('button', { className: 'apg-ptasks-more', onClick: function () { openProtocolPreview(prun); } }, steps.length > 7 ? ('+' + (steps.length - 7) + ' további — mind ›') : 'Részletek ›'));
     }
     function downMini(prun, p, last) {
       var st = p.status;
@@ -1245,6 +1292,7 @@
           h('span', { className: 'apg-mini-ic' }, AP_ICON[p.key] || '•'),
           h('span', { className: 'apg-mini-lab' }, p.label),
           action),
+        p.key === 'protocol' ? protoMini(prun) : null,
         conn);
     }
     function branchColumn(prun) {
@@ -1397,7 +1445,7 @@
                   }))
                   : h('div', { className: 'ap-pc-dempty', style: { padding: '30px 0' } }, 'Ehhez a szálhoz még nincs leszűrt (step ≥ 2) publikáció. Előbb fusson le a Literature keresés + absztrakt-szűrés.')),
             h('div', { className: 'ap-dw-f' },
-              h('div', { className: 'ap-dw-fnote' }, cnt.include ? (cnt.include + ' included cikkel folytatódik → Systematic review') : 'Jelölj ki legalább egy included cikket.'),
+              h('div', { className: 'ap-dw-fnote' }, cnt.include ? (cnt.include + ' included cikkel folytatódik a folyamat') : 'Jelölj ki legalább egy included cikket.'),
               h('div', { style: { display: 'flex', gap: 8 } },
                 h('button', { className: 'btn sm', onClick: function () { setLitRev(null); } }, 'Mégse'),
                 h('button', { className: 'btn pri sm', disabled: !cnt.include, onClick: continueLitReview }, '▶ Folytatás')))));
