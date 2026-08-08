@@ -136,6 +136,7 @@
     return { done: done, enabled: enabled, pct: Math.round(done / enabled * 100) };
   }
   var LS_STEPS_AP = [{ step: 1, kind: 'quick' }, { step: 2, kind: 'abstract' }, { step: 3, kind: 'fulltext' }, { step: 4, kind: 'review' }];
+  var LIT_KIND_LAB = { quick: 'Gyorsszűrés', abstract: 'Absztrakt-szűrés', fulltext: 'Teljes szöveg', review: 'Áttekintés' };
   function lsCfg(step, project, idea, maxResults) {
     if (step !== 1) return { keywords: [], include: [], exclude: [], filters: {}, signals: ['has_github', 'has_dataset'] };
     var sq = (idea && String((idea.question || '') + (idea.hypothesis ? '\n\nHypothesis: ' + idea.hypothesis : '')).trim()) || (project && (project.goal || project.title)) || '';
@@ -719,6 +720,7 @@
     var swS = useState(false), switching = swS[0], setSwitching = swS[1];   // guard while re-targeting the pipeline to a chosen idea
     var brS = useState([]), branchRuns = brS[0], setBranchRuns = brS[1];    // parallel per-idea branch runs (siblings of the primary run in the same group)
     var selS = useState({}), selIdeas = selS[0], setSelIdeas = selS[1];     // idea_id → true : ideas ticked for parallel development
+    var ltS = useState({}), litProg = ltS[0], setLitProg = ltS[1];          // run_id → { study_id, steps:[{step,kind,status,cursor,total,counts}], ts } : LIVE literature screening numbers
     var driving = useRef(false), alive = useRef(true), projRef = useRef(null), feedRef = useRef(null), myDriver = useRef(null);
     var bDriving = useRef({});   // per-branch-run driving flags (additive; the primary driver above is untouched)
     var branchRunsRef = useRef([]), activeRef = useRef(false);   // live mirrors for the event poller (avoids stale closures)
@@ -868,6 +870,35 @@
       var iv = setInterval(function () { if (activeRef.current) loadEvents(); }, 3000);
       return function () { clearInterval(iv); };
     }, [props.runId, (branchRuns || []).map(function (b) { return b.id; }).join(',')]);
+
+    // LIVE Literature numbers: while a group run's literature phase is running/gated/done, poll its research_study_steps
+    // (cursor/total/counts per step) so the graph's Literature card shows the search + screening figures changing live.
+    function loadLitProg() {
+      var runs = [run].concat(branchRunsRef.current || []).filter(Boolean);
+      var sidToRun = {}, sids = [];
+      runs.forEach(function (r) {
+        var lp = (r.phases || []).filter(function (p) { return p.key === 'literature'; })[0];
+        if (r.study_id && lp && (lp.status === 'running' || lp.status === 'gate' || lp.status === 'done')) { sidToRun[r.study_id] = r.id; sids.push(r.study_id); }
+      });
+      if (!sids.length) return;
+      sb.from('research_study_steps').select('study_id,step,kind,status,cursor,total,counts').in('study_id', sids).then(function (res) {
+        if (!alive.current) return;
+        var byStudy = {}; ((res && res.data) || []).forEach(function (s) { (byStudy[s.study_id] = byStudy[s.study_id] || []).push(s); });
+        setLitProg(function (prev) {
+          var next = Object.assign({}, prev);
+          Object.keys(sidToRun).forEach(function (sid) { if (byStudy[sid]) next[sidToRun[sid]] = { study_id: sid, steps: byStudy[sid], ts: Date.now() }; });
+          return next;
+        });
+      });
+    }
+    // litSig is STABLE during screening (status stays 'running', study_id fixed) → the 2.5s interval is the poller;
+    // it re-fires (and fetches once) only when a literature phase flips state (started / gated / done).
+    var litSig = [run].concat(branchRuns || []).filter(Boolean).map(function (r) { var lp = (r.phases || []).filter(function (p) { return p.key === 'literature'; })[0]; return r.id + ':' + (r.study_id || '') + ':' + ((lp && lp.status) || ''); }).join('|');
+    useEffect(function () {
+      loadLitProg();
+      var iv = setInterval(function () { if (activeRef.current) loadLitProg(); }, 2500);
+      return function () { clearInterval(iv); };
+    }, [litSig]);
 
     // approve/resume/pause must NOT depend on Realtime (research_autopilot_runs isn't in the supabase_realtime publication →
     // postgres_changes never fires). So update the LOCAL run optimistically (UI reacts instantly) and, after the DB write
@@ -1062,6 +1093,27 @@
         if (f) setPreview({ title: String(f.path).split('/').pop(), content: f.content }); else toast('Nincs elérhető áttekintés-fájl.', false);
       });
     }
+    // Live literature figures under the Literature card: search hits + the active screening step's cursor/total + include/maybe/exclude tallies.
+    function litMini(prun, st) {
+      var lp = litProg[prun.id];
+      if (!lp || !lp.steps || !lp.steps.length) return null;
+      var steps = lp.steps.slice().sort(function (a, b) { return (a.step || 0) - (b.step || 0); });
+      var s1 = steps.filter(function (s) { return s.step === 1; })[0] || steps[0];
+      var found = (s1 && (s1.total || s1.cursor)) || 0;   // papers the search returned (step-1 corpus size)
+      var act = steps.filter(function (s) { return s.status === 'running'; })[0] || steps.filter(function (s) { return s.status !== 'done'; })[0] || steps[steps.length - 1];
+      var c = (act && act.counts) || {}, cur = (act && act.cursor) || 0, tot = (act && act.total) || 0;
+      var pctB = tot ? Math.round(cur / tot * 100) : (st === 'done' ? 100 : 0);
+      return h('div', { className: 'apg-lit' + (st === 'running' ? ' live' : '') },
+        h('div', { className: 'apg-lit-top' },
+          h('span', { className: 'apg-lit-step' }, st === 'running' ? h('span', { className: 'apg-lit-dot' }) : null, LIT_KIND_LAB[act && act.kind] || 'Keresés'),
+          tot ? h('span', { className: 'apg-lit-frac mono' }, cur + ' / ' + tot) : null),
+        tot ? h('div', { className: 'apg-lit-bar' }, h('i', { style: { width: pctB + '%' } })) : null,
+        h('div', { className: 'apg-lit-chips' },
+          found ? h('span', { className: 'apg-lit-chip find', title: 'Keresési találatok' }, '🔎 ' + found) : null,
+          (c.include != null) ? h('span', { className: 'apg-lit-chip inc', title: 'Beválasztva' }, '✓ ' + c.include) : null,
+          (c.maybe != null) ? h('span', { className: 'apg-lit-chip may', title: 'Bizonytalan' }, '~ ' + c.maybe) : null,
+          (c.exclude != null) ? h('span', { className: 'apg-lit-chip exc', title: 'Kizárva' }, '✕ ' + c.exclude) : null));
+    }
     function downMini(prun, p, last) {
       var st = p.status, isRev = p.key === 'sr', revDone = isRev && st === 'done';
       var bd = st === 'done' ? '✓' : st === 'running' ? 'fut' : st === 'gate' ? '⏸' : st === 'skipped' ? '–' : '·';
@@ -1070,6 +1122,7 @@
           h('span', { className: 'apg-mini-ic' }, AP_ICON[p.key] || '•'),
           h('span', { className: 'apg-mini-lab' }, p.label),
           revDone ? h('button', { className: 'apg-mini-read', onClick: function () { openReviewPreview(prun); } }, 'Olvasás') : h('span', { className: 'apg-mini-badge ' + (st === 'gate' ? 'gate' : st) }, bd)),
+        p.key === 'literature' ? litMini(prun, st) : null,
         last ? null : h('div', { className: 'apg-conn' + (st === 'done' ? ' done' : (st === 'running' || st === 'gate') ? ' run' : '') }));
     }
     function branchColumn(prun) {
