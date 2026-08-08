@@ -274,6 +274,7 @@
   function apProtocol(run, project) {
     var cur = (run.phases[run.phase_index] || {}).cursor || {};
     if (cur.generated) return Promise.resolve(apComplete(run, 'Protokoll jóváhagyva', []));
+    var ideaId = (run.config && run.config.develop_idea_id) || null;   // PER-IDEA: each parallel branch must get its OWN protocol
     // gate on a protocol's needs_approval steps, then complete (stamps protocol_id)
     function finishProtocol(pid, steps, msg) {
       return sb.from('research_protocol_steps').select('id', { count: 'exact', head: true }).eq('protocol_id', pid).eq('needs_approval', true).then(function (cr) {
@@ -282,14 +283,20 @@
         var res = apComplete(run, msg, evs); res.patch.protocol_id = pid; return res;
       });
     }
-    // idempotent + non-destructive: 'generate' ARCHIVES any active protocol, so a retry would archive-and-recreate.
-    // If a non-archived protocol already exists (retry, or the user made one), adopt it instead of regenerating.
-    return sb.from('research_protocols').select('id').eq('project_id', project.id).neq('status', 'archived').order('created_at', { ascending: false }).limit(1).maybeSingle().then(function (ex) {
+    // BUGFIX: adopt an existing protocol ONLY if it belongs to THIS idea. The old lookup matched by project_id alone, so a
+    // second branch adopted the first branch's protocol → parallel ideas shared identical tasks. Now each idea gets its own.
+    // (Any status: a sibling branch's 'generate' may have archived this idea's protocol via the one-active-per-project
+    //  constraint, but every run keeps its own protocol_id, so the graph still shows the correct idea-specific steps.)
+    var q = ideaId
+      ? sb.from('research_protocols').select('id').eq('project_id', project.id).eq('idea_id', ideaId).order('created_at', { ascending: false }).limit(1).maybeSingle()
+      : sb.from('research_protocols').select('id').eq('project_id', project.id).neq('status', 'archived').order('created_at', { ascending: false }).limit(1).maybeSingle();
+    return q.then(function (ex) {
       var existing = ex && ex.data && ex.data.id;
-      if (existing) return finishProtocol(existing, null, 'Meglévő protokoll átvéve');
-      return callEdge('research-protocol', { action: 'generate', project_id: project.id, goal: project.goal || project.title || '' }).then(function (d) {
+      if (existing) return finishProtocol(existing, null, 'Meglévő protokoll átvéve' + (ideaId ? ' (ehhez az ötlethez)' : ''));
+      // generate scoped to THIS idea (idea_id → the edge plans from that idea's question/hypothesis)
+      return callEdge('research-protocol', { action: 'generate', project_id: project.id, idea_id: ideaId || undefined, goal: project.goal || project.title || '' }).then(function (d) {
         if (d && d.error) throw new Error('Protocol: ' + d.error);
-        return finishProtocol(d && d.protocol_id, (d && d.steps) || 0, ((d && d.steps) || 0) + ' protokoll-lépés generálva');
+        return finishProtocol(d && d.protocol_id, (d && d.steps) || 0, ((d && d.steps) || 0) + ' protokoll-lépés generálva' + (ideaId ? ' (ötlet-specifikus)' : ''));
       });
     });
   }
@@ -341,9 +348,18 @@
     });
   }
   var AP_STEPPERS = { ideas: apIdeas, literature: apLiterature, gap: apGap, sr: apSR, protocol: apProtocol, journal: apJournal, writing: apWriting, submission: apSubmission };
+  // Phases still UNDER DEVELOPMENT: the Autopilot currently ends at protocol GENERATION — Journal/Writing/Submission
+  // would run prematurely (they need the protocols' execution RESULTS, which don't exist yet), so they never auto-run.
+  var AP_WIP = { journal: true, writing: true, submission: true };
   function apStep(run, project) {
     var i = run.phase_index, ph = run.phases[i];
     if (!ph) return Promise.resolve({ patch: { status: 'done', finished_at: nowIso() }, events: [] });
+    // reaching a WIP phase = the functional pipeline is complete → end the run here, mark the rest 'fejlesztés alatt'
+    if (AP_WIP[ph.key]) {
+      var wph = run.phases.slice();
+      for (var k = i; k < wph.length; k++) { if (AP_WIP[wph[k].key]) wph[k] = Object.assign({}, wph[k], { status: 'wip', result: 'fejlesztés alatt' }); }
+      return Promise.resolve({ patch: { phases: wph, status: 'done', finished_at: nowIso() }, events: [{ level: 'ok', message: '✓ Az Autopilot a protokoll-generálásig lefutott. A Journal / Writing / Submission fázisok fejlesztés alatt állnak (a protokollok tényleges eredménye kell hozzájuk).' }] });
+    }
     if (!ph.enabled) return Promise.resolve(apSkip(run, ph.label + ' kihagyva (letiltva)'));
     var fn = AP_STEPPERS[ph.key];
     if (!fn) return Promise.resolve(apSkip(run, 'ismeretlen fázis: ' + ph.key));
@@ -632,9 +648,10 @@
   }
 
   // ======================================================================= LAUNCH (clarify)
+  // 4th element = WIP (under development): shown but not runnable — the Autopilot currently ends at protocol generation.
   var PHASES = [
     ['💡', 'Ideas', 'ötletek + PICO'], ['🔬', 'Systematic Review', 'keresés + szűrés'], ['🧭', 'Research Gap', 'gap-ellenőrzés'], ['📚', 'Literature', 'irodalmi áttekintés'],
-    ['🧪', 'Protocol', 'lépések generálása'], ['🎯', 'Journal', 'venue-ajánló'], ['✍️', 'Writing', 'draft szekciók'], ['📤', 'Submission', 'csomagolás']
+    ['🧪', 'Protocol', 'lépések generálása'], ['🎯', 'Journal', 'venue-ajánló', true], ['✍️', 'Writing', 'draft szekciók', true], ['📤', 'Submission', 'csomagolás', true]
   ];
   var TIERS = ['Top-tier (Q1)', 'Open access', 'Gyors döntés'];
   function LaunchView(props) {
@@ -660,12 +677,15 @@
           h('div', { className: 'ap-seg' }, TIERS.map(function (t) { return h('button', { key: t, className: cfg.tier === t ? 'on' : '', onClick: function () { setTier(t); } }, t); }))),
         h('div', { className: 'ap-clari' }, h('div', { className: 'ap-cl-lbl' }, 'Max. átvizsgált cikk'),
           h('input', { className: 'ap-numf', value: cfg.maxPapers, onChange: function (e) { setMax(e.target.value); } })),
-        h('div', { className: 'ap-clari' }, h('div', { className: 'ap-cl-lbl' }, 'Mely fázisok fussanak automatikusan', h('div', { style: { fontWeight: 400, color: 'var(--muted)', fontSize: 11.5, marginTop: 3 } }, 'A kikapcsolt fázisokat az Autopilot kihagyja.')),
+        h('div', { className: 'ap-clari' }, h('div', { className: 'ap-cl-lbl' }, 'Mely fázisok fussanak automatikusan', h('div', { style: { fontWeight: 400, color: 'var(--muted)', fontSize: 11.5, marginTop: 3 } }, 'A kikapcsolt fázisokat az Autopilot kihagyja. Az Autopilot jelenleg a protokoll-generálásig fut.')),
           PHASES.map(function (ph, i) {
-            return h('div', { className: 'ap-phrow', key: i },
+            var wip = !!ph[3];   // under development → shown but not runnable
+            return h('div', { className: 'ap-phrow' + (wip ? ' wip' : ''), key: i },
               h('span', { className: 'pi' }, ph[0]),
-              h('span', { className: 'pn' }, ph[1], h('small', null, ph[2])),
-              h('button', { className: 'ap-sw' + (cfg.phases[i] ? ' on' : ''), role: 'switch', 'aria-checked': cfg.phases[i] ? 'true' : 'false', 'aria-label': ph[1], onClick: function () { togglePhase(i); } }, h('i')));
+              h('span', { className: 'pn' }, ph[1], h('small', null, wip ? '🚧 fejlesztés alatt' : ph[2])),
+              wip
+                ? h('span', { className: 'ap-wipbadge' }, 'hamarosan')
+                : h('button', { className: 'ap-sw' + (cfg.phases[i] ? ' on' : ''), role: 'switch', 'aria-checked': cfg.phases[i] ? 'true' : 'false', 'aria-label': ph[1], onClick: function () { togglePhase(i); } }, h('i')));
           })),
         h('div', { className: 'ap-gatehint' }, '⏸ ', h('b', null, 'Emberi jóváhagyás bekapcsolva.'), ' Az Autopilot megáll a kulcs-döntéseknél (included források · protokoll-lépések · végső beküldés), és a jóváhagyásodra vár.'),
         h('div', { style: { marginTop: 16 } },
@@ -1317,6 +1337,15 @@
       var st = p.status;
       var bd = st === 'done' ? '✓' : st === 'running' ? 'fut' : st === 'gate' ? '⏸' : st === 'skipped' ? '–' : '·';
       var conn = last ? null : h('div', { className: 'apg-conn' + (st === 'done' ? ' done' : (st === 'running' || st === 'gate') ? ' run' : '') });
+      // WIP phases (journal/writing/submission) — under development: shown but never active
+      if (AP_WIP[p.key]) {
+        return h('div', { className: 'apg-mini-wrap', key: p.key },
+          h('div', { className: 'apg-mini wip', style: { '--hue': hueOf(p.key) }, title: 'Ez a fázis még fejlesztés alatt áll' },
+            h('span', { className: 'apg-mini-ic' }, AP_ICON[p.key] || '•'),
+            h('span', { className: 'apg-mini-lab' }, p.label),
+            h('span', { className: 'apg-mini-wipb' }, '🚧 kidolgozás alatt')),
+          conn);
+      }
       // Literature card is CLICKABLE → the screening-review drawer (override decisions / push maybe forward / continue)
       if (p.key === 'literature') {
         var clickable = !!prun.study_id;
@@ -1346,7 +1375,7 @@
       var ideas0 = (phaseArts.ideas && phaseArts.ideas.items) || [];
       var ideaId = (prun.config && prun.config.develop_idea_id) || (isPrimary && ideas0[0] ? ideas0[0].id : null);
       var idea = ideas0.filter(function (x) { return x.id === ideaId; })[0];
-      var down = (prun.phases || []).filter(function (p) { return DOWN.indexOf(p.key) >= 0 && p.enabled; });
+      var down = (prun.phases || []).filter(function (p) { return DOWN.indexOf(p.key) >= 0 && (p.enabled || AP_WIP[p.key]); });   // WIP phases stay visible (as „kidolgozás alatt")
       var failed = prun.status === 'failed';
       return h('div', { className: 'apg-col' + (isPrimary ? ' primary' : '') + (failed ? ' failed' : ''), key: prun.id },
         h('div', { className: 'apg-col-h' },
@@ -1575,7 +1604,7 @@
     var icS = useState(0), ideasCount = icS[0], setIdeasCount = icS[1];
     var crS = useState(false), creating = crS[0], setCreating = crS[1];
     var lS = useState(false), launching = lS[0], setLaunching = lS[1];
-    var cfgS = useState({ tier: TIERS[0], maxPapers: '500', phases: PHASES.map(function () { return true; }) }), cfg = cfgS[0], setCfg = cfgS[1];
+    var cfgS = useState({ tier: TIERS[0], maxPapers: '500', phases: PHASES.map(function (ph) { return !ph[3]; }) }), cfg = cfgS[0], setCfg = cfgS[1];   // WIP phases default OFF
 
     function refreshIdeas(pid) {
       sb.from('research_ideas').select('id', { count: 'exact', head: true }).eq('project_id', pid).then(function (r) { setIdeasCount((r && r.count) || 0); });
@@ -1641,7 +1670,10 @@
       if (firstIdx === -1) { toast('Válassz legalább egy fázist.', false); return; }
       setLaunching(true);
       var u = uid();
-      var phases = AP_PHASES.map(function (p, i) { return { key: p.key, label: p.label, enabled: !!cfg.phases[i], status: cfg.phases[i] ? 'pending' : 'skipped', result: '', cursor: {} }; });
+      var phases = AP_PHASES.map(function (p, i) {
+        if (AP_WIP[p.key]) return { key: p.key, label: p.label, enabled: false, status: 'wip', result: 'fejlesztés alatt', cursor: {} };   // under development → never auto-runs; Autopilot ends at protocol
+        return { key: p.key, label: p.label, enabled: !!cfg.phases[i], status: cfg.phases[i] ? 'pending' : 'skipped', result: '', cursor: {} };
+      });
       var md = '# Autopilot brief\n\n**Cél:** ' + (project.goal || '—') + '\n\n**Kulcsszavak:** ' + ((project.keywords || []).join(', ') || '—')
         + '\n\n**Adat:** ' + (files.length ? files.map(function (f) { return f.name; }).join(', ') : '—')
         + '\n\n**Cél-venue:** ' + cfg.tier + '\n\n**Max. átvizsgált cikk:** ' + (cfg.maxPapers || '—')
