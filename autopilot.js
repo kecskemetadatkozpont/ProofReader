@@ -770,6 +770,7 @@
     var ltS = useState({}), litProg = ltS[0], setLitProg = ltS[1];          // run_id → { study_id, steps:[{step,kind,status,cursor,total,counts}], ts } : LIVE literature screening numbers
     var ptaS = useState({}), protoArts = ptaS[0], setProtoArts = ptaS[1];   // run_id → [protocol steps] : inline task cards shown under the Protocol card in the graph
     var poS = useState({}), protoOpen = poS[0], setProtoOpen = poS[1];       // run_id → false to collapse the inline protocol task cards (default = expanded)
+    var rgS = useState({}), regenning = rgS[0], setRegenning = rgS[1];       // run_id → true while its protocol is being regenerated
     var driving = useRef(false), alive = useRef(true), projRef = useRef(null), feedRef = useRef(null), myDriver = useRef(null);
     var bDriving = useRef({});   // per-branch-run driving flags (additive; the primary driver above is untouched)
     var branchRunsRef = useRef([]), activeRef = useRef(false);   // live mirrors for the event poller (avoids stale closures)
@@ -1322,15 +1323,41 @@
         (Array.isArray(spec.acceptance) && spec.acceptance.length) ? h('div', { className: 'apg-tcard-acc' }, h('b', null, '✔ Elfogadás: '), spec.acceptance.slice(0, 4).map(String).join(' · ')) : null,
         (Array.isArray(spec.expected_outputs) && spec.expected_outputs.length) ? h('div', { className: 'apg-tcard-out' }, h('b', null, '⤷ Kimenet: '), spec.expected_outputs.slice(0, 4).map(function (o, k) { return h('code', { key: k }, String(o)); })) : null);
     }
+    // Regenerate a run's protocol scoped to ITS idea (fixes a mis-linked / shared protocol; each idea gets its own steps).
+    function regenProtocol(prun) {
+      if (regenning[prun.id]) return;
+      var ideaId = prun.config && prun.config.develop_idea_id, proj = projRef.current || project;
+      if (!proj) { toast('A projekt még tölt — próbáld újra.', false); return; }
+      setRegenning(function (m) { var n = Object.assign({}, m); n[prun.id] = true; return n; });
+      var clear = function () { setRegenning(function (m) { var n = Object.assign({}, m); delete n[prun.id]; return n; }); };
+      callEdge('research-protocol', { action: 'generate', project_id: proj.id, idea_id: ideaId || undefined, goal: proj.goal || proj.title || '' }).then(function (d) {
+        if (d && d.error) { clear(); toast('Hiba: ' + d.error, false); return; }
+        var pid = d && d.protocol_id;
+        if (!pid) { clear(); toast('Nem jött létre protokoll.', false); return; }
+        sb.from('research_autopilot_runs').update({ protocol_id: pid, updated_at: nowIso() }).eq('id', prun.id).then(function () {
+          if (prun.id === run.id) setRun(function (r) { return Object.assign({}, r, { protocol_id: pid }); });
+          else setBranchRow(Object.assign({}, prun, { protocol_id: pid }));
+          sb.from('research_protocol_steps').select('id,protocol_id,ord,title,kind,needs_approval,status,spec').eq('protocol_id', pid).order('ord', { ascending: true }).then(function (res) {
+            if (!alive.current) { clear(); return; }
+            setProtoArts(function (m) { var n = Object.assign({}, m); n[prun.id] = (res && res.data) || []; return n; });
+            clear(); toast('✓ ' + ((d && d.steps) || 0) + ' új, ötlet-specifikus feladat.', true);
+          });
+        });
+      }, function () { clear(); toast('Hálózati hiba — próbáld újra.', false); });
+    }
     // Inline protocol tasks under the Protocol card: FULL cards stacked vertically, collapsible (default expanded).
     function protoMini(prun) {
       var steps = protoArts[prun.id];
       if (!steps || !steps.length) return null;
       var open = protoOpen[prun.id] !== false;   // default expanded; the user can collapse to just the Protocol card
+      var busy = !!regenning[prun.id];
       return h('div', { className: 'apg-ptasks' },
-        h('button', { className: 'apg-ptasks-h', onClick: function () { setProtoOpen(function (m) { var n = Object.assign({}, m); n[prun.id] = (m[prun.id] === false); return n; }); } },
-          h('span', null, '🧪 ' + steps.length + ' feladat'),
-          h('span', { className: 'apg-ptasks-caret' }, open ? '▾ összecsuk' : '▸ kibont')),
+        h('div', { className: 'apg-ptasks-hrow' },
+          h('button', { className: 'apg-ptasks-h', onClick: function () { setProtoOpen(function (m) { var n = Object.assign({}, m); n[prun.id] = (m[prun.id] === false); return n; }); } },
+            h('span', null, '🧪 ' + steps.length + ' feladat'),
+            h('span', { className: 'apg-ptasks-caret' }, open ? '▾ összecsuk' : '▸ kibont')),
+          h('button', { className: 'apg-ptasks-regen', disabled: busy, title: 'Új, ehhez az ötlethez tervezett protokoll generálása (a mostanit lecseréli)', onClick: function () { regenProtocol(prun); } },
+            busy ? h('span', { className: 'spin' }) : '↻ Újragenerálás')),
         open ? h('div', { className: 'apg-tcards-col' }, steps.map(protoCard)) : null);
     }
     function downMini(prun, p, last) {
