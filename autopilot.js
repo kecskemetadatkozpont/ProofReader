@@ -917,8 +917,11 @@
       sb.from('research_autopilot_runs').select('*').in('id', ids).then(function (r) {
         if (!alive.current) return;
         ((r && r.data) || []).forEach(function (row) {
-          if (row.id === props.runId) { if (!driving.current) { setRun(row); ensureDrive(row); } }
-          else if (!bDriving.current[row.id]) { setBranchRow(row); ensureBranchDrive(row); }
+          try {
+            if (!row || !Array.isArray(row.phases)) return;   // never feed a malformed row into the render
+            if (row.id === props.runId) { if (!driving.current) { setRun(row); ensureDrive(row); } }
+            else if (!bDriving.current[row.id]) { setBranchRow(row); ensureBranchDrive(row); }
+          } catch (e) { }
         });
       });
     }
@@ -1292,10 +1295,12 @@
           h('span', { className: 'apg-tag kind' }, kd.ic + ' ' + kd.lab),
           (spec.est_minutes != null) ? h('span', { className: 'apg-tag' }, '⏱ ' + spec.est_minutes + ' perc') : null,
           s.needs_approval ? h('span', { className: 'apg-tag appr' }, '⏸ jóváhagyás kell') : null,
-          (s.depends_on && s.depends_on.length) ? h('span', { className: 'apg-tag dep' }, '⇠ függ: ' + s.depends_on.join(', ')) : null),
+          (Array.isArray(s.depends_on) && s.depends_on.length) ? h('span', { className: 'apg-tag dep' }, '⇠ függ: ' + s.depends_on.map(String).join(', ')) : null),
         instr ? h('div', { className: 'apg-tcard-desc' }, String(instr).slice(0, 400) + (String(instr).length > 400 ? '…' : '')) : null,
-        (spec.acceptance && spec.acceptance.length) ? h('div', { className: 'apg-tcard-acc' }, h('b', null, '✔ Elfogadás: '), spec.acceptance.slice(0, 4).join(' · ')) : null,
-        (spec.expected_outputs && spec.expected_outputs.length) ? h('div', { className: 'apg-tcard-out' }, h('b', null, '⤷ Kimenet: '), spec.expected_outputs.slice(0, 4).map(function (o) { return h('code', { key: o }, o); })) : null);
+        // NOTE: coerce every array element to String before rendering — AI-generated specs occasionally contain objects,
+        // and rendering an object as a React child throws ("Objects are not valid as a React child") → blanks the page.
+        (Array.isArray(spec.acceptance) && spec.acceptance.length) ? h('div', { className: 'apg-tcard-acc' }, h('b', null, '✔ Elfogadás: '), spec.acceptance.slice(0, 4).map(String).join(' · ')) : null,
+        (Array.isArray(spec.expected_outputs) && spec.expected_outputs.length) ? h('div', { className: 'apg-tcard-out' }, h('b', null, '⤷ Kimenet: '), spec.expected_outputs.slice(0, 4).map(function (o, k) { return h('code', { key: k }, String(o)); })) : null);
     }
     // Inline protocol tasks under the Protocol card: FULL cards stacked vertically, collapsible (default expanded).
     function protoMini(prun) {
@@ -1711,8 +1716,28 @@
       body);
   }
 
+  // A render error anywhere below must NOT blank the whole page (leaving only the purple body). This boundary catches it,
+  // shows a recoverable panel, and auto-retries a few times (transient poll-state crashes self-heal on the next tick).
+  function EB(props) { React.Component.call(this, props); this.state = { err: null }; this._resets = 0; }
+  EB.prototype = Object.create(React.Component.prototype);
+  EB.prototype.constructor = EB;
+  EB.prototype.componentDidCatch = function (err, info) {
+    try { console.error('[Autopilot] render crash — recovered by boundary:', err, info && info.componentStack); } catch (e) { }
+    var self = this;
+    if (this._resets < 5) { this._resets++; setTimeout(function () { try { self.setState({ err: null }); } catch (e) { } }, 900); }
+  };
+  EB.prototype.render = function () {
+    if (this.state.err) return h('div', { className: 'ap-wrap' }, h('div', { className: 'center' }, h('div', { className: 'box' },
+      h('div', { className: 'mk' }, h('i')),
+      h('h1', null, 'Egy pillanat — újratöltés'),
+      h('p', null, 'Átmeneti megjelenítési hiba történt; a nézet magától helyreáll. Ha nem, töltsd újra az oldalt.'),
+      h('button', { className: 'btn', onClick: function () { try { location.reload(); } catch (e) { } } }, '↻ Oldal újratöltése'))));
+    return this.props.children;
+  };
+  EB.getDerivedStateFromError = function (err) { return { err: err || true }; };
+
   // ---- boot ----
   if (!BE || !BE.sb) { root.innerHTML = '<div class="center"><div class="box"><h1>A backend nem elérhető</h1></div></div>'; return; }
   if (BE.mode !== 'cloud' || !BE.user) { root.innerHTML = '<div class="center"><div class="box"><div class="mk"><i></i></div><h1>Jelentkezz be</h1><p>Az Autopilot bejelentkezést igényel.</p><a class="btn" href="Landing.html">Bejelentkezés</a></div></div>'; return; }
-  ReactDOM.createRoot(root).render(h(App));
+  ReactDOM.createRoot(root).render(h(EB, null, h(App)));
 })();
