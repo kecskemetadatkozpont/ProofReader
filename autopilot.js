@@ -749,6 +749,7 @@
     var selS = useState({}), selIdeas = selS[0], setSelIdeas = selS[1];     // idea_id → true : ideas ticked for parallel development
     var ltS = useState({}), litProg = ltS[0], setLitProg = ltS[1];          // run_id → { study_id, steps:[{step,kind,status,cursor,total,counts}], ts } : LIVE literature screening numbers
     var ptaS = useState({}), protoArts = ptaS[0], setProtoArts = ptaS[1];   // run_id → [protocol steps] : inline task cards shown under the Protocol card in the graph
+    var poS = useState({}), protoOpen = poS[0], setProtoOpen = poS[1];       // run_id → false to collapse the inline protocol task cards (default = expanded)
     var driving = useRef(false), alive = useRef(true), projRef = useRef(null), feedRef = useRef(null), myDriver = useRef(null);
     var bDriving = useRef({});   // per-branch-run driving flags (additive; the primary driver above is untouched)
     var branchRunsRef = useRef([]), activeRef = useRef(false);   // live mirrors for the event poller (avoids stale closures)
@@ -788,6 +789,14 @@
           ensureProject(r.project_id).then(function (proj) {
             if (!alive.current || !driving.current) { driving.current = false; return; }
             if (!proj) { driving.current = false; return; }
+            // single-shot phases (sr/gap/protocol/journal/submission) otherwise flip wait→done with no interim state →
+            // their card never pulses even while a slow edge call runs. Mark the current phase 'running' first so it pulses.
+            var cph0 = (r.phases || [])[r.phase_index];
+            if (cph0 && cph0.status === 'wait') {
+              var php0 = r.phases.slice(); php0[r.phase_index] = Object.assign({}, cph0, { status: 'running' });
+              r = Object.assign({}, r, { phases: php0 }); setRun(r);
+              sb.from('research_autopilot_runs').update({ phases: php0 }).eq('id', r.id).eq('driver_token', myDriver.current);
+            }
             apStep(r, proj).then(function (res) {
               if (!alive.current) { driving.current = false; return; }
               retryRef.current[r.id] = 0;   // a successful step clears the transient-error counter
@@ -842,6 +851,12 @@
           ensureProject(r.project_id).then(function (proj) {
             if (!alive.current || !bDriving.current[rid]) { bDriving.current[rid] = false; return; }
             if (!proj) { bDriving.current[rid] = false; return; }
+            var cph0 = (r.phases || [])[r.phase_index];   // pulse single-shot phases while their edge call runs (see drive())
+            if (cph0 && cph0.status === 'wait') {
+              var php0 = r.phases.slice(); php0[r.phase_index] = Object.assign({}, cph0, { status: 'running' });
+              r = Object.assign({}, r, { phases: php0 }); setBranchRow(r);
+              sb.from('research_autopilot_runs').update({ phases: php0 }).eq('id', r.id).eq('driver_token', myDriver.current);
+            }
             apStep(r, proj).then(function (res) {
               if (!alive.current) { bDriving.current[rid] = false; return; }
               retryRef.current[r.id] = 0;   // successful step → clear the retry counter for this branch
@@ -893,9 +908,23 @@
       var ids = [props.runId].concat((branchRunsRef.current || []).map(function (b) { return b.id; }).filter(Boolean));
       sb.from('research_autopilot_events').select('*').in('run_id', ids).order('id', { ascending: true }).limit(700).then(function (r) { if (alive.current) setEvents((r && r.data) || []); });
     }
+    // research_autopilot_runs is NOT in the realtime publication → the graph would only reflect runs THIS tab drives.
+    // Poll the group runs' state so the cards track real progress even when another tab (or a stale lease) is driving.
+    // Skip runs this tab is actively driving (their local optimistic state is fresher mid-tick).
+    function refreshRuns() {
+      var ids = [props.runId].concat((branchRunsRef.current || []).map(function (b) { return b.id; }).filter(Boolean));
+      if (!ids.length) return;
+      sb.from('research_autopilot_runs').select('*').in('id', ids).then(function (r) {
+        if (!alive.current) return;
+        ((r && r.data) || []).forEach(function (row) {
+          if (row.id === props.runId) { if (!driving.current) { setRun(row); ensureDrive(row); } }
+          else if (!bDriving.current[row.id]) { setBranchRow(row); ensureBranchDrive(row); }
+        });
+      });
+    }
     useEffect(function () {
-      loadEvents();
-      var iv = setInterval(function () { if (activeRef.current) loadEvents(); }, 3000);
+      loadEvents(); refreshRuns();
+      var iv = setInterval(function () { if (activeRef.current) { loadEvents(); refreshRuns(); } }, 3000);
       return function () { clearInterval(iv); };
     }, [props.runId, (branchRuns || []).map(function (b) { return b.id; }).join(',')]);
 
@@ -1250,22 +1279,34 @@
           (act && c.maybe != null) ? h('span', { className: 'apg-lit-chip may', title: 'Bizonytalan' }, '~ ' + c.maybe) : null,
           (act && c.exclude != null) ? h('span', { className: 'apg-lit-chip exc', title: 'Kizárva' }, '✕ ' + c.exclude) : null));
     }
-    // Inline protocol task list under the Protocol card (compact rows; „mind" opens the full task-card modal)
+    // One full protocol-task card (shared by the inline graph view AND the modal): title, status, type, minutes,
+    // approval, dependencies, the instruction, acceptance criteria and expected outputs.
+    function protoCard(s) {
+      var spec = s.spec || {}, kd = PROTO_KIND[s.kind] || { ic: '•', lab: s.kind || 'lépés' }, instr = spec.instruction || '';
+      return h('div', { className: 'apg-tcard', key: s.id },
+        h('div', { className: 'apg-tcard-h' },
+          h('span', { className: 'apg-tcard-ord' }, s.ord),
+          h('span', { className: 'apg-tcard-t' }, s.title || 'Feladat'),
+          h('span', { className: 'apg-tcard-st ' + (s.status || 'todo') }, PROTO_ST[s.status] || s.status || 'todo')),
+        h('div', { className: 'apg-tcard-tags' },
+          h('span', { className: 'apg-tag kind' }, kd.ic + ' ' + kd.lab),
+          (spec.est_minutes != null) ? h('span', { className: 'apg-tag' }, '⏱ ' + spec.est_minutes + ' perc') : null,
+          s.needs_approval ? h('span', { className: 'apg-tag appr' }, '⏸ jóváhagyás kell') : null,
+          (s.depends_on && s.depends_on.length) ? h('span', { className: 'apg-tag dep' }, '⇠ függ: ' + s.depends_on.join(', ')) : null),
+        instr ? h('div', { className: 'apg-tcard-desc' }, String(instr).slice(0, 400) + (String(instr).length > 400 ? '…' : '')) : null,
+        (spec.acceptance && spec.acceptance.length) ? h('div', { className: 'apg-tcard-acc' }, h('b', null, '✔ Elfogadás: '), spec.acceptance.slice(0, 4).join(' · ')) : null,
+        (spec.expected_outputs && spec.expected_outputs.length) ? h('div', { className: 'apg-tcard-out' }, h('b', null, '⤷ Kimenet: '), spec.expected_outputs.slice(0, 4).map(function (o) { return h('code', { key: o }, o); })) : null);
+    }
+    // Inline protocol tasks under the Protocol card: FULL cards stacked vertically, collapsible (default expanded).
     function protoMini(prun) {
       var steps = protoArts[prun.id];
       if (!steps || !steps.length) return null;
-      var shown = steps.slice(0, 7);
+      var open = protoOpen[prun.id] !== false;   // default expanded; the user can collapse to just the Protocol card
       return h('div', { className: 'apg-ptasks' },
-        h('div', { className: 'apg-ptasks-h' }, '🧪 ' + steps.length + ' feladat'),
-        shown.map(function (s) {
-          var kd = PROTO_KIND[s.kind] || { ic: '•', lab: s.kind || '' };
-          return h('div', { className: 'apg-ptask ' + (s.status || 'todo'), key: s.id, title: (s.title || '') + (s.kind ? (' · ' + kd.lab) : '') },
-            h('span', { className: 'apg-ptask-ord' }, s.ord),
-            h('span', { className: 'apg-ptask-ic' }, kd.ic),
-            h('span', { className: 'apg-ptask-t' }, s.title || 'Feladat'),
-            s.needs_approval ? h('span', { className: 'apg-ptask-appr', title: 'jóváhagyás kell' }, '⏸') : null);
-        }),
-        h('button', { className: 'apg-ptasks-more', onClick: function () { openProtocolPreview(prun); } }, steps.length > 7 ? ('+' + (steps.length - 7) + ' további — mind ›') : 'Részletek ›'));
+        h('button', { className: 'apg-ptasks-h', onClick: function () { setProtoOpen(function (m) { var n = Object.assign({}, m); n[prun.id] = (m[prun.id] === false); return n; }); } },
+          h('span', null, '🧪 ' + steps.length + ' feladat'),
+          h('span', { className: 'apg-ptasks-caret' }, open ? '▾ összecsuk' : '▸ kibont')),
+        open ? h('div', { className: 'apg-tcards-col' }, steps.map(protoCard)) : null);
     }
     function downMini(prun, p, last) {
       var st = p.status;
@@ -1384,23 +1425,7 @@
               protoPv.goal ? h('div', { className: 'apg-proto-goal' }, protoPv.goal) : null,
               h('div', { className: 'apg-proto-meta' }, (protoPv.steps || []).length + ' feladat generálva'),
               (protoPv.steps || []).length
-                ? h('div', { className: 'apg-proto-grid' }, protoPv.steps.map(function (s) {
-                  var spec = s.spec || {}, kd = PROTO_KIND[s.kind] || { ic: '•', lab: s.kind || 'lépés' };
-                  var instr = spec.instruction || '';
-                  return h('div', { className: 'apg-tcard', key: s.id },
-                    h('div', { className: 'apg-tcard-h' },
-                      h('span', { className: 'apg-tcard-ord' }, s.ord),
-                      h('span', { className: 'apg-tcard-t' }, s.title || 'Feladat'),
-                      h('span', { className: 'apg-tcard-st ' + (s.status || 'todo') }, PROTO_ST[s.status] || s.status || 'todo')),
-                    h('div', { className: 'apg-tcard-tags' },
-                      h('span', { className: 'apg-tag kind' }, kd.ic + ' ' + kd.lab),
-                      (spec.est_minutes != null) ? h('span', { className: 'apg-tag' }, '⏱ ' + spec.est_minutes + ' perc') : null,
-                      s.needs_approval ? h('span', { className: 'apg-tag appr' }, '⏸ jóváhagyás kell') : null,
-                      (s.depends_on && s.depends_on.length) ? h('span', { className: 'apg-tag dep' }, '⇠ függ: ' + s.depends_on.join(', ')) : null),
-                    instr ? h('div', { className: 'apg-tcard-desc' }, String(instr).slice(0, 300) + (String(instr).length > 300 ? '…' : '')) : null,
-                    (spec.acceptance && spec.acceptance.length) ? h('div', { className: 'apg-tcard-acc' }, h('b', null, '✔ Elfogadás: '), spec.acceptance.slice(0, 3).join(' · ')) : null,
-                    (spec.expected_outputs && spec.expected_outputs.length) ? h('div', { className: 'apg-tcard-out' }, h('b', null, '⤷ Kimenet: '), spec.expected_outputs.slice(0, 4).map(function (o) { return h('code', { key: o }, o); })) : null);
-                }))
+                ? h('div', { className: 'apg-proto-grid' }, protoPv.steps.map(protoCard))
                 : h('div', { className: 'ap-pc-dempty' }, 'Ehhez a szálhoz még nincs generált protokoll-feladat.')),
           h('div', { className: 'ap-pv-f' },
             h('a', { className: 'btn sm', href: 'Research.html?project=' + encodeURIComponent(run.project_id), target: '_blank', rel: 'noopener' }, 'Protocol-fül megnyitása ↗'),
