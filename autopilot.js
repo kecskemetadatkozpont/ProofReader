@@ -722,6 +722,7 @@
     var driving = useRef(false), alive = useRef(true), projRef = useRef(null), feedRef = useRef(null), myDriver = useRef(null);
     var bDriving = useRef({});   // per-branch-run driving flags (additive; the primary driver above is untouched)
     var branchRunsRef = useRef([]), activeRef = useRef(false);   // live mirrors for the event poller (avoids stale closures)
+    var retryRef = useRef({});   // run_id → consecutive transient-error retries (a single network blip must not kill a run)
     if (!myDriver.current) myDriver.current = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : ('00000000-0000-4000-8000-' + String(Date.now()).slice(-12).padStart(12, '0'));   // per-tab lease id
     useEffect(function () { return function () { alive.current = false; driving.current = false; }; }, []);
     // live clock while running
@@ -759,13 +760,21 @@
             if (!proj) { driving.current = false; return; }
             apStep(r, proj).then(function (res) {
               if (!alive.current) { driving.current = false; return; }
+              retryRef.current[r.id] = 0;   // a successful step clears the transient-error counter
               emit(r, res.events).then(function () {
                 sb.from('research_autopilot_runs').update(Object.assign({ updated_at: nowIso(), driver_beat: nowIso() }, res.patch || {})).eq('id', r.id).eq('driver_token', myDriver.current).then(function () { setTimeout(drive, 950); });
               });
             }, function (err) {
-              var pk = (r.phases[r.phase_index] || {}).key;
-              emit(r, [{ phase: pk, level: 'error', message: 'Hiba: ' + ((err && err.message) || err) }]).then(function () {
-                sb.from('research_autopilot_runs').update({ status: 'failed', error: String((err && err.message) || err), updated_at: nowIso() }).eq('id', r.id).then(function () { driving.current = false; });
+              var pk = (r.phases[r.phase_index] || {}).key, msg = (err && err.message) || String(err), rc = retryRef.current[r.id] || 0;
+              if (rc < 3) {   // transient failure (e.g. a network blip mid-screening) → retry the SAME step (cursor is persisted) with backoff, don't kill the run
+                retryRef.current[r.id] = rc + 1;
+                emit(r, [{ phase: pk, level: 'warn', message: 'Átmeneti hiba: ' + msg + ' — újrapróbálás ' + (rc + 1) + '/3…' }]).then(function () {
+                  sb.from('research_autopilot_runs').update({ driver_beat: nowIso() }).eq('id', r.id).then(function () { setTimeout(drive, 3000 * (rc + 1)); });
+                });
+                return;
+              }
+              emit(r, [{ phase: pk, level: 'error', message: 'Hiba (3 újrapróbálás után): ' + msg }]).then(function () {
+                sb.from('research_autopilot_runs').update({ status: 'failed', error: String(msg), updated_at: nowIso() }).eq('id', r.id).then(function () { driving.current = false; });
               });
             });
           });
@@ -805,6 +814,7 @@
             if (!proj) { bDriving.current[rid] = false; return; }
             apStep(r, proj).then(function (res) {
               if (!alive.current) { bDriving.current[rid] = false; return; }
+              retryRef.current[r.id] = 0;   // successful step → clear the retry counter for this branch
               setBranchRow(Object.assign({}, r, res.patch || {}));   // reflect progress in the branch column
               emit(r, res.events).then(function () {
                 sb.from('research_autopilot_runs').update(Object.assign({ updated_at: nowIso(), driver_beat: nowIso() }, res.patch || {})).eq('id', r.id).eq('driver_token', myDriver.current).then(function () {
@@ -813,12 +823,26 @@
                 });
               });
             }, function (err) {
-              emit(r, [{ phase: (r.phases[r.phase_index] || {}).key, level: 'error', message: 'Hiba: ' + ((err && err.message) || err) }]).then(function () {
-                sb.from('research_autopilot_runs').update({ status: 'failed', error: String((err && err.message) || err), updated_at: nowIso() }).eq('id', r.id).then(function () { bDriving.current[rid] = false; setBranchRow(Object.assign({}, r, { status: 'failed' })); });
+              var msg = (err && err.message) || String(err), rc = retryRef.current[r.id] || 0;
+              if (rc < 3) {   // transient failure → retry the SAME step (cursor persisted) with backoff instead of killing the branch
+                retryRef.current[r.id] = rc + 1;
+                emit(r, [{ phase: (r.phases[r.phase_index] || {}).key, level: 'warn', message: 'Átmeneti hiba: ' + msg + ' — újrapróbálás ' + (rc + 1) + '/3…' }]).then(function () {
+                  sb.from('research_autopilot_runs').update({ driver_beat: nowIso() }).eq('id', r.id).then(function () { setTimeout(function () { driveBranch(rid); }, 3000 * (rc + 1)); });
+                });
+                return;
+              }
+              emit(r, [{ phase: (r.phases[r.phase_index] || {}).key, level: 'error', message: 'Hiba (3 újrapróbálás után): ' + msg }]).then(function () {
+                sb.from('research_autopilot_runs').update({ status: 'failed', error: String(msg), updated_at: nowIso() }).eq('id', r.id).then(function () { bDriving.current[rid] = false; setBranchRow(Object.assign({}, r, { status: 'failed' })); });
               });
             });
           });
         }, function () { bDriving.current[rid] = false; });
+    }
+    function resumeBranch(rid) {   // restart a failed branch from where it stalled (the study cursor is persisted)
+      retryRef.current[rid] = 0;
+      var next = null;
+      setBranchRuns(function (list) { return (list || []).map(function (x) { if (x.id === rid) { next = Object.assign({}, x, { status: 'running', error: null }); return next; } return x; }); });
+      sb.from('research_autopilot_runs').update({ status: 'running', error: null, updated_at: nowIso() }).eq('id', rid).then(function (r) { if (r && r.error) { toast('Nem sikerült: ' + r.error.message, false); return; } if (next) ensureBranchDrive(next); toast('↻ A szál folytatódik…', true); }, function () { toast('Hálózati hiba.', false); });
     }
     function loadBranches(primary) {
       if (!primary || !primary.project_id) return;
@@ -1054,11 +1078,13 @@
       var ideaId = (prun.config && prun.config.develop_idea_id) || (isPrimary && ideas0[0] ? ideas0[0].id : null);
       var idea = ideas0.filter(function (x) { return x.id === ideaId; })[0];
       var down = (prun.phases || []).filter(function (p) { return DOWN.indexOf(p.key) >= 0 && p.enabled; });
-      return h('div', { className: 'apg-col' + (isPrimary ? ' primary' : ''), key: prun.id },
+      var failed = prun.status === 'failed';
+      return h('div', { className: 'apg-col' + (isPrimary ? ' primary' : '') + (failed ? ' failed' : ''), key: prun.id },
         h('div', { className: 'apg-col-h' },
-          h('span', { className: 'apg-col-ic' }, '💡'),
+          h('span', { className: 'apg-col-ic' }, failed ? '✕' : '💡'),
           h('span', { className: 'apg-col-t', title: (idea && idea.question) || '' }, (idea && idea.question) || (isPrimary ? 'Fő szál' : 'Ötlet')),
-          isPrimary ? h('span', { className: 'apg-col-tag' }, 'fő') : null),
+          isPrimary ? h('span', { className: 'apg-col-tag' }, 'fő') : null,
+          failed ? h('button', { className: 'apg-col-retry', title: (prun.error ? ('Hiba: ' + prun.error + ' — ') : '') + 'A szál folytatása onnan, ahol elakadt', onClick: function () { isPrimary ? resume() : resumeBranch(prun.id); } }, '↻ Újra') : null),
         h('div', { className: 'apg-fan-conn' }),
         h('div', { className: 'apg-col-chain' }, down.map(function (p, i) { return downMini(prun, p, i === down.length - 1); })));
     }
