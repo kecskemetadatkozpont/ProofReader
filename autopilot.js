@@ -113,6 +113,7 @@
   var AP_PHASES = [
     { key: 'ideas', label: 'Ideas', ic: '💡', sub: 'ötletek + gap' },
     { key: 'literature', label: 'Literature', ic: '📚', sub: 'keresés + screening' },
+    { key: 'gap', label: 'Research Gap', ic: '🧭', sub: 'gap-ellenőrzés' },
     { key: 'sr', label: 'Systematic review', ic: '🔬', sub: 'áttekintés' },
     { key: 'protocol', label: 'Protocol', ic: '🧪', sub: 'lépések' },
     { key: 'journal', label: 'Journal', ic: '🎯', sub: 'venue-ajánló' },
@@ -121,7 +122,7 @@
   ];
   var AP_ICON = {}; AP_PHASES.forEach(function (p) { AP_ICON[p.key] = p.ic; });
   // per-phase hue for the process-graph view (each stage owns a colour → the top-to-bottom flow reads as a spectrum)
-  var AP_HUE = { ideas: 'var(--h-idea)', literature: 'var(--h-lit)', sr: 'var(--h-rev)', protocol: 'var(--h-proto)', journal: 'var(--h-jrnl)', writing: 'var(--h-write)', submission: 'var(--h-sub)' };
+  var AP_HUE = { ideas: 'var(--h-idea)', literature: 'var(--h-lit)', gap: 'var(--h-gap)', sr: 'var(--h-rev)', protocol: 'var(--h-proto)', journal: 'var(--h-jrnl)', writing: 'var(--h-write)', submission: 'var(--h-sub)' };
   function hueOf(k) { return AP_HUE[k] || 'var(--accent)'; }
   // a 'running' run that no browser tab has driven for >60s reads as 'stalled' (honest: nothing is advancing it) — resume to continue
   function apEffectiveStatus(run) {
@@ -137,6 +138,9 @@
   }
   var LS_STEPS_AP = [{ step: 1, kind: 'quick' }, { step: 2, kind: 'abstract' }, { step: 3, kind: 'fulltext' }, { step: 4, kind: 'review' }];
   var LIT_KIND_LAB = { quick: 'Gyorsszűrés', abstract: 'Absztrakt-szűrés', fulltext: 'Teljes szöveg', review: 'Áttekintés' };
+  // protocol-step task type → icon + label; status → short Hungarian label (used by the Protocol task-card modal)
+  var PROTO_KIND = { data: { ic: '📊', lab: 'Adat' }, preprocess: { ic: '🧹', lab: 'Előfeldolgozás' }, feature: { ic: '🧩', lab: 'Jellemzők' }, model: { ic: '🧠', lab: 'Modell' }, train: { ic: '🏋️', lab: 'Tanítás' }, eval: { ic: '📈', lab: 'Kiértékelés' }, analysis: { ic: '🔍', lab: 'Elemzés' }, experiment: { ic: '🧪', lab: 'Kísérlet' }, figure: { ic: '📉', lab: 'Ábra' }, write: { ic: '✍️', lab: 'Írás' }, code: { ic: '💻', lab: 'Kód' } };
+  var PROTO_ST = { todo: 'todo', pending: 'vár', running: 'fut', done: 'kész', blocked: 'blokkolt', failed: 'hiba', skipped: 'kihagyva' };
   function lsCfg(step, project, idea, maxResults) {
     if (step !== 1) return { keywords: [], include: [], exclude: [], filters: {}, signals: ['has_github', 'has_dataset'] };
     var sq = (idea && String((idea.question || '') + (idea.hypothesis ? '\n\nHypothesis: ' + idea.hypothesis : '')).trim()) || (project && (project.goal || project.title)) || '';
@@ -236,6 +240,27 @@
     });
     return Promise.resolve(apComplete(run, 'Irodalom jóváhagyva', []));   // stage 'gated' → resumed after approval
   }
+  // Research-gap CHECK against the screened literature: build the deterministic evidence-gap matrix (research-ai
+  // gap_matrix — cached), then report the EMPTY cells as the unaddressed research gaps + save a markdown report.
+  function apGap(run, project) {
+    return callEdge('research-ai', { action: 'gap_matrix', project_id: project.id }).then(function (d) {
+      if (d && d.error) throw new Error('Gap: ' + d.error);
+      var m = d && d.matrix;
+      if (!m || !Array.isArray(m.rows) || !Array.isArray(m.cols) || !Array.isArray(m.cells)) {
+        return apSkip(run, (d && d.reason === 'too_few') ? 'Kevés forrás a gap-mátrixhoz (≥3 kell) — kimarad' : 'Nincs gap-mátrix — kimarad');
+      }
+      var gaps = [];
+      m.cells.forEach(function (rrow, r) { (rrow || []).forEach(function (v, c) { if ((v || 0) === 0 && m.rows[r] && m.cols[c]) gaps.push({ row: m.rows[r], col: m.cols[c] }); }); });
+      var md = '# Research Gap ellenőrzés\n\nEvidence-gap mátrix (' + m.rows.length + ' megközelítés × ' + m.cols.length + ' terület, ' + (d.count || 0) + ' forrás alapján). Az **üres cellák** feltáratlan kutatási réseket jeleznek.\n\n';
+      md += '| |' + m.cols.map(function (c) { return ' ' + c + ' |'; }).join('') + '\n';
+      md += '|---|' + m.cols.map(function () { return '---|'; }).join('') + '\n';
+      m.rows.forEach(function (rl, r) { md += '| **' + rl + '** |' + m.cols.map(function (_c, c) { var v = (m.cells[r] && m.cells[r][c]) || 0; return ' ' + (v === 0 ? '— (rés)' : v) + ' |'; }).join('') + '\n'; });
+      md += '\n## Feltárt rések (' + gaps.length + ')\n\n' + (gaps.length ? gaps.slice(0, 40).map(function (g) { return '- **' + g.row + '** × **' + g.col + '** — nincs lefedő forrás'; }).join('\n') : '_Nincs üres cella — a terület jól lefedett._') + '\n\n*A Publify Autopilot Research Gap fázisából.*\n';
+      return saveFile(project.id, 'autopilot/research-gap.md', md, 'ai').then(function () {
+        return apComplete(run, gaps.length + ' kutatási rés azonosítva (' + m.rows.length + '×' + m.cols.length + ' mátrix)', [{ phase: 'gap', level: 'run', message: 'Gap-mátrix kész: ' + m.rows.length + '×' + m.cols.length + ', ' + gaps.length + ' üres cella (rés)' }]);
+      });
+    });
+  }
   function apSR(run, project) {
     if (!run.study_id) return Promise.resolve(apSkip(run, 'Nincs literature-study — az áttekintés kimarad'));
     return callEdge('research-study', { action: 'generate_review', study_id: run.study_id }).then(function (d) {
@@ -315,7 +340,7 @@
       });
     });
   }
-  var AP_STEPPERS = { ideas: apIdeas, literature: apLiterature, sr: apSR, protocol: apProtocol, journal: apJournal, writing: apWriting, submission: apSubmission };
+  var AP_STEPPERS = { ideas: apIdeas, literature: apLiterature, gap: apGap, sr: apSR, protocol: apProtocol, journal: apJournal, writing: apWriting, submission: apSubmission };
   function apStep(run, project) {
     var i = run.phase_index, ph = run.phases[i];
     if (!ph) return Promise.resolve({ patch: { status: 'done', finished_at: nowIso() }, events: [] });
@@ -608,7 +633,7 @@
 
   // ======================================================================= LAUNCH (clarify)
   var PHASES = [
-    ['💡', 'Ideas', 'ötletek + PICO'], ['📚', 'Literature', 'keresés + screening'], ['🔬', 'Systematic review', 'Elicit'],
+    ['💡', 'Ideas', 'ötletek + PICO'], ['📚', 'Literature', 'keresés + screening'], ['🧭', 'Research Gap', 'gap-ellenőrzés'], ['🔬', 'Systematic review', 'Elicit'],
     ['🧪', 'Protocol', 'lépések generálása'], ['🎯', 'Journal', 'venue-ajánló'], ['✍️', 'Writing', 'draft szekciók'], ['📤', 'Submission', 'csomagolás']
   ];
   var TIERS = ['Top-tier (Q1)', 'Open access', 'Gyors döntés'];
@@ -717,6 +742,7 @@
     var opS = useState(null), openPhase = opS[0], setOpenPhase = opS[1];   // which phase card is expanded to show its real artifacts
     var paS = useState({}), phaseArts = paS[0], setPhaseArts = paS[1];     // phase key → { loading, items, total } (lazy-fetched)
     var pvS = useState(null), preview = pvS[0], setPreview = pvS[1];        // { title, content } → the readable review preview modal
+    var ppvS = useState(null), protoPv = ppvS[0], setProtoPv = ppvS[1];    // { title, goal, steps:[...] } → the protocol task-cards modal
     var swS = useState(false), switching = swS[0], setSwitching = swS[1];   // guard while re-targeting the pipeline to a chosen idea
     var brS = useState([]), branchRuns = brS[0], setBranchRuns = brS[1];    // parallel per-idea branch runs (siblings of the primary run in the same group)
     var selS = useState({}), selIdeas = selS[0], setSelIdeas = selS[1];     // idea_id → true : ideas ticked for parallel development
@@ -921,7 +947,7 @@
     }
     function approve() { setStatus({ status: 'running', gate: null }); }
     // Re-target the pipeline to a chosen idea: the downstream phases (literature → …) restart for THAT idea.
-    var DOWN = ['literature', 'sr', 'protocol', 'journal', 'writing', 'submission'];
+    var DOWN = ['literature', 'gap', 'sr', 'protocol', 'journal', 'writing', 'submission'];
     function switchIdea(ideaId) {
       if (switching || !ideaId || !run) return;
       setSwitching(true);
@@ -1093,35 +1119,67 @@
         if (f) setPreview({ title: String(f.path).split('/').pop(), content: f.content }); else toast('Nincs elérhető áttekintés-fájl.', false);
       });
     }
-    // Live literature figures under the Literature card: search hits + the active screening step's cursor/total + include/maybe/exclude tallies.
+    function openGapPreview(prun) {   // the Research-gap report is a markdown file → reuse the markdown preview modal
+      var pid = (prun && prun.project_id) || run.project_id;
+      sb.from('research_files').select('path,content').eq('project_id', pid).eq('path', 'autopilot/research-gap.md').maybeSingle().then(function (r) {
+        var f = r && r.data;
+        if (f && f.content != null) setPreview({ title: 'Research Gap ellenőrzés', content: f.content }); else toast('Nincs elérhető gap-jelentés.', false);
+      });
+    }
+    function openProtocolPreview(prun) {   // load the generated protocol's steps → the task-card modal
+      var pid = (prun && prun.project_id) || run.project_id, pidProto = prun && prun.protocol_id;
+      setProtoPv({ loading: true, title: 'Protokoll-feladatok', steps: [] });
+      var q = pidProto
+        ? sb.from('research_protocols').select('id,title,goal,status').eq('id', pidProto).maybeSingle()
+        : sb.from('research_protocols').select('id,title,goal,status').eq('project_id', pid).neq('status', 'archived').order('created_at', { ascending: false }).limit(1).maybeSingle();
+      q.then(function (pr) {
+        var proto = pr && pr.data;
+        if (!proto) { setProtoPv(null); toast('Nincs elérhető protokoll.', false); return; }
+        sb.from('research_protocol_steps').select('id,ord,title,kind,spec,depends_on,needs_approval,status').eq('protocol_id', proto.id).order('ord', { ascending: true }).then(function (sr) {
+          if (!alive.current) return;
+          setProtoPv({ title: proto.title || 'Protokoll-feladatok', goal: proto.goal || '', steps: (sr && sr.data) || [] });
+        });
+      });
+    }
+    // Live literature figures under the Literature card. While a screening step runs: its label + cursor/total bar +
+    // its live include/maybe/exclude tallies. When done: the final funnel — search hits + the deepest step's included count.
     function litMini(prun, st) {
       var lp = litProg[prun.id];
       if (!lp || !lp.steps || !lp.steps.length) return null;
       var steps = lp.steps.slice().sort(function (a, b) { return (a.step || 0) - (b.step || 0); });
       var s1 = steps.filter(function (s) { return s.step === 1; })[0] || steps[0];
       var found = (s1 && (s1.total || s1.cursor)) || 0;   // papers the search returned (step-1 corpus size)
-      var act = steps.filter(function (s) { return s.status === 'running'; })[0] || steps.filter(function (s) { return s.status !== 'done'; })[0] || steps[steps.length - 1];
+      var act = steps.filter(function (s) { return s.status === 'running'; })[0];   // the step being screened right now (if any)
+      // deepest screening step (1–3) already done → its include count is the current funnel result to show when idle/done
+      var doneScreen = steps.filter(function (s) { return s.step <= 3 && s.status === 'done' && s.counts && s.counts.include != null; });
+      var deepest = doneScreen.length ? doneScreen[doneScreen.length - 1] : null;
       var c = (act && act.counts) || {}, cur = (act && act.cursor) || 0, tot = (act && act.total) || 0;
-      var pctB = tot ? Math.round(cur / tot * 100) : (st === 'done' ? 100 : 0);
-      return h('div', { className: 'apg-lit' + (st === 'running' ? ' live' : '') },
-        h('div', { className: 'apg-lit-top' },
-          h('span', { className: 'apg-lit-step' }, st === 'running' ? h('span', { className: 'apg-lit-dot' }) : null, LIT_KIND_LAB[act && act.kind] || 'Keresés'),
-          tot ? h('span', { className: 'apg-lit-frac mono' }, cur + ' / ' + tot) : null),
-        tot ? h('div', { className: 'apg-lit-bar' }, h('i', { style: { width: pctB + '%' } })) : null,
+      var pctB = tot ? Math.round(cur / tot * 100) : 0;
+      var inclNow = (act && c.include != null) ? c.include : (deepest ? deepest.counts.include : null);
+      return h('div', { className: 'apg-lit' + (act ? ' live' : '') },
+        act ? h('div', { className: 'apg-lit-top' },
+          h('span', { className: 'apg-lit-step' }, h('span', { className: 'apg-lit-dot' }), LIT_KIND_LAB[act.kind] || 'Szűrés'),
+          tot ? h('span', { className: 'apg-lit-frac mono' }, cur + ' / ' + tot) : null) : null,
+        (act && tot) ? h('div', { className: 'apg-lit-bar' }, h('i', { style: { width: pctB + '%' } })) : null,
         h('div', { className: 'apg-lit-chips' },
           found ? h('span', { className: 'apg-lit-chip find', title: 'Keresési találatok' }, '🔎 ' + found) : null,
-          (c.include != null) ? h('span', { className: 'apg-lit-chip inc', title: 'Beválasztva' }, '✓ ' + c.include) : null,
-          (c.maybe != null) ? h('span', { className: 'apg-lit-chip may', title: 'Bizonytalan' }, '~ ' + c.maybe) : null,
-          (c.exclude != null) ? h('span', { className: 'apg-lit-chip exc', title: 'Kizárva' }, '✕ ' + c.exclude) : null));
+          (inclNow != null) ? h('span', { className: 'apg-lit-chip inc', title: 'Beválasztva' }, '✓ ' + inclNow) : null,
+          (act && c.maybe != null) ? h('span', { className: 'apg-lit-chip may', title: 'Bizonytalan' }, '~ ' + c.maybe) : null,
+          (act && c.exclude != null) ? h('span', { className: 'apg-lit-chip exc', title: 'Kizárva' }, '✕ ' + c.exclude) : null));
     }
     function downMini(prun, p, last) {
-      var st = p.status, isRev = p.key === 'sr', revDone = isRev && st === 'done';
+      var st = p.status;
       var bd = st === 'done' ? '✓' : st === 'running' ? 'fut' : st === 'gate' ? '⏸' : st === 'skipped' ? '–' : '·';
+      var action;   // some phases expose a preview affordance once they have output; others just show a status badge
+      if (p.key === 'sr' && st === 'done') action = h('button', { className: 'apg-mini-read', onClick: function () { openReviewPreview(prun); } }, 'Olvasás');
+      else if (p.key === 'gap' && st === 'done') action = h('button', { className: 'apg-mini-read gap', onClick: function () { openGapPreview(prun); } }, 'Rések');
+      else if (p.key === 'protocol' && (st === 'done' || st === 'gate')) action = h('button', { className: 'apg-mini-read proto', onClick: function () { openProtocolPreview(prun); } }, 'Feladatok');
+      else action = h('span', { className: 'apg-mini-badge ' + (st === 'gate' ? 'gate' : st) }, bd);
       return h('div', { className: 'apg-mini-wrap', key: p.key },
         h('div', { className: 'apg-mini ' + st, style: { '--hue': hueOf(p.key) } },
           h('span', { className: 'apg-mini-ic' }, AP_ICON[p.key] || '•'),
           h('span', { className: 'apg-mini-lab' }, p.label),
-          revDone ? h('button', { className: 'apg-mini-read', onClick: function () { openReviewPreview(prun); } }, 'Olvasás') : h('span', { className: 'apg-mini-badge ' + (st === 'gate' ? 'gate' : st) }, bd)),
+          action),
         p.key === 'literature' ? litMini(prun, st) : null,
         last ? null : h('div', { className: 'apg-conn' + (st === 'done' ? ' done' : (st === 'running' || st === 'gate') ? ' run' : '') }));
     }
@@ -1203,7 +1261,38 @@
           h('div', { className: 'ap-pv-b report-doc', dangerouslySetInnerHTML: { __html: mdSafe(preview.content || '') } }),
           h('div', { className: 'ap-pv-f' },
             h('button', { className: 'btn sm', onClick: function () { try { navigator.clipboard.writeText(preview.content || ''); toast('Vágólapra másolva', true); } catch (e) { } } }, 'Másolás (Markdown)'),
-            h('button', { className: 'btn pri sm', onClick: function () { setPreview(null); } }, 'Bezárás')))) : null);
+            h('button', { className: 'btn pri sm', onClick: function () { setPreview(null); } }, 'Bezárás')))) : null,
+      // Protocol task-cards modal: every generated protocol step as its own card with its main metadata.
+      protoPv ? h('div', { className: 'ap-pv-scrim', onClick: function () { setProtoPv(null); } },
+        h('div', { className: 'ap-pv proto', onClick: function (e) { e.stopPropagation(); } },
+          h('div', { className: 'ap-pv-h' }, h('b', null, '🧪 ' + (protoPv.title || 'Protokoll-feladatok')), h('button', { className: 'ap-pv-x', 'aria-label': 'Bezárás', onClick: function () { setProtoPv(null); } }, '×')),
+          protoPv.loading
+            ? h('div', { className: 'ap-pv-b', style: { textAlign: 'center', padding: '30px' } }, h('span', { className: 'spin' }))
+            : h('div', { className: 'ap-pv-b' },
+              protoPv.goal ? h('div', { className: 'apg-proto-goal' }, protoPv.goal) : null,
+              h('div', { className: 'apg-proto-meta' }, (protoPv.steps || []).length + ' feladat generálva'),
+              (protoPv.steps || []).length
+                ? h('div', { className: 'apg-proto-grid' }, protoPv.steps.map(function (s) {
+                  var spec = s.spec || {}, kd = PROTO_KIND[s.kind] || { ic: '•', lab: s.kind || 'lépés' };
+                  var instr = spec.instruction || '';
+                  return h('div', { className: 'apg-tcard', key: s.id },
+                    h('div', { className: 'apg-tcard-h' },
+                      h('span', { className: 'apg-tcard-ord' }, s.ord),
+                      h('span', { className: 'apg-tcard-t' }, s.title || 'Feladat'),
+                      h('span', { className: 'apg-tcard-st ' + (s.status || 'todo') }, PROTO_ST[s.status] || s.status || 'todo')),
+                    h('div', { className: 'apg-tcard-tags' },
+                      h('span', { className: 'apg-tag kind' }, kd.ic + ' ' + kd.lab),
+                      (spec.est_minutes != null) ? h('span', { className: 'apg-tag' }, '⏱ ' + spec.est_minutes + ' perc') : null,
+                      s.needs_approval ? h('span', { className: 'apg-tag appr' }, '⏸ jóváhagyás kell') : null,
+                      (s.depends_on && s.depends_on.length) ? h('span', { className: 'apg-tag dep' }, '⇠ függ: ' + s.depends_on.join(', ')) : null),
+                    instr ? h('div', { className: 'apg-tcard-desc' }, String(instr).slice(0, 300) + (String(instr).length > 300 ? '…' : '')) : null,
+                    (spec.acceptance && spec.acceptance.length) ? h('div', { className: 'apg-tcard-acc' }, h('b', null, '✔ Elfogadás: '), spec.acceptance.slice(0, 3).join(' · ')) : null,
+                    (spec.expected_outputs && spec.expected_outputs.length) ? h('div', { className: 'apg-tcard-out' }, h('b', null, '⤷ Kimenet: '), spec.expected_outputs.slice(0, 4).map(function (o) { return h('code', { key: o }, o); })) : null);
+                }))
+                : h('div', { className: 'ap-pc-dempty' }, 'Ehhez a szálhoz még nincs generált protokoll-feladat.')),
+          h('div', { className: 'ap-pv-f' },
+            h('a', { className: 'btn sm', href: 'Research.html?project=' + encodeURIComponent(run.project_id), target: '_blank', rel: 'noopener' }, 'Protocol-fül megnyitása ↗'),
+            h('button', { className: 'btn pri sm', onClick: function () { setProtoPv(null); } }, 'Bezárás')))) : null);
   }
 
   // (A) the user's running + previous Autopilots — surfaced above the Launcher so a closed run is always findable

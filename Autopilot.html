@@ -15,7 +15,7 @@
       --ok:#0f7a4a; --ok-bg:#e3f5ec; --warn:#8f5407; --warn-bg:#fbefdb; --danger:#c0355e; --danger-bg:#fce9ef;
       --shadow:0 1px 2px rgba(20,26,40,.05), 0 10px 30px -22px rgba(20,26,40,.45);
       /* process-graph phase spectrum */
-      --h-brief:#5a6379; --h-idea:#d8912f; --h-lit:#3f7fe6; --h-rev:#159e8f; --h-proto:#8b6ff0; --h-jrnl:#c99017; --h-write:#2fa869; --h-sub:#1aa6b3;
+      --h-brief:#5a6379; --h-idea:#d8912f; --h-lit:#3f7fe6; --h-gap:#c8568c; --h-rev:#159e8f; --h-proto:#8b6ff0; --h-jrnl:#c99017; --h-write:#2fa869; --h-sub:#1aa6b3;
     }
     * { box-sizing:border-box; }
     html,body { margin:0; min-height:100%; }
@@ -36,7 +36,7 @@
     /* dark tokens theme.js does not set for this page + white-on-accent fix: theme.js dark --accent (~#8b93f8) drops
        white text below 4.5:1, so pin every white-on-accent surface to the darker #4f46e5 (≈6.3:1), matching the .me bubble. */
     html.dark { --line-2:#333c52; --ok:#43b483; --ok-bg:#173a2b; --warn:#d69a3f; --warn-bg:#3a2c14; --danger:#e8688c; --danger-bg:#3a1622;
-      --h-brief:#8892ac; --h-idea:#e6a94e; --h-lit:#6ba4ff; --h-rev:#3fc7b6; --h-proto:#a993f7; --h-jrnl:#e0b048; --h-write:#54c78a; --h-sub:#3fc9d6; }
+      --h-brief:#8892ac; --h-idea:#e6a94e; --h-lit:#6ba4ff; --h-gap:#e784b6; --h-rev:#3fc7b6; --h-proto:#a993f7; --h-jrnl:#e0b048; --h-write:#54c78a; --h-sub:#3fc9d6; }
     html.dark .ap-gobtn, html.dark .ap-csend, html.dark .ap-launch, html.dark .ap-st.on .n, html.dark .ap-sw.on { background:#4f46e5; border-color:#4f46e5; }
     html.dark .ap-gobtn:hover, html.dark .ap-csend:hover, html.dark .ap-launch:hover { background:#4338ca; }
     .btn.sm { height:30px; padding:0 11px; font-size:12px; border-radius:9px; }
@@ -338,6 +338,32 @@
     .ap-pv-b a { color:var(--accent); } .ap-pv-b code { font-family:ui-monospace,Menlo,monospace; font-size:12.5px; background:var(--surface-2); padding:1px 5px; border-radius:5px; }
     .ap-pv-b table { border-collapse:collapse; width:100%; margin:12px 0; font-size:13px; } .ap-pv-b th,.ap-pv-b td { border:1px solid var(--line); padding:6px 10px; text-align:left; }
     .ap-pv-f { display:flex; justify-content:flex-end; gap:8px; padding:13px 20px; border-top:1px solid var(--line); flex:none; }
+    /* Protocol task-cards modal — one card per generated protocol step with its metadata */
+    .ap-pv.proto { width:900px; }
+    .apg-proto-goal { font-size:12.5px; color:var(--muted); font-style:italic; padding:10px 12px; background:var(--surface-2); border-radius:10px; margin-bottom:12px; }
+    .apg-proto-meta { font-size:11.5px; font-weight:800; text-transform:uppercase; letter-spacing:.4px; color:var(--h-proto); margin-bottom:10px; }
+    .apg-proto-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:12px; }
+    @media (max-width:680px){ .apg-proto-grid { grid-template-columns:1fr; } }
+    .apg-tcard { border:1px solid var(--line); border-left:3px solid var(--h-proto); border-radius:12px; padding:12px 13px; background:var(--surface); display:flex; flex-direction:column; gap:8px; }
+    .apg-tcard-h { display:flex; align-items:flex-start; gap:9px; }
+    .apg-tcard-ord { flex:none; width:22px; height:22px; border-radius:7px; display:grid; place-items:center; background:color-mix(in srgb,var(--h-proto) 15%,transparent); color:var(--h-proto); font-size:12px; font-weight:800; font-variant-numeric:tabular-nums; }
+    .apg-tcard-t { flex:1; min-width:0; font-size:13px; font-weight:700; color:var(--ink); line-height:1.35; }
+    .apg-tcard-st { flex:none; font-size:10px; font-weight:800; text-transform:uppercase; padding:2px 7px; border-radius:6px; background:var(--surface-3); color:var(--muted); }
+    .apg-tcard-st.done { background:var(--ok-bg); color:var(--ok); } .apg-tcard-st.running { background:var(--accent-tint); color:var(--accent); }
+    .apg-tcard-st.blocked, .apg-tcard-st.failed { background:var(--danger-bg); color:var(--danger); }
+    .apg-tcard-tags { display:flex; flex-wrap:wrap; gap:5px; }
+    .apg-tag { font-size:10.5px; font-weight:700; padding:2px 7px; border-radius:6px; background:var(--surface-2); color:var(--muted); border:1px solid var(--line); }
+    .apg-tag.kind { color:var(--h-proto); background:color-mix(in srgb,var(--h-proto) 12%,transparent); border-color:transparent; }
+    .apg-tag.appr { color:var(--warn); background:var(--warn-bg); border-color:transparent; }
+    .apg-tag.dep { color:var(--muted); font-variant-numeric:tabular-nums; }
+    .apg-tcard-desc { font-size:12px; line-height:1.55; color:var(--muted); }
+    .apg-tcard-acc { font-size:11.5px; line-height:1.5; color:var(--ink); } .apg-tcard-acc b { color:var(--ok); }
+    .apg-tcard-out { font-size:11px; line-height:1.8; color:var(--muted); } .apg-tcard-out b { color:var(--ink); }
+    .apg-tcard-out code { font-family:ui-monospace,Menlo,monospace; font-size:10.5px; background:var(--surface-2); padding:1px 5px; border-radius:5px; margin-right:5px; }
+    .apg-mini-read.gap { color:var(--h-gap); background:color-mix(in srgb,var(--h-gap) 14%,transparent); }
+    .apg-mini-read.gap:hover { background:color-mix(in srgb,var(--h-gap) 24%,transparent); }
+    .apg-mini-read.proto { color:var(--h-proto); background:color-mix(in srgb,var(--h-proto) 14%,transparent); }
+    .apg-mini-read.proto:hover { background:color-mix(in srgb,var(--h-proto) 24%,transparent); }
     .ap-pc-ic { font-size:20px; width:26px; text-align:center; flex:none; }
     .ap-pc-b { flex:1; min-width:0; }
     .ap-pc-top { display:flex; align-items:center; gap:10px; } .ap-pc-n { font-size:14px; font-weight:700; flex:1; }
@@ -370,9 +396,9 @@
     .ap-toast.show { opacity:1; transform:translate(-50%,0); } .ap-toast.err { background:#8a1a12; }
     @media (prefers-reduced-motion:reduce){ .ap-toast { transition:none; } }
   </style>
-  <script src="theme.js?v=1786169228"></script>
-  <script src="nav.js?v=1786169228"></script>
-  <script src="entitlements.js?v=1786169228"></script>
+  <script src="theme.js?v=1786169918"></script>
+  <script src="nav.js?v=1786169918"></script>
+  <script src="entitlements.js?v=1786169918"></script>
 </head>
 
 <body>
@@ -385,13 +411,13 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
-  <script src="backend/config.js?v=1786169228"></script>
-  <script src="auth.js?v=1786169228"></script>
-  <script src="backend.js?v=1786169228"></script>
-  <script src="autopilot.js?v=1786169228"></script>
+  <script src="backend/config.js?v=1786169918"></script>
+  <script src="auth.js?v=1786169918"></script>
+  <script src="backend.js?v=1786169918"></script>
+  <script src="autopilot.js?v=1786169918"></script>
 
-  <script src="build.js?v=1786169228"></script>
-  <script src="version-badge.js?v=1786169228"></script>
+  <script src="build.js?v=1786169918"></script>
+  <script src="version-badge.js?v=1786169918"></script>
 </body>
 
 </html>
