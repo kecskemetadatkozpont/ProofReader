@@ -12121,7 +12121,7 @@
     ) : null;
     var body;
     if (sel) {
-      var initTab = (function () { try { var sp = new URLSearchParams(location.search); return (sp.get('step') && sp.get('project') === sel.id) ? 'protocol' : null; } catch (e) { return null; } })();
+      var initTab = (function () { try { var sp = new URLSearchParams(location.search); if (sp.get('tab') && sp.get('project') === sel.id) return sp.get('tab'); return (sp.get('step') && sp.get('project') === sel.id) ? 'protocol' : null; } catch (e) { return null; } })();
       body = h(ProjectDetail, { project: sel, initTab: initTab, me: me, log: props.detail.log, tasks: props.detail.tasks, ideas: props.detail.ideas, sources: props.detail.sources, datasets: props.detail.datasets, jobs: props.detail.jobs, studies: props.detail.studies, loading: props.detail.loading, canEdit: props.canEdit(sel), viewerId: meId, fileOwnerId: meId, studentName: (studentById[sel.student_id] && studentById[sel.student_id].name) || null, authorId: props.authorId, myEmail: props.me.email, onBack: props.onBack, onChanged: props.refreshAll });
     } else if (board) {
       body = h(GlobalBoard, { projects: props.projects, canEditProject: props.canEdit, onOpenProject: props.openProject });
