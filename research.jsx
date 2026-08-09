@@ -4503,8 +4503,10 @@
       if (!stepActive) { for (var _sj = 1; _sj <= 4; _sj++) { if (((stepRow(_sj) || {}).status) !== 'done') { stepActive = _sj; break; } } }
     }
     return h('div', null,
+      // extraction questions the screening answers INLINE (visible whether or not a study is open)
+      h(ExtractQEditor, { projectId: props.projectId, canEdit: props.canEdit, authorId: props.authorId }),
       // studies overview — every study with its progress + status; click to open one. Lets you follow several.
-      h('div', { style: { marginBottom: 12 } },
+      h('div', { style: { marginBottom: 12, marginTop: 12 } },
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5 } },
           h('div', { style: { fontSize: 11.5, color: 'var(--faint)', textTransform: 'uppercase', letterSpacing: '.04em' } }, 'Studies (' + studies.length + ')'),
           h('button', { className: 'btn', style: { marginLeft: 'auto', padding: '3px 9px', fontSize: 11.5, flex: 'none' }, onClick: function () { setStudiesOpen(true); } }, '📚 View studies')),
@@ -11224,7 +11226,7 @@
 
     return h('div', { className: 'ex-wrap' },
       h('div', { className: 'ex-head' },
-        h('div', null, h('h2', { className: 'ex-title' }, '🔎 Kivonatolás'), h('div', { className: 'ex-sub' }, 'Tegyél fel kérdéseket — a rendszer minden included cikk full-textjéből és ábráiból, idézettel alátámasztva megválaszolja őket.')),
+        h('div', null, h('h2', { className: 'ex-title' }, '🔎 Kivonatolás'), h('div', { className: 'ex-sub' }, 'Tegyél fel kérdéseket — a rendszer minden included cikk full-textjéből és ábráiból, idézettel alátámasztva megválaszolja őket. Az itt megadott kérdéseket a szűrés (Studies / keyword-funnel) is automatikusan megválaszolja, amint egy cikk átjut a screeningen.')),
         h('div', { className: 'ex-prog' }, totalN ? h(React.Fragment, null, h('b', null, doneN), ' / ' + totalN + ' cella' + (runN ? ' · ' + runN + ' fut' : '')) : null)),
       !srcs.length
         ? h('div', { className: 'ex-onboard' }, h('div', { className: 'ex-ob-ic' }, '📚'), h('h3', null, 'Nincs még included cikk'), h('p', null, 'A kivonatolás az Irodalom „included" cikkein dolgozik. Előbb szűrj le cikkeket (Studies / Irodalom), majd itt kérdezhetsz róluk.'))
