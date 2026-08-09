@@ -4254,7 +4254,18 @@
     var paS = useState([]), papers = paS[0], setPapers = paS[1];
     var plpS = useState(true), papersLoading = plpS[0], setPapersLoading = plpS[1];   // #5: true until the study's papers fetch resolves
     var cuS = useState(1), curStep = cuS[0], setCurStep = cuS[1];
+    var qfS = useState(false), showQF = qfS[0], setShowQF = qfS[1];   // Kérdésműhely (questions-first study) — native funnel, NOT gated by elicit_sysreview
     var cfS = useState(lsDefaultConfig(1, props.project)), cfg = cfS[0], setCfg = cfS[1];
+    // the questions-first entry + overlay, mounted in the native keyword funnel (so it shows regardless of the Elicit entitlement)
+    function qfBlock() {
+      return h(React.Fragment, null,
+        props.canEdit ? h('div', { className: 'qf-entry' },
+          h('div', { className: 'qf-entry-t' }, h('span', { className: 'qf-entry-ic' }, '❓'),
+            h('div', null, h('b', null, 'Indulj kérdésekből'),
+              h('div', { className: 'qf-entry-s' }, 'Írj be 1–12 kérdést — a rendszer felépít egy irodalmi tanulmányt, és minden kérdésre cikkenként választ ad, idézettel.'))),
+          h('button', { className: 'qf-entry-btn', onClick: function () { setShowQF(true); } }, '❓ Kérdésekből indítok →')) : null,
+        showQF ? h(QuestionsFirstWizard, { projectId: props.projectId, project: props.project, canEdit: props.canEdit, authorId: props.authorId, lang: (props.project && props.project.language === 'hu' ? 'hu' : 'en'), onClose: function () { setShowQF(false); }, onChanged: props.onChanged, onOpenStudy: function (sid) { setSelId(sid); setCurStep(1); } }) : null);
+    }
     var rnS = useState(false), running = rnS[0], setRunning = rnS[1];
     var pgS = useState(null), prog = pgS[0], setProg = pgS[1];
     var ttS = useState({}), titles = ttS[0], setTitles = ttS[1];
@@ -4479,6 +4490,7 @@
         props.canEdit ? h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginTop: 10 } },
           h('button', { className: 'btn', disabled: planning, title: 'Ötletek nélküli, kézi kulcsszó-szűrés indítása', onClick: function () { newStudy(null); } }, '+ Üres study (kézi kulcsszó-szűrés)')
         ) : h('div', { style: { fontSize: 13, color: 'var(--faint)' } }, 'Read-only view.'),
+        qfBlock(),
         h(ExtractQEditor, { projectId: props.projectId, canEdit: props.canEdit, authorId: props.authorId }),
         err ? h('div', { style: { color: 'var(--danger)', fontSize: 12.5, marginTop: 8 } }, err) : null);
     }
@@ -4513,6 +4525,7 @@
       if (!stepActive) { for (var _sj = 1; _sj <= 4; _sj++) { if (((stepRow(_sj) || {}).status) !== 'done') { stepActive = _sj; break; } } }
     }
     return h('div', null,
+      qfBlock(),
       // extraction questions the screening answers INLINE (visible whether or not a study is open)
       h(ExtractQEditor, { projectId: props.projectId, canEdit: props.canEdit, authorId: props.authorId }),
       // studies overview — every study with its progress + status; click to open one. Lets you follow several.
