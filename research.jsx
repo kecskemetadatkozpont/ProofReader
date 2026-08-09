@@ -3522,6 +3522,7 @@
     var jsS = useState(null), jobs = jsS[0], setJobs = jsS[1];
     var sjS = useState(null), selJob = sjS[0], setSelJob = sjS[1];   // selected review in the master-detail workspace (New design, direction B)
     var openFormS = useState(false), openForm = openFormS[0], setOpenForm = openFormS[1];
+    var qfS = useState(false), showQF = qfS[0], setShowQF = qfS[1];   // Kérdésműhely (questions-first study) overlay
     var fS = useState({ q: '', protocol: '', abs: [], ft: [], ex: [], exclude: [], gen: true, genAbs: true, genEx: true, useFig: false, runFT: true, maxResults: '1000' }), f = fS[0], setF = fS[1];
     var buS = useState(false), busy = buS[0], setBusy = buS[1];
     var erS = useState(''), err = erS[0], setErr = erS[1];
@@ -4048,6 +4049,13 @@
                     : (!rs.running ? h('button', { className: 'btn' + (rs.done ? '' : ' pri'), style: { padding: '4px 11px', fontSize: 11.5, whiteSpace: 'nowrap' }, disabled: busy || !props.canEdit, title: rs.done ? 'Új review futtatása' : 'Review indítása (Elicit → automatikus backup)', onClick: launchIt }, rs.done ? '↻ Újra' : '▶ Review') : null)));
             })) : h('div', { style: { fontSize: 11.5, color: 'var(--muted)' } }, 'Jelölj ki ötleteket az Ötletek fülön („Select"), hogy review-t indíthass belőlük — Elicittel, vagy ha az nem elérhető, a beépített szűréssel.'));
         })(),
+        // ALT. belépő: Kérdésekből (questions-first) — a rendszer a kérdésekből épít egy szűrési folyamatot + válaszol rájuk
+        canView ? h('div', { className: 'qf-entry' },
+          h('div', { className: 'qf-entry-t' }, h('span', { className: 'qf-entry-ic' }, '❓'),
+            h('div', null, h('b', null, 'Nincs kész ötleted? Indulj kérdésekből.'),
+              h('div', { className: 'qf-entry-s' }, 'Írj be 1–12 kérdést — a rendszer felépít egy irodalmi tanulmányt, és minden kérdésre cikkenként választ ad, idézettel.'))),
+          h('button', { className: 'qf-entry-btn', disabled: !props.canEdit, title: props.canEdit ? null : 'Csak szerkesztő indíthat', onClick: function () { setShowQF(true); } }, '❓ Kérdésekből indítok →')) : null,
+        showQF ? h(QuestionsFirstWizard, { projectId: props.projectId, project: props.project, canEdit: props.canEdit, authorId: props.authorId, lang: (props.project && props.project.language === 'hu' ? 'hu' : 'en'), onClose: function () { setShowQF(false); }, onChanged: props.onChanged, onOpenStudy: props.onOpenStudy }) : null,
         backupEl(),
         // STEP 2 — Review-k & eredmény (numbered process spine)
         stepHd(2, 'Review-k & eredmény', 'egy lista: futó + kész · nyisd meg a részletekért'),
@@ -4145,7 +4153,9 @@
       h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
         h('h3', { style: { margin: 0, flex: 1 } }, '🔬 Systematic Review Studio ', h('span', { style: { fontSize: 11.5, color: 'var(--faint)', fontWeight: 400 } }, '· from your Ideas → PRISMA')),
         canCreate ? h('button', { className: 'btn pri', style: { padding: '5px 11px', fontSize: 12.5 }, disabled: gen, onClick: generate }, gen ? '✨ Generating…' : '✨ Generate from Ideas') : null,
-        canCreate ? h('button', { className: 'btn', style: { padding: '5px 11px', fontSize: 12.5 }, onClick: function () { fromCand.current = null; if (openForm) { setOpenForm(false); } else { setF({ q: '', protocol: '', abs: [], ft: [], ex: [], exclude: [], gen: true, genAbs: true, genEx: true, useFig: false, runFT: true, maxResults: '1000' }); setOpenForm(true); } } }, openForm ? 'Cancel' : '+ Manual review') : null),
+        canCreate ? h('button', { className: 'btn', style: { padding: '5px 11px', fontSize: 12.5 }, onClick: function () { fromCand.current = null; if (openForm) { setOpenForm(false); } else { setF({ q: '', protocol: '', abs: [], ft: [], ex: [], exclude: [], gen: true, genAbs: true, genEx: true, useFig: false, runFT: true, maxResults: '1000' }); setOpenForm(true); } } }, openForm ? 'Cancel' : '+ Manual review') : null,
+        props.canEdit ? h('button', { className: 'btn', style: { padding: '5px 11px', fontSize: 12.5 }, title: 'Kérdésekből épít egy irodalmi tanulmányt', onClick: function () { setShowQF(true); } }, '❓ Kérdésekből') : null),
+        showQF ? h(QuestionsFirstWizard, { projectId: props.projectId, project: props.project, canEdit: props.canEdit, authorId: props.authorId, lang: (props.project && props.project.language === 'hu' ? 'hu' : 'en'), onClose: function () { setShowQF(false); }, onChanged: props.onChanged, onOpenStudy: props.onOpenStudy }) : h('span', { style: { display: 'none' } }),
       err ? h('div', { style: { fontSize: 12.5, color: /^✓/.test(err) ? 'var(--ok, #15803d)' : 'var(--danger, #b42318)', margin: '6px 0' } }, err) : null,
       backupEl(),
       // review-question cards from Ideas
@@ -11098,8 +11108,175 @@
       qs.length ? h('div', { className: 'ex-funnel-tags' }, qs.map(function (q) { return h('span', { className: 'ex-funnel-tag', key: q.id }, q.text, canEdit ? h('span', { className: 'x', title: 'Törlés', onClick: function () { del(q); } }, '×') : null); })) : h('div', { className: 'ex-funnel-empty' }, 'Nincs kérdés — adj hozzá, vagy hagyd üresen (a szűrés kérdések nélkül is fut).'),
       canEdit ? h('div', { className: 'ex-funnel-tpl' }, EX_TEMPLATES.slice(0, 4).map(function (t, i) { return h('button', { className: 'ex-tpl', key: i, onClick: function () { add(t.text); } }, '＋ ' + t.text); })) : null);
   }
+  // ═══ Kérdésműhely — questions-first literature study: ask N questions → an editable AI-derived funnel plan → one
+  //     combined native OpenAlex study whose screening answers each question per paper inline (reuses plan_preview +
+  //     the native funnel + the extraction tables). A 3-step overlay: Kérdések → Terv → Futtatás (élő mátrix).
+  function QuestionsFirstWizard(props) {
+    var pid = props.projectId, project = props.project || {}, canEdit = props.canEdit;
+    var stS = useState(1), step = stS[0], setStep = stS[1];
+    var qsS = useState([]), qs = qsS[0], setQs = qsS[1];              // [{text, answer_type, source_mode}]
+    var inS = useState(''), inp = inS[0], setInp = inS[1];
+    var planS = useState(null), plan = planS[0], setPlan = planS[1];  // editable derived plan (step 2)
+    var kwS = useState(''), kwIn = kwS[0], setKwIn = kwS[1];
+    var bS = useState(false), busy = bS[0], setBusy = bS[1];
+    var eS = useState(''), err = eS[0], setErr = eS[1];
+    var sidS = useState(null), sid = sidS[0], setSid = sidS[1];       // created study id (step 3)
+    var alive = useRef(true);
+    useEffect(function () { return function () { alive.current = false; }; }, []);
+    function norm() { return qs.map(function (q) { return Object.assign({}, q, { text: (q.text || '').trim() }); }).filter(function (q) { return q.text; }); }
+
+    function addQ(t, type, mode) { t = (t || inp || '').trim(); if (!t || qs.length >= 12) return; setQs(qs.concat([{ text: t.slice(0, 300), answer_type: type || 'text', source_mode: mode || 'both' }])); setInp(''); }
+    function delQ(i) { setQs(qs.filter(function (_x, k) { return k !== i; })); }
+    function setQField(i, k, v) { setQs(qs.map(function (q, idx) { return idx === i ? Object.assign({}, q, (function () { var o = {}; o[k] = v; return o; })()) : q; })); }
+
+    function toPlan() {
+      var n = norm(); if (!n.length) return;
+      setStep(2); setBusy(true); setErr('');
+      callStudy({ action: 'plan_preview', project_id: pid, questions: n }).then(function (d) {
+        if (!alive.current) return; setBusy(false);
+        if (d && d.error) { setErr('Terv-hiba: ' + d.error); return; }
+        var p = (d && d.plan) || {}, s1 = p.step1 || {}, s2 = p.step2 || {}, s3 = p.step3 || {};
+        setPlan({
+          title: String(n[0].text).slice(0, 80),
+          semantic_query: p.semantic_query || (d && d.joined_question) || n.map(function (q) { return q.text; }).join(' '),
+          keywords: (s1.keywords || []).map(String),
+          include: (s1.include || []).map(String), exclude: (s1.exclude || []).map(String),
+          step2_include: (s2.include || []).map(String), step2_exclude: (s2.exclude || []).map(String),
+          step3_include: (s3.include || []).map(String), step3_exclude: (s3.exclude || []).map(String),
+          filters: Object.assign({ fromYear: '', oa: false, journals: true }, s1.filters || {}),
+          maxResults: '1000', split: false,
+          joined_question: (d && d.joined_question) || n.map(function (q) { return q.text; }).join('\n\n'),
+        });
+      }, function () { if (alive.current) { setBusy(false); setErr('Hálózati hiba a tervezésnél.'); } });
+    }
+    function upPlan(k, v) { setPlan(Object.assign({}, plan, (function () { var o = {}; o[k] = v; return o; })())); }
+    function upFilter(k, v) { setPlan(Object.assign({}, plan, { filters: Object.assign({}, plan.filters, (function () { var o = {}; o[k] = v; return o; })()) })); }
+    function addKw(t) { t = (t || kwIn || '').trim(); if (!t) return; upPlan('keywords', (plan.keywords || []).concat([t])); setKwIn(''); }
+    function delKw(i) { upPlan('keywords', (plan.keywords || []).filter(function (_x, k) { return k !== i; })); }
+    function enhance() {
+      if (!plan || busy) return; setBusy(true);
+      callStudy({ action: 'sr_enhance', project_id: pid, question: plan.semantic_query || '' }).then(function (d) {
+        if (!alive.current) return; setBusy(false);
+        var s = d && d.suggestions; if (Array.isArray(s) && s[0]) upPlan('semantic_query', String(s[0]).slice(0, 340));
+      }, function () { if (alive.current) setBusy(false); });
+    }
+
+    function launch() {
+      if (!plan || busy) return;
+      var n = norm(); if (!n.length) { setErr('Adj meg legalább egy kérdést.'); return; }
+      setBusy(true); setErr('');
+      // COMBINED study (split → P2). Build the study + 4 steps with the EDITED config + N study-scoped extraction questions.
+      var studyQ = (plan.semantic_query ? plan.semantic_query + '\n\n' : '') + n.map(function (q) { return q.text; }).join('\n\n');
+      sb.from('research_studies').insert({ project_id: pid, idea_id: null, title: (plan.title || 'Kérdés-tanulmány').slice(0, 80), question: String(studyQ).slice(0, 4000), created_by: props.authorId }).select('id').maybeSingle().then(function (r) {
+        if (!alive.current) return;
+        var id = r && r.data && r.data.id;
+        if (!id) { setBusy(false); setErr('Nem sikerült létrehozni a tanulmányt' + (r && r.error ? ': ' + r.error.message : '.')); return; }
+        var s1cfg = { keywords: plan.keywords, include: plan.include, exclude: plan.exclude, filters: { fromYear: plan.filters.fromYear || '', minCites: '', oa: !!plan.filters.oa, journals: plan.filters.journals !== false }, signals: ['has_github', 'has_dataset'], source_adapter: 'openalex', max_results: parseInt(plan.maxResults, 10) || 1000, semantic_query: String(plan.semantic_query || '').slice(0, 350) };
+        var mk = function (inc, exc) { return { keywords: [], include: inc || [], exclude: exc || [], filters: {}, signals: ['has_github', 'has_dataset'] }; };
+        var rows = [
+          { study_id: id, step: 1, kind: 'quick', config: s1cfg },
+          { study_id: id, step: 2, kind: 'abstract', config: mk(plan.step2_include, plan.step2_exclude) },
+          { study_id: id, step: 3, kind: 'fulltext', config: mk(plan.step3_include, plan.step3_exclude) },
+          { study_id: id, step: 4, kind: 'review', config: mk([], []) },
+        ];
+        // study + steps exist → land on the live run step and drive the native funnel (survives tab switches)
+        var proceed = function () {
+          if (!alive.current) return;
+          setSid(id); setStep(3); setBusy(false); if (props.onChanged) props.onChanged();
+          try { PRStudyRunner.runExisting({ sid: id, projectId: pid, authorId: props.authorId, title: plan.title || 'Kérdés-tanulmány', fromStage: 's1', onChanged: props.onChanged }); } catch (e) { }
+        };
+        sb.from('research_study_steps').insert(rows).then(function (sr) {
+          if (!alive.current) return;
+          if (sr && sr.error) { setBusy(false); setErr('Lépések mentése: ' + sr.error.message); return; }   // don't leave a stepless study running
+          var qrows = n.map(function (q, i) { return { project_id: pid, study_id: id, text: q.text.slice(0, 300), answer_type: q.answer_type || 'text', source_mode: q.source_mode || 'both', ord: i, created_by: props.authorId }; });
+          // the questions are the answered columns; if the write fails the study is still valid → proceed with a warning
+          sb.from('research_extraction_questions').insert(qrows).then(function (qr) {
+            if (qr && qr.error && alive.current) { try { window.PRUI.toast('A kérdés-oszlopok mentése nem sikerült (' + qr.error.message + ') — a szűrés lefut, a válaszokat a Kivonatolásban pótolhatod.', { kind: 'error' }); } catch (e) { } }
+            proceed();
+          }, function () { if (alive.current) { try { window.PRUI.toast('A kérdés-oszlopok mentése hálózati hiba miatt kimaradt — a szűrés nélkülük fut.', { kind: 'error' }); } catch (e) { } proceed(); } });
+        }, function () { if (alive.current) { setBusy(false); setErr('Hálózati hiba a lépések mentésekor — próbáld újra.'); } });   // BUG3: steps insert reject handler
+      }, function () { if (alive.current) { setBusy(false); setErr('Hálózati hiba a létrehozásnál.'); } });
+    }
+
+    function stepper() {
+      var S = [[1, 'Kérdések'], [2, 'Terv'], [3, 'Futtatás']];
+      return h('div', { className: 'qf-stepper' }, S.map(function (x, i) {
+        return h(React.Fragment, { key: x[0] },
+          i ? h('span', { className: 'qf-sep' }, '›') : null,
+          h('span', { className: 'qf-st' + (step === x[0] ? ' on' : step > x[0] ? ' done' : '') }, h('span', { className: 'qf-b' }, step > x[0] ? '✓' : x[0]), x[1]));
+      }));
+    }
+
+    function stepQuestions() {
+      return h('div', null,
+        h('div', { className: 'qf-lbl' }, 'Kérdéseid'),
+        h('div', { className: 'qf-inrow' },
+          h('input', { className: 'qf-inp', value: inp, autoFocus: true, placeholder: 'pl. Mekkora az adathalmaz mérete?', onChange: function (e) { setInp(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter') addQ(); } }),
+          h('button', { className: 'qf-add', disabled: !inp.trim() || qs.length >= 12, onClick: function () { addQ(); } }, '＋')),
+        qs.length ? h('div', { className: 'qf-qlist' }, qs.map(function (q, i) {
+          return h('div', { className: 'qf-qrow', key: i },
+            h('span', { className: 'qf-qi' }, i + 1),
+            h('span', { className: 'qf-qt' }, q.text),
+            h('span', { className: 'qf-seg' }, EX_TYPES.map(function (t) { return h('button', { key: t[0], className: q.answer_type === t[0] ? 'on' : '', onClick: function () { setQField(i, 'answer_type', t[0]); } }, t[1]); })),
+            h('span', { className: 'qf-seg' }, EX_MODES.map(function (m) { return h('button', { key: m[0], title: m[1], className: q.source_mode === m[0] ? 'on' : '', onClick: function () { setQField(i, 'source_mode', m[0]); } }, m[1].split(' ')[0]); })),
+            h('span', { className: 'qf-qx', title: 'Törlés', onClick: function () { delQ(i); } }, '×'));
+        })) : h('div', { className: 'qf-empty' }, 'Adj hozzá 1–12 kérdést. Ezekből épül a keresés, és ezekre kapsz cikkenként választ.'),
+        h('div', { className: 'qf-count' + (qs.length > 8 ? ' warn' : '') }, qs.length + ' / 12 kérdés' + (qs.length > 8 ? ' — 8 fölött a válaszok egy része lemaradhat (a Hiányzók pótlásával tölthető)' : '')),
+        h('div', { className: 'qf-lbl', style: { marginTop: 14 } }, 'Sablonok'),
+        h('div', { className: 'qf-tpls' }, EX_TEMPLATES.map(function (t, i) { return h('button', { className: 'qf-tpl', key: i, disabled: qs.length >= 12, onClick: function () { addQ(t.text, t.answer_type, t.source_mode); } }, '＋ ' + t.text); })),
+        h('div', { className: 'qf-foot' }, h('button', { className: 'qf-btn gho', onClick: props.onClose }, '‹ Mégse'), h('button', { className: 'qf-btn pri', disabled: !norm().length, onClick: toPlan }, 'Terv készítése →')));
+    }
+
+    function stepPlan() {
+      if (busy && !plan) return h('div', { className: 'qf-planbusy' }, h('span', { className: 'spin' }), ' A terv készül a kérdéseidből…');
+      if (!plan) return h('div', { className: 'qf-planbusy' }, err || 'A terv nem készült el.', h('button', { className: 'qf-btn', style: { marginLeft: 10 }, onClick: function () { setStep(1); } }, '‹ Vissza'));
+      var f = plan.filters || {};
+      return h('div', null,
+        h('div', { className: 'qf-pcard' }, h('div', { className: 'qf-ph' }, '📌 Téma / cím'), h('input', { className: 'qf-inp', value: plan.title, onChange: function (e) { upPlan('title', e.target.value); } })),
+        h('div', { className: 'qf-pcard' },
+          h('div', { className: 'qf-ph' }, '🔎 Kutatási kérdés (szűréshez)', h('button', { className: 'qf-e', disabled: busy, onClick: enhance }, busy ? '…' : '✨ Élesítés')),
+          h('textarea', { className: 'qf-ta', value: plan.semantic_query, onChange: function (e) { upPlan('semantic_query', e.target.value); } }),
+          h('div', { className: 'qf-hint' }, 'A kérdéseid közös keretezése — ez alapján dönt include/exclude-ot. Szabadon átírható.')),
+        h('div', { className: 'qf-pcard' },
+          h('div', { className: 'qf-ph' }, '🏷 Angol kulcsszavak'),
+          h('div', { className: 'qf-kws' }, (plan.keywords || []).map(function (k, i) { return h('span', { className: 'qf-kw', key: i }, k, h('span', { className: 'x', onClick: function () { delKw(i); } }, '×')); }),
+            h('input', { className: 'qf-kwin', value: kwIn, placeholder: '＋ kulcsszó', onChange: function (e) { setKwIn(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter') addKw(); } })),
+          (plan.keywords || []).length ? null : h('div', { className: 'qf-hint' }, '⚠ Üres — a keresés gyenge lesz; adj meg pár angol kulcsszót.')),
+        h('div', { className: 'qf-p2' },
+          h('div', { className: 'qf-pcard' }, h('div', { className: 'qf-ph' }, '✓ Beválogatási feltételek'), h(CritEditor, { items: plan.include, onChange: function (a) { upPlan('include', a); }, accent: '#16a34a', placeholder: 'pl. kvantitatív eredményt közöl', empty: 'Nincs feltétel.' })),
+          h('div', { className: 'qf-pcard' }, h('div', { className: 'qf-ph' }, '✕ Kizárási feltételek'), h(CritEditor, { items: plan.exclude, onChange: function (a) { upPlan('exclude', a); }, accent: '#dc2626', placeholder: 'pl. nincs gépi tanulási modell', empty: 'Nincs feltétel.' }))),
+        h('div', { className: 'qf-pcard' },
+          h('div', { className: 'qf-ph' }, '🎛 Szűrők'),
+          h('div', { className: 'qf-filters' },
+            h('label', null, 'Kezdő év ', h('input', { className: 'qf-num', value: f.fromYear || '', onChange: function (e) { upFilter('fromYear', e.target.value.replace(/[^0-9]/g, '').slice(0, 4)); } })),
+            h('label', null, h('input', { type: 'checkbox', checked: !!f.oa, onChange: function (e) { upFilter('oa', e.target.checked); } }), ' Csak Open Access'),
+            h('label', null, h('input', { type: 'checkbox', checked: f.journals !== false, onChange: function (e) { upFilter('journals', e.target.checked); } }), ' Csak folyóirat'),
+            h('label', null, 'Max. cikk ', h('input', { className: 'qf-num', value: plan.maxResults, onChange: function (e) { upPlan('maxResults', e.target.value.replace(/[^0-9]/g, '').slice(0, 5)); } })))),
+        h('div', { className: 'qf-pcard' },
+          h('div', { className: 'qf-ph' }, '✔ A megválaszolt oszlopok (a kérdéseid)'),
+          h('div', { className: 'qf-qprev' }, norm().map(function (q, i) { return h('span', { className: 'qf-qpre', key: i }, h('span', { className: 'm' }, EX_TYPE_BADGE[q.answer_type] || 'text'), q.text.length > 40 ? q.text.slice(0, 40) + '…' : q.text); }))),
+        h('div', { className: 'qf-engine' }, '🛠 Beépített OpenAlex-motor — minden kérdést a szűrés közben, idézettel válaszol meg.'),
+        err ? h('div', { className: 'qf-err' }, err) : null,
+        h('div', { className: 'qf-foot' }, h('button', { className: 'qf-btn gho', onClick: function () { setStep(1); } }, '‹ Vissza a kérdésekhez'), h('button', { className: 'qf-btn pri', disabled: busy, onClick: launch }, busy ? h(React.Fragment, null, h('span', { className: 'spin' }), ' Indítás…') : 'Kutatás indítása 🚀')));
+    }
+
+    function stepRun() {
+      return h('div', null,
+        h('div', { className: 'qf-runhd' }, '🚀 A szűrés fut — a bizonyíték-mátrix élőben töltődik. Nyugodtan válts fület, a futás a háttérben folytatódik.'),
+        sid ? h(ExtractPanel, { projectId: pid, studyId: sid, canEdit: canEdit, authorId: props.authorId, lang: props.lang }) : null,
+        h('div', { className: 'qf-foot' },
+          h('button', { className: 'qf-btn gho', onClick: props.onClose }, 'Bezárás'),
+          sid && props.onOpenStudy ? h('button', { className: 'qf-btn', onClick: function () { props.onOpenStudy(sid); if (props.onClose) props.onClose(); } }, 'Megnyitás a Tanulmányok között ↗') : null));
+    }
+
+    return h('div', { className: 'qf-scrim', onClick: function (e) { if (e.target === e.currentTarget && step !== 3) props.onClose(); } },
+      h('div', { className: 'qf-modal' },
+        h('div', { className: 'qf-head' }, h('b', null, '❓ Kérdésekből — új irodalmi tanulmány'), h('button', { className: 'qf-x', 'aria-label': 'Bezárás', onClick: props.onClose }, '×')),
+        stepper(),
+        h('div', { className: 'qf-body' }, step === 1 ? stepQuestions() : step === 2 ? stepPlan() : stepRun())));
+  }
   function ExtractPanel(props) {
-    var pid = props.projectId, lang = props.lang, canEdit = props.canEdit;
+    var pid = props.projectId, lang = props.lang, canEdit = props.canEdit, studyId = props.studyId || null;   // studyId set → the wizard's study-scoped matrix; null → the project Kivonatolás tab (project-scoped questions)
     var qS = useState(null), questions = qS[0], setQuestions = qS[1];   // null = loading
     var cS = useState({}), cells = cS[0], setCells = cS[1];             // key "qid:sid" → cell
     var sS = useState(null), sources = sS[0], setSources = sS[1];       // included rows
@@ -11131,15 +11308,37 @@
       })();
     }
     function load() {
-      sb.from('research_extraction_questions').select('*').eq('project_id', pid).order('ord', { ascending: true }).then(function (r) { if (alive.current) setQuestions((r && r.data) || []); });
-      sb.from('research_extraction_cells').select('*').eq('project_id', pid).then(function (r) {
-        var arr = (r && r.data) || [];
-        if (alive.current) { var m = {}; arr.forEach(function (c) { m[K(c.question_id, c.source_id)] = c; }); setCells(m); }
-        var extra = {}; arr.forEach(function (c) { extra[c.source_id] = 1; });
-        loadSources(Object.keys(extra));
-      }, function () { loadSources([]); });
+      // scope the questions: a study's matrix shows ONLY that study's questions; the project tab shows project-scoped
+      // (study_id NULL) questions. Cells + rows are then derived from EXACTLY those questions (consistent, no mixing).
+      var qq = sb.from('research_extraction_questions').select('*').eq('project_id', pid);
+      qq = studyId ? qq.eq('study_id', studyId) : qq.is('study_id', null);
+      qq.order('ord', { ascending: true }).then(function (r) {
+        var qs = (r && r.data) || []; if (alive.current) setQuestions(qs);
+        var qids = qs.map(function (q) { return q.id; });
+        if (!qids.length) { if (alive.current) setCells({}); loadSources([]); return; }
+        sb.from('research_extraction_cells').select('*').in('question_id', qids).then(function (cr) {
+          var arr = (cr && cr.data) || [];
+          if (alive.current) { var m = {}; arr.forEach(function (c) { m[K(c.question_id, c.source_id)] = c; }); setCells(m); }
+          var extra = {}; arr.forEach(function (c) { extra[c.source_id] = 1; });
+          loadSources(Object.keys(extra));
+        }, function () { loadSources([]); });
+      }, function () { if (alive.current) setQuestions([]); loadSources([]); });
     }
-    useEffect(function () { load(); }, [pid]);
+    useEffect(function () { load(); }, [pid, studyId]);
+    // the wizard's LIVE study matrix: the funnel fills cells during screening (background PRStudyRunner), so poll +
+    // reload on runner changes until the study run stops. The project tab (no studyId) loads once and doesn't poll.
+    useEffect(function () {
+      if (!studyId) return;
+      var settled = false;
+      var iv = setInterval(function () {
+        if (!alive.current) return;
+        load();
+        var running = (typeof PRStudyRunner !== 'undefined' && PRStudyRunner.isStudyRunning) ? PRStudyRunner.isStudyRunning(studyId) : true;
+        if (!running) { if (settled) { clearInterval(iv); } else { settled = true; } }   // one more load after it stops, then stop polling
+      }, 4500);
+      var unsub = (typeof PRStudyRunner !== 'undefined' && PRStudyRunner.subscribe) ? PRStudyRunner.subscribe(function () { if (alive.current) load(); }) : null;
+      return function () { clearInterval(iv); if (unsub) unsub(); };
+    }, [studyId]);
 
     // bounded-concurrency client-driven run — each cell is one research-extract call (survives nothing; the tab drives it)
     function runCells(list) {
@@ -11167,7 +11366,7 @@
     function addQuestion(text, type, mode) {
       if (!text || !text.trim() || !canEdit) return;
       var ord = (questions || []).length;
-      sb.from('research_extraction_questions').insert({ project_id: pid, text: text.trim(), answer_type: type, source_mode: mode, ord: ord, created_by: props.authorId }).select('*').maybeSingle().then(function (r) {
+      sb.from('research_extraction_questions').insert({ project_id: pid, study_id: studyId, text: text.trim(), answer_type: type, source_mode: mode, ord: ord, created_by: props.authorId }).select('*').maybeSingle().then(function (r) {
         if (r && r.error) { window.PRUI.toast(r.error.message, { kind: 'error' }); return; }
         var q = r.data; setQuestions(function (l) { return (l || []).concat([q]); }); setComposing(false);
         runCells((sources || []).map(function (s) { return { question_id: q.id, source_id: s.id }; }));

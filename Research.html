@@ -2131,12 +2131,69 @@
     .ex-funnel-tag .x { cursor: pointer; font-weight: 800; opacity: .6; } .ex-funnel-tag .x:hover { opacity: 1; }
     .ex-funnel-empty { font-size: 12.5px; color: var(--faint); margin-top: 9px; }
     .ex-funnel-tpl { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+    /* ═══ Kérdésműhely (questions-first study) ═══ */
+    .qf-entry { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; border: 1px solid color-mix(in srgb, #7c3aed 28%, var(--line)); border-radius: 12px; padding: 12px 15px; margin: 2px 0 10px; background: color-mix(in srgb, #7c3aed 5%, var(--surface)); }
+    .qf-entry-t { display: flex; align-items: center; gap: 11px; flex: 1; min-width: 220px; }
+    .qf-entry-ic { font-size: 22px; flex: none; }
+    .qf-entry-t b { font-size: 13px; } .qf-entry-s { font-size: 12px; color: var(--muted); margin-top: 2px; line-height: 1.45; }
+    .qf-entry-btn { flex: none; border: 0; border-radius: 10px; background: #7c3aed; color: #fff; font-family: inherit; font-size: 13px; font-weight: 700; padding: 9px 15px; cursor: pointer; }
+    .qf-entry-btn:hover:not(:disabled) { filter: brightness(1.07); } .qf-entry-btn:disabled { opacity: .5; cursor: default; }
+    .qf-scrim { position: fixed; inset: 0; z-index: 120; background: rgba(15,18,35,.5); display: flex; align-items: flex-start; justify-content: center; padding: 30px 18px; overflow-y: auto; }
+    .qf-modal { width: 780px; max-width: 100%; background: var(--surface); border: 1px solid var(--line-2); border-radius: 16px; box-shadow: 0 30px 70px -20px rgba(0,0,0,.5); display: flex; flex-direction: column; }
+    .qf-head { display: flex; align-items: center; gap: 12px; padding: 15px 20px; border-bottom: 1px solid var(--line); }
+    .qf-head b { flex: 1; font-size: 15.5px; } .qf-x { border: 0; background: transparent; color: var(--muted); font-size: 24px; line-height: 1; cursor: pointer; }
+    .qf-stepper { display: flex; align-items: center; gap: 7px; padding: 13px 20px 0; flex-wrap: wrap; }
+    .qf-st { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 700; color: var(--faint); }
+    .qf-st .qf-b { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; background: var(--surface-2); border: 1px solid var(--line); font-size: 11px; color: var(--muted); }
+    .qf-st.on { color: var(--ink); } .qf-st.on .qf-b { background: #7c3aed; border-color: #7c3aed; color: #fff; }
+    .qf-st.done { color: var(--muted); } .qf-st.done .qf-b { background: color-mix(in srgb, #7c3aed 16%, transparent); border-color: transparent; color: #7c3aed; }
+    .qf-sep { color: var(--faint); }
+    .qf-body { padding: 18px 20px; }
+    .qf-lbl { font-size: 11.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin-bottom: 8px; }
+    .qf-inrow { display: flex; gap: 8px; }
+    .qf-inp { flex: 1; min-width: 0; border: 1.5px solid var(--line); border-radius: 10px; padding: 9px 12px; font-family: inherit; font-size: 14px; background: var(--surface); color: var(--ink); }
+    .qf-inp:focus { outline: 0; border-color: #7c3aed; }
+    .qf-add { flex: none; width: 42px; border: 0; border-radius: 10px; background: #7c3aed; color: #fff; font-size: 19px; cursor: pointer; } .qf-add:disabled { opacity: .5; cursor: default; }
+    .qf-qlist { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+    .qf-qrow { display: flex; align-items: center; gap: 9px; border: 1px solid var(--line); border-left: 3px solid #7c3aed; border-radius: 11px; padding: 8px 11px; flex-wrap: wrap; }
+    .qf-qi { width: 20px; height: 20px; border-radius: 6px; display: grid; place-items: center; background: color-mix(in srgb, #7c3aed 14%, transparent); color: #7c3aed; font-size: 11px; font-weight: 800; flex: none; }
+    .qf-qt { flex: 1; min-width: 120px; font-size: 13.5px; font-weight: 600; overflow-wrap: anywhere; }
+    .qf-seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; flex: none; }
+    .qf-seg button { border: 0; background: var(--surface); color: var(--muted); font-family: inherit; font-size: 11px; font-weight: 650; padding: 4px 8px; border-right: 1px solid var(--line); cursor: pointer; }
+    .qf-seg button:last-child { border-right: 0; } .qf-seg button.on { background: color-mix(in srgb, #7c3aed 14%, transparent); color: #7c3aed; }
+    .qf-qx { color: var(--faint); font-weight: 800; cursor: pointer; flex: none; } .qf-qx:hover { color: var(--danger); }
+    .qf-empty { margin-top: 12px; font-size: 13px; color: var(--faint); }
+    .qf-count { font-size: 12px; color: var(--faint); margin-top: 8px; } .qf-count.warn { color: var(--warn); }
+    .qf-tpls { display: flex; flex-wrap: wrap; gap: 6px; }
+    .qf-tpl { font-size: 12px; font-weight: 600; color: var(--muted); background: var(--surface-2); border: 1px solid var(--line); border-radius: 999px; padding: 5px 11px; cursor: pointer; font-family: inherit; } .qf-tpl:hover:not(:disabled) { color: #7c3aed; border-color: #7c3aed; } .qf-tpl:disabled { opacity: .5; cursor: default; }
+    .qf-foot { display: flex; justify-content: space-between; gap: 10px; margin-top: 18px; flex-wrap: wrap; }
+    .qf-btn { border: 1px solid var(--line); background: var(--surface); color: var(--ink); font-family: inherit; font-size: 13.5px; font-weight: 700; border-radius: 10px; padding: 9px 15px; cursor: pointer; display: inline-flex; align-items: center; gap: 7px; }
+    .qf-btn.pri { background: #7c3aed; border-color: #7c3aed; color: #fff; } .qf-btn.pri:disabled { opacity: .55; cursor: default; } .qf-btn.gho { background: transparent; }
+    .qf-planbusy { display: flex; align-items: center; gap: 10px; color: var(--muted); padding: 30px 0; justify-content: center; }
+    .qf-pcard { border: 1px solid var(--line); border-radius: 12px; padding: 13px; margin-bottom: 12px; background: var(--surface); }
+    .qf-ph { font-size: 12px; font-weight: 800; color: var(--ink); margin-bottom: 9px; display: flex; align-items: center; gap: 8px; }
+    .qf-e { margin-left: auto; border: 0; background: transparent; color: #7c3aed; font-family: inherit; font-size: 11.5px; font-weight: 700; cursor: pointer; }
+    .qf-ta { width: 100%; min-height: 60px; border: 1.5px solid var(--line); border-radius: 10px; padding: 9px 11px; font-family: inherit; font-size: 13.5px; background: var(--surface); color: var(--ink); resize: vertical; } .qf-ta:focus { outline: 0; border-color: #7c3aed; }
+    .qf-hint { font-size: 11.5px; color: var(--faint); margin-top: 7px; }
+    .qf-kws { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    .qf-kw { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; border-radius: 7px; padding: 4px 9px; background: color-mix(in srgb, #7c3aed 12%, transparent); color: #7c3aed; } .qf-kw .x { cursor: pointer; font-weight: 800; opacity: .6; } .qf-kw .x:hover { opacity: 1; }
+    .qf-kwin { border: 1px dashed var(--line-2); border-radius: 7px; padding: 4px 9px; font-family: inherit; font-size: 12px; background: transparent; color: var(--ink); width: 130px; } .qf-kwin:focus { outline: 0; border-color: #7c3aed; }
+    .qf-p2 { display: grid; gap: 12px; } @media (min-width: 640px) { .qf-p2 { grid-template-columns: 1fr 1fr; } }
+    .qf-filters { display: flex; flex-wrap: wrap; gap: 16px; font-size: 12.5px; color: var(--muted); align-items: center; }
+    .qf-filters label { display: inline-flex; align-items: center; gap: 6px; }
+    .qf-num { width: 64px; border: 1px solid var(--line); border-radius: 7px; padding: 4px 8px; font-family: inherit; font-size: 12.5px; background: var(--surface); color: var(--ink); }
+    .qf-qprev { display: flex; flex-wrap: wrap; gap: 6px; }
+    .qf-qpre { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 600; border-radius: 8px; padding: 4px 9px; background: color-mix(in srgb, #7c3aed 10%, transparent); color: #7c3aed; }
+    .qf-qpre .m { font-size: 9px; font-weight: 800; text-transform: uppercase; background: color-mix(in srgb, #7c3aed 16%, transparent); border-radius: 4px; padding: 1px 4px; }
+    .qf-engine { display: flex; align-items: center; gap: 9px; font-size: 12.5px; color: var(--evd, #0d8f96); font-weight: 650; background: color-mix(in srgb, var(--evd, #0d8f96) 10%, transparent); border-radius: 9px; padding: 8px 12px; }
+    .qf-err { font-size: 12.5px; color: var(--danger); margin-top: 10px; }
+    .qf-runhd { font-size: 13px; color: var(--muted); background: color-mix(in srgb, #7c3aed 7%, var(--surface)); border: 1px solid color-mix(in srgb, #7c3aed 20%, var(--line)); border-radius: 10px; padding: 11px 13px; margin-bottom: 14px; line-height: 1.5; }
     .ex-hint { font-size: 13px; color: var(--muted); margin-top: 14px; padding: 12px 14px; background: var(--accent-tint); border-radius: 10px; }
     .ex-note { font-size: 12px; color: var(--faint); margin-top: 16px; line-height: 1.55; max-width: 80ch; }
   </style>
-  <script src="theme.js?v=1786272943"></script>
-  <script src="nav.js?v=1786272943"></script>
-  <script src="entitlements.js?v=1786272943"></script>
+  <script src="theme.js?v=1786276530"></script>
+  <script src="nav.js?v=1786276530"></script>
+  <script src="entitlements.js?v=1786276530"></script>
 </head>
 
 <body>
@@ -2148,24 +2205,24 @@
   <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
   <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="backend/config.js?v=1786272943"></script>
-  <script src="auth.js?v=1786272943"></script>
-  <script src="backend.js?v=1786272943"></script>
-  <script src="universities.js?v=1786272943"></script>
-  <script src="onboarding.js?v=1786272943"></script>
-  <script src="office.js?v=1786272943"></script>
-  <script src="publications.js?v=1786272943"></script>
+  <script src="backend/config.js?v=1786276530"></script>
+  <script src="auth.js?v=1786276530"></script>
+  <script src="backend.js?v=1786276530"></script>
+  <script src="universities.js?v=1786276530"></script>
+  <script src="onboarding.js?v=1786276530"></script>
+  <script src="office.js?v=1786276530"></script>
+  <script src="publications.js?v=1786276530"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/tus-js-client@4.1.0/dist/tus.min.js"></script>
-  <script type="text/babel" src="canvas.jsx?v=1786272943"></script>
-  <script type="text/babel" src="notes.jsx?v=1786272943"></script>
-  <script src="autopilot-core.js?v=1786272943"></script>
-  <script type="text/babel" src="research.jsx?v=1786272943"></script>
+  <script type="text/babel" src="canvas.jsx?v=1786276530"></script>
+  <script type="text/babel" src="notes.jsx?v=1786276530"></script>
+  <script src="autopilot-core.js?v=1786276530"></script>
+  <script type="text/babel" src="research.jsx?v=1786276530"></script>
 
-  <script src="build.js?v=1786272943"></script>
-  <script src="version-badge.js?v=1786272943"></script>
+  <script src="build.js?v=1786276530"></script>
+  <script src="version-badge.js?v=1786276530"></script>
 </body>
 
 </html>

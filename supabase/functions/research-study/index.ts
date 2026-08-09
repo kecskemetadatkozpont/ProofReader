@@ -352,6 +352,28 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const action = String(body.action || '');
 
+    // ---- plan_preview: N free-text QUESTIONS → a DRY-RUN funnel plan (project-level; no study_id, NO DB write) ----
+    //      Powers the "Kérdésekből" wizard's editable Plan step. Reuses planStudy + deriveKeywords; writes nothing —
+    //      the client reviews/edits the returned plan and only THEN creates the study + steps + extraction questions.
+    if (action === 'plan_preview') {
+      const project_id = String(body.project_id || '');
+      if (!project_id) return json({ error: 'project_id required' }, 400);
+      const { data: proj } = await sb.from('research_projects').select('id,title,field,goal,keywords').eq('id', project_id).maybeSingle();
+      if (!proj) return json({ error: 'project not found or no access' }, 404);
+      const gateP = await assertEntitled(sb, 'literature_study'); if (gateP) return gateP;
+      const qs = (Array.isArray(body.questions) ? body.questions : [])
+        .map((q: any) => String((q && (q.text || q.q)) || q || '').trim()).filter(Boolean).slice(0, 12);
+      if (!qs.length) return json({ error: 'no questions' }, 400);
+      const modelP = await resolveModel(sb);
+      const joined = qs.join('\n\n');
+      const plan = await planStudy({ question: joined, title: qs[0] }, proj, modelP);
+      // never leave step-1 keywords empty (would collapse the funnel to a single raw-question query)
+      if (!plan.step1 || typeof plan.step1 !== 'object') plan.step1 = {};
+      const kws = (plan.step1.keywords || []).map((k: any) => String(k || '').trim()).filter(Boolean);
+      if (!kws.length) { const d = await deriveKeywords(joined, modelP); if (d.length) plan.step1.keywords = d; }
+      return json({ ok: true, plan, joined_question: joined.slice(0, 4000) });
+    }
+
     // ---- sr_suggest: project Ideas → SR-ready question candidates (project-level; no study_id) ----
     if (action === 'sr_suggest') {
       const project_id = String(body.project_id || '');
