@@ -337,6 +337,7 @@
           kids.push(h('button', { key: 'figboard', className: 'step step-littool' + (props.tab === 'figboard' ? ' cur' : '') + (props.figState === 'running' ? ' figrun' : props.figState === 'done' ? ' figdone' : '') + (!props.figState && nt['figboard'] ? ' has-new' : ''), title: props.figState === 'running' ? 'Ábra-kinyerés fut a háttérben…' : props.figState === 'done' ? 'Ábra-kinyerés kész' : 'Ábra-tábla', onClick: function () { if (props.onFigboard) props.onFigboard(); } }, h('span', { className: 'dot', 'aria-hidden': 'true' }, props.figState === 'running' ? '⏳' : props.figState === 'done' ? '✓' : '🖼'), tr(props.lang, 'Ábrák'), (!props.figState ? nw('figboard') : null)));
           kids.push(h('div', { className: 'step-sep', key: 'sep-co' }));
           kids.push(h('button', { key: 'citopt', className: 'step step-littool' + (props.tab === 'citopt' ? ' cur' : ''), title: 'Citáció-optimalizáló', onClick: function () { if (props.onCitopt) props.onCitopt(); } }, h('span', { className: 'dot', 'aria-hidden': 'true' }, '🔗'), tr(props.lang, 'Idézetek')));
+          kids.push(h('button', { key: 'extract', className: 'step step-littool' + (props.tab === 'extract' ? ' cur' : ''), title: 'Kivonatolás — kérdés-alapú adatkinyerés', onClick: function () { if (props.onExtract) props.onExtract(); } }, h('span', { className: 'dot', 'aria-hidden': 'true' }, '🔎'), tr(props.lang, 'Kivonatolás')));
         }
       }
     });
@@ -11062,6 +11063,182 @@
     );
   }
 
+  // ═══ Kivonatolás (Extraction) — Elicit-style evidence matrix: included papers × user questions, each cell answered
+  //     from the OA full-text (+figures) with a verbatim quote. Client owns CRUD (RLS); research-extract answers cells.
+  var EX_TYPES = [['text', 'Szöveg'], ['number', 'Szám'], ['bool', 'Igen/Nem'], ['enum', 'Kategória'], ['list', 'Lista']];
+  var EX_MODES = [['fulltext', '📄 Full-text'], ['both', '📄🖼️ Mindkettő'], ['figures', '🖼️ Ábrák']];
+  var EX_TYPE_BADGE = { text: 'text', number: 'szám', bool: 'i/n', enum: 'kat', list: 'lista' };
+  var EX_TEMPLATES = [
+    { text: 'Mekkora a minta/adathalmaz mérete?', answer_type: 'number', source_mode: 'fulltext' },
+    { text: 'Milyen módszert / modell-architektúrát használ?', answer_type: 'text', source_mode: 'fulltext' },
+    { text: 'Mi a fő metrika és annak értéke?', answer_type: 'number', source_mode: 'both' },
+    { text: 'Milyen korlátokat említ a cikk?', answer_type: 'list', source_mode: 'fulltext' },
+    { text: 'Elérhető-e a kód nyilvánosan?', answer_type: 'bool', source_mode: 'fulltext' },
+  ];
+  function ExtractPanel(props) {
+    var pid = props.projectId, lang = props.lang, canEdit = props.canEdit;
+    var qS = useState(null), questions = qS[0], setQuestions = qS[1];   // null = loading
+    var cS = useState({}), cells = cS[0], setCells = cS[1];             // key "qid:sid" → cell
+    var sS = useState(null), sources = sS[0], setSources = sS[1];       // included rows
+    var runS = useState({}), running = runS[0], setRunning = runS[1];   // key "qid:sid" → true
+    var busyS = useState(false), busyAll = busyS[0], setBusyAll = busyS[1];
+    var compS = useState(false), composing = compS[0], setComposing = compS[1];
+    var openS = useState(null), openCell = openS[0], setOpenCell = openS[1];   // "qid:sid" whose evidence is open
+    var alive = useRef(true);
+    useEffect(function () { return function () { alive.current = false; }; }, []);
+    function K(qid, sid) { return qid + ':' + sid; }
+
+    function loadSources() {
+      var out = [], from = 0, PAGE = 1000;
+      (function step() {
+        sb.from('research_sources').select('id,title,year,venue,url,doi,oa_pdf_url,screening,cited_by').eq('project_id', pid).eq('screening', 'include').order('cited_by', { ascending: false, nullsFirst: false }).range(from, from + PAGE - 1).then(function (r) {
+          var rows = (r && r.data) || []; out = out.concat(rows);
+          if (rows.length === PAGE) { from += PAGE; step(); } else if (alive.current) setSources(out);
+        });
+      })();
+    }
+    function load() {
+      sb.from('research_extraction_questions').select('*').eq('project_id', pid).order('ord', { ascending: true }).then(function (r) { if (alive.current) setQuestions((r && r.data) || []); });
+      sb.from('research_extraction_cells').select('*').eq('project_id', pid).then(function (r) { if (!alive.current) return; var m = {}; ((r && r.data) || []).forEach(function (c) { m[K(c.question_id, c.source_id)] = c; }); setCells(m); });
+      loadSources();
+    }
+    useEffect(function () { load(); }, [pid]);
+
+    // bounded-concurrency client-driven run — each cell is one research-extract call (survives nothing; the tab drives it)
+    function runCells(list) {
+      list = (list || []).filter(Boolean); if (!list.length) return;
+      var queue = list.slice(), active = 0, CONC = 3;
+      setBusyAll(true);
+      setRunning(function (m) { var n = Object.assign({}, m); list.forEach(function (c) { n[K(c.question_id, c.source_id)] = true; }); return n; });
+      function done(c) { if (!alive.current) return; setRunning(function (m) { var n = Object.assign({}, m); delete n[K(c.question_id, c.source_id)]; return n; }); }
+      function pump() {
+        if (!queue.length && active === 0) { if (alive.current) setBusyAll(false); return; }
+        while (active < CONC && queue.length) {
+          var c = queue.shift(); active++;
+          sb.functions.invoke('research-extract', { body: { action: 'run_cell', question_id: c.question_id, source_id: c.source_id } }).then(function (res) {
+            active--;
+            var cell = res && res.data && res.data.cell;
+            if (cell && alive.current) setCells(function (m) { var n = Object.assign({}, m); n[K(cell.question_id, cell.source_id)] = cell; return n; });
+            else if (alive.current && res && res.data && res.data.error) setCells(function (m) { var n = Object.assign({}, m); n[K(c.question_id, c.source_id)] = { question_id: c.question_id, source_id: c.source_id, status: 'error', error: res.data.error }; return n; });
+            done(c); pump();
+          }, function () { active--; done(c); pump(); });
+        }
+      }
+      pump();
+    }
+
+    function addQuestion(text, type, mode) {
+      if (!text || !text.trim() || !canEdit) return;
+      var ord = (questions || []).length;
+      sb.from('research_extraction_questions').insert({ project_id: pid, text: text.trim(), answer_type: type, source_mode: mode, ord: ord, created_by: props.authorId }).select('*').maybeSingle().then(function (r) {
+        if (r && r.error) { window.PRUI.toast(r.error.message, { kind: 'error' }); return; }
+        var q = r.data; setQuestions(function (l) { return (l || []).concat([q]); }); setComposing(false);
+        runCells((sources || []).map(function (s) { return { question_id: q.id, source_id: s.id }; }));
+      });
+    }
+    function delQuestion(q) {
+      window.PRUI.confirm({ title: 'Kérdés (oszlop) törlése?', body: q.text, danger: true, confirmLabel: 'Törlés' }).then(function (ok) {
+        if (!ok) return;
+        sb.from('research_extraction_questions').delete().eq('id', q.id).then(function () { setQuestions(function (l) { return (l || []).filter(function (x) { return x.id !== q.id; }); }); });
+      });
+    }
+    function rerunQuestion(q) { runCells((sources || []).map(function (s) { return { question_id: q.id, source_id: s.id }; })); }
+    function runAllMissing() {
+      var list = []; (questions || []).forEach(function (q) { (sources || []).forEach(function (s) { var c = cells[K(q.id, s.id)]; if (!c || c.status === 'pending' || c.status === 'error') list.push({ question_id: q.id, source_id: s.id }); }); });
+      if (!list.length) { window.PRUI.toast('Minden cella kész.', { kind: 'info' }); return; } runCells(list);
+    }
+    function exportCsv() {
+      var qs = questions || [], srcs = sources || [];
+      var esc = function (v) { v = (v == null ? '' : String(v)); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+      var head = ['Cikk', 'Év', 'Folyóirat'].concat(qs.map(function (q) { return q.text; }));
+      var lines = [head.map(esc).join(',')];
+      srcs.forEach(function (s) {
+        var row = [s.title, s.year, s.venue].concat(qs.map(function (q) { var c = cells[K(q.id, s.id)]; return c && c.status === 'done' ? (c.answer + (c.quote ? ' [' + c.quote + ']' : '')) : (c && c.status === 'na' ? 'N/A' : ''); }));
+        lines.push(row.map(esc).join(','));
+      });
+      var blob = new Blob(['﻿' + lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+      var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'kivonatolas.csv'; a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); }, 4000);
+    }
+
+    if (questions === null || sources === null) return h('div', { className: 'ex-wrap' }, h('div', { className: 'ex-loading' }, h('span', { className: 'spin' }), ' Kivonatolás betöltése…'));
+    var qs = questions, srcs = sources;
+    var doneN = 0, totalN = qs.length * srcs.length, runN = 0;
+    qs.forEach(function (q) { srcs.forEach(function (s) { var c = cells[K(q.id, s.id)]; if (c && (c.status === 'done' || c.status === 'na')) doneN++; if (running[K(q.id, s.id)]) runN++; }); });
+
+    function confCls(c) { return c && c.confidence === 'high' ? 'hi' : c && c.confidence === 'mid' ? 'mid' : 'na'; }
+    function confLbl(c) { return c && c.confidence === 'high' ? 'magas' : c && c.confidence === 'mid' ? 'közepes' : 'nem található'; }
+    function locStr(c) { var l = (c && c.location) || {}; var bits = []; if (l.figure) bits.push('🖼️ ' + l.figure); if (l.page != null) bits.push('📄 p.' + l.page); if (l.section) bits.push('§ ' + l.section); if (!bits.length) bits.push(l.basis === 'abstract' ? '📄 absztrakt' : '📄 full-text'); return bits.join(' · '); }
+
+    function cellNode(q, s) {
+      var c = cells[K(q.id, s.id)], isRun = running[K(q.id, s.id)];
+      if (isRun) return h('td', { className: 'ex-cell', key: q.id }, h('span', { className: 'ex-run' }, h('span', { className: 'ex-bar' }), 'kinyerés…'));
+      if (!c) return h('td', { className: 'ex-cell', key: q.id }, canEdit ? h('button', { className: 'ex-runc', title: 'Cella kinyerése', onClick: function () { runCells([{ question_id: q.id, source_id: s.id }]); } }, '▷ futtat') : h('span', { className: 'ex-empty' }, '—'));
+      if (c.status === 'error') return h('td', { className: 'ex-cell', key: q.id }, h('span', { className: 'ex-errc', title: c.error || 'hiba' }, '⚠ hiba'), canEdit ? h('button', { className: 'ex-runc', onClick: function () { runCells([{ question_id: q.id, source_id: s.id }]); } }, '↻') : null);
+      if (c.status === 'na') return h('td', { className: 'ex-cell', key: q.id }, h('span', { className: 'ex-na' }, 'N/A'), h('span', { className: 'ex-conf na' }, h('i'), 'nincs bizonyíték'), canEdit ? h('button', { className: 'ex-runc gho', title: 'Újra', onClick: function () { runCells([{ question_id: q.id, source_id: s.id }]); } }, '↻') : null);
+      var open = openCell === K(q.id, s.id);
+      return h('td', { className: 'ex-cell' + (open ? ' open' : ''), key: q.id },
+        h('button', { className: 'ex-ans', onClick: function () { setOpenCell(open ? null : K(q.id, s.id)); } }, h('span', { className: 'ex-val' }, c.answer || ''), h('span', { className: 'ex-caret' }, open ? '▾' : '▸')),
+        h('span', { className: 'ex-conf ' + confCls(c) }, h('i'), confLbl(c)),
+        open ? h('div', { className: 'ex-evd' },
+          c.quote ? h('div', { className: 'ex-quote' }, '“', c.quote, '”') : h('div', { className: 'ex-quote muted' }, '(nincs idézet)'),
+          h('div', { className: 'ex-loc' }, locStr(c)),
+          h('div', { className: 'ex-evd-acts' },
+            s.url || s.oa_pdf_url ? h('a', { className: 'ex-mini', href: s.oa_pdf_url || s.url, target: '_blank', rel: 'noopener' }, '📄 Forrás megnyitása ↗') : null,
+            canEdit ? h('button', { className: 'ex-mini gho', onClick: function () { setOpenCell(null); runCells([{ question_id: q.id, source_id: s.id }]); } }, '↻ Újrafuttatás') : null)) : null);
+    }
+
+    return h('div', { className: 'ex-wrap' },
+      h('div', { className: 'ex-head' },
+        h('div', null, h('h2', { className: 'ex-title' }, '🔎 Kivonatolás'), h('div', { className: 'ex-sub' }, 'Tegyél fel kérdéseket — a rendszer minden included cikk full-textjéből és ábráiból, idézettel alátámasztva megválaszolja őket.')),
+        h('div', { className: 'ex-prog' }, totalN ? h(React.Fragment, null, h('b', null, doneN), ' / ' + totalN + ' cella' + (runN ? ' · ' + runN + ' fut' : '')) : null)),
+      !srcs.length
+        ? h('div', { className: 'ex-onboard' }, h('div', { className: 'ex-ob-ic' }, '📚'), h('h3', null, 'Nincs még included cikk'), h('p', null, 'A kivonatolás az Irodalom „included" cikkein dolgozik. Előbb szűrj le cikkeket (Studies / Irodalom), majd itt kérdezhetsz róluk.'))
+        : h(React.Fragment, null,
+          h('div', { className: 'ex-toolbar' },
+            canEdit ? h('button', { className: 'ex-btn pri', onClick: function () { setComposing(true); } }, '＋ Kérdés hozzáadása') : null,
+            canEdit && qs.length ? h('button', { className: 'ex-btn', disabled: busyAll, onClick: runAllMissing }, busyAll ? h(React.Fragment, null, h('span', { className: 'spin' }), ' fut…') : '↻ Hiányzók futtatása') : null,
+            qs.length ? h('button', { className: 'ex-btn gho', onClick: exportCsv }, '⤓ Export CSV') : null,
+            h('span', { style: { flex: 1 } }),
+            h('span', { className: 'ex-cnt' }, srcs.length + ' included cikk · ' + qs.length + ' kérdés')),
+          composing ? h(ExtractComposer, { onAdd: addQuestion, onCancel: function () { setComposing(false); } }) : null,
+          h('div', { className: 'ex-mx-scroll' },
+            h('table', { className: 'ex-mx' },
+              h('thead', null, h('tr', null,
+                h('th', { className: 'ex-colpaper' }, 'Cikk (' + srcs.length + ' included)'),
+                qs.map(function (q) {
+                  return h('th', { key: q.id },
+                    h('div', { className: 'ex-qh' },
+                      h('span', { className: 'ex-qmode ' + (q.source_mode === 'figures' ? 'fig' : q.source_mode === 'both' ? 'both' : 'txt') }, EX_TYPE_BADGE[q.answer_type] || 'text'),
+                      h('span', { className: 'ex-qtext', title: q.text }, q.text),
+                      canEdit ? h('span', { className: 'ex-qacts' },
+                        h('button', { title: 'Oszlop újrafuttatása', onClick: function () { rerunQuestion(q); } }, '↻'),
+                        h('button', { title: 'Oszlop törlése', onClick: function () { delQuestion(q); } }, '×')) : null));
+                }),
+                canEdit ? h('th', { className: 'ex-addcol', onClick: function () { setComposing(true); } }, '＋ oszlop') : null)),
+              h('tbody', null, srcs.map(function (s) {
+                return h('tr', { key: s.id },
+                  h('td', { className: 'ex-colpaper' }, h('div', { className: 'ex-pt' }, s.title || 'Forrás'), h('div', { className: 'ex-pm' }, [s.year, s.venue].filter(Boolean).join(' · '), s.oa_pdf_url ? h('span', { className: 'ex-oa' }, ' · OA ✓') : null)),
+                  qs.map(function (q) { return cellNode(q, s); }),
+                  canEdit ? h('td') : null);
+              })))),
+          !qs.length ? h('div', { className: 'ex-hint' }, '↑ Adj hozzá egy kérdést (oszlopot), pl. „Mekkora az adathalmaz mérete?" — a rendszer minden cikkre kikeresi a választ.') : null,
+          h('div', { className: 'ex-note' }, 'Minden válasz mögött szó szerinti idézet + hely áll; ha a forrás nem támasztja alá, a cella őszintén „N/A". A full-text az OA-PDF-ből jön (az ábrákkal együtt), absztrakt-only cikknél az absztraktból.')));
+  }
+  function ExtractComposer(props) {
+    var tS = useState(''), text = tS[0], setText = tS[1];
+    var tyS = useState('text'), atype = tyS[0], setAtype = tyS[1];
+    var moS = useState('fulltext'), mode = moS[0], setMode = moS[1];
+    return h('div', { className: 'ex-composer' },
+      h('div', { className: 'ex-comp-row' },
+        h('input', { className: 'ex-comp-in', value: text, autoFocus: true, placeholder: 'Írd be a kérdést, pl. „Mi a fő metrika és annak értéke?"', onChange: function (e) { setText(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter') props.onAdd(text, atype, mode); } }),
+        h('button', { className: 'ex-btn pri', disabled: !text.trim(), onClick: function () { props.onAdd(text, atype, mode); } }, 'Hozzáad + futtat'),
+        h('button', { className: 'ex-btn gho', onClick: props.onCancel }, 'Mégse')),
+      h('div', { className: 'ex-comp-opts' },
+        h('div', { className: 'ex-comp-grp' }, h('span', { className: 'ex-comp-lbl' }, 'Típus'), EX_TYPES.map(function (t) { return h('button', { key: t[0], className: 'ex-seg' + (atype === t[0] ? ' on' : ''), onClick: function () { setAtype(t[0]); } }, t[1]); })),
+        h('div', { className: 'ex-comp-grp' }, h('span', { className: 'ex-comp-lbl' }, 'Forrás'), EX_MODES.map(function (m) { return h('button', { key: m[0], className: 'ex-seg' + (mode === m[0] ? ' on' : ''), onClick: function () { setMode(m[0]); } }, m[1]); }))),
+      h('div', { className: 'ex-comp-tpl' }, h('span', { className: 'ex-comp-lbl' }, 'Sablon'), EX_TEMPLATES.map(function (t, i) { return h('button', { key: i, className: 'ex-tpl', onClick: function () { setText(t.text); setAtype(t.answer_type); setMode(t.source_mode); } }, t.text); })));
+  }
+
   function ProjectDetail(props) {
     var p = props.project;
     var plang = (p.language === 'hu' ? 'hu' : 'en');   // per-project UI language (migration-65) → core chrome via tr(plang, …)
@@ -11198,6 +11375,7 @@
     else if (tab === 'gap') content = h(GapPanel, { projectId: p.id, project: p, canEdit: props.canEdit, authorId: props.authorId, onChanged: props.onChanged, onGoIdeas: function () { setTab('ideas'); }, onGoStudy: function () { setTab('study'); }, onOpenStudy: function (sid) { setFocusStudy(sid); setTab('study'); }, onSendToLauncher: sendGapToLauncher, onStartStudy: startStudyFromIdea });
     else if (tab === 'figboard') content = embedFrame('FigureBoard');
     else if (tab === 'citopt') content = embedFrame('CitationOptimizer');
+    else if (tab === 'extract') content = h(ExtractPanel, { projectId: p.id, lang: plang, canEdit: props.canEdit, authorId: props.authorId });
     else if (tab === 'literature') content = h(React.Fragment, null,
       h(LiteraturePanel, { lang: plang, projectId: p.id, sources: props.sources, studies: props.studies, canEdit: props.canEdit, myEmail: props.myEmail, onChanged: props.onChanged, onOpenFigboard: function () { setTab('figboard'); } }),
       h(ElicitReports, { projectId: p.id, project: p, canEdit: props.canEdit, authorId: props.authorId, onGoStudy: function () { setTab('study'); } }),
@@ -11235,6 +11413,7 @@
         if (i === 2 && hasLib) {   // Literature analyzers as sub-tabs (embedded via iframe) — only with a library
           kids.push(h('button', { key: 'figboard', className: 'rv-st sub' + (tab === 'figboard' ? ' cur' : '') + (figState === 'running' ? ' rv-figrun' : figState === 'done' ? ' rv-figdone' : '') + (!figState && newTabs['figboard'] ? ' rv-hasnew' : ''), title: figState === 'running' ? 'Ábra-kinyerés fut a háttérben…' : figState === 'done' ? 'Ábra-kinyerés kész — kattints a megtekintéshez' : 'Ábra-tábla — ábrák kinyerése a szakirodalomból', onClick: function () { setTab('figboard'); } }, h('span', { className: 'rv-st-dot' }, figState === 'running' ? '⏳' : figState === 'done' ? '✓' : '🖼'), h('span', { className: 'rv-st-lbl' }, 'Ábrák'), (!figState ? nw('figboard') : null)));
           kids.push(h('button', { key: 'citopt', className: 'rv-st sub' + (tab === 'citopt' ? ' cur' : ''), title: 'Citáció-optimalizáló — mire hivatkoznak a legidézettebb cikkeid', onClick: function () { setTab('citopt'); } }, h('span', { className: 'rv-st-dot' }, '🔗'), h('span', { className: 'rv-st-lbl' }, 'Idézetek')));
+          kids.push(h('button', { key: 'extract', className: 'rv-st sub' + (tab === 'extract' ? ' cur' : ''), title: 'Kivonatolás — kérdés-alapú adatkinyerés a cikkek full-textjéből és ábráiból', onClick: function () { setTab('extract'); } }, h('span', { className: 'rv-st-dot' }, '🔎'), h('span', { className: 'rv-st-lbl' }, 'Kivonatolás')));
         }
       });
       return h('div', { className: 'rv-stnav' }, kids);
@@ -11299,7 +11478,7 @@
           props.canEdit ? h('button', { className: 'btn', style: { height: 32, flex: 'none' }, title: 'Project base settings (title, field, keywords, goal)', onClick: function () { setEditOpen(true); } }, tr(plang, '✎ Settings')) : null
         )
       ),
-      h(Stepper, { stage: p.stage, tab: tab, lang: plang, canEdit: props.canEdit, newTabs: newTabs, figState: figState, studyState: studyState, onSet: setStage, onStudy: function () { setTab('study'); }, onGap: function () { setTab('gap'); }, hasLib: hasLib, onFigboard: function () { setTab('figboard'); }, onCitopt: function () { setTab('citopt'); }, onNav: function (i) { setTab(STAGE_TAB[i] || 'overview'); } }),
+      h(Stepper, { stage: p.stage, tab: tab, lang: plang, canEdit: props.canEdit, newTabs: newTabs, figState: figState, studyState: studyState, onSet: setStage, onStudy: function () { setTab('study'); }, onGap: function () { setTab('gap'); }, hasLib: hasLib, onFigboard: function () { setTab('figboard'); }, onCitopt: function () { setTab('citopt'); }, onExtract: function () { setTab('extract'); }, onNav: function (i) { setTab(STAGE_TAB[i] || 'overview'); } }),
       h('div', { className: 'subtabs' }, [['overview', 'Overview', null], ['canvas', 'Canvas', null], ['notes', 'Notes', null], ['log', 'Log', (props.log || []).length], ['tasks', 'Tasks', openTasks]].map(function (nt) {
         return h('button', { key: nt[0], className: tab === nt[0] ? 'on' : '', onClick: function () { setTab(nt[0]); } }, tr(plang, nt[1]), nt[2] ? h('span', { className: 'c' }, nt[2]) : null);
       })),
