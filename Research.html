@@ -2118,12 +2118,25 @@
     .ex-runc { font-size: 11.5px; font-weight: 700; color: var(--accent); background: var(--accent-tint); border: 0; border-radius: 7px; padding: 4px 9px; cursor: pointer; font-family: inherit; }
     .ex-runc.gho { background: transparent; color: var(--faint); margin-left: 6px; }
     .ex-empty { color: var(--faint); } .ex-errc { color: var(--danger); font-weight: 700; font-size: 12px; }
+    /* extraction-questions editor inside the OpenAlex funnel config */
+    .ex-funnel { margin-top: 14px; padding: 13px 14px; border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--line)); border-radius: 12px; background: color-mix(in srgb, var(--accent) 4%, var(--surface)); }
+    .ex-funnel-h { font-size: 13px; font-weight: 750; color: var(--ink); }
+    .ex-funnel-sub { font-weight: 400; color: var(--muted); font-size: 12px; }
+    .ex-funnel-in { display: flex; gap: 7px; margin-top: 10px; }
+    .ex-funnel-input { flex: 1; min-width: 0; border: 1.5px solid var(--line); border-radius: 9px; padding: 8px 11px; font-family: inherit; font-size: 13px; background: var(--surface); color: var(--ink); }
+    .ex-funnel-input:focus { outline: 0; border-color: var(--accent); }
+    .ex-funnel-add { flex: none; width: 38px; border: 0; border-radius: 9px; background: var(--accent); color: #fff; font-size: 17px; font-weight: 700; cursor: pointer; }
+    .ex-funnel-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+    .ex-funnel-tag { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 600; border-radius: 999px; padding: 5px 8px 5px 11px; color: var(--accent); background: var(--accent-tint); }
+    .ex-funnel-tag .x { cursor: pointer; font-weight: 800; opacity: .6; } .ex-funnel-tag .x:hover { opacity: 1; }
+    .ex-funnel-empty { font-size: 12.5px; color: var(--faint); margin-top: 9px; }
+    .ex-funnel-tpl { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
     .ex-hint { font-size: 13px; color: var(--muted); margin-top: 14px; padding: 12px 14px; background: var(--accent-tint); border-radius: 10px; }
     .ex-note { font-size: 12px; color: var(--faint); margin-top: 16px; line-height: 1.55; max-width: 80ch; }
   </style>
-  <script src="theme.js?v=1786268046"></script>
-  <script src="nav.js?v=1786268046"></script>
-  <script src="entitlements.js?v=1786268046"></script>
+  <script src="theme.js?v=1786269816"></script>
+  <script src="nav.js?v=1786269816"></script>
+  <script src="entitlements.js?v=1786269816"></script>
 </head>
 
 <body>
@@ -2135,24 +2148,24 @@
   <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
   <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="backend/config.js?v=1786268046"></script>
-  <script src="auth.js?v=1786268046"></script>
-  <script src="backend.js?v=1786268046"></script>
-  <script src="universities.js?v=1786268046"></script>
-  <script src="onboarding.js?v=1786268046"></script>
-  <script src="office.js?v=1786268046"></script>
-  <script src="publications.js?v=1786268046"></script>
+  <script src="backend/config.js?v=1786269816"></script>
+  <script src="auth.js?v=1786269816"></script>
+  <script src="backend.js?v=1786269816"></script>
+  <script src="universities.js?v=1786269816"></script>
+  <script src="onboarding.js?v=1786269816"></script>
+  <script src="office.js?v=1786269816"></script>
+  <script src="publications.js?v=1786269816"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/tus-js-client@4.1.0/dist/tus.min.js"></script>
-  <script type="text/babel" src="canvas.jsx?v=1786268046"></script>
-  <script type="text/babel" src="notes.jsx?v=1786268046"></script>
-  <script src="autopilot-core.js?v=1786268046"></script>
-  <script type="text/babel" src="research.jsx?v=1786268046"></script>
+  <script type="text/babel" src="canvas.jsx?v=1786269816"></script>
+  <script type="text/babel" src="notes.jsx?v=1786269816"></script>
+  <script src="autopilot-core.js?v=1786269816"></script>
+  <script type="text/babel" src="research.jsx?v=1786269816"></script>
 
-  <script src="build.js?v=1786268046"></script>
-  <script src="version-badge.js?v=1786268046"></script>
+  <script src="build.js?v=1786269816"></script>
+  <script src="version-badge.js?v=1786269816"></script>
 </body>
 
 </html>

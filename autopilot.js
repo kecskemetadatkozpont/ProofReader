@@ -209,6 +209,10 @@
           var sid = sr && sr.data && sr.data.id;
           if (!sid) throw new Error('Literature: a study nem jött létre' + (sr && sr.error ? ' (' + sr.error.message + ')' : ''));
           var rows = LS_STEPS_AP.map(function (s) { return { study_id: sid, step: s.step, kind: s.kind, config: lsCfg(s.step, project, idea, maxP) }; });
+          // materialize the extraction questions NOW (study-scoped) so the funnel screening answers them INLINE
+          // (research-study reads study-scoped + project-scoped questions during step-2/3 screening). Best-effort.
+          var exq = apExtractNorm((run.config && run.config.extract_questions) || []);
+          if (exq.length) { try { sb.from('research_extraction_questions').insert(exq.map(function (x, i) { return { project_id: project.id, study_id: sid, text: x.text.slice(0, 300), answer_type: x.answer_type, source_mode: x.source_mode, ord: i, created_by: uid() }; })); } catch (e) { } }
           return sb.from('research_study_steps').insert(rows).then(function (rr) {
             if (rr && rr.error) throw new Error('Literature: study-lépések (' + rr.error.message + ')');
             return callEdge('research-study', { action: 'plan', study_id: sid }).then(function (d) {
@@ -304,7 +308,15 @@
           : Promise.resolve({ data: [] });
         return existQ.then(function (ex) {
           var existing = (ex && ex.data) || [];
-          var stay = function (qids) { return apStay(run, { stage: 'run', qids: qids, sids: sids, idx: 0, iter: 0 }, [{ phase: 'extract', level: 'sys', message: 'Kivonatolás: ' + qids.length + ' kérdés × ' + sids.length + ' cikk' }]); };
+          // build the PENDING cell list = pairs the funnel screening did NOT already fill inline (skip done/na) → no re-work
+          var stay = function (qids) {
+            return sb.from('research_extraction_cells').select('question_id,source_id,status').in('question_id', qids.length ? qids : ['00000000-0000-0000-0000-000000000000']).then(function (cr) {
+              var have = {}; ((cr && cr.data) || []).forEach(function (c) { if (c.status === 'done' || c.status === 'na') have[c.question_id + ':' + c.source_id] = 1; });
+              var pending = []; qids.forEach(function (qid) { sids.forEach(function (sid) { if (!have[qid + ':' + sid]) pending.push([qid, sid]); }); });
+              var already = qids.length * sids.length - pending.length;
+              return apStay(run, { stage: 'run', qids: qids, sids: sids, pending: pending, idx: 0, iter: 0 }, [{ phase: 'extract', level: 'sys', message: 'Kivonatolás: ' + qids.length + ' kérdés × ' + sids.length + ' cikk' + (already ? ' (' + already + ' cella már kész a szűréskor)' : '') }]);
+            });
+          };
           if (existing.length >= norm.length) return stay(existing.map(function (x) { return x.id; }));
           var rows = norm.map(function (q, i) { return { project_id: project.id, study_id: sidMarker, text: q.text.slice(0, 500), answer_type: q.answer_type, source_mode: q.source_mode, ord: i, created_by: uid() }; });
           return sb.from('research_extraction_questions').insert(rows).select('id').then(function (qr) {
@@ -314,9 +326,9 @@
         });
       });
     }
-    var qids = cur.qids || [], sids = cur.sids || [], total = qids.length * sids.length, idx = cur.idx || 0;
-    if (idx >= total || !total) {
-      // done → save the matrix as a markdown file, then complete
+    var qids = cur.qids || [], sids = cur.sids || [], pending = cur.pending || [], total = pending.length, idx = cur.idx || 0;
+    if (idx >= total) {
+      // all pending cells filled → save the matrix as a markdown file, then complete
       return Promise.all([
         sb.from('research_extraction_questions').select('id,text,ord').in('id', qids),
         sb.from('research_extraction_cells').select('question_id,source_id,answer,status').in('question_id', qids.length ? qids : ['00000000-0000-0000-0000-000000000000']),
@@ -337,12 +349,11 @@
         });
       });
     }
-    // run the next small batch of cells (one research-extract call each), then persist progress
-    var batch = [];
-    for (var k = idx; k < Math.min(idx + EXTRACT_BATCH, total); k++) { batch.push({ qid: qids[Math.floor(k / sids.length)], sid: sids[k % sids.length] }); }
-    return Promise.all(batch.map(function (c) { return callEdge('research-extract', { action: 'run_cell', question_id: c.qid, source_id: c.sid }).then(function (d) { return d; }, function () { return null; }); })).then(function () {
+    // run the next small batch of PENDING cells (the funnel already filled the rest inline), then persist progress
+    var batch = pending.slice(idx, idx + EXTRACT_BATCH);
+    return Promise.all(batch.map(function (pair) { return callEdge('research-extract', { action: 'run_cell', question_id: pair[0], source_id: pair[1] }).then(function (d) { return d; }, function () { return null; }); })).then(function () {
       var nidx = idx + batch.length;
-      return apStay(run, Object.assign({}, cur, { idx: nidx, iter: (cur.iter || 0) + 1 }), [{ phase: 'extract', level: 'run', message: 'Kivonatolás: ' + Math.min(nidx, total) + '/' + total + ' cella' }]);
+      return apStay(run, Object.assign({}, cur, { idx: nidx, iter: (cur.iter || 0) + 1 }), [{ phase: 'extract', level: 'run', message: 'Kivonatolás: ' + Math.min(nidx, total) + '/' + total + ' hiányzó cella' }]);
     });
   }
   function apProtocol(run, project) {

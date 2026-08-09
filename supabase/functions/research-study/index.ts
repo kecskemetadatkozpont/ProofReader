@@ -235,7 +235,7 @@ async function fetchPdfBlock(url: string): Promise<any | null> {
   } catch { return null; }
 }
 
-function screenSystem(question: string, config: any, step: number): string {
+function screenSystem(question: string, config: any, step: number, exq: any[] = []): string {
   const inc = (config.include || []).filter(Boolean);
   const exc = (config.exclude || []).filter(Boolean);
   const head = `Research question: ${question || '(none given)'}
@@ -243,17 +243,21 @@ ${(config.keywords || []).length ? 'Keywords: ' + (config.keywords || []).join('
   if (step >= 2) {
     // Step 2 (abstract) / Step 3 (full text) — RIGOROUS screening that NARROWS the funnel (not inclusive).
     const basis = step === 3 ? 'the FULL TEXT (the attached PDF when present, otherwise the abstract)' : 'the ABSTRACT';
+    // Inline DATA EXTRACTION (Kivonatolás): answer the study's extraction questions from the SAME text, per paper.
+    // Additive — does NOT change the include/exclude decision. Grounded (verbatim quote + location) or honest "found:false".
+    const hasEx = Array.isArray(exq) && exq.length > 0;
+    const exBlock = hasEx ? `\n\nDATA EXTRACTION — additionally, for EACH paper answer these questions strictly from ${basis} (this does NOT change the include/exclude decision):\n${exq.map((q: any, i: number) => `  Q${i + 1}. ${q.text}`).join('\n')}\nReturn an "answers" array on each paper object, ONE entry per question IN THE SAME ORDER, each: {"found":true|false,"answer":"<concise; a number WITH its unit if numeric>","quote":"<VERBATIM text copied from the paper that supports it, <=240 chars>","page":<page number as integer or null>,"figure":"<figure/table label if the evidence is a figure/table, else empty>","confidence":"high|mid"}. Set "found":false when ${basis} does NOT support an answer (leave answer/quote empty) — NEVER invent a value.` : '';
     return `You are doing RIGOROUS ${step === 3 ? 'full-text' : 'abstract'} screening for a systematic literature review. This step NARROWS the set — be DISCERNING, not inclusive.
 ${head}
 Judge each paper strictly from ${basis}:
 - "include" ONLY if the text gives EXPLICIT evidence it plausibly meets ALL inclusion criteria;
 - "exclude" if any exclusion criterion clearly holds, or it does not actually address the research question;
-- "maybe" only when the text is genuinely ambiguous (e.g. no abstract is available).
+- "maybe" only when the text is genuinely ambiguous (e.g. no abstract is available).${exBlock}
 For each paper return, in order (score is an INTEGER 0–100):
 [{"i":0,"decision":"include|maybe|exclude","score":85,
   "criteria":{"inc":["short labels of the inclusion criteria it MEETS"],"exc":["short labels of any exclusion criteria that APPLY"]},
   "extract":{"method":"the paper's method/approach in <=12 words","dataset":"dataset(s) used, or 'none stated'","finding":"the key result/claim in <=15 words"},
-  "signals":{"has_github":false,"has_dataset":false},
+  "signals":{"has_github":false,"has_dataset":false},${hasEx ? '\n  "answers":[{"found":true,"answer":"...","quote":"...","page":null,"figure":"","confidence":"mid"}],' : ''}
   "reason":"one-line justification"}]
 Return ONLY the JSON array.`;
   }
@@ -673,7 +677,10 @@ Return ONLY JSON, no prose:
 async function screenAndWrite(sb: any, study: any, study_id: string, step: number, config: any, model: string, inputs: any[], fullText: boolean) {
   if (!inputs.length) return [];
   const _lang = await loadProjectLang(sb, study.project_id);
-  const sys = screenSystem(study.question || study.title, config, step) + langDirective(_lang);
+  // inline DATA EXTRACTION: load the extraction questions (Kivonatolás) answered in the SAME screening call —
+  // this study's questions AND the project-level ones (study_id NULL, set on the Kivonatolás tab / funnel config).
+  const exq: any[] = step >= 2 ? (((await sb.from('research_extraction_questions').select('id,text,ord').eq('project_id', study.project_id).or('study_id.eq.' + study_id + ',study_id.is.null').order('ord', { ascending: true })).data) || []) : [];
+  const sys = screenSystem(study.question || study.title, config, step, exq) + langDirective(_lang);
   const content: any[] = [];
   const signalsBase: Record<string, any> = {};
   for (let i = 0; i < inputs.length; i++) {
@@ -686,7 +693,7 @@ async function screenAndWrite(sb: any, study: any, study_id: string, step: numbe
   }
   content.push({ type: 'text', text: `\nReturn the JSON array now (one object per paper, ${inputs.length} objects, field "i" = paper index).` });
   let decisions: any[] = [];
-  try { decisions = parseDecisions(await callClaude(model, sys, content, false, 2048)); } catch { decisions = []; }
+  try { decisions = parseDecisions(await callClaude(model, sys, content, false, exq.length ? 4096 : 2048)); } catch { decisions = []; }
   const byIdx: Record<number, any> = {}; decisions.forEach((d: any) => { if (typeof d.i === 'number') byIdx[d.i] = d; });
   const out: any[] = [];
   for (let i = 0; i < inputs.length; i++) {
@@ -700,6 +707,19 @@ async function screenAndWrite(sb: any, study: any, study_id: string, step: numbe
     let sc: number | null = null;
     if (typeof d.score === 'number' && !isNaN(d.score)) { let v = (d.score > 0 && d.score <= 1) ? d.score * 100 : d.score; sc = Math.round(Math.max(0, Math.min(100, v))); }
     await sb.from('research_study_papers').upsert({ study_id, source_id: p.source_id, step, decision, reason: (d.reason || '').slice(0, 500), score: sc, signals, overridden: false }, { onConflict: 'study_id,source_id,step' });
+    // inline extraction cells — write the answers for SURVIVING papers (include/maybe); step 3 (PDF) overwrites step 2
+    // (abstract). Best-effort: an extraction write must NEVER fail the screening batch.
+    if (exq.length && (decision === 'include' || decision === 'maybe')) {
+      const ans: any[] = Array.isArray(d.answers) ? d.answers : [];
+      const basis = (signalsBase[p.source_id] && signalsBase[p.source_id].oa_pdf) ? 'pdf' : 'abstract';
+      for (let qi = 0; qi < exq.length; qi++) {
+        const a = ans[qi] || {}; const q = exq[qi];
+        const cellRow = (!a || !a.found)
+          ? { answer: null, quote: null, location: { basis }, confidence: 'na', status: 'na' }
+          : { answer: String(a.answer || '').slice(0, 600), quote: String(a.quote || '').slice(0, 300), location: { basis, page: (typeof a.page === 'number' ? a.page : null), figure: String(a.figure || '').slice(0, 60) }, confidence: (a.confidence === 'high' ? 'high' : 'mid'), status: 'done' };
+        try { await sb.from('research_extraction_cells').upsert(Object.assign({ question_id: q.id, source_id: p.source_id, project_id: study.project_id, model, updated_at: new Date().toISOString() }, cellRow), { onConflict: 'question_id,source_id' }); } catch (_e) { /* best-effort */ }
+      }
+    }
     out.push({ source_id: p.source_id, title: p.title, decision, reason: d.reason || '', score: sc, signals });
   }
   return out;

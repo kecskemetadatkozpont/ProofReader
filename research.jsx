@@ -4469,6 +4469,7 @@
         props.canEdit ? h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginTop: 10 } },
           h('button', { className: 'btn', disabled: planning, title: 'Ötletek nélküli, kézi kulcsszó-szűrés indítása', onClick: function () { newStudy(null); } }, '+ Üres study (kézi kulcsszó-szűrés)')
         ) : h('div', { style: { fontSize: 13, color: 'var(--faint)' } }, 'Read-only view.'),
+        h(ExtractQEditor, { projectId: props.projectId, canEdit: props.canEdit, authorId: props.authorId }),
         err ? h('div', { style: { color: 'var(--danger)', fontSize: 12.5, marginTop: 8 } }, err) : null);
     }
 
@@ -11075,6 +11076,26 @@
     { text: 'Milyen korlátokat említ a cikk?', answer_type: 'list', source_mode: 'fulltext' },
     { text: 'Elérhető-e a kód nyilvánosan?', answer_type: 'bool', source_mode: 'fulltext' },
   ];
+  // Compact extraction-questions editor for the OpenAlex funnel config — project-scoped (study_id NULL) questions the
+  // research-study screening answers INLINE (abstract + full-text), and which also power the Kivonatolás matrix.
+  function ExtractQEditor(props) {
+    var pid = props.projectId, canEdit = props.canEdit;
+    var qS = useState(null), qs = qS[0], setQs = qS[1];
+    var inS = useState(''), inp = inS[0], setInp = inS[1];
+    var alive = useRef(true);
+    useEffect(function () { return function () { alive.current = false; }; }, []);
+    useEffect(function () { sb.from('research_extraction_questions').select('id,text,ord').eq('project_id', pid).is('study_id', null).order('ord', { ascending: true }).then(function (r) { if (alive.current) setQs((r && r.data) || []); }); }, [pid]);
+    function add(t) { t = (t || inp || '').trim(); if (!t || !canEdit) return; var ord = (qs || []).length; sb.from('research_extraction_questions').insert({ project_id: pid, study_id: null, text: t.slice(0, 300), answer_type: 'text', source_mode: 'both', ord: ord, created_by: props.authorId }).select('*').maybeSingle().then(function (r) { if (r && r.error) { window.PRUI.toast(r.error.message, { kind: 'error' }); return; } setQs(function (l) { return (l || []).concat([r.data]); }); setInp(''); }); }
+    function del(q) { sb.from('research_extraction_questions').delete().eq('id', q.id).then(function () { setQs(function (l) { return (l || []).filter(function (x) { return x.id !== q.id; }); }); }); }
+    if (qs === null) return null;
+    return h('div', { className: 'ex-funnel' },
+      h('div', { className: 'ex-funnel-h' }, '🔎 Kivonatolási kérdések', h('span', { className: 'ex-funnel-sub' }, ' — a szűréskor (absztrakt + full-text) a rendszer minden cikkre eldönti, válaszol-e rájuk, és ha igen, mi a válasz + hol (idézettel). Utólag a 🔎 Kivonatolás fülön is bővíthető.')),
+      canEdit ? h('div', { className: 'ex-funnel-in' },
+        h('input', { className: 'ex-funnel-input', value: inp, placeholder: 'pl. Mekkora az adathalmaz mérete?', onChange: function (e) { setInp(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter') add(); } }),
+        h('button', { className: 'ex-funnel-add', title: 'Hozzáadás', onClick: function () { add(); } }, '＋')) : null,
+      qs.length ? h('div', { className: 'ex-funnel-tags' }, qs.map(function (q) { return h('span', { className: 'ex-funnel-tag', key: q.id }, q.text, canEdit ? h('span', { className: 'x', title: 'Törlés', onClick: function () { del(q); } }, '×') : null); })) : h('div', { className: 'ex-funnel-empty' }, 'Nincs kérdés — adj hozzá, vagy hagyd üresen (a szűrés kérdések nélkül is fut).'),
+      canEdit ? h('div', { className: 'ex-funnel-tpl' }, EX_TEMPLATES.slice(0, 4).map(function (t, i) { return h('button', { className: 'ex-tpl', key: i, onClick: function () { add(t.text); } }, '＋ ' + t.text); })) : null);
+  }
   function ExtractPanel(props) {
     var pid = props.projectId, lang = props.lang, canEdit = props.canEdit;
     var qS = useState(null), questions = qS[0], setQuestions = qS[1];   // null = loading
@@ -11088,19 +11109,33 @@
     useEffect(function () { return function () { alive.current = false; }; }, []);
     function K(qid, sid) { return qid + ':' + sid; }
 
-    function loadSources() {
-      var out = [], from = 0, PAGE = 1000;
+    // rows = the project's INCLUDED sources ∪ any source that already has an extraction cell (so cells the OpenAlex
+    // funnel produced during screening always show, even if research_sources.screening isn't 'include' yet).
+    function loadSources(extraIds) {
+      var out = [], seen = {}, from = 0, PAGE = 1000;
+      function fetchExtra() {
+        var missing = (extraIds || []).filter(function (id) { return !seen[id]; });
+        if (!missing.length) { if (alive.current) setSources(out); return; }
+        sb.from('research_sources').select('id,title,year,venue,url,doi,oa_pdf_url,screening,cited_by').in('id', missing.slice(0, 800)).then(function (r) {
+          ((r && r.data) || []).forEach(function (s) { if (!seen[s.id]) { seen[s.id] = 1; out.push(s); } });
+          if (alive.current) setSources(out);
+        }, function () { if (alive.current) setSources(out); });
+      }
       (function step() {
         sb.from('research_sources').select('id,title,year,venue,url,doi,oa_pdf_url,screening,cited_by').eq('project_id', pid).eq('screening', 'include').order('cited_by', { ascending: false, nullsFirst: false }).range(from, from + PAGE - 1).then(function (r) {
-          var rows = (r && r.data) || []; out = out.concat(rows);
-          if (rows.length === PAGE) { from += PAGE; step(); } else if (alive.current) setSources(out);
+          var rows = (r && r.data) || []; rows.forEach(function (s) { if (!seen[s.id]) { seen[s.id] = 1; out.push(s); } });
+          if (rows.length === PAGE) { from += PAGE; step(); } else fetchExtra();
         });
       })();
     }
     function load() {
       sb.from('research_extraction_questions').select('*').eq('project_id', pid).order('ord', { ascending: true }).then(function (r) { if (alive.current) setQuestions((r && r.data) || []); });
-      sb.from('research_extraction_cells').select('*').eq('project_id', pid).then(function (r) { if (!alive.current) return; var m = {}; ((r && r.data) || []).forEach(function (c) { m[K(c.question_id, c.source_id)] = c; }); setCells(m); });
-      loadSources();
+      sb.from('research_extraction_cells').select('*').eq('project_id', pid).then(function (r) {
+        var arr = (r && r.data) || [];
+        if (alive.current) { var m = {}; arr.forEach(function (c) { m[K(c.question_id, c.source_id)] = c; }); setCells(m); }
+        var extra = {}; arr.forEach(function (c) { extra[c.source_id] = 1; });
+        loadSources(Object.keys(extra));
+      }, function () { loadSources([]); });
     }
     useEffect(function () { load(); }, [pid]);
 
