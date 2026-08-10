@@ -2050,6 +2050,50 @@
     html.dark .rmap-genbusy { background: #4f46e5; }
     @media (max-width: 900px) { .rmap-wrap { flex-direction: column; } .rmap-insp { width: auto; } }
 
+    /* ═══ Tanulmány-központ (Studies overview, P0) ═══ */
+    .sh-wrap { margin: 0 0 18px; }
+    .sh-loading { display: flex; align-items: center; gap: 9px; color: var(--muted); padding: 22px; justify-content: center; }
+    .sh-strip { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 9px 13px; box-shadow: var(--shadow, 0 8px 26px -18px rgba(20,26,40,.4)); margin-bottom: 14px; }
+    .sh-t { font-weight: 800; font-size: 14px; margin-right: 6px; }
+    .sh-tok { font-size: 12px; font-weight: 650; border-radius: 999px; padding: 3px 10px; background: var(--surface-2); border: 1px solid var(--line); color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .sh-tok.fut { color: #c67d10; background: rgba(198,125,16,.12); border-color: transparent; }
+    .sh-tok.var { color: var(--warn); background: var(--warn-bg); border-color: transparent; }
+    .sh-tok.elakadt { color: var(--danger); background: var(--danger-bg); border-color: transparent; }
+    .sh-tok.kesz { color: var(--ok); background: var(--ok-bg); border-color: transparent; }
+    .sh-sec { margin-bottom: 14px; }
+    .sh-sec-h { display: flex; align-items: center; gap: 9px; font-size: 13px; font-weight: 750; margin-bottom: 9px; }
+    .sh-cnt { font-size: 11.5px; font-weight: 800; color: var(--muted); background: var(--surface-2); border-radius: 999px; padding: 1px 8px; }
+    .sh-cards { display: grid; gap: 10px; }
+    @media (min-width: 720px) { .sh-cards { grid-template-columns: 1fr 1fr; } }
+    .sh-card { background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--faint); border-radius: 12px; padding: 12px 14px; box-shadow: var(--shadow, 0 8px 26px -20px rgba(20,26,40,.4)); }
+    .sh-card.fut { border-left-color: #c67d10; } .sh-card.var { border-left-color: var(--warn); } .sh-card.elakadt { border-left-color: var(--danger); } .sh-card.terv { border-left-color: var(--faint); } .sh-card.kesz { border-left-color: var(--ok); }
+    .sh-ctop { display: flex; align-items: flex-start; gap: 9px; }
+    .sh-title { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 700; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .sh-badge { flex: none; font-size: 10.5px; font-weight: 750; border-radius: 6px; padding: 2px 7px; white-space: nowrap; }
+    .sh-badge.e { color: #8b46e0; background: color-mix(in srgb, #8b46e0 13%, transparent); }
+    .sh-badge.n { color: var(--accent); background: var(--accent-tint); }
+    .sh-rail { display: flex; align-items: center; margin: 11px 0 9px; }
+    .sh-rnode { display: flex; flex-direction: column; align-items: center; gap: 4px; flex: none; }
+    .sh-rdot { width: 13px; height: 13px; border-radius: 50%; border: 2px solid var(--line-2); background: var(--surface); }
+    .sh-rdot.done { background: var(--ok); border-color: var(--ok); }
+    .sh-rdot.at { border-color: #c67d10; background: color-mix(in srgb, #c67d10 22%, var(--surface)); }
+    .sh-rdot.cur { border-color: #c67d10; box-shadow: 0 0 0 3px rgba(198,125,16,.18); animation: shp 1.4s ease-in-out infinite; }
+    @keyframes shp { 0%,100% { box-shadow: 0 0 0 3px rgba(198,125,16,.18); } 50% { box-shadow: 0 0 0 6px rgba(198,125,16,0); } }
+    @media (prefers-reduced-motion: reduce) { .sh-rdot.cur { animation: none; } }
+    .sh-rlab { font-size: 9px; color: var(--faint); white-space: nowrap; font-weight: 600; }
+    .sh-rlab.cur { color: #c67d10; font-weight: 800; }
+    .sh-rline { height: 2px; flex: 1; min-width: 16px; background: var(--line-2); margin-bottom: 14px; }
+    .sh-rline.done { background: color-mix(in srgb, var(--ok) 55%, var(--line-2)); }
+    .sh-bot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .sh-src { font-size: 11.5px; color: var(--muted); max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .sh-live { font-size: 11.5px; font-weight: 650; color: #c67d10; }
+    .sh-idle { font-size: 11px; color: var(--faint); font-style: italic; }
+    .sh-sp { flex: 1; }
+    .sh-open { font-size: 12px; font-weight: 700; color: var(--accent); background: var(--accent-tint); border: 0; border-radius: 8px; padding: 5px 11px; cursor: pointer; font-family: inherit; }
+    .sh-open:hover { filter: brightness(.97); }
+    .sh-more { font-size: 12px; color: var(--muted); margin-top: 7px; }
+    .sh-foot { font-size: 11.5px; color: var(--faint); margin-top: 6px; line-height: 1.5; border-top: 1px dashed var(--line); padding-top: 10px; }
+
     /* ═══ Kivonatolás (Extraction) — evidence matrix ═══ */
     .ex-wrap { max-width: 1180px; margin: 0 auto; padding: 6px 2px 40px; }
     .ex-loading { display: flex; align-items: center; gap: 9px; color: var(--muted); padding: 40px; justify-content: center; }
@@ -2191,9 +2235,9 @@
     .ex-hint { font-size: 13px; color: var(--muted); margin-top: 14px; padding: 12px 14px; background: var(--accent-tint); border-radius: 10px; }
     .ex-note { font-size: 12px; color: var(--faint); margin-top: 16px; line-height: 1.55; max-width: 80ch; }
   </style>
-  <script src="theme.js?v=1786277386"></script>
-  <script src="nav.js?v=1786277386"></script>
-  <script src="entitlements.js?v=1786277386"></script>
+  <script src="theme.js?v=1786368437"></script>
+  <script src="nav.js?v=1786368437"></script>
+  <script src="entitlements.js?v=1786368437"></script>
 </head>
 
 <body>
@@ -2205,24 +2249,24 @@
   <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
   <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="backend/config.js?v=1786277386"></script>
-  <script src="auth.js?v=1786277386"></script>
-  <script src="backend.js?v=1786277386"></script>
-  <script src="universities.js?v=1786277386"></script>
-  <script src="onboarding.js?v=1786277386"></script>
-  <script src="office.js?v=1786277386"></script>
-  <script src="publications.js?v=1786277386"></script>
+  <script src="backend/config.js?v=1786368437"></script>
+  <script src="auth.js?v=1786368437"></script>
+  <script src="backend.js?v=1786368437"></script>
+  <script src="universities.js?v=1786368437"></script>
+  <script src="onboarding.js?v=1786368437"></script>
+  <script src="office.js?v=1786368437"></script>
+  <script src="publications.js?v=1786368437"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/tus-js-client@4.1.0/dist/tus.min.js"></script>
-  <script type="text/babel" src="canvas.jsx?v=1786277386"></script>
-  <script type="text/babel" src="notes.jsx?v=1786277386"></script>
-  <script src="autopilot-core.js?v=1786277386"></script>
-  <script type="text/babel" src="research.jsx?v=1786277386"></script>
+  <script type="text/babel" src="canvas.jsx?v=1786368437"></script>
+  <script type="text/babel" src="notes.jsx?v=1786368437"></script>
+  <script src="autopilot-core.js?v=1786368437"></script>
+  <script type="text/babel" src="research.jsx?v=1786368437"></script>
 
-  <script src="build.js?v=1786277386"></script>
-  <script src="version-badge.js?v=1786277386"></script>
+  <script src="build.js?v=1786368437"></script>
+  <script src="version-badge.js?v=1786368437"></script>
 </body>
 
 </html>
