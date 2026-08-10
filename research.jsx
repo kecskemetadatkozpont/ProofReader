@@ -3536,9 +3536,13 @@
     var ifS = useState([]), ideasFull = ifS[0], setIdeasFull = ifS[1];   // full selected ideas → the one-path per-idea launcher
     var asS = useState([]), allStudies = asS[0], setAllStudies = asS[1];  // ALL native/backup studies → merged into the Reviews list
     // launch engine choice + the admin-approval requests for this project (migration-109)
-    var smS = useState(function () { try { return localStorage.getItem('pr-sr-mode') || 'elicit'; } catch (e) { return 'elicit'; } }), srMode = smS[0], setSrMode = smS[1];   // 'elicit' (jóváhagyással) | 'openalex' (automatikus)
+    // P1 (Studies redesign): FORCED explicit engine choice — no implicit default. Honor a PRIOR explicit pick from
+    // localStorage (pickSrMode only writes on a click, so a stored value IS a deliberate choice); otherwise start null
+    // so the launcher can't run until the user picks 🧪 Elicit or 🔍 Beépített in the Motor step.
+    var smS = useState(function () { try { var m = localStorage.getItem('pr-sr-mode'); return (m === 'openalex' || m === 'elicit') ? m : null; } catch (e) { return null; } }), srMode = smS[0], setSrMode = smS[1];   // 'elicit' | 'openalex' | null
     var rrS = useState([]), reqReqs = rrS[0], setReqReqs = rrS[1];   // research_review_requests for this project
     var rrFallbackRef = useRef({});   // request ids for which we've already kicked off the OpenAlex fallback (once per session)
+    var ofS = useState(null), offer = ofS[0], setOffer = ofS[1];   // {rq,ideaId,short} — P1: Elicit failed → EXPLICIT "run with the built-in engine instead" offer (a click, NOT a silent auto-swap)
     var impS = useState(''), imp = impS[0], setImp = impS[1];   // job id whose papers are being (manually) imported into the Library
     function pickSrMode(m) { setSrMode(m); try { localStorage.setItem('pr-sr-mode', m); } catch (e) { } }
     function loadReqReqs() {
@@ -3684,7 +3688,9 @@
     function create() {
       var rq = f.q.trim(); if (!rq) return;
       var qCand0 = (cands || []).filter(function (x) { return x.id === fromCand.current; })[0];
-      if (srMode === 'openalex') { setErr('⚙ Automatikus futtatás (OpenAlex)…'); setOpenForm(false); runBackup(rq, qCand0 && qCand0.idea_id); fromCand.current = null; return; }   // (b) no approval
+      var mode = srMode; if (!mode) { if (nd()) { setErr('Válassz futtatómotort: zárd be ezt az ablakot, és kattints a „Motor" kártyára (🧪 Elicit vagy 🔍 Beépített).'); return; } mode = 'elicit'; }   // P1: forced choice in nd(); classic keeps the old implicit default
+      if (nd() && !engineUsable(mode)) { setErr('A kiválasztott motor jelenleg nem elérhető — zárd be ezt az ablakot, és válassz másikat a „Motor" lépésnél.'); return; }
+      if (mode === 'openalex') { setErr('⚙ Automatikus futtatás (OpenAlex)…'); setOpenForm(false); runBackup(rq, qCand0 && qCand0.idea_id); fromCand.current = null; return; }   // (b) no approval
       setBusy(true); setErr('');
       // Elicit screening has no separate exclusion field → fold each exclusion criterion into the screening criteria as an
       // inclusion-style rule ("must NOT match …") so a paper meeting it is correctly EXCLUDED. Abstract screen is the primary gate.
@@ -3700,7 +3706,9 @@
           var transient = /rate limit|429|max concurrent|too many requests|plan limit|403/i.test(em);
           if (transient) { setErr(em); return; }
           var qCand = (cands || []).filter(function (x) { return x.id === fromCand.current; })[0];
-          setErr('⚡ Elicit nem elérhető — automatikus beépített backup (Claude + OpenAlex) indul ugyanerre a kérdésre…');
+          // P1 — NO silent auto-swap: surface the failure and OFFER the built-in engine as an explicit one-click choice.
+          if (nd()) { setErr('⚠ Elicit nem indult el: ' + em); setOffer({ rq: rq, ideaId: (qCand && qCand.idea_id) || null, short: rq.slice(0, 48) }); setOpenForm(false); fromCand.current = null; return; }
+          setErr('⚡ Elicit nem elérhető — automatikus beépített backup (Claude + OpenAlex) indul ugyanerre a kérdésre…');   // classic (nd OFF): unchanged auto-backup
           setOpenForm(false); runBackup(rq, qCand && qCand.idea_id); fromCand.current = null;
           return;
         }
@@ -3708,6 +3716,10 @@
         if (fromCand.current && jid) sb.from('research_sr_candidates').update({ launched_job_id: jid, updated_at: new Date().toISOString() }).eq('id', fromCand.current);
         fromCand.current = null;
         setOpenForm(false); setF({ q: '', protocol: '', abs: [], ft: [], ex: [], exclude: [], gen: true, genAbs: true, genEx: true, useFig: false, runFT: true, maxResults: '1000' }); if (d.deduped) setErr('A review for this question is already in progress.'); load();
+      }, function () {   // network REJECT (not a {error} resolve) — clear busy + no silent swap: offer the built-in engine explicitly (nd) / keep classic auto-backup
+        if (!alive.current) return; setBusy(false);
+        if (nd()) { setErr('⚠ Hálózati hiba az Elicit-hívás közben.'); setOffer({ rq: rq, ideaId: (qCand0 && qCand0.idea_id) || null, short: rq.slice(0, 48) }); setOpenForm(false); fromCand.current = null; return; }
+        setOpenForm(false); runBackup(rq, qCand0 && qCand0.idea_id); fromCand.current = null;
       });
     }
     // ONE-PATH launcher: start a systematic review straight from a SELECTED idea. Elicit primary → on ANY non-transient
@@ -3716,7 +3728,9 @@
       if (!idea || !idea.question) return;
       var rq = String(idea.question) + (idea.hypothesis ? ' — hypothesis: ' + idea.hypothesis : '');
       var short = String(idea.question).slice(0, 48);
-      if (srMode === 'openalex') { setErr('⚙ Automatikus futtatás (OpenAlex): „' + short + '…"'); runBackup(rq, idea.id); return; }   // (b) no approval
+      var mode = srMode; if (!mode) { if (nd()) { setErr('Válassz futtatómotort a „Motor" lépésnél (🧪 Elicit vagy 🔍 Beépített).'); return; } mode = 'elicit'; }   // P1: forced choice in nd()
+      if (nd() && !engineUsable(mode)) { setErr('A kiválasztott motor jelenleg nem elérhető — válassz másikat a „Motor" lépésnél.'); return; }
+      if (mode === 'openalex') { setErr('⚙ Automatikus futtatás (OpenAlex): „' + short + '…"'); runBackup(rq, idea.id); return; }   // (b) no approval
       setBusy(true); setErr('');
       var cand = ideaCand(idea);
       callElicit({ action: 'sr.request', researchQuestion: rq, project_id: props.projectId, candidate_id: (cand && cand.id) || null, title: (props.project && props.project.title) || null, generateReport: true, genAbstract: true, genExtraction: true, runFullText: true, maxResults: 1000 }).then(function (d) {
@@ -3725,10 +3739,12 @@
         if (!d || d.error) {
           var em = String((d && d.error) || 'Could not start the review.');
           if (/rate limit|429|max concurrent|too many requests|plan limit|403/i.test(em)) { setErr('Elicit: ' + em + ' — próbáld újra kicsit később.'); return; }
-          setErr('⚡ Elicit nem elérhető — beépített backup indult: „' + short + '…"'); runBackup(rq, idea.id); return;   // admin auto-run path only
+          // P1 — NO silent auto-swap: offer the built-in engine explicitly.
+          if (nd()) { setErr('⚠ Elicit nem elérhető: „' + short + '…"'); setOffer({ rq: rq, ideaId: idea.id, short: short }); return; }
+          setErr('⚡ Elicit nem elérhető — beépített backup indult: „' + short + '…"'); runBackup(rq, idea.id); return;   // classic (nd OFF): unchanged
         }
         setErr('✓ Review elindítva (Elicit): „' + short + '…"'); load(); loadStudies(); loadAllStudies();
-      }, function () { if (!alive.current) return; setBusy(false); runBackup(rq, idea.id); });
+      }, function () { if (!alive.current) return; setBusy(false); if (nd()) { setErr('⚠ Hálózati hiba (Elicit): „' + short + '…"'); setOffer({ rq: rq, ideaId: idea.id, short: short }); } else { runBackup(rq, idea.id); } });
     }
     function runReviewAll(list) { (list || []).forEach(function (idea, i) { setTimeout(function () { if (alive.current) runReviewForIdea(idea); }, i * 600); }); }
     // Has a systematic review already COMPLETED for this idea? → a native/backup study with this idea_id is done, OR an
@@ -3968,6 +3984,55 @@
           h('button', { className: 'sr-rcx', disabled: !props.canEdit, title: 'Dismiss', onClick: function () { dismissCand(c); } }, '×'))
       );
     }
+    // is the given engine usable RIGHT NOW (entitlement + Elicit health)? — shared by the Motor cards, the launch-button
+    // gating AND the create/runReviewForIdea guards, so a selected-but-unavailable engine can't be launched into a
+    // guaranteed failure. Native (openalex) is cosmetic-entitlement-gated only (fail-open when PREnt unloaded).
+    function engineUsable(m) {
+      // Elicit: require the entitlement, but block ONLY on an AUTHORITATIVE "down" (available:false with a real reason, e.g.
+      // not_configured). A still-in-flight probe (srHealth==null) OR a FAILED health call (reason 'error') stays attemptable —
+      // sr.request is the authoritative call and already surfaces the explicit built-in offer on a real failure, so a flaky
+      // one-shot health probe must not strand the user for the whole session.
+      if (m === 'elicit') return !!canUse && !(srHealth && srHealth.available === false && srHealth.reason !== 'error');
+      if (m === 'openalex') return !(window.PREnt && window.PREnt.loaded && window.PREnt.loaded() && typeof window.PREnt.can === 'function' && window.PREnt.can('literature_study') === false);
+      return false;
+    }
+    // P1 (Studies redesign) — the "Motor" step: two TRANSPARENT engine cards, a REQUIRED explicit choice (no default),
+    // replacing the old segmented toggle + the misleading "auto-backup készenlétben" status line. Each card shows its real
+    // trade-off (approval / quota / where the result lands) and is disabled-with-reason when unavailable. On an Elicit
+    // failure the launcher no longer silently swaps engines — it renders an EXPLICIT one-click "run with the built-in engine" offer.
+    function motorPicker() {
+      if (!props.canEdit) return null;   // launching needs canEdit; read-only viewers don't pick an engine
+      var eliEnt = canUse;                                   // can('elicit_sysreview')
+      var eliDown = !!(srHealth && srHealth.available === false && srHealth.reason !== 'error');   // AUTHORITATIVE down (not a failed probe)
+      var eliState = !eliEnt ? 'noent' : (srHealth == null ? 'checking' : (eliDown ? 'down' : 'ok'));   // entitlement is known immediately; health is async
+      var eliOk = engineUsable('elicit');   // = entitled && !authoritatively-down (checking / probe-error stay attemptable)
+      var isAdmin = !!(window.PREnt && window.PREnt.role && window.PREnt.role() === 'admin');
+      var natEnt = engineUsable('openalex');
+      function engCard(key, sel, avail, ic, name, lines, reason) {
+        return h('button', { className: 'sr-eng' + (sel ? ' on' : '') + (avail ? '' : ' off'), disabled: !avail, 'aria-pressed': sel, onClick: avail ? function () { pickSrMode(key); if (offer) setOffer(null); } : null, title: avail ? (name + ' motor kiválasztása') : (reason || 'Nem elérhető') },
+          h('div', { className: 'sr-eng-h' }, h('span', { className: 'sr-eng-ic' }, ic), h('b', null, name), sel ? h('span', { className: 'sr-eng-chk' }, '✓') : null),
+          h('div', { className: 'sr-eng-lines' }, lines.map(function (l, i) { var warn = l.charAt(0) === '!'; return h('div', { key: i, className: 'sr-eng-l' + (warn ? ' warn' : '') }, warn ? l.slice(1) : l); })));
+      }
+      var eliLines = eliState === 'checking' ? ['Elérhetőség ellenőrzése…']
+        : eliState === 'noent' ? ['!🔒 Nincs engedélyezve — kérd az admintól']
+        : eliState === 'down' ? ['!🟠 Jelenleg nem elérhető' + (srHealth && srHealth.reason === 'not_configured' ? ' (nincs API-kulcs)' : '')]
+        : [(isAdmin ? '⚡ Azonnal fut' : '📨 Admin jóváhagyás szükséges'), 'Elicit review + PRISMA riport'];
+      var natLines = !natEnt ? ['!🔒 Nincs engedélyezve — kérd az admintól'] : ['⚡ Azonnal fut, jóváhagyás nélkül', 'Claude-szűrés + OpenAlex funnel'];
+      return h('div', { className: 'sr-motor' },
+        h('div', { className: 'sr-motor-h' }, 'Motor — ', h('span', { className: 'sr-motor-sub' }, srMode ? 'ezzel fut az indított review' : 'válaszd ki, mivel fusson (kötelező)')),
+        h('div', { className: 'sr-eng-wrap' },
+          engCard('elicit', srMode === 'elicit', eliOk, '🧪', 'Elicit', eliLines, eliState === 'noent' ? 'Nincs elicit_sysreview engedélyed' : eliState === 'down' ? 'Elicit jelenleg nem elérhető' : eliState === 'checking' ? 'Elérhetőség ellenőrzése…' : ''),
+          engCard('openalex', srMode === 'openalex', natEnt, '🔍', 'Beépített', natLines, natEnt ? '' : 'Nincs literature_study engedélyed')),
+        // no engine usable to this account → say so instead of two silently-greyed cards with no path forward
+        (!eliOk && !natEnt) ? h('div', { className: 'sr-eng-none' }, '⚠ Jelenleg egyik motor sem elérhető a fiókodhoz — kérd az admintól, vagy próbáld később.') : null,
+        offer ? h('div', { className: 'sr-offer' },
+          h('span', { className: 'sr-offer-ic' }, '⚠'),
+          h('div', { className: 'sr-offer-b' }, h('b', null, 'Az Elicit nem indult el'), h('div', { className: 'sr-offer-q' }, '„' + (offer.short || '') + '…"')),
+          natEnt
+            ? h('button', { className: 'sr-offer-go', onClick: function () { var o = offer; pickSrMode('openalex'); setOffer(null); setErr('⚙ Beépített motor (Claude + OpenAlex) indul: „' + (o.short || '') + '…"'); runBackup(o.rq, o.ideaId); } }, '🔍 Indítsd a beépítettel')
+            : h('span', { className: 'sr-eng-l warn', style: { flex: 'none' } }, '🔒 A beépített motor sincs engedélyezve'),
+          h('button', { className: 'sr-offer-x', title: 'Elvetés', onClick: function () { setOffer(null); } }, '×')) : null);
+    }
     function srWorkspace() {
       // resolve ONE effective selection so the highlighted rail row and the detail pane can never disagree (stale selJob → jobs[0])
       var selId = (jobs && jobs.some(function (x) { return x.id === selJob; })) ? selJob : ((jobs && jobs[0] && jobs[0].id) || null);
@@ -3979,21 +4044,8 @@
         err ? h('div', { style: { fontSize: 12.5, color: /^✓/.test(err) ? 'var(--ok, #15803d)' : 'var(--danger, #b42318)', margin: '6px 0' } }, err) : null,
         // STEP 1 — Kiindulás & indítás (Studies redesign A: numbered process spine)
         stepHd(1, 'Kiindulás & indítás', 'jelöld ki az ötleteket → indíts review-t'),
-        // ONE-PATH engine-status line: Elicit primary, built-in backup on standby. The launch auto-falls-back if Elicit is down.
-        (function () {
-          var up = srHealth && srHealth.available;
-          var bg = srHealth == null ? 'var(--surface-2)' : up ? 'color-mix(in srgb, var(--ok, #15803d) 12%, var(--surface))' : 'color-mix(in srgb, var(--warn, #d9820a) 14%, var(--surface))';
-          var col = srHealth == null ? 'var(--muted)' : up ? 'var(--ok, #15803d)' : 'var(--warn, #d9820a)';
-          var txt = srHealth == null ? 'Motor ellenőrzése…' : up ? '🟢 Motor: Elicit elérhető · a beépített backup (Claude + OpenAlex) készenlétben' : '🟠 Elicit nem elérhető' + (srHealth.reason === 'not_configured' ? ' (nincs API-kulcs)' : '') + ' — a review-k automatikusan a beépített szűréssel (Claude + OpenAlex) futnak';
-          return h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 11.5, fontWeight: 600, color: col, background: bg, border: '1px solid var(--line)', borderRadius: 9, padding: '7px 11px', margin: '4px 0 8px' } }, txt);
-        })(),
-        // (a) Elicit (admin-approval) vs (b) OpenAlex (automatic) — the launch-engine choice (migration-109)
-        (props.canEdit ? h('div', { style: { display: 'flex', alignItems: 'center', gap: 9, margin: '0 0 8px', flexWrap: 'wrap' } },
-          h('span', { style: { fontSize: 11.5, color: 'var(--muted)' } }, 'Futtatómotor:'),
-          h('div', { className: 'sr-mode-seg', role: 'group', 'aria-label': 'Futtatómotor' },
-            h('button', { className: srMode === 'elicit' ? 'on' : '', 'aria-pressed': srMode === 'elicit', onClick: function () { pickSrMode('elicit'); }, title: 'Elicit-alapú review — admin jóváhagyással' }, '🔬 Elicit (jóváhagyással)'),
-            h('button', { className: srMode === 'openalex' ? 'on' : '', 'aria-pressed': srMode === 'openalex', onClick: function () { pickSrMode('openalex'); }, title: 'Beépített, automatikus szűrés (Claude + OpenAlex) — jóváhagyás nélkül' }, '⚙ OpenAlex (automatikus)')),
-          h('span', { style: { fontSize: 11, color: 'var(--faint)' } }, srMode === 'elicit' ? 'Az Elicit-futtatás admin jóváhagyást igényel.' : 'Azonnal fut, jóváhagyás nélkül.')) : null),
+        // P1 — Motor step: FORCED explicit engine choice (2 transparent cards) replaces the old auto-fallback status line + segmented toggle.
+        motorPicker(),
         // my review requests: awaiting approval / rejected (approved ones become normal running jobs below)
         (function () {
           var me = props.viewerId || props.authorId;
@@ -4013,7 +4065,7 @@
           return h('div', { style: { border: '1px solid var(--line)', borderRadius: 10, padding: '11px 13px', margin: '2px 0 10px', background: 'var(--surface-2)' } },
             h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: sel.length ? 8 : 0, flexWrap: 'wrap' } },
               h('b', { style: { fontSize: 12.5 } }, '🔬 Review indítása a kijelölt ötletekből'),
-              sel.length ? h('button', { className: 'btn pri', style: { padding: '4px 10px', fontSize: 12, marginLeft: 'auto' }, disabled: busy || !props.canEdit, onClick: function () { runReviewAll(sel); } }, '🔬 Mind a ' + sel.length + '-ből') : null),
+              sel.length ? h('button', { className: 'btn pri', style: { padding: '4px 10px', fontSize: 12, marginLeft: 'auto' }, disabled: busy || !props.canEdit || !srMode || !engineUsable(srMode), title: !srMode ? 'Válassz futtatómotort a Motor lépésnél' : (!engineUsable(srMode) ? 'A kiválasztott motor jelenleg nem elérhető — válassz másikat' : null), onClick: function () { runReviewAll(sel); } }, '🔬 Mind a ' + sel.length + '-ből') : null),
             sel.length ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 7 } }, sel.map(function (idea) {
               // UNIFIED launcher row (B): one row per selected idea, enriched with its PICO candidate if generated. Merges
               // the old launcher (idea → ▶ Review) and the "From your Ideas" candidate cards into ONE list.
@@ -4048,8 +4100,8 @@
                 h('div', { style: { display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'stretch', flex: 'none' } },
                   (rs.done || rs.running) ? h('button', { className: 'btn', style: { padding: '4px 11px', fontSize: 11.5, whiteSpace: 'nowrap' }, title: 'Eredmény / részletek megnyitása', onClick: openIt }, 'Megnyitás') : null,
                   (pend) ? h('span', { style: { fontSize: 11, fontWeight: 700, color: '#7c3aed', whiteSpace: 'nowrap' }, title: 'Admin jóváhagyásra vár' }, '📨 Függőben')
-                    : (!rs.running ? h('button', { className: 'btn' + (rs.done ? '' : ' pri'), style: { padding: '4px 11px', fontSize: 11.5, whiteSpace: 'nowrap' }, disabled: busy || !props.canEdit, title: rs.done ? 'Új review futtatása' : 'Review indítása (Elicit → automatikus backup)', onClick: launchIt }, rs.done ? '↻ Újra' : '▶ Review') : null)));
-            })) : h('div', { style: { fontSize: 11.5, color: 'var(--muted)' } }, 'Jelölj ki ötleteket az Ötletek fülön („Select"), hogy review-t indíthass belőlük — Elicittel, vagy ha az nem elérhető, a beépített szűréssel.'));
+                    : (!rs.running ? h('button', { className: 'btn' + (rs.done ? '' : ' pri'), style: { padding: '4px 11px', fontSize: 11.5, whiteSpace: 'nowrap' }, disabled: busy || !props.canEdit || !srMode || !engineUsable(srMode), title: !srMode ? 'Válassz futtatómotort a Motor lépésnél' : (!engineUsable(srMode) ? 'A kiválasztott motor jelenleg nem elérhető — válassz másikat' : (rs.done ? 'Új review futtatása' : 'Review indítása a kiválasztott motorral')), onClick: launchIt }, rs.done ? '↻ Újra' : '▶ Review') : null)));
+            })) : h('div', { style: { fontSize: 11.5, color: 'var(--muted)' } }, 'Jelölj ki ötleteket az Ötletek fülön („Select"), hogy review-t indíthass belőlük — előbb válaszd ki fent a motort (🧪 Elicit vagy 🔍 Beépített).'));
         })(),
         // ALT. belépő: Kérdésekből (questions-first) — a rendszer a kérdésekből épít egy szűrési folyamatot + válaszol rájuk
         canView ? h('div', { className: 'qf-entry' },
@@ -4147,7 +4199,7 @@
         h('label', { key: 'gen', style: { display: 'flex', gap: 7, alignItems: 'center', fontSize: 12.5 } }, h('input', { type: 'checkbox', checked: f.gen, onChange: function (e) { upf('gen', e.target.checked); } }), 'Generate a full report at the end'),
         h('div', { key: 'ft2', style: { display: 'flex', gap: 10, justifyContent: 'flex-end', alignItems: 'center', flexWrap: 'wrap' } },
           err ? h('div', { style: { flex: 1, minWidth: 0, fontSize: 12, color: /^✓/.test(err) ? 'var(--ok, #15803d)' : 'var(--danger, #b42318)' } }, err) : null,
-          h('button', { className: 'btn pri', disabled: !canCreate || busy || !f.q.trim(), onClick: create }, busy ? 'Starting…' : 'Start review'))
+          h('button', { className: 'btn pri', disabled: !canCreate || busy || !f.q.trim() || (nd() && (!srMode || !engineUsable(srMode))), title: (nd() && !srMode) ? 'Válassz futtatómotort a „Motor" lépésnél (zárd be ezt az ablakot)' : (nd() && !engineUsable(srMode)) ? 'A kiválasztott motor jelenleg nem elérhető' : null, onClick: create }, busy ? 'Starting…' : 'Start review'))
       ];
     }
     if (nd()) return srWorkspace();

@@ -43,6 +43,7 @@
     },
     enforced: function (key) { return !!(cache && cache.enforced[key]); },
     active: function () { return !!(cache && cache.prof.status === 'approved'); },
+    role: function () { return cache ? (cache.prof.role || null) : null; },   // 'admin' | 'researcher' | … — used cosmetically (e.g. the launcher's "needs approval" badge for non-admins)
     modelAllowlist: function () { return cache ? (cache.prof.model_allowlist || null) : null; },
     // full-screen "no access" block for a whole page/menu-item (idempotent). Callers decide WHEN to block
     // (nav.js guards the current page after load; admins bypass). Data pages stay RLS-isolated regardless.
