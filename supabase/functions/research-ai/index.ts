@@ -147,6 +147,11 @@ Deno.serve(async (req) => {
         // map the AI's per-cell library refs (1-based indices into `lib`) → concrete sources, so the client can list the LITERATURE per cell
         matrix.cellSources = matrix.refs.map((rrow: any) => (Array.isArray(rrow) ? rrow : []).map((cell: any) =>
           (Array.isArray(cell) ? cell : []).map((n: any) => lib[(n | 0) - 1]).filter(Boolean).map((s: any) => ({ id: s.id, title: s.title, year: s.year, screening: s.screening }))));
+        // RECONCILE the per-cell COUNT with the resolvable LIST: the model emits `cells` (count) and `refs` (indices)
+        // independently and often inflates the count (e.g. "32 forrás" but only 2 refs). Make the count == the number of
+        // sources the client will actually list, so the heatmap number never exceeds the drill-down. (Also absorbs the
+        // filter(Boolean) drop of out-of-range/hallucinated indices.)
+        matrix.cells = matrix.cellSources.map((row: any) => (Array.isArray(row) ? row : []).map((cell: any) => (Array.isArray(cell) ? cell.length : 0)));
         delete matrix.refs;
       }
       // persist so it's returned unchanged next load (best-effort: viewers lack write access → they read an editor's cache)
@@ -350,7 +355,7 @@ Return ONLY a JSON array, no prose. Each item:
 
 // Evidence-gap MATRIX (action='gap_matrix') → {rows:[...], cols:[...], cells:[[int,...],...]} where cells[r][c] = #library items covering rows[r]×cols[c]. Empty cells are the gaps.
 // Bump when the gap-matrix PROMPT changes → invalidates every cached matrix (its fingerprint no longer matches).
-const GAP_MATRIX_PROMPT_VERSION = 'v1';
+const GAP_MATRIX_PROMPT_VERSION = 'v2';   // v2: server reconciles per-cell count := resolvable source-list length (fixes "says 32, shows 2")
 async function sha256Hex(s: string): Promise<string> {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
   return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, '0')).join('');

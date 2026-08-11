@@ -1828,15 +1828,16 @@
       if (mxBusy || matrix === null) return h('div', { className: 'gp-empty' }, '⏳ Bizonyíték-rés-mátrix számítása…');
       if (matrix === 'none') return h('div', { className: 'gp-empty', style: { fontSize: 13 } }, 'Túl kevés forrás a megbízható rés-térképhez — bővítsd a Könyvtárat.');
       if (matrix === 'error') return h('div', { className: 'gp-empty' }, h('div', { style: { fontSize: 13, marginBottom: 10 } }, 'A mátrix nem érhető el — telepítsd a research-ai edge-et (gap_matrix támogatás).'), h('button', { className: 'gp-rebtn', onClick: fetchMatrix }, '↻ Újra'));
-      var mcols = matrix.cols || [], mrows = matrix.rows || [], cells = matrix.cells || [], maxN = 1;
-      cells.forEach(function (row) { (row || []).forEach(function (n) { if (n > maxN) maxN = n; }); });
+      var mcols = matrix.cols || [], mrows = matrix.rows || [], cells = matrix.cells || [], csrc = matrix.cellSources || null, maxN = 1;
+      function cellN(ri, ci) { if (csrc && csrc[ri] && Array.isArray(csrc[ri][ci])) return csrc[ri][ci].length; return (cells[ri] && cells[ri][ci] != null) ? cells[ri][ci] : 0; }   // count == resolvable list length (fixes "says 32, shows 2")
+      mrows.forEach(function (rl, ri) { mcols.forEach(function (cl, ci) { var v = cellN(ri, ci); if (v > maxN) maxN = v; }); });
       return h('div', { className: 'gp-egm' },
         h('table', { className: 'egm' }, h('tbody', null,
           h('tr', null, h('th', null, ''), mcols.map(function (c, ci) { return h('th', { key: ci }, String(c)); })),
           mrows.map(function (rlab, ri) {
             return h('tr', { key: ri }, h('th', { className: 'rowh' }, String(rlab)),
               mcols.map(function (c, ci) {
-                var n = (cells[ri] && cells[ri][ci] != null) ? cells[ri][ci] : 0, isGap = !n, clickable = isGap && props.canEdit;
+                var n = cellN(ri, ci), isGap = !n, clickable = isGap && props.canEdit;
                 return h('td', { key: ci }, h('div', { className: 'egm-cell' + (isGap ? ' gapcell' : '') + (clickable ? ' clk' : ''), style: isGap ? null : { background: 'color-mix(in srgb, var(--accent) ' + Math.round((0.12 + (n / maxN) * 0.5) * 100) + '%, transparent)', color: (n / maxN > 0.6 ? '#fff' : 'var(--ink)') }, title: isGap ? (clickable ? 'Kattints: rés létrehozása ehhez a cellához (' + String(rlab) + ' × ' + String(c) + ')' : 'RÉS — 0 forrás fedi le') : (n + ' forrás'), onClick: clickable ? function () { createGapFromCell(rlab, c); } : null }, isGap && clickable ? '＋' : String(n)));
               }));
           }))),
@@ -1852,8 +1853,12 @@
       if (mxBusy || matrix === null) return h('div', { className: 'gp-empty', style: { padding: '26px 16px' } }, '⏳ Bizonyíték-rés-térkép számítása…');
       if (matrix === 'none') return h('div', { className: 'gp-empty', style: { padding: '22px 16px', fontSize: 13 } }, 'Túl kevés forrás a rés-térképhez — bővítsd a Könyvtárat, majd „↻ Újraelemzés".');
       if (matrix === 'error') return h('div', { className: 'gp-empty', style: { padding: '20px 16px' } }, h('div', { style: { fontSize: 13, marginBottom: 10 } }, 'A rés-térkép nem érhető el (research-ai · gap_matrix).'), h('button', { className: 'gp-rebtn', onClick: fetchMatrix }, '↻ Újra'));
-      var mcols = matrix.cols || [], mrows = matrix.rows || [], cells = matrix.cells || [], maxN = 1;
-      cells.forEach(function (row) { (row || []).forEach(function (n) { if (n > maxN) maxN = n; }); });
+      var mcols = matrix.cols || [], mrows = matrix.rows || [], cells = matrix.cells || [], csrc = matrix.cellSources || null, maxN = 1;
+      // prefer the RESOLVABLE source-list length (cellSources) over the model's self-reported count, so the heatmap number
+      // always matches the drill-down list — even for older cached matrices from before the server-side reconcile fix
+      // (this is what caused "says 32 forrás, shows 2").
+      function cellN(ri, ci) { if (csrc && csrc[ri] && Array.isArray(csrc[ri][ci])) return csrc[ri][ci].length; return (cells[ri] && cells[ri][ci] != null) ? cells[ri][ci] : 0; }
+      mrows.forEach(function (rl, ri) { mcols.forEach(function (cl, ci) { var v = cellN(ri, ci); if (v > maxN) maxN = v; }); });
       function heatCls(n) { var r = n / maxN; return n === 0 ? 'h0' : r < 0.25 ? 'h1' : r < 0.5 ? 'h2' : r < 0.75 ? 'h3' : 'h4'; }
       return h('div', { className: 'gp-heatmap' },
         h('div', { className: 'gp-heat-scroll' },
@@ -1862,7 +1867,7 @@
             mrows.map(function (rl, ri) {
               return h('tr', { key: ri }, h('th', { className: 'rowh', title: String(rl) }, String(rl)),
                 mcols.map(function (c, ci) {
-                  var n = (cells[ri] && cells[ri][ci] != null) ? cells[ri][ci] : 0, isGap = !n;
+                  var n = cellN(ri, ci), isGap = !n;
                   var cg = isGap ? gaps.filter(function (g) { return gapMatchesCell(g, rl, c); }) : [];
                   var running = cg.some(function (g) { var s = gapRunState(g); return !!(s && s.running); });
                   var done = !running && cg.some(function (g) { var s = gapRunState(g); return !!(s && s.done); });
