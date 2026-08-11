@@ -4557,8 +4557,8 @@
         props.canEdit ? h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginTop: 10 } },
           h('button', { className: 'btn', disabled: planning, title: 'Ötletek nélküli, kézi kulcsszó-szűrés indítása', onClick: function () { newStudy(null); } }, '+ Üres study (kézi kulcsszó-szűrés)')
         ) : h('div', { style: { fontSize: 13, color: 'var(--faint)' } }, 'Read-only view.'),
-        qfBlock(),
-        h(ExtractQEditor, { projectId: props.projectId, canEdit: props.canEdit, authorId: props.authorId }),
+        // (removed the redundant "Indulj kérdésekből" + "Kivonatolási kérdések" blocks — extraction questions are now
+        //  managed inside the study itself via the ▦ Mátrix view; questions-first still lives in the SR Studio above.)
         err ? h('div', { style: { color: 'var(--danger)', fontSize: 12.5, marginTop: 8 } }, err) : null);
     }
 
@@ -4625,9 +4625,8 @@
         curStep < 4 ? h('button', { className: 'lsck-cfgtoggle' + (cfgOpen ? ' on' : ''), onClick: function () { setCfgOpen(!cfgOpen); }, title: 'Beállítások panel ki/be' }, cfgOpen ? '⚙ Beállítások ▲' : '⚙ Beállítások ▾') : null);
     }
     return h('div', null,
-      qfBlock(),
-      // extraction questions the screening answers INLINE (visible whether or not a study is open)
-      h(ExtractQEditor, { projectId: props.projectId, canEdit: props.canEdit, authorId: props.authorId }),
+      // (removed the redundant "Indulj kérdésekből" + "Kivonatolási kérdések" blocks from the funnel top — the extraction
+      //  questions are managed inside the study via the ▦ Mátrix view now; questions-first still lives in the SR Studio.)
       // studies overview — every study with its progress + status; click to open one. Lets you follow several.
       h('div', { style: { marginBottom: 12, marginTop: 12 } },
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5 } },
