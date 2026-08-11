@@ -2141,8 +2141,10 @@
     .sh-badge { flex: none; font-size: 10.5px; font-weight: 750; border-radius: 6px; padding: 2px 7px; white-space: nowrap; }
     .sh-badge.e { color: #8b46e0; background: color-mix(in srgb, #8b46e0 13%, transparent); }
     .sh-badge.n { color: var(--accent); background: var(--accent-tint); }
-    .sh-rail { display: flex; align-items: center; margin: 11px 0 9px; }
+    .sh-rail { display: flex; align-items: flex-start; margin: 11px 0 9px; }
     .sh-rnode { display: flex; flex-direction: column; align-items: center; gap: 4px; flex: none; }
+    .sh-rnum { font-size: 10px; font-weight: 800; color: var(--ink); font-variant-numeric: tabular-nums; margin-top: 1px; line-height: 1; }
+    .sh-rnum.zero { color: var(--faint); font-weight: 700; }
     .sh-rdot { width: 13px; height: 13px; border-radius: 50%; border: 2px solid var(--line-2); background: var(--surface); }
     .sh-rdot.done { background: var(--ok); border-color: var(--ok); }
     .sh-rdot.at { border-color: #c67d10; background: color-mix(in srgb, #c67d10 22%, var(--surface)); }
@@ -2151,7 +2153,7 @@
     @media (prefers-reduced-motion: reduce) { .sh-rdot.cur { animation: none; } }
     .sh-rlab { font-size: 9px; color: var(--faint); white-space: nowrap; font-weight: 600; }
     .sh-rlab.cur { color: #c67d10; font-weight: 800; }
-    .sh-rline { height: 2px; flex: 1; min-width: 16px; background: var(--line-2); margin-bottom: 14px; }
+    .sh-rline { height: 2px; flex: 1; min-width: 16px; background: var(--line-2); margin-top: 5.5px; }
     .sh-rline.done { background: color-mix(in srgb, var(--ok) 55%, var(--line-2)); }
     .sh-bot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
     .sh-src { font-size: 11.5px; color: var(--muted); max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -2334,9 +2336,9 @@
     .exl-add { grid-column: 1 / -1; justify-self: start; font-family: inherit; font-size: 12px; font-weight: 700; color: var(--muted); background: transparent; border: 1px dashed var(--line-2, var(--line)); border-radius: 10px; padding: 9px 14px; cursor: pointer; }
     .exl-add:hover { border-color: #a23a86; color: #a23a86; }
   </style>
-  <script src="theme.js?v=1786448317"></script>
-  <script src="nav.js?v=1786448317"></script>
-  <script src="entitlements.js?v=1786448317"></script>
+  <script src="theme.js?v=1786452982"></script>
+  <script src="nav.js?v=1786452982"></script>
+  <script src="entitlements.js?v=1786452982"></script>
 </head>
 
 <body>
@@ -2348,24 +2350,24 @@
   <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
   <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="backend/config.js?v=1786448317"></script>
-  <script src="auth.js?v=1786448317"></script>
-  <script src="backend.js?v=1786448317"></script>
-  <script src="universities.js?v=1786448317"></script>
-  <script src="onboarding.js?v=1786448317"></script>
-  <script src="office.js?v=1786448317"></script>
-  <script src="publications.js?v=1786448317"></script>
+  <script src="backend/config.js?v=1786452982"></script>
+  <script src="auth.js?v=1786452982"></script>
+  <script src="backend.js?v=1786452982"></script>
+  <script src="universities.js?v=1786452982"></script>
+  <script src="onboarding.js?v=1786452982"></script>
+  <script src="office.js?v=1786452982"></script>
+  <script src="publications.js?v=1786452982"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/tus-js-client@4.1.0/dist/tus.min.js"></script>
-  <script type="text/babel" src="canvas.jsx?v=1786448317"></script>
-  <script type="text/babel" src="notes.jsx?v=1786448317"></script>
-  <script src="autopilot-core.js?v=1786448317"></script>
-  <script type="text/babel" src="research.jsx?v=1786448317"></script>
+  <script type="text/babel" src="canvas.jsx?v=1786452982"></script>
+  <script type="text/babel" src="notes.jsx?v=1786452982"></script>
+  <script src="autopilot-core.js?v=1786452982"></script>
+  <script type="text/babel" src="research.jsx?v=1786452982"></script>
 
-  <script src="build.js?v=1786448317"></script>
-  <script src="version-badge.js?v=1786448317"></script>
+  <script src="build.js?v=1786452982"></script>
+  <script src="version-badge.js?v=1786452982"></script>
 </body>
 
 </html>

@@ -11683,27 +11683,47 @@
         var ideaBy = {}; ideas.forEach(function (i) { ideaBy[i.id] = i; });
         var liveRuns = (typeof PRStudyRunner !== 'undefined' && PRStudyRunner.runs) ? PRStudyRunner.runs() : {};
         var liveBySid = {}; Object.keys(liveRuns).forEach(function (k) { var r = liveRuns[k]; if (r && r.sid) liveBySid[r.sid] = r; });
-        var out = [];
-        studies.forEach(function (s) {
-          var running = !!(typeof PRStudyRunner !== 'undefined' && PRStudyRunner.isStudyRunning && PRStudyRunner.isStudyRunning(s.id));
-          var live = liveBySid[s.id];
-          var stage = (live && SH_NATIVE_STAGE[live.stage]) || Math.min(Math.max(s.cur_step || 1, 1), 4);
-          // research_studies.status is only 'active'|'done' — a backup run that died leaves the DB 'active', so read the failure
-          // off the live runner (stage:'error', which flips isStudyRunning→false). status: running→fut · done→kész ·
-          // errored (live or DB)→elakadt · started (cur_step≥2) but idle→fut (áll) · only-planned→terv
-          var errored = (live && live.stage === 'error') || s.status === 'failed' || s.status === 'error';
-          var status = running ? 'fut' : (s.status === 'done' ? 'kesz' : (errored ? 'elakadt' : ((s.cur_step || 1) >= 2 ? 'fut' : 'terv')));
-          var idea = s.idea_id && ideaBy[s.idea_id];
-          var src = idea ? (idea.source === 'gap' ? { k: 'res', l: '🕳 Rés: ' + String(idea.question || '').slice(0, 40) } : { k: 'otlet', l: '💡 Ötlet: ' + String(idea.question || '').slice(0, 40) }) : { k: 'kerdes', l: '❓ Kérdés / kézi' };
-          out.push({ key: 's:' + s.id, engine: 'builtin', running: running, title: s.title || s.question || 'Tanulmány', source: src, status: status, stage: stage, live: (live && live.msg) || null, sid: s.id, jobId: null });
-        });
-        jobs.forEach(function (j) {
-          var st = String(j.status || '');
-          var life = /completed|done/.test(st) ? 'kesz' : /pending_approval|awaiting/.test(st) ? 'var' : /failed|error|stuck|paused|cancel/.test(st) ? 'elakadt' : 'fut';
-          var stage = SH_EL_STAGE[j.stage] || (life === 'kesz' ? 4 : 1);
-          out.push({ key: 'j:' + j.id, engine: 'elicit', running: life === 'fut', title: j.research_question || j.result_title || (j.kind === 'report' ? 'Elicit riport' : 'Elicit review'), source: { k: 'elicit', l: j.kind === 'report' ? '⚗️ Gyorsriport' : '⚗️ Elicit review' }, status: life, stage: stage, live: null, sid: null, jobId: j.id });
-        });
-        setRows(out);
+        var studyIds = studies.map(function (s) { return s.id; });
+        function finish(stepsBySid) {
+          if (!alive.current) return;
+          var out = [];
+          studies.forEach(function (s) {
+            var running = !!(typeof PRStudyRunner !== 'undefined' && PRStudyRunner.isStudyRunning && PRStudyRunner.isStudyRunning(s.id));
+            var live = liveBySid[s.id];
+            var stage = (live && SH_NATIVE_STAGE[live.stage]) || Math.min(Math.max(s.cur_step || 1, 1), 4);
+            // research_studies.status is only 'active'|'done' — a backup run that died leaves the DB 'active', so read the failure
+            // off the live runner (stage:'error', which flips isStudyRunning→false). status: running→fut · done→kész ·
+            // errored (live or DB)→elakadt · started (cur_step≥2) but idle→fut (áll) · only-planned→terv
+            var errored = (live && live.stage === 'error') || s.status === 'failed' || s.status === 'error';
+            var status = running ? 'fut' : (s.status === 'done' ? 'kesz' : (errored ? 'elakadt' : ((s.cur_step || 1) >= 2 ? 'fut' : 'terv')));
+            var idea = s.idea_id && ideaBy[s.idea_id];
+            var src = idea ? (idea.source === 'gap' ? { k: 'res', l: '🕳 Rés: ' + String(idea.question || '').slice(0, 40) } : { k: 'otlet', l: '💡 Ötlet: ' + String(idea.question || '').slice(0, 40) }) : { k: 'kerdes', l: '❓ Kérdés / kézi' };
+            // per-phase counts: step[i].total = how many papers REACHED each stage (Keresés = found · Kivonatszűrés = abstract-screened
+            // · Teljes szöveg = fulltext-screened). Stage 4 (Szintézis) has NO `total` written (generate_review only sets status),
+            // so use the step-3 INCLUDE count — the papers that actually fed the synthesis.
+            var stc = stepsBySid[s.id] || {};
+            var counts = [
+              (stc[1] && stc[1].total != null) ? stc[1].total : 0,
+              (stc[2] && stc[2].total != null) ? stc[2].total : 0,
+              (stc[3] && stc[3].total != null) ? stc[3].total : 0,
+              (stc[3] && stc[3].counts && stc[3].counts.include != null) ? stc[3].counts.include : 0
+            ];
+            out.push({ key: 's:' + s.id, engine: 'builtin', running: running, title: s.title || s.question || 'Tanulmány', source: src, status: status, stage: stage, live: (live && live.msg) || null, sid: s.id, jobId: null, counts: counts });
+          });
+          jobs.forEach(function (j) {
+            var st = String(j.status || '');
+            var life = /completed|done/.test(st) ? 'kesz' : /pending_approval|awaiting/.test(st) ? 'var' : /failed|error|stuck|paused|cancel/.test(st) ? 'elakadt' : 'fut';
+            var stage = SH_EL_STAGE[j.stage] || (life === 'kesz' ? 4 : 1);
+            out.push({ key: 'j:' + j.id, engine: 'elicit', running: life === 'fut', title: j.research_question || j.result_title || (j.kind === 'report' ? 'Elicit riport' : 'Elicit review'), source: { k: 'elicit', l: j.kind === 'report' ? '⚗️ Gyorsriport' : '⚗️ Elicit review' }, status: life, stage: stage, live: null, sid: null, jobId: j.id, counts: null });
+          });
+          setRows(out);
+        }
+        if (!studyIds.length) { finish({}); return; }
+        // per-stage numbers for native studies — research_study_steps has no project_id, so fetch by study_id
+        sb.from('research_study_steps').select('study_id,step,total,counts').in('study_id', studyIds).then(function (sr) {
+          var stepsBySid = {}; ((sr && sr.data) || []).forEach(function (r2) { (stepsBySid[r2.study_id] = stepsBySid[r2.study_id] || {})[r2.step] = r2; });
+          finish(stepsBySid);
+        }, function () { finish({}); });
       }, function () { if (alive.current) setRows([]); });
     }
     useEffect(function () { load(); }, [pid]);
@@ -11716,12 +11736,17 @@
     if (rows === null) return h('div', { className: 'sh-wrap' }, h('div', { className: 'sh-loading' }, h('span', { className: 'spin' }), ' Tanulmányok betöltése…'));
     var byLife = { fut: 0, var: 0, terv: 0, kesz: 0, elakadt: 0 }; rows.forEach(function (r) { if (byLife[r.status] != null) byLife[r.status]++; });
     function rail(r) {
+      var showN = !!(r.counts && r.counts[0] > 0);   // native studies that actually searched → per-phase paper counts (Keresés → … → Szintézis)
       var kids = [];
       for (var i = 0; i < 4; i++) {
         var st = i + 1, past = r.stage > st || r.status === 'kesz', here = r.stage === st && r.status !== 'kesz' && r.status !== 'terv';
         var dotcls = past ? ' done' : here ? (r.running ? ' cur' : ' at') : '';   // cur = pulsing (live), at = current stage but idle
         if (i) kids.push(h('span', { className: 'sh-rline' + (past ? ' done' : ''), key: 'l' + i }));
-        kids.push(h('span', { className: 'sh-rnode', key: 'n' + i }, h('span', { className: 'sh-rdot' + dotcls }), h('span', { className: 'sh-rlab' + (here ? ' cur' : '') }, SH_STAGES[i])));
+        var n = showN ? r.counts[i] : null;
+        kids.push(h('span', { className: 'sh-rnode', key: 'n' + i },
+          h('span', { className: 'sh-rdot' + dotcls }),
+          h('span', { className: 'sh-rlab' + (here ? ' cur' : '') }, SH_STAGES[i]),
+          n != null ? h('span', { className: 'sh-rnum' + (n > 0 ? '' : ' zero'), title: n + ' cikk ebben a fázisban' }, String(n)) : null));
       }
       return h('div', { className: 'sh-rail' }, kids);
     }
