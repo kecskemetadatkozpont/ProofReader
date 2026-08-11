@@ -33,7 +33,7 @@ Deno.serve(async (req) => {
       Deno.env.get('SUPABASE_ANON_KEY')!,
       { global: { headers: { Authorization: auth } } },
     );
-    const { action = 'gap', project_id, canvas, text, row, col, from, to, kind } = await req.json().catch(() => ({}));
+    const { action = 'gap', project_id, canvas, text, row, col, from, to, kind, force } = await req.json().catch(() => ({}));
     if (!project_id) return json({ error: 'project_id required' }, 400);
     if (!ANTHROPIC_KEY) return json({ error: 'ANTHROPIC_API_KEY not set on the function' }, 503);
 
@@ -121,7 +121,8 @@ Deno.serve(async (req) => {
     }
     // evidence-gap MATRIX (EGM): derive method×domain axes from the library and count coverage per cell (empty cells = gaps).
     if (action === 'gap_matrix') {
-      const force = !!(body && body.force);
+      // (fix) `force` is destructured from the request body above; the old `const force = !!(body && body.force)` referenced
+      // an undefined `body` → ReferenceError → every gap_matrix call 500'd → "A rés-térkép nem érhető el".
       // stable input order: cited_by desc, then id asc as a tiebreak → the numbered list fed to the model doesn't
       // reshuffle between loads (a prerequisite for a deterministic, cacheable result).
       const { data: msrc } = await sb.from('research_sources')
