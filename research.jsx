@@ -4338,6 +4338,7 @@
     // where the questions ARE the columns (the D idea). The 4 stages still drive everything; this only swaps the hero.
     var fvS = useState('papers'), funView = fvS[0], setFunView = fvS[1];
     var sqS = useState(0), studyQN = sqS[0], setStudyQN = sqS[1];   // # of study-scoped extraction questions → questions-first?
+    var cxS = useState(true), cfgOpen = cxS[0], setCfgOpen = cxS[1];   // C-cockpit (2b): the config "drawer" — open by default, collapse to give the matrix full height
     useEffect(function () { loadScimago().then(setScimap); }, []);
     // Esc closes the studies-manage modal
     useEffect(function () { if (!studiesOpen) return; function onEsc(e) { if (e.key === 'Escape') setStudiesOpen(false); } window.addEventListener('keydown', onEsc); return function () { window.removeEventListener('keydown', onEsc); }; }, [studiesOpen]);
@@ -4590,6 +4591,39 @@
       for (var _si = 1; _si <= 4; _si++) { if ((stepRow(_si) || {}).status === 'running') { stepActive = _si; break; } }
       if (!stepActive) { for (var _sj = 1; _sj <= 4; _sj++) { if (((stepRow(_sj) || {}).status) !== 'done') { stepActive = _sj; break; } } }
     }
+    // C-cockpit (2b) LEFT: the 4 stages as a VERTICAL funnel spine + standing PRISMA; each row narrows with its kept count.
+    function spineEl() {
+      var base = Math.max(incCount(1), 1);
+      return h('aside', { className: 'lsck-spine' },
+        h('div', { className: 'lsck-sh' },
+          h('div', { className: 'lsck-st', title: (sel && (sel.title || sel.question)) || 'Study' }, (sel && (sel.title || sel.question)) || 'Study'),
+          h('button', { className: 'lsck-studies', title: 'Összes tanulmány', onClick: function () { setStudiesOpen(true); } }, '📚')),
+        h('div', { className: 'lsck-funnel' }, LS_STEPS.map(function (s) {
+          var sr = stepRow(s.step) || {}; var isActive = stepActive === s.step;
+          var kept = s.step < 4 ? incCount(s.step) : incCount(3); var exc = excCount(s.step);
+          var w = Math.max(8, Math.round((s.step < 4 ? kept : incCount(3)) / base * 100));
+          return h('button', { key: s.step, 'aria-current': curStep === s.step ? 'step' : null, 'aria-label': s.label, className: 'lsck-stage' + (curStep === s.step ? ' on' : '') + (sr.status === 'done' ? ' done' : '') + (isActive ? ' run pulse-run' : ''), onClick: function () { viewStep(s.step); } },
+            h('span', { className: 'lsck-stage-n' }, String(s.step)),
+            h('span', { className: 'lsck-stage-b' },
+              h('b', null, s.label),
+              isActive ? h('span', { className: 'lsck-stage-c run' }, '⏳ fut…')
+                : s.step < 4 ? h('span', { className: 'lsck-stage-c' }, h('span', { className: 'k' }, kept + ' bent'), exc ? h('span', { className: 'x' }, ' · −' + exc) : null)
+                : h('span', { className: 'lsck-stage-c' }, sr.status === 'done' ? '✓ kész' : 'review'),
+              h('span', { className: 'lsck-stage-bar' }, h('i', { style: { width: w + '%' } }))));
+        })),
+        h('div', { className: 'lsck-summary tnum' }, incCount(1) + ' → ' + incCount(2) + ' → ' + incCount(3)));
+    }
+    // C-cockpit (2b) RIGHT top: the view ribbon (Cikkek/Mátrix/Áttekintés) + the config-drawer toggle
+    function cockpitRibbonEl() {
+      return h('div', { className: 'lsck-ribbon' },
+        h('div', { className: 'lsview-seg', role: 'group', 'aria-label': 'Fő nézet' },
+          h('button', { className: (curStep < 4 && funView === 'papers') ? 'on' : '', 'aria-pressed': curStep < 4 && funView === 'papers', onClick: function () { setFunView('papers'); if (curStep === 4) viewStep(3); }, title: 'Szűrési tábla (cikkenkénti döntés)' }, '📄 Cikkek'),
+          h('button', { className: (curStep < 4 && funView === 'matrix') ? 'on' : '', 'aria-pressed': curStep < 4 && funView === 'matrix', onClick: function () { setFunView('matrix'); if (curStep === 4) viewStep(3); }, title: 'Evidencia-mátrix: cikkenkénti válaszok + idézet' }, '▦ Mátrix' + (studyQN ? ' · ' + studyQN : '')),
+          h('button', { className: curStep === 4 ? 'on' : '', 'aria-pressed': curStep === 4, onClick: function () { viewStep(4); }, title: 'Generált áttekintés' }, '📝 Áttekintés')),
+        studyQN ? h('span', { className: 'pill-qf' }, '❓ Kérdésekből') : null,
+        h('span', { style: { flex: 1 } }),
+        curStep < 4 ? h('button', { className: 'lsck-cfgtoggle' + (cfgOpen ? ' on' : ''), onClick: function () { setCfgOpen(!cfgOpen); }, title: 'Beállítások panel ki/be' }, cfgOpen ? '⚙ Beállítások ▲' : '⚙ Beállítások ▾') : null);
+    }
     return h('div', null,
       qfBlock(),
       // extraction questions the screening answers INLINE (visible whether or not a study is open)
@@ -4625,27 +4659,15 @@
           }),
           props.canEdit ? h('button', { onClick: function () { newStudy(null); }, style: { border: '1px dashed var(--line)', background: 'transparent', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontSize: 12.5, color: 'var(--muted)' } }, '+ New study') : null
         )),
-      // funnel rail — the 4 stages with STANDING PRISMA (kept + excluded per stage, visible AFTER a run, not only during it)
-      // + the main-view toggle (Studies redesign C+D). Clicking a stage opens its config/results; the toggle swaps the hero
-      // between the screening table (Cikkek) and the evidence matrix (Mátrix); a questions-first study opens on the matrix.
-      h('div', { className: 'lsrail' },
-        h('div', { className: 'funnel lsrail-steps' }, LS_STEPS.map(function (s) {
-          var sr = stepRow(s.step) || {}; var isActive = stepActive === s.step;
-          var kept = s.step < 4 ? incCount(s.step) : incCount(3); var exc = excCount(s.step);
-          return h('button', { key: s.step, 'aria-current': curStep === s.step ? 'step' : null, 'aria-label': s.label, className: 'funnel-step lsrail-step' + (curStep === s.step ? ' on' : '') + ((sr.status === 'done') ? ' done' : '') + (isActive ? ' pulse-run' : ''), onClick: function () { viewStep(s.step); } },
-            h('b', null, s.label),
-            isActive ? h('span', { className: 'funnel-count', style: { color: '#a16207', fontWeight: 700 } }, '⏳ fut…')
-              : s.step < 4 ? h('span', { className: 'lsrail-nums' }, h('span', { className: 'k' }, kept + ' bent'), exc ? h('span', { className: 'x' }, '−' + exc + ' ki') : null)
-              : h('span', { className: 'funnel-count' }, sr.status === 'done' ? '✓ kész' : 'review'));
-        })),
-        h('div', { className: 'lsview' },
-          h('div', { className: 'lsview-seg', role: 'group', 'aria-label': 'Fő nézet' },
-            h('button', { className: (curStep < 4 && funView === 'papers') ? 'on' : '', 'aria-pressed': curStep < 4 && funView === 'papers', onClick: function () { setFunView('papers'); if (curStep === 4) viewStep(3); }, title: 'Szűrési tábla (cikkenkénti döntés)' }, '📄 Cikkek'),
-            h('button', { className: (curStep < 4 && funView === 'matrix') ? 'on' : '', 'aria-pressed': curStep < 4 && funView === 'matrix', onClick: function () { setFunView('matrix'); if (curStep === 4) viewStep(3); }, title: 'Evidencia-mátrix: cikkenkénti válaszok + idézet' }, '▦ Mátrix' + (studyQN ? ' · ' + studyQN : '')),
-            h('button', { className: curStep === 4 ? 'on' : '', 'aria-pressed': curStep === 4, onClick: function () { viewStep(4); }, title: 'Generált áttekintés' }, '📝 Áttekintés')),
-          studyQN ? h('span', { className: 'pill-qf' }, '❓ Kérdésekből — a válaszok a mátrixban') : null)),
-      // config panel (steps 1-3) or review panel (step 4)
-      curStep < 4 ? h('div', { className: 'panel', style: { marginTop: 10 } },
+      // Studies redesign C (increment 2b) — 2-column cockpit: LEFT vertical spine funnel (stages + standing PRISMA) +
+      // RIGHT work column (view ribbon + collapsible config drawer + the hero matrix/table/review). Additive: the config,
+      // results and matrix items below are UNCHANGED — they just render as children of this right column now.
+      h('div', { className: 'lsck' },
+        spineEl(),
+        h('div', { className: 'lsck-main' },
+          cockpitRibbonEl(),
+      // config panel (steps 1-3, collapsible drawer) or review panel (step 4)
+      curStep < 4 ? (cfgOpen ? h('div', { className: 'panel', style: { marginTop: 10 } },
         lockedByOther ? lsLockBox(lock) : null,
         planning ? lsPlanningBox(true) : null,
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
@@ -4706,7 +4728,7 @@
           promptText ? h('div', { style: { fontSize: 11, color: 'var(--muted)', marginTop: 4 } }, 'This is the system prompt Publify gets when judging each paper (based on the question + keywords + criteria). After changing a keyword/criterion, press “regenerate”.') : null,
           promptText ? h('pre', { style: { marginTop: 6, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: 11.5, lineHeight: 1.45, background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 8, padding: '8px 10px', maxHeight: 280, overflow: 'auto', fontFamily: 'ui-monospace, monospace' } }, promptText) : null
         ) : null
-      ) : h('div', { className: 'panel', style: { marginTop: 10 } },
+      ) : h('div', { className: 'lsck-cfgcollapsed' }, h('button', { className: 'btn', style: { padding: '6px 12px', fontSize: 12 }, onClick: function () { setCfgOpen(true); } }, '⚙ Beállítások megnyitása'))) : h('div', { className: 'panel', style: { marginTop: 10 } },
         h('h3', null, '4. Review paper'),
         h('p', { style: { fontSize: 13, color: 'var(--muted)' } }, 'We generate a structured review from the ' + incCount(3) + ' paper(s) “include”-d in step 3 (also saved to Files). Consensus grounding if the token is connected.'),
         props.canEdit ? h('div', { className: 'runbar' }, lockedByOther ? lsLockBox(lock) : null, h('button', { className: 'btn pri', disabled: running || lockedByOther || incCount(3) === 0, onClick: function () { runStep(4); } }, lockedByOther ? '🔒 Fut (' + lockNameOf(lock.by) + ')' : running ? 'Generating…' : (review ? '🔄 Regenerate review' : 'Generate review')),
@@ -4782,7 +4804,7 @@
         h('div', { style: { display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6, flexWrap: 'wrap' } },
           h('h3', { style: { margin: 0 } }, '▦ Evidencia-mátrix'),
           h('span', { style: { fontSize: 11.5, color: 'var(--faint)' } }, studyQN ? 'a szűrés cikkenként tölti — válasz + idézet + hely' : 'adj hozzá kivonatolási kérdéseket fent, és a szűrés cikkenként megválaszolja')),
-        h(ExtractPanel, { projectId: props.projectId, studyId: studyQN > 0 ? selId : null, layout: studyQN > 0 ? 'lanes' : 'grid', canEdit: props.canEdit, authorId: props.authorId, lang: (props.project && props.project.language === 'hu' ? 'hu' : 'en') })) : null,
+        h(ExtractPanel, { projectId: props.projectId, studyId: studyQN > 0 ? selId : null, layout: studyQN > 0 ? 'lanes' : 'grid', canEdit: props.canEdit, authorId: props.authorId, lang: (props.project && props.project.language === 'hu' ? 'hu' : 'en') })) : null)),
       // 📚 studies manage modal — view all studies + delete (cascades to steps/papers)
       studiesOpen ? h('div', { style: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,.4)', zIndex: 1000, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '6vh 16px', overflow: 'auto' }, onClick: function () { setStudiesOpen(false); } },
         h('div', { role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Studies', style: { background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 12, width: 'min(680px, 100%)', maxHeight: '88vh', overflow: 'auto', boxShadow: '0 12px 40px rgba(0,0,0,.25)' }, onClick: function (e) { e.stopPropagation(); } },
