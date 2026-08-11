@@ -4333,6 +4333,11 @@
     var meS = useState({}), srcMeta = meS[0], setSrcMeta = meS[1];   // source_id -> {title,venue,cited_by,year,issn}
     var scS = useState(null), scimap = scS[0], setScimap = scS[1];   // SCImago ISSN→quartile map (lazy)
     var soS = useState('decision'), sortBy = soS[0], setSortBy = soS[1];   // results sort key
+    // Studies redesign (C+D hybrid): the funnel's MAIN view — 'papers' (screening table) | 'matrix' (evidence matrix =
+    // ExtractPanel, the C "hero"). A questions-first study (study-scoped extraction questions) defaults to the matrix,
+    // where the questions ARE the columns (the D idea). The 4 stages still drive everything; this only swaps the hero.
+    var fvS = useState('papers'), funView = fvS[0], setFunView = fvS[1];
+    var sqS = useState(0), studyQN = sqS[0], setStudyQN = sqS[1];   // # of study-scoped extraction questions → questions-first?
     useEffect(function () { loadScimago().then(setScimap); }, []);
     // Esc closes the studies-manage modal
     useEffect(function () { if (!studiesOpen) return; function onEsc(e) { if (e.key === 'Escape') setStudiesOpen(false); } window.addEventListener('keydown', onEsc); return function () { window.removeEventListener('keydown', onEsc); }; }, [studiesOpen]);
@@ -4394,6 +4399,12 @@
       });
     }
     useEffect(function () { if (selId) setPapersLoading(true); loadStudy(selId); }, [selId]);
+    // detect a questions-first study (has study-scoped extraction questions) → default its main view to the evidence matrix
+    useEffect(function () {
+      if (!selId) { setStudyQN(0); return; }
+      sb.from('research_extraction_questions').select('id', { count: 'exact', head: true }).eq('study_id', selId)
+        .then(function (r) { if (!alive.current) return; var n = (r && r.count) || 0; setStudyQN(n); setFunView(n > 0 ? 'matrix' : 'papers'); }, function () { if (alive.current) { setStudyQN(0); setFunView('papers'); } });   // on error, fall back to the safe papers view (don't strand on a stale study's matrix)
+    }, [selId]);
     function stepRow(n) { return steps.filter(function (x) { return x.step === n; })[0]; }
     // first step that isn't done yet → the stage the background auto-runner should resume from (so completed steps aren't re-run)
     function firstPendingStage() { for (var n = 1; n <= 4; n++) { var sr = stepRow(n); if (!sr || sr.status !== 'done') return n === 1 ? 's1' : n === 2 ? 's2' : n === 3 ? 's3' : 'review'; } return 'review'; }
@@ -4406,6 +4417,7 @@
     }
     function viewStep(n) { setCurStep(n); var cs = stepRow(n); setCfg((cs && cs.config) || lsDefaultConfig(n, props.project)); }
     function incCount(n) { return papers.filter(function (p) { return p.step === n && p.decision === 'include'; }).length; }
+    function excCount(n) { return papers.filter(function (p) { return p.step === n && p.decision === 'exclude'; }).length; }   // standing PRISMA attrition per stage
 
     // create a study from one OR MORE selected ideas (or empty), then let Publify pre-fill the funnel config
     // one-click from the Ideas "study basis" window: auto-create the study from the selected ideas and let
@@ -4613,11 +4625,25 @@
           }),
           props.canEdit ? h('button', { onClick: function () { newStudy(null); }, style: { border: '1px dashed var(--line)', background: 'transparent', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontSize: 12.5, color: 'var(--muted)' } }, '+ New study') : null
         )),
-      // funnel stepper
-      h('div', { className: 'funnel' }, LS_STEPS.map(function (s) {
-        return h('button', { key: s.step, 'aria-current': curStep === s.step ? 'step' : null, 'aria-label': s.label, className: 'funnel-step' + (curStep === s.step ? ' on' : '') + (((stepRow(s.step) || {}).status === 'done') ? ' done' : '') + (stepActive === s.step ? ' pulse-run' : ''), onClick: function () { viewStep(s.step); } },
-          h('b', null, s.label), stepActive === s.step ? h('span', { className: 'funnel-count', style: { color: '#a16207', fontWeight: 700 } }, '⏳ fut…') : s.step < 4 ? h('span', { className: 'funnel-count' }, incCount(s.step) + ' include') : h('span', { className: 'funnel-count' }, (stepRow(4) || {}).status === 'done' ? 'done' : 'review'));
-      })),
+      // funnel rail — the 4 stages with STANDING PRISMA (kept + excluded per stage, visible AFTER a run, not only during it)
+      // + the main-view toggle (Studies redesign C+D). Clicking a stage opens its config/results; the toggle swaps the hero
+      // between the screening table (Cikkek) and the evidence matrix (Mátrix); a questions-first study opens on the matrix.
+      h('div', { className: 'lsrail' },
+        h('div', { className: 'funnel lsrail-steps' }, LS_STEPS.map(function (s) {
+          var sr = stepRow(s.step) || {}; var isActive = stepActive === s.step;
+          var kept = s.step < 4 ? incCount(s.step) : incCount(3); var exc = excCount(s.step);
+          return h('button', { key: s.step, 'aria-current': curStep === s.step ? 'step' : null, 'aria-label': s.label, className: 'funnel-step lsrail-step' + (curStep === s.step ? ' on' : '') + ((sr.status === 'done') ? ' done' : '') + (isActive ? ' pulse-run' : ''), onClick: function () { viewStep(s.step); } },
+            h('b', null, s.label),
+            isActive ? h('span', { className: 'funnel-count', style: { color: '#a16207', fontWeight: 700 } }, '⏳ fut…')
+              : s.step < 4 ? h('span', { className: 'lsrail-nums' }, h('span', { className: 'k' }, kept + ' bent'), exc ? h('span', { className: 'x' }, '−' + exc + ' ki') : null)
+              : h('span', { className: 'funnel-count' }, sr.status === 'done' ? '✓ kész' : 'review'));
+        })),
+        h('div', { className: 'lsview' },
+          h('div', { className: 'lsview-seg', role: 'group', 'aria-label': 'Fő nézet' },
+            h('button', { className: (curStep < 4 && funView === 'papers') ? 'on' : '', 'aria-pressed': curStep < 4 && funView === 'papers', onClick: function () { setFunView('papers'); if (curStep === 4) viewStep(3); }, title: 'Szűrési tábla (cikkenkénti döntés)' }, '📄 Cikkek'),
+            h('button', { className: (curStep < 4 && funView === 'matrix') ? 'on' : '', 'aria-pressed': curStep < 4 && funView === 'matrix', onClick: function () { setFunView('matrix'); if (curStep === 4) viewStep(3); }, title: 'Evidencia-mátrix: cikkenkénti válaszok + idézet' }, '▦ Mátrix' + (studyQN ? ' · ' + studyQN : '')),
+            h('button', { className: curStep === 4 ? 'on' : '', 'aria-pressed': curStep === 4, onClick: function () { viewStep(4); }, title: 'Generált áttekintés' }, '📝 Áttekintés')),
+          studyQN ? h('span', { className: 'pill-qf' }, '❓ Kérdésekből — a válaszok a mátrixban') : null)),
       // config panel (steps 1-3) or review panel (step 4)
       curStep < 4 ? h('div', { className: 'panel', style: { marginTop: 10 } },
         lockedByOther ? lsLockBox(lock) : null,
@@ -4695,8 +4721,8 @@
           h('div', { className: 'report-doc', style: { maxWidth: '100%', maxHeight: 640, overflow: 'auto', padding: '22px 26px' }, dangerouslySetInnerHTML: { __html: mdReport(review) } })
         ) : null
       ),
-      // results list (steps 1-3)
-      curStep < 4 ? h('div', { className: 'panel', style: { marginTop: 10 } },
+      // results list (steps 1-3) — shown in the 'papers' (Cikkek) view; the 'matrix' view renders the evidence matrix instead
+      (curStep < 4 && funView === 'papers') ? h('div', { className: 'panel', style: { marginTop: 10 } },
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
           h('h3', { style: { margin: 0 } }, 'Results — ' + LS_STEPS[curStep - 1].label + ' (' + stepPapers.length + ' paper(s))'),
           (curStep === 3 && stepPapers.length) ? h('span', { style: { fontSize: 11.5, color: 'var(--muted)', whiteSpace: 'nowrap' }, title: 'How many papers had their full text (PDF) downloaded and analyzed, and how many were left with only the abstract' }, '📄 ' + pdfN + ' full text · 📝 ' + absN + ' abstract') : null,
@@ -4750,6 +4776,13 @@
                   h('div', { className: 'seg', role: 'group', 'aria-label': 'Your decision — override the AI screening', style: { flex: 'none' } }, ['include', 'maybe', 'exclude'].map(function (v) { return h('button', { key: v, className: p.decision === v ? 'on' : '', 'aria-pressed': p.decision === v, 'aria-label': v, title: lockedByOther ? (lockNameOf(lock.by) + ' éppen futtatja') : v, disabled: lockedByOther, onClick: function () { override(p, v); } }, v === 'include' ? '✓' : v === 'maybe' ? '?' : '✕'); }))) : null);
             }))))
       ) : null,
+      // ▦ evidence matrix (steps 1-3, 'matrix' view) — the C "hero": papers × extraction-question columns, filled inline by
+      // the screening pass. Study-scoped (studyId=selId). For a questions-first study this is the default view (D idea).
+      (curStep < 4 && funView === 'matrix') ? h('div', { className: 'panel', style: { marginTop: 10 } },
+        h('div', { style: { display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6, flexWrap: 'wrap' } },
+          h('h3', { style: { margin: 0 } }, '▦ Evidencia-mátrix'),
+          h('span', { style: { fontSize: 11.5, color: 'var(--faint)' } }, studyQN ? 'a szűrés cikkenként tölti — válasz + idézet + hely' : 'adj hozzá kivonatolási kérdéseket fent, és a szűrés cikkenként megválaszolja')),
+        h(ExtractPanel, { projectId: props.projectId, studyId: studyQN > 0 ? selId : null, canEdit: props.canEdit, authorId: props.authorId, lang: (props.project && props.project.language === 'hu' ? 'hu' : 'en') })) : null,
       // 📚 studies manage modal — view all studies + delete (cascades to steps/papers)
       studiesOpen ? h('div', { style: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,.4)', zIndex: 1000, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '6vh 16px', overflow: 'auto' }, onClick: function () { setStudiesOpen(false); } },
         h('div', { role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Studies', style: { background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 12, width: 'min(680px, 100%)', maxHeight: '88vh', overflow: 'auto', boxShadow: '0 12px 40px rgba(0,0,0,.25)' }, onClick: function (e) { e.stopPropagation(); } },
