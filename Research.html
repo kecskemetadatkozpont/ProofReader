@@ -2270,10 +2270,38 @@
     .qf-runhd { font-size: 13px; color: var(--muted); background: color-mix(in srgb, #7c3aed 7%, var(--surface)); border: 1px solid color-mix(in srgb, #7c3aed 20%, var(--line)); border-radius: 10px; padding: 11px 13px; margin-bottom: 14px; line-height: 1.5; }
     .ex-hint { font-size: 13px; color: var(--muted); margin-top: 14px; padding: 12px 14px; background: var(--accent-tint); border-radius: 10px; }
     .ex-note { font-size: 12px; color: var(--faint); margin-top: 16px; line-height: 1.55; max-width: 80ch; }
+    /* Studies redesign D — question-canvas "lanes": each question a lane, papers as answer cards */
+    .exl-seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+    .exl-seg button { font-family: inherit; font-size: 11px; font-weight: 700; color: var(--muted); background: var(--surface); border: none; border-left: 1px solid var(--line); padding: 5px 10px; cursor: pointer; white-space: nowrap; }
+    .exl-seg button:first-child { border-left: none; }
+    .exl-seg button.on { background: var(--accent-tint); color: var(--accent); }
+    .exl-wrap { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; margin-top: 4px; align-items: start; }
+    .exl-lane { border: 1px solid var(--line); border-radius: 13px; background: var(--surface); overflow: hidden; display: flex; flex-direction: column; }
+    .exl-lh { display: flex; align-items: flex-start; gap: 7px; padding: 10px 12px 8px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, #a23a86 5%, var(--surface)); }
+    .exl-lq { flex: 1; min-width: 0; font-size: 12.5px; font-weight: 700; line-height: 1.35; }
+    .exl-meter { display: flex; align-items: center; gap: 8px; padding: 7px 12px; }
+    .exl-fill { flex: 1; height: 5px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
+    .exl-fill > i { display: block; height: 100%; background: #a23a86; border-radius: 999px; transition: width .3s; }
+    .exl-cnt { font-size: 10.5px; font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums; flex: none; }
+    .exl-cards { display: flex; flex-direction: column; gap: 7px; padding: 4px 10px 11px; max-height: 440px; overflow-y: auto; }
+    .exl-card { border: 1px solid var(--line); border-radius: 9px; padding: 8px 10px; background: var(--surface-2); }
+    .exl-card.ghost { border-style: dashed; background: transparent; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .exl-card.na { opacity: .72; }
+    .exl-card.run { border-color: color-mix(in srgb, var(--warn, #d9820a) 45%, var(--line)); }
+    .exl-src { font-size: 10.5px; color: var(--faint); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .exl-a { font-size: 12.5px; font-weight: 650; color: var(--ink); margin-top: 3px; line-height: 1.4; }
+    .exl-a.muted { color: var(--faint); font-weight: 600; font-style: italic; }
+    .exl-meta { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+    .exl-meta .ex-conf { margin-top: 0; }
+    .exl-link { text-decoration: none; color: var(--accent); font-weight: 800; font-size: 12px; }
+    .exl-quote { font-size: 11px; color: var(--muted); font-style: italic; margin-top: 5px; border-left: 2px solid var(--line-2, var(--line)); padding-left: 7px; line-height: 1.4; }
+    .exl-loc { font-size: 10px; color: var(--faint); margin-top: 4px; }
+    .exl-add { grid-column: 1 / -1; justify-self: start; font-family: inherit; font-size: 12px; font-weight: 700; color: var(--muted); background: transparent; border: 1px dashed var(--line-2, var(--line)); border-radius: 10px; padding: 9px 14px; cursor: pointer; }
+    .exl-add:hover { border-color: #a23a86; color: #a23a86; }
   </style>
-  <script src="theme.js?v=1786430988"></script>
-  <script src="nav.js?v=1786430988"></script>
-  <script src="entitlements.js?v=1786430988"></script>
+  <script src="theme.js?v=1786432308"></script>
+  <script src="nav.js?v=1786432308"></script>
+  <script src="entitlements.js?v=1786432308"></script>
 </head>
 
 <body>
@@ -2285,24 +2313,24 @@
   <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
   <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="backend/config.js?v=1786430988"></script>
-  <script src="auth.js?v=1786430988"></script>
-  <script src="backend.js?v=1786430988"></script>
-  <script src="universities.js?v=1786430988"></script>
-  <script src="onboarding.js?v=1786430988"></script>
-  <script src="office.js?v=1786430988"></script>
-  <script src="publications.js?v=1786430988"></script>
+  <script src="backend/config.js?v=1786432308"></script>
+  <script src="auth.js?v=1786432308"></script>
+  <script src="backend.js?v=1786432308"></script>
+  <script src="universities.js?v=1786432308"></script>
+  <script src="onboarding.js?v=1786432308"></script>
+  <script src="office.js?v=1786432308"></script>
+  <script src="publications.js?v=1786432308"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/tus-js-client@4.1.0/dist/tus.min.js"></script>
-  <script type="text/babel" src="canvas.jsx?v=1786430988"></script>
-  <script type="text/babel" src="notes.jsx?v=1786430988"></script>
-  <script src="autopilot-core.js?v=1786430988"></script>
-  <script type="text/babel" src="research.jsx?v=1786430988"></script>
+  <script type="text/babel" src="canvas.jsx?v=1786432308"></script>
+  <script type="text/babel" src="notes.jsx?v=1786432308"></script>
+  <script src="autopilot-core.js?v=1786432308"></script>
+  <script type="text/babel" src="research.jsx?v=1786432308"></script>
 
-  <script src="build.js?v=1786430988"></script>
-  <script src="version-badge.js?v=1786430988"></script>
+  <script src="build.js?v=1786432308"></script>
+  <script src="version-badge.js?v=1786432308"></script>
 </body>
 
 </html>

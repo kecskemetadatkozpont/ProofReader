@@ -4782,7 +4782,7 @@
         h('div', { style: { display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6, flexWrap: 'wrap' } },
           h('h3', { style: { margin: 0 } }, '▦ Evidencia-mátrix'),
           h('span', { style: { fontSize: 11.5, color: 'var(--faint)' } }, studyQN ? 'a szűrés cikkenként tölti — válasz + idézet + hely' : 'adj hozzá kivonatolási kérdéseket fent, és a szűrés cikkenként megválaszolja')),
-        h(ExtractPanel, { projectId: props.projectId, studyId: studyQN > 0 ? selId : null, canEdit: props.canEdit, authorId: props.authorId, lang: (props.project && props.project.language === 'hu' ? 'hu' : 'en') })) : null,
+        h(ExtractPanel, { projectId: props.projectId, studyId: studyQN > 0 ? selId : null, layout: studyQN > 0 ? 'lanes' : 'grid', canEdit: props.canEdit, authorId: props.authorId, lang: (props.project && props.project.language === 'hu' ? 'hu' : 'en') })) : null,
       // 📚 studies manage modal — view all studies + delete (cascades to steps/papers)
       studiesOpen ? h('div', { style: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,.4)', zIndex: 1000, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '6vh 16px', overflow: 'auto' }, onClick: function () { setStudiesOpen(false); } },
         h('div', { role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Studies', style: { background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 12, width: 'min(680px, 100%)', maxHeight: '88vh', overflow: 'auto', boxShadow: '0 12px 40px rgba(0,0,0,.25)' }, onClick: function (e) { e.stopPropagation(); } },
@@ -11363,7 +11363,7 @@
     function stepRun() {
       return h('div', null,
         h('div', { className: 'qf-runhd' }, '🚀 A szűrés fut — a bizonyíték-mátrix élőben töltődik. Nyugodtan válts fület, a futás a háttérben folytatódik.'),
-        sid ? h(ExtractPanel, { projectId: pid, studyId: sid, canEdit: canEdit, authorId: props.authorId, lang: props.lang }) : null,
+        sid ? h(ExtractPanel, { projectId: pid, studyId: sid, layout: 'lanes', canEdit: canEdit, authorId: props.authorId, lang: props.lang }) : null,   // questions-first live-run → the question-canvas (lanes), where each question fills in per paper
         h('div', { className: 'qf-foot' },
           h('button', { className: 'qf-btn gho', onClick: props.onClose }, 'Bezárás'),
           sid && props.onOpenStudy ? h('button', { className: 'qf-btn', onClick: function () { props.onOpenStudy(sid); if (props.onClose) props.onClose(); } }, 'Megnyitás a Tanulmányok között ↗') : null));
@@ -11384,6 +11384,9 @@
     var busyS = useState(false), busyAll = busyS[0], setBusyAll = busyS[1];
     var compS = useState(false), composing = compS[0], setComposing = compS[1];
     var openS = useState(null), openCell = openS[0], setOpenCell = openS[1];   // "qid:sid" whose evidence is open
+    // Studies redesign D: 'grid' (spreadsheet: papers×questions) | 'lanes' (question-canvas: each question a lane, papers as
+    // answer cards). A questions-first study opens on 'lanes' (props.layout); the user can flip it in the toolbar.
+    var lyS = useState(props.layout === 'lanes' ? 'lanes' : 'grid'), layout = lyS[0], setLayout = lyS[1];
     var alive = useRef(true);
     useEffect(function () { return function () { alive.current = false; }; }, []);
     function K(qid, sid) { return qid + ':' + sid; }
@@ -11425,6 +11428,7 @@
       }, function () { if (alive.current) setQuestions([]); loadSources([]); });
     }
     useEffect(function () { load(); }, [pid, studyId]);
+    useEffect(function () { setLayout(props.layout === 'lanes' ? 'lanes' : 'grid'); }, [studyId]);   // re-seed the layout when the study changes (questions-first → lanes); a manual toggle within one study persists
     // the wizard's LIVE study matrix: the funnel fills cells during screening (background PRStudyRunner), so poll +
     // reload on runner changes until the study run stops. The project tab (no studyId) loads once and doesn't poll.
     useEffect(function () {
@@ -11523,6 +11527,38 @@
             canEdit ? h('button', { className: 'ex-mini gho', onClick: function () { setOpenCell(null); runCells([{ question_id: q.id, source_id: s.id }]); } }, '↻ Újrafuttatás') : null)) : null);
     }
 
+    // ── D question-canvas (lanes): each QUESTION is a lane; each included paper is an answer card that fills in during
+    //    screening. Reuses the same questions/cells/sources/runCells as the grid — only the arrangement differs.
+    function laneCardNode(q, s) {
+      var c = cells[K(q.id, s.id)], isRun = running[K(q.id, s.id)];
+      var head = h('div', { className: 'exl-src', title: s.title || 'Forrás' }, (s.title || 'Forrás'), s.oa_pdf_url ? h('span', { className: 'ex-oa' }, ' · OA') : null);
+      if (isRun) return h('div', { className: 'exl-card run', key: s.id }, head, h('div', { className: 'exl-a' }, h('span', { className: 'ex-run' }, h('span', { className: 'ex-bar' }), 'kinyerés…')));
+      if (!c) return h('div', { className: 'exl-card ghost', key: s.id }, head, canEdit ? h('button', { className: 'ex-runc', onClick: function () { runCells([{ question_id: q.id, source_id: s.id }]); } }, '▷ futtat') : h('span', { className: 'ex-empty' }, '— még nincs'));
+      if (c.status === 'error') return h('div', { className: 'exl-card', key: s.id }, head, h('div', { className: 'exl-a' }, h('span', { className: 'ex-errc', title: c.error || 'hiba' }, '⚠ hiba'), canEdit ? h('button', { className: 'ex-runc', onClick: function () { runCells([{ question_id: q.id, source_id: s.id }]); } }, '↻') : null));
+      if (c.status === 'na') return h('div', { className: 'exl-card na', key: s.id }, head, h('div', { className: 'exl-a muted' }, 'N/A — nincs bizonyíték'));
+      return h('div', { className: 'exl-card', key: s.id }, head,
+        h('div', { className: 'exl-a' }, c.answer || ''),
+        h('div', { className: 'exl-meta' },
+          h('span', { className: 'ex-conf ' + confCls(c) }, h('i'), confLbl(c)),
+          (s.url || s.oa_pdf_url) ? h('a', { className: 'exl-link', href: s.oa_pdf_url || s.url, target: '_blank', rel: 'noopener', title: 'Forrás megnyitása' }, '↗') : null),
+        c.quote ? h('div', { className: 'exl-quote' }, '“' + String(c.quote).slice(0, 220) + '”') : null,
+        h('div', { className: 'exl-loc' }, locStr(c)));
+    }
+    function lanesEl() {
+      return h('div', { className: 'exl-wrap' },
+        qs.map(function (q) {
+          var done = 0; srcs.forEach(function (s) { var c = cells[K(q.id, s.id)]; if (c && (c.status === 'done' || c.status === 'na')) done++; });
+          var pct = srcs.length ? Math.round(done / srcs.length * 100) : 0;
+          return h('div', { className: 'exl-lane', key: q.id },
+            h('div', { className: 'exl-lh' },
+              h('span', { className: 'ex-qmode ' + (q.source_mode === 'figures' ? 'fig' : q.source_mode === 'both' ? 'both' : 'txt') }, EX_TYPE_BADGE[q.answer_type] || 'text'),
+              h('span', { className: 'exl-lq', title: q.text }, q.text),
+              canEdit ? h('span', { className: 'ex-qacts' }, h('button', { title: 'Sáv (kérdés) újrafuttatása', onClick: function () { rerunQuestion(q); } }, '↻'), h('button', { title: 'Kérdés törlése', onClick: function () { delQuestion(q); } }, '×')) : null),
+            h('div', { className: 'exl-meter' }, h('span', { className: 'exl-fill' }, h('i', { style: { width: pct + '%' } })), h('span', { className: 'exl-cnt' }, done + '/' + srcs.length)),
+            h('div', { className: 'exl-cards' }, srcs.map(function (s) { return laneCardNode(q, s); })));
+        }),
+        canEdit ? h('button', { className: 'exl-add', onClick: function () { setComposing(true); } }, '＋ Kérdés-sáv hozzáadása') : null);
+    }
     return h('div', { className: 'ex-wrap' },
       h('div', { className: 'ex-head' },
         h('div', null, h('h2', { className: 'ex-title' }, '🔎 Kivonatolás'), h('div', { className: 'ex-sub' }, 'Tegyél fel kérdéseket — a rendszer minden included cikk full-textjéből és ábráiból, idézettel alátámasztva megválaszolja őket. Az itt megadott kérdéseket a szűrés (Studies / keyword-funnel) is automatikusan megválaszolja, amint egy cikk átjut a screeningen.')),
@@ -11534,9 +11570,13 @@
             canEdit ? h('button', { className: 'ex-btn pri', onClick: function () { setComposing(true); } }, '＋ Kérdés hozzáadása') : null,
             canEdit && qs.length ? h('button', { className: 'ex-btn', disabled: busyAll, onClick: runAllMissing }, busyAll ? h(React.Fragment, null, h('span', { className: 'spin' }), ' fut…') : '↻ Hiányzók futtatása') : null,
             qs.length ? h('button', { className: 'ex-btn gho', onClick: exportCsv }, '⤓ Export CSV') : null,
+            qs.length ? h('span', { className: 'exl-seg' },
+              h('button', { className: layout === 'grid' ? 'on' : '', 'aria-pressed': layout === 'grid', title: 'Táblázat: cikkek × kérdések', onClick: function () { setLayout('grid'); } }, '▤ Tábla'),
+              h('button', { className: layout === 'lanes' ? 'on' : '', 'aria-pressed': layout === 'lanes', title: 'Kérdés-sávok: minden kérdés egy sáv, a cikkek válasz-kártyák', onClick: function () { setLayout('lanes'); } }, '▦ Sávok')) : null,
             h('span', { style: { flex: 1 } }),
             h('span', { className: 'ex-cnt' }, srcs.length + ' included cikk · ' + qs.length + ' kérdés')),
           composing ? h(ExtractComposer, { onAdd: addQuestion, onCancel: function () { setComposing(false); } }) : null,
+          layout === 'lanes' ? lanesEl() :
           h('div', { className: 'ex-mx-scroll' },
             h('table', { className: 'ex-mx' },
               h('thead', null, h('tr', null,
