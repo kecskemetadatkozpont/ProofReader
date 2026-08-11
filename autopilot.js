@@ -850,6 +850,107 @@
     cancelled: { t: 'Leállítva', cls: 'pause' }, queued: { t: 'Sorban', cls: 'pause' }
   };
   var EV_ICON = { run: '•', ok: '✓', warn: '⏸', sys: '⚙', error: '✕' };
+  // Publication-level extraction questions INSIDE the Literature-review drawer. Reuses the SAME shared contract as the
+  // Studies "Kivonatolás" (research_extraction_questions + research_extraction_cells + research-extract run_cell) — questions
+  // are stored study-scoped (study_id), so they ALSO appear in the Studies evidence matrix (reuse, not duplication).
+  function LitExtract(props) {
+    var pid = props.projectId, sid = props.studyId, incIds = props.includedIds || [], srcMap = props.sources || {}, canEdit = props.canEdit !== false;
+    var qS = useState(null), questions = qS[0], setQuestions = qS[1];
+    var cS = useState({}), cells = cS[0], setCells = cS[1];
+    var rS = useState({}), running = rS[0], setRunning = rS[1];
+    var iS = useState(''), input = iS[0], setInput = iS[1];
+    var bS = useState(false), busy = bS[0], setBusy = bS[1];
+    var oS = useState(null), openQ = oS[0], setOpenQ = oS[1];
+    var alive = useRef(true);
+    useEffect(function () { return function () { alive.current = false; }; }, []);
+    function K(q, s) { return q + ':' + s; }
+    function load() {
+      if (!pid || !sid) { setQuestions([]); return; }
+      sb.from('research_extraction_questions').select('*').eq('project_id', pid).eq('study_id', sid).order('ord', { ascending: true }).then(function (r) {
+        if (!alive.current) return;
+        var qs = (r && r.data) || []; setQuestions(qs);
+        var qids = qs.map(function (q) { return q.id; });
+        if (!qids.length) { setCells({}); return; }
+        sb.from('research_extraction_cells').select('*').in('question_id', qids).then(function (cr) {
+          if (!alive.current) return;
+          var m = {}; ((cr && cr.data) || []).forEach(function (c) { m[K(c.question_id, c.source_id)] = c; }); setCells(m);
+        });
+      }, function () { if (alive.current) setQuestions([]); });
+    }
+    useEffect(function () { load(); }, [pid, sid]);
+    function runCells(list) {
+      list = (list || []).filter(Boolean); if (!list.length) return;
+      var queue = list.slice(), active = 0, CONC = 3;
+      setBusy(true);
+      setRunning(function (m) { var n = Object.assign({}, m); list.forEach(function (c) { n[K(c.qid, c.sid)] = true; }); return n; });
+      function fin(c) { if (!alive.current) return; setRunning(function (m) { var n = Object.assign({}, m); delete n[K(c.qid, c.sid)]; return n; }); }
+      function pump() {
+        if (!queue.length && active === 0) { if (alive.current) setBusy(false); return; }
+        while (active < CONC && queue.length) {
+          (function (c) {
+            active++;
+            callEdge('research-extract', { action: 'run_cell', question_id: c.qid, source_id: c.sid }).then(function (d) {
+              active--;
+              var cell = d && d.cell;
+              if (cell && alive.current) setCells(function (m) { var n = Object.assign({}, m); n[K(cell.question_id, cell.source_id)] = cell; return n; });
+              else if (alive.current && d && d.error) setCells(function (m) { var n = Object.assign({}, m); n[K(c.qid, c.sid)] = { question_id: c.qid, source_id: c.sid, status: 'error', error: d.error }; return n; });
+              fin(c); pump();
+            }, function () { active--; fin(c); pump(); });
+          })(queue.shift());
+        }
+      }
+      pump();
+    }
+    function addQ() {
+      var t = (input || '').trim(); if (!t || !canEdit) return;
+      var ord = (questions || []).length;
+      sb.from('research_extraction_questions').insert({ project_id: pid, study_id: sid, text: t.slice(0, 300), answer_type: 'text', source_mode: 'both', ord: ord, created_by: uid() }).select('*').maybeSingle().then(function (r) {
+        if (r && r.error) { toast(r.error.message, false); return; }
+        var q = r && r.data; if (!alive.current || !q) return;
+        setQuestions(function (l) { return (l || []).concat([q]); }); setInput(''); setOpenQ(q.id);
+        runCells(incIds.map(function (id) { return { qid: q.id, sid: id }; }));
+      });
+    }
+    function delQ(q) { if (!canEdit) return; sb.from('research_extraction_questions').delete().eq('id', q.id).then(function () { setQuestions(function (l) { return (l || []).filter(function (x) { return x.id !== q.id; }); }); }); }
+    function rerunQ(q) { runCells(incIds.map(function (id) { return { qid: q.id, sid: id }; })); }
+    function runMissing() {
+      var list = []; (questions || []).forEach(function (q) { incIds.forEach(function (id) { var c = cells[K(q.id, id)]; if (!c || c.status === 'pending' || c.status === 'error') list.push({ qid: q.id, sid: id }); }); });
+      if (!list.length) { toast('Minden cella kész.'); return; } runCells(list);
+    }
+    var qs = questions;
+    return h('div', { className: 'ap-ex' },
+      h('div', { className: 'ap-ex-h' },
+        h('b', null, '🔎 Kérdések a publikációkhoz'),
+        h('span', { className: 'ap-ex-sub' }, incIds.length + ' included cikk · a rendszer cikkenként kikeresi és idézettel megválaszolja — a Studies kivonatolásában is megjelenik')),
+      canEdit ? h('div', { className: 'ap-ex-add' },
+        h('input', { className: 'ap-ex-in', value: input, placeholder: 'Írj egy kérdést, pl. „Mekkora a minta mérete?"', onKeyDown: function (e) { if (e.key === 'Enter') addQ(); }, onChange: function (e) { setInput(e.target.value); } }),
+        h('button', { className: 'btn pri sm', disabled: !input.trim() || !incIds.length, title: incIds.length ? null : 'Előbb jelölj ki legalább egy included cikket', onClick: addQ }, 'Hozzáad + futtat')) : null,
+      qs === null ? h('div', { className: 'ap-ex-empty' }, h('span', { className: 'spin' }), ' betöltés…')
+        : !qs.length ? h('div', { className: 'ap-ex-empty' }, 'Még nincs kérdés. Tegyél fel egyet — a rendszer minden included cikkből kikeresi a választ (idézettel, vagy őszinte „N/A").')
+          : h('div', { className: 'ap-ex-list' }, qs.map(function (q) {
+            var done = 0; incIds.forEach(function (id) { var c = cells[K(q.id, id)]; if (c && (c.status === 'done' || c.status === 'na')) done++; });
+            var open = openQ === q.id;
+            return h('div', { className: 'ap-ex-q', key: q.id },
+              h('div', { className: 'ap-ex-qh' },
+                h('button', { className: 'ap-ex-qt', onClick: function () { setOpenQ(open ? null : q.id); } }, (open ? '▾ ' : '▸ ') + q.text),
+                h('span', { className: 'ap-ex-cnt' }, done + '/' + incIds.length),
+                canEdit ? h('button', { className: 'ap-ex-ic', title: 'Oszlop újrafuttatása', onClick: function () { rerunQ(q); } }, '↻') : null,
+                canEdit ? h('button', { className: 'ap-ex-ic', title: 'Kérdés törlése', onClick: function () { delQ(q); } }, '×') : null),
+              open ? h('div', { className: 'ap-ex-ans' }, incIds.map(function (id) {
+                var c = cells[K(q.id, id)], run = running[K(q.id, id)], s = srcMap[id] || {};
+                var body = run ? h('span', { className: 'ap-ex-na' }, '⏳ kinyerés…')
+                  : !c ? (canEdit ? h('button', { className: 'ap-ex-run1', onClick: function () { runCells([{ qid: q.id, sid: id }]); } }, '▷ futtat') : h('span', { className: 'ap-ex-na' }, '—'))
+                    : c.status === 'error' ? h('span', { className: 'ap-ex-na', title: c.error || 'hiba' }, '⚠ hiba')
+                      : c.status === 'na' ? h('span', { className: 'ap-ex-na' }, 'N/A')
+                        : h('span', { className: 'ap-ex-a', title: c.quote ? ('„' + c.quote + '"' + (c.confidence ? ' (' + c.confidence + ')' : '')) : null }, c.answer || '');
+                return h('div', { className: 'ap-ex-row', key: id },
+                  h('span', { className: 'ap-ex-src', title: s.title || '' }, s.title || 'Forrás'),
+                  body);
+              })) : null);
+          })),
+      (qs && qs.length && incIds.length && canEdit) ? h('button', { className: 'btn sm ap-ex-mm', disabled: busy, onClick: runMissing }, busy ? '⏳ fut…' : '↻ Hiányzók futtatása') : null);
+  }
+
   function Dashboard(props) {
     var rS = useState(null), run = rS[0], setRun = rS[1];
     var pjS = useState(null), project = pjS[0], setProject = pjS[1];
@@ -1593,6 +1694,8 @@
       litRev ? (function () {
         var cnt = { include: 0, maybe: 0, exclude: 0 };
         (litRev.order || []).forEach(function (id) { var d = litRev.eff[id]; if (cnt[d] != null) cnt[d]++; });
+        var exIncIds = (litRev.order || []).filter(function (id) { return litRev.eff[id] === 'include'; });   // the currently-included set → extraction row set
+        var exPid = (litRev.prun && litRev.prun.project_id) || (run && run.project_id) || null;
         return h('div', { className: 'ap-dw-scrim', onClick: function () { setLitRev(null); } },
           h('div', { className: 'ap-dw', onClick: function (e) { e.stopPropagation(); } },
             h('div', { className: 'ap-dw-h' },
@@ -1627,7 +1730,8 @@
                         return h('button', { key: v, className: (dec === v ? 'on ' + v : ''), title: v, 'aria-pressed': dec === v, onClick: function () { overrideDec(id, v); } }, v === 'include' ? '✓' : v === 'maybe' ? '?' : '✕');
                       })));
                   }))
-                  : h('div', { className: 'ap-pc-dempty', style: { padding: '30px 0' } }, 'Ehhez a szálhoz még nincs leszűrt (step ≥ 2) publikáció. Előbb fusson le a Literature keresés + absztrakt-szűrés.')),
+                  : h('div', { className: 'ap-pc-dempty', style: { padding: '30px 0' } }, 'Ehhez a szálhoz még nincs leszűrt (step ≥ 2) publikáció. Előbb fusson le a Literature keresés + absztrakt-szűrés.'),
+                h(LitExtract, { projectId: exPid, studyId: litRev.studyId, includedIds: exIncIds, sources: litRev.sources, canEdit: true })),
             h('div', { className: 'ap-dw-f' },
               h('div', { className: 'ap-dw-fnote' }, cnt.include ? (cnt.include + ' included cikkel folytatódik a folyamat') : 'Jelölj ki legalább egy included cikket.'),
               h('div', { style: { display: 'flex', gap: 8 } },
