@@ -1728,6 +1728,8 @@
                 (cnt.maybe || cnt.exclude) ? h('div', { className: 'ap-dw-bulk' },
                   cnt.maybe ? h('button', { className: 'btn sm', onClick: function () { bulkPromote('maybe'); } }, '↑ Összes maybe → included') : null,
                   cnt.exclude ? h('button', { className: 'btn sm', onClick: function () { bulkPromote('exclude'); } }, '↑ Összes kizárt → included') : null) : null,
+                // publication-level extraction questions — placed ABOVE the publication list so it's reachable without scrolling
+                h(LitExtract, { projectId: exPid, studyId: litRev.studyId, includedIds: exIncIds, sources: litRev.sources, canEdit: true }),
                 (litRev.order || []).length
                   ? h('div', { className: 'ap-dw-list' }, litRev.order.map(function (id) {
                     var s = litRev.sources[id] || {}, m = litRev.meta[id] || {}, dec = litRev.eff[id];
@@ -1747,8 +1749,7 @@
                         return h('button', { key: v, className: (dec === v ? 'on ' + v : ''), title: v, 'aria-pressed': dec === v, onClick: function () { overrideDec(id, v); } }, v === 'include' ? '✓' : v === 'maybe' ? '?' : '✕');
                       })));
                   }))
-                  : h('div', { className: 'ap-pc-dempty', style: { padding: '30px 0' } }, 'Ehhez a szálhoz még nincs leszűrt (step ≥ 2) publikáció. Előbb fusson le a Literature keresés + absztrakt-szűrés.'),
-                h(LitExtract, { projectId: exPid, studyId: litRev.studyId, includedIds: exIncIds, sources: litRev.sources, canEdit: true })),
+                  : h('div', { className: 'ap-pc-dempty', style: { padding: '30px 0' } }, 'Ehhez a szálhoz még nincs leszűrt (step ≥ 2) publikáció. Előbb fusson le a Literature keresés + absztrakt-szűrés.')),
             h('div', { className: 'ap-dw-f' },
               h('div', { className: 'ap-dw-fnote' }, cnt.include ? (cnt.include + ' included cikkel folytatódik a folyamat') : 'Jelölj ki legalább egy included cikket.'),
               h('div', { style: { display: 'flex', gap: 8 } },
