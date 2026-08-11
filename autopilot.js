@@ -860,7 +860,7 @@
     var rS = useState({}), running = rS[0], setRunning = rS[1];
     var iS = useState(''), input = iS[0], setInput = iS[1];
     var bS = useState(false), busy = bS[0], setBusy = bS[1];
-    var oS = useState(null), openQ = oS[0], setOpenQ = oS[1];
+    var oS = useState(null), openCell = oS[0], setOpenCell = oS[1];   // "qid:sid" whose evidence (quote+reference) is expanded
     var alive = useRef(true);
     useEffect(function () { return function () { alive.current = false; }; }, []);
     function K(q, s) { return q + ':' + s; }
@@ -907,7 +907,7 @@
       sb.from('research_extraction_questions').insert({ project_id: pid, study_id: sid, text: t.slice(0, 300), answer_type: 'text', source_mode: 'both', ord: ord, created_by: uid() }).select('*').maybeSingle().then(function (r) {
         if (r && r.error) { toast(r.error.message, false); return; }
         var q = r && r.data; if (!alive.current || !q) return;
-        setQuestions(function (l) { return (l || []).concat([q]); }); setInput(''); setOpenQ(q.id);
+        setQuestions(function (l) { return (l || []).concat([q]); }); setInput('');
         runCells(incIds.map(function (id) { return { qid: q.id, sid: id }; }));
       });
     }
@@ -918,36 +918,53 @@
       if (!list.length) { toast('Minden cella kész.'); return; } runCells(list);
     }
     var qs = questions;
+    function locStr(c) { var l = (c && c.location) || {}; var b = []; if (l.figure) b.push('🖼️ ' + l.figure); if (l.page != null) b.push('📄 ' + l.page + '. o.'); if (l.section) b.push('§ ' + l.section); if (!b.length) b.push(l.basis === 'abstract' ? 'absztrakt' : 'teljes szöveg'); return b.join(' · '); }
+    function cellTd(q, id, s) {
+      var kk = K(q.id, id), c = cells[kk], run = running[kk], open = openCell === kk;
+      if (run) return h('td', { className: 'ap-ex-c', key: q.id }, h('span', { className: 'ap-ex-na' }, '⏳'));
+      if (!c) return h('td', { className: 'ap-ex-c', key: q.id }, canEdit ? h('button', { className: 'ap-ex-run1', title: 'Cella kinyerése', onClick: function () { runCells([{ qid: q.id, sid: id }]); } }, '▷') : h('span', { className: 'ap-ex-na' }, '—'));
+      if (c.status === 'error') return h('td', { className: 'ap-ex-c', key: q.id }, h('span', { className: 'ap-ex-na', title: c.error || 'hiba' }, '⚠'), canEdit ? h('button', { className: 'ap-ex-run1', onClick: function () { runCells([{ qid: q.id, sid: id }]); } }, '↻') : null);
+      if (c.status === 'na') return h('td', { className: 'ap-ex-c', key: q.id }, h('span', { className: 'ap-ex-na' }, 'N/A'));
+      return h('td', { className: 'ap-ex-c' + (open ? ' open' : ''), key: q.id },
+        h('button', { className: 'ap-ex-cell', title: 'Idézet / referencia', onClick: function () { setOpenCell(open ? null : kk); } },
+          h('span', { className: 'ap-ex-cv' }, c.answer || ''),
+          h('span', { className: 'ap-ex-conf ' + (c.confidence === 'high' ? 'hi' : c.confidence === 'mid' ? 'mid' : 'na') })),
+        open ? h('div', { className: 'ap-ex-ev' },
+          c.quote ? h('div', { className: 'ap-ex-cq2' }, '„' + c.quote + '"') : h('div', { className: 'ap-ex-cq2 m' }, '(nincs idézet)'),
+          h('div', { className: 'ap-ex-loc' }, '📍 ' + locStr(c), s.url ? h('a', { className: 'ap-ex-lnk', href: s.url, target: '_blank', rel: 'noopener' }, ' · forrás ↗') : null)) : null);
+    }
     return h('div', { className: 'ap-ex' },
       h('div', { className: 'ap-ex-h' },
         h('b', null, '🔎 Kérdések a publikációkhoz'),
-        h('span', { className: 'ap-ex-sub' }, incIds.length + ' included cikk · a rendszer cikkenként kikeresi és idézettel megválaszolja — a Studies kivonatolásában is megjelenik')),
+        h('span', { className: 'ap-ex-sub' }, incIds.length + ' included cikk · add meg a kérdéseket fent — a válaszok táblázata (cikkek × kérdések) a cikkek mellett épül fel, idézettel; a Studies kivonatolásában is megjelenik')),
       canEdit ? h('div', { className: 'ap-ex-add' },
-        h('input', { className: 'ap-ex-in', value: input, placeholder: 'Írj egy kérdést, pl. „Mekkora a minta mérete?"', onKeyDown: function (e) { if (e.key === 'Enter') addQ(); }, onChange: function (e) { setInput(e.target.value); } }),
-        h('button', { className: 'btn pri sm', disabled: !input.trim() || !incIds.length, title: incIds.length ? null : 'Előbb jelölj ki legalább egy included cikket', onClick: addQ }, 'Hozzáad + futtat')) : null,
-      qs === null ? h('div', { className: 'ap-ex-empty' }, h('span', { className: 'spin' }), ' betöltés…')
-        : !qs.length ? h('div', { className: 'ap-ex-empty' }, 'Még nincs kérdés. Tegyél fel egyet — a rendszer minden included cikkből kikeresi a választ (idézettel, vagy őszinte „N/A").')
-          : h('div', { className: 'ap-ex-list' }, qs.map(function (q) {
-            var done = 0; incIds.forEach(function (id) { var c = cells[K(q.id, id)]; if (c && (c.status === 'done' || c.status === 'na')) done++; });
-            var open = openQ === q.id;
-            return h('div', { className: 'ap-ex-q', key: q.id },
-              h('div', { className: 'ap-ex-qh' },
-                h('button', { className: 'ap-ex-qt', onClick: function () { setOpenQ(open ? null : q.id); } }, (open ? '▾ ' : '▸ ') + q.text),
-                h('span', { className: 'ap-ex-cnt' }, done + '/' + incIds.length),
-                canEdit ? h('button', { className: 'ap-ex-ic', title: 'Oszlop újrafuttatása', onClick: function () { rerunQ(q); } }, '↻') : null,
-                canEdit ? h('button', { className: 'ap-ex-ic', title: 'Kérdés törlése', onClick: function () { delQ(q); } }, '×') : null),
-              open ? h('div', { className: 'ap-ex-ans' }, incIds.map(function (id) {
-                var c = cells[K(q.id, id)], run = running[K(q.id, id)], s = srcMap[id] || {};
-                var body = run ? h('span', { className: 'ap-ex-na' }, '⏳ kinyerés…')
-                  : !c ? (canEdit ? h('button', { className: 'ap-ex-run1', onClick: function () { runCells([{ qid: q.id, sid: id }]); } }, '▷ futtat') : h('span', { className: 'ap-ex-na' }, '—'))
-                    : c.status === 'error' ? h('span', { className: 'ap-ex-na', title: c.error || 'hiba' }, '⚠ hiba')
-                      : c.status === 'na' ? h('span', { className: 'ap-ex-na' }, 'N/A')
-                        : h('span', { className: 'ap-ex-a', title: c.quote ? ('„' + c.quote + '"' + (c.confidence ? ' (' + c.confidence + ')' : '')) : null }, c.answer || '');
-                return h('div', { className: 'ap-ex-row', key: id },
-                  h('span', { className: 'ap-ex-src', title: s.title || '' }, s.title || 'Forrás'),
-                  body);
-              })) : null);
-          })),
+        h('input', { className: 'ap-ex-in', value: input, placeholder: 'Új kérdés, pl. „Mekkora a minta mérete?"', onKeyDown: function (e) { if (e.key === 'Enter') addQ(); }, onChange: function (e) { setInput(e.target.value); } }),
+        h('button', { className: 'btn pri sm', disabled: !input.trim() || !incIds.length, title: incIds.length ? null : 'Előbb jelölj ki legalább egy included cikket', onClick: addQ }, '＋ Kérdés')) : null,
+      !incIds.length ? h('div', { className: 'ap-ex-empty' }, 'Nincs included cikk — jelölj ki legalább egyet fent, hogy kérdezhess róluk.')
+        : qs === null ? h('div', { className: 'ap-ex-empty' }, h('span', { className: 'spin' }), ' betöltés…')
+          : !qs.length ? h('div', { className: 'ap-ex-empty' }, 'Írj be egy kérdést fent — a válaszok táblázata (cikkek × kérdések) itt épül fel, cikkenként idézettel vagy őszinte „N/A"-val.')
+            : h('div', { className: 'ap-ex-tscroll' },
+              h('table', { className: 'ap-ex-t' },
+                h('thead', null, h('tr', null,
+                  h('th', { className: 'ap-ex-cpub' }, 'Publikáció (' + incIds.length + ')'),
+                  qs.map(function (q) {
+                    var done = 0; incIds.forEach(function (id) { var c = cells[K(q.id, id)]; if (c && (c.status === 'done' || c.status === 'na')) done++; });
+                    return h('th', { className: 'ap-ex-cq', key: q.id },
+                      h('div', { className: 'ap-ex-qhh' },
+                        h('span', { className: 'ap-ex-qtt', title: q.text }, q.text),
+                        canEdit ? h('span', { className: 'ap-ex-qax' },
+                          h('button', { title: 'Oszlop újrafuttatása', onClick: function () { rerunQ(q); } }, '↻'),
+                          h('button', { title: 'Kérdés (oszlop) törlése', onClick: function () { delQ(q); } }, '×')) : null),
+                      h('span', { className: 'ap-ex-qm' }, done + '/' + incIds.length + ' kész'));
+                  }))),
+                h('tbody', null, incIds.map(function (id) {
+                  var s = srcMap[id] || {};
+                  return h('tr', { key: id },
+                    h('td', { className: 'ap-ex-cpub' },
+                      h('div', { className: 'ap-ex-pt', title: s.title || '' }, s.url ? h('a', { href: s.url, target: '_blank', rel: 'noopener' }, s.title || 'Forrás') : (s.title || 'Forrás')),
+                      h('div', { className: 'ap-ex-pm' }, [s.year, s.venue].filter(Boolean).join(' · '))),
+                    qs.map(function (q) { return cellTd(q, id, s); }));
+                })))),
       (qs && qs.length && incIds.length && canEdit) ? h('button', { className: 'btn sm ap-ex-mm', disabled: busy, onClick: runMissing }, busy ? '⏳ fut…' : '↻ Hiányzók futtatása') : null);
   }
 
