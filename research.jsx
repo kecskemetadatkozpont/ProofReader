@@ -4803,7 +4803,7 @@
         h('div', { style: { display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6, flexWrap: 'wrap' } },
           h('h3', { style: { margin: 0 } }, '▦ Evidencia-mátrix'),
           h('span', { style: { fontSize: 11.5, color: 'var(--faint)' } }, studyQN ? 'a szűrés cikkenként tölti — válasz + idézet + hely' : 'adj hozzá kivonatolási kérdéseket fent, és a szűrés cikkenként megválaszolja')),
-        h(ExtractPanel, { projectId: props.projectId, studyId: studyQN > 0 ? selId : null, layout: studyQN > 0 ? 'lanes' : 'grid', canEdit: props.canEdit, authorId: props.authorId, lang: (props.project && props.project.language === 'hu' ? 'hu' : 'en') })) : null)),
+        h(ExtractPanel, { projectId: props.projectId, studyId: studyQN > 0 ? selId : null, rowStudyId: selId, layout: studyQN > 0 ? 'lanes' : 'grid', canEdit: props.canEdit, authorId: props.authorId, lang: (props.project && props.project.language === 'hu' ? 'hu' : 'en') })) : null)),
       // 📚 studies manage modal — view all studies + delete (cascades to steps/papers)
       studiesOpen ? h('div', { style: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,.4)', zIndex: 1000, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '6vh 16px', overflow: 'auto' }, onClick: function () { setStudiesOpen(false); } },
         h('div', { role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Studies', style: { background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 12, width: 'min(680px, 100%)', maxHeight: '88vh', overflow: 'auto', boxShadow: '0 12px 40px rgba(0,0,0,.25)' }, onClick: function (e) { e.stopPropagation(); } },
@@ -11384,7 +11384,7 @@
     function stepRun() {
       return h('div', null,
         h('div', { className: 'qf-runhd' }, '🚀 A szűrés fut — a bizonyíték-mátrix élőben töltődik. Nyugodtan válts fület, a futás a háttérben folytatódik.'),
-        sid ? h(ExtractPanel, { projectId: pid, studyId: sid, layout: 'lanes', canEdit: canEdit, authorId: props.authorId, lang: props.lang }) : null,   // questions-first live-run → the question-canvas (lanes), where each question fills in per paper
+        sid ? h(ExtractPanel, { projectId: pid, studyId: sid, rowStudyId: sid, layout: 'lanes', canEdit: canEdit, authorId: props.authorId, lang: props.lang }) : null,   // questions-first live-run → the question-canvas (lanes); rows = this study's included papers
         h('div', { className: 'qf-foot' },
           h('button', { className: 'qf-btn gho', onClick: props.onClose }, 'Bezárás'),
           sid && props.onOpenStudy ? h('button', { className: 'qf-btn', onClick: function () { props.onOpenStudy(sid); if (props.onClose) props.onClose(); } }, 'Megnyitás a Tanulmányok között ↗') : null));
@@ -11412,20 +11412,25 @@
     useEffect(function () { return function () { alive.current = false; }; }, []);
     function K(qid, sid) { return qid + ':' + sid; }
 
-    // rows = the project's INCLUDED sources ∪ any source that already has an extraction cell (so cells the OpenAlex
-    // funnel produced during screening always show, even if research_sources.screening isn't 'include' yet).
-    function loadSources(extraIds) {
+    // rows = the matrix's papers. PROJECT mode (no rowStudyId): project sources with screening='include' ∪ cell-bearing.
+    // STUDY mode (studyMode=true, passed the study's included source_ids ∪ cell-bearing): use EXACTLY those — the funnel
+    // writes its includes to research_study_papers (NOT research_sources.screening), so the project query would miss them
+    // (this was the "17 shown but 31 included" bug). Sorted by citations for a stable order.
+    var SRC_SEL = 'id,title,year,venue,url,doi,oa_pdf_url,screening,cited_by';
+    function loadSources(extraIds, studyMode) {
       var out = [], seen = {}, from = 0, PAGE = 1000;
+      function finish() { if (alive.current) setSources(out.slice().sort(function (a, b) { return (b.cited_by || 0) - (a.cited_by || 0); })); }
       function fetchExtra() {
         var missing = (extraIds || []).filter(function (id) { return !seen[id]; });
-        if (!missing.length) { if (alive.current) setSources(out); return; }
-        sb.from('research_sources').select('id,title,year,venue,url,doi,oa_pdf_url,screening,cited_by').in('id', missing.slice(0, 800)).then(function (r) {
+        if (!missing.length) { finish(); return; }
+        sb.from('research_sources').select(SRC_SEL).in('id', missing.slice(0, 900)).then(function (r) {
           ((r && r.data) || []).forEach(function (s) { if (!seen[s.id]) { seen[s.id] = 1; out.push(s); } });
-          if (alive.current) setSources(out);
-        }, function () { if (alive.current) setSources(out); });
+          finish();
+        }, function () { finish(); });
       }
+      if (studyMode) { fetchExtra(); return; }   // study matrix: rows ARE the study's included set (∪ cells), not project-wide includes
       (function step() {
-        sb.from('research_sources').select('id,title,year,venue,url,doi,oa_pdf_url,screening,cited_by').eq('project_id', pid).eq('screening', 'include').order('cited_by', { ascending: false, nullsFirst: false }).range(from, from + PAGE - 1).then(function (r) {
+        sb.from('research_sources').select(SRC_SEL).eq('project_id', pid).eq('screening', 'include').order('cited_by', { ascending: false, nullsFirst: false }).range(from, from + PAGE - 1).then(function (r) {
           var rows = (r && r.data) || []; rows.forEach(function (s) { if (!seen[s.id]) { seen[s.id] = 1; out.push(s); } });
           if (rows.length === PAGE) { from += PAGE; step(); } else fetchExtra();
         });
@@ -11436,19 +11441,30 @@
       // (study_id NULL) questions. Cells + rows are then derived from EXACTLY those questions (consistent, no mixing).
       var qq = sb.from('research_extraction_questions').select('*').eq('project_id', pid);
       qq = studyId ? qq.eq('study_id', studyId) : qq.is('study_id', null);
+      // rows: STUDY matrix (rowStudyId set) → the study's included papers (research_study_papers, union across steps) ∪
+      // cell-bearing sources — the funnel writes includes there, NOT to research_sources.screening. Else → project mode.
+      var ruId = props.rowStudyId || null;
+      function rowsFor(cellSids) {
+        if (!ruId) { loadSources(cellSids, false); return; }
+        sb.from('research_study_papers').select('source_id,decision,overridden').eq('study_id', ruId).then(function (pr) {
+          var inc = {}; ((pr && pr.data) || []).forEach(function (p) { if (p.decision === 'include' || (p.overridden && p.decision !== 'exclude')) inc[p.source_id] = 1; });
+          (cellSids || []).forEach(function (id) { inc[id] = 1; });
+          loadSources(Object.keys(inc), true);
+        }, function () { loadSources(cellSids, true); });
+      }
       qq.order('ord', { ascending: true }).then(function (r) {
         var qs = (r && r.data) || []; if (alive.current) setQuestions(qs);
         var qids = qs.map(function (q) { return q.id; });
-        if (!qids.length) { if (alive.current) setCells({}); loadSources([]); return; }
+        if (!qids.length) { if (alive.current) setCells({}); rowsFor([]); return; }
         sb.from('research_extraction_cells').select('*').in('question_id', qids).then(function (cr) {
           var arr = (cr && cr.data) || [];
           if (alive.current) { var m = {}; arr.forEach(function (c) { m[K(c.question_id, c.source_id)] = c; }); setCells(m); }
           var extra = {}; arr.forEach(function (c) { extra[c.source_id] = 1; });
-          loadSources(Object.keys(extra));
-        }, function () { loadSources([]); });
-      }, function () { if (alive.current) setQuestions([]); loadSources([]); });
+          rowsFor(Object.keys(extra));
+        }, function () { rowsFor([]); });
+      }, function () { if (alive.current) setQuestions([]); rowsFor([]); });
     }
-    useEffect(function () { load(); }, [pid, studyId]);
+    useEffect(function () { load(); }, [pid, studyId, props.rowStudyId]);
     useEffect(function () { setLayout(props.layout === 'lanes' ? 'lanes' : 'grid'); }, [studyId]);   // re-seed the layout when the study changes (questions-first → lanes); a manual toggle within one study persists
     // the wizard's LIVE study matrix: the funnel fills cells during screening (background PRStudyRunner), so poll +
     // reload on runner changes until the study run stops. The project tab (no studyId) loads once and doesn't poll.
@@ -11646,6 +11662,7 @@
   function StudiesHub(props) {
     var pid = props.projectId;
     var rS = useState(null), rows = rS[0], setRows = rS[1];   // normalized list; null = loading
+    var qfHS = useState(false), shQF = qfHS[0], setShQF = qfHS[1];   // "raw from questions" launcher (ungated by elicit — native OpenAlex funnel)
     var alive = useRef(true);
     useEffect(function () { alive.current = true; return function () { alive.current = false; }; }, []);   // reset on mount too (StrictMode double-mount safety)
     function load() {
@@ -11719,7 +11736,10 @@
       h('div', { className: 'sh-strip' },
         h('span', { className: 'sh-t' }, '🔬 Tanulmány-központ'),
         SH_LIFE.map(function (l) { var c = byLife[l[0]]; return c ? h('span', { key: l[0], className: 'sh-tok ' + l[0] }, l[1] + ' ' + c + ' ' + l[2].toLowerCase()) : null; }),
-        !rows.length ? h('span', { className: 'sh-tok' }, 'nincs még tanulmány') : null),
+        !rows.length ? h('span', { className: 'sh-tok' }, 'nincs még tanulmány') : null,
+        // clean "raw from questions" launcher — native OpenAlex funnel, ungated by elicit_sysreview (works for any editor)
+        props.canEdit ? h('button', { className: 'sh-qf-btn', title: 'Study indítása pusztán kérdésekből — a rendszer felépíti a keresést és cikkenként megválaszolja őket', onClick: function () { setShQF(true); } }, '❓ Kérdésekből indítok →') : null),
+      shQF ? h(QuestionsFirstWizard, { projectId: pid, project: props.project, canEdit: props.canEdit, authorId: props.authorId, lang: (props.project && props.project.language === 'hu' ? 'hu' : 'en'), onClose: function () { setShQF(false); }, onChanged: props.onChanged, onOpenStudy: props.onOpenStudy }) : null,
       SH_LIFE.map(function (l) {
         var items = rows.filter(function (r) { return r.status === l[0]; });
         if (!items.length) return null;
