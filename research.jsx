@@ -1033,6 +1033,33 @@
     }
     return false;
   }
+  // ── radar verification (increment 2): each flagged span is checked against OpenAlex COVERAGE automatically & continuously —
+  //    0 extra LLM calls, keyless CORS-direct browser fetch, localStorage-cached, drip-fed with a budget.
+  function radarHash(s) { var hh = 5381, str = String(s || ''); for (var i = 0; i < str.length; i++) hh = (hh * 33 + str.charCodeAt(i)) >>> 0; return hh.toString(36); }
+  function radarVkey(f) { var q = (f.keywords && f.keywords.length) ? f.keywords.join(' ') : f.quote; return radarHash(String(q).toLowerCase().replace(/\s+/g, ' ').trim()); }
+  function radarFmt(n) { n = n || 0; return n >= 1000 ? (Math.round(n / 100) / 10) + 'k' : String(n); }
+  function radarOaCount(query) {   // ONE request → meta.count (total) + group_by=publication_year (trend)
+    var email = (window.PR_BACKEND && window.PR_BACKEND.user && window.PR_BACKEND.user.email) || 'research@publify.app';
+    var url = 'https://api.openalex.org/works?search=' + encodeURIComponent(String(query || '').slice(0, 200)) + '&per-page=1&group_by=publication_year&mailto=' + encodeURIComponent(email);
+    var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    var to = ctrl ? setTimeout(function () { try { ctrl.abort(); } catch (e) { } }, 10000) : null;
+    function done() { if (to) { clearTimeout(to); to = null; } }
+    // MUST check r.ok: fetch does NOT reject on 4xx/5xx, and OpenAlex serves JSON error bodies → r.json() would resolve with
+    // no meta.count → a false "0 cikk" confirmed gap (then cached). Throw on non-2xx so it lands on the 'err' path instead.
+    return fetch(url, ctrl ? { signal: ctrl.signal } : undefined).then(function (r) { done(); if (!r.ok) throw new Error('http ' + r.status); return r.json(); }, function (e) { done(); throw e; }).then(function (d) {
+      var count = (d && d.meta && typeof d.meta.count === 'number') ? d.meta.count : 0;
+      var years = {}; ((d && d.group_by) || []).forEach(function (g) { var y = parseInt(g.key, 10); if (y > 1990) years[y] = g.count; });
+      return { count: count, years: years };
+    });
+  }
+  function radarVerdict(type, count, years) {
+    var now = 2026, recent = 0, prior = 0, spark = [];
+    for (var y = now - 5; y <= now; y++) spark.push(years[y] || 0);
+    for (var yy in years) { var yn = +yy; if (yn >= now - 2) recent += years[yy]; else if (yn >= now - 5) prior += years[yy]; }
+    var trend = (recent && prior) ? (recent < prior * 0.7 ? 'down' : recent > prior * 1.4 ? 'up' : 'flat') : 'flat';
+    var status = count > 250 ? 'none' : type;   // >250 works on the topic → well-studied, not a genuine gap/novel idea
+    return { status: status, count: count, trend: trend, spark: spark, ts: Date.now() };
+  }
   function ChatPanel(props) {
     var cS = useState(null), chat = cS[0], setChat = cS[1];
     var mS = useState([]), msgs = mS[0], setMsgs = mS[1];
@@ -1094,6 +1121,11 @@
     function toggleFiles() { setFilesCollapsed(function (v) { var n = !v; try { localStorage.setItem('pr-files-collapsed', n ? '1' : '0'); } catch (e) { } return n; }); }
     var radS = useState(function () { try { return localStorage.getItem('pr-radar-open') === '1'; } catch (e) { return false; } }), radarOpen = radS[0], setRadarOpen = radS[1];   // 🔬 research-radar side panel — collapsed by default (a thin strip) so it never pinches the chat column; inline highlights show regardless
     function toggleRadar() { setRadarOpen(function (v) { var n = !v; try { localStorage.setItem('pr-radar-open', n ? '1' : '0'); } catch (e) { } return n; }); }
+    var vdS = useState({}), verdicts = vdS[0], setVerdicts = vdS[1];   // radar vkey → {status:'pending'|'gap'|'idea'|'none'|'err', count, trend, spark}
+    var verRef = useRef({ queue: [], active: 0, budget: 40, seen: {}, timer: null, stopped: false });   // background OpenAlex-verification queue + per-session budget
+    useEffect(function () { return function () { var st = verRef.current; st.stopped = true; if (st.timer) { clearTimeout(st.timer); st.timer = null; } }; }, []);   // stop the drain on unmount
+    var prS = useState({}), promoted = prS[0], setPromoted = prS[1];   // finding.key → 1 once promoted to a research_ideas idea/gap (session marker, avoids dup inserts)
+    var promoteRef = useRef({});   // SYNCHRONOUS dup guard (setPromoted is async → a fast double-click could double-insert without this)
     var CHAT_PALETTE = ['#e11d48', '#0891b2', '#7c3aed', '#ca8a04', '#059669', '#db2777', '#2563eb', '#ea580c'];
     function pColor(id, canonical) { if (canonical) return canonical; var s = String(id || ''), hh = 0; for (var i = 0; i < s.length; i++) hh = (hh * 31 + s.charCodeAt(i)) >>> 0; return CHAT_PALETTE[hh % CHAT_PALETTE.length]; }
     function pMono(nm) { var p = String(nm || '').trim().split(/\s+/).filter(Boolean); if (!p.length) return '?'; return (p.length === 1 ? p[0].slice(0, 2) : (p[0].charAt(0) + p[p.length - 1].charAt(0))).toUpperCase(); }
@@ -1484,15 +1516,85 @@
       return out;
     }
     var radarFinds = React.useMemo(function () { return radarFindingsList(); }, [msgs]);   // recompute only when messages change, not per keystroke
+    // AUTOMATIC continuous verification: drip-feed the queue (concurrency 2, ~350ms gap, session budget) — never blocks the UI
+    function drainRadar() {
+      var st = verRef.current;
+      if (st.stopped) return;
+      while (st.active < 2 && st.queue.length && st.budget > 0) {
+        st.budget--; st.active++;
+        (function (job) {
+          if (alive.current) setVerdicts(function (m) { var n = Object.assign({}, m); if (!n[job.vk]) n[job.vk] = { status: 'pending' }; return n; });
+          radarOaCount(job.query).then(function (res) {
+            st.active--;
+            var v = radarVerdict(job.type, res.count, res.years);
+            if (alive.current) setVerdicts(function (m) { var n = Object.assign({}, m); n[job.vk] = v; return n; });
+            try { localStorage.setItem('pr-oa-' + job.vk, JSON.stringify({ v: v, ts: Date.now() })); } catch (e) { }
+            if (!st.stopped) setTimeout(drainRadar, 350);
+          }, function () { st.active--; if (alive.current) setVerdicts(function (m) { var n = Object.assign({}, m); n[job.vk] = { status: 'err' }; return n; }); if (!st.stopped) setTimeout(drainRadar, 350); });
+        })(st.queue.shift());
+      }
+      // budget exhausted with items still queued → give them a terminal 'skipped' state so they don't spin forever
+      if (st.budget <= 0 && st.queue.length && alive.current) {
+        var rest = st.queue.splice(0), upd = {}; rest.forEach(function (j) { upd[j.vk] = { status: 'skipped' }; });
+        setVerdicts(function (m) { return Object.assign({}, m, upd); });
+      }
+    }
+    useEffect(function () {   // enqueue any new/uncached finding for verification; localStorage cache → instant, 0 query
+      var st = verRef.current;
+      (radarFinds || []).forEach(function (f) {
+        var vk = radarVkey(f);
+        if (verdicts[vk] || st.seen[vk]) return;
+        try { var c = localStorage.getItem('pr-oa-' + vk); if (c) { var o = JSON.parse(c); if (o && o.v && (Date.now() - (o.ts || 0)) < 14 * 864e5) { st.seen[vk] = 1; setVerdicts(function (m) { var n = Object.assign({}, m); n[vk] = o.v; return n; }); return; } } } catch (e) { }
+        st.seen[vk] = 1;
+        st.queue.push({ vk: vk, type: f.type, query: (f.keywords && f.keywords.length) ? f.keywords.join(' ') : f.quote });
+      });
+      if (st.queue.length && !st.timer) { st.timer = setTimeout(function () { st.timer = null; drainRadar(); }, 1200); }
+    }, [radarFinds]);
     function scrollToSpan(f) { var root = scrollRef.current; if (!root) return; var bub = root.querySelector('.bubble.ai[data-mid="' + f.msgId + '"]'); if (bub && bub.scrollIntoView) bub.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+    // increment 3 — promote a radar finding to a real research_ideas row: idea → source:'own'; gap → source:'gap' (+ gap_type +
+    // evidence carrying the OpenAlex coverage). Reuses the exact schema the Ideas/Gaps panels read (source='gap' IS a gap).
+    function promoteFinding(f) {
+      if (!props.canEdit || promoted[f.key] || promoteRef.current[f.key]) return;   // ref = synchronous guard against a fast double-click
+      promoteRef.current[f.key] = 1;
+      var v = verdicts[radarVkey(f)], q = String(f.quote || '').slice(0, 8000), row;
+      if (f.type === 'gap') {
+        var ev = (v && v.count != null) ? [{ note: 'OpenAlex-lefedettség (radar): ~' + v.count + ' cikk' + (v.trend === 'down' ? ' · csökkenő' : ''), coverage: v.count }] : [];
+        row = { project_id: props.projectId, source: 'gap', status: 'candidate', question: q, gap_type: 'evidence', evidence: ev, created_by: props.authorId };
+      } else {
+        row = { project_id: props.projectId, source: 'own', status: 'candidate', question: q, created_by: props.authorId };
+      }
+      setPromoted(function (m) { var n = Object.assign({}, m); n[f.key] = 'busy'; return n; });
+      sb.from('research_ideas').insert(row).then(function (r) {
+        if (r && r.error) { delete promoteRef.current[f.key]; setPromoted(function (m) { var n = Object.assign({}, m); delete n[f.key]; return n; }); if (window.PRUI) window.PRUI.toast(r.error.message, { kind: 'error' }); return; }
+        setPromoted(function (m) { var n = Object.assign({}, m); n[f.key] = 1; return n; });
+        if (window.PRUI) window.PRUI.toast(f.type === 'gap' ? '🕳 Rés mentve a Rések közé' : '💡 Ötlet mentve az Ötletek közé', { kind: 'ok' });
+        if (props.onChanged) props.onChanged();
+      }, function () { delete promoteRef.current[f.key]; setPromoted(function (m) { var n = Object.assign({}, m); delete n[f.key]; return n; }); if (window.PRUI) window.PRUI.toast('Mentés sikertelen.', { kind: 'error' }); });
+    }
+    function radarSpark(v) {
+      var sp = (v && v.spark) || []; if (!sp.length) return null; var mx = Math.max.apply(null, sp.concat([1]));
+      return h('span', { className: 'pr-spark' }, sp.map(function (n, i) { return h('i', { key: i, style: { height: Math.max(2, Math.round(n / mx * 11)) + 'px' } }); }));
+    }
+    function radarVerdictEl(f, isGap) {
+      var v = verdicts[radarVkey(f)];
+      if (!v || v.status === 'pending') return h('span', { className: 'pr-find-ver pend' }, h('span', { className: 'pr-vspin' }), ' ellenőrzés…');
+      if (v.status === 'skipped') return h('span', { className: 'pr-find-ver none', title: 'A mostani ellenőrzési keret betelt — később/újratöltéskor ellenőrizhető' }, '· nem ellenőrizve');
+      if (v.status === 'err') return h('span', { className: 'pr-find-ver err', title: 'Az OpenAlex-lekérdezés nem sikerült' }, '⚠ nem ellenőrizhető');
+      if (v.status === 'none') return h('span', { className: 'pr-find-ver none' }, '⚪ ' + radarFmt(v.count) + ' cikk — jól kutatott', radarSpark(v));
+      return h('span', { className: 'pr-find-ver ' + v.status }, (isGap ? '🕳 ~' : '💡 ~') + radarFmt(v.count) + ' cikk', v.trend === 'down' ? ' ↓' : v.trend === 'up' ? ' ↑' : '', radarSpark(v));
+    }
     function radarCard(f) {
       var isGap = f.type === 'gap';
-      return h('div', { className: 'pr-find ' + f.type, key: f.key },
+      var v = verdicts[radarVkey(f)];
+      return h('div', { className: 'pr-find ' + f.type + ((v && v.status === 'none') ? ' downgraded' : ''), key: f.key },
         h('div', { className: 'pr-find-top' },
           h('span', { className: 'pr-find-badge ' + f.type }, isGap ? '🕳 Rés' : '💡 Ötlet'),
-          h('span', { className: 'pr-find-pend' }, 'lehetséges')),
+          radarVerdictEl(f, isGap)),
         h('button', { className: 'pr-find-q', title: 'Ugrás a szöveghez', onClick: function () { scrollToSpan(f); } }, f.quote),
-        f.keywords.length ? h('div', { className: 'pr-find-kw' }, f.keywords.slice(0, 3).map(function (kw, i) { return h('span', { className: 'pr-find-kwt', key: i }, kw); })) : null);
+        f.keywords.length ? h('div', { className: 'pr-find-kw' }, f.keywords.slice(0, 3).map(function (kw, i) { return h('span', { className: 'pr-find-kwt', key: i }, kw); })) : null,
+        props.canEdit ? h('div', { className: 'pr-find-act' },
+          promoted[f.key] === 1 ? h('span', { className: 'pr-find-done' }, isGap ? '✓ Mentve a Rések közé' : '✓ Mentve az Ötletek közé')
+            : h('button', { className: 'pr-find-go ' + f.type, disabled: promoted[f.key] === 'busy', onClick: function () { promoteFinding(f); } }, promoted[f.key] === 'busy' ? '⏳ mentés…' : (isGap ? '🕳 Réssé' : '💡 Ötletnek'))) : null);
     }
     return h('div', { className: 'panel chatwrap' },
       railCollapsed ? h('div', { className: 'pr-chat-rail', style: { width: 46, flex: 'none', borderRight: '1px solid var(--line)', padding: '8px 4px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'center' } },
