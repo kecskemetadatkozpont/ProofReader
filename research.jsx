@@ -997,6 +997,42 @@
     );
   }
 
+  // ── Idea Chat "research radar" ── the model ends a reply with an optional ```publify-spans``` fence marking spans that are
+  //    potential research IDEAS or GAPS (verbatim quote + 2–4 English search keywords). The client strips the fence, highlights
+  //    the quotes inline, and collects them in the radar panel. (OpenAlex count-verification is a later increment.)
+  function extractSpans(text) {
+    if (!text) return [];
+    var raw = String(text), jsonStr = null;
+    var m = /```publify-spans\s*([\s\S]*?)```/i.exec(raw);
+    if (m) jsonStr = m[1].trim();
+    else { var mb = /\[\s*\{[\s\S]*?"quote"[\s\S]*\}\s*\]/.exec(raw); if (mb && /"type"\s*:/.test(mb[0])) jsonStr = mb[0]; }
+    if (!jsonStr) return [];
+    var arr; try { arr = JSON.parse(jsonStr); } catch (e) { return []; }
+    if (!Array.isArray(arr)) return [];
+    return arr.filter(function (x) { return x && x.quote && (x.type === 'idea' || x.type === 'gap'); }).slice(0, 8).map(function (x) {
+      return { type: x.type, quote: String(x.quote).slice(0, 220), keywords: (Array.isArray(x.keywords) ? x.keywords : []).map(String).map(function (s) { return s.slice(0, 60); }).filter(Boolean).slice(0, 5), strength: (x.strength === 'strong' || x.strength === 'weak') ? x.strength : 'weak' };
+    });
+  }
+  function stripSpans(text) {
+    if (!text) return text;
+    var t = String(text).replace(/```publify-spans[\s\S]*?```/gi, '').replace(/```publify-spans[\s\S]*$/i, '').trim();
+    var i = t.search(/\[\s*\{[\s\S]*?"quote"\s*:/);   // bare spans array (model dropped the fence) — hide so raw JSON never flashes
+    if (i >= 0 && t.indexOf('"type"', i) >= 0 && t.indexOf('"options"', i) < 0) t = t.slice(0, i).trim();
+    return t;
+  }
+  // wrap the FIRST verbatim occurrence of `quote` (within a single text node, skipping code/links/existing marks) in a <mark>
+  function radarWrapFirst(root, quote, cls) {
+    var q = String(quote || '').trim(); if (q.length < 5 || !root || typeof document === 'undefined') return false;
+    var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+    var node;
+    while ((node = walker.nextNode())) {
+      var pn = node.parentNode; if (pn && pn.closest && pn.closest('mark, code, pre, a')) continue;
+      var idx = node.nodeValue.indexOf(q);
+      if (idx < 0) continue;
+      try { var r = document.createRange(); r.setStart(node, idx); r.setEnd(node, idx + q.length); var mk = document.createElement('mark'); mk.className = cls; r.surroundContents(mk); return true; } catch (e) { return false; }
+    }
+    return false;
+  }
   function ChatPanel(props) {
     var cS = useState(null), chat = cS[0], setChat = cS[1];
     var mS = useState([]), msgs = mS[0], setMsgs = mS[1];
@@ -1056,6 +1092,8 @@
     var fclS = useState(function () { try { return localStorage.getItem('pr-files-collapsed') === '1'; } catch (e) { return false; } }), filesCollapsed = fclS[0], setFilesCollapsed = fclS[1];
     function toggleRail() { setRailCollapsed(function (v) { var n = !v; try { localStorage.setItem('pr-chat-rail-collapsed', n ? '1' : '0'); } catch (e) { } return n; }); }
     function toggleFiles() { setFilesCollapsed(function (v) { var n = !v; try { localStorage.setItem('pr-files-collapsed', n ? '1' : '0'); } catch (e) { } return n; }); }
+    var radS = useState(function () { try { return localStorage.getItem('pr-radar-open') === '1'; } catch (e) { return false; } }), radarOpen = radS[0], setRadarOpen = radS[1];   // 🔬 research-radar side panel — collapsed by default (a thin strip) so it never pinches the chat column; inline highlights show regardless
+    function toggleRadar() { setRadarOpen(function (v) { var n = !v; try { localStorage.setItem('pr-radar-open', n ? '1' : '0'); } catch (e) { } return n; }); }
     var CHAT_PALETTE = ['#e11d48', '#0891b2', '#7c3aed', '#ca8a04', '#059669', '#db2777', '#2563eb', '#ea580c'];
     function pColor(id, canonical) { if (canonical) return canonical; var s = String(id || ''), hh = 0; for (var i = 0; i < s.length; i++) hh = (hh * 31 + s.charCodeAt(i)) >>> 0; return CHAT_PALETTE[hh % CHAT_PALETTE.length]; }
     function pMono(nm) { var p = String(nm || '').trim().split(/\s+/).filter(Boolean); if (!p.length) return '?'; return (p.length === 1 ? p[0].slice(0, 2) : (p[0].charAt(0) + p[p.length - 1].charAt(0))).toUpperCase(); }
@@ -1110,7 +1148,7 @@
     }
     function loadMsgs(cid) {
       Promise.all([
-        sb.from('research_messages').select('id,role,content,created_at').eq('chat_id', cid).order('created_at', { ascending: true }),
+        sb.from('research_messages').select('id,role,content,created_at,blocks').eq('chat_id', cid).order('created_at', { ascending: true }),
         sb.from('research_evidence').select('message_id').eq('chat_id', cid)
       ]).then(function (res) {
         var data = (res[0] && res[0].data) || [];
@@ -1417,6 +1455,45 @@
         o.online ? h('span', { style: { width: 7, height: 7, borderRadius: '50%', background: '#22c55e', flex: 'none' } }) : null);
     }
     var viewColor = peek ? pColor(peek.ownerId, peek.color) : null;
+    // inline highlight of flagged research ideas/gaps: after messages render, wrap each assistant bubble's span quotes in <mark>.
+    // Content is immutable per message id → mark once (data-radar-sig guard); the bubble is dangerouslySetInnerHTML → mutate post-render.
+    useEffect(function () {
+      var root = scrollRef.current; if (!root) return;
+      var byId = {}; (msgs || []).forEach(function (mm2) { if (mm2.role === 'assistant') byId[mm2.id] = mm2; });
+      try {
+        root.querySelectorAll('.bubble.ai[data-mid]').forEach(function (bub) {
+          var mid = bub.getAttribute('data-mid'); var mm2 = byId[mid]; if (!mm2) return;
+          var bt = bub.querySelector('.btxt'); if (!bt || bt.querySelector('.tw-cursor')) return;   // skip a mid-typing bubble
+          if (bt.getAttribute('data-radar-sig') === mid) return;   // immutable content → highlight once
+          extractSpans(mm2.content).forEach(function (sp) { radarWrapFirst(bt, sp.quote, 'pr-' + sp.type); });
+          bt.setAttribute('data-radar-sig', mid);
+        });
+      } catch (e) { }
+    }, [msgs, typing]);
+    // radar findings: all flagged ideas/gaps across the conversation, deduped by normalized quote
+    function radarFindingsList() {
+      var out = [], seen = {};
+      (msgs || []).forEach(function (mm2) {
+        if (mm2.role !== 'assistant') return;
+        extractSpans(mm2.content).forEach(function (sp) {
+          var k = sp.type + '|' + sp.quote.toLowerCase().replace(/\s+/g, ' ').trim().slice(0, 90);
+          if (seen[k]) return; seen[k] = 1;
+          out.push({ key: k, msgId: mm2.id, type: sp.type, quote: sp.quote, keywords: sp.keywords, strength: sp.strength });
+        });
+      });
+      return out;
+    }
+    var radarFinds = React.useMemo(function () { return radarFindingsList(); }, [msgs]);   // recompute only when messages change, not per keystroke
+    function scrollToSpan(f) { var root = scrollRef.current; if (!root) return; var bub = root.querySelector('.bubble.ai[data-mid="' + f.msgId + '"]'); if (bub && bub.scrollIntoView) bub.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+    function radarCard(f) {
+      var isGap = f.type === 'gap';
+      return h('div', { className: 'pr-find ' + f.type, key: f.key },
+        h('div', { className: 'pr-find-top' },
+          h('span', { className: 'pr-find-badge ' + f.type }, isGap ? '🕳 Rés' : '💡 Ötlet'),
+          h('span', { className: 'pr-find-pend' }, 'lehetséges')),
+        h('button', { className: 'pr-find-q', title: 'Ugrás a szöveghez', onClick: function () { scrollToSpan(f); } }, f.quote),
+        f.keywords.length ? h('div', { className: 'pr-find-kw' }, f.keywords.slice(0, 3).map(function (kw, i) { return h('span', { className: 'pr-find-kwt', key: i }, kw); })) : null);
+    }
     return h('div', { className: 'panel chatwrap' },
       railCollapsed ? h('div', { className: 'pr-chat-rail', style: { width: 46, flex: 'none', borderRight: '1px solid var(--line)', padding: '8px 4px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'center' } },
         h('button', { className: 'pnl-cbtn', title: 'Munkatársak megnyitása', onClick: toggleRail }, '›'),
@@ -1458,14 +1535,14 @@
           var isTyping = typing && typing.id === m.id;
           var ai = m.role === 'assistant';
           var body;
-          if (ai && !isTyping) body = h('div', { className: 'btxt md', dangerouslySetInnerHTML: { __html: foldCode(mdHtml(stripQuestions(stripFiles(m.content)))) } });
+          if (ai && !isTyping) body = h('div', { className: 'btxt md', dangerouslySetInnerHTML: { __html: foldCode(mdHtml(stripSpans(stripQuestions(stripFiles(m.content))))) } });
           else if (ai && isTyping) {
-            var toks = (stripQuestions(stripFiles(m.content)) || '').split(/(\s+)/), shown = toks.slice(0, typing.n);
+            var toks = (stripSpans(stripQuestions(stripFiles(m.content))) || '').split(/(\s+)/), shown = toks.slice(0, typing.n);
             body = h('div', { className: 'btxt' }, shown.slice(0, -1).join(''), h('span', { key: typing.n, className: 'tw-word' }, shown[shown.length - 1] || ''), h('span', { className: 'tw-cursor' }, '▌'));
           } else body = h('div', { className: 'btxt' }, m.content);
           // feleletválasztós tisztázó kérdések — csak a LEGUTOLSÓ asszisztens-üzenetnél aktívak (a korábbiak már megválaszoltak)
           var qs = (ai && !isTyping && props.canEdit && !peek && msgs.length && msgs[msgs.length - 1].id === m.id) ? extractQuestions(m.content) : [];
-          return h('div', { key: m.id, className: 'bubble ' + (ai ? 'ai' : 'user') },
+          return h('div', { key: m.id, className: 'bubble ' + (ai ? 'ai' : 'user'), 'data-mid': m.id },
             body,
             (ai && !isTyping) ? (function () {
               var fls = extractFiles(m.content);   // ```file:PATH``` blocks the AI wrote → clickable preview links
@@ -1510,7 +1587,7 @@
           props.canEdit ? h('div', { className: 'chat-suggest' }, CHAT_SUGGEST.map(function (s, i) { return h('button', { key: i, onClick: function () { sendText(s); } }, s); })) : null
         )),
         (!peek && streaming) ? (function () {
-          var live = stripQuestions(streaming.text || '');   // hide the trailing questions fence from the live preview (it renders as pills after)
+          var live = stripSpans(stripQuestions(streaming.text || ''));   // hide the trailing questions fence from the live preview (it renders as pills after)
           var sts = streaming.statuses || [];
           var lanes = streaming.lanes || null;   // 🤖 ágens-mód: per-ágens élő sávok
           var laneIc = function (role) { return role === 'researcher' ? '🔬' : role === 'reviewer' ? '🧐' : role === 'synth' ? '🧩' : role === 'planner' ? '🧭' : '•'; };
@@ -1554,6 +1631,14 @@
         )
       ) : null)
       ),
+      // 🔬 research radar — flagged ideas/gaps collected live from the conversation (verification + promotion in later increments)
+      (!peek) ? (radarOpen
+        ? h('aside', { className: 'pr-radar' },
+            h('div', { className: 'pr-radar-h' }, h('b', null, '🔬 Élő találatok'), h('span', { className: 'pr-radar-cnt' }, String(radarFinds.length)), h('button', { className: 'pr-radar-x', title: 'Bezárás', onClick: toggleRadar }, '×')),
+            h('div', { className: 'pr-radar-b' },
+              radarFinds.length ? radarFinds.map(radarCard)
+                : h('div', { className: 'pr-radar-empty' }, 'Ahogy beszélgetsz, ide gyűlnek a lehetséges kutatási ötletek és rések — a rendszer a szövegben is kiemeli őket (a következő lépésben OpenAlex-ből ellenőrzi).')))
+        : h('button', { className: 'pr-radar-strip', title: 'Kutatási radar megnyitása (' + radarFinds.length + ' találat)', onClick: toggleRadar }, '🔬', radarFinds.length ? h('span', { className: 'pr-radar-strip-n' }, String(radarFinds.length)) : null)) : null,
       filesCollapsed ? null : h('div', { className: 'fb-resizer', onMouseDown: startResize, title: 'Drag to resize the panels' }),
       h(SessionFileBrowser, { projectId: props.projectId, authorId: props.authorId, canEdit: props.canEdit, version: filesVersion, width: filesCollapsed ? 46 : fbWidth, collapsed: filesCollapsed, onToggleCollapse: toggleFiles, onAttach: function (a) { setAttach(function (p) { return p.concat([a]); }); }, onAddIdea: function (text) { saveIdeaText(text); } }),
       selPop ? h('button', { className: 'sel-idea-btn', style: { position: 'fixed', left: selPop.x, top: selPop.y - 40, transform: 'translateX(-50%)', zIndex: 60 }, onMouseDown: function (e) { e.preventDefault(); }, onClick: function () { saveIdeaText(selPop.text); setSelPop(null); try { window.getSelection().removeAllRanges(); } catch (e) { } } }, '✚ To idea') : null,
