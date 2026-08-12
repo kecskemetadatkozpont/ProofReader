@@ -156,21 +156,35 @@ Deno.serve(async (req) => {
             critique = rev.text; send({ t: 'done', a: 'rev', s: '✅ kész' });
           } catch { send({ t: 'done', a: 'rev', s: '⚠️ hiba' }); }
 
-          // ---- SYNTHESIZER (streams the answer) ----
+          // ---- SYNTHESIZER (streams the answer) — retry ONCE (2nd try falls back to the worker model in case the caller's
+          //      model is the problem), and surface the real error instead of swallowing it. ----
           send({ t: 'start', a: 'syn' });
           const priorNote = prior ? `\n\nEarlier in the conversation:\n${prior}` : '';
           const synMsg = `Task: ${task}${priorNote}\n\nResearchers' findings:\n${findingsText}\n\nReviewer's critique:\n${critique || '(none)'}\n\nWrite the final grounded answer for the user.`;
           let answer = '';
-          try {
-            const syn = await runAgent(headers, { model: userModel, max_tokens: MAX_TOKENS, system: [{ type: 'text', text: SYNTH_SYS + ctx + lang, cache_control: { type: 'ephemeral' } }], messages: [{ role: 'user', content: synMsg }] },
-              { onToken: (t) => { answer += t; send({ t: 'tok', d: t }); } });
-            for (const c of syn.citations) allCitations.push(c);
-            if (!answer) { answer = syn.text; if (answer) send({ t: 'tok', d: answer }); }
-            send({ t: 'done', a: 'syn', s: '✅ kész' });
-          } catch (e) { send({ t: 'done', a: 'syn', s: '⚠️ hiba' }); }
+          let synErr = '';
+          for (let attempt = 0; attempt < 2; attempt++) {
+            try {
+              const syn = await runAgent(headers, { model: attempt === 0 ? userModel : WORKER_MODEL, max_tokens: MAX_TOKENS, system: [{ type: 'text', text: SYNTH_SYS + ctx + lang, cache_control: { type: 'ephemeral' } }], messages: [{ role: 'user', content: synMsg }] },
+                { onToken: (t) => { answer += t; send({ t: 'tok', d: t }); } });
+              for (const c of syn.citations) allCitations.push(c);
+              if (!answer) { answer = syn.text; if (answer) send({ t: 'tok', d: answer }); }
+              break;
+            } catch (e) { synErr = String(e); if (attempt === 0 && !answer) { send({ t: 'status', a: 'syn', s: '⚠️ újrapróbálás…' }); await new Promise((r) => setTimeout(r, 1500)); continue; } break; }
+          }
+          send({ t: 'done', a: 'syn', s: answer.trim() ? '✅ kész' : '⚠️ hiba' });
 
-          // ---- persist (best-effort; the stream already delivered the answer) ----
-          const finalText = answer.trim() || '(a szintézis nem adott vissza szöveget)';
+          // ---- persist. If the synthesizer produced NOTHING, do NOT discard the swarm's work — surface the reason and fall
+          //      back to the researchers' findings (+ the reviewer's critique) so the user still gets a useful, grounded message.
+          let finalText = answer.trim();
+          if (!finalText) {
+            if (findings.some((f) => f.text)) {
+              finalText = 'ℹ️ A végső összegzés most nem készült el' + (synErr ? ' (' + synErr.slice(0, 140) + ')' : '') + ' — a kutató-ágensek eredményei:\n\n' + findingsText + (critique ? '\n\n---\n\n**Kritikus értékelés**\n\n' + critique : '');
+            } else {
+              finalText = '⚠️ Az ágensek most nem adtak vissza eredményt' + (synErr ? ' — ' + synErr.slice(0, 140) : '') + '. Próbáld újra, vagy küldd el Ágens-mód nélkül (a 🤖 gombbal kikapcsolva).';
+            }
+            send({ t: 'tok', d: finalText });   // stream the fallback so the live bubble isn't left empty
+          }
           let messageId: string | null = null;
           try {
             const { data: saved } = await sb.from('research_messages').insert({ chat_id, role: 'assistant', content: finalText, blocks: [{ type: 'agent_trace', roster }] }).select('id').maybeSingle();
