@@ -139,7 +139,12 @@ Deno.serve(async (req) => {
               // streamed the error, which then VANISHED on the client's reload → "nothing happened". PERSIST it so the real
               // reason stays visible and survives loadMsgs.
               const detail = (await sr.text().catch(() => '')).slice(0, 300);
-              const errMsg = '⚠️ A modell most nem tudott válaszolni (' + sr.status + (detail ? ' — ' + detail : '') + '). Ez általában átmeneti (túlterheltség/limit) — próbáld újra egy kis idő múlva.';
+              const isCredit = /credit balance is too low|billing/i.test(detail);
+              const isRate = sr.status === 429 || sr.status === 529;
+              const hint = isCredit ? 'Az Anthropic API-fiók egyenlege elfogyott — tölts fel kreditet a console.anthropic.com → Plans & Billing oldalon, és minden AI-funkció újra működik. (Ez nem átmeneti hiba.)'
+                : isRate ? 'Ez átmeneti (túlterheltség/limit) — próbáld újra egy kis idő múlva.'
+                : 'Ez lehet átmeneti, vagy egy beállítási/jogosultsági probléma — ha ismétlődik, szólj az adminnak.';
+              const errMsg = '⚠️ A modell most nem tudott válaszolni (' + sr.status + (detail ? ' — ' + detail.slice(0, 220) : '') + '). ' + hint;
               controller.enqueue(enc.encode(errMsg));
               try { await sb.from('research_messages').insert({ chat_id, role: 'assistant', content: errMsg }); } catch { /* best-effort */ }
               controller.close(); return;

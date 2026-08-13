@@ -165,7 +165,18 @@ Deno.serve(async (req) => {
           const enc = new TextEncoder();
           try {
             const sr = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers, body: JSON.stringify({ ...body, stream: true }) });
-            if (!sr.ok || !sr.body) { controller.enqueue(enc.encode('\n\n[hiba: ' + (await sr.text()).slice(0, 300) + ']')); controller.close(); return; }
+            if (!sr.ok || !sr.body) {
+              // model failed BEFORE streaming → persist the error so it doesn't vanish on the client's reload ("nothing happened")
+              const detail = (await sr.text().catch(() => '')).slice(0, 300);
+              const isCredit = /credit balance is too low|billing/i.test(detail);
+              const hint = isCredit ? 'Az Anthropic API-fiók egyenlege elfogyott — tölts fel kreditet a console.anthropic.com → Plans & Billing oldalon. (Ez nem átmeneti hiba.)'
+                : (sr.status === 429 || sr.status === 529) ? 'Ez átmeneti (túlterheltség/limit) — próbáld újra kicsit később.'
+                : 'Ha ismétlődik, szólj az adminnak.';
+              const errMsg = '⚠️ A modell most nem tudott válaszolni (' + sr.status + (detail ? ' — ' + detail.slice(0, 220) : '') + '). ' + hint;
+              controller.enqueue(enc.encode(errMsg));
+              try { await sb.from('user_chat_messages').insert({ chat_id, role: 'assistant', content: errMsg }); } catch { /* best-effort */ }
+              controller.close(); return;
+            }
             const reader = sr.body.getReader(); const dec = new TextDecoder();
             let buf = '', text = '', stop = '';
             for (;;) {
