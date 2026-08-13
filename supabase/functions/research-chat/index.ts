@@ -134,7 +134,16 @@ Deno.serve(async (req) => {
           const emitStatus = (s: string) => { try { controller.enqueue(enc.encode('␟' + JSON.stringify({ s }) + '␟')); } catch { /* stream may be closed */ } };
           try {
             const sr = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers, body: JSON.stringify({ ...body, stream: true }) });
-            if (!sr.ok || !sr.body) { controller.enqueue(enc.encode('\n\n[hiba: ' + (await sr.text()).slice(0, 300) + ']')); controller.close(); return; }
+            if (!sr.ok || !sr.body) {
+              // The model failed BEFORE streaming (overload 529 / rate-limit 429 / 400 / model access). Previously we only
+              // streamed the error, which then VANISHED on the client's reload → "nothing happened". PERSIST it so the real
+              // reason stays visible and survives loadMsgs.
+              const detail = (await sr.text().catch(() => '')).slice(0, 300);
+              const errMsg = '⚠️ A modell most nem tudott válaszolni (' + sr.status + (detail ? ' — ' + detail : '') + '). Ez általában átmeneti (túlterheltség/limit) — próbáld újra egy kis idő múlva.';
+              controller.enqueue(enc.encode(errMsg));
+              try { await sb.from('research_messages').insert({ chat_id, role: 'assistant', content: errMsg }); } catch { /* best-effort */ }
+              controller.close(); return;
+            }
             const reader = sr.body.getReader(); const dec = new TextDecoder();
             const sblocks: any[] = []; let stopReason = ''; let buf = '';
             for (;;) {
