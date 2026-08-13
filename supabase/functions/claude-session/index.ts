@@ -11,6 +11,8 @@ const MODEL = Deno.env.get('RESEARCH_AI_MODEL') || 'claude-sonnet-4-6';
 const ALLOWED_MODELS = new Set(['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001']);
 const MAX_TOKENS = parseInt(Deno.env.get('SESSION_MAX_TOKENS') || '4096', 10);
 const HISTORY = parseInt(Deno.env.get('SESSION_HISTORY') || '20', 10);
+const WS_TOOL = Deno.env.get('RESEARCH_WEBSEARCH_TOOL') || 'web_search_20250305';   // Anthropic server-side web search (shared config with research-chat)
+const WS_MAX = parseInt(Deno.env.get('RESEARCH_WEBSEARCH_MAX_USES') || '4', 10);
 const SYSTEM = `You are Publify, a helpful, knowledgeable research assistant inside the Publify platform. You help researchers with their writing, publications, and projects. Answer clearly and concisely in the user's language. Use Markdown; put code in fenced code blocks. When the user has attached documents, LaTeX/research projects, or publications, ground your answers in them and cite which attachment you used.`;
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -42,7 +44,7 @@ Deno.serve(async (req) => {
     if (!ANTHROPIC_KEY) return json({ error: 'ANTHROPIC_API_KEY not set' }, 503);
     const auth = req.headers.get('Authorization') || '';
     const sb = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!, { global: { headers: { Authorization: auth } } });
-    const { chat_id, stream: wantStream, mode } = await req.json().catch(() => ({}));
+    const { chat_id, stream: wantStream, mode, web: reqWeb } = await req.json().catch(() => ({}));
     if (!chat_id) return json({ error: 'chat_id required' }, 400);
 
     const { data: chat } = await sb.from('user_chats').select('id').eq('id', chat_id).maybeSingle();
@@ -52,6 +54,10 @@ Deno.serve(async (req) => {
     const gate = await assertEntitled(sb, 'page_session'); if (gate) return gate;
     const { data: profRow } = await sb.from('profiles').select('ai_model,can_workflows').eq('id', uid).maybeSingle();
     const model = await resolveModel(sb);
+    // Optional web search (Anthropic server-side tool) — gated by the same entitlement as the research chat; if the user
+    // isn't entitled, webOn stays false and the toggle is silently ignored (graceful).
+    let webOn = false;
+    if (reqWeb) { try { const { data: wsOk } = await sb.rpc('is_feature_enabled', { p_key: 'research_web_search' }); webOn = !!wsOk; } catch { webOn = false; } }
 
     const { data: history } = await sb.from('user_chat_messages').select('role,content').eq('chat_id', chat_id).order('created_at', { ascending: true });
     let rows = (history || []).filter((m: any) => m.content);
@@ -94,7 +100,8 @@ Deno.serve(async (req) => {
     }
 
     const headers: Record<string, string> = { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' };
-    const body = { model, max_tokens: MAX_TOKENS, system: systemFull, messages };
+    const body: any = { model, max_tokens: MAX_TOKENS, system: systemFull, messages };
+    if (webOn) body.tools = [{ type: WS_TOOL, name: 'web_search', max_uses: WS_MAX }];   // grounded answers with live web sources + citations
     const TRUNC = '\n\n---\n_⚠️ A válasz a hosszkorlát miatt megszakadt. Írd be, hogy **„folytasd"**._';
 
     // ---- Workflow (agentic) mode: Claude works autonomously across steps with file tools (item 4) ----
@@ -194,6 +201,7 @@ Deno.serve(async (req) => {
               }
             }
             if (stop === 'max_tokens') { controller.enqueue(enc.encode(TRUNC)); text += TRUNC; }
+            else if (stop === 'pause_turn') { const P = '\n\n---\n_⚠️ A webkeresés megszakadt (a modell szüneteltette a hosszú keresést). Írd be, hogy **„folytasd"**._'; controller.enqueue(enc.encode(P)); text += P; }
             try {
               await sb.from('user_chat_messages').insert({ chat_id, role: 'assistant', content: text || '(no text)' });
               await sb.from('user_chats').update({ updated_at: new Date().toISOString() }).eq('id', chat_id);

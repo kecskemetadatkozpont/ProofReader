@@ -33,6 +33,8 @@
     var stS = useState(null), streaming = stS[0], setStreaming = stS[1];
     var wfS = useState(false), wf = wfS[0], setWf = wfS[1];               // workflow (agentic) mode toggle
     var cwS = useState(false), canWf = cwS[0], setCanWf = cwS[1];         // admin-granted permission
+    var wbS = useState(function () { try { return localStorage.getItem('pr-session-web') === '1'; } catch (e) { return false; } }), webOn = wbS[0], setWebOn = wbS[1];   // 🌐 web search (Anthropic tool, entitlement-gated server-side)
+    function toggleWeb() { setWebOn(function (v) { var n = !v; try { localStorage.setItem('pr-session-web', n ? '1' : '0'); } catch (e) { } return n; }); }
     var flS = useState([]), files = flS[0], setFiles = flS[1];           // user_chat_files for the current chat
     var pvS = useState(null), preview = pvS[0], setPreview = pvS[1];
     var atS = useState(false), atOpen = atS[0], setAtOpen = atS[1];        // attach menu open
@@ -77,7 +79,7 @@
         if (stopReq.current) { stopReq.current = false; setBusy(false); return; }   // Stop pressed before the request went out
         var token = (s && s.data && s.data.session && s.data.session.access_token) || CFG.supabaseAnonKey;
         var ac = new AbortController(); abortRef.current = ac;
-        fetch(CFG.supabaseUrl + '/functions/v1/claude-session', { method: 'POST', headers: { 'Content-Type': 'application/json', 'apikey': CFG.supabaseAnonKey, 'Authorization': 'Bearer ' + token }, body: JSON.stringify({ chat_id: id, stream: true }), signal: ac.signal }).then(function (resp) {
+        fetch(CFG.supabaseUrl + '/functions/v1/claude-session', { method: 'POST', headers: { 'Content-Type': 'application/json', 'apikey': CFG.supabaseAnonKey, 'Authorization': 'Bearer ' + token }, body: JSON.stringify({ chat_id: id, stream: true, web: webOn }), signal: ac.signal }).then(function (resp) {
           if (!resp.ok || !resp.body || !resp.body.getReader) { abortRef.current = null; setBusy(false); return; }
           var reader = resp.body.getReader(), dec = new TextDecoder(), acc = '';
           setStreaming({ text: '' });
@@ -233,9 +235,10 @@
         h('button', { className: 'fs-x', title: 'Remove', 'aria-label': 'Remove attachment', onClick: function (e) { removeFile(f, e); } }, '×')); })) : null,
       conv,
       h('div', { className: 'composer' },
-        canWf ? h('div', { className: 'wf-row' },
-          h('button', { className: 'wf-toggle' + (wf ? ' on' : ''), 'aria-pressed': wf, 'aria-label': 'Workflow mode', onClick: function () { setWf(!wf); } }, '🛠 Workflow mode: ' + (wf ? 'ON' : 'OFF')),
-          h('span', { className: 'wf-hint' }, wf ? 'Publify solves a task in multiple steps, with files.' : 'Multi-step agent mode (enabled by admin).')) : null,
+        h('div', { className: 'wf-row' },
+          h('button', { className: 'wf-toggle' + (webOn ? ' on' : ''), 'aria-pressed': webOn, 'aria-label': 'Web search', disabled: busy, title: 'Webkeresés — a modell valós idejű internetes forrásokból is meríthet és idézi őket (a modell dönti el, mikor keres). Jogosultsághoz kötött.', onClick: toggleWeb }, webOn ? '🌐 Web: BE' : '🌐 Web: KI'),
+          canWf ? h('button', { className: 'wf-toggle' + (wf ? ' on' : ''), 'aria-pressed': wf, 'aria-label': 'Workflow mode', onClick: function () { setWf(!wf); } }, '🛠 Workflow mode: ' + (wf ? 'ON' : 'OFF')) : null,
+          h('span', { className: 'wf-hint' }, webOn ? 'A bot valós idejű webforrásokból is meríthet, idézetekkel.' : (canWf && wf ? 'Publify solves a task in multiple steps, with files.' : 'Kapcsold be a webkeresést a friss, hivatkozott válaszokhoz.'))),
         h('div', { className: 'composer-in' },
           h('div', { className: 'attach-wrap' },
             h('button', { className: 'attach-btn', title: 'Attach', 'aria-label': 'Attach', 'aria-haspopup': 'true', 'aria-expanded': atOpen, disabled: busy, onClick: function () { setAtOpen(!atOpen); } }, '📎'),
