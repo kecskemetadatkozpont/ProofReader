@@ -37,6 +37,16 @@ const CORS = {
 };
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...CORS, 'Content-Type': 'application/json' } });
 
+// UTF-8-safe base64 → embed the run-trace (what each agent did + searches + sources) as an INVISIBLE HTML comment in the
+// answer content, decoded by the shared pr-trace.js viewer. Invisible even on old clients (DOMPurify strips comments).
+function b64utf8(s: string): string { const bytes = new TextEncoder().encode(s); let bin = ''; for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]); return btoa(bin); }
+function traceFence(trace: unknown): string { try { return '\n\n<!--pf-trace:' + b64utf8(JSON.stringify(trace)) + '-->'; } catch { return ''; } }
+function citeSources(citations: any[]): { title: string; url: string }[] {
+  const map = new Map<string, { title: string; url: string }>();
+  for (const c of (citations || [])) { if (!c) continue; const url = String(c.url || ''); const title = String(c.document_title || c.title || url || 'forrás'); const k = url || title; if (k && !map.has(k)) map.set(k, { title: title.slice(0, 200), url: url.slice(0, 400) }); }
+  return Array.from(map.values()).slice(0, 40);
+}
+
 const PLANNER_SYS = `You are the planner of a small research swarm inside a PhD ideation platform. Given the user's request and the project context, break the task into ${MAX_R} DISTINCT, complementary research angles that parallel researcher agents will each investigate. Return ONLY a compact JSON array (no prose, no code fence) of objects, each {"label": "<short 2–5 word title>", "brief": "<one-sentence instruction for that researcher>"}. Angles must not overlap. If the task is narrow, return fewer than ${MAX_R}.`;
 const RESEARCHER_SYS = `You are a researcher agent in a swarm. Investigate ONLY your assigned angle for the user's task. Use web search when current facts, recent work, or evidence grounding would help. Return concise, specific findings (key facts, relevant methods/works, numbers) and cite sources where you used them. Do not answer the whole task — just your angle.`;
 const REVIEWER_SYS = `You are the critical reviewer of a research swarm. Given the task and the researchers' combined findings, briefly assess: what is well-supported, what is missing or unaddressed, and any contradictions or weak/unsupported claims. Be concise, specific and constructive — this critique guides the final synthesis.`;
@@ -135,16 +145,16 @@ Deno.serve(async (req) => {
 
           // ---- RESEARCHERS (parallel) ----
           const findings = await Promise.all(angles.map(async (a, i) => {
-            const id = 'r' + i;
+            const id = 'r' + i; const searches: string[] = [];
             send({ t: 'start', a: id });
             const body: Record<string, unknown> = { model: WORKER_MODEL, max_tokens: 1600, system: [{ type: 'text', text: RESEARCHER_SYS + ctx + lang }], messages: [{ role: 'user', content: `Assigned angle: ${a.label}\n${a.brief}\n\nUser's task: ${task}` }] };
             const wt = webTool(); if (wt) body.tools = wt;
             try {
-              const res = await runAgent(headers, body, { onSearch: (q) => send({ t: 'status', a: id, s: '🌐 ' + q.slice(0, 60) }) });
+              const res = await runAgent(headers, body, { onSearch: (q) => { searches.push(String(q).slice(0, 80)); send({ t: 'status', a: id, s: '🌐 ' + q.slice(0, 60) }); } });
               for (const c of res.citations) allCitations.push(c);
               send({ t: 'done', a: id, s: '✅ kész' + (res.citations.length ? ' · ' + res.citations.length + ' forrás' : '') });
-              return { label: a.label, text: res.text };
-            } catch (e) { send({ t: 'done', a: id, s: '⚠️ hiba' }); return { label: a.label, text: '' }; }
+              return { id, label: a.label, text: res.text, searches, nsrc: res.citations.length, ok: true };
+            } catch (e) { send({ t: 'done', a: id, s: '⚠️ hiba' }); return { id, label: a.label, text: '', searches, nsrc: 0, ok: false }; }
           }));
           const findingsText = findings.filter((f) => f.text).map((f) => `### ${f.label}\n${f.text}`).join('\n\n') || '(a kutatók nem adtak vissza eredményt)';
 
@@ -185,9 +195,20 @@ Deno.serve(async (req) => {
             }
             send({ t: 'tok', d: finalText });   // stream the fallback so the live bubble isn't left empty
           }
+          // Invisible run-trace (what each agent did + searches + sources) → appended to the answer for the shared pr-trace.js viewer.
+          const trace = {
+            v: 1, kind: 'swarm',
+            agents: [
+              { id: 'plan', role: 'planner', label: 'Tervezés', status: angles.length + ' szögre bontva' },
+              ...findings.map((f: any) => ({ id: f.id, role: 'researcher', label: f.label, searches: (f.searches || []).slice(0, 8), nsrc: f.nsrc || 0, status: f.ok ? '✅ kész' : '⚠️ hiba' })),
+              { id: 'rev', role: 'reviewer', label: 'Kritikus értékelés', status: critique ? '✅ kész' : '⚠️ hiba' },
+              { id: 'syn', role: 'synth', label: 'Szintézis', status: answer.trim() ? '✅ kész' : '⚠️ hiba' },
+            ],
+            sources: citeSources(allCitations),
+          };
           let messageId: string | null = null;
           try {
-            const { data: saved } = await sb.from('research_messages').insert({ chat_id, role: 'assistant', content: finalText, blocks: [{ type: 'agent_trace', roster }] }).select('id').maybeSingle();
+            const { data: saved } = await sb.from('research_messages').insert({ chat_id, role: 'assistant', content: finalText + traceFence(trace), blocks: [{ type: 'agent_trace', roster }] }).select('id').maybeSingle();
             messageId = saved?.id ?? null;
             const seen = new Set<string>();
             const ev = allCitations.filter((c) => c && c.cited_text).map((c) => {

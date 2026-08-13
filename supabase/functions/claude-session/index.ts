@@ -45,6 +45,17 @@ async function getOrgElicitToken(svc: any): Promise<string | null> {
   return org.access_token;
 }
 
+// UTF-8-safe base64 (btoa alone breaks on Hungarian/emoji). Used to embed the run-trace as an invisible HTML comment.
+function b64utf8(s: string): string { const bytes = new TextEncoder().encode(s); let bin = ''; for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]); return btoa(bin); }
+// Build the invisible trace fence appended to the persisted answer — the shared pr-trace.js viewer decodes it. Never streamed.
+function traceFence(trace: unknown): string { try { return '\n\n<!--pf-trace:' + b64utf8(JSON.stringify(trace)) + '-->'; } catch { return ''; } }
+// Dedup citations → a compact {title,url} source list for the trace.
+function citeSources(citations: any[]): { title: string; url: string }[] {
+  const map = new Map<string, { title: string; url: string }>();
+  for (const c of (citations || [])) { if (!c) continue; const url = String(c.url || ''); const title = String(c.document_title || c.title || url || 'forrás'); const k = url || title; if (k && !map.has(k)) map.set(k, { title: title.slice(0, 200), url: url.slice(0, 400) }); }
+  return Array.from(map.values()).slice(0, 40);
+}
+
 // Read one Anthropic SSE stream to completion, firing callbacks as blocks arrive. Used by the agent swarm (mode:'agents').
 async function runSwarmAgent(headers: Record<string, string>, body: Record<string, unknown>,
   cbs: { onSearch?: (q: string) => void; onToken?: (t: string) => void }): Promise<{ text: string; citations: any[]; stopReason: string }> {
@@ -247,16 +258,16 @@ Deno.serve(async (req) => {
 
             // WORKERS (parallel)
             const findings = await Promise.all(angles.map(async (a, i) => {
-              const id = 'r' + i;
+              const id = 'r' + i; const searches: string[] = [];
               send({ t: 'start', a: id });
               const wBody: Record<string, unknown> = { model: WORKER_MODEL, max_tokens: 1600, system: [{ type: 'text', text: AG_WORKER_SYS + ctxShort }], messages: [{ role: 'user', content: `Assigned angle: ${a.label}\n${a.brief}\n\nUser's task: ${task}` }] };
               const wt = webTool(); if (wt) wBody.tools = wt;
               try {
-                const res = await runSwarmAgent(headers, wBody, { onSearch: (q) => send({ t: 'status', a: id, s: '🌐 ' + q.slice(0, 60) }) });
+                const res = await runSwarmAgent(headers, wBody, { onSearch: (q) => { searches.push(String(q).slice(0, 80)); send({ t: 'status', a: id, s: '🌐 ' + q.slice(0, 60) }); } });
                 for (const c of res.citations) allCitations.push(c);
                 send({ t: 'done', a: id, s: '✅ kész' + (res.citations.length ? ' · ' + res.citations.length + ' forrás' : '') });
-                return { label: a.label, text: res.text };
-              } catch (_e) { send({ t: 'done', a: id, s: '⚠️ hiba' }); return { label: a.label, text: '' }; }
+                return { id, label: a.label, text: res.text, searches, nsrc: res.citations.length, ok: true };
+              } catch (_e) { send({ t: 'done', a: id, s: '⚠️ hiba' }); return { id, label: a.label, text: '', searches, nsrc: 0, ok: false }; }
             }));
             const findingsText = findings.filter((f) => f.text).map((f) => `### ${f.label}\n${f.text}`).join('\n\n') || '(a munkás-ágensek nem adtak vissza eredményt)';
 
@@ -291,9 +302,20 @@ Deno.serve(async (req) => {
               else finalText = '⚠️ Az ágensek most nem adtak vissza eredményt' + (synErr ? ' — ' + synErr.slice(0, 140) : '') + '. Próbáld újra, vagy küldd el Ágens-mód nélkül (a 🤖 gombbal kikapcsolva).';
               send({ t: 'tok', d: finalText });   // stream the fallback so the live bubble isn't left empty
             }
+            // Build the invisible run-trace (what each agent did + searches + sources) → appended to the persisted answer.
+            const trace = {
+              v: 1, kind: 'swarm',
+              agents: [
+                { id: 'plan', role: 'planner', label: 'Tervezés', status: angles.length + ' szögre bontva' },
+                ...findings.map((f) => ({ id: f.id, role: 'researcher', label: f.label, searches: f.searches.slice(0, 8), nsrc: f.nsrc, status: f.ok ? '✅ kész' : '⚠️ hiba' })),
+                { id: 'rev', role: 'reviewer', label: 'Kritikus értékelés', status: critique ? '✅ kész' : '⚠️ hiba' },
+                { id: 'syn', role: 'synth', label: 'Szintézis', status: answer.trim() ? '✅ kész' : '⚠️ hiba' },
+              ],
+              sources: citeSources(allCitations),
+            };
             let messageId: string | null = null;
             try {
-              const { data: saved } = await sb.from('user_chat_messages').insert({ chat_id, role: 'assistant', content: finalText }).select('id').maybeSingle();
+              const { data: saved } = await sb.from('user_chat_messages').insert({ chat_id, role: 'assistant', content: finalText + traceFence(trace) }).select('id').maybeSingle();
               messageId = saved?.id ?? null;
               await sb.from('user_chats').update({ updated_at: new Date().toISOString() }).eq('id', chat_id);
             } catch { /* persistence best-effort */ }

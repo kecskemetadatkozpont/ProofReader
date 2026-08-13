@@ -29,10 +29,14 @@
     var lone = text.lastIndexOf('␟'); if (lone >= 0) text = text.slice(0, lone);   // hide a half-arrived trailing frame
     return { statuses: statuses, text: text };
   }
+  // Strip the invisible run-trace fence (<!--pf-trace:…-->) so the visible answer never shows it (belt — DOMPurify strips comments too).
+  function stripTrace(t) { return (window.PRTrace && window.PRTrace.strip) ? window.PRTrace.strip(t) : t; }
+  function parseTrace(t) { return (window.PRTrace && window.PRTrace.parse) ? window.PRTrace.parse(t) : null; }
   var SUGGEST = ['Explain Fisher information simply.', 'Write a short research abstract on OOD detection.', 'Give me 5 ideas for a dissertation chapter.', 'Help me structure a presentation.'];
 
   function App() {
     var phS = useState('loading'), phase = phS[0], setPhase = phS[1];
+    var toS = useState({}), traceOpen = toS[0], setTraceOpen = toS[1];   // message_id → is the 🔬 Nyomvonal panel expanded
     var meS = useState(null), me = meS[0], setMe = meS[1];
     var chS = useState([]), chats = chS[0], setChats = chS[1];
     var cidS = useState(null), cid = cidS[0], setCid = cidS[1];
@@ -267,9 +271,14 @@
     var conv = (msgs.length || streaming || busy) ? h('div', { className: 'conv', ref: scrollRef }, h('div', { className: 'wrap' },
       msgs.map(function (m) {
         var ai = m.role === 'assistant';
+        var tr = ai ? parseTrace(m.content) : null;   // 🔬 run-trace of the agent swarm / web search, if this reply carries one
+        var open = tr && traceOpen[m.id];
         return h('div', { key: m.id, className: 'bubble ' + (ai ? 'ai' : 'user') },
-          ai ? h('div', { className: 'btxt md', dangerouslySetInnerHTML: { __html: foldCode(mdHtml(m.content)) } }) : h('div', { className: 'btxt' }, m.content),
-          ai ? h('div', { className: 'bmeta' }, h('button', { 'aria-label': 'Copy message', onClick: function () { copy(m); } }, 'Copy')) : null);
+          ai ? h('div', { className: 'btxt md', dangerouslySetInnerHTML: { __html: foldCode(mdHtml(stripTrace(m.content))) } }) : h('div', { className: 'btxt' }, m.content),
+          ai ? h('div', { className: 'bmeta' },
+            h('button', { 'aria-label': 'Copy message', onClick: function () { copy(m); } }, 'Copy'),
+            tr ? h('button', { 'aria-expanded': !!open, title: 'Mit csináltak az ágensek + a felkutatott források', onClick: function () { setTraceOpen(function (o) { var n = Object.assign({}, o); n[m.id] = !n[m.id]; return n; }); } }, '🔬 Nyomvonal ' + (open ? '▲' : '▼')) : null) : null,
+          open ? window.PRTrace.view(tr) : null);
       }),
       streaming ? (function () {
         var sts = streaming.statuses || [], live = streaming.text || '', lanes = streaming.lanes || null;   // lanes = 🤖 agent-mode per-agent live rows

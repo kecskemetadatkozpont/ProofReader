@@ -1020,6 +1020,9 @@
     if (i >= 0 && t.indexOf('"type"', i) >= 0 && t.indexOf('"options"', i) < 0) t = t.slice(0, i).trim();
     return t;
   }
+  // invisible run-trace fence (<!--pf-trace:…-->) → the shared pr-trace.js viewer; strip it from the visible answer.
+  function stripTrace(text) { return (window.PRTrace && window.PRTrace.strip) ? window.PRTrace.strip(text) : text; }
+  function parseTrace(text) { return (window.PRTrace && window.PRTrace.parse) ? window.PRTrace.parse(text) : null; }
   // wrap the FIRST verbatim occurrence of `quote` (within a single text node, skipping code/links/existing marks) in a <mark>
   function radarWrapFirst(root, quote, cls) {
     var q = String(quote || '').trim(); if (q.length < 5 || !root || typeof document === 'undefined') return false;
@@ -1065,6 +1068,7 @@
     var mS = useState([]), msgs = mS[0], setMsgs = mS[1];
     var eS = useState({}), evByMsg = eS[0], setEvByMsg = eS[1];
     var oeS = useState(null), openEv = oeS[0], setOpenEv = oeS[1];        // message_id whose evidence/citation panel is expanded
+    var otS = useState({}), traceOpen = otS[0], setTraceOpen = otS[1];    // message_id → is the 🔬 Nyomvonal (agent run-trace) panel expanded
     var esS = useState({}), evSnips = esS[0], setEvSnips = esS[1];        // message_id → [{query, snippet}] (lazy-loaded from research_evidence)
     var iS = useState(''), input = iS[0], setInput = iS[1];
     var bS = useState(false), busy = bS[0], setBusy = bS[1];
@@ -1193,7 +1197,7 @@
         else {
           var aMsgs = data.filter(function (m) { return m.role === 'assistant'; });
           var last = aMsgs[aMsgs.length - 1];
-          if (last && !animated.current[last.id]) { animated.current[last.id] = true; if (!justStreamed.current) startTyping(last.id, stripQuestions(stripFiles(last.content))); }  // a streamed reply was already revealed live → no replay
+          if (last && !animated.current[last.id]) { animated.current[last.id] = true; if (!justStreamed.current) startTyping(last.id, stripQuestions(stripFiles(stripTrace(last.content)))); }  // a streamed reply was already revealed live → no replay
           justStreamed.current = false;
         }
       });
@@ -1637,9 +1641,9 @@
           var isTyping = typing && typing.id === m.id;
           var ai = m.role === 'assistant';
           var body;
-          if (ai && !isTyping) body = h('div', { className: 'btxt md', dangerouslySetInnerHTML: { __html: foldCode(mdHtml(stripSpans(stripQuestions(stripFiles(m.content))))) } });
+          if (ai && !isTyping) body = h('div', { className: 'btxt md', dangerouslySetInnerHTML: { __html: foldCode(mdHtml(stripSpans(stripQuestions(stripFiles(stripTrace(m.content)))))) } });
           else if (ai && isTyping) {
-            var toks = (stripSpans(stripQuestions(stripFiles(m.content))) || '').split(/(\s+)/), shown = toks.slice(0, typing.n);
+            var toks = (stripSpans(stripQuestions(stripFiles(stripTrace(m.content)))) || '').split(/(\s+)/), shown = toks.slice(0, typing.n);
             body = h('div', { className: 'btxt' }, shown.slice(0, -1).join(''), h('span', { key: typing.n, className: 'tw-word' }, shown[shown.length - 1] || ''), h('span', { className: 'tw-cursor' }, '▌'));
           } else body = h('div', { className: 'btxt' }, m.content);
           // feleletválasztós tisztázó kérdések — csak a LEGUTOLSÓ asszisztens-üzenetnél aktívak (a korábbiak már megválaszoltak)
@@ -1673,9 +1677,11 @@
             })() : null,
             (ai && !isTyping) ? h('div', { className: 'bmeta' },
               evByMsg[m.id] ? h('button', { className: 'evbtn' + (openEv === m.id ? ' on' : ''), title: 'Hivatkozott források / részletek', onClick: function () { toggleEv(m.id); } }, '📄 ' + evByMsg[m.id] + ' forrás ' + (openEv === m.id ? '▲' : '▼')) : null,
+              parseTrace(m.content) ? h('button', { className: 'evbtn' + (traceOpen[m.id] ? ' on' : ''), 'aria-expanded': !!traceOpen[m.id], title: 'Mit csináltak az ágensek + a felkutatott források', onClick: function () { setTraceOpen(function (o) { var n = Object.assign({}, o); n[m.id] = !n[m.id]; return n; }); } }, '🔬 Nyomvonal ' + (traceOpen[m.id] ? '▲' : '▼')) : null,
               h('button', { className: 'copybtn', onClick: function () { copy(m); } }, 'Copy'),
               props.canEdit ? h('button', { className: 'savebtn', onClick: function () { saveIdea(m); } }, '✚ Save as idea') : null
             ) : null,
+            (ai && !isTyping && traceOpen[m.id] && window.PRTrace) ? window.PRTrace.view(parseTrace(m.content)) : null,
             (ai && !isTyping && openEv === m.id) ? h('div', { className: 'chat-ev' },
               (evSnips[m.id] || []).length ? evSnips[m.id].map(function (sn, si) {
                 return h('div', { className: 'chat-ev-item', key: si },
