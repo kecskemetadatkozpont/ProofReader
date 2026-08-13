@@ -44,6 +44,9 @@
     var cwS = useState(false), canWf = cwS[0], setCanWf = cwS[1];         // admin-granted permission
     var wbS = useState(function () { try { return localStorage.getItem('pr-session-web') === '1'; } catch (e) { return false; } }), webOn = wbS[0], setWebOn = wbS[1];   // 🌐 web search (Anthropic tool, entitlement-gated server-side)
     function toggleWeb() { setWebOn(function (v) { var n = !v; try { localStorage.setItem('pr-session-web', n ? '1' : '0'); } catch (e) { } return n; }); }
+    var amS = useState(function () { try { return localStorage.getItem('pr-session-agents') === '1'; } catch (e) { return false; } }), agentMode = amS[0], setAgentMode = amS[1];   // 🤖 multi-agent swarm
+    var caS = useState(false), canAgents = caS[0], setCanAgents = caS[1];   // entitlement (research_agents; admin bypasses)
+    function toggleAgents() { setAgentMode(function (v) { var n = !v; try { localStorage.setItem('pr-session-agents', n ? '1' : '0'); } catch (e) { } return n; }); }
     var flS = useState([]), files = flS[0], setFiles = flS[1];           // user_chat_files for the current chat
     var pvS = useState(null), preview = pvS[0], setPreview = pvS[1];
     var atS = useState(false), atOpen = atS[0], setAtOpen = atS[1];        // attach menu open
@@ -64,6 +67,7 @@
       // loadChats runs anon and comes back empty (the session is loaded asynchronously after createClient)
       sb.auth.getSession().then(function () {
         sb.from('profiles').select('can_workflows').eq('id', BE.user.id).maybeSingle().then(function (r) { setCanWf(!!(r && r.data && r.data.can_workflows)); });
+        sb.rpc('is_feature_enabled', { p_key: 'research_agents' }).then(function (r) { setCanAgents(!!(r && r.data)); }, function () { });
         loadChats(function (list) { if (list && list.length) openChat(list[0].id); setPhase('ready'); });
       }, function () { setHistLoading(false); setPhase('ready'); });
     }
@@ -107,12 +111,50 @@
           .then(function () { if (!alive.current) return; abortRef.current = null; setBusy(false); loadMsgs(id); loadChats(); loadFiles(id); }, function () { abortRef.current = null; setBusy(false); });
       });
     }
+    // 🤖 multi-agent swarm: Planner → Workers → Reviewer → Synthesizer, with LIVE per-agent lanes (NDJSON), like the Research Idea Chat.
+    function runAgents(id) {
+      sb.auth.getSession().then(function (s) {
+        if (stopReq.current) { stopReq.current = false; setBusy(false); return; }
+        var token = (s && s.data && s.data.session && s.data.session.access_token) || CFG.supabaseAnonKey;
+        var ac = new AbortController(); abortRef.current = ac;
+        fetch(CFG.supabaseUrl + '/functions/v1/claude-session', { method: 'POST', headers: { 'Content-Type': 'application/json', 'apikey': CFG.supabaseAnonKey, 'Authorization': 'Bearer ' + token }, body: JSON.stringify({ chat_id: id, mode: 'agents', web: webOn }), signal: ac.signal }).then(function (resp) {
+          if (!resp.ok || !resp.body || !resp.body.getReader) { abortRef.current = null; setStreaming(null); setBusy(false); try { window.PRUI.toast('Ágens-mód nem elérhető — nincs hozzá jogosultságod (research_agents), vagy hiba történt.', { kind: 'warn' }); } catch (e) { } return; }
+          var reader = resp.body.getReader(), dec = new TextDecoder(), buf = '', answer = '';
+          var lanes = [{ id: 'plan', role: 'planner', label: 'Tervezés', state: 'run', status: '' }], laneById = { plan: lanes[0] };
+          function upd() { setStreaming({ text: answer, lanes: lanes.slice() }); }
+          upd();
+          (function pump() {
+            reader.read().then(function (r) {
+              if (!alive.current) return;
+              if (r.done) { abortRef.current = null; setStreaming(null); setBusy(false); loadMsgs(id); loadChats(); return; }
+              buf += dec.decode(r.value, { stream: true });
+              var nl;
+              while ((nl = buf.indexOf('\n')) >= 0) {
+                var line = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1);
+                if (!line) continue;
+                var ev; try { ev = JSON.parse(line); } catch (e) { continue; }
+                if (ev.t === 'plan' && Array.isArray(ev.items)) {
+                  if (laneById.plan) laneById.plan.state = 'done';
+                  lanes = [laneById.plan].concat(ev.items.map(function (it) { return { id: it.id, role: it.role, label: it.label, state: 'wait', status: '' }; }));
+                  laneById = {}; lanes.forEach(function (l) { laneById[l.id] = l; }); upd();
+                } else if (ev.t === 'start') { var la = laneById[ev.a]; if (la) { la.state = 'run'; upd(); } }
+                else if (ev.t === 'status') { var lb = laneById[ev.a]; if (lb) { lb.state = 'run'; lb.status = ev.s || ''; upd(); } }
+                else if (ev.t === 'done') { var lc = laneById[ev.a]; if (lc) { lc.state = 'done'; lc.status = ev.s || lc.status; upd(); } }
+                else if (ev.t === 'tok') { answer += (ev.d || ''); upd(); }
+                else if (ev.t === 'err') { try { window.PRUI.toast('Ágens-hiba: ' + (ev.m || 'ismeretlen'), { kind: 'warn' }); } catch (e) { } }
+              }
+              pump();
+            }, function (e) { if (e && e.name === 'AbortError') return; abortRef.current = null; setStreaming(null); setBusy(false); loadMsgs(id); });
+          })();
+        }, function (e) { if (e && e.name === 'AbortError') return; abortRef.current = null; setBusy(false); });
+      });
+    }
     function sendText(raw) {
       var txt = (raw || '').trim(); if (!txt || busy) return;
       stopReq.current = false; setBusy(true); setInput(''); if (taRef.current) taRef.current.style.height = 'auto';
       ensureChat(txt).then(function (id) {
         if (!id) { setBusy(false); return; }
-        sb.from('user_chat_messages').insert({ chat_id: id, role: 'user', content: txt }).then(function () { loadMsgs(id); if (wf) runWorkflow(id); else streamReply(id); });
+        sb.from('user_chat_messages').insert({ chat_id: id, role: 'user', content: txt }).then(function () { loadMsgs(id); if (agentMode && canAgents) runAgents(id); else if (wf) runWorkflow(id); else streamReply(id); });
       });
     }
     function send() { sendText(input); }
@@ -230,13 +272,21 @@
           ai ? h('div', { className: 'bmeta' }, h('button', { 'aria-label': 'Copy message', onClick: function () { copy(m); } }, 'Copy')) : null);
       }),
       streaming ? (function () {
-        var sts = streaming.statuses || [], live = streaming.text || '';
+        var sts = streaming.statuses || [], live = streaming.text || '', lanes = streaming.lanes || null;   // lanes = 🤖 agent-mode per-agent live rows
+        var laneIc = function (role) { return role === 'researcher' ? '🔬' : role === 'reviewer' ? '🧐' : role === 'synth' ? '🧩' : role === 'planner' ? '🧭' : '•'; };
         return h('div', { className: 'bubble ai', key: 'stream', 'aria-live': 'polite' },
-          sts.length ? h('div', { className: 'act-strip' }, sts.map(function (s, i) {
-            var isCur = (i === sts.length - 1) && !live;   // the newest status is "current" only while no answer text has arrived yet
-            return h('div', { key: i, className: 'pr-actrow ' + (isCur ? 'cur' : 'done') }, isCur ? h('span', { className: 'pr-spin' }) : h('span', null, '✓'), h('span', null, s));
-          })) : null,
-          h('div', { className: 'btxt' }, live || (sts.length ? null : h('span', { style: { color: 'var(--faint)' } }, 'Publify is thinking…')), h('span', { className: 'tw-cursor', 'aria-hidden': 'true' }, '▌')));
+          (lanes && lanes.length) ? h('div', { className: 'pr-agents', style: { marginBottom: live ? 8 : 0 } }, lanes.map(function (l) {
+            return h('div', { key: l.id, className: 'pr-lane ' + l.state },
+              h('span', { className: 'pr-lane-ic' }, laneIc(l.role)),
+              h('span', { className: 'pr-lane-lab' }, l.label),
+              l.state === 'run' ? h('span', { className: 'pr-spin' }) : l.state === 'done' ? h('span', { className: 'pr-lane-ok' }, '✓') : h('span', { className: 'pr-lane-wait' }, '…'),
+              l.status ? h('span', { className: 'pr-lane-st' }, l.status) : null);
+          }))
+            : (sts.length ? h('div', { className: 'act-strip' }, sts.map(function (s, i) {
+              var isCur = (i === sts.length - 1) && !live;   // the newest status is "current" only while no answer text has arrived yet
+              return h('div', { key: i, className: 'pr-actrow ' + (isCur ? 'cur' : 'done') }, isCur ? h('span', { className: 'pr-spin' }) : h('span', null, '✓'), h('span', null, s));
+            })) : null),
+          h('div', { className: 'btxt' }, live || ((sts.length || (lanes && lanes.length)) ? null : h('span', { style: { color: 'var(--faint)' } }, 'Publify is thinking…')), h('span', { className: 'tw-cursor', 'aria-hidden': 'true' }, '▌')));
       })()
         : busy ? h('div', { className: 'bubble ai', 'aria-live': 'polite' }, h('div', { className: 'btxt', style: { color: 'var(--faint)' } },
           h('div', null, wf ? '🛠 Publify is working on the task (multiple steps, with files)…' : 'Publify is thinking…'),
@@ -254,8 +304,9 @@
       h('div', { className: 'composer' },
         h('div', { className: 'wf-row' },
           h('button', { className: 'wf-toggle' + (webOn ? ' on' : ''), 'aria-pressed': webOn, 'aria-label': 'Web search', disabled: busy, title: 'Webkeresés — a modell valós idejű internetes forrásokból is meríthet és idézi őket (a modell dönti el, mikor keres). Jogosultsághoz kötött.', onClick: toggleWeb }, webOn ? '🌐 Web: BE' : '🌐 Web: KI'),
+          canAgents ? h('button', { className: 'wf-toggle' + (agentMode ? ' on' : ''), 'aria-pressed': agentMode, 'aria-label': 'Agent mode', disabled: busy, title: 'Ágens-mód — egy kis ügynök-raj (tervező → kutatók → értékelő → szintézis) dolgozik a feladaton, élő státusszal minden ágensről. Költségesebb (több modellhívás).', onClick: toggleAgents }, agentMode ? '🤖 Ágensek: BE' : '🤖 Ágensek: KI') : null,
           canWf ? h('button', { className: 'wf-toggle' + (wf ? ' on' : ''), 'aria-pressed': wf, 'aria-label': 'Workflow mode', onClick: function () { setWf(!wf); } }, '🛠 Workflow mode: ' + (wf ? 'ON' : 'OFF')) : null,
-          h('span', { className: 'wf-hint' }, webOn ? 'A bot valós idejű webforrásokból is meríthet, idézetekkel.' : (canWf && wf ? 'Publify solves a task in multiple steps, with files.' : 'Kapcsold be a webkeresést a friss, hivatkozott válaszokhoz.'))),
+          h('span', { className: 'wf-hint' }, (agentMode && canAgents) ? 'Egy ügynök-raj dolgozik a kérdéseden — élőben látod, melyik ágens mit csinál.' : webOn ? 'A bot valós idejű webforrásokból is meríthet, idézetekkel.' : (canWf && wf ? 'Publify solves a task in multiple steps, with files.' : 'Kapcsold be a webkeresést a friss, hivatkozott válaszokhoz.'))),
         h('div', { className: 'composer-in' },
           h('div', { className: 'attach-wrap' },
             h('button', { className: 'attach-btn', title: 'Attach', 'aria-label': 'Attach', 'aria-haspopup': 'true', 'aria-expanded': atOpen, disabled: busy, onClick: function () { setAtOpen(!atOpen); } }, '📎'),
