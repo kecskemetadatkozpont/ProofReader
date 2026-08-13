@@ -6,7 +6,7 @@ const ANTHROPIC_KEY = Deno.env.get('ANTHROPIC_API_KEY');
 const MODEL = 'claude-sonnet-4-6';   // planning quality matters for the protocol
 function json(b: unknown, s = 200) { return new Response(JSON.stringify(b), { status: s, headers: { ...CORS, 'Content-Type': 'application/json' } }); }
 
-const SYS = `You are a senior research engineer planning an EXECUTABLE research protocol that a Claude Code agent will run autonomously on a dedicated GPU machine. Turn the idea + selected literature into an ORDERED list of concrete, atomic, verifiable steps (data → preprocess → baselines → method → evaluation → figures → write-up). Each step must be runnable and checkable on its own.
+const SYS = `You are a senior research engineer planning an EXECUTABLE research protocol that a Claude Code agent will run autonomously on a dedicated GPU machine. Turn the idea + selected literature into an ORDERED list of concrete, atomic, verifiable steps (data → preprocess → baselines → method → evaluation → figures → write-up). Each step must be runnable and checkable on its own. GROUND the plan in the evidence provided: use the literature ABSTRACTS and the SYSTEMATIC-REVIEW synthesized findings to choose concrete baselines, datasets, methods and evaluation metrics (prefer the specific baselines/datasets/metrics the reviewed work actually used), and to make the method a defensible step BEYOND what that evidence already established. Do not invent results, datasets or numbers that are not supported by the provided evidence.
 
 Return ONLY a JSON object, no prose, no markdown fences:
 {"title": "<short protocol title>", "steps": [
@@ -78,23 +78,31 @@ Deno.serve(async (req) => {
         if (!idea) idea = ideas.find((x: any) => x.status === 'selected') || ideas[0];
       }
       if (idea && !selIdeas.length) selIdeas = [idea];   // no explicit selection → the legacy single idea is the source
-      const srcQ = await sb.from('research_sources').select('title,venue,year,screening').eq('project_id', projectId).limit(200);
+      const srcQ = await sb.from('research_sources').select('title,venue,year,screening,abstract').eq('project_id', projectId).limit(200);
       const allSrc = (srcQ.data || []);
       const inc = allSrc.filter((s: any) => s.screening === 'include');
       const lit = (inc.length ? inc : allSrc).slice(0, 25);
       const dsQ = await sb.from('research_datasets').select('name,notes').eq('project_id', projectId).limit(20);
       const datasets = (dsQ.data || []);
       // SR results are ALWAYS native context (§5): every completed systematic review + the papers it included.
-      const srQ = await sb.from('elicit_jobs').select('id,research_question,result_title').eq('project_id', projectId).eq('kind', 'sysreview').eq('status', 'completed').limit(12);
+      const srQ = await sb.from('elicit_jobs').select('id,research_question,result_title,result_summary,result_abstract').eq('project_id', projectId).eq('kind', 'sysreview').eq('status', 'completed').limit(12);
       const srJobs = (srQ.data || []);
       const srBlocks: string[] = [];
       for (const j of srJobs) {
         const incP = await sb.from('research_sources').select('title,year').eq('project_id', projectId).eq('origin_job_id', j.id).eq('screening', 'include').limit(8);
         const titles = ((incP.data as any) || []).map((s: any) => `    • ${s.title}${s.year ? ' (' + s.year + ')' : ''}`).join('\n');
-        srBlocks.push(`- ${j.research_question || j.result_title || 'Systematic review'}\n  Included papers:\n${titles || '    (none passed screening)'}`);
+        // the SR's SYNTHESIZED findings (Elicit report summary/abstract) — not just the included-paper list — so the plan builds on WHAT the review concluded.
+        const findings = String(j.result_summary || j.result_abstract || '').replace(/\s+/g, ' ').trim();
+        srBlocks.push(`- ${j.research_question || j.result_title || 'Systematic review'}`
+          + (findings ? `\n  Synthesized findings: ${findings.slice(0, 1200)}` : '')
+          + `\n  Included papers:\n${titles || '    (none passed screening)'}`);
       }
 
-      const litTxt = lit.map((s: any, i: number) => `${i + 1}. ${s.title}${s.venue ? ' — ' + s.venue : ''}${s.year ? ' (' + s.year + ')' : ''}`).join('\n') || '(none yet)';
+      // include a short ABSTRACT per selected source so steps ground in WHAT each paper actually did (methods/datasets/baselines), not just the title.
+      const litTxt = lit.map((s: any, i: number) => {
+        const ab = String(s.abstract || '').replace(/\s+/g, ' ').trim();
+        return `${i + 1}. ${s.title}${s.venue ? ' — ' + s.venue : ''}${s.year ? ' (' + s.year + ')' : ''}${ab ? `\n     Abstract: ${ab.slice(0, 500)}` : ''}`;
+      }).join('\n') || '(none yet)';
       const dsTxt = datasets.map((d: any) => `- ${d.name}${d.notes ? ': ' + d.notes : ''}`).join('\n') || '(none registered)';
       const ideasTxt = selIdeas.map((x: any) => `- [${x.source === 'gap' ? 'RESEARCH GAP' : 'IDEA'}] ${x.question || ''}${x.hypothesis ? ' | Hypothesis: ' + x.hypothesis : ''}${x.rationale ? ' | Why: ' + String(x.rationale).slice(0, 300) : ''}`).join('\n') || '(no idea recorded)';
       const stepsTxt = selSteps.map((x: any) => `- [EXISTING STEP] ${x.title}${x.spec && x.spec.instruction ? ': ' + String(x.spec.instruction).slice(0, 200) : ''}`).join('\n');
