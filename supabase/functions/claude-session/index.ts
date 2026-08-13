@@ -100,7 +100,9 @@ Deno.serve(async (req) => {
     }
 
     const headers: Record<string, string> = { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' };
-    const body: any = { model, max_tokens: MAX_TOKENS, system: systemFull, messages };
+    // Nudge the model to ACTUALLY search when web is on — otherwise it often replies "I have no real-time data" even with the tool available.
+    const WEB_NOTE = ' Web search is ENABLED. When the user asks about anything current, recent, real-time or time-sensitive — news, currently OPEN calls/grants/tenders/opportunities, recent research or publications, prices, dates, or anything phrased as "latest"/"2025"/"jelenleg"/"most nyitott" — you MUST use the web_search tool to look it up and cite live sources, instead of replying that your knowledge is not up to date. Prefer authoritative/official sources (e.g. the relevant agency or ministry site) and cite them.';
+    const body: any = { model, max_tokens: MAX_TOKENS, system: webOn ? systemFull + WEB_NOTE : systemFull, messages };
     if (webOn) body.tools = [{ type: WS_TOOL, name: 'web_search', max_uses: WS_MAX }];   // grounded answers with live web sources + citations
     const TRUNC = '\n\n---\n_⚠️ A válasz a hosszkorlát miatt megszakadt. Írd be, hogy **„folytasd"**._';
 
@@ -186,6 +188,12 @@ Deno.serve(async (req) => {
             }
             const reader = sr.body.getReader(); const dec = new TextDecoder();
             let buf = '', text = '', stop = '';
+            // Live activity frames (␟{"s":…}␟) so the client can show what the model is doing — web search, which query, drafting.
+            // Same protocol as research-chat; the client's parseStatus strips these frames from the visible answer.
+            const sblocks: Record<number, any> = {};
+            // Only emit frames when web search is on: that's where activity is worth showing (search takes seconds with no text),
+            // and it keeps the plain web-off path byte-identical to before, so a stale cached client never sees raw ␟ frames.
+            const emitStatus = (s: string) => { if (!webOn) return; try { controller.enqueue(enc.encode('␟' + JSON.stringify({ s }) + '␟')); } catch { /* stream may be closed */ } };
             for (;;) {
               const { done, value } = await reader.read(); if (done) break;
               buf += dec.decode(value, { stream: true });
@@ -195,7 +203,16 @@ Deno.serve(async (req) => {
                 const dl = piece.split('\n').find((l) => l.startsWith('data:')); if (!dl) continue;
                 const raw = dl.slice(5).trim(); if (!raw || raw === '[DONE]') continue;
                 let ev: any; try { ev = JSON.parse(raw); } catch { continue; }
-                if (ev.type === 'content_block_delta' && ev.delta?.type === 'text_delta' && typeof ev.delta.text === 'string') { text += ev.delta.text; controller.enqueue(enc.encode(ev.delta.text)); }
+                if (ev.type === 'content_block_start') {
+                  const bt = ev.content_block?.type; sblocks[ev.index] = ev.content_block || {};
+                  if (bt === 'thinking' || bt === 'redacted_thinking') emitStatus('🧠 Gondolkodik a válaszon…');
+                  else if (bt === 'server_tool_use' || bt === 'tool_use' || bt === 'mcp_tool_use') emitStatus(ev.content_block?.name === 'web_search' ? '🌐 Keresés a weben…' : '🔎 Eszköz futtatása…');
+                  else if (bt === 'web_search_tool_result' || bt === 'mcp_tool_result' || bt === 'tool_result') emitStatus('📚 Találatok feldolgozása…');
+                  else if (bt === 'text') emitStatus('✍️ Válasz megfogalmazása…');
+                }
+                else if (ev.type === 'content_block_delta' && ev.delta?.type === 'text_delta' && typeof ev.delta.text === 'string') { text += ev.delta.text; controller.enqueue(enc.encode(ev.delta.text)); }
+                else if (ev.type === 'content_block_delta' && ev.delta?.type === 'input_json_delta' && typeof ev.delta.partial_json === 'string') { const b = sblocks[ev.index] || (sblocks[ev.index] = {}); b._pj = (b._pj || '') + ev.delta.partial_json; }
+                else if (ev.type === 'content_block_stop') { const b = sblocks[ev.index]; if (b && b._pj) { try { const inp = JSON.parse(b._pj); const q = inp.query || inp.q; if (q) emitStatus('🔎 Keresés: „' + String(q).slice(0, 60) + '”'); } catch { /* partial json */ } } }
                 else if (ev.type === 'message_delta' && ev.delta?.stop_reason) stop = ev.delta.stop_reason;
                 else if (ev.type === 'error') controller.enqueue(enc.encode('\n\n[hiba: ' + (ev.error?.message || 'anthropic') + ']'));
               }

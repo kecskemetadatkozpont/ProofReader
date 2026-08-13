@@ -20,6 +20,15 @@
 
   function mdHtml(t) { var s = String(t == null ? '' : t); try { if (window.marked && window.DOMPurify) return window.DOMPurify.sanitize(window.marked.parse(s, { breaks: true })); } catch (e) { } return s.replace(/[&<>]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]; }).replace(/\n/g, '<br>'); }
   function foldCode(html) { if (!html) return html; return html.replace(/<pre>/g, '<details class="code-fold"><summary>⟨⟩ Code — expand / collapse</summary><pre>').replace(/<\/pre>/g, '</pre></details>'); }
+  // Split live-activity frames (␟{"s":…}␟, emitted by claude-session during web search) out of the streamed answer text.
+  function parseStatus(acc) {
+    var s = String(acc || ''); if (s.indexOf('␟') < 0) return { statuses: [], text: s };
+    var statuses = [], re = /␟([\s\S]*?)␟/g, m;
+    while ((m = re.exec(s))) { try { var o = JSON.parse(m[1]); if (o && o.s) statuses.push(String(o.s)); } catch (e) { } }
+    var text = s.replace(/␟[\s\S]*?␟/g, '');            // drop complete frames
+    var lone = text.lastIndexOf('␟'); if (lone >= 0) text = text.slice(0, lone);   // hide a half-arrived trailing frame
+    return { statuses: statuses, text: text };
+  }
   var SUGGEST = ['Explain Fisher information simply.', 'Write a short research abstract on OOD detection.', 'Give me 5 ideas for a dissertation chapter.', 'Help me structure a presentation.'];
 
   function App() {
@@ -83,7 +92,7 @@
           if (!resp.ok || !resp.body || !resp.body.getReader) { abortRef.current = null; setBusy(false); return; }
           var reader = resp.body.getReader(), dec = new TextDecoder(), acc = '';
           setStreaming({ text: '' });
-          (function pump() { reader.read().then(function (r) { if (!alive.current) return; if (r.done) { abortRef.current = null; setStreaming(null); setBusy(false); loadMsgs(id); loadChats(); return; } acc += dec.decode(r.value, { stream: true }); setStreaming({ text: acc }); pump(); }, function () { abortRef.current = null; setStreaming(null); setBusy(false); loadMsgs(id); }); })();
+          (function pump() { reader.read().then(function (r) { if (!alive.current) return; if (r.done) { abortRef.current = null; setStreaming(null); setBusy(false); loadMsgs(id); loadChats(); return; } acc += dec.decode(r.value, { stream: true }); var ps = parseStatus(acc); setStreaming({ text: ps.text, statuses: ps.statuses }); pump(); }, function () { abortRef.current = null; setStreaming(null); setBusy(false); loadMsgs(id); }); })();
         }, function () { abortRef.current = null; setBusy(false); });
       });
     }
@@ -220,7 +229,15 @@
           ai ? h('div', { className: 'btxt md', dangerouslySetInnerHTML: { __html: foldCode(mdHtml(m.content)) } }) : h('div', { className: 'btxt' }, m.content),
           ai ? h('div', { className: 'bmeta' }, h('button', { 'aria-label': 'Copy message', onClick: function () { copy(m); } }, 'Copy')) : null);
       }),
-      streaming ? h('div', { className: 'bubble ai', key: 'stream', 'aria-live': 'polite' }, h('div', { className: 'btxt' }, streaming.text || '', h('span', { className: 'tw-cursor', 'aria-hidden': 'true' }, '▌')))
+      streaming ? (function () {
+        var sts = streaming.statuses || [], live = streaming.text || '';
+        return h('div', { className: 'bubble ai', key: 'stream', 'aria-live': 'polite' },
+          sts.length ? h('div', { className: 'act-strip' }, sts.map(function (s, i) {
+            var isCur = (i === sts.length - 1) && !live;   // the newest status is "current" only while no answer text has arrived yet
+            return h('div', { key: i, className: 'pr-actrow ' + (isCur ? 'cur' : 'done') }, isCur ? h('span', { className: 'pr-spin' }) : h('span', null, '✓'), h('span', null, s));
+          })) : null,
+          h('div', { className: 'btxt' }, live || (sts.length ? null : h('span', { style: { color: 'var(--faint)' } }, 'Publify is thinking…')), h('span', { className: 'tw-cursor', 'aria-hidden': 'true' }, '▌')));
+      })()
         : busy ? h('div', { className: 'bubble ai', 'aria-live': 'polite' }, h('div', { className: 'btxt', style: { color: 'var(--faint)' } },
           h('div', null, wf ? '🛠 Publify is working on the task (multiple steps, with files)…' : 'Publify is thinking…'),
           h('div', { className: 'pr-bar indet', style: { marginTop: 8 }, role: 'progressbar', 'aria-label': wf ? 'Workflow run in progress' : 'Generating reply' }, h('i')))) : null
