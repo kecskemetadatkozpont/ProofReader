@@ -298,9 +298,20 @@
       var norm = apExtractNorm((run.config && run.config.extract_questions) || []);
       if (!norm.length) norm = EXTRACT_DEFAULTS;   // phase enabled but no questions → sensible defaults
       var sidMarker = run.study_id || null;
-      // included sources for the matrix (cap to top-cited so the phase converges)
-      return sb.from('research_sources').select('id').eq('project_id', project.id).eq('screening', 'include').order('cited_by', { ascending: false, nullsFirst: false }).limit(EXTRACT_MAX_SOURCES).then(function (sr) {
-        var sids = ((sr && sr.data) || []).map(function (x) { return x.id; });
+      // Included sources for the matrix (cap to top-cited so the phase converges). BUGFIX: the Autopilot funnel writes its
+      // includes to research_study_papers per STUDY (decision='include'), NOT to research_sources.screening — so in study
+      // mode read the study's include set (union across steps, honoring overrides), order by citations & cap; only fall
+      // back to project-level Library includes (research_sources.screening) when there is no study or it has none.
+      var byCite = function (ids) { return ids.length ? sb.from('research_sources').select('id').in('id', ids).order('cited_by', { ascending: false, nullsFirst: false }).limit(EXTRACT_MAX_SOURCES).then(function (r) { return ((r && r.data) || []).map(function (x) { return x.id; }); }) : Promise.resolve([]); };
+      var projInc = function () { return sb.from('research_sources').select('id').eq('project_id', project.id).eq('screening', 'include').order('cited_by', { ascending: false, nullsFirst: false }).limit(EXTRACT_MAX_SOURCES).then(function (r) { return ((r && r.data) || []).map(function (x) { return x.id; }); }); };
+      var resolveSids = sidMarker
+        ? sb.from('research_study_papers').select('source_id,decision,overridden').eq('study_id', sidMarker).then(function (pr) {
+            var inc = {}; ((pr && pr.data) || []).forEach(function (p) { if (p.decision === 'include' || (p.overridden && p.decision !== 'exclude')) inc[p.source_id] = 1; });
+            var ids = Object.keys(inc);
+            return ids.length ? byCite(ids) : projInc();
+          }, function () { return projInc(); })
+        : projInc();
+      return resolveSids.then(function (sids) {
         if (!sids.length) return apSkip(run, 'Nincs included cikk a kivonatoláshoz — kimarad');
         // idempotent: adopt questions already created for this study (retry-safe), else insert them
         var existQ = sidMarker
