@@ -266,8 +266,8 @@ Deno.serve(async (req) => {
                 const res = await runSwarmAgent(headers, wBody, { onSearch: (q) => { searches.push(String(q).slice(0, 80)); send({ t: 'status', a: id, s: '🌐 ' + q.slice(0, 60) }); } });
                 for (const c of res.citations) allCitations.push(c);
                 send({ t: 'done', a: id, s: '✅ kész' + (res.citations.length ? ' · ' + res.citations.length + ' forrás' : '') });
-                return { id, label: a.label, text: res.text, searches, nsrc: res.citations.length, ok: true };
-              } catch (_e) { send({ t: 'done', a: id, s: '⚠️ hiba' }); return { id, label: a.label, text: '', searches, nsrc: 0, ok: false }; }
+                return { id, label: a.label, brief: a.brief, text: res.text, searches, nsrc: res.citations.length, ok: true };
+              } catch (_e) { send({ t: 'done', a: id, s: '⚠️ hiba' }); return { id, label: a.label, brief: a.brief, text: '', searches, nsrc: 0, ok: false }; }
             }));
             const findingsText = findings.filter((f) => f.text).map((f) => `### ${f.label}\n${f.text}`).join('\n\n') || '(a munkás-ágensek nem adtak vissza eredményt)';
 
@@ -304,12 +304,12 @@ Deno.serve(async (req) => {
             }
             // Build the invisible run-trace (what each agent did + searches + sources) → appended to the persisted answer.
             const trace = {
-              v: 1, kind: 'swarm',
+              v: 1, kind: 'swarm', task: String(task).slice(0, 240),
               agents: [
-                { id: 'plan', role: 'planner', label: 'Tervezés', status: angles.length + ' szögre bontva' },
-                ...findings.map((f) => ({ id: f.id, role: 'researcher', label: f.label, searches: f.searches.slice(0, 8), nsrc: f.nsrc, status: f.ok ? '✅ kész' : '⚠️ hiba' })),
-                { id: 'rev', role: 'reviewer', label: 'Kritikus értékelés', status: critique ? '✅ kész' : '⚠️ hiba' },
-                { id: 'syn', role: 'synth', label: 'Szintézis', status: answer.trim() ? '✅ kész' : '⚠️ hiba' },
+                { id: 'plan', role: 'planner', label: 'Tervező', goal: angles.length + ' komplementer kutatási szögre bontotta a feladatot', status: angles.length + ' szög' },
+                ...findings.map((f) => ({ id: f.id, role: 'researcher', label: f.label, goal: f.brief || '', searches: f.searches.slice(0, 8), nsrc: f.nsrc, status: f.ok ? '✅ kész' : '⚠️ hiba' })),
+                { id: 'rev', role: 'reviewer', label: 'Kritikus értékelés', goal: 'A kutatók találatainak kritikus ellenőrzése (hiányok, ellentmondások)', status: critique ? '✅ kész' : '⚠️ hiba' },
+                { id: 'syn', role: 'synth', label: 'Szintézis', goal: 'A megállapítások egységes, forrásolt válasszá szerkesztése', status: answer.trim() ? '✅ kész' : '⚠️ hiba' },
               ],
               sources: citeSources(allCitations),
             };
