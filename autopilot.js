@@ -705,7 +705,9 @@
             })) : null,
             (streaming.text || !(streaming.lanes && streaming.lanes.length)) ? h('div', { className: 'ap-bub', dangerouslySetInnerHTML: { __html: mdSafe(apHideJson(streaming.text || '')) } }) : null)) : null,
         (busy && !streaming) ? h('div', { className: 'ap-turn ai', key: 'typing' }, h('span', { className: 'ap-av ai' }, 'AI'), h('div', { className: 'ap-typing' }, h('i'), h('i'), h('i'))) : null),
-      err ? h('div', { className: 'ap-cerr' }, err) : null,
+      err ? h('div', { className: 'ap-cerr' },
+        h('span', { className: 'ap-cerr-t' }, err),
+        h('button', { className: 'ap-cerr-retry', disabled: busy, title: 'Az utolsó üzenet újraküldése', onClick: function () { if (busy) return; setErr(''); replyNow(props.chatId); } }, '↻ Újraküldés')) : null,
       h('div', { className: 'ap-cbar' },
         h('input', { type: 'file', ref: fileRef, multiple: true, style: { display: 'none' }, onChange: onFile }),
         h('button', { className: 'ap-cicon', title: 'Fájl feltöltése', onClick: pickFile, disabled: busy }, '📎'),
@@ -1956,21 +1958,38 @@
       }, function () { if (alive.current) setRows([]); });
     }, [props.reloadKey]);
     function rel(ts) { if (!ts) return ''; var d = (Date.now() - Date.parse(ts)) / 1000; if (d < 3600) return Math.max(1, Math.round(d / 60)) + ' perce'; if (d < 86400) return Math.round(d / 3600) + ' órája'; if (d < 2592000) return Math.round(d / 86400) + ' napja'; try { return new Date(ts).toLocaleDateString('hu-HU'); } catch (e) { return ''; } }
+    // delete a whole Autopilot project + ALL its data (research_projects FK cascade removes runs/events/ideas/sources/studies/
+    // protocols/files/gap-matrix/extraction). Owner-scoped by RLS. Confirms first — irreversible.
+    function delProject(row) {
+      var go = function (ok) {
+        if (!ok) return;
+        sb.from('research_projects').delete().eq('id', row.pid).then(function (r) {
+          if (r && r.error) { toast('Nem sikerült törölni: ' + r.error.message, false); return; }
+          if (alive.current) setRows(function (list) { return (list || []).filter(function (x) { return x.pid !== row.pid; }); });
+          toast('Projekt törölve.', true);
+        }, function () { toast('Nem sikerült törölni — próbáld újra.', false); });
+      };
+      var body = '„' + (row.title || 'Projekt') + '" és MINDEN hozzá tartozó adat (futások, ötletek, rések, források, study-k, protokollok, fájlok) VÉGLEGESEN törlődik — nem vonható vissza.';
+      if (window.PRUI && window.PRUI.confirm) window.PRUI.confirm({ title: 'Autopilot-projekt törlése?', body: body, danger: true, confirmLabel: 'Végleges törlés' }).then(go);
+      else if (window.confirm('Törlöd a(z) „' + (row.title || 'Projekt') + '" projektet és minden adatát? Nem vonható vissza.')) go(true);
+    }
     return h('aside', { className: 'ap-side' },
       h('div', { className: 'ap-side-h' }, 'Projektjeim', rows && rows.length ? h('span', { className: 'ap-side-c' }, rows.length) : null),
       rows === null ? h('div', { className: 'ap-side-empty' }, h('span', { className: 'spin' })) :
       !rows.length ? h('div', { className: 'ap-side-empty' }, 'Még nincs megkezdett projekt. Indíts egy beszélgetést jobbra →') :
       h('div', { className: 'ap-side-list' }, rows.map(function (row) {
         var run = row.run, eff = run ? apEffectiveStatus(run) : null, st = run ? (AP_STATUS[eff] || AP_STATUS.queued) : null, pr = run ? apProgress(run) : null;
-        return h('button', { key: row.pid, className: 'ap-side-row', title: row.goal || row.title,
-          onClick: function () { if (run) props.onOpenRun(run.id); else props.onOpenBrief(row.pid, row.chatId); } },
-          h('div', { className: 'ap-side-t' }, row.title),
-          row.goal ? h('div', { className: 'ap-side-g' }, row.goal) : null,
-          h('div', { className: 'ap-side-meta' },
-            run ? h('span', { className: 'ap-pill ' + st.cls }, h('span', { className: 'ap-sdot' }), st.t)
-                : h('span', { className: 'ap-pill ap-pill-brief' }, '📝 Piszkozat'),
-            run && pr ? h('span', { className: 'ap-side-pr mono' }, pr.done + '/' + pr.enabled) : null,
-            row.ts ? h('span', { className: 'ap-side-ts' }, rel(row.ts)) : null));
+        return h('div', { key: row.pid, className: 'ap-side-rowwrap' },
+          h('button', { className: 'ap-side-row', title: row.goal || row.title,
+            onClick: function () { if (run) props.onOpenRun(run.id); else props.onOpenBrief(row.pid, row.chatId); } },
+            h('div', { className: 'ap-side-t' }, row.title),
+            row.goal ? h('div', { className: 'ap-side-g' }, row.goal) : null,
+            h('div', { className: 'ap-side-meta' },
+              run ? h('span', { className: 'ap-pill ' + st.cls }, h('span', { className: 'ap-sdot' }), st.t)
+                  : h('span', { className: 'ap-pill ap-pill-brief' }, '📝 Piszkozat'),
+              run && pr ? h('span', { className: 'ap-side-pr mono' }, pr.done + '/' + pr.enabled) : null,
+              row.ts ? h('span', { className: 'ap-side-ts' }, rel(row.ts)) : null)),
+          h('button', { className: 'ap-side-del', title: 'Projekt törlése', 'aria-label': 'Projekt törlése', onClick: function (e) { e.stopPropagation(); delProject(row); } }, '🗑'));
       })));
   }
 
