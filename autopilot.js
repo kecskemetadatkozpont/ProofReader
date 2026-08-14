@@ -125,6 +125,13 @@
   // per-phase hue for the process-graph view (each stage owns a colour → the top-to-bottom flow reads as a spectrum)
   var AP_HUE = { ideas: 'var(--h-idea)', literature: 'var(--h-lit)', gap: 'var(--h-gap)', sr: 'var(--h-rev)', extract: 'var(--h-ext)', protocol: 'var(--h-proto)', journal: 'var(--h-jrnl)', writing: 'var(--h-write)', submission: 'var(--h-sub)' };
   function hueOf(k) { return AP_HUE[k] || 'var(--accent)'; }
+  // short HU label for a research-gap type slug (from research-ai gap analysis) → shown as a chip on gap cards
+  function gapLabel(s) {
+    if (!s) return 'Rés';
+    var m = { method: 'Módszer-rés', dataset: 'Adat-rés', data: 'Adat-rés', metric: 'Metrika-rés', theory: 'Elméleti rés', theoretical: 'Elméleti rés', application: 'Alkalmazási rés', population: 'Populáció-rés', evaluation: 'Kiértékelési rés', comparison: 'Összevetési rés', temporal: 'Időbeli rés', scale: 'Skála-rés', methodological: 'Módszertani rés', empirical: 'Empirikus rés' };
+    var k = String(s).toLowerCase();
+    return m[k] || (String(s).charAt(0).toUpperCase() + String(s).slice(1).replace(/_/g, ' '));
+  }
   // a 'running' run that no browser tab has driven for >60s reads as 'stalled' (honest: nothing is advancing it) — resume to continue
   function apEffectiveStatus(run) {
     if (run && run.status === 'running') { var u = run.updated_at ? new Date(run.updated_at).getTime() : 0; if (u && (Date.now() - u) > 60000) return 'stalled'; }
@@ -1317,8 +1324,13 @@
       function put(v) { setPhaseArts(function (m) { var n = Object.assign({}, m); n[key] = v; return n; }); }
       put({ loading: true });
       if (key === 'ideas') {
-        sb.from('research_ideas').select('id,question,hypothesis,novelty,source').eq('project_id', pid).neq('status', 'rejected').order('created_at', { ascending: false }).limit(15)
-          .then(function (r) { if (alive.current) put({ items: (r && r.data) || [] }); }, function () { if (alive.current) put({ items: [] }); });
+        sb.from('research_ideas').select('id,question,hypothesis,novelty,source,gap_type,rationale').eq('project_id', pid).neq('status', 'rejected').order('created_at', { ascending: false }).limit(20)
+          .then(function (r) {
+            // surface the generated research GAPS first — they are the developable research directions (source='gap')
+            var items = (r && r.data) || [];
+            items.sort(function (a, b) { return (b.source === 'gap' ? 1 : 0) - (a.source === 'gap' ? 1 : 0); });
+            if (alive.current) put({ items: items });
+          }, function () { if (alive.current) put({ items: [] }); });
       } else if (key === 'literature') {
         Promise.all([
           sb.from('research_sources').select('id', { count: 'exact', head: true }).eq('project_id', pid),
@@ -1384,18 +1396,24 @@
         var developing = {}; [run].concat(branchRuns || []).forEach(function (rr) { var did = rr && rr.config && rr.config.develop_idea_id; if (did) developing[did] = rr; });
         if (!Object.keys(developing).length && ideas[0]) developing[ideas[0].id] = run;   // default: primary develops the most recent
         var selCount = Object.keys(selIdeas).filter(function (id) { return selIdeas[id]; }).length;
+        var gapCount = ideas.filter(function (x) { return x.source === 'gap'; }).length;
         return h('div', { className: 'apg-step apg-step-wide', key: p.key },
           h('div', { className: 'apg-node ' + p.status + (p.enabled ? '' : ' off'), style: { '--hue': hueOf('ideas') } },
             h('div', { className: 'apg-hd static' },
               h('span', { className: 'apg-ic' }, AP_ICON.ideas || '💡'),
-              h('span', { className: 'apg-tx' }, h('span', { className: 'apg-lab' }, p.label + (ideas.length ? ' · ' + ideas.length : '')), h('span', { className: 'apg-sub' }, ideas.length ? 'pipáld ki, melyeket dolgozzon ki párhuzamosan az Autopilot' : sub)),
+              h('span', { className: 'apg-tx' }, h('span', { className: 'apg-lab' }, p.label + (ideas.length ? ' · ' + ideas.length : '')), h('span', { className: 'apg-sub' }, ideas.length ? ((gapCount ? '🧭 ' + gapCount + ' kutatási rés — ' : '') + 'pipáld ki, melyeket dolgozzon ki párhuzamosan') : sub)),
               h('span', { className: 'apg-badge ' + (p.status === 'gate' ? 'gate' : p.status) }, badge))),
           ideas.length ? h('div', { className: 'apg-fan-conn' }) : null,
           ideas.length ? h('div', { className: 'apg-fan' }, ideas.map(function (x) {
-            var dev = !!developing[x.id], sel = !!selIdeas[x.id];
-            return h('div', { className: 'apg-idea' + (dev ? ' active' : '') + (sel ? ' sel' : ''), key: x.id, style: { '--hue': hueOf('ideas') }, title: (x.hypothesis || x.question || '') },
-              h('span', { className: 'apg-idea-h' }, h('span', { className: 'apg-idea-ic' }, '💡'), (x.novelty != null) ? h('span', { className: 'apg-idea-n' }, '★ ' + x.novelty) : null),
-              h('span', { className: 'apg-idea-t' }, x.question || 'Ötlet'),
+            var dev = !!developing[x.id], sel = !!selIdeas[x.id], isGap = x.source === 'gap';
+            var subtitle = isGap ? (x.rationale || x.hypothesis || '') : '';
+            return h('div', { className: 'apg-idea' + (isGap ? ' gap' : '') + (dev ? ' active' : '') + (sel ? ' sel' : ''), key: x.id, style: { '--hue': hueOf(isGap ? 'gap' : 'ideas') }, title: (x.hypothesis || x.rationale || x.question || '') },
+              h('span', { className: 'apg-idea-h' },
+                h('span', { className: 'apg-idea-ic' }, isGap ? '🧭' : '💡'),
+                isGap ? h('span', { className: 'apg-idea-chip' }, gapLabel(x.gap_type)) : null,
+                (x.novelty != null) ? h('span', { className: 'apg-idea-n' }, '★ ' + x.novelty) : null),
+              h('span', { className: 'apg-idea-t' }, x.question || (isGap ? 'Kutatási rés' : 'Ötlet')),
+              subtitle ? h('span', { className: 'apg-idea-sub' }, subtitle) : null,
               dev ? h('span', { className: 'apg-idea-badge' }, '◉ Fejlesztés alatt')
                   : h('label', { className: 'apg-idea-pick' }, h('input', { type: 'checkbox', checked: sel, disabled: switching, onChange: function () { toggleSel(x.id); } }), ' Kidolgozásra jelöl'));
           })) : null,
