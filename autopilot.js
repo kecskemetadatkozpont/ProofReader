@@ -1102,12 +1102,13 @@
       var ip = (run.phases || []).filter(function (x) { return x.key === 'ideas'; })[0];
       if (ip && (ip.status === 'done' || ip.status === 'running' || ip.status === 'gate')) loadPhaseArts('ideas');
     }, [run && run.project_id, run && (run.phases || []).filter(function (x) { return x.key === 'ideas'; }).map(function (x) { return x.status; }).join('')]);
-    // eager-load the research gaps too, so the Research Gap phase fans them out as developable cards (not behind a click)
+    // eager-load the research gaps so the fan shows them as developable cards. Gaps are PROJECT-scoped (research_ideas
+    // source='gap'), so load them whenever they might exist — NOT gated on the current run's gap phase status (a run whose
+    // own gap phase was skipped, e.g. an unscreened first pass, still lives in a project that has gaps from another run).
     useEffect(function () {
       if (!run || !run.project_id) return;
-      var gp = (run.phases || []).filter(function (x) { return x.key === 'gap'; })[0];
-      if (gp && (gp.status === 'done' || gp.status === 'running' || gp.status === 'gate')) loadPhaseArts('gap');
-    }, [run && run.project_id, run && (run.phases || []).filter(function (x) { return x.key === 'gap'; }).map(function (x) { return x.status; }).join('')]);
+      loadPhaseArts('gap');
+    }, [run && run.project_id, run && (run.phases || []).filter(function (x) { return x.key === 'gap'; }).map(function (x) { return x.status; }).join(''), (branchRuns || []).length]);
 
     // ── PARALLEL BRANCHES: each extra chosen idea is a sibling run in the same group, driven ADDITIVELY (the primary
     //    driver above is untouched). Branch runs auto-run (gates:false) so several ideas develop at once.
