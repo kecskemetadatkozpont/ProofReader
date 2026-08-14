@@ -323,8 +323,13 @@
       var byCite = function (ids) { return ids.length ? sb.from('research_sources').select('id').in('id', ids).order('cited_by', { ascending: false, nullsFirst: false }).limit(EXTRACT_MAX_SOURCES).then(function (r) { return ((r && r.data) || []).map(function (x) { return x.id; }); }) : Promise.resolve([]); };
       var projInc = function () { return sb.from('research_sources').select('id').eq('project_id', project.id).eq('screening', 'include').order('cited_by', { ascending: false, nullsFirst: false }).limit(EXTRACT_MAX_SOURCES).then(function (r) { return ((r && r.data) || []).map(function (x) { return x.id; }); }); };
       var resolveSids = sidMarker
-        ? sb.from('research_study_papers').select('source_id,decision,overridden').eq('study_id', sidMarker).then(function (pr) {
-            var inc = {}; ((pr && pr.data) || []).forEach(function (p) { if (p.decision === 'include' || (p.overridden && p.decision !== 'exclude')) inc[p.source_id] = 1; });
+        ? sb.from('research_study_papers').select('source_id,decision,overridden,step').eq('study_id', sidMarker).then(function (pr) {
+            // FINAL funnel output, not the union across steps: a paper is extracted only if it SURVIVED to its deepest
+            // screening step as an include (matches the SR, which reads the full-text/step-3 includes). The union
+            // over-counted papers that were included early but later excluded (e.g. 62 across steps → really ~2 survivors).
+            var deepest = {};
+            ((pr && pr.data) || []).forEach(function (p) { var c = deepest[p.source_id]; if (!c || (p.step || 0) >= (c.step || 0)) deepest[p.source_id] = p; });
+            var inc = {}; Object.keys(deepest).forEach(function (sid) { var p = deepest[sid]; if (p.decision === 'include' || (p.overridden && p.decision !== 'exclude')) inc[sid] = 1; });
             var ids = Object.keys(inc);
             return ids.length ? byCite(ids) : projInc();
           }, function () { return projInc(); })
@@ -346,7 +351,10 @@
               return apStay(run, { stage: 'run', qids: qids, sids: sids, pending: pending, idx: 0, iter: 0 }, [{ phase: 'extract', level: 'sys', message: 'Kivonatolás: ' + qids.length + ' kérdés × ' + sids.length + ' cikk' + (already ? ' (' + already + ' cella már kész a szűréskor)' : '') }]);
             });
           };
-          if (existing.length >= norm.length) return stay(existing.map(function (x) { return x.id; }));
+          // Respect the user's own extraction questions: if the study ALREADY has ANY question (added in the Studies/Literature
+          // extraction UI, or materialized from the launch config), run EXACTLY those — do NOT inject the 4 defaults on top.
+          // Only fall back to the defaults when there is literally no question yet (a phase enabled with nothing configured).
+          if (existing.length) return stay(existing.map(function (x) { return x.id; }));
           var rows = norm.map(function (q, i) { return { project_id: project.id, study_id: sidMarker, text: q.text.slice(0, 500), answer_type: q.answer_type, source_mode: q.source_mode, ord: i, created_by: uid() }; });
           return sb.from('research_extraction_questions').insert(rows).select('id').then(function (qr) {
             if (qr && qr.error) throw new Error('Extract: kérdések (' + qr.error.message + ')');
