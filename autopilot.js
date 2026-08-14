@@ -563,7 +563,8 @@
                 : s === 404 ? 'A beszélgetés nem található vagy nincs hozzáférés — nyiss egy új briefet.'
                 : (s === 400 && /no messages/i.test(d)) ? 'Még nincs mit megválaszolni — küldd el az üzenetet újra (lehet, hogy nem mentődött el).'
                 : s === 403 ? 'Nincs jogosultságod az AI-chathez (research_chat_ideas) — szólj az adminnak.'
-                : (s === 429 || s === 529) ? 'Átmeneti túlterheltség/limit — próbáld újra egy pillanat múlva.'
+                : s === 429 ? (d && d.trim() ? d : 'Elérted a mai AI-kereted (napi kérés-limit) — holnap újratöltődik. Az admin emelheti a napi keretet.')   // per-user daily AI-request cap (migration-48/101), NOT an Anthropic rate limit
+                : s === 529 ? 'Az AI épp túlterhelt — próbáld újra egy pillanat múlva.'
                 : 'Az AI most nem válaszolt (' + s + (d ? ' — ' + d.slice(0, 160) : '') + '). Próbáld újra.';
               if (alive.current) setErr(msg);
             }, function () { if (alive.current) setErr('Az AI most nem válaszolt (' + resp.status + '). Próbáld újra.'); });
