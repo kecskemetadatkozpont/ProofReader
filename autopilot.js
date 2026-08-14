@@ -258,17 +258,28 @@
   // in the full library (research-ai gap_analyze → typed, evidence-grounded gaps as research_ideas source='gap'). They are
   // shown as parallel cards; each can be developed into a protocol. Idempotent: adopt existing gaps on a retry.
   function apGap(run, project) {
+    // persist the generated gaps as a report + complete the phase
+    function finishGaps(gaps) {
+      var md = '# Research Gap-ek\n\nA teljes összegyűjtött irodalom + áttekintés alapján azonosított, kidolgozható kutatási rések.\n\n'
+        + gaps.map(function (g, i) { return (i + 1) + '. **' + (g.question || 'Rés') + '**' + (g.novelty != null ? ' — újdonság: ' + g.novelty : ''); }).join('\n')
+        + '\n\n*A Publify Autopilot Research Gap fázisából.*\n';
+      return saveFile(project.id, 'autopilot/research-gap.md', md, 'ai').then(function () {
+        return apComplete(run, gaps.length + ' kutatási rés generálva', [{ phase: 'gap', level: 'run', message: gaps.length + ' kidolgozható research gap generálva az irodalomból' }]);
+      });
+    }
     return sb.from('research_ideas').select('id').eq('project_id', project.id).eq('source', 'gap').neq('status', 'rejected').limit(1).then(function (gr) {
       if (((gr && gr.data) || []).length) return apComplete(run, 'Meglévő kutatási rések', [{ phase: 'gap', level: 'sys', message: 'Már vannak rések — a gap-generálás kimarad' }]);
+      // primary: typed, evidence-grounded gaps (prefers screened-in literature)
       return callEdge('research-ai', { action: 'gap_analyze', project_id: project.id }).then(function (d) {
         if (d && d.error) throw new Error('Gap: ' + d.error);
         var gaps = (d && d.ideas) || [];
-        if (!gaps.length) return apSkip(run, 'Nem sikerült rést azonosítani a jelenlegi irodalomból — kimarad');
-        var md = '# Research Gap-ek\n\nA teljes összegyűjtött irodalom + áttekintés alapján azonosított, kidolgozható kutatási rések.\n\n'
-          + gaps.map(function (g, i) { return (i + 1) + '. **' + (g.question || 'Rés') + '**' + (g.novelty != null ? ' — újdonság: ' + g.novelty : ''); }).join('\n')
-          + '\n\n*A Publify Autopilot Research Gap fázisából.*\n';
-        return saveFile(project.id, 'autopilot/research-gap.md', md, 'ai').then(function () {
-          return apComplete(run, gaps.length + ' kutatási rés generálva', [{ phase: 'gap', level: 'run', message: gaps.length + ' kidolgozható research gap generálva az irodalomból' }]);
+        if (gaps.length) return finishGaps(gaps);
+        // gap_analyze found nothing (typically: unscreened / heterogeneous library) → fall back to the broader gap generator
+        return callEdge('research-ai', { action: 'gap', project_id: project.id }).then(function (d2) {
+          if (d2 && d2.error) throw new Error('Gap: ' + d2.error);
+          var g2 = (d2 && d2.ideas) || [];
+          if (g2.length) return finishGaps(g2);
+          return apSkip(run, 'Nem sikerült rést azonosítani — előbb szűrd le az irodalmat (legyenek „included" források a Studies-ban), majd futtasd újra a Gap fázist.');
         });
       });
     });

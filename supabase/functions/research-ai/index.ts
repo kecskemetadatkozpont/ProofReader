@@ -86,10 +86,21 @@ Deno.serve(async (req) => {
     // action='gap' (untyped questions) which stays byte-identical. Returns the SAME {ok,count,ideas} shape.
     if (action === 'gap_analyze') {
       const { data: gsrc } = await sb.from('research_sources')
-        .select('id,title,year,venue,abstract,screening').eq('project_id', project_id).order('cited_by', { ascending: false, nullsFirst: false }).limit(60);
+        .select('id,title,year,venue,abstract,screening').eq('project_id', project_id).order('cited_by', { ascending: false, nullsFirst: false }).limit(200);
       const all = gsrc || [];
-      const inc = all.filter((s: any) => s.screening === 'include' || s.screening === 'included');
-      const lib = (inc.length >= 4 ? inc : all);   // prefer the screened-in library; fall back to everything
+      // the Autopilot funnel writes includes to research_study_papers.decision (NOT research_sources.screening) — honor both,
+      // so gap analysis prefers the ACTUALLY screened-in library instead of falling back to the raw, unscreened pile.
+      const incIds = new Set<string>();
+      try {
+        const { data: studies } = await sb.from('research_studies').select('id').eq('project_id', project_id);
+        const sids = (studies || []).map((s: any) => s.id);
+        if (sids.length) {
+          const { data: sp } = await sb.from('research_study_papers').select('source_id,decision,overridden').in('study_id', sids);
+          for (const p of (sp || [])) { if (p.decision === 'include' || (p.overridden && p.decision !== 'exclude')) incIds.add(p.source_id); }
+        }
+      } catch { /* best-effort — screening store optional */ }
+      const inc = all.filter((s: any) => s.screening === 'include' || s.screening === 'included' || incIds.has(s.id));
+      const lib = (inc.length >= 4 ? inc : all).slice(0, 60);   // prefer the screened-in library; fall back to top-cited everything
       const N = lib.length;
       const TYPES = ['evidence', 'knowledge', 'methodological', 'population', 'theoretical', 'practical', 'contradictory'];
       const gaps = await askClaudeGaps(proj, lib, userModel, _lang);
