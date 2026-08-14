@@ -552,7 +552,23 @@
           method: 'POST', headers: { 'Content-Type': 'application/json', 'apikey': CFG.supabaseAnonKey, 'Authorization': 'Bearer ' + token },
           body: JSON.stringify({ chat_id: cid, stream: true, web: true })   // 🌐 web search always on
         }).then(function (resp) {
-          if (!resp.ok || !resp.body || !resp.body.getReader) { setErr('AI-kapcsolat függőben — telepítsd a research-chat Edge függvényt és állítsd be az ANTHROPIC_API_KEY-t.'); endStream(false); return; }
+          if (!resp.ok || !resp.body || !resp.body.getReader) {
+            // Show the REAL reason (this branch only fires on a non-200 BEFORE streaming; a credit/overload error arrives as a
+            // 200 stream and is shown as chat text). The old message always blamed the edge/key, which is usually wrong.
+            resp.text().then(function (t) {
+              var detail = ''; try { detail = (JSON.parse(t) || {}).error || t; } catch (e) { detail = t; }
+              var s = resp.status, d = String(detail || '');
+              var msg = (s === 503 && /ANTHROPIC_API_KEY/i.test(d)) ? 'AI-kapcsolat függőben — az ANTHROPIC_API_KEY nincs beállítva az edge-ben.'
+                : (/credit balance is too low|billing/i.test(d)) ? 'Az Anthropic-egyenleg elfogyott — tölts fel kreditet (console.anthropic.com → Plans & Billing).'
+                : s === 404 ? 'A beszélgetés nem található vagy nincs hozzáférés — nyiss egy új briefet.'
+                : (s === 400 && /no messages/i.test(d)) ? 'Még nincs mit megválaszolni — küldd el az üzenetet újra (lehet, hogy nem mentődött el).'
+                : s === 403 ? 'Nincs jogosultságod az AI-chathez (research_chat_ideas) — szólj az adminnak.'
+                : (s === 429 || s === 529) ? 'Átmeneti túlterheltség/limit — próbáld újra egy pillanat múlva.'
+                : 'Az AI most nem válaszolt (' + s + (d ? ' — ' + d.slice(0, 160) : '') + '). Próbáld újra.';
+              if (alive.current) setErr(msg);
+            }, function () { if (alive.current) setErr('Az AI most nem válaszolt (' + resp.status + '). Próbáld újra.'); });
+            endStream(false); return;
+          }
           var reader = resp.body.getReader(), dec = new TextDecoder(), acc = '';
           setStreaming({ text: '' });
           (function pump() {
@@ -562,7 +578,7 @@
               acc += dec.decode(rr.value, { stream: true }); setStreaming({ text: acc }); pump();
             }, function () { endStream(true); });
           })();
-        }, function () { setErr('AI-kapcsolat függőben — telepítsd a research-chat Edge függvényt.'); endStream(false); });
+        }, function () { setErr('Nem sikerült elérni a szervert — hálózati hiba, próbáld újra.'); endStream(false); });
       }, function () { setErr('Nem sikerült a munkamenet lekérése.'); endStream(false); });
     }
     // 🤖 Multi-agent mode: several parallel agents (Kutató/Reviewer/Szintetizáló) via research-agents (NDJSON events);
