@@ -199,7 +199,8 @@ Deno.serve(async (req) => {
     const ideas = await askClaude(action, proj, sources || [], userModel, _lang);
     if (ideas.length) {
       const rows = ideas.slice(0, 8).map((i: any) => ({
-        project_id, source: 'gap', question: String(i.question || '').slice(0, 600),
+        // action 'ideas' → plain research ideas (source='idea'); action 'gap' → research gaps (source='gap').
+        project_id, source: action === 'ideas' ? 'idea' : 'gap', question: String(i.question || '').slice(0, 600),
         hypothesis: i.hypothesis ? String(i.hypothesis).slice(0, 800) : null,
         rationale: i.rationale ? String(i.rationale).slice(0, 1000) : null,
         novelty: Number.isFinite(i.novelty) ? Math.max(0, Math.min(100, Math.round(i.novelty))) : null,

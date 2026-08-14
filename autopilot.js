@@ -110,12 +110,14 @@
   // Client-driven, tick-based, resumable. Each apStep() does ONE bounded unit of work (usually one edge call),
   // returns a { patch, events } that the driver persists to research_autopilot_runs/_events. State (phase index +
   // per-phase cursor) lives entirely in the run row, so a refresh/re-open resumes exactly where it left off.
+  // Flow: Ideas → (Systematic Review = search+screen → library) → (Literature = review) → Kivonatolás → Research Gap → Protocol.
+  // The Research Gap phase runs AFTER the whole literature+review is in, so gaps are grounded in the full collected library.
   var AP_PHASES = [
-    { key: 'ideas', label: 'Ideas', ic: '💡', sub: 'ötletek + gap' },
+    { key: 'ideas', label: 'Ideas', ic: '💡', sub: 'kutatási ötletek' },
     { key: 'literature', label: 'Systematic Review', ic: '🔬', sub: 'keresés + szűrés → könyvtár' },
-    { key: 'gap', label: 'Research Gap', ic: '🧭', sub: 'gap-ellenőrzés' },
     { key: 'sr', label: 'Literature', ic: '📚', sub: 'irodalmi áttekintés' },
     { key: 'extract', label: 'Kivonatolás', ic: '🔎', sub: 'kérdés-alapú kinyerés' },
+    { key: 'gap', label: 'Research Gap', ic: '🧭', sub: 'rések az irodalomból' },
     { key: 'protocol', label: 'Protocol', ic: '🧪', sub: 'lépések' },
     { key: 'journal', label: 'Journal', ic: '🎯', sub: 'venue-ajánló' },
     { key: 'writing', label: 'Writing', ic: '✍️', sub: 'draft szekciók' },
@@ -187,15 +189,15 @@
 
   // ---- the 7 phase steppers (each returns Promise<{patch, events}>) ----
   function apIdeas(run, project) {
-    // idempotent: the 'gap' edge path does NOT dedup, so a retry would duplicate up to 8 ideas. If the project already
-    // has candidate ideas (from the brief step or a prior tick), adopt them instead of regenerating.
+    // Step 2 = plain research IDEAS from the brief/goal (source='idea'). Research GAPS are generated LATER, in the
+    // Research Gap phase, grounded in the collected literature. Idempotent: adopt existing candidate ideas on a retry.
     return sb.from('research_ideas').select('id', { count: 'exact', head: true }).eq('project_id', project.id).neq('status', 'rejected').then(function (cr) {
       var existing = (cr && cr.count) || 0;
-      if (existing > 0) return apComplete(run, existing + ' meglévő ötlet-jelölt', [{ phase: 'ideas', level: 'sys', message: 'Már vannak ötletek — a gap-generálás kimarad' }]);
-      return callEdge('research-ai', { action: 'gap', project_id: project.id }).then(function (d) {
+      if (existing > 0) return apComplete(run, existing + ' meglévő ötlet-jelölt', [{ phase: 'ideas', level: 'sys', message: 'Már vannak ötletek — az ötlet-generálás kimarad' }]);
+      return callEdge('research-ai', { action: 'ideas', project_id: project.id }).then(function (d) {
         if (d && d.error) throw new Error('Ideas: ' + d.error);
         var n = (d && d.count) || 0;
-        return apComplete(run, n ? (n + ' ötlet-jelölt generálva') : 'Nincs új ötlet', [{ phase: 'ideas', level: 'run', message: 'Gap-elemzés lefutott' }]);
+        return apComplete(run, n ? (n + ' ötlet-jelölt generálva') : 'Nincs új ötlet', [{ phase: 'ideas', level: 'run', message: 'Kutatási ötletek generálva' }]);
       });
     });
   }
@@ -252,24 +254,22 @@
     });
     return Promise.resolve(apComplete(run, 'Irodalom jóváhagyva', []));   // stage 'gated' → resumed after approval
   }
-  // Research-gap CHECK against the screened literature: build the deterministic evidence-gap matrix (research-ai
-  // gap_matrix — cached), then report the EMPTY cells as the unaddressed research gaps + save a markdown report.
+  // Research Gap phase (runs AFTER the whole literature+review is collected): generate DEVELOPABLE research gaps grounded
+  // in the full library (research-ai gap_analyze → typed, evidence-grounded gaps as research_ideas source='gap'). They are
+  // shown as parallel cards; each can be developed into a protocol. Idempotent: adopt existing gaps on a retry.
   function apGap(run, project) {
-    return callEdge('research-ai', { action: 'gap_matrix', project_id: project.id }).then(function (d) {
-      if (d && d.error) throw new Error('Gap: ' + d.error);
-      var m = d && d.matrix;
-      if (!m || !Array.isArray(m.rows) || !Array.isArray(m.cols) || !Array.isArray(m.cells)) {
-        return apSkip(run, (d && d.reason === 'too_few') ? 'Kevés forrás a gap-mátrixhoz (≥3 kell) — kimarad' : 'Nincs gap-mátrix — kimarad');
-      }
-      var gaps = [];
-      m.cells.forEach(function (rrow, r) { (rrow || []).forEach(function (v, c) { if ((v || 0) === 0 && m.rows[r] && m.cols[c]) gaps.push({ row: m.rows[r], col: m.cols[c] }); }); });
-      var md = '# Research Gap ellenőrzés\n\nEvidence-gap mátrix (' + m.rows.length + ' megközelítés × ' + m.cols.length + ' terület, ' + (d.count || 0) + ' forrás alapján). Az **üres cellák** feltáratlan kutatási réseket jeleznek.\n\n';
-      md += '| |' + m.cols.map(function (c) { return ' ' + c + ' |'; }).join('') + '\n';
-      md += '|---|' + m.cols.map(function () { return '---|'; }).join('') + '\n';
-      m.rows.forEach(function (rl, r) { md += '| **' + rl + '** |' + m.cols.map(function (_c, c) { var v = (m.cells[r] && m.cells[r][c]) || 0; return ' ' + (v === 0 ? '— (rés)' : v) + ' |'; }).join('') + '\n'; });
-      md += '\n## Feltárt rések (' + gaps.length + ')\n\n' + (gaps.length ? gaps.slice(0, 40).map(function (g) { return '- **' + g.row + '** × **' + g.col + '** — nincs lefedő forrás'; }).join('\n') : '_Nincs üres cella — a terület jól lefedett._') + '\n\n*A Publify Autopilot Research Gap fázisából.*\n';
-      return saveFile(project.id, 'autopilot/research-gap.md', md, 'ai').then(function () {
-        return apComplete(run, gaps.length + ' kutatási rés azonosítva (' + m.rows.length + '×' + m.cols.length + ' mátrix)', [{ phase: 'gap', level: 'run', message: 'Gap-mátrix kész: ' + m.rows.length + '×' + m.cols.length + ', ' + gaps.length + ' üres cella (rés)' }]);
+    return sb.from('research_ideas').select('id').eq('project_id', project.id).eq('source', 'gap').neq('status', 'rejected').limit(1).then(function (gr) {
+      if (((gr && gr.data) || []).length) return apComplete(run, 'Meglévő kutatási rések', [{ phase: 'gap', level: 'sys', message: 'Már vannak rések — a gap-generálás kimarad' }]);
+      return callEdge('research-ai', { action: 'gap_analyze', project_id: project.id }).then(function (d) {
+        if (d && d.error) throw new Error('Gap: ' + d.error);
+        var gaps = (d && d.ideas) || [];
+        if (!gaps.length) return apSkip(run, 'Nem sikerült rést azonosítani a jelenlegi irodalomból — kimarad');
+        var md = '# Research Gap-ek\n\nA teljes összegyűjtött irodalom + áttekintés alapján azonosított, kidolgozható kutatási rések.\n\n'
+          + gaps.map(function (g, i) { return (i + 1) + '. **' + (g.question || 'Rés') + '**' + (g.novelty != null ? ' — újdonság: ' + g.novelty : ''); }).join('\n')
+          + '\n\n*A Publify Autopilot Research Gap fázisából.*\n';
+        return saveFile(project.id, 'autopilot/research-gap.md', md, 'ai').then(function () {
+          return apComplete(run, gaps.length + ' kutatási rés generálva', [{ phase: 'gap', level: 'run', message: gaps.length + ' kidolgozható research gap generálva az irodalomból' }]);
+        });
       });
     });
   }
@@ -752,9 +752,10 @@
 
   // ======================================================================= LAUNCH (clarify)
   // 4th element = WIP (under development): shown but not runnable — the Autopilot currently ends at protocol generation.
+  // MUST stay index-aligned with AP_PHASES (cfg.phases[i] toggles AP_PHASES[i]).
   var PHASES = [
-    ['💡', 'Ideas', 'ötletek + PICO'], ['🔬', 'Systematic Review', 'keresés + szűrés'], ['🧭', 'Research Gap', 'gap-ellenőrzés'], ['📚', 'Literature', 'irodalmi áttekintés'],
-    ['🔎', 'Kivonatolás', 'kérdés-alapú kinyerés'],
+    ['💡', 'Ideas', 'kutatási ötletek'], ['🔬', 'Systematic Review', 'keresés + szűrés'], ['📚', 'Literature', 'irodalmi áttekintés'],
+    ['🔎', 'Kivonatolás', 'kérdés-alapú kinyerés'], ['🧭', 'Research Gap', 'rések az irodalomból'],
     ['🧪', 'Protocol', 'lépések generálása'], ['🎯', 'Journal', 'venue-ajánló', true], ['✍️', 'Writing', 'draft szekciók', true], ['📤', 'Submission', 'csomagolás', true]
   ];
   var TIERS = ['Top-tier (Q1)', 'Open access', 'Gyors döntés'];
@@ -1000,6 +1001,8 @@
     var swS = useState(false), switching = swS[0], setSwitching = swS[1];   // guard while re-targeting the pipeline to a chosen idea
     var brS = useState([]), branchRuns = brS[0], setBranchRuns = brS[1];    // parallel per-idea branch runs (siblings of the primary run in the same group)
     var selS = useState({}), selIdeas = selS[0], setSelIdeas = selS[1];     // idea_id → true : ideas ticked for parallel development
+    var sgS = useState({}), selGaps = sgS[0], setSelGaps = sgS[1];          // gap_id → true : research gaps ticked to develop into a protocol
+    var gbS = useState(false), gapBusy = gbS[0], setGapBusy = gbS[1];       // protocol-from-gaps generation in flight
     var ltS = useState({}), litProg = ltS[0], setLitProg = ltS[1];          // run_id → { study_id, steps:[{step,kind,status,cursor,total,counts}], ts } : LIVE literature screening numbers
     var ptaS = useState({}), protoArts = ptaS[0], setProtoArts = ptaS[1];   // run_id → [protocol steps] : inline task cards shown under the Protocol card in the graph
     var poS = useState({}), protoOpen = poS[0], setProtoOpen = poS[1];       // run_id → false to collapse the inline protocol task cards (default = expanded)
@@ -1088,6 +1091,12 @@
       var ip = (run.phases || []).filter(function (x) { return x.key === 'ideas'; })[0];
       if (ip && (ip.status === 'done' || ip.status === 'running' || ip.status === 'gate')) loadPhaseArts('ideas');
     }, [run && run.project_id, run && (run.phases || []).filter(function (x) { return x.key === 'ideas'; }).map(function (x) { return x.status; }).join('')]);
+    // eager-load the research gaps too, so the Research Gap phase fans them out as developable cards (not behind a click)
+    useEffect(function () {
+      if (!run || !run.project_id) return;
+      var gp = (run.phases || []).filter(function (x) { return x.key === 'gap'; })[0];
+      if (gp && (gp.status === 'done' || gp.status === 'running' || gp.status === 'gate')) loadPhaseArts('gap');
+    }, [run && run.project_id, run && (run.phases || []).filter(function (x) { return x.key === 'gap'; }).map(function (x) { return x.status; }).join('')]);
 
     // ── PARALLEL BRANCHES: each extra chosen idea is a sibling run in the same group, driven ADDITIVELY (the primary
     //    driver above is untouched). Branch runs auto-run (gates:false) so several ideas develop at once.
@@ -1256,7 +1265,7 @@
     }
     function approve() { setStatus({ status: 'running', gate: null }); }
     // Re-target the pipeline to a chosen idea: the downstream phases (literature → …) restart for THAT idea.
-    var DOWN = ['literature', 'gap', 'sr', 'extract', 'protocol', 'journal', 'writing', 'submission'];
+    var DOWN = ['literature', 'sr', 'extract', 'gap', 'protocol', 'journal', 'writing', 'submission'];
     function switchIdea(ideaId) {
       if (switching || !ideaId || !run) return;
       setSwitching(true);
@@ -1275,6 +1284,19 @@
       }, function () { setSwitching(false); if (alive.current) setRun(prev); toast('Hálózati hiba — próbáld újra.', false); });
     }
     function toggleSel(id) { setSelIdeas(function (m) { var n = Object.assign({}, m); if (n[id]) delete n[id]; else n[id] = true; return n; }); }
+    function toggleGap(id) { setSelGaps(function (m) { var n = Object.assign({}, m); if (n[id]) delete n[id]; else n[id] = true; return n; }); }
+    // develop the ticked research gaps: generate ONE protocol scoped to them (research-protocol accepts multiple gap sources).
+    function startGapProtocols() {
+      var ids = Object.keys(selGaps).filter(function (id) { return selGaps[id]; });
+      if (!ids.length || gapBusy) return;
+      setGapBusy(true);
+      var sources = ids.map(function (id) { return { kind: 'gap', id: id }; });
+      callEdge('research-protocol', { action: 'generate', project_id: run.project_id, sources: sources, goal: (run.config && run.config.goal) || '' }).then(function (d) {
+        setGapBusy(false); setSelGaps({});
+        if (d && d.error) { toast('Protokoll hiba: ' + d.error, false); return; }
+        toast('🧪 Protokoll generálva ' + ids.length + ' résre' + ((d && d.steps) ? ' (' + d.steps + ' lépés)' : '') + '.', true);
+      }, function () { setGapBusy(false); toast('Protokoll generálás nem sikerült.', false); });
+    }
     // ADD the ticked ideas as PARALLEL branch runs (non-destructive): the primary keeps developing its idea, and each
     // ticked idea spawns its own sibling run (gates off) that auto-runs its downstream (literature → review → …).
     function startBranches() {
@@ -1324,7 +1346,12 @@
       function put(v) { setPhaseArts(function (m) { var n = Object.assign({}, m); n[key] = v; return n; }); }
       put({ loading: true });
       if (key === 'ideas') {
-        sb.from('research_ideas').select('id,question,hypothesis,novelty,source').eq('project_id', pid).neq('status', 'rejected').order('created_at', { ascending: false }).limit(15)
+        // step 2 = plain research ideas only; the research GAPS (source='gap') belong to the Research Gap phase's own fan
+        sb.from('research_ideas').select('id,question,hypothesis,novelty,source').eq('project_id', pid).neq('status', 'rejected').neq('source', 'gap').order('created_at', { ascending: false }).limit(15)
+          .then(function (r) { if (alive.current) put({ items: (r && r.data) || [] }); }, function () { if (alive.current) put({ items: [] }); });
+      } else if (key === 'gap') {
+        // developable research-gap cards (grounded in the collected library)
+        sb.from('research_ideas').select('id,question,hypothesis,novelty,source,gap_type,rationale').eq('project_id', pid).eq('source', 'gap').neq('status', 'rejected').order('created_at', { ascending: false }).limit(20)
           .then(function (r) { if (alive.current) put({ items: (r && r.data) || [] }); }, function () { if (alive.current) put({ items: [] }); });
       } else if (key === 'literature') {
         Promise.all([
@@ -1408,6 +1435,32 @@
           })) : null,
           (ia && ia.loading) ? h('div', { className: 'ap-pc-dempty' }, h('span', { className: 'spin' })) : null,
           selCount ? h('div', { className: 'apg-develop' }, h('button', { className: 'btn pri sm', disabled: switching, onClick: startBranches }, switching ? '⏳ Indítás…' : ('▶ Kidolgozás — ' + selCount + ' szál párhuzamosan'))) : null,
+          conn);
+      }
+      // RESEARCH GAP phase = parallel developable gap cards (grounded in the collected library); tick some → generate a protocol.
+      if (p.key === 'gap') {
+        var ga = phaseArts.gap, gaps = (ga && !ga.loading && ga.items) || [];
+        var gselCount = Object.keys(selGaps).filter(function (id) { return selGaps[id]; }).length;
+        return h('div', { className: 'apg-step apg-step-wide', key: p.key },
+          h('div', { className: 'apg-node ' + p.status + (p.enabled ? '' : ' off'), style: { '--hue': hueOf('gap') } },
+            h('div', { className: 'apg-hd static' },
+              h('span', { className: 'apg-ic' }, AP_ICON.gap || '🧭'),
+              h('span', { className: 'apg-tx' }, h('span', { className: 'apg-lab' }, p.label + (gaps.length ? ' · ' + gaps.length : '')), h('span', { className: 'apg-sub' }, gaps.length ? 'a felkutatott irodalomból — pipáld ki, melyekre generáljon protokollt' : sub)),
+              h('span', { className: 'apg-badge ' + (p.status === 'gate' ? 'gate' : p.status) }, badge))),
+          gaps.length ? h('div', { className: 'apg-fan-conn' }) : null,
+          gaps.length ? h('div', { className: 'apg-fan' }, gaps.map(function (x) {
+            var sel = !!selGaps[x.id], subtitle = x.rationale || x.hypothesis || '';
+            return h('div', { className: 'apg-idea gap' + (sel ? ' sel' : ''), key: x.id, style: { '--hue': hueOf('gap') }, title: (x.hypothesis || x.rationale || x.question || '') },
+              h('span', { className: 'apg-idea-h' },
+                h('span', { className: 'apg-idea-ic' }, '🧭'),
+                h('span', { className: 'apg-idea-chip' }, gapLabel(x.gap_type)),
+                (x.novelty != null) ? h('span', { className: 'apg-idea-n' }, '★ ' + x.novelty) : null),
+              h('span', { className: 'apg-idea-t' }, x.question || 'Kutatási rés'),
+              subtitle ? h('span', { className: 'apg-idea-sub' }, subtitle) : null,
+              h('label', { className: 'apg-idea-pick' }, h('input', { type: 'checkbox', checked: sel, disabled: gapBusy, onChange: function () { toggleGap(x.id); } }), ' Kidolgozásra jelöl'));
+          })) : null,
+          (ga && ga.loading) ? h('div', { className: 'ap-pc-dempty' }, h('span', { className: 'spin' })) : null,
+          gselCount ? h('div', { className: 'apg-develop' }, h('button', { className: 'btn pri sm', disabled: gapBusy, onClick: startGapProtocols }, gapBusy ? '⏳ Generálás…' : ('🧪 Protokoll — ' + gselCount + ' résre'))) : null,
           conn);
       }
       return h('div', { className: 'apg-step', key: p.key },
