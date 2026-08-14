@@ -1296,17 +1296,37 @@
     }
     function toggleSel(id) { setSelIdeas(function (m) { var n = Object.assign({}, m); if (n[id]) delete n[id]; else n[id] = true; return n; }); }
     function toggleGap(id) { setSelGaps(function (m) { var n = Object.assign({}, m); if (n[id]) delete n[id]; else n[id] = true; return n; }); }
-    // develop the ticked research gaps: generate ONE protocol scoped to them (research-protocol accepts multiple gap sources).
-    function startGapProtocols() {
+    // BRANCH AGAIN at the Research Gap phase: each ticked gap spawns its OWN parallel sibling run that generates a protocol
+    // FOR THAT GAP. The runs start at the PROTOCOL phase (the shared literature/review is already collected) → each gap
+    // develops into its own protocol, shown as a parallel column next to the idea branches.
+    function startGapBranches() {
       var ids = Object.keys(selGaps).filter(function (id) { return selGaps[id]; });
-      if (!ids.length || gapBusy) return;
+      if (!ids.length || gapBusy || !run) return;
       setGapBusy(true);
-      var sources = ids.map(function (id) { return { kind: 'gap', id: id }; });
-      callEdge('research-protocol', { action: 'generate', project_id: run.project_id, sources: sources, goal: (run.config && run.config.goal) || '' }).then(function (d) {
-        setGapBusy(false); setSelGaps({});
-        if (d && d.error) { toast('Protokoll hiba: ' + d.error, false); return; }
-        toast('🧪 Protokoll generálva ' + ids.length + ' résre' + ((d && d.steps) ? ' (' + d.steps + ' lépés)' : '') + '.', true);
-      }, function () { setGapBusy(false); toast('Protokoll generálás nem sikerült.', false); });
+      var grp = groupOf(run), prev = run;
+      function spawn() {
+        var protoIdx = -1; (prev.phases || []).forEach(function (p, k) { if (p.key === 'protocol' && protoIdx < 0) protoIdx = k; });
+        // everything up to (and incl.) the gap phase is shared/done; the protocol phase is the branch's real work
+        var mkGapPhases = function () {
+          return (prev.phases || []).map(function (p, k) {
+            if (AP_WIP[p.key]) return Object.assign({}, p, { status: 'wip', result: 'fejlesztés alatt', cursor: {} });
+            if (protoIdx >= 0 && k < protoIdx) return Object.assign({}, p, { status: 'done', cursor: p.cursor || {}, result: p.result || 'kész' });
+            return p.enabled ? Object.assign({}, p, { status: 'wait', cursor: null, result: null }) : Object.assign({}, p, { status: 'skipped' });
+          });
+        };
+        var inserts = ids.map(function (gapId) { return { project_id: prev.project_id, owner_id: uid(), status: 'running', started_at: nowIso(), phase_index: protoIdx >= 0 ? protoIdx : 0, phases: mkGapPhases(), config: Object.assign({}, prev.config || {}, { develop_idea_id: gapId, group_id: grp, gates: false }) }; });
+        sb.from('research_autopilot_runs').insert(inserts).select('*').then(function (ir) {
+          setGapBusy(false); setSelGaps({});
+          var created = (ir && ir.data) || []; setBranchRuns(function (l) { return (l || []).concat(created); }); created.forEach(ensureBranchDrive);
+          toast('▶ ' + ids.length + ' kutatási rés párhuzamos kidolgozása (protokoll) elindult.', true);
+        }, function () { setGapBusy(false); toast('Nem sikerült elindítani a szálakat.', false); });
+      }
+      // stamp the primary with a stable group so the branches render as sibling columns
+      if (!(run.config && run.config.group_id)) {
+        var cfgP = Object.assign({}, run.config || {}, { group_id: grp });
+        setRun(Object.assign({}, run, { config: cfgP }));
+        sb.from('research_autopilot_runs').update({ config: cfgP }).eq('id', run.id).then(spawn, spawn);
+      } else spawn();
     }
     // ADD the ticked ideas as PARALLEL branch runs (non-destructive): the primary keeps developing its idea, and each
     // ticked idea spawns its own sibling run (gates off) that auto-runs its downstream (literature → review → …).
@@ -1446,32 +1466,6 @@
           })) : null,
           (ia && ia.loading) ? h('div', { className: 'ap-pc-dempty' }, h('span', { className: 'spin' })) : null,
           selCount ? h('div', { className: 'apg-develop' }, h('button', { className: 'btn pri sm', disabled: switching, onClick: startBranches }, switching ? '⏳ Indítás…' : ('▶ Kidolgozás — ' + selCount + ' szál párhuzamosan'))) : null,
-          conn);
-      }
-      // RESEARCH GAP phase = parallel developable gap cards (grounded in the collected library); tick some → generate a protocol.
-      if (p.key === 'gap') {
-        var ga = phaseArts.gap, gaps = (ga && !ga.loading && ga.items) || [];
-        var gselCount = Object.keys(selGaps).filter(function (id) { return selGaps[id]; }).length;
-        return h('div', { className: 'apg-step apg-step-wide', key: p.key },
-          h('div', { className: 'apg-node ' + p.status + (p.enabled ? '' : ' off'), style: { '--hue': hueOf('gap') } },
-            h('div', { className: 'apg-hd static' },
-              h('span', { className: 'apg-ic' }, AP_ICON.gap || '🧭'),
-              h('span', { className: 'apg-tx' }, h('span', { className: 'apg-lab' }, p.label + (gaps.length ? ' · ' + gaps.length : '')), h('span', { className: 'apg-sub' }, gaps.length ? 'a felkutatott irodalomból — pipáld ki, melyekre generáljon protokollt' : sub)),
-              h('span', { className: 'apg-badge ' + (p.status === 'gate' ? 'gate' : p.status) }, badge))),
-          gaps.length ? h('div', { className: 'apg-fan-conn' }) : null,
-          gaps.length ? h('div', { className: 'apg-fan' }, gaps.map(function (x) {
-            var sel = !!selGaps[x.id], subtitle = x.rationale || x.hypothesis || '';
-            return h('div', { className: 'apg-idea gap' + (sel ? ' sel' : ''), key: x.id, style: { '--hue': hueOf('gap') }, title: (x.hypothesis || x.rationale || x.question || '') },
-              h('span', { className: 'apg-idea-h' },
-                h('span', { className: 'apg-idea-ic' }, '🧭'),
-                h('span', { className: 'apg-idea-chip' }, gapLabel(x.gap_type)),
-                (x.novelty != null) ? h('span', { className: 'apg-idea-n' }, '★ ' + x.novelty) : null),
-              h('span', { className: 'apg-idea-t' }, x.question || 'Kutatási rés'),
-              subtitle ? h('span', { className: 'apg-idea-sub' }, subtitle) : null,
-              h('label', { className: 'apg-idea-pick' }, h('input', { type: 'checkbox', checked: sel, disabled: gapBusy, onChange: function () { toggleGap(x.id); } }), ' Kidolgozásra jelöl'));
-          })) : null,
-          (ga && ga.loading) ? h('div', { className: 'ap-pc-dempty' }, h('span', { className: 'spin' })) : null,
-          gselCount ? h('div', { className: 'apg-develop' }, h('button', { className: 'btn pri sm', disabled: gapBusy, onClick: startGapProtocols }, gapBusy ? '⏳ Generálás…' : ('🧪 Protokoll — ' + gselCount + ' résre'))) : null,
           conn);
       }
       return h('div', { className: 'apg-step', key: p.key },
@@ -1698,14 +1692,16 @@
     function branchColumn(prun) {
       var isPrimary = prun.id === run.id;
       var ideas0 = (phaseArts.ideas && phaseArts.ideas.items) || [];
+      var pool = ideas0.concat((phaseArts.gap && phaseArts.gap.items) || []);   // a branch may develop an IDEA or a research GAP
       var ideaId = (prun.config && prun.config.develop_idea_id) || (isPrimary && ideas0[0] ? ideas0[0].id : null);
-      var idea = ideas0.filter(function (x) { return x.id === ideaId; })[0];
+      var idea = pool.filter(function (x) { return x.id === ideaId; })[0];
+      var isGapCol = !!(idea && idea.source === 'gap');
       var down = (prun.phases || []).filter(function (p) { return DOWN.indexOf(p.key) >= 0 && (p.enabled || AP_WIP[p.key]); });   // WIP phases stay visible (as „kidolgozás alatt")
       var failed = prun.status === 'failed';
       return h('div', { className: 'apg-col' + (isPrimary ? ' primary' : '') + (failed ? ' failed' : ''), key: prun.id },
         h('div', { className: 'apg-col-h' },
-          h('span', { className: 'apg-col-ic' }, failed ? '✕' : '💡'),
-          h('span', { className: 'apg-col-t', title: (idea && idea.question) || '' }, (idea && idea.question) || (isPrimary ? 'Fő szál' : 'Ötlet')),
+          h('span', { className: 'apg-col-ic' }, failed ? '✕' : (isGapCol ? '🧭' : '💡')),
+          h('span', { className: 'apg-col-t', title: (idea && idea.question) || '' }, (idea && idea.question) || (isPrimary ? 'Fő szál' : (isGapCol ? 'Kutatási rés' : 'Ötlet'))),
           isPrimary ? h('span', { className: 'apg-col-tag' }, 'fő') : null,
           failed ? h('button', { className: 'apg-col-retry', title: (prun.error ? ('Hiba: ' + prun.error + ' — ') : '') + 'A szál folytatása onnan, ahol elakadt', onClick: function () { isPrimary ? resume() : resumeBranch(prun.id); } }, '↻ Újra') : null),
         h('div', { className: 'apg-fan-conn' }),
@@ -1715,12 +1711,41 @@
       var cols = [run].concat((branchRuns || []).filter(function (r) { return r && r.config && r.config.develop_idea_id; }));   // primary always + each branch
       return h('div', { className: 'apg-branches' + (cols.length > 1 ? ' multi' : '') }, cols.map(branchColumn));
     }
+    // Research Gap fan: once the pipeline has generated the research gaps, show them side-by-side (like the ideas fan) →
+    // tick some → each spawns a parallel gap→protocol branch (startGapBranches). Rendered in the flow after the branch columns.
+    function gapFanNode() {
+      var ga = phaseArts.gap, gaps = (ga && !ga.loading && ga.items) || [];
+      if (!gaps.length && !(ga && ga.loading)) return null;
+      var gselCount = Object.keys(selGaps).filter(function (id) { return selGaps[id]; }).length;
+      var devGap = {}; (branchRuns || []).forEach(function (rr) { var did = rr && rr.config && rr.config.develop_idea_id; if (did) devGap[did] = rr; });
+      return h('div', { className: 'apg-step apg-step-wide', key: 'gapfan' },
+        h('div', { className: 'apg-fan-conn' }),
+        h('div', { className: 'apg-node done', style: { '--hue': hueOf('gap') } },
+          h('div', { className: 'apg-hd static' },
+            h('span', { className: 'apg-ic' }, '🧭'),
+            h('span', { className: 'apg-tx' }, h('span', { className: 'apg-lab' }, 'Research Gap-ek' + (gaps.length ? ' · ' + gaps.length : '')), h('span', { className: 'apg-sub' }, 'a felkutatott irodalomból — pipáld ki, melyeket dolgozzon ki (protokoll) párhuzamosan')))),
+        gaps.length ? h('div', { className: 'apg-fan-conn' }) : null,
+        gaps.length ? h('div', { className: 'apg-fan' }, gaps.map(function (x) {
+          var sel = !!selGaps[x.id], dev = !!devGap[x.id], subtitle = x.rationale || x.hypothesis || '';
+          return h('div', { className: 'apg-idea gap' + (dev ? ' active' : '') + (sel ? ' sel' : ''), key: x.id, style: { '--hue': hueOf('gap') }, title: (x.hypothesis || x.rationale || x.question || '') },
+            h('span', { className: 'apg-idea-h' },
+              h('span', { className: 'apg-idea-ic' }, '🧭'),
+              h('span', { className: 'apg-idea-chip' }, gapLabel(x.gap_type)),
+              (x.novelty != null) ? h('span', { className: 'apg-idea-n' }, '★ ' + x.novelty) : null),
+            h('span', { className: 'apg-idea-t' }, x.question || 'Kutatási rés'),
+            subtitle ? h('span', { className: 'apg-idea-sub' }, subtitle) : null,
+            dev ? h('span', { className: 'apg-idea-badge' }, '◉ Protokoll készül')
+                : h('label', { className: 'apg-idea-pick' }, h('input', { type: 'checkbox', checked: sel, disabled: gapBusy, onChange: function () { toggleGap(x.id); } }), ' Kidolgozásra jelöl'));
+        })) : null,
+        (ga && ga.loading) ? h('div', { className: 'ap-pc-dempty' }, h('span', { className: 'spin' })) : null,
+        gselCount ? h('div', { className: 'apg-develop' }, h('button', { className: 'btn pri sm', disabled: gapBusy, onClick: startGapBranches }, gapBusy ? '⏳ Indítás…' : ('▶ Kidolgozás — ' + gselCount + ' rés párhuzamosan'))) : null);
+    }
     // which thread (idea) an activity event belongs to → shown as a chip in the feed when parallel threads run
     function threadLabel(runId) {
       var rr = ([run].concat(branchRuns || [])).filter(function (x) { return x && x.id === runId; })[0];
       if (!rr) return null;
       var did = rr.config && rr.config.develop_idea_id;
-      var idea = ((phaseArts.ideas && phaseArts.ideas.items) || []).filter(function (x) { return x.id === did; })[0];
+      var idea = ((phaseArts.ideas && phaseArts.ideas.items) || []).concat((phaseArts.gap && phaseArts.gap.items) || []).filter(function (x) { return x.id === did; })[0];
       return (idea && idea.question) ? idea.question : (rr.id === run.id ? 'Fő szál' : 'Ág');
     }
     function focusPanel() {
@@ -1754,7 +1779,8 @@
       h('div', { className: 'ap-dgrid' },
         h('div', { className: 'apg-flow' }, briefNode(),
           phaseNode((phases.filter(function (p) { return p.key === 'ideas'; })[0]) || phases[0], 0, false),   // ideas fan (multi-select)
-          branchesRow()),   // parallel downstream columns — one per developing idea (primary + branches)
+          branchesRow(),   // parallel downstream columns — one per developing idea (primary + branches)
+          gapFanNode()),   // research-gap fan → each ticked gap spawns a parallel gap→protocol branch (above)
         h('div', { className: 'ap-dside' },
           focusPanel(),
           h('div', { className: 'ap-card ap-feed' }, h('h3', null, 'Activity', ((branchRuns || []).length ? h('span', { className: 'ap-feed-live' }, '● ' + (1 + (branchRuns || []).length) + ' szál') : null)),
