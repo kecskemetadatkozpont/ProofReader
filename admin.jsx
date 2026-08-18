@@ -626,6 +626,89 @@
     );
   }
 
+  // ---------- 💰 AI cost / token report (migration-113) ----------
+  // Reads the is_admin()-gated aggregate RPCs (ai_cost_summary / _by_user / _by_project). Graceful when the
+  // migration isn't applied yet (RPC errors → "apply migration-113" notice). Real-time: every AI edge logs each call.
+  function AiCostReport() {
+    var rgS = useState('30d'), range = rgS[0], setRange = rgS[1];
+    var suS = useState(undefined), summary = suS[0], setSummary = suS[1];   // undefined=loading, null=error/no-migration, {}=ok
+    var buS = useState([]), byUser = buS[0], setByUser = buS[1];
+    var bpS = useState([]), byProj = bpS[0], setByProj = bpS[1];
+    var erS = useState(''), err = erS[0], setErr = erS[1];
+    var alive = React.useRef(true);
+    useEffect(function () { return function () { alive.current = false; }; }, []);
+
+    function bounds(r) {
+      var now = Date.now(), to = new Date(now).toISOString(), from;
+      if (r === 'today') { var d = new Date(); d.setUTCHours(0, 0, 0, 0); from = d.toISOString(); }
+      else if (r === '7d') from = new Date(now - 7 * 86400000).toISOString();
+      else if (r === '30d') from = new Date(now - 30 * 86400000).toISOString();
+      else from = '2020-01-01T00:00:00.000Z';
+      return { from: from, to: to };
+    }
+    function load() {
+      var b = bounds(range); setSummary(undefined); setErr('');
+      Promise.all([
+        sb.rpc('ai_cost_summary', { p_from: b.from, p_to: b.to }),
+        sb.rpc('ai_cost_by_user', { p_from: b.from, p_to: b.to }),
+        sb.rpc('ai_cost_by_project', { p_from: b.from, p_to: b.to }),
+      ]).then(function (res) {
+        if (!alive.current) return;
+        var e = (res[0] && res[0].error) || (res[1] && res[1].error) || (res[2] && res[2].error);
+        if (e) { setSummary(null); setErr((e && e.message) || String(e)); return; }
+        setSummary((res[0] && res[0].data) || {});
+        setByUser((res[1] && res[1].data) || []);
+        setByProj((res[2] && res[2].data) || []);
+      }, function (e) { if (alive.current) { setSummary(null); setErr(String(e)); } });
+    }
+    useEffect(function () { load(); }, [range]);
+
+    function money(v) { v = Number(v || 0); return '$' + (v >= 1 ? v.toFixed(2) : v.toFixed(4)); }
+    function num(v) { return Number(v || 0).toLocaleString('hu-HU'); }
+    function tok(v) { v = Number(v || 0); return v >= 1e6 ? (v / 1e6).toFixed(2) + 'M' : v >= 1e3 ? (v / 1e3).toFixed(1) + 'k' : String(v); }
+    function tile(label, value, accent) {
+      return h('div', { key: label, className: 'cost-tile' + (accent ? ' accent' : '') },
+        h('div', { className: 'cost-tile-l' }, label), h('div', { className: 'cost-tile-v' }, value));
+    }
+    function table(rows, kind) {
+      if (!rows || !rows.length) return h('div', { style: { color: 'var(--faint,#8a92a0)', fontSize: 12.5, padding: '6px 0' } }, 'Nincs adat ebben az időszakban.');
+      return h('div', { style: { overflowX: 'auto' } }, h('table', { className: 'cost-tbl' },
+        h('thead', null, h('tr', null,
+          h('th', null, kind === 'user' ? 'Felhasználó' : 'Projekt'),
+          h('th', { className: 'num' }, 'Hívások'), h('th', { className: 'num' }, 'Input'), h('th', { className: 'num' }, 'Output'), h('th', { className: 'num' }, 'Költség'))),
+        h('tbody', null, rows.slice(0, 50).map(function (r, i) {
+          var label = kind === 'user' ? (r.name || r.email || '(ismeretlen)') : (r.title || '(projekt nélkül)');
+          var sub = kind === 'user' ? r.email : r.owner_email;
+          return h('tr', { key: (kind === 'user' ? r.user_id : r.project_id) || ('x' + i) },
+            h('td', null, h('div', null, label), (sub && sub !== label) ? h('div', { style: { fontSize: 11, color: 'var(--faint,#8a92a0)' } }, sub) : null),
+            h('td', { className: 'num' }, num(r.calls)), h('td', { className: 'num' }, tok(r.input_tokens)), h('td', { className: 'num' }, tok(r.output_tokens)),
+            h('td', { className: 'num', style: { fontWeight: 700 } }, money(r.cost_usd)));
+        }))));
+    }
+
+    var total = (summary && summary.total) || {}, byFn = (summary && summary.by_fn) || [];
+    var RANGES = [['today', 'Ma'], ['7d', '7 nap'], ['30d', '30 nap'], ['all', 'Összes']];
+    return h(React.Fragment, null,
+      h('div', { className: 'sec-h' }, h('h2', null, '💰 AI költség / token'),
+        (summary && summary.total) ? h('span', { className: 'count' }, num(total.calls) + ' hívás · ' + money(total.cost)) : null,
+        h('div', { style: { marginLeft: 'auto', display: 'flex', gap: 6, flexWrap: 'wrap' } },
+          RANGES.map(function (r) { return h('button', { key: r[0], className: 'btn' + (range === r[0] ? ' pri' : ''), style: { padding: '4px 10px', fontSize: 12 }, onClick: function () { setRange(r[0]); } }, r[1]); }),
+          h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12 }, onClick: load }, '↻'))),
+      h('div', { className: 'panel', style: { padding: 14 } },
+        summary === undefined ? h('div', { style: { color: 'var(--muted)' } }, 'Betöltés…')
+          : summary === null ? h('div', { style: { color: 'var(--warn,#b45309)', fontSize: 13, lineHeight: 1.5 } },
+            '⚠️ A költség-riport még nem elérhető. Alkalmazd a ', h('code', null, 'backend/migration-113-ai-cost-tracking.sql'), '-t a Supabase SQL editorban, majd frissíts.',
+            err ? h('div', { style: { fontSize: 11, color: 'var(--faint,#8a92a0)', marginTop: 4 } }, err) : null)
+            : h('div', null,
+              h('div', { style: { display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 16 } },
+                tile('Összes költség', money(total.cost), true), tile('AI-hívások', num(total.calls)), tile('Input tokenek', tok(total.input)), tile('Output tokenek', tok(total.output))),
+              byFn.length ? h('div', { style: { marginBottom: 16 } },
+                h('div', { className: 'cost-mini-h' }, 'Funkciónként'),
+                h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 8 } }, byFn.map(function (f) { return h('span', { key: f.fn, className: 'cost-chip' }, f.fn + ' · ' + money(f.cost) + ' (' + num(f.calls) + ')'); }))) : null,
+              h('div', { className: 'cost-mini-h' }, 'Felhasználónként (top költség)'), table(byUser, 'user'),
+              h('div', { className: 'cost-mini-h', style: { marginTop: 16 } }, 'Projektenként (top költség)'), table(byProj, 'project'))));
+  }
+
   function App() {
     var ph = useState('loading'), phase = ph[0], setPhase = ph[1];
     var meS = useState(null), me = meS[0], setMe = meS[1];
@@ -878,6 +961,7 @@
         ),
 
         h(GlobalTaskBoard, { profiles: profiles }),
+        h(AiCostReport, null),
 
         h(ElicitMcpPanel, null),
 

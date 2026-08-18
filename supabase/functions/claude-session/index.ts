@@ -5,6 +5,7 @@
 // Deploy:  supabase functions deploy claude-session --no-verify-jwt
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { assertEntitled, resolveModel } from '../_shared/entitlement.ts';
+import { logAiCost, makeUsageAccumulator } from '../_shared/aicost.ts';
 
 const ANTHROPIC_KEY = Deno.env.get('ANTHROPIC_API_KEY');
 const MODEL = Deno.env.get('RESEARCH_AI_MODEL') || 'claude-sonnet-4-6';
@@ -58,11 +59,11 @@ function citeSources(citations: any[]): { title: string; url: string }[] {
 
 // Read one Anthropic SSE stream to completion, firing callbacks as blocks arrive. Used by the agent swarm (mode:'agents').
 async function runSwarmAgent(headers: Record<string, string>, body: Record<string, unknown>,
-  cbs: { onSearch?: (q: string) => void; onToken?: (t: string) => void }): Promise<{ text: string; citations: any[]; stopReason: string }> {
+  cbs: { onSearch?: (q: string) => void; onToken?: (t: string) => void }): Promise<{ text: string; citations: any[]; stopReason: string; usage: { input_tokens: number; output_tokens: number } }> {
   const sr = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers, body: JSON.stringify({ ...body, stream: true }) });
   if (!sr.ok || !sr.body) { const t = await sr.text().catch(() => ''); throw new Error('anthropic ' + sr.status + ' ' + t.slice(0, 200)); }
   const reader = sr.body.getReader(); const dec = new TextDecoder();
-  const blocks: any[] = []; let stopReason = ''; let buf = '';
+  const blocks: any[] = []; let stopReason = ''; let buf = ''; let inTok = 0, outTok = 0;
   for (;;) {
     const { done, value } = await reader.read(); if (done) break;
     buf += dec.decode(value, { stream: true });
@@ -80,13 +81,14 @@ async function runSwarmAgent(headers: Record<string, string>, body: Record<strin
         else if (d.type === 'citations_delta' && d.citation) { if (!blocks[ev.index]) blocks[ev.index] = { type: 'text', text: '' }; (blocks[ev.index].citations = blocks[ev.index].citations || []).push(d.citation); }
       }
       else if (ev.type === 'content_block_stop') { const b = blocks[ev.index]; if (b && b._pj) { try { b.input = JSON.parse(b._pj); } catch { /* keep */ } delete b._pj; if ((b.type === 'server_tool_use' || b.type === 'tool_use') && b.input) { const q = b.input.query || b.input.q; if (q && cbs.onSearch) cbs.onSearch(String(q)); } } }
-      else if (ev.type === 'message_delta') { if (ev.delta && ev.delta.stop_reason) stopReason = ev.delta.stop_reason; }
+      else if (ev.type === 'message_start') { inTok = ev.message?.usage?.input_tokens || inTok; }
+      else if (ev.type === 'message_delta') { if (ev.delta && ev.delta.stop_reason) stopReason = ev.delta.stop_reason; if (ev.usage && typeof ev.usage.output_tokens === 'number') outTok = ev.usage.output_tokens; }
     }
   }
   const clean = blocks.filter(Boolean);
   const text = clean.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
   const citations = clean.filter((b) => b.type === 'text' && Array.isArray(b.citations)).flatMap((b) => b.citations);
-  return { text, citations, stopReason };
+  return { text, citations, stopReason, usage: { input_tokens: inTok, output_tokens: outTok } };
 }
 
 Deno.serve(async (req) => {
@@ -180,12 +182,14 @@ Deno.serve(async (req) => {
       const convo: any[] = messages.slice();
       const steps: any[] = [];
       let finalText = '';
+      const wfAcc = makeUsageAccumulator();
       for (let iter = 0; iter < 14; iter++) {
         const wfBody: any = { model, max_tokens: MAX_TOKENS, system: sysW, tools: TOOLS, messages: convo };
         if (mcpServers) wfBody.mcp_servers = mcpServers;
         const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: wfHeaders, body: JSON.stringify(wfBody) });
         const o = await r.json();
         if (o.error) return json({ error: 'anthropic: ' + (o.error.message || '') }, 502);
+        wfAcc.add(o.usage);
         const blocks = o.content || [];
         const tp = blocks.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n').trim();
         if (tp) finalText = tp;
@@ -216,6 +220,7 @@ Deno.serve(async (req) => {
       const summary = (wrote.length ? ('🛠 **Workflow kész** — ' + wrote.length + ' fájl: ' + wrote.join(', ') + '\n\n') : '') + (finalText || 'Kész.');
       await sb.from('user_chat_messages').insert({ chat_id, role: 'assistant', content: summary });
       await sb.from('user_chats').update({ updated_at: new Date().toISOString() }).eq('id', chat_id);
+      logAiCost(sb, { fn: 'claude-session:workflow', model, input: wfAcc.input, output: wfAcc.output });
       return json({ ok: true, text: finalText, steps, files: wrote });
     }
 
@@ -236,6 +241,7 @@ Deno.serve(async (req) => {
           const enc = new TextEncoder();
           const send = (o: unknown) => { try { controller.enqueue(enc.encode(JSON.stringify(o) + '\n')); } catch { /* closed */ } };
           const allCitations: any[] = [];
+          const agAcc = makeUsageAccumulator();   // sum tokens across planner + workers + reviewer + synth → one cost event
           try {
             // PLANNER (non-streaming, quick)
             send({ t: 'status', a: 'plan', s: '🧭 Terv készítése…' });
@@ -243,6 +249,7 @@ Deno.serve(async (req) => {
             try {
               const pr = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers, body: JSON.stringify({ model: WORKER_MODEL, max_tokens: 500, system: [{ type: 'text', text: AG_PLANNER_SYS + ctxShort }], messages: [{ role: 'user', content: task }] }) });
               const pout = await pr.json();
+              agAcc.add(pout && pout.usage);
               const ptext = (pout.content || []).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('');
               const mArr = ptext.match(/\[[\s\S]*\]/);
               if (mArr) { const arr = JSON.parse(mArr[0]); if (Array.isArray(arr)) angles = arr.filter((x: any) => x && x.label).map((x: any) => ({ label: String(x.label).slice(0, 60), brief: String(x.brief || x.label).slice(0, 300) })).slice(0, MAX_R); }
@@ -264,6 +271,7 @@ Deno.serve(async (req) => {
               const wt = webTool(); if (wt) wBody.tools = wt;
               try {
                 const res = await runSwarmAgent(headers, wBody, { onSearch: (q) => { searches.push(String(q).slice(0, 80)); send({ t: 'status', a: id, s: '🌐 ' + q.slice(0, 60) }); } });
+                agAcc.add(res.usage);
                 for (const c of res.citations) allCitations.push(c);
                 send({ t: 'done', a: id, s: '✅ kész' + (res.citations.length ? ' · ' + res.citations.length + ' forrás' : '') });
                 return { id, label: a.label, brief: a.brief, text: res.text, searches, nsrc: res.citations.length, ok: true };
@@ -276,6 +284,7 @@ Deno.serve(async (req) => {
             let critique = '';
             try {
               const rev = await runSwarmAgent(headers, { model: WORKER_MODEL, max_tokens: 1200, system: [{ type: 'text', text: AG_REVIEWER_SYS }], messages: [{ role: 'user', content: `Task: ${task}\n\nWorkers' findings:\n${findingsText}` }] }, {});
+              agAcc.add(rev.usage);
               critique = rev.text; send({ t: 'done', a: 'rev', s: '✅ kész' });
             } catch { send({ t: 'done', a: 'rev', s: '⚠️ hiba' }); }
 
@@ -288,6 +297,7 @@ Deno.serve(async (req) => {
               try {
                 const syn = await runSwarmAgent(headers, { model: attempt === 0 ? model : WORKER_MODEL, max_tokens: MAX_TOKENS, system: [{ type: 'text', text: AG_SYNTH_SYS + ctxFull, cache_control: { type: 'ephemeral' } }], messages: [{ role: 'user', content: synMsg }] },
                   { onToken: (t) => { answer += t; send({ t: 'tok', d: t }); } });
+                agAcc.add(syn.usage);
                 for (const c of syn.citations) allCitations.push(c);
                 if (!answer) { answer = syn.text; if (answer) send({ t: 'tok', d: answer }); }
                 break;
@@ -319,6 +329,7 @@ Deno.serve(async (req) => {
               messageId = saved?.id ?? null;
               await sb.from('user_chats').update({ updated_at: new Date().toISOString() }).eq('id', chat_id);
             } catch { /* persistence best-effort */ }
+            logAiCost(sb, { fn: 'claude-session:agents', model, input: agAcc.input, output: agAcc.output });
             send({ t: 'end', message_id: messageId });
             controller.close();
           } catch (e) { send({ t: 'err', m: String(e) }); try { controller.close(); } catch { /* */ } }
@@ -346,7 +357,7 @@ Deno.serve(async (req) => {
               controller.close(); return;
             }
             const reader = sr.body.getReader(); const dec = new TextDecoder();
-            let buf = '', text = '', stop = '';
+            let buf = '', text = '', stop = '', inTok = 0, outTok = 0;
             // Live activity frames (␟{"s":…}␟) so the client can show what the model is doing — web search, which query, drafting.
             // Same protocol as research-chat; the client's parseStatus strips these frames from the visible answer.
             const sblocks: Record<number, any> = {};
@@ -372,10 +383,12 @@ Deno.serve(async (req) => {
                 else if (ev.type === 'content_block_delta' && ev.delta?.type === 'text_delta' && typeof ev.delta.text === 'string') { text += ev.delta.text; controller.enqueue(enc.encode(ev.delta.text)); }
                 else if (ev.type === 'content_block_delta' && ev.delta?.type === 'input_json_delta' && typeof ev.delta.partial_json === 'string') { const b = sblocks[ev.index] || (sblocks[ev.index] = {}); b._pj = (b._pj || '') + ev.delta.partial_json; }
                 else if (ev.type === 'content_block_stop') { const b = sblocks[ev.index]; if (b && b._pj) { try { const inp = JSON.parse(b._pj); const q = inp.query || inp.q; if (q) emitStatus('🔎 Keresés: „' + String(q).slice(0, 60) + '”'); } catch { /* partial json */ } } }
-                else if (ev.type === 'message_delta' && ev.delta?.stop_reason) stop = ev.delta.stop_reason;
+                else if (ev.type === 'message_start') { inTok = ev.message?.usage?.input_tokens || inTok; }
+                else if (ev.type === 'message_delta') { if (ev.delta?.stop_reason) stop = ev.delta.stop_reason; if (ev.usage && typeof ev.usage.output_tokens === 'number') outTok = ev.usage.output_tokens; }
                 else if (ev.type === 'error') controller.enqueue(enc.encode('\n\n[hiba: ' + (ev.error?.message || 'anthropic') + ']'));
               }
             }
+            logAiCost(sb, { fn: 'claude-session', model, input: inTok, output: outTok });
             if (stop === 'max_tokens') { controller.enqueue(enc.encode(TRUNC)); text += TRUNC; }
             else if (stop === 'pause_turn') { const P = '\n\n---\n_⚠️ A webkeresés megszakadt (a modell szüneteltette a hosszú keresést). Írd be, hogy **„folytasd"**._'; controller.enqueue(enc.encode(P)); text += P; }
             try {
@@ -396,6 +409,7 @@ Deno.serve(async (req) => {
     if (o.stop_reason === 'max_tokens') text += TRUNC;
     const { data: saved } = await sb.from('user_chat_messages').insert({ chat_id, role: 'assistant', content: text || '(no text)' }).select('id').maybeSingle();
     await sb.from('user_chats').update({ updated_at: new Date().toISOString() }).eq('id', chat_id);
+    logAiCost(sb, { fn: 'claude-session', model, usage: o.usage });
     return json({ ok: true, message_id: saved?.id, model, usage: o.usage });
   } catch (e) {
     return json({ error: String(e) }, 500);

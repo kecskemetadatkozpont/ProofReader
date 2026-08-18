@@ -21,6 +21,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { assertEntitled, resolveModel } from '../_shared/entitlement.ts';
 import { langDirective, loadProjectLang } from '../_shared/lang.ts';
+import { logAiCost, makeUsageAccumulator } from '../_shared/aicost.ts';
 
 const ANTHROPIC_KEY = Deno.env.get('ANTHROPIC_API_KEY');
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
@@ -54,11 +55,11 @@ const SYNTH_SYS = `You are the synthesizer of a research swarm inside a PhD idea
 
 // Read one Anthropic SSE stream to completion, firing callbacks as blocks arrive. Reused for every agent.
 async function runAgent(headers: Record<string, string>, body: Record<string, unknown>,
-  cbs: { onSearch?: (q: string) => void; onToken?: (t: string) => void }): Promise<{ text: string; citations: any[]; stopReason: string }> {
+  cbs: { onSearch?: (q: string) => void; onToken?: (t: string) => void }): Promise<{ text: string; citations: any[]; stopReason: string; usage: { input_tokens: number; output_tokens: number } }> {
   const sr = await fetch(ANTHROPIC_URL, { method: 'POST', headers, body: JSON.stringify({ ...body, stream: true }) });
   if (!sr.ok || !sr.body) { const t = await sr.text().catch(() => ''); throw new Error('anthropic ' + sr.status + ' ' + t.slice(0, 200)); }
   const reader = sr.body.getReader(); const dec = new TextDecoder();
-  const blocks: any[] = []; let stopReason = ''; let buf = '';
+  const blocks: any[] = []; let stopReason = ''; let buf = ''; let inTok = 0, outTok = 0;
   for (;;) {
     const { done, value } = await reader.read(); if (done) break;
     buf += dec.decode(value, { stream: true });
@@ -76,13 +77,14 @@ async function runAgent(headers: Record<string, string>, body: Record<string, un
         else if (d.type === 'citations_delta' && d.citation) { if (!blocks[ev.index]) blocks[ev.index] = { type: 'text', text: '' }; (blocks[ev.index].citations = blocks[ev.index].citations || []).push(d.citation); }
       }
       else if (ev.type === 'content_block_stop') { const b = blocks[ev.index]; if (b && b._pj) { try { b.input = JSON.parse(b._pj); } catch { /* keep */ } delete b._pj; if ((b.type === 'server_tool_use' || b.type === 'tool_use') && b.input) { const q = b.input.query || b.input.q; if (q && cbs.onSearch) cbs.onSearch(String(q)); } } }
-      else if (ev.type === 'message_delta') { if (ev.delta && ev.delta.stop_reason) stopReason = ev.delta.stop_reason; }
+      else if (ev.type === 'message_start') { inTok = ev.message?.usage?.input_tokens || inTok; }
+      else if (ev.type === 'message_delta') { if (ev.delta && ev.delta.stop_reason) stopReason = ev.delta.stop_reason; if (ev.usage && typeof ev.usage.output_tokens === 'number') outTok = ev.usage.output_tokens; }
     }
   }
   const clean = blocks.filter(Boolean);
   const text = clean.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
   const citations = clean.filter((b) => b.type === 'text' && Array.isArray(b.citations)).flatMap((b) => b.citations);
-  return { text, citations, stopReason };
+  return { text, citations, stopReason, usage: { input_tokens: inTok, output_tokens: outTok } };
 }
 
 Deno.serve(async (req) => {
@@ -123,6 +125,7 @@ Deno.serve(async (req) => {
         const enc = new TextEncoder();
         const send = (o: unknown) => { try { controller.enqueue(enc.encode(JSON.stringify(o) + '\n')); } catch { /* closed */ } };
         const allCitations: any[] = [];
+        const agAcc = makeUsageAccumulator();   // sum tokens across planner + researchers + reviewer + synth → one cost event
         try {
           // ---- PLANNER (non-streaming, quick) ----
           send({ t: 'status', a: 'plan', s: '🧭 Terv készítése…' });
@@ -130,6 +133,7 @@ Deno.serve(async (req) => {
           try {
             const pr = await fetch(ANTHROPIC_URL, { method: 'POST', headers, body: JSON.stringify({ model: WORKER_MODEL, max_tokens: 500, system: [{ type: 'text', text: PLANNER_SYS + ctx + lang }], messages: [{ role: 'user', content: task }] }) });
             const pout = await pr.json();
+            agAcc.add(pout && pout.usage);
             const ptext = (pout.content || []).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('');
             const mArr = ptext.match(/\[[\s\S]*\]/);
             if (mArr) { const arr = JSON.parse(mArr[0]); if (Array.isArray(arr)) angles = arr.filter((x: any) => x && x.label).map((x: any) => ({ label: String(x.label).slice(0, 60), brief: String(x.brief || x.label).slice(0, 300) })).slice(0, MAX_R); }
@@ -151,6 +155,7 @@ Deno.serve(async (req) => {
             const wt = webTool(); if (wt) body.tools = wt;
             try {
               const res = await runAgent(headers, body, { onSearch: (q) => { searches.push(String(q).slice(0, 80)); send({ t: 'status', a: id, s: '🌐 ' + q.slice(0, 60) }); } });
+              agAcc.add(res.usage);
               for (const c of res.citations) allCitations.push(c);
               send({ t: 'done', a: id, s: '✅ kész' + (res.citations.length ? ' · ' + res.citations.length + ' forrás' : '') });
               return { id, label: a.label, brief: a.brief, text: res.text, searches, nsrc: res.citations.length, ok: true };
@@ -163,6 +168,7 @@ Deno.serve(async (req) => {
           let critique = '';
           try {
             const rev = await runAgent(headers, { model: WORKER_MODEL, max_tokens: 1200, system: [{ type: 'text', text: REVIEWER_SYS + lang }], messages: [{ role: 'user', content: `Task: ${task}\n\nResearchers' findings:\n${findingsText}` }] }, {});
+            agAcc.add(rev.usage);
             critique = rev.text; send({ t: 'done', a: 'rev', s: '✅ kész' });
           } catch { send({ t: 'done', a: 'rev', s: '⚠️ hiba' }); }
 
@@ -177,6 +183,7 @@ Deno.serve(async (req) => {
             try {
               const syn = await runAgent(headers, { model: attempt === 0 ? userModel : WORKER_MODEL, max_tokens: MAX_TOKENS, system: [{ type: 'text', text: SYNTH_SYS + ctx + lang, cache_control: { type: 'ephemeral' } }], messages: [{ role: 'user', content: synMsg }] },
                 { onToken: (t) => { answer += t; send({ t: 'tok', d: t }); } });
+              agAcc.add(syn.usage);
               for (const c of syn.citations) allCitations.push(c);
               if (!answer) { answer = syn.text; if (answer) send({ t: 'tok', d: answer }); }
               break;
@@ -219,6 +226,7 @@ Deno.serve(async (req) => {
             if (ev.length) await sb.from('research_evidence').insert(ev);
           } catch { /* persistence best-effort */ }
 
+          logAiCost(sb, { fn: 'research-agents', project_id: chat.project_id, model: userModel, input: agAcc.input, output: agAcc.output });
           send({ t: 'end', message_id: messageId });
           controller.close();
         } catch (e) { send({ t: 'err', m: String(e) }); try { controller.close(); } catch { /* */ } }

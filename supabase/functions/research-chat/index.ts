@@ -17,6 +17,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { assertEntitled, resolveModel } from '../_shared/entitlement.ts';
 import { langDirective, loadProjectLang } from '../_shared/lang.ts';
+import { logAiCost } from '../_shared/aicost.ts';
 
 const ANTHROPIC_KEY = Deno.env.get('ANTHROPIC_API_KEY');
 const CONSENSUS_TOKEN = Deno.env.get('CONSENSUS_MCP_TOKEN');
@@ -150,7 +151,7 @@ Deno.serve(async (req) => {
               controller.close(); return;
             }
             const reader = sr.body.getReader(); const dec = new TextDecoder();
-            const sblocks: any[] = []; let stopReason = ''; let buf = '';
+            const sblocks: any[] = []; let stopReason = ''; let buf = ''; let inTok = 0, outTok = 0;
             for (;;) {
               const { done, value } = await reader.read(); if (done) break;
               buf += dec.decode(value, { stream: true });
@@ -175,10 +176,12 @@ Deno.serve(async (req) => {
                   else if (d.type === 'citations_delta' && d.citation) { if (!sblocks[ev.index]) sblocks[ev.index] = { type: 'text', text: '' }; (sblocks[ev.index].citations = sblocks[ev.index].citations || []).push(d.citation); }   // grounded-answer citations interleave with text on the same block
                 }
                 else if (ev.type === 'content_block_stop') { const b = sblocks[ev.index]; if (b && b._pj) { try { b.input = JSON.parse(b._pj); } catch { /* keep partial */ } delete b._pj; } if (b && (b.type === 'mcp_tool_use' || b.type === 'tool_use' || b.type === 'server_tool_use')) { const q = b.input && (b.input.query || b.input.q); if (q) emitStatus('🔎 Keresés: „' + String(q).slice(0, 60) + '”'); } }
-                else if (ev.type === 'message_delta') { if (ev.delta && ev.delta.stop_reason) stopReason = ev.delta.stop_reason; }
+                else if (ev.type === 'message_start') { inTok = ev.message?.usage?.input_tokens || inTok; }
+                else if (ev.type === 'message_delta') { if (ev.delta && ev.delta.stop_reason) stopReason = ev.delta.stop_reason; if (ev.usage && typeof ev.usage.output_tokens === 'number') outTok = ev.usage.output_tokens; }
                 else if (ev.type === 'error') { controller.enqueue(enc.encode('\n\n[hiba: ' + ((ev.error && ev.error.message) || 'anthropic') + ']')); }
               }
             }
+            logAiCost(sb, { fn: 'research-chat', project_id: chat.project_id, model: userModel, input: inTok, output: outTok });
             const cleanBlocks = sblocks.filter(Boolean);
             let text = cleanBlocks.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
             if (stopReason === 'max_tokens') { controller.enqueue(enc.encode(TRUNC)); text += TRUNC; }
@@ -228,6 +231,7 @@ Deno.serve(async (req) => {
       if (b.type === 'text' && Array.isArray(b.citations)) { for (const cit of b.citations) { const snip = cit?.cited_text; if (snip) { const src = cit.document_title || cit.title || cit.url || null; const withUrl = cit.url ? String(snip).slice(0, 3900) + '\n[' + cit.url + ']' : String(snip).slice(0, 4000); ev.push({ chat_id, message_id: saved?.id ?? null, query: src, snippet: withUrl }); } } }   // doc + web citations → evidence
     }
     if (ev.length) await sb.from('research_evidence').insert(ev);
+    logAiCost(sb, { fn: 'research-chat', project_id: chat.project_id, model: userModel, usage: out.usage });
 
     return json({ ok: true, version: 'attach-v4', message_id: saved?.id, evidence: ev.length, mode: useMcp ? 'consensus' : (webOn ? 'web' : 'plain'), model: userModel, usage: out.usage, dbg });
   } catch (e) {
