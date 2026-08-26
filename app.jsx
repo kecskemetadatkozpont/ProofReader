@@ -1241,6 +1241,9 @@
           const uid = uAdd(it.base, it.size, 'uploading');
           if (it.isText) {
             it.ent.async('string').then((txt) => {
+              // belt-and-braces: the pre-check used JSZip's uncompressedSize, which can be absent (-> 0). Data files
+              // land INLINE in the project payload, so re-check the real length before committing one.
+              if (it.isData && String(txt).length > ZIP_DATA_LIMIT) { try { const c = { ...filesRef.current }; delete c[it.path]; filesRef.current = c; } catch (e) { } uSet(uid, { status: 'skipped', reason: 'Adatfájl 512 KB felett' }); nSkipped++; step(); return; }
               setFiles((f) => ({ ...f, [it.path]: { type: it.isData ? 'md' : fileTypeOf(it.base), content: String(txt) } }));
               setOrder((o) => o.includes(it.path) ? o : [...o, it.path]);
               uSet(uid, { status: 'done' }); step();
