@@ -6,6 +6,16 @@
 
   // Importable text formats (LaTeX sources + build artifacts like .bbl + Markdown notes).
   const TEXT_EXT_RE = /\.(tex|bib|cls|sty|txt|bbl|bst|md|markdown)$/i;
+  // ---- one import policy for EVERY path (file picker, folder upload, ZIP) so they can never drift apart ----
+  const MEDIA_EXT_RE = /\.(png|jpe?g|gif|svg|webp|pdf)$/i;                 // rendered + usable by the LaTeX compiler
+  // Data/scripts: kept as plain-text docs (type 'md' — never fed to the LaTeX engine, unlike fileTypeOf's 'tex'
+  // fallback) and capped, because text lives INLINE in the project payload.
+  const DATA_EXT_RE = /\.(csv|tsv|json|ya?ml|py|r|sh|cfg|ini|toml|log|bibtex)$/i;
+  const DATA_LIMIT = 512 * 1024;
+  // Binary research artifacts (numpy archives, models, datasets, archives). Never rendered, never compiled — they
+  // live in cloud storage, are downloadable from the file tree, and travel in the project export.
+  const ATTACH_EXT_RE = /\.(npz|npy|mat|h5|hdf5|nc|pkl|pickle|pt|pth|ckpt|safetensors|onnx|parquet|feather|arrow|zip|gz|tgz|tar|7z|xz|bz2|db|sqlite|dat|bin)$/i;
+  const attachOK = () => !!(window.PRUploads && window.PRUploads.enabled);   // attachments require cloud storage
   // Map a filename to its editor doc-type. .tex/.txt stay 'tex' (full LaTeX pipeline);
   // the rest are plain-text docs we display and edit but never feed to the LaTeX engine.
   function fileTypeOf(name) {
@@ -1182,12 +1192,7 @@
     // ---- ZIP import (e.g. a journal submission package) ----------------------------------------------------
     // Extracted in the browser with JSZip (already loaded by ProofReader.html); the archive's folder structure is
     // preserved. Binaries go through putBinary, i.e. Supabase Storage when available — never inline megabytes.
-    const ZIP_BIN_RE = /\.(png|jpe?g|gif|svg|webp|pdf)$/i;
-    // Data/script files that ship with a submission package. They are kept as plain-text docs (type 'md' — shown
-    // and editable, never fed to the LaTeX engine, unlike fileTypeOf's 'tex' fallback) and capped hard: text lives
-    // INLINE in the project payload, so a multi-MB CSV would bloat every save and the localStorage warm cache.
-    const ZIP_DATA_RE = /\.(csv|tsv|json|ya?ml|py|r|m|sh|cfg|ini|toml|log|bibtex)$/i;
-    const ZIP_DATA_LIMIT = 512 * 1024;
+    const ZIP_BIN_RE = MEDIA_EXT_RE, ZIP_DATA_RE = DATA_EXT_RE, ZIP_DATA_LIMIT = DATA_LIMIT;
     const importZip = (file, dir) => {
       if (!window.JSZip) { try { window.PRUI.toast('A ZIP-kicsomagoló még tölt — próbáld újra egy pillanat múlva.'); } catch (e) { } return; }
       const zid = uAdd(file.name, file.size, 'uploading', 'kicsomagolás…');
@@ -1207,9 +1212,11 @@
           if (!rel) return;
           const base = rel.split('/').pop();
           const isTex = TEXT_EXT_RE.test(base), isBin = ZIP_BIN_RE.test(base), isData = !isTex && !isBin && ZIP_DATA_RE.test(base);
+          const isAttach = !isTex && !isBin && !isData && ATTACH_EXT_RE.test(base);
           const isText = isTex || isData;
           const size = (x.ent._data && x.ent._data.uncompressedSize) || 0;
-          if (!isText && !isBin) { nSkipped++; uAdd(base, size, 'skipped', 'Nem támogatott formátum'); return; }
+          if (!isText && !isBin && !isAttach) { nSkipped++; uAdd(base, size, 'skipped', 'Nem támogatott formátum'); return; }
+          if (isAttach && !attachOK()) { nSkipped++; uAdd(base, size, 'skipped', 'Melléklethez felhő-tároló kell'); return; }
           if (isData && size > ZIP_DATA_LIMIT) { nSkipped++; uAdd(base, size, 'skipped', 'Adatfájl 512 KB felett'); return; }
           if (size > SIZE_LIMIT) { nSkipped++; uAdd(base, size, 'skipped', '50 MB felett'); return; }
           const path = uniquePath((pp) => !!filesRef.current[pp] || reserved[pp], dir ? dir + '/' + rel : rel);
@@ -1218,7 +1225,7 @@
           let acc = '';
           segs.forEach((sg) => { acc = acc ? acc + '/' + sg : sg; if (!folders.includes(acc)) newFolders.add(acc); });
           if (isTex && /\.tex$/i.test(base)) { if (!firstTex) firstTex = path; if (!mainTex && /^main/i.test(base)) mainTex = path; }
-          items.push({ path: path, ent: x.ent, isText: isText, isData: isData, base: base, size: size });
+          items.push({ path: path, ent: x.ent, isText: isText, isData: isData, isAttach: isAttach, base: base, size: size });
         });
         if (!items.length) {
           uSet(zid, { status: 'skipped', reason: 'nincs importálható fájl' });
@@ -1250,7 +1257,7 @@
             }, (er) => { uSet(uid, { status: 'error', reason: (er && er.message) || 'kicsomagolási hiba' }); step(); });
           } else {
             it.ent.async('blob').then((blob) => {
-              putBinary(it.path, blob, /\.pdf$/i.test(it.base) ? 'pdf' : 'image', it.base, null, uid);
+              putBinary(it.path, blob, it.isAttach ? 'bin' : (/\.pdf$/i.test(it.base) ? 'pdf' : 'image'), it.base, null, uid);
               step();
             }, (er) => { uSet(uid, { status: 'error', reason: (er && er.message) || 'kicsomagolási hiba' }); step(); });
           }
@@ -1264,10 +1271,15 @@
       list.forEach((file) => {
         if (/\.zip$/i.test(file.name)) { importZip(file, dir); return; }   // submission package → extract in place
         if (window.PROffice && window.PROffice.isOffice(file.name)) { importOfficeFile(file, dir); return; }
-        const isText = TEXT_EXT_RE.test(file.name);
-        const isImg = /\.(png|jpe?g|gif|svg|webp|pdf)$/i.test(file.name);
+        const isTex = TEXT_EXT_RE.test(file.name);
+        const isImg = MEDIA_EXT_RE.test(file.name);
         const isPdf = /\.pdf$/i.test(file.name);
-        if (!isText && !isImg) { uAdd(file.name, file.size, 'skipped', 'Unsupported format'); return; }
+        const isData = !isTex && !isImg && DATA_EXT_RE.test(file.name);
+        const isAttach = !isTex && !isImg && !isData && ATTACH_EXT_RE.test(file.name);
+        const isText = isTex || isData;
+        if (!isText && !isImg && !isAttach) { uAdd(file.name, file.size, 'skipped', 'Unsupported format'); return; }
+        if (isAttach && !attachOK()) { uAdd(file.name, file.size, 'skipped', 'Melléklethez felhő-tároló kell'); return; }
+        if (isData && file.size > DATA_LIMIT) { uAdd(file.name, file.size, 'skipped', 'Adatfájl 512 KB felett'); return; }
         if (!isText && file.size > SIZE_LIMIT) { uAdd(file.name, file.size, 'skipped', 'Larger than 50 MB'); return; }
         const path = uniquePath((p) => !!filesRef.current[p], pjoin(dir, file.name));
         filesRef.current = { ...filesRef.current, [path]: {} }; // reserve to avoid same-batch collisions
@@ -1275,7 +1287,7 @@
           const uid = uAdd(file.name, file.size, 'uploading');
           const r = new FileReader();
           r.onload = () => {
-            setFiles((f) => ({ ...f, [path]: { type: fileTypeOf(file.name), content: String(r.result) } }));
+            setFiles((f) => ({ ...f, [path]: { type: isData ? 'md' : fileTypeOf(file.name), content: String(r.result) } }));
             setOrder((o) => o.includes(path) ? o : [...o, path]);
             if (/\.tex$/i.test(file.name)) setActive(path);
             uSet(uid, { status: 'done' });
@@ -1283,7 +1295,7 @@
           r.onerror = () => uSet(uid, { status: 'error', reason: 'Could not read file' });
           r.readAsText(file);
         } else {
-          putBinary(path, file, isPdf ? 'pdf' : 'image', file.name);
+          putBinary(path, file, isAttach ? 'bin' : (isPdf ? 'pdf' : 'image'), file.name);
         }
         if (dir) setExpanded((s) => new Set(s).add(dir));
       });
@@ -1307,20 +1319,25 @@
       const items = [];
       list.forEach((file) => {
         const rel = (file.webkitRelativePath || file.name).replace(/\\/g, '/');
-        const isText = TEXT_EXT_RE.test(file.name);
-        const isImg = /\.(png|jpe?g|gif|svg|pdf)$/i.test(file.name);
-        if (!isText && !isImg) { uAdd(file.name, file.size, 'skipped', 'Unsupported format'); return; }
-        if (file.size > SIZE_LIMIT) { uAdd(file.name, file.size, 'skipped', 'Larger than 50 MB'); return; }
+        const isTex = TEXT_EXT_RE.test(file.name);
+        const isImg = MEDIA_EXT_RE.test(file.name);
+        const isData = !isTex && !isImg && DATA_EXT_RE.test(file.name);
+        const isAttach = !isTex && !isImg && !isData && ATTACH_EXT_RE.test(file.name);
+        const isText = isTex || isData;
+        if (!isText && !isImg && !isAttach) { skipped++; uAdd(file.name, file.size, 'skipped', 'Unsupported format'); return; }
+        if (isAttach && !attachOK()) { skipped++; uAdd(file.name, file.size, 'skipped', 'Melléklethez felhő-tároló kell'); return; }
+        if (isData && file.size > DATA_LIMIT) { skipped++; uAdd(file.name, file.size, 'skipped', 'Adatfájl 512 KB felett'); return; }
+        if (file.size > SIZE_LIMIT) { skipped++; uAdd(file.name, file.size, 'skipped', 'Larger than 50 MB'); return; }
         const path = uniquePath((p) => !!filesRef.current[p] || reserved[p], dir ? dir + '/' + rel : rel);
         reserved[path] = 1; filesRef.current = { ...filesRef.current, [path]: {} };
         const segs = path.split('/'); segs.pop();
         let acc = '';
         segs.forEach((s) => { acc = acc ? acc + '/' + s : s; if (!folders.includes(acc)) newFolders.add(acc); });
-        const makeActive = isText && /\.tex$/i.test(file.name) && !firstTex;
+        const makeActive = isTex && /\.tex$/i.test(file.name) && !firstTex;
         if (makeActive) firstTex = path;
-        items.push({ file, path, isText, makeActive });
+        items.push({ file, path, isText, isData, isAttach, makeActive });
       });
-      const note = (n) => window.PRUI.toast(n + ' file' + (n === 1 ? '' : 's') + ' skipped — only .tex, .bib, .bbl, .bst, .cls, .sty, .txt, .md, images and PDFs under 50 MB are imported.');
+      const note = (n) => window.PRUI.toast(n + ' file' + (n === 1 ? '' : 's') + ' skipped — LaTeX sources, images/PDFs (<50 MB), data files (<512 KB) and binary attachments are imported; anything else is not.');
       if (!items.length) { if (skipped) note(skipped); return; }
       if (newFolders.size) setFolders((fs) => { const set = new Set(fs); newFolders.forEach((f) => set.add(f)); return Array.from(set); });
       setExpanded((s) => { const n = new Set(s); if (dir) n.add(dir); newFolders.forEach((f) => n.add(f)); return n; });
@@ -1329,7 +1346,7 @@
           const uid = uAdd(bn(it.path), it.file.size, 'uploading');
           const r = new FileReader();
           r.onload = () => {
-            setFiles((f) => ({ ...f, [it.path]: { type: fileTypeOf(it.file.name), content: String(r.result) } }));
+            setFiles((f) => ({ ...f, [it.path]: { type: it.isData ? 'md' : fileTypeOf(it.file.name), content: String(r.result) } }));
             setOrder((o) => o.includes(it.path) ? o : [...o, it.path]);
             if (it.makeActive) setActive(it.path);
             uSet(uid, { status: 'done' });
@@ -1337,7 +1354,7 @@
           r.onerror = () => uSet(uid, { status: 'error', reason: 'Could not read file' });
           r.readAsText(it.file);
         } else {
-          putBinary(it.path, it.file, /\.pdf$/i.test(it.file.name) ? 'pdf' : 'image', it.file.name);
+          putBinary(it.path, it.file, it.isAttach ? 'bin' : (/\.pdf$/i.test(it.file.name) ? 'pdf' : 'image'), it.file.name);
         }
       });
       if (skipped) setTimeout(() => note(skipped), 120);
@@ -1892,6 +1909,20 @@
       return f.dataURL || f.src || null;
     }, [files, signTick]);
     const getFileData = useCallback((file) => { const f = files[file]; return f && f.dataURL ? f.dataURL : null; }, [files]);
+    // Binary attachments (.npz, models, archives) are not rendered — clicking one downloads it.
+    const downloadAttachment = useCallback(async (path) => {
+      const f = files[path]; if (!f) return;
+      let url = getFileURL(path);
+      if (!url && f.storagePath && window.PRUploads && window.PRUploads.signedUrl) {
+        try { url = await window.PRUploads.signedUrl(f.storagePath); } catch (e) { url = null; }
+      }
+      if (!url) { try { window.PRUI.toast('A melléklet még szinkronizál — próbáld újra egy pillanat múlva.'); } catch (e) { } return; }
+      try {
+        const a = document.createElement('a');
+        a.href = url; a.download = bn(path); a.rel = 'noopener'; a.target = '_blank';
+        document.body.appendChild(a); a.click(); a.remove();
+      } catch (e) { try { window.PRUI.toast('A melléklet letöltése nem sikerült.', { kind: 'error' }); } catch (e2) { } }
+    }, [files, getFileURL]);
     const onPrintDoc = useCallback((docId) => {
       docId = docId || active;
       const comp = getCompiled(docId); if (!comp) { window.PRUI.toast('Nothing to render yet — open a document first.', { kind: 'error' }); return; }
@@ -2132,7 +2163,7 @@
             <button className="btn" onClick={() => setShareOpen(true)}>
               <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4"><circle cx="4" cy="8" r="2" /><circle cx="12" cy="4" r="2" /><circle cx="12" cy="12" r="2" /><path d="M5.8 7l4.4-2.2M5.8 9l4.4 2.2" /></svg>Share
             </button>
-            <input ref={fileInput} type="file" multiple accept=".zip,.tex,.bib,.bbl,.bst,.cls,.sty,.txt,.md,.markdown,.pdf,application/pdf,.docx,.xlsx,.xls,.pptx,image/*" style={{ display: 'none' }} onChange={onUpload} />
+            <input ref={fileInput} type="file" multiple accept=".zip,.tex,.bib,.bbl,.bst,.cls,.sty,.txt,.md,.markdown,.pdf,application/pdf,.docx,.xlsx,.xls,.pptx,.csv,.tsv,.json,.yml,.yaml,.py,.npz,.npy,.mat,.h5,.hdf5,.pkl,.pt,.pth,.onnx,.parquet,image/*" style={{ display: 'none' }} onChange={onUpload} />
             <input ref={reviewInput} type="file" accept=".json,application/json" style={{ display: 'none' }} onChange={onReviewFile} />
             <input ref={dirInput} type="file" multiple style={{ display: 'none' }} onChange={onUploadFolder} />
             <button className="btn btn-icon" title="Upload files" aria-label="Upload files" onClick={() => fileInput.current.click()}>
@@ -2172,6 +2203,7 @@
             expanded={expanded} currentDir={currentDir} renaming={renaming}
             onOpen={(p) => {
               const f = files[p];
+              if (f && f.type === 'bin') { downloadAttachment(p); return; }   // binary attachment → download
               if (f && (f.type === 'pdf' || f.type === 'image')) { wsOnAddMedia(f.type, p); return; }
               if (!docExists(p)) return;
               // rebind the source/preview/compiled panes that follow the active doc so the clicked file shows
@@ -2361,6 +2393,7 @@
     const ico = (type) => {
       if (type === 'pdf') return <svg viewBox="0 0 16 16"><path d="M3.5 2.5h6l3 3V13a.5.5 0 01-.5.5h-8A.5.5 0 013 13V3a.5.5 0 01.5-.5z" fill="none" stroke="currentColor" strokeWidth="1.2" /><text x="8" y="11.5" fontSize="4" textAnchor="middle" fill="currentColor" fontFamily="sans-serif" fontWeight="700">PDF</text></svg>;
       if (type === 'image') return <svg viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.2" /><circle cx="5.5" cy="6" r="1.2" fill="currentColor" /><path d="M2 12l3.5-3 2.5 2 3-3.5 3 4.5" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" /></svg>;
+      if (type === 'bin') return <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2"><path d="M8 1.8l5.2 2.6v6.4L8 13.4 2.8 10.8V4.4z" strokeLinejoin="round" /><path d="M2.8 4.4L8 7l5.2-2.6M8 7v6.4" strokeLinejoin="round" /></svg>;
       if (type === 'bib') return <svg viewBox="0 0 16 16"><path d="M3 2.5h7l3 3V13a.5.5 0 01-.5.5h-9A.5.5 0 013 13z" fill="none" stroke="currentColor" strokeWidth="1.2" /><path d="M6 8h4M6 10.5h4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" /></svg>;
       return <svg viewBox="0 0 16 16"><path d="M3.5 2.5h6l3 3V13a.5.5 0 01-.5.5h-8A.5.5 0 013 13V3a.5.5 0 01.5-.5z" fill="none" stroke="currentColor" strokeWidth="1.2" /><text x="8" y="11" fontSize="5" textAnchor="middle" fill="currentColor" fontFamily="serif">T</text></svg>;
     };
