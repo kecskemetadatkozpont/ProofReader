@@ -218,12 +218,25 @@
   // One-shot recovery: a project we still hold locally but the server has NEVER seen (its debounced save died
   // with a navigation) is re-sent now. Only our own rows, only once per page load.
   var redrove = false;
+  var REDRIVE_MAX_AGE = 10 * 60 * 1000;  // only RECOVER a recent loss; a day-old marker means the world moved on
+  // Recovery is deliberately limited to rows the server has NEVER seen — the create-then-navigate case. We do NOT
+  // re-send an unconfirmed edit to a row that already exists server-side: pr_save_project replaces `data`
+  // wholesale, and a local copy can be silently incomplete (persistWarm() falls back to trimForWarm() under
+  // localStorage quota pressure, which drops version history and blanks big inline images). Overwriting a live
+  // row from such a copy would destroy history/figures for the owner AND every collaborator — a far worse loss
+  // than the one unsent edit we give up here. (Unsent edits are still covered by the pagehide flush and by the
+  // awaited flushes on create/open/sign-out.)
   function redriveUnconf(seen) {
     if (redrove) return; redrove = true;
     Object.keys(unconf).forEach(function (id) {
-      if (seen[id]) { clearUnconf(id); return; }                            // server already has the row
       var i = idx(id);
-      if (i < 0 || CACHE[i].ownerId !== me.id) { clearUnconf(id); return; }  // nothing local left / not ours
+      if (i < 0) { clearUnconf(id); return; }                                        // nothing local left
+      if (seen[id]) { clearUnconf(id); return; }                                     // server already has the row
+      // Only the OWNER may (re)create a missing row. For an editor a missing row never means "create"
+      // (pr_save_project rejects that); it means our evidence is incomplete — e.g. a failed project_members
+      // query, or an owner-TRASHED shared row, which hydrate filters out — and pushing would blind-overwrite.
+      if (CACHE[i].ownerId !== me.id) { clearUnconf(id); return; }
+      if ((Date.now() - (unconf[id] || 0)) >= REDRIVE_MAX_AGE) { clearUnconf(id); return; }
       console.info('[PR] re-sending unconfirmed project', id);
       pushProject(CACHE[i]);
     });
@@ -372,7 +385,8 @@
     // nothing to send), false if the server rejected it. ANY caller that navigates away right after a write
     // MUST await this — a page unload silently kills the 500 ms debounce.
     flushNow: function (id) { if (!id) return Promise.resolve(true); clearTimeout(timers[id]); return flush(id); },
-    flushAll: function () { return Promise.all(Object.keys(pending).map(function (id) { clearTimeout(timers[id]); return flush(id); })).then(function (rs) { return rs.every(Boolean); }); },
+    flushAll: function () { var ids = {}; Object.keys(pending).forEach(function (id) { ids[id] = 1; }); Object.keys(inflight).forEach(function (id) { ids[id] = 1; });   // in-flight saves are NOT in `pending` any more
+      return Promise.all(Object.keys(ids).map(function (id) { clearTimeout(timers[id]); return flush(id); })).then(function (rs) { return rs.every(Boolean); }); },
 
     raw: function () { return CACHE.map(normalize); },
     list: function () { return this.raw().filter(function (p) { return !p.deletedAt; }).slice().sort(function (a, b) { return (b.updated || 0) - (a.updated || 0); }); },

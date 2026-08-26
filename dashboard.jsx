@@ -53,7 +53,8 @@ function useNotifications(uid) {
       update: (n) => setNotes((l) => l.map((x) => x.id === n.id ? { ...x, ...n } : x))
     });
   }, [uid]);
-  const markRead = (n) => { if (!n || n.read_at || !sb) return; sb.from('notifications').update({ read_at: new Date().toISOString() }).eq('id', n.id).then(() => setNotes((l) => l.map((x) => x.id === n.id ? { ...x, read_at: 'now' } : x))); };
+  // returns a Promise so callers that navigate right after (view()) can let the update land first
+  const markRead = (n) => { if (!n || n.read_at || !sb) return Promise.resolve(); return sb.from('notifications').update({ read_at: new Date().toISOString() }).eq('id', n.id).then(() => setNotes((l) => l.map((x) => x.id === n.id ? { ...x, read_at: 'now' } : x))); };
   const markAll = () => { const ids = notes.filter((n) => !n.read_at).map((n) => n.id); if (!ids.length || !sb) return; sb.from('notifications').update({ read_at: new Date().toISOString() }).in('id', ids).then(load); };
   const unread = notes.filter((n) => !n.read_at).length;
   return { notes, unread, markRead, markAll, reload: load };
@@ -70,7 +71,12 @@ function NotifBell({ notif }) {
   const [open, setOpen] = useState(false);
   useEffect(() => { if (!open) return; const h = (e) => { if (!e.target.closest('.notif-wrap')) setOpen(false); }; document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h); }, [open]);
   const accept = (n) => { const p = n.payload || {}; if (p.project_id && Store.acceptInvitation) Store.acceptInvitation(p.project_id); notif.markRead(n); };
-  const view = (n) => { notif.markRead(n); const t = notifTarget(n); if (t) location.href = t; };
+  const view = async (n) => {
+    const t = notifTarget(n);
+    // the navigation used to abort the in-flight read-receipt, so the notification kept coming back unread
+    try { await Promise.race([notif.markRead(n), new Promise((r) => setTimeout(r, 2500))]); } catch (e) { }
+    if (t) location.href = t;
+  };
   return <div className="notif-wrap">
     <button className="bell" title="Notifications" aria-label={'Notifications' + (notif.unread ? ' (' + notif.unread + ' unread)' : '')} aria-pressed={open} onClick={(e) => { e.stopPropagation(); const o = !open; setOpen(o); if (o) notif.reload(); }}>
       <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M8 2a3.5 3.5 0 0 0-3.5 3.5c0 3-1.5 4-1.5 4h10s-1.5-1-1.5-4A3.5 3.5 0 0 0 8 2z" strokeLinejoin="round" /><path d="M6.6 12.4a1.5 1.5 0 0 0 2.8 0" strokeLinecap="round" /></svg>

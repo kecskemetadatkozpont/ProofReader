@@ -279,8 +279,18 @@
       var c = document.getElementById('pn-close'); if (c) c.onclick = close;
       var so = document.getElementById('pn-signout');
       if (so) so.onclick = function () {
-        try { if (window.PR_BACKEND && window.PR_BACKEND.signOut) { window.PR_BACKEND.signOut(); } else if (window.PRAuth) { PRAuth.signOut(); } } catch (e) { }
-        location.replace('Landing.html');
+        // Signing out tears the store down, so any debounced project save MUST land first (capped, never hangs).
+        var go = function () {
+          try { if (window.PR_BACKEND && window.PR_BACKEND.signOut) { window.PR_BACKEND.signOut(); } else if (window.PRAuth) { PRAuth.signOut(); } } catch (e) { }
+          location.replace('Landing.html');
+        };
+        try {
+          if (window.PRStore && window.PRStore.flushAll) {
+            Promise.race([window.PRStore.flushAll(), new Promise(function (r) { setTimeout(r, 3000); })]).then(go, go);
+            return;
+          }
+        } catch (e) { }
+        go();
       };
     }
 
