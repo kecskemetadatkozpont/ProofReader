@@ -1179,10 +1179,87 @@
         if (dir) setExpanded((s) => new Set(s).add(dir));
       }, (er) => uSet(uid, { status: 'error', reason: 'Office: ' + ((er && er.message) || er) }));
     };
+    // ---- ZIP import (e.g. a journal submission package) ----------------------------------------------------
+    // Extracted in the browser with JSZip (already loaded by ProofReader.html); the archive's folder structure is
+    // preserved. Binaries go through putBinary, i.e. Supabase Storage when available — never inline megabytes.
+    const ZIP_BIN_RE = /\.(png|jpe?g|gif|svg|webp|pdf)$/i;
+    // Data/script files that ship with a submission package. They are kept as plain-text docs (type 'md' — shown
+    // and editable, never fed to the LaTeX engine, unlike fileTypeOf's 'tex' fallback) and capped hard: text lives
+    // INLINE in the project payload, so a multi-MB CSV would bloat every save and the localStorage warm cache.
+    const ZIP_DATA_RE = /\.(csv|tsv|json|ya?ml|py|r|m|sh|cfg|ini|toml|log|bibtex)$/i;
+    const ZIP_DATA_LIMIT = 512 * 1024;
+    const importZip = (file, dir) => {
+      if (!window.JSZip) { try { window.PRUI.toast('A ZIP-kicsomagoló még tölt — próbáld újra egy pillanat múlva.'); } catch (e) { } return; }
+      const zid = uAdd(file.name, file.size, 'uploading', 'kicsomagolás…');
+      window.JSZip.loadAsync(file).then((zip) => {
+        const all = [];
+        zip.forEach((rel, ent) => { if (!ent.dir) all.push({ rel: String(rel).replace(/\\/g, '/'), ent: ent }); });
+        // archive junk: macOS resource forks + Finder/Windows metadata
+        const clean = all.filter((x) => !/(^|\/)(__MACOSX|\.DS_Store|Thumbs\.db)(\/|$)/i.test(x.rel) && !/(^|\/)\._/.test(x.rel));
+        // a package wrapped in ONE top-level folder is flattened by that level (pkg/main.tex -> main.tex)
+        const tops = {}; clean.forEach((x) => { tops[x.rel.split('/')[0]] = 1; });
+        const topKeys = Object.keys(tops);
+        const strip = (topKeys.length === 1 && clean.every((x) => x.rel.indexOf('/') > 0)) ? topKeys[0] + '/' : '';
+        const newFolders = new Set(), reserved = {}, items = [];
+        let nSkipped = 0, firstTex = null, mainTex = null;
+        clean.forEach((x) => {
+          const rel = strip ? x.rel.slice(strip.length) : x.rel;
+          if (!rel) return;
+          const base = rel.split('/').pop();
+          const isTex = TEXT_EXT_RE.test(base), isBin = ZIP_BIN_RE.test(base), isData = !isTex && !isBin && ZIP_DATA_RE.test(base);
+          const isText = isTex || isData;
+          const size = (x.ent._data && x.ent._data.uncompressedSize) || 0;
+          if (!isText && !isBin) { nSkipped++; uAdd(base, size, 'skipped', 'Nem támogatott formátum'); return; }
+          if (isData && size > ZIP_DATA_LIMIT) { nSkipped++; uAdd(base, size, 'skipped', 'Adatfájl 512 KB felett'); return; }
+          if (size > SIZE_LIMIT) { nSkipped++; uAdd(base, size, 'skipped', '50 MB felett'); return; }
+          const path = uniquePath((pp) => !!filesRef.current[pp] || reserved[pp], dir ? dir + '/' + rel : rel);
+          reserved[path] = 1; filesRef.current = { ...filesRef.current, [path]: {} };
+          const segs = path.split('/'); segs.pop();
+          let acc = '';
+          segs.forEach((sg) => { acc = acc ? acc + '/' + sg : sg; if (!folders.includes(acc)) newFolders.add(acc); });
+          if (isTex && /\.tex$/i.test(base)) { if (!firstTex) firstTex = path; if (!mainTex && /^main/i.test(base)) mainTex = path; }
+          items.push({ path: path, ent: x.ent, isText: isText, isData: isData, base: base, size: size });
+        });
+        if (!items.length) {
+          uSet(zid, { status: 'skipped', reason: 'nincs importálható fájl' });
+          try { window.PRUI.toast('A ZIP nem tartalmazott importálható fájlt (.tex, .bib, .bbl, .bst, .cls, .sty, .txt, .md, kép, PDF).'); } catch (e) { }
+          return;
+        }
+        if (newFolders.size) setFolders((fs) => { const set = new Set(fs); newFolders.forEach((f) => set.add(f)); return Array.from(set); });
+        setExpanded((st) => { const n = new Set(st); if (dir) n.add(dir); newFolders.forEach((f) => n.add(f)); return n; });
+        // extract SEQUENTIALLY — a 10+ MB package decompressed all at once would spike memory; each binary then
+        // uploads on its own while the next entry is being inflated.
+        let i = 0;
+        const step = () => {
+          if (i >= items.length) {
+            uSet(zid, { status: 'done', reason: items.length + ' fájl' + (nSkipped ? ' · ' + nSkipped + ' kihagyva' : '') });
+            const act = mainTex || firstTex; if (act) setActive(act);
+            try { window.PRUI.toast('📦 ' + items.length + ' fájl importálva a ZIP-ből' + (nSkipped ? ' · ' + nSkipped + ' kihagyva (nem támogatott formátum)' : '') + '.'); } catch (e) { }
+            return;
+          }
+          const it = items[i++];
+          const uid = uAdd(it.base, it.size, 'uploading');
+          if (it.isText) {
+            it.ent.async('string').then((txt) => {
+              setFiles((f) => ({ ...f, [it.path]: { type: it.isData ? 'md' : fileTypeOf(it.base), content: String(txt) } }));
+              setOrder((o) => o.includes(it.path) ? o : [...o, it.path]);
+              uSet(uid, { status: 'done' }); step();
+            }, (er) => { uSet(uid, { status: 'error', reason: (er && er.message) || 'kicsomagolási hiba' }); step(); });
+          } else {
+            it.ent.async('blob').then((blob) => {
+              putBinary(it.path, blob, /\.pdf$/i.test(it.base) ? 'pdf' : 'image', it.base, null, uid);
+              step();
+            }, (er) => { uSet(uid, { status: 'error', reason: (er && er.message) || 'kicsomagolási hiba' }); step(); });
+          }
+        };
+        step();
+      }, (er) => uSet(zid, { status: 'error', reason: 'ZIP: ' + ((er && er.message) || er) }));
+    };
     function onUpload(e) {
       const list = Array.from(e.target.files || []);
       const dir = currentDir;
       list.forEach((file) => {
+        if (/\.zip$/i.test(file.name)) { importZip(file, dir); return; }   // submission package → extract in place
         if (window.PROffice && window.PROffice.isOffice(file.name)) { importOfficeFile(file, dir); return; }
         const isText = TEXT_EXT_RE.test(file.name);
         const isImg = /\.(png|jpe?g|gif|svg|webp|pdf)$/i.test(file.name);
@@ -2052,7 +2129,7 @@
             <button className="btn" onClick={() => setShareOpen(true)}>
               <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4"><circle cx="4" cy="8" r="2" /><circle cx="12" cy="4" r="2" /><circle cx="12" cy="12" r="2" /><path d="M5.8 7l4.4-2.2M5.8 9l4.4 2.2" /></svg>Share
             </button>
-            <input ref={fileInput} type="file" multiple accept=".tex,.bib,.bbl,.bst,.cls,.sty,.txt,.md,.markdown,.pdf,application/pdf,.docx,.xlsx,.xls,.pptx,image/*" style={{ display: 'none' }} onChange={onUpload} />
+            <input ref={fileInput} type="file" multiple accept=".zip,.tex,.bib,.bbl,.bst,.cls,.sty,.txt,.md,.markdown,.pdf,application/pdf,.docx,.xlsx,.xls,.pptx,image/*" style={{ display: 'none' }} onChange={onUpload} />
             <input ref={reviewInput} type="file" accept=".json,application/json" style={{ display: 'none' }} onChange={onReviewFile} />
             <input ref={dirInput} type="file" multiple style={{ display: 'none' }} onChange={onUploadFolder} />
             <button className="btn btn-icon" title="Upload files" aria-label="Upload files" onClick={() => fileInput.current.click()}>
