@@ -139,9 +139,20 @@
   }
 
   /* ---- server push (debounced per project) ---- */
-  var pending = {}, timers = {};
+  var pending = {}, timers = {}, inflight = {};
+  // `pending` dies with the page, so it cannot protect a project whose 500 ms debounce was cut short by a
+  // navigation (create -> open). `unconf` is its durable twin: persisted, exempt from the hydrate prune, and
+  // re-sent on the next load — the project-level equivalent of the annotation queue above.
+  var UNCONF = 'proofreader:cloud:' + me.id + ':unconfirmed';
+  var UNCONF_TTL = 7 * 24 * 60 * 60 * 1000;
+  var unconf = {}; try { unconf = JSON.parse(localStorage.getItem(UNCONF) || '{}') || {}; } catch (e) { unconf = {}; }
+  function persistUnconf() { try { localStorage.setItem(UNCONF, JSON.stringify(unconf)); } catch (e) { } }
+  function markUnconf(id) { if (!unconf[id]) { unconf[id] = Date.now(); persistUnconf(); } }
+  function clearUnconf(id) { if (unconf[id]) { delete unconf[id]; persistUnconf(); } }
+  (function expireUnconf() { var now = Date.now(), ch = false; Object.keys(unconf).forEach(function (id) { if (!unconf[id] || (now - unconf[id]) > UNCONF_TTL) { delete unconf[id]; ch = true; } }); if (ch) persistUnconf(); })();
   function pushProject(p) {
     pending[p.id] = p;
+    markUnconf(p.id);
     clearTimeout(timers[p.id]);
     timers[p.id] = setTimeout(function () { flush(p.id); }, 500);
   }
@@ -151,20 +162,37 @@
     var m = (p.members || []).filter(function (x) { return x.userId === me.id; })[0];
     return m ? m.role : null;
   }
+  // A rejection the server will never accept on retry (permission/RLS/constraint) — retrying it forever would
+  // pin an unconfirmed marker on the project. Transport/timeouts are NOT permanent and keep retrying.
+  function permanentSaveError(err) {
+    var c = String((err && err.code) || ''), m = String((err && err.message) || '');
+    return c === '42501' || /^23/.test(c) || /^22/.test(c) || /permission denied|violates row-level security|another owner|no write access/i.test(m);
+  }
+  // Returns a Promise<boolean>: true once the row has landed server-side (or there was nothing to send).
   function flush(id) {
-    var p = pending[id]; if (!p) return; delete pending[id];
+    var p = pending[id];
+    if (!p) return inflight[id] || Promise.resolve(true);   // nothing queued, or already in flight
+    delete pending[id];
     var role = myRoleOn(p);
     // Commenters/viewers never write the project row; their comments/to-dos go through the granular annotation
     // RPCs (pr_upsert_annotation / pr_delete_annotation), not this full-project flush.
-    if (role !== 'owner' && role !== 'editor') return;
+    if (role !== 'owner' && role !== 'editor') { clearUnconf(id); return Promise.resolve(true); }
     var delAt = p.deletedAt ? new Date(p.deletedAt).toISOString() : null;
+    function retry() { pending[id] = p; clearTimeout(timers[id]); timers[id] = setTimeout(function () { flush(id); }, 4000); return false; }
     // pr_save_project saves the doc/files/members but PRESERVES the server's annotations array — so a debounced
     // full-project save can never clobber comments/to-dos a collaborator added meanwhile (insert if new,
     // update if it exists; gated to owner/editor server-side, which also lets a non-owner editor save).
-    sb.rpc('pr_save_project', { p_id: p.id, p_owner: p.ownerId || me.id, p_data: p, p_title: p.title || 'Untitled project', p_deleted_at: delAt }).then(function (r) {
-      if (r && r.error) { console.warn('[PR] save failed, will retry', r.error.message); pending[id] = p; clearTimeout(timers[id]); timers[id] = setTimeout(function () { flush(id); }, 4000); return; }
-      syncMembers(p);
-    }).catch(function (e) { console.warn('[PR] save error', e); });
+    var pr = sb.rpc('pr_save_project', { p_id: p.id, p_owner: p.ownerId || me.id, p_data: p, p_title: p.title || 'Untitled project', p_deleted_at: delAt })
+      .then(function (r) {
+        if (r && r.error) {
+          if (permanentSaveError(r.error)) { clearUnconf(id); console.warn('[PR] save rejected (dropped)', r.error.message); return false; }
+          console.warn('[PR] save failed, will retry', r.error.message); return retry();
+        }
+        clearUnconf(id); syncMembers(p); return true;
+      }, function (e) { console.warn('[PR] save error', e); return retry(); })
+      .then(function (ok) { if (inflight[id] === pr) delete inflight[id]; return ok; });
+    inflight[id] = pr;
+    return pr;
   }
   function syncMembers(p) {
     try {
@@ -187,6 +215,19 @@
   // thesis row is megabytes — refetching it every 10s blew the Supabase egress quota). We first fetch only
   // id+updated_at (tiny), then pull `data` ONLY for projects whose updated_at actually changed (or are new).
   var tsCache = {};   // id -> last-seen updated_at
+  // One-shot recovery: a project we still hold locally but the server has NEVER seen (its debounced save died
+  // with a navigation) is re-sent now. Only our own rows, only once per page load.
+  var redrove = false;
+  function redriveUnconf(seen) {
+    if (redrove) return; redrove = true;
+    Object.keys(unconf).forEach(function (id) {
+      if (seen[id]) { clearUnconf(id); return; }                            // server already has the row
+      var i = idx(id);
+      if (i < 0 || CACHE[i].ownerId !== me.id) { clearUnconf(id); return; }  // nothing local left / not ours
+      console.info('[PR] re-sending unconfirmed project', id);
+      pushProject(CACHE[i]);
+    });
+  }
   function hydrate() {
     // Scope to what THIS user owns or is a member of (explicit, not admin-RLS). Owner sees trashed rows too.
     var ownedQ = sb.from('projects').select('id,updated_at,deleted_at').eq('owner_id', me.id);
@@ -208,7 +249,8 @@
           var i = idx(row.id);
           if (i >= 0) { if (row.deleted_at) { if (!CACHE[i].deletedAt) CACHE[i].deletedAt = Date.parse(row.deleted_at) || Date.now(); } else if (CACHE[i].deletedAt) { delete CACHE[i].deletedAt; } }
         });
-        CACHE = CACHE.filter(function (p) { return seen[p.id] || pending[p.id]; });   // drop projects we lost access to
+        CACHE = CACHE.filter(function (p) { return seen[p.id] || pending[p.id] || unconf[p.id]; });   // drop projects we lost access to — but NEVER one whose save is unconfirmed
+        redriveUnconf(seen);
         need = need.filter(function (id) { return !pending[id]; });                    // don't clobber a locally-queued edit
         if (!need.length) { persistWarm(); notify(); loadProfilesFor(CACHE); return; }
         sb.from('projects').select('id,data,updated_at,deleted_at').in('id', need).then(function (full) {
@@ -248,6 +290,12 @@
   } catch (e) { }
   window.addEventListener('focus', hydrateSoon);
   document.addEventListener('visibilitychange', function () { if (!document.hidden) hydrateSoon(); });
+  // A navigation / tab close must not sit on a 500 ms debounce. Fire the queued saves immediately — the request
+  // may still be cut off at document teardown, which is why the persisted `unconf` markers (re-sent on the next
+  // load) are the real guarantee, not this.
+  function flushAllNow() { Object.keys(pending).forEach(function (id) { clearTimeout(timers[id]); flush(id); }); }
+  window.addEventListener('pagehide', flushAllNow);
+  document.addEventListener('visibilitychange', function () { if (document.hidden) flushAllNow(); });
   // fallback poll — now light (id+updated_at only; full data fetched only for genuinely-changed rows)
   setInterval(function () { if (!document.hidden) hydrate(); }, 15000);
 
@@ -320,6 +368,11 @@
     subscribe: subscribe,
     _notify: notify,
     _hydrate: hydrate,
+    // Force this project's debounced save to the server NOW; resolves true once it has landed (or there was
+    // nothing to send), false if the server rejected it. ANY caller that navigates away right after a write
+    // MUST await this — a page unload silently kills the 500 ms debounce.
+    flushNow: function (id) { if (!id) return Promise.resolve(true); clearTimeout(timers[id]); return flush(id); },
+    flushAll: function () { return Promise.all(Object.keys(pending).map(function (id) { clearTimeout(timers[id]); return flush(id); })).then(function (rs) { return rs.every(Boolean); }); },
 
     raw: function () { return CACHE.map(normalize); },
     list: function () { return this.raw().filter(function (p) { return !p.deletedAt; }).slice().sort(function (a, b) { return (b.updated || 0) - (a.updated || 0); }); },
@@ -362,7 +415,7 @@
     // must not lose the state if the debounced upsert hasn't fired yet.
     remove: function (id) { var p = this.get(id); if (!p) return; p.deletedAt = Date.now(); this.save(p); this.logActivity(id, me.id, 'moved to trash', p.title); try { sb.from('projects').update({ deleted_at: new Date(p.deletedAt).toISOString() }).eq('id', id).then(function () {}, function () {}); } catch (e) {} },
     restore: function (id) { var p = this.get(id); if (!p) return; delete p.deletedAt; this.save(p); this.logActivity(id, me.id, 'restored', p.title); try { sb.from('projects').update({ deleted_at: null }).eq('id', id).then(function () {}, function () {}); } catch (e) {} },
-    purge: function (id) { var i = idx(id); if (i >= 0) CACHE.splice(i, 1); persistWarm(); delete pending[id]; try { sb.from('projects').delete().eq('id', id).then(function (r) { if (r && r.error) hardDelete(id); }, function () { hardDelete(id); }); } catch (e) { hardDelete(id); } notify(); },
+    purge: function (id) { var i = idx(id); if (i >= 0) CACHE.splice(i, 1); persistWarm(); delete pending[id]; clearUnconf(id); try { sb.from('projects').delete().eq('id', id).then(function (r) { if (r && r.error) hardDelete(id); }, function () { hardDelete(id); }); } catch (e) { hardDelete(id); } notify(); },
     purgeExpired: function () {
       var now = Date.now(), self = this;
       CACHE.filter(function (p) { return p.deletedAt && (now - p.deletedAt) > TRASH_TTL; }).forEach(function (p) { self.purge(p.id); });

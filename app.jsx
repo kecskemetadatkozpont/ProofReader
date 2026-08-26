@@ -90,8 +90,20 @@
         } catch (e) { }
       }
     }
-    if (!project && window.PRStore) {
-      // No (or not-yet-loaded) project: fall back to the persistent sample project so the editor still works.
+    // An explicitly requested ?p=<id> that we cannot resolve must NEVER silently open a DIFFERENT publication:
+    // that used to drop the user into their most-recently-updated project (list()[0]) while the URL still showed
+    // the requested id — and the autosave below then wrote their edits into that unrelated project.
+    // Local/demo store: an explicit ?p= must still be able to seed an empty store — otherwise the auto-generated
+    // ?p=sample bookmark below would open an unsaveable in-memory phantom.
+    if (!project && PROJECT_ID && !cloud && window.PRStore && window.PRStore.seedIfEmpty) { window.PRStore.seedIfEmpty(); project = window.PRStore.get(PROJECT_ID); }
+    if (!project && PROJECT_ID) {
+      try { window.PR_PROJECT_MISSING = PROJECT_ID; } catch (e) { }
+      // buildInitial runs inside React's RENDER phase and createRoot().render() is async, so a flag read right
+      // after render() would still be undefined — fire the (idempotent, id-guarded) banner from here instead.
+      setTimeout(function () { showMissingProjectBanner(PROJECT_ID); }, 0);
+    }
+    if (!project && !PROJECT_ID && window.PRStore) {
+      // No project requested at all: fall back to the persistent sample project so the editor still works.
       window.PRStore.seedIfEmpty();
       project = window.PRStore.get('sample') || (window.PRStore.list()[0]);
       // only rewrite the URL when NO explicit project was requested — never clobber a direct link we're still loading
@@ -2577,12 +2589,40 @@
           const src = data.files || {}; const files = {}; const order = [];
           Object.keys(src).forEach((k) => { const f = src[k] || {}; if (f.type === 'image') files[k] = { type: 'image', dataURL: f.content }; else files[k] = { type: fileTypeOf(k), content: f.content != null ? f.content : '' }; order.push(k); });
           if (order.length) { proj.files = files; proj.order = order; proj.active = files['main.tex'] ? 'main.tex' : (order.find((k) => files[k].type === 'tex') || order[0]); window.PRStore.save(proj); }
-          try { await sb.from('research_drafts').update({ editor_project_id: proj.id, status: 'imported', updated_at: new Date().toISOString() }).eq('id', draftId); } catch (e) { }
+          // The project row must exist server-side BEFORE we stamp editor_project_id — otherwise the draft is
+          // permanently pinned to a project that was never created (the short-circuit above redirects to it forever).
+          let saved = true;
+          if (window.PRStore.flushNow) { try { saved = await window.PRStore.flushNow(proj.id); } catch (e) { saved = false; } }
+          if (saved) { try { await sb.from('research_drafts').update({ editor_project_id: proj.id, status: 'imported', updated_at: new Date().toISOString() }).eq('id', draftId); } catch (e) { } }
+          else console.warn('[PR] draft import: project not yet confirmed, draft left unstamped');
           location.replace(location.pathname + '?p=' + proj.id); return;
         }
       }
     } catch (e) { console.warn('[PR] draft import failed', e); }
     ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  }
+  // Plain-DOM banner (no React dependency, cannot break the editor mount).
+  function showMissingProjectBanner(id) {
+    try {
+      if (document.getElementById('pr-missing-proj')) return;
+      const b = document.createElement('div');
+      b.id = 'pr-missing-proj';
+      b.setAttribute('role', 'status');
+      b.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);top:14px;z-index:99999;max-width:min(680px,92vw);background:#fff;border:1px solid #e6e8ee;border-left:4px solid #b45309;border-radius:12px;box-shadow:0 10px 30px rgba(15,18,32,.16);padding:12px 14px;font:14px/1.5 system-ui,sans-serif;color:#1a2030;display:flex;gap:12px;align-items:flex-start';
+      const txt = document.createElement('div');
+      txt.style.cssText = 'flex:1;min-width:0';
+      txt.innerHTML = '<b>Ez a publikáció még nem érhető el</b><div style="color:#5b6473;font-size:12.5px;margin-top:3px">Lehet, hogy még mentés alatt áll (ilyenkor pár másodperc múlva újratöltve megjelenik), vagy törölték / már nincs megosztva veled. <b>Semmit nem írtunk felül</b> — szándékosan nem nyitottunk meg helyette másik publikációt.</div><div style="color:#8a92a0;font-size:11px;margin-top:4px;font-family:ui-monospace,Menlo,monospace">id: ' + String(id).slice(0, 60) + '</div>';
+      const acts = document.createElement('div');
+      acts.style.cssText = 'display:flex;flex-direction:column;gap:6px;flex:none';
+      const rl = document.createElement('button');
+      rl.textContent = '↻ Újratöltés'; rl.style.cssText = 'font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;border:1px solid #4f46e5;background:#4f46e5;color:#fff;border-radius:8px;padding:6px 11px';
+      rl.onclick = function () { location.reload(); };
+      const bk = document.createElement('a');
+      bk.textContent = '‹ Publikációim'; bk.href = 'Projects.html'; bk.style.cssText = 'font:inherit;font-size:12.5px;font-weight:600;text-align:center;text-decoration:none;border:1px solid #e6e8ee;color:#1a2030;border-radius:8px;padding:6px 11px';
+      acts.appendChild(rl); acts.appendChild(bk);
+      b.appendChild(txt); b.appendChild(acts);
+      document.body.appendChild(b);
+    } catch (e) { }
   }
   bootstrap();
 })();

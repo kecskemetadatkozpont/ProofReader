@@ -336,7 +336,10 @@
           members: [{ userId: 'u_bela', role: 'editor', invitedAt: Date.now() }, { userId: 'u_cili', role: 'commenter', invitedAt: Date.now() }],
           activity: [{ id: uid(), actorId: 'u_anna', verb: 'created', target: 'Sample paper', at: Date.now() - 86400000 }] }));
       }
-    }
+    },
+    // Parity with the cloud store: the local store writes synchronously, so there is nothing to flush.
+    flushNow: function () { return Promise.resolve(true); },
+    flushAll: function () { return Promise.resolve(true); }
   };
 
   window.PRStore = Store;

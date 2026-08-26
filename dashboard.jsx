@@ -143,6 +143,8 @@ function NewModal({ me, onClose, onCreate }) {
   const [role, setRole] = useState('editor');
   const [collabs, setCollabs] = useState([]); // [{user, role}]
   const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);        // creating: the server write must land BEFORE we navigate
+  const [saveErr, setSaveErr] = useState('');
   const ref = useRef(null);
   const journalTouched = useRef(false);
   useEffect(() => { if (ref.current) ref.current.focus(); }, []);
@@ -159,7 +161,13 @@ function NewModal({ me, onClose, onCreate }) {
     if (!u) { setErr(isCloudMode() ? 'No registered user with that email.' : 'No user with that email. Try: ' + Auth.users().map((x) => x.email).join(', ')); return; }
     setCollabs((cs) => cs.concat([{ user: u, role }])); setEmail(''); setErr('');
   };
-  const create = () => onCreate(title.trim() || 'Untitled project', tpl, { journal: journal.trim(), members: collabs.map((c) => ({ userId: c.user.id, role: c.role })) });
+  const create = async () => {
+    if (busy) return;                       // guard: a second click must not create a duplicate
+    setBusy(true); setSaveErr('');
+    const ok = await onCreate(title.trim() || 'Untitled project', tpl, { journal: journal.trim(), members: collabs.map((c) => ({ userId: c.user.id, role: c.role })) });
+    // on success we are navigating away — keep busy so the button stays disabled until the page unloads
+    if (ok === false) { setBusy(false); setSaveErr('A publikációt nem sikerült elmenteni a szerverre. Ellenőrizd a kapcsolatot és próbáld újra — a piszkozat helyben megmarad, és automatikusan újraküldjük.'); }
+  };
 
   return (
     <div className="overlay" onClick={onClose}>
@@ -211,7 +219,11 @@ function NewModal({ me, onClose, onCreate }) {
                 <button className={'tpl' + (tpl === 'sample' ? ' on' : '')} onClick={() => setTpl('sample')}><b>Sample paper</b><small>Full demo with figures &amp; math.</small></button>
               </div>}
         </div>
-        <div className="modal-foot"><button className="btn-ghost" onClick={onClose}>Cancel</button><button className="btn-primary" onClick={create}>Create publication</button></div>
+        <div className="modal-foot">
+          {saveErr && <div className="usage-sub" style={{ color: '#dc2626', flex: 1, textAlign: 'left' }}>{saveErr}</div>}
+          <button className="btn-ghost" onClick={onClose} disabled={busy}>Cancel</button>
+          <button className="btn-primary" onClick={create} disabled={busy}>{busy ? 'Creating…' : 'Create publication'}</button>
+        </div>
       </div>
     </div>
   );
@@ -484,6 +496,7 @@ function App() {
   const notif = useNotifications(me && me.id);
   const [modal, setModal] = useState(null); // 'new' | 'usage' | 'activity'
   const [shareId, setShareId] = useState(null);
+  const draftRef = useRef(null);   // {id,tpl} of a create attempt whose server save failed — retried, never duplicated
   const [tab, setTab] = useState('all');
   const [isAdmin, setIsAdmin] = useState(() => !!(window.PR_BACKEND && window.PR_BACKEND.user && window.PR_BACKEND.user.role === 'admin'));
   const [, force] = useState(0);
@@ -525,8 +538,35 @@ function App() {
 
   if (!me) return <SignIn onSignIn={(id) => { Auth.signIn(id); setMe(Auth.byId(id)); }} />;
 
-  const open = (id) => { location.href = 'ProofReader.html?p=' + encodeURIComponent(id); };
-  const create = (title, tpl, opts) => { const p = Store.create(title, tpl, opts); open(p.id); };
+  // Both of these MUST land the server write BEFORE the page unloads — Store.save() is debounced 500 ms and a
+  // navigation silently discards it (that is how a just-created publication used to vanish and the editor then
+  // fell back to another project). Always capped, so a dead network can never freeze the button.
+  const flushCapped = (id) => Promise.race([
+    (Store.flushNow ? Store.flushNow(id) : Promise.resolve(true)).catch(() => false),
+    new Promise((r) => setTimeout(() => r(false), 8000)),
+  ]);
+  const open = async (id) => { try { await flushCapped(id); } catch (e) { } location.href = 'ProofReader.html?p=' + encodeURIComponent(id); };
+  const create = async (title, tpl, opts) => {
+    // A retry after a failed save must RE-SEND the same project, never mint a second one (Store.create assigns a
+    // fresh uuid on every call, so a naive retry would leave an orphan draft and create a duplicate publication).
+    let p = null, d = draftRef.current;
+    if (d && Store.get(d.id)) {
+      if (d.tpl === tpl) {
+        p = Store.get(d.id);
+        p.title = title || 'Untitled project';
+        p.journal = (opts && opts.journal) || '';
+        if (opts && opts.members) p.members = opts.members.filter((m) => m && m.userId && m.userId !== me.id).map((m) => ({ userId: m.userId, role: m.role || 'editor', invitedAt: Date.now() }));
+        Store.save(p);
+      } else { try { Store.purge(d.id); } catch (e) { } }   // template changed → drop the abandoned draft
+    }
+    if (!p) p = Store.create(title, tpl, opts);
+    draftRef.current = { id: p.id, tpl: tpl };
+    const ok = await flushCapped(p.id);
+    if (!ok) return false;            // stay in the modal; the project is queued locally and auto-retried
+    draftRef.current = null;
+    await open(p.id);
+    return true;
+  };
   const trashed = Store.listTrashedFor ? Store.listTrashedFor(me.id) : [];
   const shown = tab === 'trash' ? [] : projects.filter((p) => tab === 'all' ? true : tab === 'owned' ? !p._shared : p._shared);
   const usage = Store.usage(me.id);
