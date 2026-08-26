@@ -30,6 +30,16 @@ function hashBars(seed) {
 function fmtBytes(b) { if (b < 1024) return b + ' B'; if (b < 1048576) return (b / 1024).toFixed(0) + ' KB'; if (b < 1073741824) return (b / 1048576).toFixed(1) + ' MB'; return (b / 1073741824).toFixed(2) + ' GB'; }
 const ROLES = ['editor', 'commenter', 'viewer'];
 const isUrl = (s) => /^https?:\/\//i.test(String(s || '').trim());
+// Accept what researchers actually paste: a full URL, a bare DOI (10.xxxx/yyy), "doi:...", or a bare host.
+const normUrl = (s) => {
+  const v = String(s || '').trim();
+  if (!v) return '';
+  if (/^https?:\/\//i.test(v)) return v;
+  if (/^doi:/i.test(v)) return 'https://doi.org/' + v.replace(/^doi:\s*/i, '').trim();
+  if (/^10\.\d{4,9}\/\S+$/.test(v)) return 'https://doi.org/' + v;
+  if (/^[\w.-]+\.[a-z]{2,}(\/|$)/i.test(v)) return 'https://' + v;
+  return v;   // not URL-shaped: keep the text as typed (rendered as plain text, not a link)
+};
 function journalLabel(j) { if (!j) return ''; const m = /^https?:\/\/([^/]+)/i.exec(j); return m ? m[1].replace(/^www\./, '') : j; }
 const jStyle = { display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 6, fontSize: 11.5, fontWeight: 600, color: 'var(--ink)', background: 'var(--surface-2)', borderRadius: 6, padding: '2px 7px', maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textDecoration: 'none' };
 const isCloudMode = () => !!(window.PR_BACKEND && window.PR_BACKEND.mode === 'cloud');
@@ -394,7 +404,35 @@ function MiniPage({ project }) {
     </div>
   );
 }
-function Card({ project, me, onOpen, onRename, onDuplicate, onDelete, onShare, onStatus }) {
+// Submission / publication links for one publication: where it was sent, and — once accepted — where it lives.
+function LinksModal({ project, onClose, onSave }) {
+  const [sub, setSub] = useState(project.submitUrl || '');
+  const [pub, setPub] = useState(project.pubUrl || '');
+  const ref = useRef(null);
+  useEffect(() => { if (ref.current) ref.current.focus(); }, []);
+  useEffect(() => { const k = (e) => { if (e.key === 'Escape') onClose(); }; document.addEventListener('keydown', k); return () => document.removeEventListener('keydown', k); }, [onClose]);
+  const save = () => onSave({ submitUrl: normUrl(sub), pubUrl: normUrl(pub) });
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="modal" style={{ width: 560 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head"><h3>Beküldés és megjelenés</h3><p>Hova küldted be a kéziratot, és ha elfogadták, hol érhető el.</p></div>
+        <div className="modal-body">
+          <div className="field-label">Beküldési link <span className="usage-sub" style={{ fontWeight: 400 }}>· a folyóirat kezelőfelülete vagy a lap oldala</span></div>
+          <input ref={ref} className="text-input" value={sub} placeholder="https://susy.mdpi.com/user/manuscripts/…" onChange={(e) => setSub(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') save(); }} />
+          <div className="field-label" style={{ marginTop: 14 }}>Megjelenés linkje <span className="usage-sub" style={{ fontWeight: 400 }}>· elfogadás után: DOI vagy a cikk oldala</span></div>
+          <input className="text-input" value={pub} placeholder="10.1038/s41746-025-… vagy https://doi.org/…" onChange={(e) => setPub(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') save(); }} />
+          <div className="usage-sub" style={{ marginTop: 10 }}>A csupasz DOI-t automatikusan <b>doi.org</b> linkké alakítjuk. Üresen hagyva a mező törlődik.</div>
+        </div>
+        <div className="modal-foot">
+          <button className="btn-ghost" onClick={onClose}>Mégse</button>
+          <button className="btn-primary" onClick={save}>Mentés</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Card({ project, me, onOpen, onRename, onDuplicate, onDelete, onShare, onStatus, onLinks }) {
   const status = project.status || 'Drafting';
   const stColor = STAGE_COLOR[status] || '#8a92a0';
   const [renaming, setRenaming] = useState(false);
@@ -433,6 +471,18 @@ function Card({ project, me, onOpen, onRename, onDuplicate, onDelete, onShare, o
         {project.journal && (isUrl(project.journal)
           ? <a href={project.journal} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} style={jStyle} title={project.journal}>↗ {journalLabel(project.journal)}</a>
           : <span style={jStyle} title={project.journal}>{journalLabel(project.journal)}</span>)}
+        {(project.submitUrl || project.pubUrl || status === 'Accepted') && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {project.submitUrl && (isUrl(project.submitUrl)
+              ? <a href={project.submitUrl} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} style={{ ...jStyle, color: STAGE_COLOR['Submitted'] }} title={'Beküldve ide: ' + project.submitUrl}>↗ Beküldve · {journalLabel(project.submitUrl)}</a>
+              : <span style={{ ...jStyle, color: STAGE_COLOR['Submitted'] }} title={project.submitUrl}>Beküldve · {project.submitUrl}</span>)}
+            {project.pubUrl && (isUrl(project.pubUrl)
+              ? <a href={project.pubUrl} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} style={{ ...jStyle, color: STAGE_COLOR['Accepted'] }} title={'Megjelent: ' + project.pubUrl}>✓ Megjelent · {journalLabel(project.pubUrl)}</a>
+              : <span style={{ ...jStyle, color: STAGE_COLOR['Accepted'] }} title={project.pubUrl}>✓ Megjelent · {project.pubUrl}</span>)}
+            {status === 'Accepted' && !project.pubUrl && onLinks &&
+              <button onClick={(e) => { e.stopPropagation(); onLinks(); }} style={{ ...jStyle, color: STAGE_COLOR['Accepted'], border: '1px dashed ' + STAGE_COLOR['Accepted'] + '66', background: 'transparent', cursor: 'pointer', font: 'inherit', fontSize: 11.5, fontWeight: 600 }} title="Elfogadva — add meg, hol jelent meg">+ Megjelenés linkje</button>}
+          </div>
+        )}
         {members.length > 1 && <div className="members-stack">{members.slice(0, 5).map((u, i) => <Avatar key={i} user={u} size={22} />)}</div>}
         {!renaming && (
           <div className="card-actions" onClick={(e) => e.stopPropagation()}>
@@ -445,6 +495,9 @@ function Card({ project, me, onOpen, onRename, onDuplicate, onDelete, onShare, o
             <span className="ca-grow" />
             <button className="ca ca-ico" onClick={() => setRenaming(true)} title="Rename" aria-label="Rename project">
               <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 2.2l2.8 2.8-7.4 7.4-3.2.4.4-3.2z" /></svg>
+            </button>
+            <button className="ca ca-ico" onClick={onLinks} title="Beküldési és megjelenési link" aria-label="Beküldési és megjelenési link">
+              <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M6.5 9.5a2.5 2.5 0 003.5 0l2-2a2.5 2.5 0 00-3.5-3.5l-.8.8" /><path d="M9.5 6.5a2.5 2.5 0 00-3.5 0l-2 2a2.5 2.5 0 003.5 3.5l.8-.8" /></svg>
             </button>
             <button className="ca ca-ico" onClick={onDuplicate} title="Duplicate" aria-label="Duplicate project">
               <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="5" y="5" width="9" height="9" rx="1.5" /><path d="M11 5V3.5A1.5 1.5 0 009.5 2H3.5A1.5 1.5 0 002 3.5v6A1.5 1.5 0 003.5 11H5" /></svg>
@@ -503,6 +556,7 @@ function App() {
   const [modal, setModal] = useState(null); // 'new' | 'usage' | 'activity'
   const [shareId, setShareId] = useState(null);
   const draftRef = useRef(null);   // {id,tpl} of a create attempt whose server save failed — retried, never duplicated
+  const [linksId, setLinksId] = useState(null);   // publication whose submission/publication links are being edited
   const [tab, setTab] = useState('all');
   const [isAdmin, setIsAdmin] = useState(() => !!(window.PR_BACKEND && window.PR_BACKEND.user && window.PR_BACKEND.user.role === 'admin'));
   const [, force] = useState(0);
@@ -578,6 +632,7 @@ function App() {
   const usage = Store.usage(me.id);
   const stPct = Math.min(100, usage.storageBytes / usage.storageLimit * 100);
   const shareProject = shareId ? Store.get(shareId) : null;
+  const linksProject = linksId ? Store.get(linksId) : null;
 
   return (
     <div>
@@ -631,6 +686,7 @@ function App() {
                 {shown.map((p) => (
                   <Card key={p.id} project={p} me={me} onOpen={() => open(p.id)}
                     onShare={() => setShareId(p.id)}
+                    onLinks={() => setLinksId(p.id)}
                     onRename={(t) => { Store.rename(p.id, t); refresh(); }}
                     onStatus={(s) => { const pr = Store.get(p.id); if (pr) { pr.status = s; Store.save(pr); refresh(); } }}
                     onDuplicate={() => { Store.duplicate(p.id); refresh(); }}
@@ -643,6 +699,7 @@ function App() {
       {modal === 'usage' && <UsageModal me={me} onClose={() => setModal(null)} />}
       {modal === 'activity' && <ActivityModal projects={projects} onClose={() => setModal(null)} />}
       {shareProject && <ShareModal project={shareProject} me={me} onClose={() => setShareId(null)} onChange={() => { force((n) => n + 1); refresh(); }} />}
+      {linksProject && <LinksModal project={linksProject} onClose={() => setLinksId(null)} onSave={(v) => { if (Store.setLinks) Store.setLinks(linksId, v); else { const pr = Store.get(linksId); if (pr) { pr.submitUrl = v.submitUrl; pr.pubUrl = v.pubUrl; Store.save(pr); } }   /* tolerate a stale cached store */ setLinksId(null); force((n) => n + 1); refresh(); }} />}
     </div>
   );
 }

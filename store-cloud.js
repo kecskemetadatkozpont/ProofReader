@@ -423,6 +423,8 @@
     duplicate: function (id) { var s = this.get(id); if (!s) return null; var p = clone(s); p.id = uuid(); p.title = s.title + ' (copy)'; p.created = p.updated = Date.now(); p.ownerId = me.id; p.members = []; p.activity = []; delete p.deletedAt; return this.save(p); },
     rename: function (id, title) { var p = this.get(id); if (!p) return; p.title = title; this.save(p); },
     setJournal: function (id, journal) { var p = this.get(id); if (!p) return; p.journal = (journal || '').trim(); this.save(p); },
+    // Where the manuscript was SUBMITTED, and — once accepted — where it is PUBLISHED (DOI/article page).
+    setLinks: function (id, links) { var p = this.get(id); if (!p) return; links = links || {}; p.submitUrl = String(links.submitUrl || '').trim(); p.pubUrl = String(links.pubUrl || '').trim(); this.save(p); },
     /* ---- trash (soft-delete, 7-day retention, restorable) ---- */
     // The save() debounce (500ms) + the deleted_at column both matter here, so we also
     // push the deleted_at flag DIRECTLY and immediately — a fast reload after delete/restore

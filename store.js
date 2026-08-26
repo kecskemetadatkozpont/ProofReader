@@ -187,6 +187,8 @@
     duplicate: function (id) { var s = this.get(id); if (!s) return null; var p = clone(s); p.id = uid(); p.title = s.title + ' (copy)'; p.created = p.updated = Date.now(); p.ownerId = curId(); p.members = []; p.activity = []; delete p.deletedAt; return this.save(p); },
     rename: function (id, title) { var p = this.get(id); if (!p) return; p.title = title; this.save(p); },
     setJournal: function (id, journal) { var p = this.get(id); if (!p) return; p.journal = (journal || '').trim(); this.save(p); },
+    // Where the manuscript was SUBMITTED, and — once accepted — where it is PUBLISHED (DOI/article page).
+    setLinks: function (id, links) { var p = this.get(id); if (!p) return; links = links || {}; p.submitUrl = String(links.submitUrl || '').trim(); p.pubUrl = String(links.pubUrl || '').trim(); this.save(p); },
     /* ---- trash (soft-delete, 7-day retention, restorable) ---- */
     remove: function (id) { var p = this.get(id); if (!p) return; p.deletedAt = Date.now(); this.save(p); this.logActivity(id, curId(), 'moved to trash', p.title); },
     restore: function (id) { var p = this.get(id); if (!p) return; delete p.deletedAt; this.save(p); this.logActivity(id, curId(), 'restored', p.title); },
