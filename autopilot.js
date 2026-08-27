@@ -1179,15 +1179,23 @@
         var q = function (withStudy) {
           var b = sb.from('research_ideas').select('id,question,hypothesis,novelty,gap_type,rationale').eq('project_id', pid).eq('source', 'gap').neq('status', 'rejected');
           if (withStudy && sid) b = b.eq('study_id', sid);
-          return b.order('created_at', { ascending: false }).limit(20);
+          return b.order('created_at', { ascending: false }).limit(8);
         };
         var set = function (items) { if (alive.current) setGapsByRun(function (m) { var n = Object.assign({}, m); n[rr.id] = items; return n; }); };
+        // ONLY the primary column may fall back to the project's gaps. A branch showing another thread's gaps would
+        // invite the user to develop a gap that its own review never produced.
+        var fallback = function () { if (rr.id !== run.id) { set([]); return; } q(false).then(function (r2) { set((r2 && r2.data) || []); }, function () { set([]); }); };
         q(true).then(function (r) {
-          if ((r && r.error) || !((r && r.data) || []).length) { q(false).then(function (r2) { set((r2 && r2.data) || []); }, function () { set([]); }); return; }
+          if ((r && r.error) || !((r && r.data) || []).length) { fallback(); return; }
           set(r.data);
-        }, function () { q(false).then(function (r2) { set((r2 && r2.data) || []); }, function () { set([]); }); });
+        }, fallback);
       });
-    }, [run && run.project_id, (branchRuns || []).length, run && (run.phases || []).filter(function (x) { return x.key === 'gap'; }).map(function (x) { return x.status; }).join('')]);
+      // deps: EVERY run's own identity + study + gap status — a branch acquires its study_id and finishes its gap
+      // phase long after branchRuns.length last changed, and the primary's status never reflects that (litSig pattern).
+    }, [run && run.project_id, [run].concat(branchRuns || []).filter(Boolean).map(function (r) {
+      var gp = (r.phases || []).filter(function (x) { return x.key === 'gap'; })[0];
+      return r.id + ':' + (r.study_id || '') + ':' + ((gp && gp.status) || '');
+    }).join('|')]);
     useEffect(function () {
       if (!run || !run.project_id) return;
       loadPhaseArts('gap');
@@ -1383,11 +1391,12 @@
     // BRANCH AGAIN at the Research Gap phase: each ticked gap spawns its OWN parallel sibling run that generates a protocol
     // FOR THAT GAP. The runs start at the PROTOCOL phase (the shared literature/review is already collected) → each gap
     // develops into its own protocol, shown as a parallel column next to the idea branches.
-    function startGapBranches() {
-      var ids = Object.keys(selGaps).filter(function (id) { return selGaps[id]; });
+    function startGapBranches(ids, srcRun) {
+      ids = (ids && ids.length) ? ids : Object.keys(selGaps).filter(function (id) { return selGaps[id]; });
       if (!ids.length || gapBusy || !run) return;
       setGapBusy(true);
-      var grp = groupOf(run), prev = run;
+      // clone the phases/config of the column the gaps were ticked in — not always the primary
+      var grp = groupOf(run), prev = srcRun || run;
       function spawn() {
         var protoIdx = -1; (prev.phases || []).forEach(function (p, k) { if (p.key === 'protocol' && protoIdx < 0) protoIdx = k; });
         // everything up to (and incl.) the gap phase is shared/done; the protocol phase is the branch's real work
@@ -1398,9 +1407,9 @@
             return p.enabled ? Object.assign({}, p, { status: 'wait', cursor: null, result: null }) : Object.assign({}, p, { status: 'skipped' });
           });
         };
-        var inserts = ids.map(function (gapId) { return { project_id: prev.project_id, owner_id: uid(), status: 'running', started_at: nowIso(), phase_index: protoIdx >= 0 ? protoIdx : 0, phases: mkGapPhases(), config: Object.assign({}, prev.config || {}, { develop_idea_id: gapId, group_id: grp, gates: false }) }; });
+        var inserts = ids.map(function (gapId) { return { project_id: prev.project_id, owner_id: uid(), status: 'running', started_at: nowIso(), phase_index: protoIdx >= 0 ? protoIdx : 0, phases: mkGapPhases(), config: Object.assign({}, prev.config || {}, { develop_idea_id: gapId, develop_kind: 'gap', group_id: grp, gates: false }) }; });   // develop_kind marks a GAP thread even before its gap row is loaded
         sb.from('research_autopilot_runs').insert(inserts).select('*').then(function (ir) {
-          setGapBusy(false); setSelGaps({});
+          setGapBusy(false); setSelGaps(function (m) { var n = Object.assign({}, m); ids.forEach(function (id) { delete n[id]; }); return n; });   // clear only what we just launched
           var created = (ir && ir.data) || []; setBranchRuns(function (l) { return (l || []).concat(created); }); created.forEach(ensureBranchDrive);
           toast('▶ ' + ids.length + ' kutatási rés párhuzamos kidolgozása (protokoll) elindult.', true);
         }, function () { setGapBusy(false); toast('Nem sikerült elindítani a szálakat.', false); });
@@ -1807,10 +1816,12 @@
       var gaps = gapsByRun[prun.id];
       if (!gaps || !gaps.length) return null;
       var devGap = {}; (branchRuns || []).forEach(function (rr) { var did = rr && rr.config && rr.config.develop_idea_id; if (did) devGap[did] = rr; });
-      var gsel = Object.keys(selGaps).filter(function (id) { return selGaps[id]; }).length;
+      // selGaps is one map; the count and the launch must cover only THIS column's gaps, otherwise every column
+      // shows the same count and any button launches another thread's ticks.
+      var mine = gaps.filter(function (x) { return !!selGaps[x.id]; });
       return h('div', { className: 'apg-gapsi' },
         h('div', { className: 'apg-gapsi-h' }, '🧭 ' + gaps.length + ' kutatási rés — a fenti review-ból; ezekből készül a protokoll'),
-        gaps.map(function (x) {
+        h('div', { className: 'apg-gapc-list' }, gaps.map(function (x) {
           var sel = !!selGaps[x.id], dev = !!devGap[x.id];
           return h('div', { className: 'apg-gapc' + (dev ? ' active' : '') + (sel ? ' sel' : ''), key: x.id, title: (x.hypothesis || x.rationale || x.question || '') },
             h('div', { className: 'apg-gapc-h' },
@@ -1819,8 +1830,8 @@
             h('div', { className: 'apg-gapc-t' }, x.question || 'Kutatási rés'),
             dev ? h('div', { className: 'apg-gapc-badge' }, '◉ Protokoll készül')
               : h('label', { className: 'apg-gapc-pick' }, h('input', { type: 'checkbox', checked: sel, disabled: gapBusy, onChange: function () { toggleGap(x.id); } }), ' Kidolgozásra jelöl'));
-        }),
-        gsel ? h('button', { className: 'btn pri sm', style: { marginTop: 4, alignSelf: 'stretch' }, disabled: gapBusy, onClick: startGapBranches }, gapBusy ? '⏳ Indítás…' : ('▶ Kidolgozás — ' + gsel + ' rés párhuzamosan')) : null);
+        })),
+        mine.length ? h('button', { className: 'btn pri sm', style: { marginTop: 4, alignSelf: 'stretch', height: 'auto', whiteSpace: 'normal', lineHeight: 1.3, padding: '6px 10px' }, disabled: gapBusy, onClick: function () { startGapBranches(mine.map(function (x) { return x.id; }), prun); } }, gapBusy ? '⏳ Indítás…' : ('▶ Kidolgozás — ' + mine.length + ' rés párhuzamosan')) : null);
     }
     function branchColumn(prun) {
       var isPrimary = prun.id === run.id;
@@ -1828,7 +1839,7 @@
       var pool = ideas0.concat((phaseArts.gap && phaseArts.gap.items) || []);   // a branch may develop an IDEA or a research GAP
       var ideaId = (prun.config && prun.config.develop_idea_id) || (isPrimary && ideas0[0] ? ideas0[0].id : null);
       var idea = pool.filter(function (x) { return x.id === ideaId; })[0];
-      var isGapCol = !!(idea && idea.source === 'gap');
+      var isGapCol = ((prun.config && prun.config.develop_kind) === 'gap') || !!(idea && idea.source === 'gap');   // stamped at insert, so it holds before the gap row loads
       var down = (prun.phases || []).filter(function (p) { return DOWN.indexOf(p.key) >= 0 && (p.enabled || AP_WIP[p.key]); });   // WIP phases stay visible (as „kidolgozás alatt")
       var failed = prun.status === 'failed';
       return h('div', { className: 'apg-col' + (isPrimary ? ' primary' : '') + (failed ? ' failed' : ''), key: prun.id },
@@ -1838,12 +1849,23 @@
           isPrimary ? h('span', { className: 'apg-col-tag' }, 'fő') : null,
           failed ? h('button', { className: 'apg-col-retry', title: (prun.error ? ('Hiba: ' + prun.error + ' — ') : '') + 'A szál folytatása onnan, ahol elakadt', onClick: function () { isPrimary ? resume() : resumeBranch(prun.id); } }, '↻ Újra') : null),
         h('div', { className: 'apg-fan-conn' }),
-        h('div', { className: 'apg-col-chain' }, down.map(function (p, i) {
-          var mini = downMini(prun, p, i === down.length - 1);
-          if (p.key !== 'gap' || isGapCol) return mini;   // a gap-thread column develops ONE gap — no fan inside it
-          var fan = gapFanInline(prun);
-          return fan ? h(React.Fragment, { key: p.key }, mini, fan) : mini;
-        })));
+        h('div', { className: 'apg-col-chain' }, (function () {
+          var chain = down.map(function (p, i) {
+            var mini = downMini(prun, p, i === down.length - 1);
+            // a gap-thread column develops ONE gap — no fan inside it; and only show gaps once this thread's own
+            // gap phase actually produced them (otherwise the card would advertise another run's gaps)
+            if (p.key !== 'gap' || isGapCol || p.status !== 'done') return mini;
+            var fan = gapFanInline(prun);
+            // keep the column's spine unbroken: the phase connector sits INSIDE downMini, above the fan
+            return fan ? h(React.Fragment, { key: p.key }, mini, fan, h('div', { className: 'apg-conn done' })) : mini;
+          });
+          // the Research Gap phase can be switched OFF at launch — the project's gaps must still be reachable
+          if (!isGapCol && isPrimary && !down.some(function (p) { return p.key === 'gap'; })) {
+            var f2 = gapFanInline(prun);
+            if (f2) chain.push(h('div', { key: 'gapfan-off', style: { width: '100%' } }, f2));
+          }
+          return chain;
+        })()));
     }
     function branchesRow() {
       var cols = [run].concat((branchRuns || []).filter(function (r) { return r && r.config && r.config.develop_idea_id; }));   // primary always + each branch
