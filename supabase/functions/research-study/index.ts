@@ -497,6 +497,16 @@ Return ONLY JSON, no prose:
       return json({ ok: true, summary: String(parsed.summary || '').slice(0, 400), questions });
     }
 
+    if (action === 'sync_library') {
+      // Repair/refresh: push every study's screening verdicts into the project Library. Idempotent.
+      const project_id = String(body.project_id || '');
+      if (!project_id) return json({ error: 'project_id required' }, 400);
+      const { data: prj } = await sb.from('research_projects').select('id').eq('id', project_id).maybeSingle();   // RLS = access check
+      if (!prj) return json({ error: 'project not found or no access' }, 404);
+      const counts = await syncLibrary(sb, project_id);
+      return json({ ok: true, ...counts });
+    }
+
     const study_id = String(body.study_id || '');
     if (!study_id) return json({ error: 'study_id required' }, 400);
 
@@ -509,15 +519,6 @@ Return ONLY JSON, no prose:
     const model = await resolveModel(sb);
 
     // ---------------- generate_review (step 4) ----------------
-    if (action === 'sync_library') {
-      // Repair/refresh: push every study's screening verdicts into the project Library. Idempotent.
-      const project_id = String(body.project_id || '');
-      if (!project_id) return json({ error: 'project_id required' }, 400);
-      const { data: prj } = await sb.from('research_projects').select('id').eq('id', project_id).maybeSingle();   // RLS = access check
-      if (!prj) return json({ error: 'project not found or no access' }, 404);
-      const counts = await syncLibrary(sb, project_id);
-      return json({ ok: true, ...counts });
-    }
     if (action === 'generate_review') {
       const { data: inc } = await sb.from('research_study_papers').select('source_id').eq('study_id', study_id).eq('step', 3).eq('decision', 'include');
       const ids = (inc || []).map((x: any) => x.source_id);
