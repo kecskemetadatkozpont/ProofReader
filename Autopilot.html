@@ -285,7 +285,17 @@
     .apg-gapsi { width:100%; display:flex; flex-direction:column; gap:6px; margin:2px 0 6px; padding:9px 10px; border-radius:12px;
       background:color-mix(in srgb,var(--h-gap) 6%,var(--surface)); border:1px solid color-mix(in srgb,var(--h-gap) 30%,var(--line)); }
     .apg-gapsi-h { font-size:11px; font-weight:800; letter-spacing:.01em; color:var(--h-gap); line-height:1.35; }
-    .apg-gapc-list { display:flex; flex-direction:column; gap:6px; max-height:300px; overflow-y:auto; }
+    /* gap cards SIDE BY SIDE — each is the root of the protocol generated from it */
+    .apg-gapc-list { display:flex; flex-direction:row; flex-wrap:wrap; justify-content:center; gap:8px; }
+    .apg-gapc { flex:1 1 220px; min-width:200px; max-width:290px; }
+    .apg-col.wide { flex-basis:100%; max-width:100%; }
+    .apg-gapc-proto { display:flex; align-items:center; gap:6px; margin-top:2px; }
+    .apg-gapc-arrow { color:var(--h-proto); font-weight:800; }
+    .apg-gapc-tasks { font-family:inherit; font-size:10.5px; font-weight:800; color:var(--h-proto); background:color-mix(in srgb,var(--h-proto) 13%,transparent);
+      border:1px solid color-mix(in srgb,var(--h-proto) 38%,transparent); border-radius:7px; padding:4px 9px; cursor:pointer; white-space:nowrap; }
+    .apg-gapc-tasks:hover { background:color-mix(in srgb,var(--h-proto) 22%,transparent); }
+    .apg-gapc-tasks.err { color:var(--danger,#b42318); background:color-mix(in srgb,var(--danger,#b42318) 10%,transparent); border-color:color-mix(in srgb,var(--danger,#b42318) 35%,transparent); }
+    .apg-gapc-run { display:flex; align-items:center; gap:5px; font-size:10.5px; font-weight:700; color:var(--muted); }
     .apg-gapc { background:var(--surface); border:1px solid var(--line); border-left:3px solid var(--h-gap); border-radius:9px; padding:7px 9px; display:flex; flex-direction:column; gap:4px; }
     .apg-gapc.active { border-color:var(--h-gap); box-shadow:0 0 0 2px color-mix(in srgb,var(--h-gap) 28%,transparent); }
     .apg-gapc.sel { background:color-mix(in srgb,var(--h-gap) 10%,var(--surface)); }
@@ -532,9 +542,9 @@
     .ap-toast.show { opacity:1; transform:translate(-50%,0); } .ap-toast.err { background:#8a1a12; }
     @media (prefers-reduced-motion:reduce){ .ap-toast { transition:none; } }
   </style>
-  <script src="theme.js?v=1787859691"></script>
-  <script src="nav.js?v=1787859691"></script>
-  <script src="entitlements.js?v=1787859691"></script>
+  <script src="theme.js?v=1787860949"></script>
+  <script src="nav.js?v=1787860949"></script>
+  <script src="entitlements.js?v=1787860949"></script>
 </head>
 
 <body>
@@ -547,13 +557,13 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
-  <script src="backend/config.js?v=1787859691"></script>
-  <script src="auth.js?v=1787859691"></script>
-  <script src="backend.js?v=1787859691"></script>
-  <script src="autopilot.js?v=1787859691"></script>
+  <script src="backend/config.js?v=1787860949"></script>
+  <script src="auth.js?v=1787860949"></script>
+  <script src="backend.js?v=1787860949"></script>
+  <script src="autopilot.js?v=1787860949"></script>
 
-  <script src="build.js?v=1787859691"></script>
-  <script src="version-badge.js?v=1787859691"></script>
+  <script src="build.js?v=1787860949"></script>
+  <script src="version-badge.js?v=1787860949"></script>
 </body>
 
 </html>

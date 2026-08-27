@@ -1828,7 +1828,16 @@
               h('span', { className: 'apg-gapc-chip' }, gapLabel(x.gap_type)),
               (x.novelty != null) ? h('span', { className: 'apg-gapc-n' }, '★ ' + x.novelty) : null),
             h('div', { className: 'apg-gapc-t' }, x.question || 'Kutatási rés'),
-            dev ? h('div', { className: 'apg-gapc-badge' }, '◉ Protokoll készül')
+            // the protocol built FROM THIS GAP hangs off the card itself — that is where it came from
+            dev ? (function () {
+              var gr = devGap[x.id], pp = ((gr.phases || []).filter(function (q) { return q.key === 'protocol'; })[0]) || {}, steps = protoArts[gr.id] || [];
+              return h('div', { className: 'apg-gapc-proto' },
+                h('span', { className: 'apg-gapc-arrow', 'aria-hidden': 'true' }, '↳'),
+                steps.length ? h('button', { className: 'apg-gapc-tasks', title: 'A résből generált feladatok', onClick: function () { openProtocolPreview(gr); } }, '🧪 ' + steps.length + ' feladat ›')
+                  : gr.status === 'failed' ? h('button', { className: 'apg-gapc-tasks err', title: (gr.error || 'Hiba') + ' — folytatás', onClick: function () { resumeBranch(gr.id); } }, '↻ Újra')
+                    : pp.status === 'gate' ? h('button', { className: 'apg-gapc-tasks', onClick: function () { openProtocolPreview(gr); } }, '⏸ Jóváhagyásra vár')
+                      : h('span', { className: 'apg-gapc-run' }, h('span', { className: 'spin' }), ' Protokoll készül…'));
+            })()
               : h('label', { className: 'apg-gapc-pick' }, h('input', { type: 'checkbox', checked: sel, disabled: gapBusy, onChange: function () { toggleGap(x.id); } }), ' Kidolgozásra jelöl'));
         })),
         mine.length ? h('button', { className: 'btn pri sm', style: { marginTop: 4, alignSelf: 'stretch', height: 'auto', whiteSpace: 'normal', lineHeight: 1.3, padding: '6px 10px' }, disabled: gapBusy, onClick: function () { startGapBranches(mine.map(function (x) { return x.id; }), prun); } }, gapBusy ? '⏳ Indítás…' : ('▶ Kidolgozás — ' + mine.length + ' rés párhuzamosan')) : null);
@@ -1842,7 +1851,9 @@
       var isGapCol = ((prun.config && prun.config.develop_kind) === 'gap') || !!(idea && idea.source === 'gap');   // stamped at insert, so it holds before the gap row loads
       var down = (prun.phases || []).filter(function (p) { return DOWN.indexOf(p.key) >= 0 && (p.enabled || AP_WIP[p.key]); });   // WIP phases stay visible (as „kidolgozás alatt")
       var failed = prun.status === 'failed';
-      return h('div', { className: 'apg-col' + (isPrimary ? ' primary' : '') + (failed ? ' failed' : ''), key: prun.id },
+      // a column showing the gap fan needs the full row: the cards sit SIDE BY SIDE, each with its own protocol
+      var showsGaps = !isGapCol && ((gapsByRun[prun.id] || []).length > 0) && down.some(function (p) { return p.key === 'gap' && p.status === 'done'; });
+      return h('div', { className: 'apg-col' + (isPrimary ? ' primary' : '') + (failed ? ' failed' : '') + (showsGaps ? ' wide' : ''), key: prun.id },
         h('div', { className: 'apg-col-h' },
           h('span', { className: 'apg-col-ic' }, failed ? '✕' : (isGapCol ? '🧭' : '💡')),
           h('span', { className: 'apg-col-t', title: (idea && idea.question) || '' }, (idea && idea.question) || (isPrimary ? 'Fő szál' : (isGapCol ? 'Kutatási rés' : 'Ötlet'))),
@@ -1868,7 +1879,9 @@
         })()));
     }
     function branchesRow() {
-      var cols = [run].concat((branchRuns || []).filter(function (r) { return r && r.config && r.config.develop_idea_id; }));   // primary always + each branch
+      // Only IDEA threads are columns. A gap thread belongs UNDER the gap card it develops (gapFanInline), not
+      // beside the ideas as if it were one — that made a research gap look like a new idea.
+      var cols = [run].concat((branchRuns || []).filter(function (r) { return r && r.config && r.config.develop_idea_id && r.config.develop_kind !== 'gap'; }));
       return h('div', { className: 'apg-branches' + (cols.length > 1 ? ' multi' : '') }, cols.map(branchColumn));
     }
     // Research Gap fan: once the pipeline has generated the research gaps, show them side-by-side (like the ideas fan) →
