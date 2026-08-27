@@ -1819,12 +1819,16 @@
       // selGaps is one map; the count and the launch must cover only THIS column's gaps, otherwise every column
       // shows the same count and any button launches another thread's ticks.
       var mine = gaps.filter(function (x) { return !!selGaps[x.id]; });
+      // every developed gap gets its OWN task column below, tied to its card by the same number
+      var developed = gaps.filter(function (x) { return !!devGap[x.id]; });
+      var numOf = {}; developed.forEach(function (x, i) { numOf[x.id] = i + 1; });
       return h('div', { className: 'apg-gapsi' },
         h('div', { className: 'apg-gapsi-h' }, '🧭 ' + gaps.length + ' kutatási rés — a fenti review-ból; ezekből készül a protokoll'),
         h('div', { className: 'apg-gapc-list' }, gaps.map(function (x) {
           var sel = !!selGaps[x.id], dev = !!devGap[x.id];
           return h('div', { className: 'apg-gapc' + (dev ? ' active' : '') + (sel ? ' sel' : ''), key: x.id, title: (x.hypothesis || x.rationale || x.question || '') },
             h('div', { className: 'apg-gapc-h' },
+              numOf[x.id] ? h('span', { className: 'apg-gapc-num' }, numOf[x.id]) : null,
               h('span', { className: 'apg-gapc-chip' }, gapLabel(x.gap_type)),
               (x.novelty != null) ? h('span', { className: 'apg-gapc-n' }, '★ ' + x.novelty) : null),
             h('div', { className: 'apg-gapc-t' }, x.question || 'Kutatási rés'),
@@ -1844,7 +1848,23 @@
             })()
               : h('label', { className: 'apg-gapc-pick' }, h('input', { type: 'checkbox', checked: sel, disabled: gapBusy, onChange: function () { toggleGap(x.id); } }), ' Kidolgozásra jelöl'));
         })),
-        mine.length ? h('button', { className: 'btn pri sm', style: { marginTop: 4, alignSelf: 'stretch', height: 'auto', whiteSpace: 'normal', lineHeight: 1.3, padding: '6px 10px' }, disabled: gapBusy, onClick: function () { startGapBranches(mine.map(function (x) { return x.id; }), prun); } }, gapBusy ? '⏳ Indítás…' : ('▶ Kidolgozás — ' + mine.length + ' rés párhuzamosan')) : null);
+        mine.length ? h('button', { className: 'btn pri sm', style: { marginTop: 4, alignSelf: 'stretch', height: 'auto', whiteSpace: 'normal', lineHeight: 1.3, padding: '6px 10px' }, disabled: gapBusy, onClick: function () { startGapBranches(mine.map(function (x) { return x.id; }), prun); } }, gapBusy ? '⏳ Indítás…' : ('▶ Kidolgozás — ' + mine.length + ' rés párhuzamosan')) : null,
+        // ONE task column per developed gap — as many columns as gaps ticked, each labelled with its gap
+        developed.length ? h('div', { className: 'apg-gaptasks' }, developed.map(function (x) {
+          var gr = devGap[x.id], steps = protoArts[gr.id] || [];
+          var pp = ((gr.phases || []).filter(function (q) { return q.key === 'protocol'; })[0]) || {};
+          return h('div', { className: 'apg-gaptcol', key: gr.id },
+            h('div', { className: 'apg-gaptcol-h' },
+              h('span', { className: 'apg-gapc-num' }, numOf[x.id]),
+              h('span', { className: 'apg-gaptcol-t', title: x.question || '' }, gapLabel(x.gap_type) + ' · ' + String(x.question || 'Kutatási rés')),
+              steps.length ? h('button', { className: 'apg-gaptcol-regen', disabled: !!regenning[gr.id], title: 'Protokoll újragenerálása ebből a résből', onClick: function () { regenProtocol(gr); } }, regenning[gr.id] ? h('span', { className: 'spin' }) : '↻') : null),
+            steps.length ? h('div', { className: 'apg-tcards-col' }, steps.map(protoCard))
+              : h('div', { className: 'apg-gaptcol-empty' },
+                pp.status === 'skipped' ? '– Protokoll kihagyva'
+                  : gr.status === 'failed' ? h('button', { className: 'apg-gapc-tasks err', onClick: function () { resumeBranch(gr.id); } }, '↻ Újra')
+                    : (gr.status === 'done' || gr.status === 'cancelled') ? h('button', { className: 'apg-gapc-tasks', disabled: !!regenning[gr.id], onClick: function () { regenProtocol(gr); } }, regenning[gr.id] ? '⏳ Generálás…' : '↻ Protokoll újra')
+                      : h('span', null, h('span', { className: 'spin' }), ' Protokoll készül…')));
+        })) : null);
     }
     // Which gap cards a column actually renders. Used by BOTH branchColumn and branchesRow so a gap thread can never
     // fall between them: if its card is not rendered anywhere, the thread gets its own column back.
