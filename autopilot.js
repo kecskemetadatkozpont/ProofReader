@@ -1076,6 +1076,7 @@
     var brS = useState([]), branchRuns = brS[0], setBranchRuns = brS[1];    // parallel per-idea branch runs (siblings of the primary run in the same group)
     var selS = useState({}), selIdeas = selS[0], setSelIdeas = selS[1];     // idea_id → true : ideas ticked for parallel development
     var sgS = useState({}), selGaps = sgS[0], setSelGaps = sgS[1];          // gap_id → true : research gaps ticked to develop into a protocol
+    var gbrS = useState({}), gapsByRun = gbrS[0], setGapsByRun = gbrS[1];   // run_id → that thread's research gaps (its own study's)
     var gbS = useState(false), gapBusy = gbS[0], setGapBusy = gbS[1];       // protocol-from-gaps generation in flight
     var ltS = useState({}), litProg = ltS[0], setLitProg = ltS[1];          // run_id → { study_id, steps:[{step,kind,status,cursor,total,counts}], ts } : LIVE literature screening numbers
     var ptaS = useState({}), protoArts = ptaS[0], setProtoArts = ptaS[1];   // run_id → [protocol steps] : inline task cards shown under the Protocol card in the graph
@@ -1168,6 +1169,25 @@
     // eager-load the research gaps so the fan shows them as developable cards. Gaps are PROJECT-scoped (research_ideas
     // source='gap'), so load them whenever they might exist — NOT gated on the current run's gap phase status (a run whose
     // own gap phase was skipped, e.g. an unscreened first pass, still lives in a project that has gaps from another run).
+    // Per-THREAD gaps for the in-flow cards: each column shows the gaps ITS systematic review revealed
+    // (migration-114); legacy/unscoped data falls back to the project's gaps.
+    useEffect(function () {
+      if (!run || !run.project_id) return;
+      var pid = run.project_id;
+      [run].concat(branchRuns || []).filter(Boolean).forEach(function (rr) {
+        var sid = rr.study_id || null;
+        var q = function (withStudy) {
+          var b = sb.from('research_ideas').select('id,question,hypothesis,novelty,gap_type,rationale').eq('project_id', pid).eq('source', 'gap').neq('status', 'rejected');
+          if (withStudy && sid) b = b.eq('study_id', sid);
+          return b.order('created_at', { ascending: false }).limit(20);
+        };
+        var set = function (items) { if (alive.current) setGapsByRun(function (m) { var n = Object.assign({}, m); n[rr.id] = items; return n; }); };
+        q(true).then(function (r) {
+          if ((r && r.error) || !((r && r.data) || []).length) { q(false).then(function (r2) { set((r2 && r2.data) || []); }, function () { set([]); }); return; }
+          set(r.data);
+        }, function () { q(false).then(function (r2) { set((r2 && r2.data) || []); }, function () { set([]); }); });
+      });
+    }, [run && run.project_id, (branchRuns || []).length, run && (run.phases || []).filter(function (x) { return x.key === 'gap'; }).map(function (x) { return x.status; }).join('')]);
     useEffect(function () {
       if (!run || !run.project_id) return;
       loadPhaseArts('gap');
@@ -1781,6 +1801,27 @@
         p.key === 'protocol' ? protoMini(prun) : null,
         conn);
     }
+    // The research gaps sit IN the flow, right after Kivonatolás where the Research Gap phase card is — that is the
+    // branching point: SR → these gaps → a protocol per gap. (They used to hang at the very bottom of the graph.)
+    function gapFanInline(prun) {
+      var gaps = gapsByRun[prun.id];
+      if (!gaps || !gaps.length) return null;
+      var devGap = {}; (branchRuns || []).forEach(function (rr) { var did = rr && rr.config && rr.config.develop_idea_id; if (did) devGap[did] = rr; });
+      var gsel = Object.keys(selGaps).filter(function (id) { return selGaps[id]; }).length;
+      return h('div', { className: 'apg-gapsi' },
+        h('div', { className: 'apg-gapsi-h' }, '🧭 ' + gaps.length + ' kutatási rés — a fenti review-ból; ezekből készül a protokoll'),
+        gaps.map(function (x) {
+          var sel = !!selGaps[x.id], dev = !!devGap[x.id];
+          return h('div', { className: 'apg-gapc' + (dev ? ' active' : '') + (sel ? ' sel' : ''), key: x.id, title: (x.hypothesis || x.rationale || x.question || '') },
+            h('div', { className: 'apg-gapc-h' },
+              h('span', { className: 'apg-gapc-chip' }, gapLabel(x.gap_type)),
+              (x.novelty != null) ? h('span', { className: 'apg-gapc-n' }, '★ ' + x.novelty) : null),
+            h('div', { className: 'apg-gapc-t' }, x.question || 'Kutatási rés'),
+            dev ? h('div', { className: 'apg-gapc-badge' }, '◉ Protokoll készül')
+              : h('label', { className: 'apg-gapc-pick' }, h('input', { type: 'checkbox', checked: sel, disabled: gapBusy, onChange: function () { toggleGap(x.id); } }), ' Kidolgozásra jelöl'));
+        }),
+        gsel ? h('button', { className: 'btn pri sm', style: { marginTop: 4, alignSelf: 'stretch' }, disabled: gapBusy, onClick: startGapBranches }, gapBusy ? '⏳ Indítás…' : ('▶ Kidolgozás — ' + gsel + ' rés párhuzamosan')) : null);
+    }
     function branchColumn(prun) {
       var isPrimary = prun.id === run.id;
       var ideas0 = (phaseArts.ideas && phaseArts.ideas.items) || [];
@@ -1797,7 +1838,12 @@
           isPrimary ? h('span', { className: 'apg-col-tag' }, 'fő') : null,
           failed ? h('button', { className: 'apg-col-retry', title: (prun.error ? ('Hiba: ' + prun.error + ' — ') : '') + 'A szál folytatása onnan, ahol elakadt', onClick: function () { isPrimary ? resume() : resumeBranch(prun.id); } }, '↻ Újra') : null),
         h('div', { className: 'apg-fan-conn' }),
-        h('div', { className: 'apg-col-chain' }, down.map(function (p, i) { return downMini(prun, p, i === down.length - 1); })));
+        h('div', { className: 'apg-col-chain' }, down.map(function (p, i) {
+          var mini = downMini(prun, p, i === down.length - 1);
+          if (p.key !== 'gap' || isGapCol) return mini;   // a gap-thread column develops ONE gap — no fan inside it
+          var fan = gapFanInline(prun);
+          return fan ? h(React.Fragment, { key: p.key }, mini, fan) : mini;
+        })));
     }
     function branchesRow() {
       var cols = [run].concat((branchRuns || []).filter(function (r) { return r && r.config && r.config.develop_idea_id; }));   // primary always + each branch
@@ -1805,36 +1851,6 @@
     }
     // Research Gap fan: once the pipeline has generated the research gaps, show them side-by-side (like the ideas fan) →
     // tick some → each spawns a parallel gap→protocol branch (startGapBranches). Rendered in the flow after the branch columns.
-    function gapFanNode() {
-      var ga = phaseArts.gap, gaps = (ga && !ga.loading && ga.items) || [];
-      if (!gaps.length && !(ga && ga.loading)) return null;
-      var gselCount = Object.keys(selGaps).filter(function (id) { return selGaps[id]; }).length;
-      var devGap = {}; (branchRuns || []).forEach(function (rr) { var did = rr && rr.config && rr.config.develop_idea_id; if (did) devGap[did] = rr; });
-      return h('div', { className: 'apg-step apg-step-wide', key: 'gapfan' },
-        h('div', { className: 'apg-fan-conn' }),
-        h('div', { className: 'apg-node done', style: { '--hue': hueOf('gap') } },
-          h('div', { className: 'apg-hd static' },
-            h('span', { className: 'apg-ic' }, '🧭'),
-            h('span', { className: 'apg-tx' }, h('span', { className: 'apg-lab' }, 'Research Gap-ek' + (gaps.length ? ' · ' + gaps.length : '')), h('span', { className: 'apg-sub' }, 'a fenti systematic review-ból — ezekből készül a protokoll; pipálj ki többet a párhuzamos kidolgozáshoz')))),
-        gaps.length ? h('div', { className: 'apg-fan-conn' }) : null,
-        gaps.length ? h('div', { className: 'apg-fan' }, gaps.map(function (x) {
-          var sel = !!selGaps[x.id], dev = !!devGap[x.id], subtitle = x.rationale || x.hypothesis || '';
-          return h('div', { className: 'apg-idea gap' + (dev ? ' active' : '') + (sel ? ' sel' : ''), key: x.id, style: { '--hue': hueOf('gap') }, title: (x.hypothesis || x.rationale || x.question || '') },
-            h('span', { className: 'apg-idea-h' },
-              h('span', { className: 'apg-idea-ic' }, '🧭'),
-              h('span', { className: 'apg-idea-chip' }, gapLabel(x.gap_type)),
-              (x.novelty != null) ? h('span', { className: 'apg-idea-n' }, '★ ' + x.novelty) : null),
-            h('span', { className: 'apg-idea-t' }, x.question || 'Kutatási rés'),
-            subtitle ? h('span', { className: 'apg-idea-sub' }, subtitle) : null,
-            dev ? h('span', { className: 'apg-idea-badge' }, '◉ Protokoll készül')
-                : h('label', { className: 'apg-idea-pick' }, h('input', { type: 'checkbox', checked: sel, disabled: gapBusy, onChange: function () { toggleGap(x.id); } }), ' Kidolgozásra jelöl'));
-        })) : null,
-        (ga && ga.loading) ? h('div', { className: 'ap-pc-dempty' }, h('span', { className: 'spin' })) : null,
-        gselCount ? h('div', { className: 'apg-develop' }, h('button', { className: 'btn pri sm', disabled: gapBusy, onClick: startGapBranches }, gapBusy ? '⏳ Indítás…' : ('▶ Kidolgozás — ' + gselCount + ' rés párhuzamosan'))) : null,
-        // the flow continues here: the automatic protocol phase plans FROM these gaps (apProtocol → sources:[gap…])
-        gaps.length ? h('div', { className: 'apg-fan-conn' }) : null,
-        gaps.length ? h('div', { className: 'apg-gapout' }, h('span', { className: 'apg-gapout-ic' }, '🧪'), 'Ezekből a résekből készülnek a protokoll-feladatok') : null);
-    }
     // which thread (idea) an activity event belongs to → shown as a chip in the feed when parallel threads run
     function threadLabel(runId) {
       var rr = ([run].concat(branchRuns || [])).filter(function (x) { return x && x.id === runId; })[0];
@@ -1874,8 +1890,7 @@
       h('div', { className: 'ap-dgrid' },
         h('div', { className: 'apg-flow' }, briefNode(),
           phaseNode((phases.filter(function (p) { return p.key === 'ideas'; })[0]) || phases[0], 0, false),   // ideas fan (multi-select)
-          branchesRow(),   // parallel downstream columns — one per developing idea (primary + branches)
-          gapFanNode()),   // research-gap fan → each ticked gap spawns a parallel gap→protocol branch (above)
+          branchesRow()),   // parallel downstream columns — each carries its own gap cards in the flow (gapFanInline)
         h('div', { className: 'ap-dside' },
           focusPanel(),
           h('div', { className: 'ap-card ap-feed' }, h('h3', null, 'Activity', ((branchRuns || []).length ? h('span', { className: 'ap-feed-live' }, '● ' + (1 + (branchRuns || []).length) + ' szál') : null)),
