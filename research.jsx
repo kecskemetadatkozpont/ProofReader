@@ -2639,6 +2639,19 @@
       sb.from('research_sources').insert({ project_id: props.projectId, source_api: 'openalex', ext_id: w.id, doi: w.doi || null, title: w.display_name || 'Untitled', authors: authors.length ? authors : null, year: w.publication_year || null, venue: venueOf(w) || null, abstract: abstractFromInverted(w.abstract_inverted_index), cited_by: w.cited_by_count, url: w.doi || w.id, screening: 'unscreened' }).then(function (res) { if (res && res.error) { if (!/duplicate|unique/i.test(res.error.message)) window.PRUI.toast(res.error.message, { kind: 'error' }); return; } props.onChanged(); });
     }
     function setScreen(s, v) { sb.from('research_sources').update({ screening: v }).eq('id', s.id).then(props.onChanged); }
+    // The screening funnel records its verdicts per STUDY (research_study_papers); the Library counts
+    // research_sources.screening. Without this bridge a finished review shows "0 included" here.
+    var slS = useState(false), syncing = slS[0], setSyncing = slS[1];
+    function syncLibrary() {
+      if (syncing) return; setSyncing(true);
+      sb.functions.invoke('research-study', { body: { action: 'sync_library', project_id: props.projectId } }).then(function (res) {
+        setSyncing(false);
+        var d = res && res.data, e = (res && res.error) || (d && d.error);
+        if (e) { window.PRUI.toast('Nem sikerült átvezetni: ' + (e.message || e), { kind: 'error' }); return; }
+        window.PRUI.toast('✓ ' + ((d && d.include) || 0) + ' cikk „included" a szűrés alapján.', { kind: 'ok' });
+        if (props.onChanged) props.onChanged();
+      }, function () { setSyncing(false); window.PRUI.toast('Hálózati hiba az átvezetésnél.', { kind: 'error' }); });
+    }
     function del(s) { sb.from('research_sources').delete().eq('id', s.id).then(props.onChanged); }
     var lib = (props.sources || []).slice().sort(function (a, b) { return ((studyInc[b.id] && studyInc[b.id].length) ? 1 : 0) - ((studyInc[a.id] && studyInc[a.id].length) ? 1 : 0); });   // study-selected sources first
     var hasSci = scimap && Object.keys(scimap).length > 0;
@@ -2814,6 +2827,7 @@
               running ? ('⏳ Figure Board · ' + (fr.done || 0) + '/' + (fr.total || 0)) : (doneRun ? '✓ Figure Board' : '🖼 Figure Board'));
           })() : null,
           (lib.length && props.canEdit) ? h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12 }, disabled: PRFigureRunner.isRunning(props.projectId), title: 'Ábrák kinyerése a háttérben — fut tovább, amíg az appot használod (teljes újratöltés állítja csak le, onnan folytatható)', onClick: startFigExtract }, PRFigureRunner.isRunning(props.projectId) ? '⏳ Kinyerés…' : '✨ Ábrák kinyerése (háttér)') : null,
+          (lib.length && props.canEdit && Object.keys(studyInc).length) ? h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12 }, disabled: syncing, title: 'A Study-k szűrési döntéseinek átvezetése a könyvtárba (a legmélyebb lépés dönt; egy „included" sosem íródik felül)', onClick: syncLibrary }, syncing ? '⏳ Átvezetés…' : '↻ Szűrés átvezetése') : null,
           lib.length ? h('button', { className: 'btn', style: { padding: '4px 10px', fontSize: 12 }, title: 'Export included (or all) as BibTeX', onClick: function () { var inc = lib.filter(function (x) { return x.screening === 'include'; }); downloadText('library.bib', genBibtex(inc.length ? inc : lib)); } }, '⬇ BibTeX') : null
         )),
         (function () {   // realtime figure-extraction progress (background runner) — survives tab/view switches

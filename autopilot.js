@@ -1419,7 +1419,10 @@
         ]).then(function (res) { if (alive.current) put({ total: (res[0] && res[0].count) || 0, items: (res[1] && res[1].data) || [] }); }, function () { if (alive.current) put({ items: [] }); });
       } else if (key === 'sr') {
         // the generated systematic review is a markdown file in research_files (studies/…-review.md)
-        sb.from('research_files').select('id,path,content,updated_at').eq('project_id', pid).ilike('path', 'studies/%').order('updated_at', { ascending: false }).limit(8)
+        var s8 = String((run && run.study_id) || '').slice(0, 8);   // this run's study — not every study in the project
+        var fq = sb.from('research_files').select('id,path,content,updated_at').eq('project_id', pid);
+        fq = s8 ? fq.ilike('path', 'studies/%-' + s8 + '-review.md') : fq.ilike('path', 'studies/%');
+        fq.order('updated_at', { ascending: false }).limit(8)
           .then(function (r) { if (alive.current) put({ files: ((r && r.data) || []).filter(function (f) { return /\.md$/i.test(f.path); }) }); }, function () { if (alive.current) put({ files: [] }); });
       } else { put({ items: [] }); }   // other phases: the detail shows a Research deep-link instead of a list
     }
@@ -1509,9 +1512,16 @@
     // ── Parallel branch columns: one compact downstream mini-chain per developing idea (primary + branch runs).
     function openReviewPreview(prun) {
       var pid = (prun && prun.project_id) || run.project_id;
-      sb.from('research_files').select('path,content').eq('project_id', pid).ilike('path', 'studies/%').order('updated_at', { ascending: false }).limit(8).then(function (r) {
+      // The review file is written as studies/<slug>-<studyId8>-review.md, so it MUST be matched on this thread's
+      // study — the old query took the project's most recently updated review and therefore showed the same file
+      // for every parallel idea.
+      var sid8 = String((prun && prun.study_id) || '').slice(0, 8);
+      var q = sb.from('research_files').select('path,content').eq('project_id', pid);
+      q = sid8 ? q.ilike('path', 'studies/%-' + sid8 + '-review.md') : q.ilike('path', 'studies/%');
+      q.order('updated_at', { ascending: false }).limit(8).then(function (r) {
         var f = ((r && r.data) || []).filter(function (x) { return /\.md$/i.test(x.path) && x.content != null; })[0];
-        if (f) setPreview({ title: String(f.path).split('/').pop(), content: f.content }); else toast('Nincs elérhető áttekintés-fájl.', false);
+        if (f) setPreview({ title: String(f.path).split('/').pop(), content: f.content });
+        else toast(sid8 ? 'Ehhez a szálhoz még nincs áttekintés-fájl.' : 'Nincs elérhető áttekintés-fájl.', false);
       });
     }
     function openGapPreview(prun) {   // the Research-gap report is a markdown file → reuse the markdown preview modal

@@ -509,6 +509,15 @@ Return ONLY JSON, no prose:
     const model = await resolveModel(sb);
 
     // ---------------- generate_review (step 4) ----------------
+    if (action === 'sync_library') {
+      // Repair/refresh: push every study's screening verdicts into the project Library. Idempotent.
+      const project_id = String(body.project_id || '');
+      if (!project_id) return json({ error: 'project_id required' }, 400);
+      const { data: prj } = await sb.from('research_projects').select('id').eq('id', project_id).maybeSingle();   // RLS = access check
+      if (!prj) return json({ error: 'project not found or no access' }, 404);
+      const counts = await syncLibrary(sb, project_id);
+      return json({ ok: true, ...counts });
+    }
     if (action === 'generate_review') {
       const { data: inc } = await sb.from('research_study_papers').select('source_id').eq('study_id', study_id).eq('step', 3).eq('decision', 'include');
       const ids = (inc || []).map((x: any) => x.source_id);
@@ -527,6 +536,8 @@ Return ONLY JSON, no prose:
       const sid8 = String(study_id).replace(/-/g, '').slice(0, 8);   // #9b: stable per-study id in the filename (unique + traceable, idempotent on re-run)
       const path = 'studies/' + slug + '-' + sid8 + '-review.md';
       await sb.from('research_files').upsert({ project_id: study.project_id, path, content: md, mime: 'text/markdown', size: md.length, source: 'ai', created_by: uid, updated_by: uid, updated_at: new Date().toISOString() }, { onConflict: 'project_id,path' });
+      // the funnel is finished for this study → make the project Library reflect its verdicts
+      try { await syncLibrary(sb, study.project_id, study_id); } catch (_e) { /* best-effort */ }
       await sb.from('research_study_steps').update({ status: 'done', last_run_at: new Date().toISOString() }).eq('study_id', study_id).eq('step', 4);
       await sb.from('research_studies').update({ status: 'done', cur_step: 4, updated_at: new Date().toISOString() }).eq('id', study_id);
       return json({ ok: true, file_path: path, words: md.split(/\s+/).length });
@@ -696,6 +707,46 @@ Return ONLY JSON, no prose:
 });
 
 // Screen a batch of papers with one Claude call, write research_study_papers(step), return UI rows.
+// The project Library (research_sources.screening) is what every downstream view counts — the Literature tab, the
+// extraction matrix, gap analysis, protocol generation, BibTeX export. The funnel writes its verdicts to
+// research_study_papers instead, so without this the Library stays 'unscreened' forever and shows 0 included even
+// when a review included papers. Propagate each study's DEEPEST-step verdict; an include from ANY study wins, and
+// 'exclude'/'maybe' only fill rows nobody has judged yet (a human include is never downgraded).
+async function syncLibrary(sb: any, project_id: string, study_id?: string) {
+  let ids: string[] = [];
+  if (study_id) ids = [study_id];
+  else ids = (((await sb.from('research_studies').select('id').eq('project_id', project_id)).data) || []).map((x: any) => x.id);
+  if (!ids.length) return { include: 0, exclude: 0, maybe: 0 };
+  const { data: rows } = await sb.from('research_study_papers').select('study_id,source_id,step,decision,overridden').in('study_id', ids);
+  // deepest step PER (study, source) — a paper included at step 1 but excluded at step 3 is excluded
+  const deepest: Record<string, any> = {};
+  for (const r of (rows || [])) {
+    const k = r.study_id + '|' + r.source_id, c = deepest[k];
+    if (!c || (r.step || 0) >= (c.step || 0)) deepest[k] = r;
+  }
+  const verdict: Record<string, string> = {};
+  for (const k of Object.keys(deepest)) {
+    const r = deepest[k], sid = r.source_id;
+    const v = (r.decision === 'include' || (r.overridden && r.decision !== 'exclude')) ? 'include' : (r.decision || 'maybe');
+    if (verdict[sid] === 'include') continue;                     // an include from another study already won
+    if (v === 'include' || !verdict[sid] || verdict[sid] === 'maybe') verdict[sid] = v;
+  }
+  const inc: string[] = [], exc: string[] = [], may: string[] = [];
+  for (const sid of Object.keys(verdict)) (verdict[sid] === 'include' ? inc : verdict[sid] === 'exclude' ? exc : may).push(sid);
+  const CH = 150;   // keep the PostgREST URL well under any length limit
+  const apply = async (list: string[], value: string, onlyUnscreened: boolean) => {
+    for (let i = 0; i < list.length; i += CH) {
+      let q = sb.from('research_sources').update({ screening: value }).in('id', list.slice(i, i + CH));
+      q = onlyUnscreened ? q.eq('screening', 'unscreened') : q.neq('screening', value);
+      try { await q; } catch (_e) { /* best-effort: never fail the caller over a Library refresh */ }
+    }
+  };
+  await apply(inc, 'include', false);
+  await apply(exc, 'exclude', true);
+  await apply(may, 'maybe', true);
+  return { include: inc.length, exclude: exc.length, maybe: may.length };
+}
+
 async function screenAndWrite(sb: any, study: any, study_id: string, step: number, config: any, model: string, inputs: any[], fullText: boolean) {
   if (!inputs.length) return [];
   const _lang = await loadProjectLang(sb, study.project_id);
