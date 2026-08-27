@@ -404,6 +404,22 @@
       return apStay(run, Object.assign({}, cur, { idx: nidx, iter: (cur.iter || 0) + 1 }), [{ phase: 'extract', level: 'run', message: 'Kivonatolás: ' + Math.min(nidx, total) + '/' + total + ' hiányzó cella' }]);
     });
   }
+  // The research gaps THIS thread's systematic review revealed, as protocol sources. The gaps — not the raw idea —
+  // are what a protocol should develop: they are the evidence-grounded, actionable output of the review.
+  // Study-scoped first (migration-114); falls back to the project's gaps for legacy/unmigrated data.
+  function threadGapSources(run, project) {
+    var sid = run.study_id || null;
+    var q = function (withStudy) {
+      var b = sb.from('research_ideas').select('id,novelty').eq('project_id', project.id).eq('source', 'gap').neq('status', 'rejected');
+      if (withStudy && sid) b = b.eq('study_id', sid);
+      return b.order('novelty', { ascending: false, nullsFirst: false }).limit(6);
+    };
+    var map = function (r) { return ((r && r.data) || []).map(function (g) { return { kind: 'gap', id: g.id }; }); };
+    return q(true).then(function (r) {
+      if ((r && r.error) || !((r && r.data) || []).length) return q(false).then(map, function () { return []; });
+      return map(r);
+    }, function () { return q(false).then(map, function () { return []; }); });
+  }
   function apProtocol(run, project) {
     var cur = (run.phases[run.phase_index] || {}).cursor || {};
     if (cur.generated) return Promise.resolve(apComplete(run, 'Protokoll jóváhagyva', []));
@@ -427,9 +443,18 @@
       var existing = ex && ex.data && ex.data.id;
       if (existing) return finishProtocol(existing, null, 'Meglévő protokoll átvéve' + (ideaId ? ' (ehhez az ötlethez)' : ''));
       // generate scoped to THIS idea (idea_id → the edge plans from that idea's question/hypothesis)
-      return callEdge('research-protocol', { action: 'generate', project_id: project.id, idea_id: ideaId || undefined, goal: project.goal || project.title || '' }).then(function (d) {
-        if (d && d.error) throw new Error('Protocol: ' + d.error);
-        return finishProtocol(d && d.protocol_id, (d && d.steps) || 0, ((d && d.steps) || 0) + ' protokoll-lépés generálva' + (ideaId ? ' (ötlet-specifikus)' : ''));
+      return threadGapSources(run, project).then(function (gaps) {
+        var payload = { action: 'generate', project_id: project.id, goal: project.goal || project.title || '' };
+        if (gaps.length) {
+          // gaps first (they drive the plan), the idea last so the protocol keeps its idea provenance
+          payload.sources = gaps.concat(ideaId ? [{ kind: 'idea', id: ideaId }] : []);
+          if (ideaId) payload.idea_id = ideaId;
+        } else if (ideaId) payload.idea_id = ideaId;   // no gaps yet → plan from the idea, as before
+        return callEdge('research-protocol', payload).then(function (d) {
+          if (d && d.error) throw new Error('Protocol: ' + d.error);
+          var n = (d && d.steps) || 0;
+          return finishProtocol(d && d.protocol_id, n, n + ' protokoll-lépés generálva' + (gaps.length ? (' — ' + gaps.length + ' kutatási rés kidolgozására') : (ideaId ? ' (ötlet-specifikus)' : '')));
+        });
       });
     });
   }
@@ -1683,7 +1708,12 @@
       if (!proj) { toast('A projekt még tölt — próbáld újra.', false); return; }
       setRegenning(function (m) { var n = Object.assign({}, m); n[prun.id] = true; return n; });
       var clear = function () { setRegenning(function (m) { var n = Object.assign({}, m); delete n[prun.id]; return n; }); };
-      callEdge('research-protocol', { action: 'generate', project_id: proj.id, idea_id: ideaId || undefined, goal: proj.goal || proj.title || '' }).then(function (d) {
+      threadGapSources(prun, proj).then(function (gaps) {
+        var payload = { action: 'generate', project_id: proj.id, goal: proj.goal || proj.title || '' };
+        if (gaps.length) { payload.sources = gaps.concat(ideaId ? [{ kind: 'idea', id: ideaId }] : []); if (ideaId) payload.idea_id = ideaId; }
+        else if (ideaId) payload.idea_id = ideaId;
+        return callEdge('research-protocol', payload);
+      }).then(function (d) {
         if (d && d.error) { clear(); toast('Hiba: ' + d.error, false); return; }
         var pid = d && d.protocol_id;
         if (!pid) { clear(); toast('Nem jött létre protokoll.', false); return; }
@@ -1785,7 +1815,7 @@
         h('div', { className: 'apg-node done', style: { '--hue': hueOf('gap') } },
           h('div', { className: 'apg-hd static' },
             h('span', { className: 'apg-ic' }, '🧭'),
-            h('span', { className: 'apg-tx' }, h('span', { className: 'apg-lab' }, 'Research Gap-ek' + (gaps.length ? ' · ' + gaps.length : '')), h('span', { className: 'apg-sub' }, 'a felkutatott irodalomból — pipáld ki, melyeket dolgozzon ki (protokoll) párhuzamosan')))),
+            h('span', { className: 'apg-tx' }, h('span', { className: 'apg-lab' }, 'Research Gap-ek' + (gaps.length ? ' · ' + gaps.length : '')), h('span', { className: 'apg-sub' }, 'a fenti systematic review-ból — ezekből készül a protokoll; pipálj ki többet a párhuzamos kidolgozáshoz')))),
         gaps.length ? h('div', { className: 'apg-fan-conn' }) : null,
         gaps.length ? h('div', { className: 'apg-fan' }, gaps.map(function (x) {
           var sel = !!selGaps[x.id], dev = !!devGap[x.id], subtitle = x.rationale || x.hypothesis || '';
@@ -1800,7 +1830,10 @@
                 : h('label', { className: 'apg-idea-pick' }, h('input', { type: 'checkbox', checked: sel, disabled: gapBusy, onChange: function () { toggleGap(x.id); } }), ' Kidolgozásra jelöl'));
         })) : null,
         (ga && ga.loading) ? h('div', { className: 'ap-pc-dempty' }, h('span', { className: 'spin' })) : null,
-        gselCount ? h('div', { className: 'apg-develop' }, h('button', { className: 'btn pri sm', disabled: gapBusy, onClick: startGapBranches }, gapBusy ? '⏳ Indítás…' : ('▶ Kidolgozás — ' + gselCount + ' rés párhuzamosan'))) : null);
+        gselCount ? h('div', { className: 'apg-develop' }, h('button', { className: 'btn pri sm', disabled: gapBusy, onClick: startGapBranches }, gapBusy ? '⏳ Indítás…' : ('▶ Kidolgozás — ' + gselCount + ' rés párhuzamosan'))) : null,
+        // the flow continues here: the automatic protocol phase plans FROM these gaps (apProtocol → sources:[gap…])
+        gaps.length ? h('div', { className: 'apg-fan-conn' }) : null,
+        gaps.length ? h('div', { className: 'apg-gapout' }, h('span', { className: 'apg-gapout-ic' }, '🧪'), 'Ezekből a résekből készülnek a protokoll-feladatok') : null);
     }
     // which thread (idea) an activity event belongs to → shown as a chip in the feed when parallel threads run
     function threadLabel(runId) {
