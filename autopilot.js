@@ -408,6 +408,11 @@
   // are what a protocol should develop: they are the evidence-grounded, actionable output of the review.
   // Study-scoped first (migration-114); falls back to the project's gaps for legacy/unmigrated data.
   function threadGapSources(run, project) {
+    // A gap thread develops exactly ONE gap — never widen it to the project's other gaps, or the protocol (and its
+    // idea_id provenance, which the edge stamps from the first source) would belong to a different gap.
+    if ((run.config && run.config.develop_kind) === 'gap' && run.config.develop_idea_id) {
+      return Promise.resolve([{ kind: 'gap', id: run.config.develop_idea_id }]);
+    }
     var sid = run.study_id || null;
     var q = function (withStudy) {
       var b = sb.from('research_ideas').select('id,novelty').eq('project_id', project.id).eq('source', 'gap').neq('status', 'rejected');
@@ -1115,7 +1120,7 @@
           if (!alive.current || !driving.current) { driving.current = false; return; }
           if (!r) {   // another tab holds a live lease OR the run is no longer 'running' → stop driving; live view keeps flowing via Realtime
             driving.current = false;
-            sb.from('research_autopilot_runs').select('*').eq('id', props.runId).maybeSingle().then(function (x) { if (alive.current && x && x.data) setRun(x.data); });
+            sb.from('research_autopilot_runs').select('*').eq('id', props.runId).maybeSingle().order('created_at', { ascending: true }).then(function (x) { if (alive.current && x && x.data) setRun(x.data); });
             return;
           }
           ensureProject(r.project_id).then(function (proj) {
@@ -1336,12 +1341,12 @@
     function loadProtoArts() {
       var runs = [run].concat(branchRunsRef.current || []).filter(Boolean);
       var pidToRun = {}, pids = [];
-      runs.forEach(function (r) { var pp = (r.phases || []).filter(function (p) { return p.key === 'protocol'; })[0]; if (r.protocol_id && pp && (pp.status === 'done' || pp.status === 'gate' || pp.status === 'running')) { pidToRun[r.protocol_id] = r.id; pids.push(r.protocol_id); } });
+      runs.forEach(function (r) { var pp = (r.phases || []).filter(function (p) { return p.key === 'protocol'; })[0]; if (r.protocol_id && pp && (pp.status === 'done' || pp.status === 'gate' || pp.status === 'running')) { (pidToRun[r.protocol_id] = pidToRun[r.protocol_id] || []).push(r.id); pids.push(r.protocol_id); } });   // several runs can share an ADOPTED protocol — map to ALL of them, else one column renders empty
       if (!pids.length) return;
       sb.from('research_protocol_steps').select('id,protocol_id,ord,title,kind,needs_approval,status,spec').in('protocol_id', pids).order('ord', { ascending: true }).then(function (res) {
         if (!alive.current) return;
         var byProto = {}; ((res && res.data) || []).forEach(function (s) { (byProto[s.protocol_id] = byProto[s.protocol_id] || []).push(s); });
-        setProtoArts(function (prev) { var next = Object.assign({}, prev); Object.keys(pidToRun).forEach(function (pid) { if (byProto[pid]) next[pidToRun[pid]] = byProto[pid]; }); return next; });
+        setProtoArts(function (prev) { var next = Object.assign({}, prev); Object.keys(pidToRun).forEach(function (pid) { if (byProto[pid]) (pidToRun[pid] || []).forEach(function (rid) { next[rid] = byProto[pid]; }); }); return next; });
       });
     }
     var protoSig = [run].concat(branchRuns || []).filter(Boolean).map(function (r) { var pp = (r.phases || []).filter(function (p) { return p.key === 'protocol'; })[0]; return r.id + ':' + (r.protocol_id || '') + ':' + ((pp && pp.status) || ''); }).join('|');
@@ -1393,7 +1398,11 @@
     // develops into its own protocol, shown as a parallel column next to the idea branches.
     function startGapBranches(ids, srcRun) {
       ids = (ids && ids.length) ? ids : Object.keys(selGaps).filter(function (id) { return selGaps[id]; });
-      if (!ids.length || gapBusy || !run) return;
+      // a gap already being developed must not get a SECOND run — its tasks would be paid for but unreachable
+      var dup = ids.filter(function (id) { return (branchRuns || []).some(function (rr) { return rr && rr.config && rr.config.develop_idea_id === id && rr.status !== 'cancelled'; }); });
+      ids = ids.filter(function (id) { return dup.indexOf(id) < 0; });
+      if (dup.length) toast(dup.length + ' rés kidolgozása már fut — kihagyva.', false);
+      if (!ids.length || gapBusy || !run) { if (!ids.length) setGapBusy(false); return; }
       setGapBusy(true);
       // clone the phases/config of the column the gaps were ticked in — not always the primary
       var grp = groupOf(run), prev = srcRun || run;
@@ -1853,13 +1862,17 @@
         developed.length ? h('div', { className: 'apg-gaptasks' }, developed.map(function (x) {
           var gr = devGap[x.id], steps = protoArts[gr.id] || [];
           var pp = ((gr.phases || []).filter(function (q) { return q.key === 'protocol'; })[0]) || {};
+          var open = (protoOpen[gr.id] !== undefined) ? protoOpen[gr.id] : (developed.length <= 1);
           return h('div', { className: 'apg-gaptcol', key: gr.id },
             h('div', { className: 'apg-gaptcol-h' },
               h('span', { className: 'apg-gapc-num' }, numOf[x.id]),
               h('span', { className: 'apg-gaptcol-t', title: x.question || '' }, gapLabel(x.gap_type) + ' · ' + String(x.question || 'Kutatási rés')),
               steps.length ? h('button', { className: 'apg-gaptcol-regen', disabled: !!regenning[gr.id], title: 'Protokoll újragenerálása ebből a résből', onClick: function () { regenProtocol(gr); } }, regenning[gr.id] ? h('span', { className: 'spin' }) : '↻') : null),
-            steps.length ? h('div', { className: 'apg-tcards-col' }, steps.map(protoCard))
-              : h('div', { className: 'apg-gaptcol-empty' },
+            // a full task card is tall; with several gaps developed the columns start collapsed (same idiom as protoMini)
+            steps.length ? h('button', { className: 'apg-gaptcol-toggle', onClick: function () { setProtoOpen(function (m) { var n = Object.assign({}, m); n[gr.id] = !open; return n; }); } },
+              h('span', null, '🧪 ' + steps.length + ' feladat'), h('span', { className: 'apg-ptasks-caret' }, open ? '▾ összecsuk' : '▸ kibont')) : null,
+            (steps.length && open) ? h('div', { className: 'apg-tcards-col' }, steps.map(protoCard))
+              : steps.length ? null : h('div', { className: 'apg-gaptcol-empty' },
                 pp.status === 'skipped' ? '– Protokoll kihagyva'
                   : gr.status === 'failed' ? h('button', { className: 'apg-gapc-tasks err', onClick: function () { resumeBranch(gr.id); } }, '↻ Újra')
                     : (gr.status === 'done' || gr.status === 'cancelled') ? h('button', { className: 'apg-gapc-tasks', disabled: !!regenning[gr.id], onClick: function () { regenProtocol(gr); } }, regenning[gr.id] ? '⏳ Generálás…' : '↻ Protokoll újra')
