@@ -1816,7 +1816,8 @@
           h('span', { className: 'apg-mini-ic' }, AP_ICON[p.key] || '•'),
           h('span', { className: 'apg-mini-lab' }, p.label),
           action),
-        p.key === 'protocol' ? protoMini(prun) : null,
+        (p.key === 'protocol' && !hasGapProtocols(prun)) ? protoMini(prun) : null,
+        (p.key === 'protocol' && hasGapProtocols(prun)) ? h('div', { className: 'apg-proto-note' }, '↑ A feladatok résenként, a rés-kártyák alatt') : null,
         conn);
     }
     // The research gaps sit IN the flow, right after Kivonatolás where the Research Gap phase card is — that is the
@@ -1892,6 +1893,11 @@
       // show once this thread's gap phase produced them, while any of them is being developed (so a re-run of the
       // upstream phases cannot hide a running gap thread), or when the phase was switched off (primary only)
       return (gapDone || devHere || (!hasGapPhase && prun.id === run.id)) ? gs : [];
+    }
+    // True when this column already shows a protocol PER GAP under the gap cards — then the thread-level Protocol
+    // card must not repeat a big task list of its own (that is the duplication the gap columns replaced).
+    function hasGapProtocols(prun) {
+      return columnGaps(prun).some(function (g) { return (branchRuns || []).some(function (rr) { return rr && rr.config && rr.config.develop_idea_id === g.id; }); });
     }
     function branchColumn(prun) {
       var isPrimary = prun.id === run.id;
