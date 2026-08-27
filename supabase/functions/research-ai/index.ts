@@ -33,7 +33,7 @@ Deno.serve(async (req) => {
       Deno.env.get('SUPABASE_ANON_KEY')!,
       { global: { headers: { Authorization: auth } } },
     );
-    const { action = 'gap', project_id, canvas, text, row, col, from, to, kind, force } = await req.json().catch(() => ({}));
+    const { action = 'gap', project_id, canvas, text, row, col, from, to, kind, force, study_id } = await req.json().catch(() => ({}));
     if (!project_id) return json({ error: 'project_id required' }, 400);
     if (!ANTHROPIC_KEY) return json({ error: 'ANTHROPIC_API_KEY not set on the function' }, 503);
 
@@ -90,17 +90,28 @@ Deno.serve(async (req) => {
       const all = gsrc || [];
       // the Autopilot funnel writes includes to research_study_papers.decision (NOT research_sources.screening) — honor both,
       // so gap analysis prefers the ACTUALLY screened-in library instead of falling back to the raw, unscreened pile.
+      // PER-THREAD gaps: with a study_id we look ONLY at that study's screened-in papers, so each parallel idea
+      // produces gaps from ITS OWN systematic review instead of one project-wide set. Without it, behaviour is
+      // unchanged (every study's includes, then the raw library).
+      const scopeStudy = String(study_id || '');
       const incIds = new Set<string>();
+      let deepestOK = false;
       try {
-        const { data: studies } = await sb.from('research_studies').select('id').eq('project_id', project_id);
-        const sids = (studies || []).map((s: any) => s.id);
+        let sids: string[] = [];
+        if (scopeStudy) sids = [scopeStudy];
+        else sids = (((await sb.from('research_studies').select('id').eq('project_id', project_id)).data) || []).map((s: any) => s.id);
         if (sids.length) {
-          const { data: sp } = await sb.from('research_study_papers').select('source_id,decision,overridden').in('study_id', sids);
-          for (const p of (sp || [])) { if (p.decision === 'include' || (p.overridden && p.decision !== 'exclude')) incIds.add(p.source_id); }
+          const { data: sp } = await sb.from('research_study_papers').select('source_id,step,decision,overridden').in('study_id', sids);
+          // deepest step per source decides (included at step 1 but excluded at step 3 = excluded)
+          const deep: Record<string, any> = {};
+          for (const r of (sp || [])) { const c = deep[r.source_id]; if (!c || (r.step || 0) >= (c.step || 0)) deep[r.source_id] = r; }
+          for (const k of Object.keys(deep)) { const r = deep[k]; if (r.decision === 'include' || (r.overridden && r.decision !== 'exclude')) incIds.add(r.source_id); }
+          deepestOK = incIds.size > 0;
         }
       } catch { /* best-effort — screening store optional */ }
-      const inc = all.filter((s: any) => s.screening === 'include' || s.screening === 'included' || incIds.has(s.id));
-      const lib = (inc.length >= 4 ? inc : all).slice(0, 60);   // prefer the screened-in library; fall back to top-cited everything
+      const inc = all.filter((s: any) => (scopeStudy ? incIds.has(s.id) : (s.screening === 'include' || s.screening === 'included' || incIds.has(s.id))));
+      // a scoped run must NOT silently widen to the whole project unless its own study yielded nothing at all
+      const lib = ((scopeStudy && deepestOK) ? inc : (inc.length >= 4 ? inc : all)).slice(0, 60);
       const N = lib.length;
       const TYPES = ['evidence', 'knowledge', 'methodological', 'population', 'theoretical', 'practical', 'contradictory'];
       const gaps = await askClaudeGaps(proj, lib, userModel, _lang);
@@ -114,6 +125,7 @@ Deno.serve(async (req) => {
         const gt = TYPES.indexOf(String(g.gap_type || '').toLowerCase().trim()) >= 0 ? String(g.gap_type).toLowerCase().trim() : 'knowledge';
         return {
           project_id, source: 'gap', status: 'candidate', gap_type: gt, evidence: ev,
+          study_id: scopeStudy || null,   // which systematic review revealed this gap (migration-114)
           question: String(g.statement || g.question || '').slice(0, 600),
           rationale: g.rationale ? String(g.rationale).slice(0, 1000) : null,
           hypothesis: g.suggested_question ? String(g.suggested_question).slice(0, 800) : null,
@@ -121,11 +133,16 @@ Deno.serve(async (req) => {
         };
       }).filter((r: any) => r.question);
       if (!rows.length) return json({ ok: true, count: 0, ideas: [] });
-      let res = await sb.from('research_ideas').insert(rows).select('id,question,source,novelty,status,gap_type,evidence,created_at');
-      if (res.error && /gap_type|evidence|addressed_by|column/i.test(res.error.message)) {
-        // migration-83 not applied yet → insert untyped gaps so the feature still works (client shows a degrade banner)
-        const bare = rows.map((r: any) => { const { gap_type, evidence, ...rest } = r; return rest; });
-        res = await sb.from('research_ideas').insert(bare).select('id,question,source,novelty,status,created_at');
+      let res = await sb.from('research_ideas').insert(rows).select('id,question,source,novelty,status,gap_type,evidence,study_id,created_at');
+      if (res.error && /study_id|column/i.test(res.error.message)) {
+        // migration-114 not applied yet → drop the study link (gaps still work, just not thread-scoped in the UI)
+        const noStudy = rows.map((r: any) => { const { study_id: _s, ...rest } = r; return rest; });
+        res = await sb.from('research_ideas').insert(noStudy).select('id,question,source,novelty,status,gap_type,evidence,created_at');
+        if (res.error && /gap_type|evidence|addressed_by|column/i.test(res.error.message)) {
+          // migration-83 not applied either → insert untyped gaps so the feature still works
+          const bare = noStudy.map((r: any) => { const { gap_type, evidence, ...rest } = r; return rest; });
+          res = await sb.from('research_ideas').insert(bare).select('id,question,source,novelty,status,created_at');
+        }
       }
       if (res.error) return json({ error: 'insert failed: ' + res.error.message }, 403);
       return json({ ok: true, count: (res.data || rows).length, ideas: res.data || [] });

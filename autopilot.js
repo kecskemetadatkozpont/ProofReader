@@ -258,19 +258,30 @@
   // in the full library (research-ai gap_analyze → typed, evidence-grounded gaps as research_ideas source='gap'). They are
   // shown as parallel cards; each can be developed into a protocol. Idempotent: adopt existing gaps on a retry.
   function apGap(run, project) {
+    var sid = run.study_id || null;   // this thread's systematic review
     // persist the generated gaps as a report + complete the phase
     function finishGaps(gaps) {
       var md = '# Research Gap-ek\n\nA teljes összegyűjtött irodalom + áttekintés alapján azonosított, kidolgozható kutatási rések.\n\n'
         + gaps.map(function (g, i) { return (i + 1) + '. **' + (g.question || 'Rés') + '**' + (g.novelty != null ? ' — újdonság: ' + g.novelty : ''); }).join('\n')
         + '\n\n*A Publify Autopilot Research Gap fázisából.*\n';
-      return saveFile(project.id, 'autopilot/research-gap.md', md, 'ai').then(function () {
+      // per-thread file — a single shared autopilot/research-gap.md would be overwritten by every parallel branch
+      var gpath = sid ? ('studies/gaps-' + String(sid).slice(0, 8) + '.md') : 'autopilot/research-gap.md';
+      return saveFile(project.id, gpath, md, 'ai').then(function () {
         return apComplete(run, gaps.length + ' kutatási rés generálva', [{ phase: 'gap', level: 'run', message: gaps.length + ' kidolgozható research gap generálva az irodalomból' }]);
       });
     }
-    return sb.from('research_ideas').select('id').eq('project_id', project.id).eq('source', 'gap').neq('status', 'rejected').limit(1).then(function (gr) {
-      if (((gr && gr.data) || []).length) return apComplete(run, 'Meglévő kutatási rések', [{ phase: 'gap', level: 'sys', message: 'Már vannak rések — a gap-generálás kimarad' }]);
-      // primary: typed, evidence-grounded gaps (prefers screened-in literature)
-      return callEdge('research-ai', { action: 'gap_analyze', project_id: project.id }).then(function (d) {
+    // Each parallel thread derives gaps from ITS OWN systematic review, so the check for "already generated" and
+    // the generation itself are scoped to this run's study (migration-114). Without the column/study we behave
+    // exactly as before: one project-wide set.
+    var gq = sb.from('research_ideas').select('id').eq('project_id', project.id).eq('source', 'gap').neq('status', 'rejected').limit(1);
+    if (sid) gq = gq.eq('study_id', sid);
+    return gq.then(function (gr) {
+      if (gr && gr.error) return { data: [] };   // column missing (migration-114 not applied) → treat as "none yet"
+      return gr;
+    }, function () { return { data: [] }; }).then(function (gr) {
+      if (((gr && gr.data) || []).length) return apComplete(run, 'Meglévő kutatási rések', [{ phase: 'gap', level: 'sys', message: 'Már vannak rések ehhez a szálhoz — a gap-generálás kimarad' }]);
+      // primary: typed, evidence-grounded gaps from THIS study's screened-in literature
+      return callEdge('research-ai', { action: 'gap_analyze', project_id: project.id, study_id: sid || undefined }).then(function (d) {
         if (d && d.error) throw new Error('Gap: ' + d.error);
         var gaps = (d && d.ideas) || [];
         if (gaps.length) return finishGaps(gaps);
@@ -1410,8 +1421,17 @@
           .then(function (r) { if (alive.current) put({ items: (r && r.data) || [] }); }, function () { if (alive.current) put({ items: [] }); });
       } else if (key === 'gap') {
         // developable research-gap cards (grounded in the collected library)
-        sb.from('research_ideas').select('id,question,hypothesis,novelty,source,gap_type,rationale').eq('project_id', pid).eq('source', 'gap').neq('status', 'rejected').order('created_at', { ascending: false }).limit(20)
-          .then(function (r) { if (alive.current) put({ items: (r && r.data) || [] }); }, function () { if (alive.current) put({ items: [] }); });
+        var gsid = (run && run.study_id) || null;
+        var base = function (withStudy) {
+          var q = sb.from('research_ideas').select('id,question,hypothesis,novelty,source,gap_type,rationale').eq('project_id', pid).eq('source', 'gap').neq('status', 'rejected');
+          if (withStudy && gsid) q = q.eq('study_id', gsid);
+          return q.order('created_at', { ascending: false }).limit(20);
+        };
+        base(true).then(function (r) {
+          // no study column yet (migration-114) or no thread-scoped gaps → fall back to the project's gaps
+          if ((r && r.error) || !((r && r.data) || []).length) { base(false).then(function (r2) { if (alive.current) put({ items: (r2 && r2.data) || [] }); }, function () { if (alive.current) put({ items: [] }); }); return; }
+          if (alive.current) put({ items: r.data });
+        }, function () { base(false).then(function (r2) { if (alive.current) put({ items: (r2 && r2.data) || [] }); }, function () { if (alive.current) put({ items: [] }); }); });
       } else if (key === 'literature') {
         Promise.all([
           sb.from('research_sources').select('id', { count: 'exact', head: true }).eq('project_id', pid),
@@ -1526,10 +1546,14 @@
     }
     function openGapPreview(prun) {   // the Research-gap report is a markdown file → reuse the markdown preview modal
       var pid = (prun && prun.project_id) || run.project_id;
-      sb.from('research_files').select('path,content').eq('project_id', pid).eq('path', 'autopilot/research-gap.md').maybeSingle().then(function (r) {
-        var f = r && r.data;
-        if (f && f.content != null) setPreview({ title: 'Research Gap ellenőrzés', content: f.content }); else toast('Nincs elérhető gap-jelentés.', false);
-      });
+      var gs8 = String((prun && prun.study_id) || '').slice(0, 8);
+      var read = function (path) { return sb.from('research_files').select('path,content').eq('project_id', pid).eq('path', path).maybeSingle(); };
+      var show = function (r) { var f = r && r.data; if (f && f.content != null) { setPreview({ title: 'Research Gap ellenőrzés', content: f.content }); return true; } return false; };
+      // this thread's own report first; older runs wrote one shared file, so fall back to it
+      (gs8 ? read('studies/gaps-' + gs8 + '.md') : Promise.resolve(null)).then(function (r) {
+        if (show(r)) return;
+        read('autopilot/research-gap.md').then(function (r2) { if (!show(r2)) toast('Nincs elérhető gap-jelentés.', false); }, function () { toast('Nincs elérhető gap-jelentés.', false); });
+      }, function () { read('autopilot/research-gap.md').then(function (r2) { if (!show(r2)) toast('Nincs elérhető gap-jelentés.', false); }, function () { toast('Nincs elérhető gap-jelentés.', false); }); });
     }
     // ── Screening-review DRAWER: reopen a study's screened papers, override the AI decisions (e.g. rescue papers when
     //    a step excluded everything, or push "maybe" papers through), then continue the run with the chosen set.
