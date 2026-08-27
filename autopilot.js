@@ -1813,8 +1813,8 @@
     // The research gaps sit IN the flow, right after Kivonatolás where the Research Gap phase card is — that is the
     // branching point: SR → these gaps → a protocol per gap. (They used to hang at the very bottom of the graph.)
     function gapFanInline(prun) {
-      var gaps = gapsByRun[prun.id];
-      if (!gaps || !gaps.length) return null;
+      var gaps = columnGaps(prun);
+      if (!gaps.length) return null;
       var devGap = {}; (branchRuns || []).forEach(function (rr) { var did = rr && rr.config && rr.config.develop_idea_id; if (did) devGap[did] = rr; });
       // selGaps is one map; the count and the launch must cover only THIS column's gaps, otherwise every column
       // shows the same count and any button launches another thread's ticks.
@@ -1836,11 +1836,29 @@
                 steps.length ? h('button', { className: 'apg-gapc-tasks', title: 'A résből generált feladatok', onClick: function () { openProtocolPreview(gr); } }, '🧪 ' + steps.length + ' feladat ›')
                   : gr.status === 'failed' ? h('button', { className: 'apg-gapc-tasks err', title: (gr.error || 'Hiba') + ' — folytatás', onClick: function () { resumeBranch(gr.id); } }, '↻ Újra')
                     : pp.status === 'gate' ? h('button', { className: 'apg-gapc-tasks', onClick: function () { openProtocolPreview(gr); } }, '⏸ Jóváhagyásra vár')
-                      : h('span', { className: 'apg-gapc-run' }, h('span', { className: 'spin' }), ' Protokoll készül…'));
+                      // TERMINAL states must never keep spinning: the phase was switched off, or the run finished
+                      // without steps (empty generation / adopted empty protocol / failed step fetch).
+                      : pp.status === 'skipped' ? h('span', { className: 'apg-gapc-run' }, '– Protokoll kihagyva')
+                        : (gr.status === 'done' || gr.status === 'cancelled') ? h('button', { className: 'apg-gapc-tasks', disabled: !!regenning[gr.id], title: 'Nincs betöltött feladat — protokoll újragenerálása ebből a résből', onClick: function () { regenProtocol(gr); } }, regenning[gr.id] ? '⏳ Generálás…' : '↻ Protokoll újra')
+                          : h('span', { className: 'apg-gapc-run' }, h('span', { className: 'spin' }), ' Protokoll készül…'));
             })()
               : h('label', { className: 'apg-gapc-pick' }, h('input', { type: 'checkbox', checked: sel, disabled: gapBusy, onChange: function () { toggleGap(x.id); } }), ' Kidolgozásra jelöl'));
         })),
         mine.length ? h('button', { className: 'btn pri sm', style: { marginTop: 4, alignSelf: 'stretch', height: 'auto', whiteSpace: 'normal', lineHeight: 1.3, padding: '6px 10px' }, disabled: gapBusy, onClick: function () { startGapBranches(mine.map(function (x) { return x.id; }), prun); } }, gapBusy ? '⏳ Indítás…' : ('▶ Kidolgozás — ' + mine.length + ' rés párhuzamosan')) : null);
+    }
+    // Which gap cards a column actually renders. Used by BOTH branchColumn and branchesRow so a gap thread can never
+    // fall between them: if its card is not rendered anywhere, the thread gets its own column back.
+    function columnGaps(prun) {
+      if (!prun || ((prun.config && prun.config.develop_kind) === 'gap')) return [];
+      var gs = gapsByRun[prun.id] || [];
+      if (!gs.length) return [];
+      var ph = prun.phases || [];
+      var gapDone = ph.some(function (p) { return p.key === 'gap' && p.status === 'done'; });
+      var hasGapPhase = ph.some(function (p) { return p.key === 'gap' && (p.enabled || AP_WIP[p.key]); });
+      var devHere = gs.some(function (g) { return (branchRuns || []).some(function (rr) { return rr && rr.config && rr.config.develop_idea_id === g.id; }); });
+      // show once this thread's gap phase produced them, while any of them is being developed (so a re-run of the
+      // upstream phases cannot hide a running gap thread), or when the phase was switched off (primary only)
+      return (gapDone || devHere || (!hasGapPhase && prun.id === run.id)) ? gs : [];
     }
     function branchColumn(prun) {
       var isPrimary = prun.id === run.id;
@@ -1852,7 +1870,7 @@
       var down = (prun.phases || []).filter(function (p) { return DOWN.indexOf(p.key) >= 0 && (p.enabled || AP_WIP[p.key]); });   // WIP phases stay visible (as „kidolgozás alatt")
       var failed = prun.status === 'failed';
       // a column showing the gap fan needs the full row: the cards sit SIDE BY SIDE, each with its own protocol
-      var showsGaps = !isGapCol && ((gapsByRun[prun.id] || []).length > 0) && down.some(function (p) { return p.key === 'gap' && p.status === 'done'; });
+      var showsGaps = columnGaps(prun).length > 0;
       return h('div', { className: 'apg-col' + (isPrimary ? ' primary' : '') + (failed ? ' failed' : '') + (showsGaps ? ' wide' : ''), key: prun.id },
         h('div', { className: 'apg-col-h' },
           h('span', { className: 'apg-col-ic' }, failed ? '✕' : (isGapCol ? '🧭' : '💡')),
@@ -1865,13 +1883,13 @@
             var mini = downMini(prun, p, i === down.length - 1);
             // a gap-thread column develops ONE gap — no fan inside it; and only show gaps once this thread's own
             // gap phase actually produced them (otherwise the card would advertise another run's gaps)
-            if (p.key !== 'gap' || isGapCol || p.status !== 'done') return mini;
+            if (p.key !== 'gap' || !showsGaps) return mini;
             var fan = gapFanInline(prun);
             // keep the column's spine unbroken: the phase connector sits INSIDE downMini, above the fan
             return fan ? h(React.Fragment, { key: p.key }, mini, fan, h('div', { className: 'apg-conn done' })) : mini;
           });
           // the Research Gap phase can be switched OFF at launch — the project's gaps must still be reachable
-          if (!isGapCol && isPrimary && !down.some(function (p) { return p.key === 'gap'; })) {
+          if (showsGaps && !down.some(function (p) { return p.key === 'gap'; })) {
             var f2 = gapFanInline(prun);
             if (f2) chain.push(h('div', { key: 'gapfan-off', style: { width: '100%' } }, f2));
           }
@@ -1879,9 +1897,14 @@
         })()));
     }
     function branchesRow() {
-      // Only IDEA threads are columns. A gap thread belongs UNDER the gap card it develops (gapFanInline), not
-      // beside the ideas as if it were one — that made a research gap look like a new idea.
-      var cols = [run].concat((branchRuns || []).filter(function (r) { return r && r.config && r.config.develop_idea_id && r.config.develop_kind !== 'gap'; }));
+      // A gap thread belongs UNDER the gap card it develops (that is where it came from), NOT beside the ideas as if
+      // it were a new idea. But it must never become invisible: if no rendered card carries it (upstream phases
+      // re-running, the dashboard opened ON a gap run, a stale cache), it gets its own column back.
+      var ideaCols = [run].concat((branchRuns || []).filter(function (r) { return r && r.config && r.config.develop_kind !== 'gap' && r.id !== run.id; }));
+      var shown = {};
+      ideaCols.forEach(function (c) { columnGaps(c).forEach(function (g) { shown[g.id] = 1; }); });
+      var orphanGaps = (branchRuns || []).filter(function (r) { return r && r.config && r.config.develop_kind === 'gap' && r.id !== run.id && !shown[r.config.develop_idea_id]; });
+      var cols = ideaCols.concat(orphanGaps);
       return h('div', { className: 'apg-branches' + (cols.length > 1 ? ' multi' : '') }, cols.map(branchColumn));
     }
     // Research Gap fan: once the pipeline has generated the research gaps, show them side-by-side (like the ideas fan) →
