@@ -1144,7 +1144,7 @@
       var ro = null; try { ro = new ResizeObserver(sync); ro.observe(st); } catch (e) { }
       window.addEventListener('resize', sync);
       return function () { try { ro && ro.disconnect(); } catch (e) { } window.removeEventListener('resize', sync); };
-    }, [zoom, cvFull]);
+    }, [zoom, cvFull, run && run.id]);
     useEffect(function () {
       if (!cvFull) return;
       var onKey = function (e) { if (e.key === 'Escape') setCvFull(false); };
