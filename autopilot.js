@@ -543,7 +543,12 @@
     var cur = (run.phases[run.phase_index] || {}).cursor || {};
     if (!cur.stage) {
       var norm = apExtractNorm((run.config && run.config.extract_questions) || []);
-      if (!norm.length) norm = EXTRACT_DEFAULTS;   // phase enabled but no questions → sensible defaults
+      if (!norm.length) {
+        // An EXPLICIT empty list means the user removed every question — honour it. Only legacy runs (whose config
+        // never carried the list) fall back to the defaults.
+        if (run.config && run.config.extract_q_set) return Promise.resolve(apSkip(run, 'Nincs kivonatolási kérdés — a fázis kimarad'));
+        norm = EXTRACT_DEFAULTS;
+      }
       var sidMarker = run.study_id || null;
       // Included sources for the matrix (cap to top-cited so the phase converges). BUGFIX: the Autopilot funnel writes its
       // includes to research_study_papers per STUDY (decision='include'), NOT to research_sources.screening — so in study
@@ -1102,12 +1107,15 @@
                 : h('button', { className: 'ap-sw' + (cfg.phases[i] ? ' on' : ''), role: 'switch', 'aria-checked': cfg.phases[i] ? 'true' : 'false', 'aria-label': ph[1], onClick: function () { togglePhase(i); } }, h('i')));
           })),
         extractOn ? h('div', { className: 'ap-clari' },
-          h('div', { className: 'ap-cl-lbl' }, '🔎 Kivonatolási kérdések', h('div', { style: { fontWeight: 400, color: 'var(--muted)', fontSize: 11.5, marginTop: 3 } }, 'A Kivonatolás fázis minden included cikkből kikeresi ezekre a választ (idézettel). Üresen hagyva alap kérdésekkel fut.')),
+          h('div', { className: 'ap-cl-lbl' }, '🔎 Kivonatolási kérdések', h('div', { style: { fontWeight: 400, color: 'var(--muted)', fontSize: 11.5, marginTop: 3 } }, 'A Kivonatolás fázis minden included cikkből kikeresi ezekre a választ (idézettel). Az alábbiak az alapkérdések — bármelyik törölhető az ×-szel. Ha mindet törlöd, a fázis kimarad.')),
           h('div', { className: 'ap-exq-in' },
             h('input', { className: 'ap-exq-input', value: exIn, placeholder: 'pl. Mekkora az adathalmaz mérete?', onChange: function (e) { setExIn(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter') addExQ(); } }),
             h('button', { className: 'ap-exq-add', onClick: function () { addExQ(); } }, '＋')),
           (cfg.extractQuestions && cfg.extractQuestions.length) ? h('div', { className: 'ap-exq-tags' }, cfg.extractQuestions.map(function (q, i) { return h('span', { className: 'ap-exq-tag', key: i }, q.text, h('span', { className: 'x', title: 'Törlés', onClick: function () { delExQ(i); } }, '×')); })) : null,
-          h('div', { className: 'ap-exq-tpl' }, EXTRACT_DEFAULTS.map(function (t, i) { return h('button', { className: 'ap-exq-sug', key: i, onClick: function () { addExQ(t.text); } }, '＋ ' + t.text); }))) : null,
+          h('div', { className: 'ap-exq-tpl' },
+            EXTRACT_DEFAULTS.filter(function (t) { return !(cfg.extractQuestions || []).some(function (q) { return q.text === t.text; }); })
+              .map(function (t, i) { return h('button', { className: 'ap-exq-sug', key: i, onClick: function () { addExQ(t.text); } }, '＋ ' + t.text); }),
+            (cfg.extractQuestions || []).length ? null : h('span', { className: 'ap-exq-none' }, 'Nincs kérdés — a Kivonatolás fázis kimarad.'))) : null,
         h('div', { className: 'ap-gatehint' }, '⏸ ', h('b', null, 'Emberi jóváhagyás bekapcsolva.'), ' Az Autopilot megáll a kulcs-döntéseknél (included források · protokoll-lépések · végső beküldés), és a jóváhagyásodra vár.'),
         h('div', { style: { marginTop: 16 } },
           h('button', { className: 'ap-launch', disabled: props.launching, onClick: props.onLaunch }, props.launching ? h('span', null, h('span', { className: 'spin' }), ' Indítás…') : '⚡ Autopilot indítása →')),
@@ -1439,6 +1447,7 @@
     var rgS = useState({}), regenning = rgS[0], setRegenning = rgS[1];       // run_id → true while its protocol is being regenerated
     var teS = useState(null), taskEd = teS[0], setTaskEd = teS[1];           // the protocol task card opened for editing (ToDo editor + AI chat)
     var lkS = useState([]), links = lkS[0], setLinks = lkS[1];               // SVG connectors: idea card → the column developing it
+    var exqS = useState(null), exqMgr = exqS[0], setExqMgr = exqS[1];        // { prun, studyId, loading, items:[], input, busy } → extraction-question manager
     var driving = useRef(false), alive = useRef(true), projRef = useRef(null), feedRef = useRef(null), myDriver = useRef(null);
     var bDriving = useRef({});   // per-branch-run driving flags (additive; the primary driver above is untouched)
     var branchRunsRef = useRef([]), activeRef = useRef(false);   // live mirrors for the event poller (avoids stale closures)
@@ -1983,6 +1992,37 @@
         read('autopilot/research-gap.md').then(function (r2) { if (!show(r2)) toast('Nincs elérhető gap-jelentés.', false); }, function () { toast('Nincs elérhető gap-jelentés.', false); });
       }, function () { read('autopilot/research-gap.md').then(function (r2) { if (!show(r2)) toast('Nincs elérhető gap-jelentés.', false); }, function () { toast('Nincs elérhető gap-jelentés.', false); }); });
     }
+    // ── Extraction QUESTIONS of this thread: list / add / delete. The questions live in the database from the
+    //    moment the study is created, so the launch-time list is not enough — they must be editable here too.
+    function openExq(prun) {
+      var sid = prun && prun.study_id;
+      if (!sid) { toast('Ehhez a szálhoz még nincs literatúra-study.', false); return; }
+      setExqMgr({ prun: prun, studyId: sid, loading: true, items: [], input: '', busy: false });
+      sb.from('research_extraction_questions').select('id,text,answer_type,source_mode,ord').eq('study_id', sid).order('ord', { ascending: true }).then(function (r) {
+        setExqMgr(function (m) { return m && m.studyId === sid ? Object.assign({}, m, { loading: false, items: (r && r.data) || [] }) : m; });
+      }, function () { setExqMgr(function (m) { return m ? Object.assign({}, m, { loading: false }) : m; }); });
+    }
+    function exqDel(q) {
+      if (!window.confirm('Törlöd ezt a kérdést?\n\n„' + String(q.text || '').slice(0, 120) + '"\n\nA hozzá tartozó kivonatolt válaszok is eltűnnek.')) return;
+      setExqMgr(function (m) { return m ? Object.assign({}, m, { busy: true }) : m; });
+      sb.from('research_extraction_cells').delete().eq('question_id', q.id).then(function () {
+        return sb.from('research_extraction_questions').delete().eq('id', q.id);
+      }).then(function (r) {
+        if (r && r.error) { toast('Törlés hiba: ' + r.error.message, false); setExqMgr(function (m) { return m ? Object.assign({}, m, { busy: false }) : m; }); return; }
+        setExqMgr(function (m) { return m ? Object.assign({}, m, { busy: false, items: (m.items || []).filter(function (x) { return x.id !== q.id; }) }) : m; });
+        toast('✓ Kérdés törölve', true);
+      }, function () { toast('Hálózati hiba.', false); setExqMgr(function (m) { return m ? Object.assign({}, m, { busy: false }) : m; }); });
+    }
+    function exqAdd() {
+      var m0 = exqMgr; if (!m0) return;
+      var t = String(m0.input || '').trim(); if (!t) return;
+      setExqMgr(function (m) { return m ? Object.assign({}, m, { busy: true }) : m; });
+      var ord = (m0.items || []).length;
+      sb.from('research_extraction_questions').insert({ project_id: (m0.prun.project_id || run.project_id), study_id: m0.studyId, text: t.slice(0, 300), answer_type: 'text', source_mode: 'fulltext', ord: ord, created_by: uid() }).select('*').maybeSingle().then(function (r) {
+        if (!r || r.error) { toast('Hozzáadás hiba' + ((r && r.error) ? ': ' + r.error.message : ''), false); setExqMgr(function (m) { return m ? Object.assign({}, m, { busy: false }) : m; }); return; }
+        setExqMgr(function (m) { return m ? Object.assign({}, m, { busy: false, input: '', items: (m.items || []).concat([r.data]) }) : m; });
+      }, function () { toast('Hálózati hiba.', false); setExqMgr(function (m) { return m ? Object.assign({}, m, { busy: false }) : m; }); });
+    }
     // ── Screening-review DRAWER: reopen a study's screened papers, override the AI decisions (e.g. rescue papers when
     //    a step excluded everything, or push "maybe" papers through), then continue the run with the chosen set.
     var SR_STEP = 3;   // generate_review (the SR phase) reads step-3 includes → every manual include is written here so it reaches the review
@@ -2221,7 +2261,9 @@
           conn);
       }
       var action;   // some phases expose a preview affordance once they have output; others just show a status badge
-      if (p.key === 'extract' && (st === 'done' || st === 'running')) action = h('a', { className: 'apg-mini-read ext', href: 'Research.html?project=' + encodeURIComponent(prun.project_id || run.project_id) + '&tab=extract', target: '_blank', rel: 'noopener' }, 'Mátrix ↗');
+      if (p.key === 'extract') action = h('span', { className: 'apg-mini-acts' },
+        prun.study_id ? h('button', { className: 'apg-mini-read', title: 'A szál kivonatolási kérdései — hozzáadás / törlés', onClick: function () { openExq(prun); } }, 'Kérdések') : null,
+        (st === 'done' || st === 'running') ? h('a', { className: 'apg-mini-read ext', href: 'Research.html?project=' + encodeURIComponent(prun.project_id || run.project_id) + '&tab=extract', target: '_blank', rel: 'noopener' }, 'Mátrix ↗') : null);
       else if (p.key === 'sr' && st === 'done') action = h('button', { className: 'apg-mini-read', onClick: function () { openReviewPreview(prun); } }, 'Olvasás');
       else if (p.key === 'gap' && st === 'done') action = h('button', { className: 'apg-mini-read gap', onClick: function () { openGapPreview(prun); } }, 'Rések');
       else if (p.key === 'protocol' && (st === 'done' || st === 'gate')) action = h('button', { className: 'apg-mini-read proto', onClick: function () { openProtocolPreview(prun); } }, 'Feladatok');
@@ -2463,6 +2505,28 @@
             h('a', { className: 'btn sm', href: 'Research.html?project=' + encodeURIComponent(run.project_id), target: '_blank', rel: 'noopener' }, 'Protocol-fül megnyitása ↗'),
             h('button', { className: 'btn pri sm', onClick: function () { setProtoPv(null); } }, 'Bezárás')))) : null,
       // Screening-review DRAWER (right side): override the AI screening decisions, then continue the run.
+      exqMgr ? h('div', { className: 'ap-pv-scrim ap-te-scrim', onClick: function () { setExqMgr(null); } },
+        h('div', { className: 'ap-pv', style: { width: '620px' }, onClick: function (e) { e.stopPropagation(); } },
+          h('div', { className: 'ap-pv-h' }, h('b', null, '🔎 Kivonatolási kérdések'), h('button', { className: 'ap-pv-x', style: { marginLeft: 'auto' }, 'aria-label': 'Bezárás', onClick: function () { setExqMgr(null); } }, '×')),
+          h('div', { className: 'ap-pv-b' },
+            h('div', { className: 'ap-exq-note' }, 'Ennek a szálnak a kérdései. A Kivonatolás fázis minden included cikkből ezekre keresi a választ — a törlés a hozzájuk tartozó válaszokat is eltávolítja.'),
+            exqMgr.loading ? h('div', { style: { textAlign: 'center', padding: '18px' } }, h('span', { className: 'spin' }))
+              : h('div', { className: 'ap-exq-list' }, (exqMgr.items || []).length
+                ? exqMgr.items.map(function (q, i) {
+                  return h('div', { className: 'ap-exq-row', key: q.id },
+                    h('span', { className: 'ap-exq-n' }, i + 1),
+                    h('span', { className: 'ap-exq-t' }, q.text),
+                    h('button', { className: 'ap-exq-del', disabled: !!exqMgr.busy, title: 'Kérdés törlése', onClick: function () { exqDel(q); } }, '×'));
+                })
+                : h('div', { className: 'ap-pc-dempty' }, 'Nincs kérdés ehhez a szálhoz — a Kivonatolás fázis kimarad.')),
+            h('div', { className: 'ap-exq-in', style: { marginTop: 10 } },
+              h('input', {
+                className: 'ap-exq-input', value: exqMgr.input || '', placeholder: 'Új kérdés — pl. Milyen adathalmazon mérték?',
+                onChange: function (e) { var v = e.target.value; setExqMgr(function (m) { return m ? Object.assign({}, m, { input: v }) : m; }); },
+                onKeyDown: function (e) { if (e.key === 'Enter') exqAdd(); }
+              }),
+              h('button', { className: 'ap-exq-add', disabled: !!exqMgr.busy, onClick: exqAdd }, '＋'))),
+          h('div', { className: 'ap-pv-f' }, h('button', { className: 'btn pri sm', onClick: function () { setExqMgr(null); } }, 'Kész')))) : null,
       // rendered LAST so it stacks above the task-list modal it is usually opened from
       taskEd ? h(TaskEdit, { step: taskEd, projectId: run.project_id, onClose: function () { setTaskEd(null); }, onSaved: applyStepUpdate }) : null,
       litRev ? (function () {
@@ -2628,7 +2692,9 @@
     var icS = useState(0), ideasCount = icS[0], setIdeasCount = icS[1];
     var crS = useState(false), creating = crS[0], setCreating = crS[1];
     var lS = useState(false), launching = lS[0], setLaunching = lS[1];
-    var cfgS = useState({ tier: TIERS[0], maxPapers: '500', phases: PHASES.map(function (ph) { return !ph[3]; }), extractQuestions: [] }), cfg = cfgS[0], setCfg = cfgS[1];   // WIP phases default OFF
+    // The default extraction questions are PRE-FILLED as real, removable entries — they used to be invisible
+    // defaults injected at runtime, which is why they could not be deleted.
+    var cfgS = useState({ tier: TIERS[0], maxPapers: '500', phases: PHASES.map(function (ph) { return !ph[3]; }), extractQuestions: EXTRACT_DEFAULTS.map(function (q) { return { text: q.text, answer_type: q.answer_type, source_mode: q.source_mode }; }) }), cfg = cfgS[0], setCfg = cfgS[1];   // WIP phases default OFF
 
     function refreshIdeas(pid) {
       sb.from('research_ideas').select('id', { count: 'exact', head: true }).eq('project_id', pid).then(function (r) { setIdeasCount((r && r.count) || 0); });
@@ -2705,7 +2771,7 @@
         + '\n\n**Emberi jóváhagyás:** bekapcsolva (included források · protokoll-lépések · végső beküldés).\n\n---\n*A Publify Autopilot elindítva.*\n';
       function fail(msg) { setLaunching(false); toast(msg, false); }
       function createRun() {
-        sb.from('research_autopilot_runs').insert({ project_id: project.id, owner_id: u, status: 'running', started_at: nowIso(), phase_index: firstIdx, phases: phases, config: { tier: cfg.tier, max_papers: parseInt(cfg.maxPapers, 10) || null, gates: true, extract_questions: (cfg.extractQuestions || []) } }).select('id').maybeSingle().then(function (rr) {
+        sb.from('research_autopilot_runs').insert({ project_id: project.id, owner_id: u, status: 'running', started_at: nowIso(), phase_index: firstIdx, phases: phases, config: { tier: cfg.tier, max_papers: parseInt(cfg.maxPapers, 10) || null, gates: true, extract_questions: (cfg.extractQuestions || []), extract_q_set: true } }).select('id').maybeSingle().then(function (rr) {
           setLaunching(false);
           if (!rr || rr.error || !rr.data) { fail('Nem sikerült elindítani az Autopilotot' + (rr && rr.error ? ': ' + rr.error.message : '.')); return; }
           var rid = rr.data.id;
