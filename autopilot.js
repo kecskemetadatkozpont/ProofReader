@@ -151,6 +151,60 @@
   // protocol-step task type → icon + label; status → short Hungarian label (used by the Protocol task-card modal)
   var PROTO_KIND = { data: { ic: '📊', lab: 'Adat' }, preprocess: { ic: '🧹', lab: 'Előfeldolgozás' }, feature: { ic: '🧩', lab: 'Jellemzők' }, model: { ic: '🧠', lab: 'Modell' }, train: { ic: '🏋️', lab: 'Tanítás' }, eval: { ic: '📈', lab: 'Kiértékelés' }, analysis: { ic: '🔍', lab: 'Elemzés' }, experiment: { ic: '🧪', lab: 'Kísérlet' }, figure: { ic: '📉', lab: 'Ábra' }, write: { ic: '✍️', lab: 'Írás' }, code: { ic: '💻', lab: 'Kód' } };
   var PROTO_ST = { todo: 'todo', pending: 'vár', running: 'fut', done: 'kész', blocked: 'blokkolt', failed: 'hiba', skipped: 'kihagyva' };
+  // ── Floating panel: the status/activity surfaces sit ON the board (draggable by their header, collapsible),
+  //    so the canvas itself can own the whole page. Position + collapsed state are remembered per panel. ──
+  function FloatPanel(props) {
+    var KEY = 'ap-fp-' + props.id;
+    var pS = useState(function () {
+      var v = null; try { v = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (e) { }
+      return (v && typeof v === 'object') ? { x: v.x, y: v.y, col: !!v.col } : { x: null, y: null, col: !!props.defaultCollapsed };
+    });
+    var pos = pS[0], setPos = pS[1];
+    var elRef = useRef(null), drag = useRef(null), last = useRef(null);
+    function save(o) { try { localStorage.setItem(KEY, JSON.stringify(o)); } catch (e) { } }
+    // First paint: place it from the parent's edge (top-right / bottom-right), then it is user-owned.
+    useEffect(function () {
+      var el = elRef.current, par = el && el.parentNode; if (!el || !par) return;
+      var pw = par.clientWidth, ph = par.clientHeight, w = el.offsetWidth || 340, hh = el.offsetHeight || 200;
+      if (pos.x == null || pos.y == null) {
+        var n = { x: Math.max(8, pw - w - 16), y: props.anchor === 'br' ? Math.max(8, ph - hh - 58) : 14, col: pos.col };
+        setPos(n); save(n); return;
+      }
+      // keep it reachable if the window shrank
+      var cx = Math.max(6, Math.min(Math.max(6, pw - 80), pos.x)), cy = Math.max(6, Math.min(Math.max(6, ph - 40), pos.y));
+      if (cx !== pos.x || cy !== pos.y) { var c = { x: cx, y: cy, col: pos.col }; setPos(c); save(c); }
+    });
+    function down(e) {
+      try { if (e.target && e.target.closest && e.target.closest('button')) return; } catch (er) { }
+      drag.current = { x: e.clientX, y: e.clientY, ox: pos.x || 0, oy: pos.y || 0 };
+      try { e.currentTarget.setPointerCapture(e.pointerId); } catch (er) { }
+      e.preventDefault(); e.stopPropagation();
+    }
+    function move(e) {
+      var d = drag.current; if (!d) return;
+      var el = elRef.current, par = el && el.parentNode; if (!el || !par) return;
+      var nx = Math.max(6, Math.min(Math.max(6, par.clientWidth - 80), d.ox + (e.clientX - d.x)));
+      var ny = Math.max(6, Math.min(Math.max(6, par.clientHeight - 40), d.oy + (e.clientY - d.y)));
+      last.current = { x: nx, y: ny, col: pos.col };
+      setPos(function (o) { return { x: nx, y: ny, col: o.col }; });
+    }
+    function up(e) {
+      if (!drag.current) return; drag.current = null;
+      try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (er) { }
+      save(last.current || pos);
+    }
+    function toggle() { setPos(function (o) { var n = { x: o.x, y: o.y, col: !o.col }; save(n); return n; }); }
+    return h('div', {
+      className: 'ap-fp' + (pos.col ? ' col' : ''), ref: elRef,
+      style: { left: (pos.x || 0) + 'px', top: (pos.y || 0) + 'px', width: (props.width || 340) + 'px', visibility: (pos.x == null ? 'hidden' : 'visible') }
+    },
+      h('div', { className: 'ap-fp-h', onPointerDown: down, onPointerMove: move, onPointerUp: up, onPointerCancel: up, title: 'Húzd a panel áthelyezéséhez' },
+        h('span', { className: 'ap-fp-ic' }, props.icon || '▦'),
+        h('span', { className: 'ap-fp-t' }, props.title),
+        props.badge || null,
+        h('button', { className: 'ap-fp-x', 'aria-label': pos.col ? 'Kinyitás' : 'Összecsukás', title: pos.col ? 'Kinyitás' : 'Összecsukás', onClick: toggle }, pos.col ? '▸' : '▾')),
+      pos.col ? null : h('div', { className: 'ap-fp-body' }, props.children));
+  }
   // ── Task (ToDo) editor: click any protocol task card → edit every field of it, with an AI chat beside the form
   //    that can propose concrete field values (research-protocol · task_assist / refine_step). ──
   var TASK_KINDS = ['data', 'preprocess', 'feature', 'model', 'train', 'eval', 'analysis', 'experiment', 'figure', 'write', 'code', 'custom'];
@@ -1315,6 +1369,34 @@
       window.addEventListener('keydown', onKey);
       return function () { window.removeEventListener('keydown', onKey); };
     }, [cvFull]);
+    // Draw the branch connectors in STAGE coordinates (the stage is transform:scale'd, so divide out the zoom).
+    useEffect(function () {
+      var stage = stageRef.current; if (!stage) return;
+      var apply = function () {
+        var sr = stage.getBoundingClientRect(), out = [];
+        var byIdea = {};
+        Array.prototype.forEach.call(stage.querySelectorAll('[data-idea-card]'), function (el) { byIdea[el.getAttribute('data-idea-card')] = el; });
+        Array.prototype.forEach.call(stage.querySelectorAll('[data-col-from]'), function (col) {
+          var srcId = col.getAttribute('data-col-from'); if (!srcId) return;
+          var from = byIdea[srcId]; if (!from) return;
+          var a = from.getBoundingClientRect(), b = col.getBoundingClientRect();
+          var x1 = (a.left + a.width / 2 - sr.left) / zoom, y1 = (a.bottom - sr.top) / zoom;
+          var x2 = (b.left + b.width / 2 - sr.left) / zoom, y2 = (b.top - sr.top) / zoom;
+          if (!isFinite(x1) || !isFinite(x2)) return;
+          var dy = Math.max(16, (y2 - y1) / 2);
+          out.push({ k: srcId + '>' + (col.getAttribute('data-col-id') || ''), live: col.getAttribute('data-col-live') === '1',
+            d: 'M' + x1.toFixed(1) + ',' + y1.toFixed(1) + ' C' + x1.toFixed(1) + ',' + (y1 + dy).toFixed(1) + ' ' + x2.toFixed(1) + ',' + (y2 - dy).toFixed(1) + ' ' + x2.toFixed(1) + ',' + y2.toFixed(1) });
+        });
+        setLinks(function (prev) {
+          if (prev.length === out.length && prev.every(function (p, i) { return p.d === out[i].d && p.k === out[i].k && p.live === out[i].live; })) return prev;
+          return out;
+        });
+      };
+      apply();
+      var ro = null; try { ro = new ResizeObserver(apply); ro.observe(stage); } catch (e) { }
+      window.addEventListener('resize', apply);
+      return function () { try { ro && ro.disconnect(); } catch (e) { } window.removeEventListener('resize', apply); };
+    });
     var PAN_SKIP = 'button, a, input, textarea, select, label, [data-nopan]';
     function panStart(e) {
       if (e.button !== 0 && e.button !== 1) return;
@@ -1349,6 +1431,7 @@
     var poS = useState({}), protoOpen = poS[0], setProtoOpen = poS[1];       // run_id → false to collapse the inline protocol task cards (default = expanded)
     var rgS = useState({}), regenning = rgS[0], setRegenning = rgS[1];       // run_id → true while its protocol is being regenerated
     var teS = useState(null), taskEd = teS[0], setTaskEd = teS[1];           // the protocol task card opened for editing (ToDo editor + AI chat)
+    var lkS = useState([]), links = lkS[0], setLinks = lkS[1];               // SVG connectors: idea card → the column developing it
     var driving = useRef(false), alive = useRef(true), projRef = useRef(null), feedRef = useRef(null), myDriver = useRef(null);
     var bDriving = useRef({});   // per-branch-run driving flags (additive; the primary driver above is untouched)
     var branchRunsRef = useRef([]), activeRef = useRef(false);   // live mirrors for the event poller (avoids stale closures)
@@ -1846,7 +1929,7 @@
           ideas.length ? h('div', { className: 'apg-fan-conn' }) : null,
           ideas.length ? h('div', { className: 'apg-fan' }, ideas.map(function (x) {
             var dev = !!developing[x.id], sel = !!selIdeas[x.id];
-            return h('div', { className: 'apg-idea' + (dev ? ' active' : '') + (sel ? ' sel' : ''), key: x.id, style: { '--hue': hueOf('ideas') }, title: (x.hypothesis || x.question || '') },
+            return h('div', { className: 'apg-idea' + (dev ? ' active' : '') + (sel ? ' sel' : ''), key: x.id, 'data-idea-card': x.id, style: { '--hue': hueOf('ideas') }, title: (x.hypothesis || x.question || '') },
               h('span', { className: 'apg-idea-h' }, h('span', { className: 'apg-idea-ic' }, '💡'), (x.novelty != null) ? h('span', { className: 'apg-idea-n' }, '★ ' + x.novelty) : null),
               h('span', { className: 'apg-idea-t' }, x.question || 'Ötlet'),
               dev ? h('span', { className: 'apg-idea-badge' + (x.id === guessed ? ' guess' : ''), title: x.id === guessed ? 'Az Autopilot még nem rögzítette a választását — ez a legfrissebb ötlet.' : (autoDev[x.id] ? 'Az Autopilot automatikusan ezt választotta kidolgozásra.' : 'Te jelölted ki kidolgozásra.') },
@@ -2163,7 +2246,7 @@
         h('div', { className: 'apg-gapsi-h' }, '🧭 ' + gaps.length + ' kutatási rés — a fenti review-ból; ezekből készül a protokoll'),
         h('div', { className: 'apg-gapc-list' }, gaps.map(function (x) {
           var sel = !!selGaps[x.id], dev = !!devGap[x.id];
-          return h('div', { className: 'apg-gapc' + (dev ? ' active' : '') + (sel ? ' sel' : ''), key: x.id, title: (x.hypothesis || x.rationale || x.question || '') },
+          return h('div', { className: 'apg-gapc' + (dev ? ' active' : '') + (sel ? ' sel' : ''), key: x.id, 'data-idea-card': x.id, title: (x.hypothesis || x.rationale || x.question || '') },
             h('div', { className: 'apg-gapc-h' },
               numOf[x.id] ? h('span', { className: 'apg-gapc-num' }, numOf[x.id]) : null,
               h('span', { className: 'apg-gapc-chip' }, gapLabel(x.gap_type)),
@@ -2239,7 +2322,8 @@
       var failed = prun.status === 'failed';
       // a column showing the gap fan needs the full row: the cards sit SIDE BY SIDE, each with its own protocol
       var showsGaps = columnGaps(prun).length > 0;
-      return h('div', { className: 'apg-col' + (isPrimary ? ' primary' : '') + (failed ? ' failed' : '') + (showsGaps ? ' wide' : ''), key: prun.id },
+      return h('div', { className: 'apg-col' + (isPrimary ? ' primary' : '') + (failed ? ' failed' : '') + (showsGaps ? ' wide' : ''), key: prun.id,
+        'data-col-id': prun.id, 'data-col-from': ideaId || '', 'data-col-live': (prun.status === 'running' ? '1' : '0') },
         h('div', { className: 'apg-col-h' },
           h('span', { className: 'apg-col-ic' }, failed ? '✕' : (isGapCol ? '🧭' : '💡')),
           h('span', { className: 'apg-col-t', title: (idea && idea.question) || '' }, (idea && idea.question) || (isPrimary ? 'Fő szál' : (isGapCol ? 'Kutatási rés' : 'Ötlet'))),
@@ -2304,7 +2388,7 @@
       return h('div', { className: 'ap-focus' }, h('div', { className: 'ap-focus-h' }, rp ? (AP_ICON[rp.key] + ' ') : '', h('b', null, rp ? rp.label : 'Autopilot')), h('div', { className: 'ap-focus-d' }, rp ? 'Ez a fázis épp dolgozik. A részletek az activity-listában frissülnek élőben.' : (run.status === 'paused' ? 'Szüneteltetve — a „Folytatás" gombbal indíthatod újra.' : 'Indul…')));
     }
 
-    return h('div', { className: 'ap-wrap' },
+    return h('div', { className: 'ap-wrap dash' },
       h('div', { className: 'ap-dhead' },
         h('div', { className: 'mk' }, '⚡'),
         h('div', { className: 'ap-dt' }, h('h2', null, 'Autopilot'), h('div', { className: 'ap-dp' }, (project && project.title) || '…')),
@@ -2315,35 +2399,37 @@
           run.status === 'paused' ? h('button', { className: 'btn pri sm', onClick: resume }, '▶ Folytatás') : null,
           (run.status === 'running' || run.status === 'paused' || run.status === 'awaiting_approval') ? h('button', { className: 'btn sm', onClick: stop }, '⏹ Leállítás') : null)),
       h('div', { className: 'ap-card ap-dov' }, h('div', { className: 'ap-dl' }, 'Fázis ', h('b', null, Math.min(enabledN, doneN + (run.status === 'done' ? 0 : 1))), ' / ', h('b', null, enabledN)), h('div', { className: 'ap-dtrack' }, h('i', { style: { width: pct + '%' } })), h('div', { className: 'ap-dpct mono' }, pct + '%')),
-      h('div', { className: 'ap-dgrid' },
-        // ── The graph lives on a CANVAS: every idea and every developed gap opens a new column to the RIGHT, so the
-        //    board is panned/zoomed rather than squeezed (branches used to wrap onto a new line = "continues below").
-        h('div', { className: 'apg-cwrap' + (cvFull ? ' full' : '') },
-          h('div', {
-            className: 'apg-canvas', ref: cvRef, onWheel: function () { cvTouched.current = true; },
-            onPointerDown: panStart, onPointerMove: panMove, onPointerUp: panEnd, onPointerCancel: panEnd, onClickCapture: panClick
-          },
-            h('div', { className: 'apg-canvas-sizer', ref: sizerRef },
-              h('div', { className: 'apg-stage', ref: stageRef, style: { transform: 'scale(' + zoom + ')' } },
-                h('div', { className: 'apg-flow' }, briefNode(),
-                  phaseNode((phases.filter(function (p) { return p.key === 'ideas'; })[0]) || phases[0], 0, false),   // ideas fan (multi-select)
-                  branchesRow())))),   // parallel downstream columns — each carries its own gap cards in the flow (gapFanInline)
-          h('div', { className: 'apg-hint' }, '✥ Húzd a hátteret a mozgatáshoz'),
-          h('div', { className: 'apg-zoom', 'data-nopan': '1' },
-            h('button', { onClick: function () { setZoomP(zoom - 0.1); }, title: 'Kicsinyítés', 'aria-label': 'Kicsinyítés' }, '−'),
-            h('button', { className: 'z-val', onClick: function () { setZoomP(1); }, title: '100%-ra vissza' }, Math.round(zoom * 100) + '%'),
-            h('button', { onClick: function () { setZoomP(zoom + 0.1); }, title: 'Nagyítás', 'aria-label': 'Nagyítás' }, '+'),
-            h('button', { onClick: fitZoom, title: 'Illesztés a szélességhez' }, '⤡'),
-            h('button', { onClick: function () { setCvFull(!cvFull); }, title: cvFull ? 'Kilépés a teljes nézetből (Esc)' : 'Teljes nézet' }, cvFull ? '✕' : '⤢'))),
-        h('div', { className: 'ap-dside' },
-          focusPanel(),
-          h('div', { className: 'ap-card ap-feed' }, h('h3', null, 'Activity', ((branchRuns || []).length ? h('span', { className: 'ap-feed-live' }, '● ' + (1 + (branchRuns || []).length) + ' szál') : null)),
-            h('div', { className: 'ap-feed-list', ref: feedRef }, events.length ? events.map(function (e) {
-              var multi = (branchRuns || []).length > 0, tag = multi ? threadLabel(e.run_id) : null;
-              return h('div', { className: 'ap-feed-row ' + (e.level || 'run'), key: e.id },
-                h('span', { className: 'ap-fi' }, EV_ICON[e.level] || '•'),
-                h('span', { className: 'ap-ft' }, tag ? h('span', { className: 'ap-fthread', title: tag }, tag.length > 24 ? tag.slice(0, 24) + '…' : tag) : null, e.message));
-            }) : h('div', { className: 'ap-feed-empty' }, 'Még nincs esemény…'))))),
+      // ── The whole page IS the board: the graph lives on a pannable CANVAS and the status/activity surfaces
+      //    float ON it as draggable, collapsible panels. Every new idea/gap thread opens a column to the RIGHT,
+      //    joined to the card it came from by a drawn connector.
+      h('div', { className: 'apg-cwrap' + (cvFull ? ' full' : '') },
+        h('div', {
+          className: 'apg-canvas', ref: cvRef, onWheel: function () { cvTouched.current = true; },
+          onPointerDown: panStart, onPointerMove: panMove, onPointerUp: panEnd, onPointerCancel: panEnd, onClickCapture: panClick
+        },
+          h('div', { className: 'apg-canvas-sizer', ref: sizerRef },
+            h('div', { className: 'apg-stage', ref: stageRef, style: { transform: 'scale(' + zoom + ')' } },
+              h('svg', { className: 'apg-links', 'aria-hidden': 'true' },
+                links.map(function (l) { return h('path', { key: l.k, className: 'apg-link' + (l.live ? ' live' : ''), d: l.d }); })),
+              h('div', { className: 'apg-flow' }, briefNode(),
+                phaseNode((phases.filter(function (p) { return p.key === 'ideas'; })[0]) || phases[0], 0, false),   // ideas fan (multi-select)
+                branchesRow())))),   // parallel downstream columns — each carries its own gap cards in the flow (gapFanInline)
+        h('div', { className: 'apg-hint' }, '✥ Húzd a hátteret a mozgatáshoz'),
+        h('div', { className: 'apg-zoom', 'data-nopan': '1' },
+          h('button', { onClick: function () { setZoomP(zoom - 0.1); }, title: 'Kicsinyítés', 'aria-label': 'Kicsinyítés' }, '−'),
+          h('button', { className: 'z-val', onClick: function () { setZoomP(1); }, title: '100%-ra vissza' }, Math.round(zoom * 100) + '%'),
+          h('button', { onClick: function () { setZoomP(zoom + 0.1); }, title: 'Nagyítás', 'aria-label': 'Nagyítás' }, '+'),
+          h('button', { onClick: fitZoom, title: 'Illesztés a szélességhez' }, '⤡'),
+          h('button', { onClick: function () { setCvFull(!cvFull); }, title: cvFull ? 'Kilépés a teljes nézetből (Esc)' : 'Teljes nézet' }, cvFull ? '✕' : '⤢')),
+        h(FloatPanel, { id: 'focus', icon: '🎯', title: 'Állapot', anchor: 'tr', width: 344 }, focusPanel()),
+        h(FloatPanel, { id: 'feed', icon: '📡', title: 'Activity', anchor: 'br', width: 344,
+          badge: (branchRuns || []).length ? h('span', { className: 'ap-feed-live' }, '● ' + (1 + (branchRuns || []).length) + ' szál') : null },
+          h('div', { className: 'ap-feed-list', ref: feedRef }, events.length ? events.map(function (e) {
+            var multi = (branchRuns || []).length > 0, tag = multi ? threadLabel(e.run_id) : null;
+            return h('div', { className: 'ap-feed-row ' + (e.level || 'run'), key: e.id },
+              h('span', { className: 'ap-fi' }, EV_ICON[e.level] || '•'),
+              h('span', { className: 'ap-ft' }, tag ? h('span', { className: 'ap-fthread', title: tag }, tag.length > 24 ? tag.slice(0, 24) + '…' : tag) : null, e.message));
+          }) : h('div', { className: 'ap-feed-empty' }, 'Még nincs esemény…')))),
       h('div', { className: 'ap-dacts' },
         h('a', { className: 'btn sm', href: 'Research.html?project=' + encodeURIComponent(run.project_id) }, 'Megnyitás a Research-ben ↗'),
         h('button', { className: 'btn sm', onClick: props.onExit }, '‹ Új kutatás')),
