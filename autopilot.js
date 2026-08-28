@@ -228,7 +228,12 @@
               // a failed AI plan is NON-fatal: the study_steps already hold valid client-seeded config, so search on
               var ev = !(d && d.error) ? { phase: 'literature', level: 'sys', message: 'Study létrehozva + keresés megtervezve' }
                 : { phase: 'literature', level: 'warn', message: 'Study létrehozva — AI-tervezés kimaradt (' + (d.error || '') + '), a mentett kulcsszavakkal keresek' };
-              return apStay(run, { stage: 's1', offset: 0, study_id: sid, iter: 0 }, [ev], { study_id: sid });
+              // Record WHICH idea this thread develops. The ideas are inserted in ONE batch, so "most recent"
+              // is not a stable tie-break — without this stamp the graph could only guess, and marked the wrong
+              // idea card as being developed.
+              var patch = { study_id: sid };
+              if (!chosen && idea && idea.id) patch.config = Object.assign({}, run.config || {}, { develop_idea_id: idea.id, develop_auto: true });
+              return apStay(run, { stage: 's1', offset: 0, study_id: sid, iter: 0 }, [ev], patch);
             });
           });
         });
@@ -430,11 +435,14 @@
     if (cur.generated) return Promise.resolve(apComplete(run, 'Protokoll jóváhagyva', []));
     var ideaId = (run.config && run.config.develop_idea_id) || null;   // PER-IDEA: each parallel branch must get its OWN protocol
     // gate on a protocol's needs_approval steps, then complete (stamps protocol_id)
-    function finishProtocol(pid, steps, msg) {
+    function finishProtocol(pid, steps, msg, gapIds) {
+      // Provenance: the graph must be able to say WHICH research gaps these tasks were planned for.
+      var cfg = (gapIds && gapIds.length) ? Object.assign({}, run.config || {}, { protocol_gap_ids: gapIds }) : null;
       return sb.from('research_protocol_steps').select('id', { count: 'exact', head: true }).eq('protocol_id', pid).eq('needs_approval', true).then(function (cr) {
         var na = (cr && cr.count) || 0, evs = [{ phase: 'protocol', level: 'run', message: msg }];
-        if (na > 0 && apGatesOn(run)) return apGate(run, { phase: 'protocol', title: na + ' protokoll-lépés jóváhagyása', detail: na + ' lépés „needs approval". Nézd át a Protocol-fülön, majd hagyd jóvá a futtatáshoz.' }, { generated: true }, { protocol_id: pid });
-        var res = apComplete(run, msg, evs); res.patch.protocol_id = pid; return res;
+        var gp = cfg ? { protocol_id: pid, config: cfg } : { protocol_id: pid };
+        if (na > 0 && apGatesOn(run)) return apGate(run, { phase: 'protocol', title: na + ' protokoll-lépés jóváhagyása', detail: na + ' lépés „needs approval". Nézd át a Protocol-fülön, majd hagyd jóvá a futtatáshoz.' }, { generated: true }, gp);
+        var res = apComplete(run, msg, evs); res.patch.protocol_id = pid; if (cfg) res.patch.config = cfg; return res;
       });
     }
     // BUGFIX: adopt an existing protocol ONLY if it belongs to THIS idea. The old lookup matched by project_id alone, so a
@@ -458,7 +466,7 @@
         return callEdge('research-protocol', payload).then(function (d) {
           if (d && d.error) throw new Error('Protocol: ' + d.error);
           var n = (d && d.steps) || 0;
-          return finishProtocol(d && d.protocol_id, n, n + ' protokoll-lépés generálva' + (gaps.length ? (' — ' + gaps.length + ' kutatási rés kidolgozására') : (ideaId ? ' (ötlet-specifikus)' : '')));
+          return finishProtocol(d && d.protocol_id, n, n + ' protokoll-lépés generálva' + (gaps.length ? (' — ' + gaps.length + ' kutatási rés kidolgozására') : (ideaId ? ' (ötlet-specifikus)' : '')), gaps.map(function (g) { return g.id; }));
         });
       });
     });
@@ -1102,6 +1110,70 @@
       try { document.body.style.userSelect = ''; document.body.style.cursor = ''; } catch (er) { }
       try { localStorage.setItem(DW_KEY, String(dwLast.current || dwW)); } catch (er) { }
     }
+    // ── Canvas: parallel threads grow SIDEWAYS, so the graph is a pannable/zoomable board rather than a column.
+    var CZ_KEY = 'ap-canvas-zoom', Z_MIN = 0.4, Z_MAX = 1.4;
+    var czS = useState(function () { var v = 0; try { v = parseFloat(localStorage.getItem(CZ_KEY) || ''); } catch (e) { } return (v >= Z_MIN && v <= Z_MAX) ? v : 1; });
+    var zoom = czS[0], setZoom = czS[1];
+    var cfS = useState(false), cvFull = cfS[0], setCvFull = cfS[1];
+    var cvRef = useRef(null), stageRef = useRef(null), sizerRef = useRef(null), panRef = useRef(null), panEat = useRef(false);
+    var cvTouched = useRef(false);   // once the user moves the board themselves, stop re-centring it under them
+    function setZoomP(z) {
+      z = Math.max(Z_MIN, Math.min(Z_MAX, Math.round(z * 100) / 100));
+      setZoom(z); try { localStorage.setItem(CZ_KEY, String(z)); } catch (e) { }
+    }
+    function fitZoom() {
+      var cv = cvRef.current, st = stageRef.current; if (!cv || !st) return;
+      var w = st.offsetWidth || 1;
+      setZoomP(Math.min(1, (cv.clientWidth - 40) / w));
+    }
+    // The stage is scaled with a transform, which does NOT change its layout box — so the scroll area is sized
+    // explicitly from the stage's natural size × zoom, otherwise zooming in would simply clip the graph.
+    useEffect(function () {
+      var st = stageRef.current, sz = sizerRef.current; if (!st || !sz) return;
+      var sync = function () {
+        try {
+          sz.style.width = Math.ceil(st.offsetWidth * zoom) + 'px';
+          sz.style.height = Math.ceil(st.offsetHeight * zoom) + 'px';
+          // Threads load in asynchronously, so the board keeps getting wider — keep the flow centred until the
+          // user takes the wheel, otherwise a wide board would open scrolled off to one side.
+          var cv = cvRef.current;
+          if (cv && !cvTouched.current) cv.scrollLeft = Math.max(0, (sz.offsetWidth - cv.clientWidth) / 2);
+        } catch (e) { }
+      };
+      sync();
+      var ro = null; try { ro = new ResizeObserver(sync); ro.observe(st); } catch (e) { }
+      window.addEventListener('resize', sync);
+      return function () { try { ro && ro.disconnect(); } catch (e) { } window.removeEventListener('resize', sync); };
+    }, [zoom, cvFull]);
+    useEffect(function () {
+      if (!cvFull) return;
+      var onKey = function (e) { if (e.key === 'Escape') setCvFull(false); };
+      window.addEventListener('keydown', onKey);
+      return function () { window.removeEventListener('keydown', onKey); };
+    }, [cvFull]);
+    var PAN_SKIP = 'button, a, input, textarea, select, label, [data-nopan]';
+    function panStart(e) {
+      if (e.button !== 0 && e.button !== 1) return;
+      try { if (e.target && e.target.closest && e.target.closest(PAN_SKIP)) return; } catch (er) { }
+      var el = cvRef.current; if (!el) return;
+      cvTouched.current = true;
+      panRef.current = { x: e.clientX, y: e.clientY, sl: el.scrollLeft, st: el.scrollTop, moved: 0 };
+      try { el.setPointerCapture(e.pointerId); } catch (er) { }
+      el.classList.add('panning');
+    }
+    function panMove(e) {
+      var p = panRef.current, el = cvRef.current; if (!p || !el) return;
+      var dx = e.clientX - p.x, dy = e.clientY - p.y;
+      p.moved = Math.max(p.moved, Math.abs(dx) + Math.abs(dy));
+      el.scrollLeft = p.sl - dx; el.scrollTop = p.st - dy;
+    }
+    function panEnd(e) {
+      var p = panRef.current, el = cvRef.current; if (!p) return;
+      panRef.current = null;
+      if (el) { el.classList.remove('panning'); try { el.releasePointerCapture(e.pointerId); } catch (er) { } }
+      if (p.moved > 5) panEat.current = true;   // a drag must not also "click" the card it started on
+    }
+    function panClick(e) { if (panEat.current) { panEat.current = false; e.stopPropagation(); e.preventDefault(); } }
     var swS = useState(false), switching = swS[0], setSwitching = swS[1];   // guard while re-targeting the pipeline to a chosen idea
     var brS = useState([]), branchRuns = brS[0], setBranchRuns = brS[1];    // parallel per-idea branch runs (siblings of the primary run in the same group)
     var selS = useState({}), selIdeas = selS[0], setSelIdeas = selS[1];     // idea_id → true : ideas ticked for parallel development
@@ -1207,11 +1279,19 @@
       [run].concat(branchRuns || []).filter(Boolean).forEach(function (rr) {
         var sid = rr.study_id || null;
         var q = function (withStudy) {
-          var b = sb.from('research_ideas').select('id,question,hypothesis,novelty,gap_type,rationale').eq('project_id', pid).eq('source', 'gap').neq('status', 'rejected');
+          var b = sb.from('research_ideas').select('id,question,hypothesis,novelty,gap_type,rationale,created_at').eq('project_id', pid).eq('source', 'gap').neq('status', 'rejected');
           if (withStudy && sid) b = b.eq('study_id', sid);
           return b.order('created_at', { ascending: false }).limit(8);
         };
-        var set = function (items) { if (alive.current) setGapsByRun(function (m) { var n = Object.assign({}, m); n[rr.id] = items; return n; }); };
+        // The cards are NUMBERED and the protocol points back at those numbers, so the order must be identical on
+        // every load — a batch insert gives the gaps the same created_at, so tie-break on id.
+        var set = function (items) {
+          var sorted = (items || []).slice().sort(function (a, b2) {
+            var d = String(b2.created_at || '').localeCompare(String(a.created_at || ''));
+            return d || String(a.id).localeCompare(String(b2.id));
+          });
+          if (alive.current) setGapsByRun(function (m) { var n = Object.assign({}, m); n[rr.id] = sorted; return n; });
+        };
         // ONLY the primary column may fall back to the project's gaps. A branch showing another thread's gaps would
         // invite the user to develop a gap that its own review never produced.
         var fallback = function () { if (rr.id !== run.id) { set([]); return; } q(false).then(function (r2) { set((r2 && r2.data) || []); }, function () { set([]); }); };
@@ -1585,8 +1665,12 @@
       // The active idea flows down into the shared downstream (literature → review → …); the others offer „Ezt dolgozd ki".
       if (p.key === 'ideas') {
         var ia = phaseArts.ideas, ideas = (ia && !ia.loading && ia.items) || [];
-        var developing = {}; [run].concat(branchRuns || []).forEach(function (rr) { var did = rr && rr.config && rr.config.develop_idea_id; if (did) developing[did] = rr; });
-        if (!Object.keys(developing).length && ideas[0]) developing[ideas[0].id] = run;   // default: primary develops the most recent
+        var developing = {}, autoDev = {};
+        [run].concat(branchRuns || []).forEach(function (rr) { var did = rr && rr.config && rr.config.develop_idea_id; if (did) { developing[did] = rr; if (rr.config.develop_auto) autoDev[did] = 1; } });
+        // Before the literature phase stamps the real pick there is nothing to read — say so instead of
+        // presenting the guess as a fact.
+        var guessed = null;
+        if (!Object.keys(developing).length && ideas[0]) { developing[ideas[0].id] = run; guessed = ideas[0].id; }
         var selCount = Object.keys(selIdeas).filter(function (id) { return selIdeas[id]; }).length;
         return h('div', { className: 'apg-step apg-step-wide', key: p.key },
           h('div', { className: 'apg-node ' + p.status + (p.enabled ? '' : ' off'), style: { '--hue': hueOf('ideas') } },
@@ -1600,7 +1684,8 @@
             return h('div', { className: 'apg-idea' + (dev ? ' active' : '') + (sel ? ' sel' : ''), key: x.id, style: { '--hue': hueOf('ideas') }, title: (x.hypothesis || x.question || '') },
               h('span', { className: 'apg-idea-h' }, h('span', { className: 'apg-idea-ic' }, '💡'), (x.novelty != null) ? h('span', { className: 'apg-idea-n' }, '★ ' + x.novelty) : null),
               h('span', { className: 'apg-idea-t' }, x.question || 'Ötlet'),
-              dev ? h('span', { className: 'apg-idea-badge' }, '◉ Fejlesztés alatt')
+              dev ? h('span', { className: 'apg-idea-badge' + (x.id === guessed ? ' guess' : ''), title: x.id === guessed ? 'Az Autopilot még nem rögzítette a választását — ez a legfrissebb ötlet.' : (autoDev[x.id] ? 'Az Autopilot automatikusan ezt választotta kidolgozásra.' : 'Te jelölted ki kidolgozásra.') },
+                    x.id === guessed ? '◉ Ezt fogja kidolgozni' : (autoDev[x.id] ? '◉ Automatikusan kidolgozás alatt' : '◉ Fejlesztés alatt'))
                   : h('label', { className: 'apg-idea-pick' }, h('input', { type: 'checkbox', checked: sel, disabled: switching, onChange: function () { toggleSel(x.id); } }), ' Kidolgozásra jelöl'));
           })) : null,
           (ia && ia.loading) ? h('div', { className: 'ap-pc-dempty' }, h('span', { className: 'spin' })) : null,
@@ -1771,7 +1856,9 @@
       if (!proj) { toast('A projekt még tölt — próbáld újra.', false); return; }
       setRegenning(function (m) { var n = Object.assign({}, m); n[prun.id] = true; return n; });
       var clear = function () { setRegenning(function (m) { var n = Object.assign({}, m); delete n[prun.id]; return n; }); };
+      var gapIds = [];
       threadGapSources(prun, proj).then(function (gaps) {
+        gapIds = gaps.map(function (g) { return g.id; });
         var payload = { action: 'generate', project_id: proj.id, goal: proj.goal || proj.title || '' };
         if (gaps.length) { payload.sources = gaps.concat(ideaId ? [{ kind: 'idea', id: ideaId }] : []); if (ideaId) payload.idea_id = ideaId; }
         else if (ideaId) payload.idea_id = ideaId;
@@ -1780,9 +1867,12 @@
         if (d && d.error) { clear(); toast('Hiba: ' + d.error, false); return; }
         var pid = d && d.protocol_id;
         if (!pid) { clear(); toast('Nem jött létre protokoll.', false); return; }
-        sb.from('research_autopilot_runs').update({ protocol_id: pid, updated_at: nowIso() }).eq('id', prun.id).then(function () {
-          if (prun.id === run.id) setRun(function (r) { return Object.assign({}, r, { protocol_id: pid }); });
-          else setBranchRow(Object.assign({}, prun, { protocol_id: pid }));
+        var cfg = gapIds.length ? Object.assign({}, prun.config || {}, { protocol_gap_ids: gapIds }) : null;
+        var upd = { protocol_id: pid, updated_at: nowIso() }; if (cfg) upd.config = cfg;
+        sb.from('research_autopilot_runs').update(upd).eq('id', prun.id).then(function () {
+          var extra = cfg ? { protocol_id: pid, config: cfg } : { protocol_id: pid };
+          if (prun.id === run.id) setRun(function (r) { return Object.assign({}, r, extra); });
+          else setBranchRow(Object.assign({}, prun, extra));
           sb.from('research_protocol_steps').select('id,protocol_id,ord,title,kind,needs_approval,status,spec').eq('protocol_id', pid).order('ord', { ascending: true }).then(function (res) {
             if (!alive.current) { clear(); return; }
             setProtoArts(function (m) { var n = Object.assign({}, m); n[prun.id] = (res && res.data) || []; return n; });
@@ -1792,6 +1882,39 @@
       }, function () { clear(); toast('Hálózati hiba — próbáld újra.', false); });
     }
     // Inline protocol tasks under the Protocol card: FULL cards stacked vertically, collapsible (default expanded).
+    // Every gap the UI knows about, from any thread — used to name a protocol's source gaps.
+    function gapById(gid) {
+      if (!gid) return null;
+      var hit = null;
+      Object.keys(gapsByRun || {}).forEach(function (k) { (gapsByRun[k] || []).forEach(function (g) { if (g.id === gid && !hit) hit = g; }); });
+      if (!hit) hit = (((phaseArts.gap && phaseArts.gap.items) || []).filter(function (g) { return g.id === gid; })[0]) || null;
+      return hit;
+    }
+    // WHICH research gap(s) these tasks were planned for. Stamped at generation (config.protocol_gap_ids);
+    // protocols generated before that was recorded say so rather than guessing.
+    function protoSourceLine(prun) {
+      var isGapThread = (prun.config && prun.config.develop_kind) === 'gap';
+      if (isGapThread) {
+        var one = gapById(prun.config.develop_idea_id);
+        return h('div', { className: 'apg-ptasks-src' },
+          h('span', { className: 'apg-ptasks-src-l' }, '🧭 Ebből a résből:'),
+          h('span', { className: 'apg-ptasks-srcc', title: (one && one.question) || '' }, (one && one.question) ? String(one.question).slice(0, 70) : 'kutatási rés'));
+      }
+      var ids = (prun.config && prun.config.protocol_gap_ids) || [];
+      var gaps = gapsByRun[prun.id] || [];
+      var numOf = {}; gaps.forEach(function (g, i) { numOf[g.id] = i + 1; });
+      if (!ids.length) {
+        return h('div', { className: 'apg-ptasks-src none', title: 'A rés-hozzárendelést csak az újabb futások rögzítik. Az ↻ Újragenerálás beírja.' },
+          '🧭 Nincs rögzítve, melyik résekből készültek — régebbi generálás.');
+      }
+      return h('div', { className: 'apg-ptasks-src' },
+        h('span', { className: 'apg-ptasks-src-l' }, '🧭 ' + ids.length + ' rés kidolgozására:'),
+        ids.map(function (gid) {
+          var g = gapById(gid), n = numOf[gid];
+          return h('span', { className: 'apg-ptasks-srcc', key: gid, title: (g && g.question) || 'Kutatási rés' },
+            n ? h('b', null, n) : null, (g && g.question) ? String(g.question).slice(0, 54) : 'kutatási rés');
+        }));
+    }
     function protoMini(prun) {
       var steps = protoArts[prun.id];
       if (!steps || !steps.length) return null;
@@ -1804,6 +1927,7 @@
             h('span', { className: 'apg-ptasks-caret' }, open ? '▾ összecsuk' : '▸ kibont')),
           h('button', { className: 'apg-ptasks-regen', disabled: busy, title: 'Új, ehhez az ötlethez tervezett protokoll generálása (a mostanit lecseréli)', onClick: function () { regenProtocol(prun); } },
             busy ? h('span', { className: 'spin' }) : '↻ Újragenerálás')),
+        protoSourceLine(prun),
         open ? h('div', { className: 'apg-tcards-col' }, steps.map(protoCard)) : null);
     }
     function downMini(prun, p, last) {
@@ -1856,7 +1980,9 @@
       var mine = gaps.filter(function (x) { return !!selGaps[x.id]; });
       // every developed gap gets its OWN task column below, tied to its card by the same number
       var developed = gaps.filter(function (x) { return !!devGap[x.id]; });
-      var numOf = {}; developed.forEach(function (x, i) { numOf[x.id] = i + 1; });
+      // Number EVERY card (not just the developed ones) so the thread protocol can point back at them by number.
+      var numOf = {}; gaps.forEach(function (x, i) { numOf[x.id] = i + 1; });
+      var fed = {}; ((prun.config && prun.config.protocol_gap_ids) || []).forEach(function (id) { fed[id] = 1; });
       return h('div', { className: 'apg-gapsi' },
         h('div', { className: 'apg-gapsi-h' }, '🧭 ' + gaps.length + ' kutatási rés — a fenti review-ból; ezekből készül a protokoll'),
         h('div', { className: 'apg-gapc-list' }, gaps.map(function (x) {
@@ -1867,6 +1993,8 @@
               h('span', { className: 'apg-gapc-chip' }, gapLabel(x.gap_type)),
               (x.novelty != null) ? h('span', { className: 'apg-gapc-n' }, '★ ' + x.novelty) : null),
             h('div', { className: 'apg-gapc-t' }, x.question || 'Kutatási rés'),
+            // this gap fed the THREAD-level protocol (the automatic run plans from several gaps at once)
+            (fed[x.id] && !dev) ? h('span', { className: 'apg-gapc-fed', title: 'Az alábbi Protokoll-kártya feladatai ebből (és a többi megjelölt résből) készültek.' }, '↓ a szál protokolljában') : null,
             // the protocol built FROM THIS GAP hangs off the card itself — that is where it came from
             dev ? (function () {
               var gr = devGap[x.id], pp = ((gr.phases || []).filter(function (q) { return q.key === 'protocol'; })[0]) || {}, steps = protoArts[gr.id] || [];
@@ -1892,7 +2020,7 @@
           return h('div', { className: 'apg-gaptcol', key: gr.id },
             h('div', { className: 'apg-gaptcol-h' },
               h('span', { className: 'apg-gapc-num' }, numOf[x.id]),
-              h('span', { className: 'apg-gaptcol-t', title: x.question || '' }, gapLabel(x.gap_type) + ' · ' + String(x.question || 'Kutatási rés')),
+              h('span', { className: 'apg-gaptcol-t', title: 'Ennek a résnek a kidolgozására: ' + (x.question || '') }, gapLabel(x.gap_type) + ' · ' + String(x.question || 'Kutatási rés')),
               steps.length ? h('button', { className: 'apg-gaptcol-regen', disabled: !!regenning[gr.id], title: 'Protokoll újragenerálása ebből a résből', onClick: function () { regenProtocol(gr); } }, regenning[gr.id] ? h('span', { className: 'spin' }) : '↻') : null),
             // a full task card is tall; with several gaps developed the columns start collapsed (same idiom as protoMini)
             steps.length ? h('button', { className: 'apg-gaptcol-toggle', onClick: function () { setProtoOpen(function (m) { var n = Object.assign({}, m); n[gr.id] = !open; return n; }); } },
@@ -1940,6 +2068,8 @@
           h('span', { className: 'apg-col-ic' }, failed ? '✕' : (isGapCol ? '🧭' : '💡')),
           h('span', { className: 'apg-col-t', title: (idea && idea.question) || '' }, (idea && idea.question) || (isPrimary ? 'Fő szál' : (isGapCol ? 'Kutatási rés' : 'Ötlet'))),
           isPrimary ? h('span', { className: 'apg-col-tag' }, 'fő') : null,
+          (prun.config && prun.config.develop_auto) ? h('span', { className: 'apg-col-tag auto', title: 'Az Autopilot automatikusan ezt az ötletet választotta kidolgozásra.' }, 'auto') : null,
+          (prun.config && prun.config.develop_kind === 'gap') ? h('span', { className: 'apg-col-tag gap', title: 'Ez a szál egy kutatási rés kidolgozása.' }, 'rés') : null,
           failed ? h('button', { className: 'apg-col-retry', title: (prun.error ? ('Hiba: ' + prun.error + ' — ') : '') + 'A szál folytatása onnan, ahol elakadt', onClick: function () { isPrimary ? resume() : resumeBranch(prun.id); } }, '↻ Újra') : null),
         h('div', { className: 'apg-fan-conn' }),
         h('div', { className: 'apg-col-chain' }, (function () {
@@ -2010,9 +2140,25 @@
           (run.status === 'running' || run.status === 'paused' || run.status === 'awaiting_approval') ? h('button', { className: 'btn sm', onClick: stop }, '⏹ Leállítás') : null)),
       h('div', { className: 'ap-card ap-dov' }, h('div', { className: 'ap-dl' }, 'Fázis ', h('b', null, Math.min(enabledN, doneN + (run.status === 'done' ? 0 : 1))), ' / ', h('b', null, enabledN)), h('div', { className: 'ap-dtrack' }, h('i', { style: { width: pct + '%' } })), h('div', { className: 'ap-dpct mono' }, pct + '%')),
       h('div', { className: 'ap-dgrid' },
-        h('div', { className: 'apg-flow' }, briefNode(),
-          phaseNode((phases.filter(function (p) { return p.key === 'ideas'; })[0]) || phases[0], 0, false),   // ideas fan (multi-select)
-          branchesRow()),   // parallel downstream columns — each carries its own gap cards in the flow (gapFanInline)
+        // ── The graph lives on a CANVAS: every idea and every developed gap opens a new column to the RIGHT, so the
+        //    board is panned/zoomed rather than squeezed (branches used to wrap onto a new line = "continues below").
+        h('div', { className: 'apg-cwrap' + (cvFull ? ' full' : '') },
+          h('div', {
+            className: 'apg-canvas', ref: cvRef, onWheel: function () { cvTouched.current = true; },
+            onPointerDown: panStart, onPointerMove: panMove, onPointerUp: panEnd, onPointerCancel: panEnd, onClickCapture: panClick
+          },
+            h('div', { className: 'apg-canvas-sizer', ref: sizerRef },
+              h('div', { className: 'apg-stage', ref: stageRef, style: { transform: 'scale(' + zoom + ')' } },
+                h('div', { className: 'apg-flow' }, briefNode(),
+                  phaseNode((phases.filter(function (p) { return p.key === 'ideas'; })[0]) || phases[0], 0, false),   // ideas fan (multi-select)
+                  branchesRow())))),   // parallel downstream columns — each carries its own gap cards in the flow (gapFanInline)
+          h('div', { className: 'apg-hint' }, '✥ Húzd a hátteret a mozgatáshoz'),
+          h('div', { className: 'apg-zoom', 'data-nopan': '1' },
+            h('button', { onClick: function () { setZoomP(zoom - 0.1); }, title: 'Kicsinyítés', 'aria-label': 'Kicsinyítés' }, '−'),
+            h('button', { className: 'z-val', onClick: function () { setZoomP(1); }, title: '100%-ra vissza' }, Math.round(zoom * 100) + '%'),
+            h('button', { onClick: function () { setZoomP(zoom + 0.1); }, title: 'Nagyítás', 'aria-label': 'Nagyítás' }, '+'),
+            h('button', { onClick: fitZoom, title: 'Illesztés a szélességhez' }, '⤡'),
+            h('button', { onClick: function () { setCvFull(!cvFull); }, title: cvFull ? 'Kilépés a teljes nézetből (Esc)' : 'Teljes nézet' }, cvFull ? '✕' : '⤢'))),
         h('div', { className: 'ap-dside' },
           focusPanel(),
           h('div', { className: 'ap-card ap-feed' }, h('h3', null, 'Activity', ((branchRuns || []).length ? h('span', { className: 'ap-feed-live' }, '● ' + (1 + (branchRuns || []).length) + ' szál') : null)),

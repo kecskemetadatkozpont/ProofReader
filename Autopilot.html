@@ -237,9 +237,27 @@
     .ap-dtrack { flex:1; height:8px; border-radius:999px; background:var(--surface-3); overflow:hidden; } .ap-dtrack i { display:block; height:100%; background:var(--accent); border-radius:999px; transition:width .5s; }
     .ap-dpct { font-size:13px; font-weight:700; color:var(--accent); white-space:nowrap; }
     .ap-dgrid { display:grid; grid-template-columns:1fr 360px; gap:16px; align-items:start; }
+    .ap-dgrid > * { min-width:0; }   /* the canvas column must be allowed to be narrower than its content */
     @media (max-width:900px){ .ap-dgrid { grid-template-columns:1fr; } }
     .ap-pcards { display:flex; flex-direction:column; gap:10px; }
-    /* ===== PROCESS GRAPH (top-to-bottom flow: brief → ideas → literature → review → …) ===== */
+    /* ===== PROCESS GRAPH — a pannable CANVAS: the flow runs top-to-bottom, parallel threads open to the right ===== */
+    .apg-cwrap { position:relative; min-width:0; }
+    .apg-cwrap.full { position:fixed; left:10px; right:10px; bottom:10px; top:calc(var(--pubnav-h,52px) + 8px); z-index:55; }   /* keep the top nav reachable */
+    .apg-canvas { position:relative; overflow:auto; overscroll-behavior:contain; cursor:grab; touch-action:pan-x pan-y;
+      height:clamp(520px, calc(100vh - 300px), 1150px);
+      border:1px solid var(--line); border-radius:16px; background:var(--surface-2);
+      background-image:radial-gradient(circle at 1px 1px, color-mix(in srgb,var(--line-2) 75%,transparent) 1px, transparent 0);
+      background-size:22px 22px; }
+    .apg-cwrap.full .apg-canvas { height:100%; box-shadow:0 24px 60px -14px rgba(15,20,40,.42); }
+    .apg-canvas.panning { cursor:grabbing; }
+    .apg-canvas-sizer { margin:0 auto; }                      /* centred while it fits, left-anchored once it overflows */
+    .apg-stage { width:max-content; transform-origin:0 0; padding:18px 22px 26px; }
+    .apg-hint { position:absolute; left:14px; bottom:16px; z-index:3; pointer-events:none; font-size:10.5px; font-weight:700; color:var(--faint); letter-spacing:.01em; }
+    .apg-zoom { position:absolute; right:12px; bottom:12px; z-index:3; display:flex; align-items:center; gap:2px; padding:4px;
+      border-radius:11px; background:color-mix(in srgb,var(--surface) 92%,transparent); border:1px solid var(--line); box-shadow:var(--shadow); backdrop-filter:blur(6px); }
+    .apg-zoom button { border:0; background:transparent; color:var(--ink); font:inherit; font-size:13px; font-weight:800; cursor:pointer; padding:4px 9px; border-radius:8px; line-height:1; }
+    .apg-zoom button:hover { background:var(--surface-2); }
+    .apg-zoom .z-val { font-size:10.5px; color:var(--muted); min-width:44px; font-variant-numeric:tabular-nums; }
     .apg-flow { display:flex; flex-direction:column; align-items:center; }
     .apg-step { display:flex; flex-direction:column; align-items:center; width:100%; max-width:480px; }
     .apg-conn { width:3px; height:24px; border-radius:3px; background:var(--line-2); }
@@ -267,7 +285,7 @@
     .apg-caret { flex:none; color:var(--faint); font-size:12px; }
     .apg-detail { padding:2px 15px 14px; border-top:1px solid var(--line); }
     /* IDEAS fan — the ideas node branches into N parallel idea cards */
-    .apg-step-wide { max-width:720px; }
+    .apg-step-wide { max-width:960px; }
     .apg-step-wide > .apg-node { max-width:480px; align-self:center; }
     .apg-fan-conn { width:3px; height:14px; border-radius:3px; background:color-mix(in srgb,var(--h-idea) 55%,var(--line-2)); }
     .apg-fan { position:relative; width:100%; display:flex; flex-wrap:wrap; justify-content:center; gap:10px; padding-top:4px; }
@@ -278,6 +296,15 @@
     .apg-idea-t { font-size:12.5px; line-height:1.4; color:var(--ink); display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
     .apg-idea.active { border-color:var(--h-idea); box-shadow:0 0 0 2px color-mix(in srgb,var(--h-idea) 40%,transparent), var(--shadow); }
     .apg-idea-badge { margin-top:2px; font-size:10.5px; font-weight:800; letter-spacing:.02em; color:var(--h-idea); background:color-mix(in srgb,var(--h-idea) 15%,transparent); border-radius:7px; padding:4px 8px; text-align:center; }
+    .apg-idea-badge.guess { background:transparent; border:1px dashed color-mix(in srgb,var(--h-idea) 50%,transparent); color:var(--muted); font-weight:700; }
+    /* which gap(s) a protocol's tasks were planned for — shown on the Protocol card itself */
+    .apg-ptasks-src { display:flex; flex-wrap:wrap; align-items:center; gap:5px; padding:2px 2px 5px; font-size:10px; }
+    .apg-ptasks-src-l { font-weight:800; color:var(--h-gap); }
+    .apg-ptasks-srcc { display:inline-flex; align-items:center; gap:5px; max-width:240px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+      font-weight:650; color:var(--ink); background:color-mix(in srgb,var(--h-gap) 11%,transparent);
+      border:1px solid color-mix(in srgb,var(--h-gap) 30%,transparent); border-radius:999px; padding:2px 9px; }
+    .apg-ptasks-srcc b { font-variant-numeric:tabular-nums; color:var(--h-proto); }
+    .apg-ptasks-src.none { color:var(--muted); font-weight:600; line-height:1.35; }
     /* generated research-gap cards (source='gap') — visually distinct developable directions in the ideas fan */
     .apg-idea.gap { background:color-mix(in srgb,var(--h-gap) 5%,var(--surface)); }
     .apg-idea.gap.active { border-color:var(--h-gap); box-shadow:0 0 0 2px color-mix(in srgb,var(--h-gap) 40%,transparent), var(--shadow); }
@@ -286,18 +313,18 @@
       background:color-mix(in srgb,var(--h-gap) 6%,var(--surface)); border:1px solid color-mix(in srgb,var(--h-gap) 30%,var(--line)); }
     .apg-gapsi-h { font-size:11px; font-weight:800; letter-spacing:.01em; color:var(--h-gap); line-height:1.35; }
     /* gap cards SIDE BY SIDE — each is the root of the protocol generated from it */
-    .apg-gapc-list { display:flex; flex-direction:row; flex-wrap:wrap; justify-content:center; gap:8px; max-height:340px; overflow-y:auto; }
-    .apg-gapc { flex:1 1 220px; min-width:200px; max-width:290px; }
-    /* Full-width ONLY when this is the single thread — with several threads the columns must stay side by side. */
-    /* the gap-carrying column takes its own full-width wrap line (its inner cards stay capped below), so the task
-       columns can sit side by side; the remaining threads still share the other lines */
-    .apg-col.wide { flex-basis:100%; max-width:100%; }
-    /* the wrapper widens, the phase cards inside stay capped and centred (same idiom as .apg-step-wide > .apg-node) */
-    .apg-col.wide > .apg-col-h, .apg-col.wide .apg-mini-wrap { max-width:480px; }
+    .apg-gapc-list { display:flex; flex-direction:row; flex-wrap:nowrap; justify-content:center; gap:8px; align-items:flex-start; }
+    .apg-gapc { flex:0 0 244px; width:244px; }
+    .apg-gapc-fed { align-self:flex-start; font-size:9.5px; font-weight:800; color:var(--h-proto); background:color-mix(in srgb,var(--h-proto) 14%,transparent);
+      border:1px solid color-mix(in srgb,var(--h-proto) 32%,transparent); border-radius:7px; padding:2px 6px; }
+    /* A column carrying gap cards grows as wide as it needs — on a canvas that is free. Its phase cards stay
+       capped and centred (same idiom as .apg-step-wide > .apg-node), only the gap/task rows use the extra width. */
+    .apg-col.wide { flex:0 0 auto; width:max-content; min-width:520px; }
+    .apg-col.wide > .apg-col-h, .apg-col.wide .apg-mini-wrap { width:480px; max-width:480px; }
     .apg-gapc-num { flex:none; width:18px; height:18px; border-radius:50%; display:grid; place-items:center; font-size:10.5px; font-weight:800; color:var(--h-proto); background:color-mix(in srgb,var(--h-proto) 20%,transparent); border:1px solid color-mix(in srgb,var(--h-proto) 45%,transparent); }
     /* one task column per developed gap — same number as its card */
-    .apg-gaptasks { display:flex; flex-wrap:wrap; justify-content:center; align-items:flex-start; gap:12px; width:100%; margin-top:6px; }
-    .apg-gaptcol { flex:1 1 250px; min-width:230px; max-width:340px; display:flex; flex-direction:column; gap:7px; padding:8px 9px; border-radius:10px;
+    .apg-gaptasks { display:flex; flex-wrap:nowrap; justify-content:center; align-items:flex-start; gap:12px; width:100%; margin-top:6px; }
+    .apg-gaptcol { flex:0 0 300px; width:300px; display:flex; flex-direction:column; gap:7px; padding:8px 9px; border-radius:10px;
       background:color-mix(in srgb,var(--h-proto) 5%,var(--surface)); border:1px solid color-mix(in srgb,var(--h-proto) 22%,var(--line)); }
     .apg-gaptcol-h { display:flex; align-items:flex-start; gap:6px; }
     .apg-gaptcol-toggle { display:flex; align-items:center; justify-content:space-between; gap:8px; border:0; background:transparent; padding:0; font:inherit; font-size:10.5px; font-weight:800; color:var(--h-proto); cursor:pointer; }
@@ -333,13 +360,16 @@
     .apg-idea.sel { border-color:var(--h-idea); background:color-mix(in srgb,var(--h-idea) 8%,transparent); }
     .apg-develop { display:flex; justify-content:center; margin-top:12px; }
     /* parallel branch columns — one downstream mini-chain per developing idea */
-    .apg-branches { width:100%; display:flex; flex-wrap:wrap; justify-content:center; gap:16px; align-items:flex-start; }
-    .apg-col { flex:1 1 320px; min-width:260px; max-width:400px; display:flex; flex-direction:column; align-items:center; }
+    /* NEVER wrap: a new thread is a new column to the RIGHT (the canvas scrolls), not a new line below. */
+    .apg-branches { width:100%; display:flex; flex-wrap:nowrap; justify-content:center; gap:18px; align-items:flex-start; }
+    .apg-col { flex:0 0 340px; width:340px; display:flex; flex-direction:column; align-items:center; }
     .apg-col-h { width:100%; display:flex; align-items:center; gap:8px; background:var(--surface); border:1px solid var(--line); border-top:3px solid var(--h-idea); border-radius:12px; padding:9px 12px; box-shadow:var(--shadow); }
     .apg-col.primary .apg-col-h { box-shadow:0 0 0 2px color-mix(in srgb,var(--h-idea) 30%,transparent), var(--shadow); }
     .apg-col-ic { flex:none; font-size:15px; }
     .apg-col-t { flex:1; min-width:0; font-size:12px; font-weight:650; color:var(--ink); display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; line-height:1.3; }
     .apg-col-tag { flex:none; font-size:9.5px; font-weight:800; text-transform:uppercase; color:var(--h-idea); background:color-mix(in srgb,var(--h-idea) 15%,transparent); border-radius:6px; padding:2px 6px; }
+    .apg-col-tag.auto { color:var(--muted); background:var(--surface-3); }
+    .apg-col-tag.gap { color:var(--h-gap); background:color-mix(in srgb,var(--h-gap) 15%,transparent); }
     .apg-col.failed .apg-col-h { border-top-color:var(--bad,#e5484d); box-shadow:0 0 0 2px color-mix(in srgb,var(--bad,#e5484d) 22%,transparent), var(--shadow); }
     .apg-col.failed .apg-col-ic { color:var(--bad,#e5484d); }
     .apg-col-retry { flex:none; cursor:pointer; font-size:10px; font-weight:800; color:#fff; background:var(--bad,#e5484d); border:0; border-radius:7px; padding:4px 8px; box-shadow:var(--shadow); }
@@ -563,9 +593,9 @@
     .ap-toast.show { opacity:1; transform:translate(-50%,0); } .ap-toast.err { background:#8a1a12; }
     @media (prefers-reduced-motion:reduce){ .ap-toast { transition:none; } }
   </style>
-  <script src="theme.js?v=1787898274"></script>
-  <script src="nav.js?v=1787898274"></script>
-  <script src="entitlements.js?v=1787898274"></script>
+  <script src="theme.js?v=1787899468"></script>
+  <script src="nav.js?v=1787899468"></script>
+  <script src="entitlements.js?v=1787899468"></script>
 </head>
 
 <body>
@@ -578,13 +608,13 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
-  <script src="backend/config.js?v=1787898274"></script>
-  <script src="auth.js?v=1787898274"></script>
-  <script src="backend.js?v=1787898274"></script>
-  <script src="autopilot.js?v=1787898274"></script>
+  <script src="backend/config.js?v=1787899468"></script>
+  <script src="auth.js?v=1787899468"></script>
+  <script src="backend.js?v=1787899468"></script>
+  <script src="autopilot.js?v=1787899468"></script>
 
-  <script src="build.js?v=1787898274"></script>
-  <script src="version-badge.js?v=1787898274"></script>
+  <script src="build.js?v=1787899468"></script>
+  <script src="version-badge.js?v=1787899468"></script>
 </body>
 
 </html>
