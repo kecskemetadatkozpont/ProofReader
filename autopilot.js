@@ -1077,6 +1077,31 @@
     var pvS = useState(null), preview = pvS[0], setPreview = pvS[1];        // { title, content } → the readable review preview modal
     var ppvS = useState(null), protoPv = ppvS[0], setProtoPv = ppvS[1];    // { title, goal, steps:[...] } → the protocol task-cards modal
     var lrS = useState(null), litRev = lrS[0], setLitRev = lrS[1];         // { prun, studyId, loading, order:[srcId], sources, eff:{srcId:decision}, meta, dirty } → the side screening-review drawer
+    // resizable review drawer: drag its left edge; the chosen width is remembered across sessions
+    var DW_MIN = 380, DW_KEY = 'ap-dw-width';
+    var dwS = useState(function () { var v = 0; try { v = parseInt(localStorage.getItem(DW_KEY) || '', 10); } catch (e) { } return (v >= DW_MIN) ? v : 560; });
+    var dwW = dwS[0], setDwW = dwS[1];
+    var dwDrag = useRef(false), dwLast = useRef(0);   // dwLast: the width actually dragged to (a stale closure must not be persisted)
+    function dwMax() { try { return Math.max(DW_MIN, window.innerWidth - 80); } catch (e) { return 1200; } }
+    function dwResizeStart(e) {
+      e.preventDefault(); e.stopPropagation();
+      dwDrag.current = true;
+      try { e.currentTarget.setPointerCapture(e.pointerId); } catch (er) { }
+      try { document.body.style.userSelect = 'none'; document.body.style.cursor = 'col-resize'; } catch (er) { }
+    }
+    function dwResizeMove(e) {
+      if (!dwDrag.current) return;
+      var w = Math.round(window.innerWidth - e.clientX);          // the drawer is anchored to the right edge
+      var cl = Math.max(DW_MIN, Math.min(dwMax(), w));
+      dwLast.current = cl; setDwW(cl);
+    }
+    function dwResizeEnd(e) {
+      if (!dwDrag.current) return;
+      dwDrag.current = false;
+      try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (er) { }
+      try { document.body.style.userSelect = ''; document.body.style.cursor = ''; } catch (er) { }
+      try { localStorage.setItem(DW_KEY, String(dwLast.current || dwW)); } catch (er) { }
+    }
     var swS = useState(false), switching = swS[0], setSwitching = swS[1];   // guard while re-targeting the pipeline to a chosen idea
     var brS = useState([]), branchRuns = brS[0], setBranchRuns = brS[1];    // parallel per-idea branch runs (siblings of the primary run in the same group)
     var selS = useState({}), selIdeas = selS[0], setSelIdeas = selS[1];     // idea_id → true : ideas ticked for parallel development
@@ -2028,8 +2053,11 @@
         (litRev.order || []).forEach(function (id) { var d = litRev.eff[id]; if (cnt[d] != null) cnt[d]++; });
         var exIncIds = (litRev.order || []).filter(function (id) { return litRev.eff[id] === 'include'; });   // the currently-included set → extraction row set
         var exPid = (litRev.prun && litRev.prun.project_id) || (run && run.project_id) || null;
-        return h('div', { className: 'ap-dw-scrim', onClick: function () { setLitRev(null); } },
-          h('div', { className: 'ap-dw', onClick: function (e) { e.stopPropagation(); } },
+        return h('div', { className: 'ap-dw-scrim', onClick: function () { if (dwDrag.current) return; setLitRev(null); } },
+          h('div', { className: 'ap-dw', style: { width: Math.max(DW_MIN, Math.min(dwMax(), dwW)) + 'px' }, onClick: function (e) { e.stopPropagation(); } },
+            h('div', { className: 'ap-dw-grip', title: 'Húzd a szélesség állításához', role: 'separator', 'aria-orientation': 'vertical', 'aria-label': 'Panel szélessége',
+              onPointerDown: dwResizeStart, onPointerMove: dwResizeMove, onPointerUp: dwResizeEnd, onPointerCancel: dwResizeEnd,
+              onDoubleClick: function () { setDwW(560); try { localStorage.setItem(DW_KEY, '560'); } catch (e) { } } }),
             h('div', { className: 'ap-dw-h' },
               h('div', null, h('b', null, '📚 Bírálat felülbírálása'), h('div', { className: 'ap-dw-sub' }, 'A szűrés döntéseit itt kézzel átírhatod, majd folytathatod a folyamatot.')),
               h('button', { className: 'ap-pv-x', 'aria-label': 'Bezárás', onClick: function () { setLitRev(null); } }, '×')),
