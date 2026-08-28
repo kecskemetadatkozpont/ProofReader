@@ -341,6 +341,8 @@
     },
     // Parity with the cloud store: the local store writes synchronously, so there is nothing to flush.
     flushNow: function () { return Promise.resolve(true); },
+    pinWarm: function () { },
+    fetchOne: function (id) { try { return Promise.resolve(this.get(id)); } catch (e) { return Promise.resolve(null); } },
     flushAll: function () { return Promise.resolve(true); }
   };
 

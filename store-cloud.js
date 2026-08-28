@@ -30,18 +30,34 @@
   /* ---- cache ---- */
   var CACHE = [];
   (function warm() { try { CACHE = JSON.parse(localStorage.getItem(WARM) || '[]') || []; } catch (e) { CACHE = []; } })();
-  // A localStorage-friendly copy of a project: drop the heavy version history + big inline file payloads
-  // (both stay in memory + on the server). A large project (e.g. a thesis with long history) can otherwise
-  // blow the ~5 MB localStorage quota and silently break OTHER writes — notably the annotation queue below.
-  function trimForWarm(p) {
-    var t = {}; for (var k in p) if (Object.prototype.hasOwnProperty.call(p, k)) t[k] = p[k];
-    t.versions = [];
-    if (t.files && typeof t.files === 'object') { var nf = {}; for (var f in t.files) if (Object.prototype.hasOwnProperty.call(t.files, f)) { var v = t.files[f]; nf[f] = (v && v.dataURL && String(v.dataURL).length > 4000) ? Object.assign({}, v, { dataURL: '' }) : v; } t.files = nf; }
-    return t;
+  // ---- warm (boot) cache ----
+  // The warm cache is ONLY a boot accelerator; the server is the truth. Two hard rules:
+  //   1. a row is stored WHOLE or not at all — a lossy row could later be flushed back OVER the server copy;
+  //   2. running out of quota must never wipe the cache wholesale (that made every ?p=<id> unresolvable at
+  //      load, so the editor showed "this publication is not available yet" for projects that existed).
+  // Under pressure we simply keep fewer rows: pinned (currently open) first, then unsaved, then most recent.
+  var WARM_BUDGET = 3500000;   // JSON chars; localStorage is ~5 MB per origin and other keys share it
+  var warmPin = null;          // id of the project the current page is showing — always kept
+  function warmRank(p) {
+    if (warmPin && p.id === warmPin) return 0;
+    if ((unconf && unconf[p.id]) || (pending && pending[p.id])) return 1;   // not yet on the server → must survive
+    return 2;
   }
   function persistWarm() {
-    try { localStorage.setItem(WARM, JSON.stringify(CACHE)); }
-    catch (e) { try { localStorage.setItem(WARM, JSON.stringify(CACHE.map(trimForWarm))); } catch (e2) { try { localStorage.removeItem(WARM); } catch (e3) { } } }
+    var rows = CACHE.slice().sort(function (a, b) { var d = warmRank(a) - warmRank(b); return d || ((b.updated || 0) - (a.updated || 0)); });
+    var keep = [], size = 2;
+    for (var i = 0; i < rows.length; i++) {
+      var js; try { js = JSON.stringify(rows[i]); } catch (e) { continue; }
+      if (!js) continue;
+      if (keep.length && (size + js.length + 1) > WARM_BUDGET) continue;   // skip this one, a smaller row may still fit
+      keep.push(rows[i]); size += js.length + 1;
+    }
+    while (true) {
+      try { localStorage.setItem(WARM, JSON.stringify(keep)); return; } catch (e) { }
+      if (!keep.length) break;
+      keep.pop();                                                          // shed the least important row and retry
+    }
+    try { localStorage.removeItem(WARM); } catch (e) { }
   }
   // ---- unconfirmed-annotation queue ----
   // Comments/to-dos persist via granular RPCs that are NOT part of the project-level `pending` flush, so a
@@ -56,8 +72,7 @@
   function persistAnnoQ() {
     try { localStorage.setItem('pr-anno-q', JSON.stringify(annoQ)); }
     catch (e) {
-      try { localStorage.setItem(WARM, JSON.stringify(CACHE.map(trimForWarm))); localStorage.setItem('pr-anno-q', JSON.stringify(annoQ)); }
-      catch (e2) { try { localStorage.removeItem(WARM); localStorage.setItem('pr-anno-q', JSON.stringify(annoQ)); } catch (e3) { } }
+      try { localStorage.removeItem(WARM); localStorage.setItem('pr-anno-q', JSON.stringify(annoQ)); persistWarm(); } catch (e2) { }
     }
   }
   function qAnno(pid, entry) { if (!annoQ[pid]) annoQ[pid] = {}; annoQ[pid][entry.op === 'delete' ? entry.id : entry.ann.id] = entry; persistAnnoQ(); }
@@ -221,8 +236,7 @@
   var REDRIVE_MAX_AGE = 10 * 60 * 1000;  // only RECOVER a recent loss; a day-old marker means the world moved on
   // Recovery is deliberately limited to rows the server has NEVER seen — the create-then-navigate case. We do NOT
   // re-send an unconfirmed edit to a row that already exists server-side: pr_save_project replaces `data`
-  // wholesale, and a local copy can be silently incomplete (persistWarm() falls back to trimForWarm() under
-  // localStorage quota pressure, which drops version history and blanks big inline images). Overwriting a live
+  // wholesale, and a warm-cache copy read at boot may predate someone else's edit. Overwriting a live
   // row from such a copy would destroy history/figures for the owner AND every collaborator — a far worse loss
   // than the one unsent edit we give up here. (Unsent edits are still covered by the pagehide flush and by the
   // awaited flushes on create/open/sign-out.)
@@ -381,6 +395,31 @@
     subscribe: subscribe,
     _notify: notify,
     _hydrate: hydrate,
+    // Keep this project in the warm (boot) cache no matter how full localStorage gets — the page showing it
+    // must be able to resolve it at load without waiting for a hydrate round-trip.
+    pinWarm: function (id) { warmPin = id || null; },
+    // Resolve ONE project straight from the server by id. The warm cache is best-effort (it can be short a row
+    // after a quota shed, and it is empty on a brand-new device/browser), so a direct ?p=<id> link must not
+    // depend on it. Returns the project, or null when it genuinely isn't readable (deleted / not shared / bad id).
+    fetchOne: function (id) {
+      if (!id) return Promise.resolve(null);
+      var i = idx(id); if (i >= 0) return Promise.resolve(normalize(CACHE[i]));
+      warmPin = id;
+      try {
+        return sb.from('projects').select('id,data,updated_at,deleted_at').eq('id', id).maybeSingle().then(function (r) {
+          var row = r && r.data;
+          if (!row || (r && r.error)) return null;
+          // Never materialise a stub over a real row: without `files` the editor would seed a Sample and autosave it.
+          if (!(row.data && typeof row.data === 'object' && row.data.files)) return null;
+          var p = row.data; p.id = row.id;
+          if (row.deleted_at) { if (!p.deletedAt) p.deletedAt = Date.parse(row.deleted_at) || Date.now(); } else if (p.deletedAt) { delete p.deletedAt; }
+          tsCache[row.id] = row.updated_at || '';
+          if (!pending[row.id]) mergeRow(p);
+          persistWarm(); notify();
+          var j = idx(id); return j >= 0 ? normalize(CACHE[j]) : null;
+        }, function () { return null; });
+      } catch (e) { return Promise.resolve(null); }
+    },
     // Force this project's debounced save to the server NOW; resolves true once it has landed (or there was
     // nothing to send), false if the server rejected it. ANY caller that navigates away right after a write
     // MUST await this — a page unload silently kills the 500 ms debounce.

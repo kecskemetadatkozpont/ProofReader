@@ -87,17 +87,27 @@
     // A SHARED project opened by direct link is often not in the warm cache yet (a collaborator's first visit).
     // Hydrate and reload once it arrives — instead of dropping the user onto a Sample and overwriting the URL,
     // which is why a collaborator could see a stale "Sample" instead of the shared project. Reload-loop guarded.
-    if (!project && PROJECT_ID && cloud && window.PRStore && window.PRStore._hydrate) {
+    // Keep whatever we are showing in the warm (boot) cache, whatever else has to be shed under quota pressure.
+    if (project && PROJECT_ID && window.PRStore && window.PRStore.pinWarm) { try { window.PRStore.pinWarm(PROJECT_ID); } catch (e) { } }
+    // Not in the local cache? Resolve the id STRAIGHT FROM THE SERVER. The warm cache is best-effort — it is
+    // empty on a new browser, and a full localStorage used to drop rows (which made existing publications look
+    // deleted). A direct ?p=<id> link must never depend on it.
+    let awaiting = false;
+    if (!project && PROJECT_ID && cloud && window.PRStore && window.PRStore.fetchOne) {
       const awKey = 'pr_await_' + PROJECT_ID;
-      let awaited = false; try { awaited = !!sessionStorage.getItem(awKey); } catch (e) { }
-      if (!awaited) {
-        try {
-          const off = window.PRStore.subscribe(function () {
-            if (window.PRStore.get(PROJECT_ID)) { try { off(); } catch (e) { } try { sessionStorage.setItem(awKey, '1'); } catch (e) { } location.reload(); }
-          });
-          window.PRStore._hydrate();
-          setTimeout(function () { try { off(); } catch (e) { } }, 12000);   // give up after 12s (invalid / no-access id)
-        } catch (e) { }
+      let tries = 0; try { tries = parseInt(sessionStorage.getItem(awKey) || '0', 10) || 0; } catch (e) { }
+      if (tries < 2) {                                        // reload at most twice, then tell the truth
+        awaiting = true;
+        try { sessionStorage.setItem(awKey, String(tries + 1)); } catch (e) { }
+        let settled = false;
+        const done = function (ok) {
+          if (settled) return; settled = true;
+          if (ok) location.reload();                          // it is in the cache now — rebuild with the real project
+          else showMissingProjectBanner(PROJECT_ID);          // genuinely not readable (deleted / not shared / bad id)
+        };
+        try { window.PRStore.fetchOne(PROJECT_ID).then(function (p) { done(!!p); }, function () { done(false); }); }
+        catch (e) { done(false); }
+        setTimeout(function () { done(false); }, 12000);      // never leave the user staring at a blank Sample
       }
     }
     // An explicitly requested ?p=<id> that we cannot resolve must NEVER silently open a DIFFERENT publication:
@@ -110,7 +120,9 @@
       try { window.PR_PROJECT_MISSING = PROJECT_ID; } catch (e) { }
       // buildInitial runs inside React's RENDER phase and createRoot().render() is async, so a flag read right
       // after render() would still be undefined — fire the (idempotent, id-guarded) banner from here instead.
-      setTimeout(function () { showMissingProjectBanner(PROJECT_ID); }, 0);
+      // While a server lookup is in flight we stay quiet: claiming "not available" and then loading it is worse
+      // than a one-second wait.
+      if (!awaiting) setTimeout(function () { showMissingProjectBanner(PROJECT_ID); }, 0);
     }
     if (!project && !PROJECT_ID && window.PRStore) {
       // No project requested at all: fall back to the persistent sample project so the editor still works.
