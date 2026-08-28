@@ -466,6 +466,7 @@
     .apg-tcard.clickable { cursor:pointer; transition:box-shadow .14s, border-color .14s, transform .14s; }
     .apg-tcard.clickable:hover { border-color:color-mix(in srgb,var(--h-proto) 55%,var(--line)); box-shadow:0 6px 18px -8px rgba(15,20,40,.35); transform:translateY(-1px); }
     .apg-tcard.clickable:focus-visible { outline:2px solid var(--h-proto); outline-offset:2px; }
+    .ap-te-scrim { z-index:130; }   /* above the task-list modal and the review drawer it can be opened from */
     .ap-te { background:var(--surface); border:1px solid var(--line); border-radius:16px; box-shadow:0 24px 60px rgba(0,0,0,.32);
       width:1080px; max-width:100%; max-height:90vh; display:flex; flex-direction:column; }
     .ap-te .ap-pv-x { margin-left:auto; }
@@ -666,9 +667,9 @@
     .ap-toast.show { opacity:1; transform:translate(-50%,0); } .ap-toast.err { background:#8a1a12; }
     @media (prefers-reduced-motion:reduce){ .ap-toast { transition:none; } }
   </style>
-  <script src="theme.js?v=1787900772"></script>
-  <script src="nav.js?v=1787900772"></script>
-  <script src="entitlements.js?v=1787900772"></script>
+  <script src="theme.js?v=1787902325"></script>
+  <script src="nav.js?v=1787902325"></script>
+  <script src="entitlements.js?v=1787902325"></script>
 </head>
 
 <body>
@@ -681,13 +682,13 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
-  <script src="backend/config.js?v=1787900772"></script>
-  <script src="auth.js?v=1787900772"></script>
-  <script src="backend.js?v=1787900772"></script>
-  <script src="autopilot.js?v=1787900772"></script>
+  <script src="backend/config.js?v=1787902325"></script>
+  <script src="auth.js?v=1787902325"></script>
+  <script src="backend.js?v=1787902325"></script>
+  <script src="autopilot.js?v=1787902325"></script>
 
-  <script src="build.js?v=1787900772"></script>
-  <script src="version-badge.js?v=1787900772"></script>
+  <script src="build.js?v=1787902325"></script>
+  <script src="version-badge.js?v=1787902325"></script>
 </body>
 
 </html>

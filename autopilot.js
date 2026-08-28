@@ -284,7 +284,7 @@
     }
     function close() { if (dirty && !window.confirm('Vannak mentetlen módosítások. Biztosan bezárod?')) return; props.onClose(); }
     var fld = function (label, node, hint) { return h('label', { className: 'ap-te-f' }, h('span', { className: 'ap-te-lab' }, label, hint ? h('i', null, hint) : null), node); };
-    return h('div', { className: 'ap-pv-scrim', onClick: close },
+    return h('div', { className: 'ap-pv-scrim ap-te-scrim', onClick: close },
       h('div', { className: 'ap-te', onClick: function (e) { e.stopPropagation(); } },
         h('div', { className: 'ap-pv-h' },
           h('b', null, '📝 Feladat szerkesztése' + (st.ord ? ' · #' + st.ord : '')),
@@ -295,9 +295,9 @@
             fld('Cím', h('input', { className: 'ap-te-in', value: f.title, onChange: function (e) { set('title', e.target.value); } })),
             h('div', { className: 'ap-te-row' },
               fld('Típus', h('select', { className: 'ap-te-in', value: f.kind, onChange: function (e) { set('kind', e.target.value); } },
-                TASK_KINDS.map(function (k) { return h('option', { key: k, value: k }, ((PROTO_KIND[k] || {}).ic || '•') + ' ' + ((PROTO_KIND[k] || {}).lab || k)); }))),
+                (TASK_KINDS.indexOf(f.kind) >= 0 ? TASK_KINDS : TASK_KINDS.concat([f.kind])).map(function (k) { return h('option', { key: k, value: k }, ((PROTO_KIND[k] || {}).ic || '•') + ' ' + ((PROTO_KIND[k] || {}).lab || k)); }))),
               fld('Állapot', h('select', { className: 'ap-te-in', value: f.status, onChange: function (e) { set('status', e.target.value); } },
-                TASK_ST.map(function (k) { return h('option', { key: k, value: k }, PROTO_ST[k] || k); }))),
+                (TASK_ST.indexOf(f.status) >= 0 ? TASK_ST : TASK_ST.concat([f.status])).map(function (k) { return h('option', { key: k, value: k }, PROTO_ST[k] || k); }))),
               fld('Becsült perc', h('input', { className: 'ap-te-in', type: 'number', min: '0', value: f.est_minutes, onChange: function (e) { set('est_minutes', e.target.value); } }))),
             fld('Utasítás', h('textarea', { className: 'ap-te-in ta', rows: 6, value: f.instruction, onChange: function (e) { set('instruction', e.target.value); } }), 'ezt hajtja végre a futtató'),
             fld('Bemenetek', h('textarea', { className: 'ap-te-in ta', rows: 3, value: f.inputs, onChange: function (e) { set('inputs', e.target.value); } }), 'soronként egy'),
@@ -1398,26 +1398,33 @@
       return function () { try { ro && ro.disconnect(); } catch (e) { } window.removeEventListener('resize', apply); };
     });
     var PAN_SKIP = 'button, a, input, textarea, select, label, [data-nopan]';
+    var PAN_SLOP = 4;   // below this the gesture is a CLICK, not a pan
     function panStart(e) {
       if (e.button !== 0 && e.button !== 1) return;
       try { if (e.target && e.target.closest && e.target.closest(PAN_SKIP)) return; } catch (er) { }
       var el = cvRef.current; if (!el) return;
-      cvTouched.current = true;
-      panRef.current = { x: e.clientX, y: e.clientY, sl: el.scrollLeft, st: el.scrollTop, moved: 0 };
-      try { el.setPointerCapture(e.pointerId); } catch (er) { }
-      el.classList.add('panning');
+      // Deliberately NO setPointerCapture here: capturing on pointerdown retargets the follow-up mouse/click
+      // events to the canvas, which swallowed every click on a card. The capture is taken only once the
+      // gesture actually becomes a drag (below).
+      panRef.current = { x: e.clientX, y: e.clientY, sl: el.scrollLeft, st: el.scrollTop, moved: 0, active: false, id: e.pointerId };
     }
     function panMove(e) {
       var p = panRef.current, el = cvRef.current; if (!p || !el) return;
       var dx = e.clientX - p.x, dy = e.clientY - p.y;
       p.moved = Math.max(p.moved, Math.abs(dx) + Math.abs(dy));
+      if (!p.active) {
+        if (p.moved < PAN_SLOP) return;
+        p.active = true; cvTouched.current = true;
+        try { el.setPointerCapture(p.id); } catch (er) { }
+        el.classList.add('panning');
+      }
       el.scrollLeft = p.sl - dx; el.scrollTop = p.st - dy;
     }
     function panEnd(e) {
       var p = panRef.current, el = cvRef.current; if (!p) return;
       panRef.current = null;
-      if (el) { el.classList.remove('panning'); try { el.releasePointerCapture(e.pointerId); } catch (er) { } }
-      if (p.moved > 5) panEat.current = true;   // a drag must not also "click" the card it started on
+      if (el && p.active) { el.classList.remove('panning'); try { el.releasePointerCapture(p.id); } catch (er) { } }
+      if (p.moved > PAN_SLOP) panEat.current = true;   // a drag must not also "click" the card it started on
     }
     function panClick(e) { if (panEat.current) { panEat.current = false; e.stopPropagation(); e.preventDefault(); } }
     var swS = useState(false), switching = swS[0], setSwitching = swS[1];   // guard while re-targeting the pipeline to a chosen idea
@@ -2440,7 +2447,6 @@
           h('div', { className: 'ap-pv-f' },
             h('button', { className: 'btn sm', onClick: function () { try { navigator.clipboard.writeText(preview.content || ''); toast('Vágólapra másolva', true); } catch (e) { } } }, 'Másolás (Markdown)'),
             h('button', { className: 'btn pri sm', onClick: function () { setPreview(null); } }, 'Bezárás')))) : null,
-      taskEd ? h(TaskEdit, { step: taskEd, projectId: run.project_id, onClose: function () { setTaskEd(null); }, onSaved: applyStepUpdate }) : null,
       // Protocol task-cards modal: every generated protocol step as its own card with its main metadata.
       protoPv ? h('div', { className: 'ap-pv-scrim', onClick: function () { setProtoPv(null); } },
         h('div', { className: 'ap-pv proto', onClick: function (e) { e.stopPropagation(); } },
@@ -2457,6 +2463,8 @@
             h('a', { className: 'btn sm', href: 'Research.html?project=' + encodeURIComponent(run.project_id), target: '_blank', rel: 'noopener' }, 'Protocol-fül megnyitása ↗'),
             h('button', { className: 'btn pri sm', onClick: function () { setProtoPv(null); } }, 'Bezárás')))) : null,
       // Screening-review DRAWER (right side): override the AI screening decisions, then continue the run.
+      // rendered LAST so it stacks above the task-list modal it is usually opened from
+      taskEd ? h(TaskEdit, { step: taskEd, projectId: run.project_id, onClose: function () { setTaskEd(null); }, onSaved: applyStepUpdate }) : null,
       litRev ? (function () {
         var cnt = { include: 0, maybe: 0, exclude: 0 };
         (litRev.order || []).forEach(function (id) { var d = litRev.eff[id]; if (cnt[d] != null) cnt[d]++; });
