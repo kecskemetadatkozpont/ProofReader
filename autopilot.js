@@ -151,6 +151,142 @@
   // protocol-step task type → icon + label; status → short Hungarian label (used by the Protocol task-card modal)
   var PROTO_KIND = { data: { ic: '📊', lab: 'Adat' }, preprocess: { ic: '🧹', lab: 'Előfeldolgozás' }, feature: { ic: '🧩', lab: 'Jellemzők' }, model: { ic: '🧠', lab: 'Modell' }, train: { ic: '🏋️', lab: 'Tanítás' }, eval: { ic: '📈', lab: 'Kiértékelés' }, analysis: { ic: '🔍', lab: 'Elemzés' }, experiment: { ic: '🧪', lab: 'Kísérlet' }, figure: { ic: '📉', lab: 'Ábra' }, write: { ic: '✍️', lab: 'Írás' }, code: { ic: '💻', lab: 'Kód' } };
   var PROTO_ST = { todo: 'todo', pending: 'vár', running: 'fut', done: 'kész', blocked: 'blokkolt', failed: 'hiba', skipped: 'kihagyva' };
+  // ── Task (ToDo) editor: click any protocol task card → edit every field of it, with an AI chat beside the form
+  //    that can propose concrete field values (research-protocol · task_assist / refine_step). ──
+  var TASK_KINDS = ['data', 'preprocess', 'feature', 'model', 'train', 'eval', 'analysis', 'experiment', 'figure', 'write', 'code', 'custom'];
+  var TASK_ST = ['todo', 'pending', 'running', 'done', 'blocked', 'failed', 'skipped'];
+  function TaskEdit(props) {
+    var st = props.step || {}, sp = st.spec || {};
+    var lines = function (a) { return (Array.isArray(a) ? a : []).map(String).filter(Boolean).join('\n'); };
+    var toArr = function (t) { return String(t || '').split('\n').map(function (x) { return x.trim(); }).filter(Boolean); };
+    var fS = useState({
+      title: st.title || '', kind: st.kind || 'custom', status: st.status || 'todo', needs_approval: !!st.needs_approval,
+      instruction: sp.instruction || '', inputs: lines(sp.inputs), expected_outputs: lines(sp.expected_outputs),
+      acceptance: lines(sp.acceptance), command_hint: sp.command_hint || '', est_minutes: (sp.est_minutes != null ? String(sp.est_minutes) : '')
+    });
+    var f = fS[0], setF = fS[1];
+    var dS = useState(false), dirty = dS[0], setDirty = dS[1];
+    var bS = useState(false), busy = bS[0], setBusy = bS[1];
+    var mS = useState([]), msgs = mS[0], setMsgs = mS[1];
+    var iS = useState(''), input = iS[0], setInput = iS[1];
+    var qS = useState([]), questions = qS[0], setQuestions = qS[1];
+    var gS = useState(null), sugg = gS[0], setSugg = gS[1];
+    var cS = useState(false), chatBusy = cS[0], setChatBusy = cS[1];
+    var listRef = useRef(null);
+    useEffect(function () { var el = listRef.current; if (el) el.scrollTop = el.scrollHeight; }, [msgs, chatBusy, questions]);
+    function set(k, v) { setF(function (o) { var n = Object.assign({}, o); n[k] = v; return n; }); setDirty(true); }
+    function taskNow() { return { title: f.title, kind: f.kind, instruction: f.instruction, inputs: toArr(f.inputs), expected_outputs: toArr(f.expected_outputs), acceptance: toArr(f.acceptance), command_hint: f.command_hint }; }
+    function send(text) {
+      var t = String(text == null ? input : text).trim();
+      if (!t || chatBusy) return;
+      var hist = msgs.slice(-8);
+      setMsgs(msgs.concat([{ role: 'user', content: t }])); setInput(''); setQuestions([]); setChatBusy(true);
+      callEdge('research-protocol', { action: 'task_assist', project_id: props.projectId, task: taskNow(), message: t, history: hist }).then(function (d) {
+        setChatBusy(false);
+        if (!d || d.error) { setMsgs(function (m) { return m.concat([{ role: 'assistant', content: '⚠ ' + ((d && d.error) || 'Az asszisztens nem elérhető.') }]); }); return; }
+        setMsgs(function (m) { return m.concat([{ role: 'assistant', content: String(d.reply || '') }]); });
+        setQuestions((d.questions || []).slice(0, 3));
+        if (d.suggestion) setSugg(d.suggestion);
+      }, function () { setChatBusy(false); setMsgs(function (m) { return m.concat([{ role: 'assistant', content: '⚠ Hálózati hiba.' }]); }); });
+    }
+    function refine() {
+      if (busy || chatBusy) return; setChatBusy(true);
+      callEdge('research-protocol', { action: 'refine_step', step_id: st.id, hint: input.trim() }).then(function (d) {
+        setChatBusy(false);
+        if (!d || d.error || !d.step) { toast('A csiszolás nem sikerült' + ((d && d.error) ? ': ' + d.error : ''), false); return; }
+        setSugg(d.step);
+        setMsgs(function (m) { return m.concat([{ role: 'assistant', content: '✨ Elkészült egy pontosított változat. Nézd át, és ha jó, töltsd be az űrlapba.' }]); });
+      }, function () { setChatBusy(false); toast('Hálózati hiba.', false); });
+    }
+    function applySugg() {
+      if (!sugg) return;
+      setF(function (o) {
+        var n = Object.assign({}, o);
+        if (sugg.title) n.title = String(sugg.title);
+        if (sugg.kind && TASK_KINDS.indexOf(String(sugg.kind)) >= 0) n.kind = String(sugg.kind);
+        if (sugg.instruction) n.instruction = String(sugg.instruction);
+        if (Array.isArray(sugg.inputs)) n.inputs = sugg.inputs.map(String).join('\n');
+        if (Array.isArray(sugg.expected_outputs)) n.expected_outputs = sugg.expected_outputs.map(String).join('\n');
+        if (Array.isArray(sugg.acceptance)) n.acceptance = sugg.acceptance.map(String).join('\n');
+        if (sugg.command_hint) n.command_hint = String(sugg.command_hint);
+        if (sugg.est_minutes != null && !isNaN(parseInt(sugg.est_minutes, 10))) n.est_minutes = String(parseInt(sugg.est_minutes, 10));
+        if (typeof sugg.needs_approval === 'boolean') n.needs_approval = sugg.needs_approval;
+        return n;
+      });
+      setDirty(true); setSugg(null);
+      toast('Betöltve az űrlapba — nézd át, majd Mentés.', true);
+    }
+    function save() {
+      if (busy) return; setBusy(true);
+      var spec = Object.assign({}, sp, { instruction: f.instruction, inputs: toArr(f.inputs), expected_outputs: toArr(f.expected_outputs), acceptance: toArr(f.acceptance), command_hint: f.command_hint });
+      var em = parseInt(f.est_minutes, 10); if (em > 0) spec.est_minutes = em; else delete spec.est_minutes;
+      var patch = { title: String(f.title || 'Feladat').slice(0, 300), kind: f.kind, status: f.status, needs_approval: !!f.needs_approval, spec: spec };
+      sb.from('research_protocol_steps').update(patch).eq('id', st.id).then(function (r) {
+        setBusy(false);
+        if (r && r.error) { toast('Mentés hiba: ' + r.error.message, false); return; }
+        setDirty(false); toast('✓ A feladat mentve', true);
+        if (props.onSaved) props.onSaved(Object.assign({ id: st.id }, patch));
+      }, function () { setBusy(false); toast('Hálózati hiba a mentésnél.', false); });
+    }
+    function close() { if (dirty && !window.confirm('Vannak mentetlen módosítások. Biztosan bezárod?')) return; props.onClose(); }
+    var fld = function (label, node, hint) { return h('label', { className: 'ap-te-f' }, h('span', { className: 'ap-te-lab' }, label, hint ? h('i', null, hint) : null), node); };
+    return h('div', { className: 'ap-pv-scrim', onClick: close },
+      h('div', { className: 'ap-te', onClick: function (e) { e.stopPropagation(); } },
+        h('div', { className: 'ap-pv-h' },
+          h('b', null, '📝 Feladat szerkesztése' + (st.ord ? ' · #' + st.ord : '')),
+          dirty ? h('span', { className: 'ap-te-dirty' }, '● mentetlen') : null,
+          h('button', { className: 'ap-pv-x', 'aria-label': 'Bezárás', onClick: close }, '×')),
+        h('div', { className: 'ap-te-body' },
+          h('div', { className: 'ap-te-form' },
+            fld('Cím', h('input', { className: 'ap-te-in', value: f.title, onChange: function (e) { set('title', e.target.value); } })),
+            h('div', { className: 'ap-te-row' },
+              fld('Típus', h('select', { className: 'ap-te-in', value: f.kind, onChange: function (e) { set('kind', e.target.value); } },
+                TASK_KINDS.map(function (k) { return h('option', { key: k, value: k }, ((PROTO_KIND[k] || {}).ic || '•') + ' ' + ((PROTO_KIND[k] || {}).lab || k)); }))),
+              fld('Állapot', h('select', { className: 'ap-te-in', value: f.status, onChange: function (e) { set('status', e.target.value); } },
+                TASK_ST.map(function (k) { return h('option', { key: k, value: k }, PROTO_ST[k] || k); }))),
+              fld('Becsült perc', h('input', { className: 'ap-te-in', type: 'number', min: '0', value: f.est_minutes, onChange: function (e) { set('est_minutes', e.target.value); } }))),
+            fld('Utasítás', h('textarea', { className: 'ap-te-in ta', rows: 6, value: f.instruction, onChange: function (e) { set('instruction', e.target.value); } }), 'ezt hajtja végre a futtató'),
+            fld('Bemenetek', h('textarea', { className: 'ap-te-in ta', rows: 3, value: f.inputs, onChange: function (e) { set('inputs', e.target.value); } }), 'soronként egy'),
+            fld('Várt kimenetek', h('textarea', { className: 'ap-te-in ta', rows: 3, value: f.expected_outputs, onChange: function (e) { set('expected_outputs', e.target.value); } }), 'soronként egy'),
+            fld('Elfogadási feltételek', h('textarea', { className: 'ap-te-in ta', rows: 3, value: f.acceptance, onChange: function (e) { set('acceptance', e.target.value); } }), 'soronként egy'),
+            fld('Parancs-tipp', h('input', { className: 'ap-te-in mono', value: f.command_hint, onChange: function (e) { set('command_hint', e.target.value); } })),
+            h('label', { className: 'ap-te-chk' }, h('input', { type: 'checkbox', checked: f.needs_approval, onChange: function (e) { set('needs_approval', e.target.checked); } }), ' Jóváhagyás kell a futtatás előtt')),
+          h('div', { className: 'ap-te-chat' },
+            h('div', { className: 'ap-te-ch-h' }, '💬 Asszisztens', h('span', null, 'kérd meg, hogy írja át a kártyát')),
+            h('div', { className: 'ap-te-ch-list', ref: listRef },
+              !msgs.length ? h('div', { className: 'ap-te-ch-empty' }, 'Írd le, mit változtasson — pl. „legyen konkrétabb az utasítás, és adj hozzá elfogadási feltételeket", vagy „ez a lépés a nuScenes adathalmazra vonatkozzon".') : null,
+              msgs.map(function (m, i) { return h('div', { className: 'ap-te-msg ' + m.role, key: i }, m.content); }),
+              questions.length ? h('div', { className: 'ap-te-qs' }, questions.map(function (q, i) {
+                return h('div', { className: 'ap-te-q', key: i }, h('div', { className: 'ap-te-qq' }, q.q),
+                  h('div', { className: 'ap-te-qo' }, (q.options || []).map(function (o, k) {
+                    return h('button', { className: 'ap-te-qb', key: k, onClick: function () { send(o); } }, o);
+                  })));
+              })) : null,
+              sugg ? h('div', { className: 'ap-te-sugg' },
+                h('b', null, '✨ Javaslat a mezőkre'),
+                h('div', { className: 'ap-te-sugg-b' }, Object.keys(sugg).slice(0, 8).map(function (k) {
+                  var v = sugg[k]; var txt = Array.isArray(v) ? v.map(String).join(' · ') : String(v == null ? '' : v);
+                  return h('div', { key: k }, h('i', null, k + ': '), txt.slice(0, 160));
+                })),
+                h('div', { className: 'ap-te-sugg-a' },
+                  h('button', { className: 'btn pri sm', onClick: applySugg }, 'Betöltés az űrlapba'),
+                  h('button', { className: 'btn sm', onClick: function () { setSugg(null); } }, 'Elvetés'))) : null,
+              chatBusy ? h('div', { className: 'ap-te-msg assistant' }, h('span', { className: 'spin' }), ' gondolkodik…') : null),
+            h('div', { className: 'ap-te-ch-in' },
+              h('textarea', {
+                rows: 2, value: input, placeholder: 'Mit írjon át ezen a kártyán?',
+                onChange: function (e) { setInput(e.target.value); },
+                onKeyDown: function (e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }
+              }),
+              h('div', { className: 'ap-te-ch-acts' },
+                h('button', { className: 'btn sm', disabled: chatBusy, title: 'Az AI pontosítja az egész kártyát a jelenlegi tartalom alapján', onClick: refine }, '✨ Csiszolás'),
+                h('button', { className: 'btn pri sm', disabled: chatBusy || !input.trim(), onClick: function () { send(); } }, 'Küldés')))))
+        ,
+        h('div', { className: 'ap-pv-f' },
+          h('span', { className: 'ap-te-hint' }, 'A mentés azonnal a protokollba írja a kártyát.'),
+          h('button', { className: 'btn sm', onClick: close }, 'Mégse'),
+          h('button', { className: 'btn pri sm', disabled: busy || !dirty, onClick: save }, busy ? h('span', { className: 'spin' }) : '💾 Mentés'))));
+  }
   function lsCfg(step, project, idea, maxResults) {
     if (step !== 1) return { keywords: [], include: [], exclude: [], filters: {}, signals: ['has_github', 'has_dataset'] };
     var sq = (idea && String((idea.question || '') + (idea.hypothesis ? '\n\nHypothesis: ' + idea.hypothesis : '')).trim()) || (project && (project.goal || project.title)) || '';
@@ -200,6 +336,19 @@
         return apComplete(run, n ? (n + ' ötlet-jelölt generálva') : 'Nincs új ötlet', [{ phase: 'ideas', level: 'run', message: 'Kutatási ötletek generálva' }]);
       });
     });
+  }
+  // The funnel's FINAL output for a study: each source at its DEEPEST screening step, kept only if it survived as an
+  // include (or was manually overridden). Every downstream phase must agree on this set — the SR reads it, so the
+  // extraction and the gates must too.
+  function studyIncludes(sid) {
+    if (!sid) return Promise.resolve([]);
+    return sb.from('research_study_papers').select('source_id,decision,overridden,step').eq('study_id', sid).then(function (pr) {
+      var deepest = {};
+      ((pr && pr.data) || []).forEach(function (p) { var c = deepest[p.source_id]; if (!c || (p.step || 0) >= (c.step || 0)) deepest[p.source_id] = p; });
+      var inc = [];
+      Object.keys(deepest).forEach(function (k) { var p = deepest[k]; if (p.decision === 'include' || (p.overridden && p.decision !== 'exclude')) inc.push(k); });
+      return inc;
+    }, function () { return []; });
   }
   function apLiterature(run, project) {
     var cur = (run.phases[run.phase_index] || {}).cursor || {};
@@ -254,8 +403,13 @@
     if (cur.stage === 's2') return litScreen(2, 's3', 8, 'Absztrakt').then(function (r) { return r.advance ? apStay(run, { stage: 's3', offset: 0, study_id: sid, iter: 0 }, [{ phase: 'literature', level: 'ok', message: r.msg + ' — absztrakt kész' }]) : r; });
     if (cur.stage === 's3') return litScreen(3, 'gated', 3, 'Full-text').then(function (r) {
       if (!r.advance) return r;
-      if (apGatesOn(run)) return apGate(run, { phase: 'literature', title: 'Included források jóváhagyása', detail: 'Az AI leszűrte az irodalmat. Nézd át az included forrásokat a Studies-ban, majd hagyd jóvá a folytatáshoz.' }, { stage: 'gated', study_id: sid });
-      return apComplete(run, 'Irodalom leszűrve (included kész)', [{ phase: 'literature', level: 'ok', message: r.msg + ' — full-text kész' }]);
+      return studyIncludes(sid).then(function (inc) {
+        // ZERO includes is never something to walk past: the review would be empty and the extraction would have
+        // nothing of its own to work on. Stop for a human even when the gates are switched off.
+        if (!inc.length) return apGate(run, { phase: 'literature', title: '0 cikk jutott át a szűrésen', detail: 'Ebben a szálban egyetlen cikk sem lett included, így az áttekintésnek és a kivonatolásnak nem lenne mit feldolgoznia. Nyisd meg az Irodalom kártyát („Bírálat ›"), vedd be kézzel a releváns cikkeket, majd hagyd jóvá a folytatást.' }, { stage: 'gated', study_id: sid });
+        if (apGatesOn(run)) return apGate(run, { phase: 'literature', title: inc.length + ' included forrás jóváhagyása', detail: inc.length + ' cikk jutott át a szűrésen. Nézd át őket az Irodalom kártya „Bírálat ›" gombjával, majd hagyd jóvá a folytatáshoz.' }, { stage: 'gated', study_id: sid });
+        return apComplete(run, 'Irodalom leszűrve (' + inc.length + ' included)', [{ phase: 'literature', level: 'ok', message: r.msg + ' — full-text kész' }]);
+      });
     });
     return Promise.resolve(apComplete(run, 'Irodalom jóváhagyva', []));   // stage 'gated' → resumed after approval
   }
@@ -302,9 +456,14 @@
   }
   function apSR(run, project) {
     if (!run.study_id) return Promise.resolve(apSkip(run, 'Nincs literature-study — az áttekintés kimarad'));
+    var srCur = (run.phases[run.phase_index] || {}).cursor || {};
     return callEdge('research-study', { action: 'generate_review', study_id: run.study_id }).then(function (d) {
       if (d && d.error) {
-        if (/full-?text|passed/i.test(d.error)) return apSkip(run, 'Nincs full-text included cikk — az áttekintés kimarad');
+        if (/full-?text|passed/i.test(d.error)) {
+          // Offer the manual rescue once; if the user approves without including anything, skip rather than re-gate.
+          if (!srCur.rescued) return apGate(run, { phase: 'sr', title: 'Nincs full-text included cikk', detail: 'A szűrés egyetlen cikket sem engedett a full-text szakaszig, így nincs miből áttekintést írni. Az Irodalom kártya „Bírálat ›" gombjával kézzel is beveheted a releváns cikkeket, majd hagyd jóvá a folytatást.' }, { rescued: true });
+          return apSkip(run, 'Nincs full-text included cikk — az áttekintés kimarad');
+        }
         throw new Error('SR: ' + d.error);
       }
       return apComplete(run, (d && d.words ? ('Áttekintés: ~' + d.words + ' szó') : 'Áttekintés kész'), [{ phase: 'sr', level: 'run', message: 'Systematic review generálva' + (d && d.file_path ? ' → ' + d.file_path : '') }]);
@@ -347,11 +506,16 @@
             ((pr && pr.data) || []).forEach(function (p) { var c = deepest[p.source_id]; if (!c || (p.step || 0) >= (c.step || 0)) deepest[p.source_id] = p; });
             var inc = {}; Object.keys(deepest).forEach(function (sid) { var p = deepest[sid]; if (p.decision === 'include' || (p.overridden && p.decision !== 'exclude')) inc[sid] = 1; });
             var ids = Object.keys(inc);
-            return ids.length ? byCite(ids) : projInc();
-          }, function () { return projInc(); })
+            // NO project-wide fallback in study mode: borrowing the project's includes pulled in ANOTHER thread's
+            // papers, so a thread with 0 includes "extracted" 28 foreign articles.
+            return byCite(ids);
+          }, function () { return []; })
         : projInc();
       return resolveSids.then(function (sids) {
-        if (!sids.length) return apSkip(run, 'Nincs included cikk a kivonatoláshoz — kimarad');
+        if (!sids.length) {
+          if (sidMarker && !cur.rescued) return apGate(run, { phase: 'extract', title: 'Ebben a szálban 0 included cikk van', detail: 'A kivonatoláshoz ennek a szálnak a saját included cikkei kellenek — más szál cikkeit szándékosan nem vesszük át. Nyisd meg az Irodalom kártyát („Bírálat ›"), vedd be a releváns cikkeket, majd hagyd jóvá a folytatást.' }, { rescued: true });
+          return apSkip(run, 'Nincs included cikk a kivonatoláshoz — kimarad');
+        }
         // idempotent: adopt questions already created for this study (retry-safe), else insert them
         var existQ = sidMarker
           ? sb.from('research_extraction_questions').select('id,ord').eq('project_id', project.id).eq('study_id', sidMarker).order('ord', { ascending: true })
@@ -1184,6 +1348,7 @@
     var ptaS = useState({}), protoArts = ptaS[0], setProtoArts = ptaS[1];   // run_id → [protocol steps] : inline task cards shown under the Protocol card in the graph
     var poS = useState({}), protoOpen = poS[0], setProtoOpen = poS[1];       // run_id → false to collapse the inline protocol task cards (default = expanded)
     var rgS = useState({}), regenning = rgS[0], setRegenning = rgS[1];       // run_id → true while its protocol is being regenerated
+    var teS = useState(null), taskEd = teS[0], setTaskEd = teS[1];           // the protocol task card opened for editing (ToDo editor + AI chat)
     var driving = useRef(false), alive = useRef(true), projRef = useRef(null), feedRef = useRef(null), myDriver = useRef(null);
     var bDriving = useRef({});   // per-branch-run driving flags (additive; the primary driver above is untouched)
     var branchRunsRef = useRef([]), activeRef = useRef(false);   // live mirrors for the event poller (avoids stale closures)
@@ -1831,9 +1996,20 @@
     }
     // One full protocol-task card (shared by the inline graph view AND the modal): title, status, type, minutes,
     // approval, dependencies, the instruction, acceptance criteria and expected outputs.
+    // Applying a saved task everywhere it is on screen (graph column, protocol modal, the open editor).
+    function applyStepUpdate(upd) {
+      setProtoArts(function (m) {
+        var n = {}; Object.keys(m).forEach(function (k) { n[k] = (m[k] || []).map(function (x) { return x.id === upd.id ? Object.assign({}, x, upd) : x; }); });
+        return n;
+      });
+      setProtoPv(function (pv) { return (pv && pv.steps) ? Object.assign({}, pv, { steps: pv.steps.map(function (x) { return x.id === upd.id ? Object.assign({}, x, upd) : x; }) }) : pv; });
+      setTaskEd(function (t) { return (t && t.id === upd.id) ? Object.assign({}, t, upd) : t; });
+    }
     function protoCard(s) {
       var spec = s.spec || {}, kd = PROTO_KIND[s.kind] || { ic: '•', lab: s.kind || 'lépés' }, instr = spec.instruction || '';
-      return h('div', { className: 'apg-tcard', key: s.id },
+      return h('div', { className: 'apg-tcard clickable', key: s.id, title: 'Kattints a szerkesztéshez', role: 'button', tabIndex: 0,
+        onClick: function () { setTaskEd(s); },
+        onKeyDown: function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setTaskEd(s); } } },
         h('div', { className: 'apg-tcard-h' },
           h('span', { className: 'apg-tcard-ord' }, s.ord),
           h('span', { className: 'apg-tcard-t' }, s.title || 'Feladat'),
@@ -2178,6 +2354,7 @@
           h('div', { className: 'ap-pv-f' },
             h('button', { className: 'btn sm', onClick: function () { try { navigator.clipboard.writeText(preview.content || ''); toast('Vágólapra másolva', true); } catch (e) { } } }, 'Másolás (Markdown)'),
             h('button', { className: 'btn pri sm', onClick: function () { setPreview(null); } }, 'Bezárás')))) : null,
+      taskEd ? h(TaskEdit, { step: taskEd, projectId: run.project_id, onClose: function () { setTaskEd(null); }, onSaved: applyStepUpdate }) : null,
       // Protocol task-cards modal: every generated protocol step as its own card with its main metadata.
       protoPv ? h('div', { className: 'ap-pv-scrim', onClick: function () { setProtoPv(null); } },
         h('div', { className: 'ap-pv proto', onClick: function (e) { e.stopPropagation(); } },
