@@ -63,7 +63,11 @@
     window._pdfjsLoading = new Promise(function (res, rej) {
       var sc = document.createElement('script');
       sc.src = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js';
-      sc.onload = function () { try { window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js'; } catch (e) { } res(window.pdfjsLib); };
+      sc.onload = function () {
+        if (!window.pdfjsLib) { window._pdfjsLoading = null; rej(new Error('A PDF-olvasó nem töltődött be.')); return; }
+        try { window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js'; } catch (e) { }
+        res(window.pdfjsLib);
+      };
       sc.onerror = function () { window._pdfjsLoading = null; rej(new Error('A PDF-olvasót nem sikerült betölteni.')); };
       document.head.appendChild(sc);
     });
@@ -78,15 +82,31 @@
           .catch(function () { });   // one unreadable page must not lose the rest
       })(i);
       return chain.then(function () {
-        return { text: String(text || '').replace(/-\s*\n\s*/g, '').replace(/[ \t]+/g, ' ').trim().slice(0, PDF_TEXT_CAP), pages: pdf.numPages, read: n };
+        var full = String(text || '').replace(/-\s*\n\s*/g, '').replace(/[ \t]+/g, ' ').trim();
+        return { text: full.slice(0, PDF_TEXT_CAP), pages: pdf.numPages, read: n, capped: full.length > PDF_TEXT_CAP };
       });
     });
   }
+  var PDF_ERR = {
+    loader: 'a PDF-olvasó nem töltődött be (hálózati vagy tartalomblokkolási hiba)',
+    parse: 'a PDF-et nem sikerült értelmezni (sérült vagy jelszóval védett)',
+    read: 'a fájlt nem sikerült beolvasni',
+    empty: 'nincs benne szövegréteg (valószínűleg szkennelt / kép alapú)',
+    too_large: 'túl nagy a böngészőben történő feldolgozáshoz (40 MB fölött)',
+    binary: 'ebből a fájltípusból nem tudok szöveget kinyerni'
+  };
   function pdfTextFromFile(f) {
     return new Promise(function (res) {
       var rd = new FileReader();
-      rd.onload = function () { pdfTextFromBytes(rd.result, 40).then(res, function () { res(null); }); };
-      rd.onerror = function () { res(null); };
+      rd.onload = function () {
+        ensurePdfJs().then(function () {
+          return pdfTextFromBytes(rd.result, 40).then(function (r) {
+            if (!r || !r.text || r.text.length < 40) { res({ err: 'empty', pages: r && r.pages, read: r && r.read }); return; }
+            res(r);
+          }, function () { res({ err: 'parse' }); });
+        }, function () { res({ err: 'loader' }); });
+      };
+      rd.onerror = function () { res({ err: 'read' }); };
       rd.readAsArrayBuffer(f);
     });
   }
@@ -97,14 +117,15 @@
     return Promise.all(arr.map(function (f) {
       var base = { name: f.name, size: f.size, mime: f.type || 'application/octet-stream', content: '' };
       if (isPdfFile(f)) {
-        if (f.size > 40 * 1024 * 1024) return Promise.resolve(base);
+        base.mime = 'application/pdf';
+        if (f.size > 40 * 1024 * 1024) { base.extracted = false; base.skipReason = 'too_large'; return Promise.resolve(base); }
         return pdfTextFromFile(f).then(function (r) {
-          if (r && r.text) { base.content = r.text; base.mime = 'application/pdf'; base.pdfPages = r.pages; base.extracted = true; }
-          else { base.mime = 'application/pdf'; base.extracted = false; }   // scanned/image-only PDF → no text layer
+          if (r && r.text) { base.content = r.text; base.pdfPages = r.pages; base.pdfRead = r.read; base.capped = !!r.capped; base.extracted = true; }
+          else { base.extracted = false; base.skipReason = (r && r.err) || 'parse'; base.pdfPages = r && r.pages; }
           return base;
-        }, function () { return base; });
+        }, function () { base.extracted = false; base.skipReason = 'parse'; return base; });
       }
-      if (!isTextFile(f) || f.size > 400 * 1024) return Promise.resolve(base);
+      if (!isTextFile(f) || f.size > 400 * 1024) { base.extracted = false; base.skipReason = (isTextFile(f) ? 'too_large' : 'binary'); return Promise.resolve(base); }
       return new Promise(function (res) {
         var rd = new FileReader();
         rd.onload = function () { base.content = String(rd.result || '').slice(0, 400 * 1024); if (base.mime === 'application/octet-stream') base.mime = 'text/plain'; res(base); };
@@ -141,19 +162,21 @@
     var names = ok.map(function (f) { return f.name; }).join(', ');
     var head = (lead || 'Feltöltöttem: ' + names);
     var withText = ok.filter(function (f) { return (f.content || '').trim().length > 40; });
-    if (!withText.length) {
-      var scanned = ok.filter(function (f) { return f.mime === 'application/pdf' && f.extracted === false; });
-      return head + (scanned.length ? '\n\n(A PDF-ből nem sikerült szöveget kinyerni — valószínűleg szkennelt/kép alapú. Kérdezz rá, mit tartalmaz, vagy kérj szöveges változatot.)' : '');
-    }
+    var unread = ok.filter(function (f) { return !((f.content || '').trim().length > 40); });
+    var caveat = unread.length
+      ? '\n\n(Amit NEM tudok elolvasni: ' + unread.map(function (f) { return f.name + ' — ' + (PDF_ERR[f.skipReason] || 'ismeretlen ok'); }).join('; ') + '.)'
+      : '';
+    if (!withText.length) return head + caveat;
     var budget = CTX_TOTAL, parts = [];
     withText.forEach(function (f) {
       if (budget <= 200) return;
       var take = Math.min(CTX_PER_FILE, budget);
       var body = String(f.content).slice(0, take);
       budget -= body.length + 60;
-      parts.push('--- ' + f.name + (f.pdfPages ? ' (' + f.pdfPages + ' oldal' + (String(f.content).length >= PDF_TEXT_CAP ? ', rövidítve' : '') + ')' : '') + ' ---\n' + body + (String(f.content).length > body.length ? '\n…(a teljes szöveg a projekt fájljai között)' : ''));
+      var cov = f.pdfPages ? (' (' + (f.pdfRead && f.pdfRead < f.pdfPages ? 'az első ' + f.pdfRead + ' oldal a(z) ' + f.pdfPages + '-ból' : f.pdfPages + ' oldal') + (f.capped ? ', a szöveg hosszban is vágva' : '') + ')') : '';
+      parts.push('--- ' + f.name + cov + ' ---\n' + body + (String(f.content).length > body.length ? '\n…(itt megszakad — a hosszabb szöveg a projekt fájljai között van, de ebben a beszélgetésben csak ez a részlet érhető el)' : ''));
     });
-    return head + '\n\n' + parts.join('\n\n');
+    return head + '\n\n' + parts.join('\n\n') + caveat;
   }
   // ===================== KIINDULÁS SAJÁT MTMT-PUBLIKÁCIÓBÓL =====================
   // A felhasználó nem csak fájlt csatolhat: hivatkozhat a saját MTMT-publikációjára. Ilyenkor megpróbáljuk
@@ -192,24 +215,31 @@
   // Full pipeline for one chosen publication. `onStep` reports progress honestly, including the failure branches.
   function preparePaperStart(pub, onStep) {
     var step = function (t) { try { onStep && onStep(t); } catch (e) { } };
-    var out = { pub: pub, pdfText: '', pdfPages: 0, pdfUrl: null, abstract: null, why: null };
+    var out = { pub: pub, pdfText: '', pdfPages: 0, pdfRead: 0, capped: false, pdfUrl: null, abstract: null, why: null, matchedTitle: null, byTitle: false };
     step('Nyílt hozzáférésű PDF keresése…');
     return callEdge('pdf-proxy', { action: 'resolve', doi: pub.doi || '', title: pub.title || '', year: pub.year || undefined })
       .then(function (d) {
         // Only a genuine ok:true answer may be read as "no open-access copy" — an error object must not.
         if (!d || d.error || d.ok !== true) { out.why = 'A PDF-kereső nem válaszolt (' + ((d && d.error) || 'ismeretlen hiba') + ').'; return null; }
         out.abstract = d.abstract || null;
+        out.matchedTitle = d.matched_title || null;
+        out.byTitle = String(d.source || '').indexOf('title') >= 0 || (!pub.doi && !!d.matched_title);
         var urls = (d.pdf_urls && d.pdf_urls.length) ? d.pdf_urls : (d.pdf_url ? [d.pdf_url] : []);
-        if (!urls.length) { out.why = pub.doi ? 'Nincs nyilvánosan elérhető (open access) PDF.' : 'Nincs DOI, és cím alapján sem találtam nyilvános PDF-et.'; return null; }
+        if (!urls.length) {
+          // The server tells these apart now: a failed lookup is NOT evidence that no open-access copy exists.
+          out.why = d.lookup_failed ? 'A keresőszolgáltatás most nem válaszolt — nem tudom, van-e nyilvános PDF.'
+            : (pub.doi ? 'Nincs nyilvánosan elérhető (open access) PDF.' : 'Nincs DOI, és cím alapján sem találtam nyilvános PDF-et.');
+          return null;
+        }
         step('PDF letöltése…');
         return fetchPdfBytes(urls).then(function (got) {
           if (!got) { out.why = 'Találtam PDF-hivatkozást, de a letöltés nem sikerült.'; return null; }
           out.pdfUrl = got.url;
           step('Szöveg kinyerése a PDF-ből…');
           return pdfTextFromBytes(got.buf, 40).then(function (r) {
-            if (!r || !r.text || r.text.length < 400) { out.why = 'A PDF-ből nem sikerült szöveget kinyerni (valószínűleg szkennelt).'; return null; }
-            out.pdfText = r.text; out.pdfPages = r.pages; return out;
-          }, function () { out.why = 'A PDF szövegének kinyerése nem sikerült.'; return null; });
+            if (!r || !r.text || r.text.length < 400) { out.why = 'A letöltött PDF-ben nincs szövegréteg (valószínűleg szkennelt / kép alapú).'; return null; }
+            out.pdfText = r.text; out.pdfPages = r.pages; out.pdfRead = r.read; out.capped = !!r.capped; return out;
+          }, function () { out.why = 'A PDF-et nem sikerült értelmezni (sérült, védett, vagy nem töltött be az olvasó).'; return null; });
         });
       }, function () { out.why = 'A PDF-kereső nem érhető el.'; return null; })
       .then(function () { return out; });
@@ -227,37 +257,54 @@
       + (p.citations ? '- **Idézettség:** ' + p.citations + ' (független: ' + (p.indep_citations || 0) + ')\n' : '')
       + '\n> Ez a publikáció az Autopilot-kutatás kiindulási pontja.\n'
       + (prep.abstract ? '\n## Absztrakt\n\n' + prep.abstract + '\n' : '')
+      + (prep.byTitle && prep.matchedTitle ? '\n> ⚠ A PDF-et **cím alapján** azonosítottam (nem DOI-val). Talált rekord: _' + prep.matchedTitle + '_ — érdemes ellenőrizni, hogy tényleg ez a cikk.\n' : '')
       + (prep.pdfUrl ? '\n## Forrás-PDF\n\n' + prep.pdfUrl + '\n' : '')
-      + (prep.pdfText ? '\n## A cikk kinyert szövege' + (prep.pdfPages ? ' (' + prep.pdfPages + ' oldal)' : '') + '\n\n' + prep.pdfText + '\n'
+      + (prep.pdfText ? '\n## A cikk kinyert szövege' + (prep.pdfPages ? ' (' + (prep.pdfRead && prep.pdfRead < prep.pdfPages ? 'az első ' + prep.pdfRead + ' oldal a(z) ' + prep.pdfPages + '-ból' : prep.pdfPages + ' oldal') + (prep.capped ? ', hosszban vágva' : '') + ')' : '') + '\n\n' + prep.pdfText + '\n'
         : '\n## A cikk szövege\n\n_Nem sikerült megszerezni: ' + (prep.why || 'ismeretlen ok') + '_\n');
     var name = 'mtmt-' + (p.mtid || (p.id || '').slice(0, 8)) + '.md';   // mtid in the name: 'uploads/'+name is the upsert key
     return { name: name, size: md.length, mime: 'text/markdown', content: md, extracted: !!prep.pdfText };
   }
   // The seed message. The Autopilot chat runs on the multi-agent path, whose synthesiser gets NO instruction
   // about the questions fence — so the format is spelled out here, in the first user message.
-  var SEED_CAP = 3600;
-  function paperSeedMessage(prep) {
+  // The chat edge slices the task at 4000 chars. Everything that MUST survive (the instructions, and the
+  // "ask me for the PDF" rule) therefore goes BEFORE the article excerpt — truncation may only eat article text.
+  var TASK_LIMIT = 4000, SEED_MARGIN = 120;
+  function paperSeedMessage(prep, reserved) {
     var p = prep.pub;
     var head = 'Ebből a saját publikációmból szeretnék továbbindulni:\n\n'
       + '**' + (p.title || 'Publikáció') + '**\n'
       + [pubAuthors(p), p.year, p.journal, p.doi ? 'DOI: ' + p.doi : '', p.mtid ? 'MTMT #' + p.mtid : ''].filter(Boolean).join(' · ') + '\n';
-    var body = '';
-    if (prep.pdfText) body = '\nA cikk teljes szövegét megszereztem, részlet:\n\n--- ' + (prep.pdfPages ? prep.pdfPages + ' oldal, ' : '') + 'kinyert szöveg ---\n';
-    else if (prep.abstract) body = '\nAz eredeti PDF nem elérhető (' + (prep.why || '—') + '), de az absztrakt igen:\n\n';
-    else body = '\nAz eredeti PDF-et nem sikerült megszereznem (' + (prep.why || '—') + '), és absztraktot sem találtam — egyelőre csak a bibliográfiai adatok állnak rendelkezésre.\n';
-    var tail = '\n\nFeladatod:\n'
+    var instr = '\nFeladatod:\n'
       + '1. Foglald össze 3-4 mondatban, mit tett le ez a munka, és hol a folytatás tere.\n'
       + '2. Javasolj 2-3 KONKRÉT továbblépési irányt (mit kutassunk tovább), mindegyiknél egy mondat indoklással.\n'
       + '3. A válasz VÉGÉN kérdezz vissza. A kérdéseket pontosan ebben a formátumban add meg, a válasz legutolsó elemeként:\n'
       + '```publify-questions\n[{"q":"kérdés","options":["opció 1","opció 2"]}]\n```\n';
     if (!prep.pdfText) {
-      tail += '4. FONTOS: a legelső kérdésed arra kérjen, hogy töltsem fel a cikk PDF-jét a chat 📎 gombjával, mert enélkül csak a metaadatokból tudsz dolgozni. Példa: {"q":"Fel tudod tölteni a cikk PDF-jét? A 📎 gombbal csatolhatod — enélkül csak a bibliográfiai adatokból és az absztraktból dolgozom.","options":["Feltöltöm most","Nincs meg — dolgozz abból, ami van"]}\n';
+      instr += '4. FONTOS: a legelső kérdésed arra kérjen, hogy töltsem fel a cikk PDF-jét a chat 📎 gombjával, mert enélkül csak a metaadatokból tudsz dolgozni. Példa: {"q":"Fel tudod tölteni a cikk PDF-jét? A 📎 gombbal csatolhatod — enélkül csak a bibliográfiai adatokból és az absztraktból dolgozom.","options":["Feltöltöm most","Nincs meg — dolgozz abból, ami van"]}\n';
     }
-    var room = SEED_CAP - head.length - body.length - tail.length;
+    var lead;
+    if (prep.pdfText) lead = '\nA cikk szövegéből ennyi fér ide (a teljes kinyert szöveg a projekt fájljai közt van, de EBBEN a beszélgetésben csak az alábbi részlet érhető el):\n\n';
+    else if (prep.abstract) lead = '\nAz eredeti PDF nem elérhető (' + (prep.why || '—') + '), de az absztrakt igen:\n\n';
+    else lead = '\nAz eredeti PDF-et nem sikerült megszereznem (' + (prep.why || '—') + '), és absztraktot sem találtam — egyelőre csak a bibliográfiai adatok állnak rendelkezésre.\n';
+    var fixed = head + instr + lead;
+    var room = TASK_LIMIT - SEED_MARGIN - (reserved || 0) - fixed.length;
     var excerpt = '';
-    if (prep.pdfText && room > 300) excerpt = prep.pdfText.slice(0, room) + (prep.pdfText.length > room ? '\n…(a teljes szöveg a projekt fájljai között)' : '');
-    else if (!prep.pdfText && prep.abstract && room > 200) excerpt = prep.abstract.slice(0, room);
-    return head + body + excerpt + tail;
+    if (room > 250) {
+      var src = prep.pdfText || prep.abstract || '';
+      if (src) excerpt = src.slice(0, room) + (src.length > room ? '\n…(itt megszakad)' : '');
+    }
+    return fixed + excerpt;
+  }
+  // Durable context: research-agents passes research_projects.goal UNTRUNCATED into every agent's system prompt
+  // on EVERY turn, while the seed message only reaches the model on the first one. Without this the paper fell
+  // out of context as soon as the user answered the first clarifying question.
+  function paperGoal(prep) {
+    var p = prep.pub;
+    var src = prep.abstract || prep.pdfText || '';
+    return 'Kiindulási publikáció (a kutató sajátja): "' + (p.title || '—') + '" — ' + [pubAuthors(p), p.year, p.journal, p.doi ? 'DOI ' + p.doi : ''].filter(Boolean).join(', ') + '. '
+      + 'A kutatás célja: ebből a munkából továbblépni.'
+      + (src ? ' A cikk lényege: ' + src.slice(0, 2200) : '')
+      + (prep.pdfText ? ' (A teljes kinyert szöveg a projekt fájljai közt: uploads/mtmt-' + (p.mtid || '') + '.md)' : '');
   }
   function loadFiles(pid) {
     return sb.from('research_files').select('path,size,mime').eq('project_id', pid).like('path', 'uploads/%').order('path').then(function (r) {
@@ -1351,6 +1398,7 @@
             h('div', { className: 'ap-pp-b' },
               st.loading ? h('div', { className: 'ap-pp-empty' }, h('span', { className: 'spin' }))
                 : st.err ? h('div', { className: 'ap-pp-empty' }, 'Nem sikerült betölteni: ' + st.err)
+                  : (!st.rows.length && prof === null) ? h('div', { className: 'ap-pp-empty' }, h('span', { className: 'spin' }))
                   : !st.rows.length ? h('div', { className: 'ap-pp-empty' },
                     h('b', null, (prof && prof.mtmt_id) ? 'Még nincs szinkronizálva egyetlen publikáció sem.' : 'Nincs beállítva MTMT azonosítód.'),
                     h('div', { style: { marginTop: 6, lineHeight: 1.5 } }, (prof && prof.mtmt_id)
@@ -1396,19 +1444,30 @@
     // conversation on it. The project cannot exist yet (research_files needs a project), so it travels as a
     // staged file — exactly like an upload.
     function onPickPub(pub) {
-      if (pubBusy) return;
+      if (pubBusy || props.creating) return;   // a create already in flight would end up as a SECOND project
       setPubBusy(true); setPubStep('Nyílt hozzáférésű PDF keresése…');
       preparePaperStart(pub, setPubStep).then(function (prep) {
+        setPubBusy(false); setPickPub(false); setPubStep('');
+        // preparing takes 10-20s; the first project may have finished starting in the meantime
+        if (props.creating) { toast('Már fut egy projekt létrehozása — próbáld újra utána.', false); return; }
         var file = paperStagedFile(prep);
+        var typed = dir.trim();
+        var others = staged.slice();
+        // reserve room for the typed direction AND the other attachments' names, so the instruction block
+        // in the seed can never be the part the 4000-char task slice eats
+        var extra = others.length ? '\n\nEmellett feltöltöttem: ' + others.map(function (f) { return f.name; }).join(', ') : '';
         var meta = {
           title: (pub.title || 'Publikáció').slice(0, 70),
-          goal: 'Továbblépés a saját publikációmból: ' + pubRef(pub),
-          seed: paperSeedMessage(prep),
-          note: prep.pdfText ? ('✓ A cikk szövege megvan (' + prep.pdfPages + ' oldal)') : ('⚠ ' + (prep.why || 'A PDF nem érhető el'))
+          goal: paperGoal(prep),
+          seed: paperSeedMessage(prep, typed.length + extra.length + 4) + extra,
+          note: prep.pdfText
+            ? ('✓ Megvan a cikk szövege' + (prep.pdfRead && prep.pdfPages && prep.pdfRead < prep.pdfPages ? ' (az első ' + prep.pdfRead + ' oldal a(z) ' + prep.pdfPages + '-ból)' : (prep.pdfPages ? ' (' + prep.pdfPages + ' oldal)' : '')))
+            : ('⚠ ' + (prep.why || 'A PDF nem érhető el')),
+          titleWarn: (prep.byTitle && prep.matchedTitle) ? prep.matchedTitle : null
         };
-        setPubBusy(false); setPickPub(false); setPubStep('');
         toast(meta.note, !!prep.pdfText);
-        props.onStart(dir.trim(), staged.concat([file]), meta);
+        if (meta.titleWarn) setTimeout(function () { toast('A PDF cím alapján lett azonosítva: „' + String(meta.titleWarn).slice(0, 60) + '…" — ellenőrizd.', false); }, 2800);
+        props.onStart(typed, others.concat([file]), meta);
       }, function () {
         setPubBusy(false); setPubStep('');
         toast('A publikáció előkészítése nem sikerült.', false);
@@ -1431,7 +1490,7 @@
         h('textarea', { ref: taRef, className: 'ap-bigin', rows: 1, value: dir, placeholder: ph, onChange: onTa, onKeyDown: onKey }),
         h('button', { className: 'ap-gobtn', title: 'Indítás (⌘/Ctrl+Enter)', disabled: !canStart || props.creating, onClick: start }, props.creating ? h('span', { className: 'spin' }) : '➤')),
       h('div', { className: 'ap-starters' }, STARTERS.map(function (s) {
-        return h('div', { key: s.key, className: 'ap-starter' + (starter === s.key ? ' on' : ''), onClick: function () { pickStarter(s.key); } },
+        return h('div', { key: s.key, className: 'ap-starter' + (starter === s.key ? ' on' : '') + (props.creating ? ' off' : ''), onClick: function () { if (props.creating) return; pickStarter(s.key); } },
           h('div', { className: 'si' }, s.si), h('b', null, s.b), h('small', null, s.s));
       })),
       h('input', { type: 'file', ref: fileRef, multiple: true, style: { display: 'none' }, onChange: onFile }),
@@ -2998,6 +3057,10 @@
             var seed = meta.seed || stagedContextMsg(staged.filter(function (f) { return okNames[f.name]; }),
               (dir || '(fájl-alapú indítás)') + (okd.length ? '\n\nFeltöltött fájlok: ' + okd.map(function (x) { return x.name; }).join(', ') : ''));
             if (meta.seed && dir) seed = dir + '\n\n' + seed;
+            // Hard guard: the chat edge slices the first message at 4000 chars. paperSeedMessage already budgeted
+            // for `dir`, but a file-based start (or a future caller) could still overflow — trim the MIDDLE, never
+            // the tail, so nothing that instructs the model is lost.
+            if (seed.length > 3980) seed = seed.slice(0, 3000) + '\n…(a részlet itt megszakad)\n' + seed.slice(-900);
             sb.from('research_messages').insert({ chat_id: cid, role: 'user', content: seed }).then(function (ins) {
               if (ins && ins.error) { abortCreate(proj.id, 'Nem sikerült elküldeni az első üzenetet: ' + ins.error.message); return; }
               setProject(proj); setChatId(cid); setCreating(false); setView('brief');
