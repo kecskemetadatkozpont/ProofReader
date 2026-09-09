@@ -22,9 +22,25 @@ function arxivPdf(doi: string): string | null {
   const m = bareDoi(doi).match(/arxiv\.([0-9]{4}\.[0-9]{4,5}(v\d+)?)/i) || bareDoi(doi).match(/arxiv\.([a-z-]+\/\d{7})/i);
   return m ? 'https://arxiv.org/pdf/' + m[1] : null;
 }
-async function resolveOa(doi: string): Promise<{ url: string | null; source: string }> {
+// OpenAlex ships abstracts as an inverted index (term -> positions); rebuild the running text.
+function abstractFrom(w: any): string | null {
+  const inv = w && w.abstract_inverted_index;
+  if (!inv || typeof inv !== 'object') return null;
+  const words: string[] = [];
+  for (const term of Object.keys(inv)) for (const pos of (inv[term] || [])) words[pos] = term;
+  const out = words.filter((x) => x != null).join(' ').replace(/\s+/g, ' ').trim();
+  return out ? out.slice(0, 4000) : null;
+}
+function pdfCandidates(w: any): string[] {
+  const raw = [w?.best_oa_location?.pdf_url, w?.primary_location?.pdf_url,
+  ...((w?.locations || []).map((l: any) => l?.pdf_url)), w?.open_access?.oa_url];   // oa_url LAST: often a landing page
+  const seen: Record<string, boolean> = {}; const out: string[] = [];
+  for (const u of raw) { const v = String(u || '').trim(); if (v && !seen[v]) { seen[v] = true; out.push(v); } }
+  return out;
+}
+async function resolveOa(doi: string): Promise<{ url: string | null; urls?: string[]; source: string; abstract?: string | null; matched_title?: string | null }> {
   const ax = arxivPdf(doi);
-  if (ax) return { url: ax, source: 'arxiv' };
+  if (ax) return { url: ax, urls: [ax], source: 'arxiv' };
   const d = bareDoi(doi);
   if (!d) return { url: null, source: 'none' };
   try {
@@ -32,9 +48,43 @@ async function resolveOa(doi: string): Promise<{ url: string | null; source: str
     const r = await fetch(u, { headers: { 'User-Agent': UA } });
     if (r.ok) {
       const w = await r.json();
-      const cands = [w?.best_oa_location?.pdf_url, w?.primary_location?.pdf_url, w?.open_access?.oa_url,
-      ...((w?.locations || []).map((l: any) => l?.pdf_url))].filter(Boolean);
-      if (cands.length) return { url: cands[0], source: 'openalex' };
+      const abs = abstractFrom(w);
+      const cands = pdfCandidates(w);
+      // the abstract is returned even when there is no PDF — it is the fallback context
+      if (cands.length) return { url: cands[0], urls: cands, source: 'openalex', abstract: abs, matched_title: w?.display_name || null };
+      return { url: null, urls: [], source: 'none', abstract: abs, matched_title: w?.display_name || null };
+    }
+  } catch (_e) { /* fall through */ }
+  return { url: null, source: 'none' };
+}
+// Many MTMT records carry no DOI, so a title lookup is the only way to reach the open-access copy. The title
+// match is deliberately STRICT: attaching the wrong paper as the conversation's context is far worse than
+// finding nothing, and OpenAlex's search happily returns loose matches.
+function normTitle(s: string): string {
+  return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+async function resolveByTitle(title: string, year?: number): Promise<{ url: string | null; urls?: string[]; source: string; matched_title?: string | null; doi?: string | null; abstract?: string | null }> {
+  const t = String(title || '').trim().slice(0, 300);
+  if (normTitle(t).length < 15) return { url: null, source: 'none' };
+  try {
+    const filters = ['title.search:' + t.replace(/[,:;()\[\]]/g, ' ')];
+    if (Number.isFinite(year as number) && (year as number) > 1800) filters.push('publication_year:' + year);
+    const u = 'https://api.openalex.org/works?filter=' + encodeURIComponent(filters.join(',')) + '&per-page=5' + (OA_KEY ? '&api_key=' + OA_KEY : '');
+    const r = await fetch(u, { headers: { 'User-Agent': UA } });
+    if (!r.ok) return { url: null, source: 'none' };
+    const d = await r.json();
+    const want = normTitle(t);
+    for (const w of ((d && d.results) || [])) {
+      const got = normTitle(w?.display_name || w?.title);
+      if (!got) continue;
+      const strong = got === want
+        || (want.length > 30 && (got.indexOf(want) === 0 || want.indexOf(got) === 0))   // sub/super-title differences only
+        || (got.length > 30 && want.length > 30 && got.slice(0, 45) === want.slice(0, 45));
+      if (!strong) continue;
+      const cands = pdfCandidates(w);
+      const abs = abstractFrom(w);
+      if (cands.length) return { url: cands[0], urls: cands, source: 'openalex-title', matched_title: w?.display_name || w?.title || null, doi: w?.doi || null, abstract: abs };
+      if (abs) return { url: null, source: 'none', matched_title: w?.display_name || w?.title || null, doi: w?.doi || null, abstract: abs };
     }
   } catch (_e) { /* fall through */ }
   return { url: null, source: 'none' };
@@ -65,7 +115,15 @@ Deno.serve(async (req) => {
 
     if (action === 'resolve') {
       const r = await resolveOa(String(body.doi || ''));
-      return json({ ok: true, pdf_url: r.url, source: r.source, no_oa: !r.url });
+      if (r.url) return json({ ok: true, pdf_url: r.url, pdf_urls: r.urls || [r.url], source: r.source, abstract: r.abstract || null, matched_title: r.matched_title || null, no_oa: false });
+      // No DOI (or the DOI led nowhere) → try the title. Backwards compatible: callers that pass only a doi
+      // get exactly the old behaviour plus an abstract when OpenAlex has one.
+      const t = String(body.title || '');
+      if (t) {
+        const r2 = await resolveByTitle(t, Number(body.year));
+        if (r2.url || r2.abstract) return json({ ok: true, pdf_url: r2.url, pdf_urls: r2.urls || (r2.url ? [r2.url] : []), source: r2.url ? r2.source : 'none', matched_title: r2.matched_title || null, doi: r2.doi || null, abstract: r2.abstract || null, no_oa: !r2.url });
+      }
+      return json({ ok: true, pdf_url: null, pdf_urls: [], source: 'none', abstract: r.abstract || null, no_oa: true });
     }
 
     if (action === 'fetch') {

@@ -52,11 +52,58 @@
   }
   var TEXT_RE = /\.(txt|md|markdown|csv|tsv|json|bib|tex|py|js|ts|jsx|r|yaml|yml|log|html|xml)$/i;
   function isTextFile(f) { return TEXT_RE.test(f.name || '') || /^text\//.test(f.type || '') || f.type === 'application/json'; }
+  function isPdfFile(f) { return /\.pdf$/i.test(f.name || '') || (f.type || '') === 'application/pdf'; }
+  // ---- PDF text extraction (pdf.js, lazily loaded from the CDN — no page-level script tag needed) ----
+  // Without this an attached paper reached the model as a FILENAME only: readStaged skipped binaries and the
+  // chat edge never reads research_files. Extracting here is what makes "attach the PDF" actually work.
+  var PDF_TEXT_CAP = 200000;   // stored text cap; the conversation seed takes a much smaller excerpt
+  function ensurePdfJs() {
+    if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+    if (window._pdfjsLoading) return window._pdfjsLoading;
+    window._pdfjsLoading = new Promise(function (res, rej) {
+      var sc = document.createElement('script');
+      sc.src = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js';
+      sc.onload = function () { try { window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js'; } catch (e) { } res(window.pdfjsLib); };
+      sc.onerror = function () { window._pdfjsLoading = null; rej(new Error('A PDF-olvasót nem sikerült betölteni.')); };
+      document.head.appendChild(sc);
+    });
+    return window._pdfjsLoading;
+  }
+  function pdfTextFromBytes(buf, maxPages) {
+    return ensurePdfJs().then(function (lib) { return lib.getDocument({ data: new Uint8Array(buf) }).promise; }).then(function (pdf) {
+      var n = Math.min(pdf.numPages, maxPages || 40), text = '', chain = Promise.resolve();
+      for (var i = 1; i <= n; i++) (function (k) {
+        chain = chain.then(function () { return pdf.getPage(k); }).then(function (pg) { return pg.getTextContent(); })
+          .then(function (tc) { text += tc.items.map(function (it) { return it.str; }).join(' ') + '\n'; })
+          .catch(function () { });   // one unreadable page must not lose the rest
+      })(i);
+      return chain.then(function () {
+        return { text: String(text || '').replace(/-\s*\n\s*/g, '').replace(/[ \t]+/g, ' ').trim().slice(0, PDF_TEXT_CAP), pages: pdf.numPages, read: n };
+      });
+    });
+  }
+  function pdfTextFromFile(f) {
+    return new Promise(function (res) {
+      var rd = new FileReader();
+      rd.onload = function () { pdfTextFromBytes(rd.result, 40).then(res, function () { res(null); }); };
+      rd.onerror = function () { res(null); };
+      rd.readAsArrayBuffer(f);
+    });
+  }
   function readStaged(fileList) {
-    // read text-like files' content (capped); binary files keep name/size only (content extracted later in the workspace)
+    // read text-like files' content (capped); PDFs are text-extracted here so they can serve as real context;
+    // other binaries keep name/size only (content extracted later in the workspace)
     var arr = [].slice.call(fileList || []);
     return Promise.all(arr.map(function (f) {
       var base = { name: f.name, size: f.size, mime: f.type || 'application/octet-stream', content: '' };
+      if (isPdfFile(f)) {
+        if (f.size > 40 * 1024 * 1024) return Promise.resolve(base);
+        return pdfTextFromFile(f).then(function (r) {
+          if (r && r.text) { base.content = r.text; base.mime = 'application/pdf'; base.pdfPages = r.pages; base.extracted = true; }
+          else { base.mime = 'application/pdf'; base.extracted = false; }   // scanned/image-only PDF → no text layer
+          return base;
+        }, function () { return base; });
+      }
       if (!isTextFile(f) || f.size > 400 * 1024) return Promise.resolve(base);
       return new Promise(function (res) {
         var rd = new FileReader();
@@ -84,6 +131,133 @@
         size: f.size || (f.content || '').length, source: 'upload', created_by: u, updated_by: u, updated_at: nowIso()
       }, { onConflict: 'project_id,path' }).then(function (r) { return { name: f.name, size: f.size, path: path, mime: f.mime, ok: !(r && r.error), err: r && r.error && r.error.message }; });
     }));
+  }
+  // The chat edge reads ONLY the project row + the message history — never research_files. So anything an
+  // attachment should contribute has to travel inside a message. Keep it inside the edge's 4000-char task slice.
+  var CTX_TOTAL = 3400, CTX_PER_FILE = 2200;
+  function stagedContextMsg(staged, lead) {
+    var ok = (staged || []).filter(Boolean);
+    if (!ok.length) return lead || '';
+    var names = ok.map(function (f) { return f.name; }).join(', ');
+    var head = (lead || 'Feltöltöttem: ' + names);
+    var withText = ok.filter(function (f) { return (f.content || '').trim().length > 40; });
+    if (!withText.length) {
+      var scanned = ok.filter(function (f) { return f.mime === 'application/pdf' && f.extracted === false; });
+      return head + (scanned.length ? '\n\n(A PDF-ből nem sikerült szöveget kinyerni — valószínűleg szkennelt/kép alapú. Kérdezz rá, mit tartalmaz, vagy kérj szöveges változatot.)' : '');
+    }
+    var budget = CTX_TOTAL, parts = [];
+    withText.forEach(function (f) {
+      if (budget <= 200) return;
+      var take = Math.min(CTX_PER_FILE, budget);
+      var body = String(f.content).slice(0, take);
+      budget -= body.length + 60;
+      parts.push('--- ' + f.name + (f.pdfPages ? ' (' + f.pdfPages + ' oldal' + (String(f.content).length >= PDF_TEXT_CAP ? ', rövidítve' : '') + ')' : '') + ' ---\n' + body + (String(f.content).length > body.length ? '\n…(a teljes szöveg a projekt fájljai között)' : ''));
+    });
+    return head + '\n\n' + parts.join('\n\n');
+  }
+  // ===================== KIINDULÁS SAJÁT MTMT-PUBLIKÁCIÓBÓL =====================
+  // A felhasználó nem csak fájlt csatolhat: hivatkozhat a saját MTMT-publikációjára. Ilyenkor megpróbáljuk
+  // felkutatni az eredeti (nyílt hozzáférésű) PDF-et, kinyerni a szövegét, és ebből indítani a beszélgetést.
+  function mtmtGuiUrl(mtid) { return mtid ? 'https://m2.mtmt.hu/gui2/?mode=browse&params=publication;' + mtid : null; }
+  function pubAuthors(p) {
+    // Nincs strukturált szerzőlista (csak first_author + author_count); a formázott citation elejéből is kinyerhető.
+    if (p.first_author) return p.first_author + (p.author_count > 1 ? ' és mtsai (' + p.author_count + ' szerző)' : '');
+    var c = String(p.citation || ''); var i = c.indexOf('. ');
+    return (i > 0 && i < 120) ? c.slice(0, i) : '';
+  }
+  function pubRef(p) {
+    return [p.title || 'Cím nélkül', p.year ? '(' + p.year + ')' : '', p.journal || '', p.doi ? 'DOI: ' + p.doi : ''].filter(Boolean).join(' · ');
+  }
+  // Try the resolved candidates in order. A failed download must NEVER be reported as "there is no open-access
+  // copy" — that is exactly the bug the Figure Board carries, where any 401/5xx got recorded as no_oa forever.
+  function fetchPdfBytes(urls) {
+    var list = (urls || []).slice(0, 4);
+    if (!list.length) return Promise.resolve(null);
+    return sb.auth.getSession().then(function (s) {
+      var tok = s && s.data && s.data.session && s.data.session.access_token;
+      if (!tok) return null;
+      var next = function (i) {
+        if (i >= list.length) return Promise.resolve(null);
+        return fetch(CFG.supabaseUrl + '/functions/v1/pdf-proxy', {
+          method: 'POST', headers: { 'Content-Type': 'application/json', apikey: CFG.supabaseAnonKey, Authorization: 'Bearer ' + tok },
+          body: JSON.stringify({ action: 'fetch', url: list[i] })
+        }).then(function (r) {
+          if (!r.ok) return next(i + 1);                       // landing page / 404 / too large → try the next candidate
+          return r.arrayBuffer().then(function (ab) { return ab && ab.byteLength > 1000 ? { buf: ab, url: list[i] } : next(i + 1); });
+        }, function () { return next(i + 1); });
+      };
+      return next(0);
+    });
+  }
+  // Full pipeline for one chosen publication. `onStep` reports progress honestly, including the failure branches.
+  function preparePaperStart(pub, onStep) {
+    var step = function (t) { try { onStep && onStep(t); } catch (e) { } };
+    var out = { pub: pub, pdfText: '', pdfPages: 0, pdfUrl: null, abstract: null, why: null };
+    step('Nyílt hozzáférésű PDF keresése…');
+    return callEdge('pdf-proxy', { action: 'resolve', doi: pub.doi || '', title: pub.title || '', year: pub.year || undefined })
+      .then(function (d) {
+        // Only a genuine ok:true answer may be read as "no open-access copy" — an error object must not.
+        if (!d || d.error || d.ok !== true) { out.why = 'A PDF-kereső nem válaszolt (' + ((d && d.error) || 'ismeretlen hiba') + ').'; return null; }
+        out.abstract = d.abstract || null;
+        var urls = (d.pdf_urls && d.pdf_urls.length) ? d.pdf_urls : (d.pdf_url ? [d.pdf_url] : []);
+        if (!urls.length) { out.why = pub.doi ? 'Nincs nyilvánosan elérhető (open access) PDF.' : 'Nincs DOI, és cím alapján sem találtam nyilvános PDF-et.'; return null; }
+        step('PDF letöltése…');
+        return fetchPdfBytes(urls).then(function (got) {
+          if (!got) { out.why = 'Találtam PDF-hivatkozást, de a letöltés nem sikerült.'; return null; }
+          out.pdfUrl = got.url;
+          step('Szöveg kinyerése a PDF-ből…');
+          return pdfTextFromBytes(got.buf, 40).then(function (r) {
+            if (!r || !r.text || r.text.length < 400) { out.why = 'A PDF-ből nem sikerült szöveget kinyerni (valószínűleg szkennelt).'; return null; }
+            out.pdfText = r.text; out.pdfPages = r.pages; return out;
+          }, function () { out.why = 'A PDF szövegének kinyerése nem sikerült.'; return null; });
+        });
+      }, function () { out.why = 'A PDF-kereső nem érhető el.'; return null; })
+      .then(function () { return out; });
+  }
+  // The staged file that carries the paper into the project (visible in the workspace, full text preserved).
+  function paperStagedFile(prep) {
+    var p = prep.pub;
+    var md = '# ' + (p.title || 'Publikáció') + '\n\n'
+      + '- **Szerző:** ' + (pubAuthors(p) || '—') + '\n'
+      + '- **Év:** ' + (p.year || '—') + '\n'
+      + '- **Megjelenés:** ' + (p.journal || '—') + (p.volume ? ', ' + p.volume : '') + (p.issue ? '(' + p.issue + ')' : '') + (p.pages ? ', ' + p.pages : '') + '\n'
+      + '- **Típus:** ' + (p.type_hu || p.type || '—') + '\n'
+      + (p.doi ? '- **DOI:** https://doi.org/' + p.doi + '\n' : '')
+      + (p.mtid ? '- **MTMT:** ' + mtmtGuiUrl(p.mtid) + '\n' : '')
+      + (p.citations ? '- **Idézettség:** ' + p.citations + ' (független: ' + (p.indep_citations || 0) + ')\n' : '')
+      + '\n> Ez a publikáció az Autopilot-kutatás kiindulási pontja.\n'
+      + (prep.abstract ? '\n## Absztrakt\n\n' + prep.abstract + '\n' : '')
+      + (prep.pdfUrl ? '\n## Forrás-PDF\n\n' + prep.pdfUrl + '\n' : '')
+      + (prep.pdfText ? '\n## A cikk kinyert szövege' + (prep.pdfPages ? ' (' + prep.pdfPages + ' oldal)' : '') + '\n\n' + prep.pdfText + '\n'
+        : '\n## A cikk szövege\n\n_Nem sikerült megszerezni: ' + (prep.why || 'ismeretlen ok') + '_\n');
+    var name = 'mtmt-' + (p.mtid || (p.id || '').slice(0, 8)) + '.md';   // mtid in the name: 'uploads/'+name is the upsert key
+    return { name: name, size: md.length, mime: 'text/markdown', content: md, extracted: !!prep.pdfText };
+  }
+  // The seed message. The Autopilot chat runs on the multi-agent path, whose synthesiser gets NO instruction
+  // about the questions fence — so the format is spelled out here, in the first user message.
+  var SEED_CAP = 3600;
+  function paperSeedMessage(prep) {
+    var p = prep.pub;
+    var head = 'Ebből a saját publikációmból szeretnék továbbindulni:\n\n'
+      + '**' + (p.title || 'Publikáció') + '**\n'
+      + [pubAuthors(p), p.year, p.journal, p.doi ? 'DOI: ' + p.doi : '', p.mtid ? 'MTMT #' + p.mtid : ''].filter(Boolean).join(' · ') + '\n';
+    var body = '';
+    if (prep.pdfText) body = '\nA cikk teljes szövegét megszereztem, részlet:\n\n--- ' + (prep.pdfPages ? prep.pdfPages + ' oldal, ' : '') + 'kinyert szöveg ---\n';
+    else if (prep.abstract) body = '\nAz eredeti PDF nem elérhető (' + (prep.why || '—') + '), de az absztrakt igen:\n\n';
+    else body = '\nAz eredeti PDF-et nem sikerült megszereznem (' + (prep.why || '—') + '), és absztraktot sem találtam — egyelőre csak a bibliográfiai adatok állnak rendelkezésre.\n';
+    var tail = '\n\nFeladatod:\n'
+      + '1. Foglald össze 3-4 mondatban, mit tett le ez a munka, és hol a folytatás tere.\n'
+      + '2. Javasolj 2-3 KONKRÉT továbblépési irányt (mit kutassunk tovább), mindegyiknél egy mondat indoklással.\n'
+      + '3. A válasz VÉGÉN kérdezz vissza. A kérdéseket pontosan ebben a formátumban add meg, a válasz legutolsó elemeként:\n'
+      + '```publify-questions\n[{"q":"kérdés","options":["opció 1","opció 2"]}]\n```\n';
+    if (!prep.pdfText) {
+      tail += '4. FONTOS: a legelső kérdésed arra kérjen, hogy töltsem fel a cikk PDF-jét a chat 📎 gombjával, mert enélkül csak a metaadatokból tudsz dolgozni. Példa: {"q":"Fel tudod tölteni a cikk PDF-jét? A 📎 gombbal csatolhatod — enélkül csak a bibliográfiai adatokból és az absztraktból dolgozom.","options":["Feltöltöm most","Nincs meg — dolgozz abból, ami van"]}\n';
+    }
+    var room = SEED_CAP - head.length - body.length - tail.length;
+    var excerpt = '';
+    if (prep.pdfText && room > 300) excerpt = prep.pdfText.slice(0, room) + (prep.pdfText.length > room ? '\n…(a teljes szöveg a projekt fájljai között)' : '');
+    else if (!prep.pdfText && prep.abstract && room > 200) excerpt = prep.abstract.slice(0, room);
+    return head + body + excerpt + tail;
   }
   function loadFiles(pid) {
     return sb.from('research_files').select('path,size,mime').eq('project_id', pid).like('path', 'uploads/%').order('path').then(function (r) {
@@ -921,7 +1095,9 @@
           if (props.onFilesChanged) props.onFilesChanged();
           var names = okd.map(function (x) { return x.name; }).join(', ');
           if (!names) { setBusy(false); toast('A fájl feltöltése nem sikerült.', false); return; }
-          sb.from('research_messages').insert({ chat_id: props.chatId, role: 'user', content: 'Feltöltöttem: ' + names }).then(function () {
+          var okNames = {}; okd.forEach(function (x) { okNames[x.name] = 1; });
+          var body = stagedContextMsg(staged.filter(function (f) { return okNames[f.name]; }), 'Feltöltöttem: ' + names);
+          sb.from('research_messages').insert({ chat_id: props.chatId, role: 'user', content: body }).then(function () {
             loadMsgs(props.chatId); replyNow(props.chatId);
           });
         });
@@ -1127,20 +1303,116 @@
     { key: 'paper', si: '📄', b: 'Egy cikkből', s: 'DOI / PDF alapján', ph: 'Illeszd be a DOI-t vagy írd le, melyik cikkből indulnál ki…' },
     { key: 'data', si: '📊', b: 'Adatból', s: 'CSV / eredmény', ph: 'Írd le, milyen adatod / eredményed van, és mit szeretnél belőle…' },
     { key: 'idea', si: '💡', b: 'Egy ötletből', s: 'kérdés + PICO', ph: 'Fogalmazd meg a kutatási kérdést vagy hipotézist egy mondatban…' },
-    { key: 'upload', si: '📎', b: 'Feltöltésből', s: 'több fájl', ph: 'Tölts fel fájlokat lent, és írd le, mit kezdjünk velük…' }
+    { key: 'upload', si: '📎', b: 'Feltöltésből', s: 'több fájl', ph: 'Tölts fel fájlokat lent, és írd le, mit kezdjünk velük…' },
+    { key: 'mtmt', si: '📚', b: 'Publikációmból', s: 'saját MTMT-cikk', ph: 'Válaszd ki a cikket lent — a rendszer felkutatja a PDF-et és abból indul a beszélgetés…' }
   ];
+  // ---- picker: the researcher's own MTMT publications ----
+  // pub_read RLS is `using(true)` — every signed-in user can read EVERY researcher's rows — so the
+  // researcher_id filter here is the actual access control, not a convenience.
+  function PubPicker(props) {
+    var lS = useState({ loading: true, rows: [], err: null }), st = lS[0], setSt = lS[1];
+    var qS = useState(''), q = qS[0], setQ = qS[1];
+    var syS = useState(false), syncing = syS[0], setSyncing = syS[1];
+    var meS = useState(null), prof = meS[0], setProf = meS[1];
+    function load() {
+      var u = uid(); if (!u) { setSt({ loading: false, rows: [], err: 'Nincs bejelentkezett felhasználó.' }); return; }
+      sb.from('profiles').select('mtmt_id').eq('id', u).maybeSingle().then(function (r) { setProf((r && r.data) || {}); });
+      sb.from('publications').select('id,mtid,title,year,journal,doi,type,type_hu,first_author,author_count,citations,indep_citations,volume,issue,pages,citation')
+        .eq('researcher_id', u).order('year', { ascending: false, nullsFirst: false }).limit(600)
+        .then(function (r) {
+          if (r && r.error) { setSt({ loading: false, rows: [], err: r.error.message }); return; }
+          setSt({ loading: false, rows: (r && r.data) || [], err: null });
+        }, function () { setSt({ loading: false, rows: [], err: 'Hálózati hiba.' }); });
+    }
+    useEffect(load, []);
+    function syncNow() {
+      setSyncing(true);
+      // invoke() hides the body on non-2xx, so the honest reason (no MTMT id / entitlement) is read via callEdge
+      callEdge('mtmt-sync', {}).then(function (d) {
+        setSyncing(false);
+        if (!d || d.error) { toast(((d && (d.message || d.error)) || 'A szinkron nem futott le.'), false); return; }
+        toast('✓ ' + (d.count || 0) + ' publikáció szinkronizálva', true);
+        setSt({ loading: true, rows: [], err: null }); load();
+      }, function () { setSyncing(false); toast('Hálózati hiba a szinkron közben.', false); });
+    }
+    var needle = q.trim().toLowerCase();
+    var rows = needle ? st.rows.filter(function (p) {
+      return (String(p.title || '') + ' ' + String(p.journal || '') + ' ' + String(p.year || '') + ' ' + String(p.doi || '')).toLowerCase().indexOf(needle) >= 0;
+    }) : st.rows;
+    return h('div', { className: 'ap-pp-scrim', onClick: props.onClose },
+      h('div', { className: 'ap-pp', onClick: function (e) { e.stopPropagation(); } },
+        h('div', { className: 'ap-pp-h' },
+          h('b', null, '📚 Kiindulás a saját publikációdból'),
+          h('button', { className: 'ap-pv-x', 'aria-label': 'Bezárás', onClick: props.onClose }, '×')),
+        props.busy
+          ? h('div', { className: 'ap-pp-busy' }, h('span', { className: 'spin' }), h('div', null, props.busyStep || 'Előkészítés…'),
+            h('div', { className: 'ap-pp-busy-s' }, 'Megkeressük a cikk nyilvános PDF-jét, kinyerjük a szövegét, és abból indítjuk a beszélgetést.'))
+          : h(React.Fragment, null,
+            h('div', { className: 'ap-pp-b' },
+              st.loading ? h('div', { className: 'ap-pp-empty' }, h('span', { className: 'spin' }))
+                : st.err ? h('div', { className: 'ap-pp-empty' }, 'Nem sikerült betölteni: ' + st.err)
+                  : !st.rows.length ? h('div', { className: 'ap-pp-empty' },
+                    h('b', null, (prof && prof.mtmt_id) ? 'Még nincs szinkronizálva egyetlen publikáció sem.' : 'Nincs beállítva MTMT azonosítód.'),
+                    h('div', { style: { marginTop: 6, lineHeight: 1.5 } }, (prof && prof.mtmt_id)
+                      ? 'Az MTMT azonosítód megvan (' + prof.mtmt_id + ') — a szinkron letölti a publikációidat.'
+                      : 'Add meg a Profil → Beállítások → Researcher IDs alatt, majd futtasd a szinkront.'),
+                    h('div', { style: { marginTop: 10, display: 'flex', gap: 8, justifyContent: 'center' } },
+                      (prof && prof.mtmt_id) ? h('button', { className: 'btn pri sm', disabled: syncing, onClick: syncNow }, syncing ? '⏳ Szinkron…' : '⟳ Szinkron most') : null,
+                      h('a', { className: 'btn sm', href: 'Profile.html', style: { textDecoration: 'none' } }, 'Profil megnyitása ↗')))
+                    : h(React.Fragment, null,
+                      h('input', { className: 'ap-pp-search', value: q, placeholder: 'Keresés cím, folyóirat, év vagy DOI szerint…', onChange: function (e) { setQ(e.target.value); } }),
+                      h('div', { className: 'ap-pp-list' }, rows.length ? rows.map(function (p) {
+                        return h('div', { className: 'ap-pp-row', key: p.id, onClick: function () { props.onPick(p); } },
+                          h('div', { className: 'ap-pp-t' }, p.title || 'Cím nélkül'),
+                          h('div', { className: 'ap-pp-m' },
+                            p.year ? h('span', null, p.year) : null,
+                            p.journal ? h('span', null, p.journal) : null,
+                            (p.type_hu || p.type) ? h('span', null, p.type_hu || p.type) : null,
+                            p.doi ? h('span', { className: 'ok' }, 'DOI') : h('span', { className: 'warn', title: 'DOI nélkül cím alapján keressük a PDF-et' }, 'nincs DOI'),
+                            (p.citations ? h('span', null, '★ ' + p.citations) : null)));
+                      }) : h('div', { className: 'ap-pp-empty' }, 'Nincs találat erre a keresésre.')))),
+            h('div', { className: 'ap-pp-f' },
+              h('span', null, st.rows.length ? (rows.length + ' / ' + st.rows.length + ' publikáció') : ''),
+              st.rows.length ? h('button', { className: 'btn sm', disabled: syncing, onClick: syncNow }, syncing ? '⏳ Szinkron…' : '⟳ Frissítés MTMT-ből') : null))));
+  }
   function Launcher(props) {
     var dS = useState(''), dir = dS[0], setDir = dS[1];
     var stS = useState(''), starter = stS[0], setStarter = stS[1];
     var fS = useState([]), staged = fS[0], setStaged = fS[1];
     var dgS = useState(false), drag = dgS[0], setDrag = dgS[1];
+    var ppS = useState(false), pickPub = ppS[0], setPickPub = ppS[1];       // MTMT publication picker open
+    var pbS = useState(''), pubStep = pbS[0], setPubStep = pbS[1];          // honest progress while the paper is prepared
+    var pbuS = useState(false), pubBusy = pbuS[0], setPubBusy = pbuS[1];
     var taRef = useRef(null), fileRef = useRef(null);
     var ph = (STARTERS.filter(function (x) { return x.key === starter; })[0] || {}).ph || 'Írd le egy mondatban, mit szeretnél kutatni…';
 
     function pickStarter(k) {
       setStarter(k);
       if (k === 'upload') { if (fileRef.current) fileRef.current.click(); }
+      else if (k === 'mtmt') { setPickPub(true); }
       else if (taRef.current) taRef.current.focus();
+    }
+    // A chosen publication becomes the project's starting point: find the PDF, extract its text, and open the
+    // conversation on it. The project cannot exist yet (research_files needs a project), so it travels as a
+    // staged file — exactly like an upload.
+    function onPickPub(pub) {
+      if (pubBusy) return;
+      setPubBusy(true); setPubStep('Nyílt hozzáférésű PDF keresése…');
+      preparePaperStart(pub, setPubStep).then(function (prep) {
+        var file = paperStagedFile(prep);
+        var meta = {
+          title: (pub.title || 'Publikáció').slice(0, 70),
+          goal: 'Továbblépés a saját publikációmból: ' + pubRef(pub),
+          seed: paperSeedMessage(prep),
+          note: prep.pdfText ? ('✓ A cikk szövege megvan (' + prep.pdfPages + ' oldal)') : ('⚠ ' + (prep.why || 'A PDF nem érhető el'))
+        };
+        setPubBusy(false); setPickPub(false); setPubStep('');
+        toast(meta.note, !!prep.pdfText);
+        props.onStart(dir.trim(), staged.concat([file]), meta);
+      }, function () {
+        setPubBusy(false); setPubStep('');
+        toast('A publikáció előkészítése nem sikerült.', false);
+      });
     }
     function addFiles(list) { readStaged(list).then(function (arr) { setStaged(function (cur) { return cur.concat(arr); }); }); }
     function onFile(e) { if (e.target.files && e.target.files.length) addFiles(e.target.files); e.target.value = ''; }
@@ -1150,7 +1422,7 @@
     function onKey(e) { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); start(); } }
 
     var canStart = !!(dir.trim() || staged.length);
-    function start() { if (!canStart || props.creating) return; props.onStart(dir.trim(), staged); }
+    function start() { if (!canStart || props.creating) return; props.onStart(dir.trim(), staged, null); }
 
     return h('div', { className: 'ap-launcher' },
       h('div', { className: 'ap-lhead' }, 'Mit szeretnél kutatni?'),
@@ -1171,6 +1443,7 @@
           return h('span', { className: 'ap-fchip', key: i }, '📎 ' + f.name, h('span', { className: 'fsz' }, fmtSize(f.size)),
             h('span', { className: 'fx', title: 'Eltávolítás', onClick: function (e) { e.stopPropagation(); removeStaged(i); } }, '×'));
         })) : null),
+      pickPub ? h(PubPicker, { busy: pubBusy, busyStep: pubStep, onClose: function () { if (!pubBusy) { setPickPub(false); setStarter(''); } }, onPick: onPickPub }) : null,
       h('div', { className: 'ap-lnote' }, 'A „➤" létrehoz egy projektet a munkaterületeden, és átvisz a beszélgetésre: az AI tisztázó kérdéseket tesz fel, a briefet pedig te töltöd fel (az „Ötletek" gomb és a fájlfeltöltések segítenek). Elvetni bármikor tudod.'));
   }
 
@@ -2703,12 +2976,14 @@
     // a partial create failed after the project row existed → delete it so abandonment never orphans a project
     function abortCreate(pid, msg) { if (pid) sb.from('research_projects').delete().eq('id', pid); setCreating(false); toast(msg, false); }
 
-    function startProject(dir, staged) {
+    function startProject(dir, staged, meta) {
       setCreating(true);
       var u = uid();
+      meta = meta || {};
       // student_id is deliberately NOT stamped here — it's set at launch (doLaunch), so abandoned exploration
       // never reaches the supervisor. The project is created now only because the live AI chat needs a real row.
-      var payload = { owner_id: u, title: deriveTitle(dir || (staged[0] && staged[0].name) || ''), field: null, keywords: null, goal: dir || null, stage: 0, status: 'active' };
+      // deriveTitle truncates at 70 chars, so the FULL reference lives in `goal` — that is what the chat edge reads.
+      var payload = { owner_id: u, title: meta.title || deriveTitle(dir || (staged[0] && staged[0].name) || ''), field: null, keywords: null, goal: meta.goal || dir || null, stage: 0, status: 'active' };
       sb.from('research_projects').insert(payload).select().maybeSingle().then(function (r) {
         if (!r || r.error || !r.data) { setCreating(false); toast('Nem sikerült létrehozni: ' + ((r && r.error && r.error.message) || 'ismeretlen hiba'), false); return; }
         var proj = r.data;
@@ -2717,7 +2992,12 @@
           if (!cr || cr.error || !cid) { abortCreate(proj.id, 'Nem sikerült elindítani a beszélgetést' + ((cr && cr.error) ? ': ' + cr.error.message : '.')); return; }
           uploadFiles(proj.id, staged).then(function (up) {
             var okd = up.filter(function (x) { return x.ok; });
-            var seed = (dir || '(fájl-alapú indítás)') + (okd.length ? '\n\nFeltöltött fájlok: ' + okd.map(function (x) { return x.name; }).join(', ') : '');
+            var okNames = {}; okd.forEach(function (x) { okNames[x.name] = 1; });
+            // A paper start brings its own seed (bibliography + extracted text + what to ask); otherwise build
+            // the seed from the staged files. Either way the LAST row must be role='user' or the chat stays silent.
+            var seed = meta.seed || stagedContextMsg(staged.filter(function (f) { return okNames[f.name]; }),
+              (dir || '(fájl-alapú indítás)') + (okd.length ? '\n\nFeltöltött fájlok: ' + okd.map(function (x) { return x.name; }).join(', ') : ''));
+            if (meta.seed && dir) seed = dir + '\n\n' + seed;
             sb.from('research_messages').insert({ chat_id: cid, role: 'user', content: seed }).then(function (ins) {
               if (ins && ins.error) { abortCreate(proj.id, 'Nem sikerült elküldeni az első üzenetet: ' + ins.error.message); return; }
               setProject(proj); setChatId(cid); setCreating(false); setView('brief');
