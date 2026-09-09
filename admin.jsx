@@ -326,9 +326,52 @@
   }
 
   /* ---------- user drawer ---------- */
+  // ---- Researcher IDs (MTMT + ORCID) — editable AFTER registration, per account. These are what the
+  //      publication sync builds the researcher profile from, so they are set here, not only at sign-up.
+  var ORCID_RE = /^\d{4}-\d{4}-\d{4}-\d{3}[\dX]$/;
+  function fmtOrcid(v) {
+    var d = String(v || '').replace(/[^0-9Xx]/g, '').toUpperCase().slice(0, 16);
+    return d.replace(/(.{4})(?=.)/g, '$1-');
+  }
+  function ResearcherIds(props) {
+    var u = props.user;
+    var [mtmt, setMtmt] = useState(u.mtmt_id || '');
+    var [orcid, setOrcid] = useState(u.orcid || '');
+    var [busy, setBusy] = useState(false), [syncing, setSyncing] = useState(false), [err, setErr] = useState(null);
+    useEffect(function () { setMtmt(u.mtmt_id || ''); setOrcid(u.orcid || ''); setErr(null); }, [u.id]);
+    var dirty = (mtmt || '') !== (u.mtmt_id || '') || (orcid || '') !== (u.orcid || '');
+    var inStyle = { width: '100%', height: 36, border: '1px solid var(--line)', borderRadius: 8, padding: '0 10px', fontFamily: 'inherit', fontSize: 13, background: 'var(--surface)', color: 'inherit', boxSizing: 'border-box' };
+    function save() {
+      var o = String(orcid || '').trim();
+      if (o && !ORCID_RE.test(o)) { setErr('Az ORCID formátuma: 0000-0000-0000-0000 (az utolsó karakter X is lehet).'); return; }
+      setErr(null); setBusy(true);
+      props.onSave(u.id, String(mtmt || '').trim() || null, o || null, function () { setBusy(false); });
+    }
+    return h('div', { style: { marginBottom: 16, padding: '12px 13px', border: '1px solid var(--line)', borderRadius: 10, background: 'var(--surface-2, transparent)' } },
+      h('div', { style: { fontSize: 12, fontWeight: 700, color: 'var(--muted)', marginBottom: 7 } }, 'Researcher IDs — MTMT & ORCID'),
+      h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 9 } },
+        h('div', null,
+          h('div', { style: { fontSize: 11.5, color: 'var(--faint)', marginBottom: 3 } }, 'MTMT azonosító'),
+          h('input', { value: mtmt, placeholder: 'pl. 10012345', style: inStyle, onChange: function (e) { setMtmt(e.target.value.replace(/[^0-9]/g, '')); } })),
+        h('div', null,
+          h('div', { style: { fontSize: 11.5, color: 'var(--faint)', marginBottom: 3 } }, 'ORCID'),
+          h('input', { value: orcid, placeholder: '0000-0000-0000-0000', style: inStyle, onChange: function (e) { setOrcid(fmtOrcid(e.target.value)); } }))),
+      err ? h('div', { style: { fontSize: 11.5, color: 'var(--bad, #dc2626)', marginTop: 6 } }, err) : null,
+      h('div', { style: { display: 'flex', gap: 8, alignItems: 'center', marginTop: 9, flexWrap: 'wrap' } },
+        h('button', { className: 'btn pri', disabled: busy || !dirty, onClick: save }, busy ? 'Mentés…' : (dirty ? 'Mentés' : 'Mentve')),
+        h('button', {
+          className: 'btn', disabled: syncing || !u.mtmt_id || dirty,
+          title: !u.mtmt_id ? 'Előbb mentsd az MTMT azonosítót' : (dirty ? 'Előbb mentsd a módosítást' : 'Publikációk letöltése az MTMT-ből ehhez a fiókhoz'),
+          onClick: function () { setSyncing(true); props.onSync(u.id, function () { setSyncing(false); }); }
+        }, syncing ? 'Építés…' : '⟳ Kutatói profil felépítése'),
+        u.orcid ? h('a', { className: 'btn', href: 'https://orcid.org/' + u.orcid, target: '_blank', rel: 'noopener', style: { textDecoration: 'none' } }, 'ORCID ↗') : null),
+      h('div', { style: { fontSize: 11, color: 'var(--faint)', marginTop: 6, lineHeight: 1.45 } },
+        'A profil-építés az MTMT azonosítóból tölti le és frissíti a publikációkat. Az ORCID-ot a rendszer tárolja és a profilon hivatkozza; publikáció-import belőle jelenleg nem történik.'));
+  }
   function UserDrawer(props) {
     var u = props.user, agg = props.agg, onClose = props.onClose, onPreview = props.onPreview, onAction = props.onAction, onSetModel = props.onSetModel, onSetWorkflows = props.onSetWorkflows, onSetFigures = props.onSetFigures, onSetDailyCap = props.onSetDailyCap;
     var onSetFeature = props.onSetFeature, onSetAllowlist = props.onSetAllowlist, catalog = props.catalog || [];
+    // (onSaveIds / onSyncMtmt are read straight off props inside ResearcherIds)
     var open = !!u;
     useEffect(function () { if (!open) return; var onKey = function (e) { if (e.key === 'Escape') onClose(); }; window.addEventListener('keydown', onKey); return function () { window.removeEventListener('keydown', onKey); }; }, [open]);
     return h(React.Fragment, null,
@@ -412,7 +455,7 @@
               h('div', { className: 'c' }, h('div', { className: 'l' }, 'AI voice'), h('div', { className: 'v' }, (agg.chars || 0).toLocaleString()), h('div', { className: 's' }, (agg.requests || 0) + ' requests · chars'))
             ),
             h('div', { className: 'meta-line' }, h('b', null, 'Affiliation: '), u.affiliation || '—'),
-            h('div', { className: 'meta-line' }, h('b', null, 'MTMT: '), u.mtmt_id || '—', '   ', h('b', null, 'ORCID: '), u.orcid ? h('a', { className: 'ext', href: 'https://orcid.org/' + u.orcid, target: '_blank' }, u.orcid) : '—'),
+            h(ResearcherIds, { user: u, onSave: props.onSaveIds, onSync: props.onSyncMtmt }),
             h('div', { className: 'meta-line' }, h('b', null, 'Last active: '), fmtDate(u.last_active_at), '   ', h('b', null, 'Joined: '), u.created_at ? new Date(u.created_at).toLocaleDateString() : '—'),
             h('h3', { className: 'dsub' }, 'LaTeX projects (' + agg.projects.length + ')'),
             agg.projects.length === 0 && h('div', { style: { fontSize: 13, color: 'var(--muted)' } }, 'No LaTeX projects yet.'),
@@ -821,6 +864,28 @@
       setSelUser(function (u) { return u && u.id === uid ? Object.assign({}, u, { ai_daily_cap: v }) : u; });
       sb.from('profiles').update({ ai_daily_cap: v }).eq('id', uid).then(function (r) { if (r && r.error) { window.PRUI.toast('Cap update failed (fut a migration-101?): ' + r.error.message, { kind: 'error' }); loadData(); } else { window.PRUI.toast('AI-cap mentve: ' + (v == null ? 'globális alap' : v + '/nap'), { kind: 'ok' }); } });
     }
+    // Set a researcher's MTMT / ORCID after the fact (admin). These drive the publication sync below.
+    function saveResearchIds(uid, mtmt, orcid, done) {
+      sb.from('profiles').update({ mtmt_id: mtmt, orcid: orcid }).eq('id', uid).then(function (r) {
+        if (done) done();
+        if (r && r.error) { window.PRUI.toast('Mentés sikertelen: ' + r.error.message, { kind: 'error' }); return; }
+        setProfiles(function (list) { return list.map(function (u) { return u.id === uid ? Object.assign({}, u, { mtmt_id: mtmt, orcid: orcid }) : u; }); });
+        setSelUser(function (u) { return u && u.id === uid ? Object.assign({}, u, { mtmt_id: mtmt, orcid: orcid }) : u; });
+        window.PRUI.toast('✓ Azonosítók mentve', { kind: 'ok' });
+      }, function () { if (done) done(); window.PRUI.toast('Hálózati hiba.', { kind: 'error' }); });
+    }
+    // Build the researcher profile: pull this account's publications from MTMT (admin-on-behalf).
+    function syncMtmt(uid, done) {
+      sb.functions.invoke('mtmt-sync', { body: { user_id: uid } }).then(function (res) {
+        if (done) done();
+        var d = res && res.data;
+        if (res && res.error && !(d && d.ok)) { window.PRUI.toast('A szinkron nem futott le (telepítve van a mtmt-sync edge függvény?).', { kind: 'error' }); return; }
+        if (d && d.error) { window.PRUI.toast(d.message || d.error, { kind: 'error' }); return; }
+        var n = (d && d.count) || 0, tot = (d && d.publications && d.publications.length) || 0;
+        window.PRUI.toast('✓ ' + n + ' publikáció szinkronizálva · a profilon most ' + tot + ' tétel', { kind: 'ok' });
+        loadData();
+      }, function () { if (done) done(); window.PRUI.toast('Hálózati hiba a szinkron közben.', { kind: 'error' }); });
+    }
     function setWorkflows(uid, on) {
       setProfiles(function (list) { return list.map(function (u) { return u.id === uid ? Object.assign({}, u, { can_workflows: on }) : u; }); });
       setSelUser(function (u) { return u && u.id === uid ? Object.assign({}, u, { can_workflows: on }) : u; });
@@ -1019,7 +1084,7 @@
         h(ClientErrors),
         h(BugReports)
       ),
-      h(UserDrawer, { user: selUser, agg: selUser ? aggFor(selUser.id) : { projects: [], storage: 0, chars: 0, requests: 0 }, onClose: function () { setSelUser(null); }, onPreview: function (p) { setPreview(p); }, onAction: setStatus, onSetModel: setModel, onSetWorkflows: setWorkflows, onSetFigures: setFigures, onSetDailyCap: setDailyCap, onSetFeature: setFeature, onSetAllowlist: setAllowlist, catalog: catalog }),
+      h(UserDrawer, { user: selUser, agg: selUser ? aggFor(selUser.id) : { projects: [], storage: 0, chars: 0, requests: 0 }, onClose: function () { setSelUser(null); }, onPreview: function (p) { setPreview(p); }, onAction: setStatus, onSetModel: setModel, onSetWorkflows: setWorkflows, onSetFigures: setFigures, onSetDailyCap: setDailyCap, onSetFeature: setFeature, onSetAllowlist: setAllowlist, onSaveIds: saveResearchIds, onSyncMtmt: syncMtmt, catalog: catalog }),
       preview && h(ProjectPreview, { project: preview, onClose: function () { setPreview(null); } })
     );
   }

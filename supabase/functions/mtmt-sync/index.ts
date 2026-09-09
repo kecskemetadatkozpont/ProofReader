@@ -1,5 +1,7 @@
-// Publify — MTMT publication sync. Pulls the signed-in user's publications from MTMT (m2.mtmt.hu) by their
-// profiles.mtmt_id and upserts them into the publications table (researcher_id = the caller), under RLS.
+// Publify — MTMT publication sync. Pulls a researcher's publications from MTMT (m2.mtmt.hu) by their
+// profiles.mtmt_id and upserts them into the publications table (researcher_id = that researcher), under RLS.
+// By default the researcher is the caller; an ADMIN may pass { user_id } to build another account's profile
+// (the pub_write policy already allows `researcher_id = auth.uid() or is_admin()`).
 // Runs server-side so MTMT's no-CORS API is reachable. Called via supabase.functions.invoke('mtmt-sync').
 // Deploy:  supabase functions deploy mtmt-sync --no-verify-jwt
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
@@ -79,16 +81,23 @@ Deno.serve(async (req) => {
     const uid = ures?.user?.id;
     if (!uid) return json({ error: 'not signed in' }, 401);
     const gate = await assertEntitled(sb, 'mtmt_sync'); if (gate) return gate;
-    const { data: prof } = await sb.from('profiles').select('mtmt_id').eq('id', uid).maybeSingle();
+    // Optional admin-on-behalf target. Anything else than the caller requires is_admin().
+    const body = await req.json().catch(() => ({}));
+    const target = String((body && body.user_id) || '').trim() || uid;
+    if (target !== uid) {
+      const { data: isAdm } = await sb.rpc('is_admin');
+      if (isAdm !== true) return json({ error: 'forbidden', message: 'Más felhasználó profilját csak adminisztrátor építheti fel.' }, 403);
+    }
+    const { data: prof } = await sb.from('profiles').select('mtmt_id').eq('id', target).maybeSingle();
     const mtmtId = prof?.mtmt_id;
-    if (!mtmtId) return json({ error: 'no_mtmt_id', message: 'Állítsd be az MTMT azonosítód a profilodban.' }, 400);
+    if (!mtmtId) return json({ error: 'no_mtmt_id', message: target === uid ? 'Állítsd be az MTMT azonosítód a profilodban.' : 'Ehhez a fiókhoz nincs MTMT azonosító beállítva.' }, 400);
     const pubs = await fetchMtmt(String(mtmtId).trim());
-    const rows = pubs.filter((p) => p && p.mtid).map((p) => mapPub(p, uid));
+    const rows = pubs.filter((p) => p && p.mtid).map((p) => mapPub(p, target));
     if (rows.length) {
       const { error } = await sb.from('publications').upsert(rows, { onConflict: 'researcher_id,mtid' });
       if (error) return json({ error: error.message }, 403);
     }
-    const { data: fresh } = await sb.from('publications').select('*').eq('researcher_id', uid).order('year', { ascending: false });
+    const { data: fresh } = await sb.from('publications').select('*').eq('researcher_id', target).order('year', { ascending: false });
     return json({ ok: true, count: rows.length, publications: fresh || [] });
   } catch (e) {
     return json({ error: String(e) }, 500);
