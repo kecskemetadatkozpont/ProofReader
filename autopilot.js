@@ -910,7 +910,12 @@
       return sb.from('research_protocol_steps').select('id', { count: 'exact', head: true }).eq('protocol_id', pid).eq('needs_approval', true).then(function (cr) {
         var na = (cr && cr.count) || 0, evs = [{ phase: 'protocol', level: 'run', message: msg }];
         var gp = cfg ? { protocol_id: pid, config: cfg } : { protocol_id: pid };
-        if (na > 0 && apGatesOn(run)) return apGate(run, { phase: 'protocol', title: na + ' protokoll-lépés jóváhagyása', detail: na + ' lépés „needs approval". Nézd át a Protocol-fülön, majd hagyd jóvá a futtatáshoz.' }, { generated: true }, gp);
+        // A kapus ág korábban ELDOBTA az `evs`-t, ezért a naplóból hiányzott, hogy miből készült a protokoll.
+        if (na > 0 && apGatesOn(run)) {
+          var g = apGate(run, { phase: 'protocol', title: na + ' protokoll-lépés jóváhagyása', detail: na + ' lépés „needs approval". Nézd át a Protocol-fülön, majd hagyd jóvá a futtatáshoz.' }, { generated: true }, gp);
+          g.events = (g.events || []).concat(evs);
+          return g;
+        }
         var res = apComplete(run, msg, evs); res.patch.protocol_id = pid; if (cfg) res.patch.config = cfg; return res;
       });
     }
@@ -923,7 +928,14 @@
       : sb.from('research_protocols').select('id').eq('project_id', project.id).neq('status', 'archived').order('created_at', { ascending: false }).limit(1).maybeSingle();
     return q.then(function (ex) {
       var existing = ex && ex.data && ex.data.id;
-      if (existing) return finishProtocol(existing, null, 'Meglévő protokoll átvéve' + (ideaId ? ' (ehhez az ötlethez)' : ''));
+      if (existing) {
+        // Átvett protokollnál is rögzítjük a szál réseit — enélkül a felület csak annyit tudott mondani,
+        // hogy „nincs rögzítve", pedig a rések ugyanúgy megvannak.
+        return threadGapSources(run, project).then(function (gs) {
+          return finishProtocol(existing, null, 'Meglévő protokoll átvéve' + (ideaId ? ' (ehhez az ötlethez)' : '')
+            + (gs.length ? ' — a szál ' + gs.length + ' réséhez rendelve' : ''), gs.map(function (g) { return g.id; }));
+        }, function () { return finishProtocol(existing, null, 'Meglévő protokoll átvéve'); });
+      }
       // generate scoped to THIS idea (idea_id → the edge plans from that idea's question/hypothesis)
       return threadGapSources(run, project).then(function (gaps) {
         var payload = { action: 'generate', project_id: project.id, goal: project.goal || project.title || '' };
@@ -2581,23 +2593,35 @@
       if (isGapThread) {
         var one = gapById(prun.config.develop_idea_id);
         return h('div', { className: 'apg-ptasks-src' },
-          h('span', { className: 'apg-ptasks-src-l' }, '🧭 Ebből a résből:'),
+          h('span', { className: 'apg-ptasks-src-l' }, '🧭 Ebből az EGY résből (te jelölted ki):'),
           h('span', { className: 'apg-ptasks-srcc', title: (one && one.question) || '' }, (one && one.question) ? String(one.question).slice(0, 70) : 'kutatási rés'));
       }
       var ids = (prun.config && prun.config.protocol_gap_ids) || [];
       var gaps = gapsByRun[prun.id] || [];
       var numOf = {}; gaps.forEach(function (g, i) { numOf[g.id] = i + 1; });
-      if (!ids.length) {
-        return h('div', { className: 'apg-ptasks-src none', title: 'A rés-hozzárendelést csak az újabb futások rögzítik. Az ↻ Újragenerálás beírja.' },
-          '🧭 Nincs rögzítve, melyik résekből készültek — régebbi generálás.');
+      // A választás szabálya, kimondva: az automatikus ágon NEM a felhasználó dönt.
+      var rule = h('div', { className: 'apg-ptasks-rule' },
+        'Az automatikus ágon a rendszer választ: a szál réseit újdonság-pontszám szerint rangsorolja, és a legjobb hatból tervez. ',
+        h('b', null, 'Egy konkrét réshez'), ' jelöld ki a rés-kártyát („Kidolgozásra jelöl") — ahhoz külön protokoll készül.');
+      if (ids.length) {
+        return h(React.Fragment, null,
+          h('div', { className: 'apg-ptasks-src' },
+            h('span', { className: 'apg-ptasks-src-l' }, '🧭 ' + ids.length + ' rés kidolgozására — a rendszer választotta:'),
+            ids.map(function (gid) {
+              var g = gapById(gid), n = numOf[gid];
+              return h('span', { className: 'apg-ptasks-srcc', key: gid, title: (g && g.question) || 'Kutatási rés' },
+                n ? h('b', null, n) : null, (g && g.question) ? String(g.question).slice(0, 54) : 'kutatási rés');
+            })),
+          rule);
       }
-      return h('div', { className: 'apg-ptasks-src' },
-        h('span', { className: 'apg-ptasks-src-l' }, '🧭 ' + ids.length + ' rés kidolgozására:'),
-        ids.map(function (gid) {
-          var g = gapById(gid), n = numOf[gid];
-          return h('span', { className: 'apg-ptasks-srcc', key: gid, title: (g && g.question) || 'Kutatási rés' },
-            n ? h('b', null, n) : null, (g && g.question) ? String(g.question).slice(0, 54) : 'kutatási rés');
-        }));
+      if (!gaps.length) {
+        return h('div', { className: 'apg-ptasks-src none' },
+          '🧭 Nem résből készült: ehhez a szálhoz nem született kutatási rés, ezért a protokoll közvetlenül az ötletből lett megtervezve.');
+      }
+      return h(React.Fragment, null,
+        h('div', { className: 'apg-ptasks-src none' },
+          '🧭 A szál ' + gaps.length + ' rése közül készült, de ennél a futásnál a pontos hozzárendelés nincs rögzítve (régebbi generálás). Az ↻ Újragenerálás rögzíti.'),
+        rule);
     }
     function protoMini(prun) {
       var steps = protoArts[prun.id];
