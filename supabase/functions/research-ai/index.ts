@@ -9,6 +9,7 @@
 // (Model override optional:  supabase secrets set RESEARCH_AI_MODEL=claude-sonnet-4-6)
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { assertEntitled, resolveModel } from '../_shared/entitlement.ts';
+import { logAiCost } from '../_shared/aicost.ts';
 import { langDirective, loadProjectLang } from '../_shared/lang.ts';
 
 const ANTHROPIC_KEY = Deno.env.get('ANTHROPIC_API_KEY');
@@ -52,12 +53,12 @@ Deno.serve(async (req) => {
 
     // Research Canvas: free-text summary of the edgeless whiteboard (no DB writes).
     if (action === 'canvas-summary') {
-      const summary = await summarizeCanvas(proj, String(canvas || '').slice(0, 12000), userModel, _lang);
+      const summary = await summarizeCanvas(sb, proj, String(canvas || '').slice(0, 12000), userModel, _lang);
       return json({ ok: true, summary });
     }
     // #6 — automatic prompt enhancement: rewrite the user's chat prompt to be clearer/more specific (no DB writes)
     if (action === 'enhance') {
-      const improved = await enhancePrompt(proj, String(text || '').slice(0, 4000), userModel);
+      const improved = await enhancePrompt(sb, proj, String(text || '').slice(0, 4000), userModel);
       return json({ ok: true, text: improved });
     }
     // #2 — continuously suggest research ideas grounded in the chat conversation; inserted as candidates the
@@ -65,7 +66,7 @@ Deno.serve(async (req) => {
     if (action === 'suggest') {
       const { data: existing } = await sb.from('research_ideas').select('question').eq('project_id', project_id).limit(60);
       const existingQs = (existing || []).map((e: any) => String(e.question || ''));
-      const ideas = await suggestFromChat(proj, String(text || '').slice(0, 9000), existingQs, userModel, _lang);
+      const ideas = await suggestFromChat(sb, proj, String(text || '').slice(0, 9000), existingQs, userModel, _lang);
       const rows = ideas.slice(0, 3).map((i: any) => ({
         project_id, source: 'chat', question: String(i.question || '').slice(0, 600),
         hypothesis: i.hypothesis ? String(i.hypothesis).slice(0, 800) : null,
@@ -114,7 +115,7 @@ Deno.serve(async (req) => {
       const lib = ((scopeStudy && deepestOK) ? inc : (inc.length >= 4 ? inc : all)).slice(0, 60);
       const N = lib.length;
       const TYPES = ['evidence', 'knowledge', 'methodological', 'population', 'theoretical', 'practical', 'contradictory'];
-      const gaps = await askClaudeGaps(proj, lib, userModel, _lang);
+      const gaps = await askClaudeGaps(sb, proj, lib, userModel, _lang);
       const rows = (gaps || []).slice(0, 8).map((g: any) => {
         // validate evidence source_ref indices against the ACTUAL library length — drop hallucinated citations
         const ev = Array.isArray(g.evidence) ? g.evidence.map((e: any) => {
@@ -170,7 +171,7 @@ Deno.serve(async (req) => {
         const { data: cached } = await sb.from('research_gap_matrix').select('matrix,fingerprint,updated_at').eq('project_id', project_id).maybeSingle();
         if (cached && cached.fingerprint === fp && cached.matrix) return json({ ok: true, matrix: cached.matrix, count: lib.length, cached: true, computed_at: cached.updated_at });
       }
-      const matrix = await askClaudeMatrix(proj, lib, userModel, _lang);
+      const matrix = await askClaudeMatrix(sb, proj, lib, userModel, _lang);
       if (matrix && Array.isArray(matrix.refs)) {
         // map the AI's per-cell library refs (1-based indices into `lib`) → concrete sources, so the client can list the LITERATURE per cell
         matrix.cellSources = matrix.refs.map((rrow: any) => (Array.isArray(rrow) ? rrow : []).map((cell: any) =>
@@ -193,7 +194,7 @@ Deno.serve(async (req) => {
       const { data: csrc } = await sb.from('research_sources')
         .select('title,year,abstract').eq('project_id', project_id).order('cited_by', { ascending: false, nullsFirst: false }).limit(40);
       const TYPES = ['evidence', 'knowledge', 'methodological', 'population', 'theoretical', 'practical', 'contradictory'];
-      const one = await askClaudeCell(proj, csrc || [], rlab, clab, userModel, _lang);
+      const one = await askClaudeCell(sb, proj, csrc || [], rlab, clab, userModel, _lang);
       const gt = (one && TYPES.indexOf(String(one.gap_type || '').toLowerCase().trim()) >= 0) ? String(one.gap_type).toLowerCase().trim() : 'population';
       const rowIns: any = {
         project_id, source: 'gap', status: 'candidate', gap_type: gt, evidence: [],
@@ -214,7 +215,7 @@ Deno.serve(async (req) => {
     if (action === 'explain_edge') {
       const f = from || {}, t = to || {};
       if (!f.title || !t.title) return json({ error: 'from and to required' }, 400);
-      const label = await explainEdge(proj, f, t, String(kind || ''), userModel, _lang);
+      const label = await explainEdge(sb, proj, f, t, String(kind || ''), userModel, _lang);
       return json({ ok: true, label });
     }
 
@@ -224,7 +225,7 @@ Deno.serve(async (req) => {
     const { data: sources } = await sb.from('research_sources')
       .select('title,year,venue,abstract').eq('project_id', project_id).limit(40);
 
-    const ideas = await askClaude(action, proj, sources || [], userModel, _lang);
+    const ideas = await askClaude(sb, action, proj, sources || [], userModel, _lang);
     if (ideas.length) {
       const rows = ideas.slice(0, 8).map((i: any) => ({
         // action 'ideas' → plain research ideas (source='idea'); action 'gap' → research gaps (source='gap').
@@ -245,7 +246,7 @@ Deno.serve(async (req) => {
   }
 });
 
-async function summarizeCanvas(proj: any, canvas: string, model: string, lang: 'en' | 'hu'): Promise<string> {
+async function summarizeCanvas(sb: any, proj: any, canvas: string, model: string, lang: 'en' | 'hu'): Promise<string> {
   const prompt = `Egy kutató edgeless vásznát (Research Canvas) kapod: tipizált csomópontok (jegyzet/ötlet/publikáció/forrás/adat) és tipizált kapcsolatok (kapcsolódik/alátámaszt/cáfol/vezet-hozzá). Projekt: "${proj.title}"${proj.field ? ' (' + proj.field + ')' : ''}.
 
 VÁSZON TARTALMA:
@@ -258,11 +259,12 @@ Készíts TÖMÖR összefoglalót a témavezető/kutató számára: (1) mi a vá
     body: JSON.stringify({ model, max_tokens: 600, messages: [{ role: 'user', content: prompt }] }),
   });
   const out = await r.json();
+  logAiCost(sb, { fn: 'research-ai', model, usage: out.usage });
   if (out.error) throw new Error(out.error.message || 'anthropic error');
   return (out.content || []).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n').trim();
 }
 
-async function enhancePrompt(proj: any, text: string, model: string): Promise<string> {
+async function enhancePrompt(sb: any, proj: any, text: string, model: string): Promise<string> {
   if (!text.trim()) return text;
   const ctx = `Project: "${proj.title || ''}"${proj.field ? ' (' + proj.field + ')' : ''}.${proj.goal ? ' Goal: ' + proj.goal + '.' : ''}${(proj.keywords && proj.keywords.length) ? ' Keywords: ' + proj.keywords.join(', ') + '.' : ''}`;
   const prompt = `You improve prompts for an AI research assistant. Rewrite the user's message below to be clearer, more specific and well-structured: keep the SAME language and intent, expand vague terms, and add helpful framing where obvious — but do not invent facts or answer it. Return ONLY the improved prompt text — no preamble, no quotes, no explanation.
@@ -277,12 +279,13 @@ ${text}`;
     body: JSON.stringify({ model, max_tokens: 800, messages: [{ role: 'user', content: prompt }] }),
   });
   const out = await r.json();
+  logAiCost(sb, { fn: 'research-ai', model, usage: out.usage });
   if (out.error) throw new Error(out.error.message || 'anthropic error');
   const t = (out.content || []).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n').trim();
   return t || text;
 }
 
-async function suggestFromChat(proj: any, transcript: string, existingQs: string[], model: string, lang: 'en' | 'hu'): Promise<any[]> {
+async function suggestFromChat(sb: any, proj: any, transcript: string, existingQs: string[], model: string, lang: 'en' | 'hu'): Promise<any[]> {
   if (!transcript.trim()) return [];
   const avoid = existingQs.slice(0, 40).map((q) => '- ' + q).join('\n');
   const prompt = `You watch a researcher's chat and surface NEW research ideas as they emerge. Project: "${proj.title || ''}"${proj.field ? ' (' + proj.field + ')' : ''}.${proj.goal ? ' Goal: ' + proj.goal + '.' : ''}
@@ -300,6 +303,7 @@ Return ONLY a JSON array, no prose. Each item: {"question": "...", "hypothesis":
     body: JSON.stringify({ model, max_tokens: 1200, messages: [{ role: 'user', content: prompt }] }),
   });
   const out = await r.json();
+  logAiCost(sb, { fn: 'research-ai', model, usage: out.usage });
   if (out.error) throw new Error(out.error.message || 'anthropic error');
   const txt = (out.content || []).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n');
   const m = txt.match(/\[[\s\S]*\]/);
@@ -307,7 +311,7 @@ Return ONLY a JSON array, no prose. Each item: {"question": "...", "hypothesis":
   try { const arr = JSON.parse(m[0]); return Array.isArray(arr) ? arr : []; } catch { return []; }
 }
 
-async function askClaude(action: string, proj: any, sources: any[], model: string, lang: 'en' | 'hu'): Promise<any[]> {
+async function askClaude(sb: any, action: string, proj: any, sources: any[], model: string, lang: 'en' | 'hu'): Promise<any[]> {
   const lib = sources.map((s, i) =>
     `[${i + 1}] ${s.title} (${s.year ?? 'n.d.'}, ${s.venue ?? ''})\n${(s.abstract ?? '').slice(0, 600)}`).join('\n\n');
   const verb = action === 'ideas' ? 'Propose novel research directions' : 'Perform a research-gap analysis';
@@ -336,13 +340,14 @@ Return ONLY a JSON array, no prose, each item:
     body: JSON.stringify({ model, max_tokens: MAX_TOKENS, messages: [{ role: 'user', content: prompt }] }),
   });
   const j = await r.json();
+  logAiCost(sb, { fn: 'research-ai', model, usage: j.usage });
   const text = (j?.content?.[0]?.text) || '';
   const m = text.match(/\[[\s\S]*\]/);
   try { return m ? JSON.parse(m[0]) : []; } catch { return []; }
 }
 
 // Typed, evidence-grounded gap analysis (action='gap_analyze'). Returns [{gap_type,statement,evidence:[{source_ref,coverage}],rationale,novelty,suggested_question}].
-async function askClaudeGaps(proj: any, sources: any[], model: string, lang: 'en' | 'hu'): Promise<any[]> {
+async function askClaudeGaps(sb: any, proj: any, sources: any[], model: string, lang: 'en' | 'hu'): Promise<any[]> {
   const lib = sources.map((s, i) =>
     `[${i + 1}] ${s.title} (${s.year ?? 'n.d.'}, ${s.venue ?? ''})\n${(s.abstract ?? '').slice(0, 500)}`).join('\n\n');
   const prompt =
@@ -377,6 +382,7 @@ Return ONLY a JSON array, no prose. Each item:
     body: JSON.stringify({ model, max_tokens: Math.max(MAX_TOKENS, 2200), messages: [{ role: 'user', content: prompt }] }),
   });
   const j = await r.json();
+  logAiCost(sb, { fn: 'research-ai', model, usage: j.usage });
   const text = (j?.content?.[0]?.text) || '';
   const mm = text.match(/\[[\s\S]*\]/);
   try { return mm ? JSON.parse(mm[0]) : []; } catch { return []; }
@@ -389,7 +395,7 @@ async function sha256Hex(s: string): Promise<string> {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
   return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, '0')).join('');
 }
-async function askClaudeMatrix(proj: any, sources: any[], model: string, lang: 'en' | 'hu'): Promise<any> {
+async function askClaudeMatrix(sb: any, proj: any, sources: any[], model: string, lang: 'en' | 'hu'): Promise<any> {
   const lib = sources.map((s, i) => `[${i + 1}] ${s.title} (${s.year ?? 'n.d.'})\n${(s.abstract ?? '').slice(0, 300)}`).join('\n\n');
   const prompt =
 `You build an EVIDENCE-GAP MAP (EGM) for a research project — a matrix whose EMPTY cells reveal research gaps.
@@ -412,6 +418,7 @@ Return ONLY JSON, no prose: {"rows":["..."],"cols":["..."],"cells":[[<int>, ...]
     body: JSON.stringify({ model, max_tokens: 1900, temperature: 0, messages: [{ role: 'user', content: prompt }] }),   // temp 0 → the least-varying output for a fixed input (paired with the input-fingerprint cache)
   });
   const j = await r.json();
+  logAiCost(sb, { fn: 'research-ai', model, usage: j.usage });
   const text = (j?.content?.[0]?.text) || '';
   const m = text.match(/\{[\s\S]*\}/);
   try {
@@ -422,7 +429,7 @@ Return ONLY JSON, no prose: {"rows":["..."],"cols":["..."],"cells":[[<int>, ...]
 }
 
 // P5.2b — one typed gap for a single method×domain matrix cell (action='gap_cell').
-async function askClaudeCell(proj: any, sources: any[], row: string, col: string, model: string, lang: 'en' | 'hu'): Promise<any> {
+async function askClaudeCell(sb: any, proj: any, sources: any[], row: string, col: string, model: string, lang: 'en' | 'hu'): Promise<any> {
   const lib = sources.map((s, i) => `[${i + 1}] ${s.title} (${s.year ?? 'n.d.'})`).join('\n');
   const prompt =
 `You articulate ONE precise research gap for a specific cell of an evidence-gap map.
@@ -444,6 +451,7 @@ Return ONLY JSON: {"gap_type":"<slug>","statement":"the gap in one sentence","ra
     body: JSON.stringify({ model, max_tokens: 700, messages: [{ role: 'user', content: prompt }] }),
   });
   const j = await r.json();
+  logAiCost(sb, { fn: 'research-ai', model, usage: j.usage });
   const text = (j?.content?.[0]?.text) || '';
   const m = text.match(/\{[\s\S]*\}/);
   try { return m ? JSON.parse(m[0]) : null; } catch { return null; }
@@ -451,7 +459,7 @@ Return ONLY JSON: {"gap_type":"<slug>","statement":"the gap in one sentence","ra
 
 // auto edge-label: given the two connected cards (type+title+snippet) and the relation kind, write ONE concise Hungarian
 // phrase for WHY the source card connects to the target (cause → effect), read on the arrow. Returns '' on failure.
-async function explainEdge(proj: any, from: any, to: any, kind: string, model: string, lang: 'en' | 'hu'): Promise<string> {
+async function explainEdge(sb: any, proj: any, from: any, to: any, kind: string, model: string, lang: 'en' | 'hu'): Promise<string> {
   const snip = (c: any) => { const s = String(c.snippet || '').replace(/\s+/g, ' ').slice(0, 400); return s ? ` — „${s}”` : ''; };
   const KV: Record<string, string> = { erd: 'ered/származik belőle', idz: 'idézi/hivatkozik rá', bem: 'bemenete/táplálja', tam: 'alátámasztja', ell: 'cáfolja/ellentmond', fug: 'előfeltétele/függ tőle', kap: 'kapcsolódik' };
   const prompt =
@@ -471,6 +479,7 @@ Return ONLY JSON: {"label":"a rövid kifejezés"}`;
     body: JSON.stringify({ model, max_tokens: 120, messages: [{ role: 'user', content: prompt }] }),
   });
   const j = await r.json();
+  logAiCost(sb, { fn: 'research-ai', model, usage: j.usage });
   const text = (j?.content?.[0]?.text) || '';
   const m = text.match(/\{[\s\S]*\}/);
   try { const o = m ? JSON.parse(m[0]) : null; return (o && o.label) ? String(o.label).replace(/\s+/g, ' ').trim().slice(0, 80) : ''; } catch { return ''; }

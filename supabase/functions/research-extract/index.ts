@@ -10,6 +10,7 @@
 // Secrets: ANTHROPIC_API_KEY (reused).
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { assertEntitled, clampModel } from '../_shared/entitlement.ts';
+import { logAiCost } from '../_shared/aicost.ts';
 import { langDirective, loadProjectLang } from '../_shared/lang.ts';
 
 const ANTHROPIC_KEY = Deno.env.get('ANTHROPIC_API_KEY');
@@ -39,12 +40,13 @@ async function fetchPdfBlock(url: string): Promise<any | null> {
   } catch { return null; }
 }
 
-async function callClaude(model: string, system: string, content: any, maxTokens: number): Promise<string> {
+async function callClaude(sb: any, model: string, system: string, content: any, maxTokens: number): Promise<string> {
   const headers: Record<string, string> = { 'x-api-key': ANTHROPIC_KEY!, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' };
   const body = { model, max_tokens: maxTokens, system, messages: [{ role: 'user', content }] };
   const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers, body: JSON.stringify(body) });
   const o = await r.json();
   if (o.error) throw new Error(o.error.message || 'anthropic');
+  logAiCost(sb, { fn: 'research-extract', model, usage: o.usage });   // every paid call is recorded (migration-113)
   return (o.content || []).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n');
 }
 function parseObj(text: string): any {
@@ -123,7 +125,7 @@ Rules:
       if (pdfBlock) content.push(pdfBlock);
 
       let parsed: any = null;
-      try { parsed = parseObj(await callClaude(model, sys, content, 900)); } catch (e) { parsed = null; }
+      try { parsed = parseObj(await callClaude(sb, model, sys, content, 900)); } catch (e) { parsed = null; }
 
       const nowIso = new Date().toISOString();
       const fingerprint = await sha256([q.text, sourceId, model, q.source_mode].join('|'));

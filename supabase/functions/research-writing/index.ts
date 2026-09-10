@@ -1,18 +1,20 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 import { assertEntitled, clampModel } from '../_shared/entitlement.ts';
+import { logAiCost } from '../_shared/aicost.ts';
 import { langDirective, loadProjectLang } from '../_shared/lang.ts';
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type', 'Access-Control-Allow-Methods': 'POST, OPTIONS' };
 const ANTHROPIC_KEY = Deno.env.get('ANTHROPIC_API_KEY');
 const BEST = 'claude-opus-4-8';          // always use the best model for the manuscript
 const FALLBACK = 'claude-sonnet-4-6';
 function json(b: unknown, s = 200) { return new Response(JSON.stringify(b), { status: s, headers: { ...CORS, 'Content-Type': 'application/json' } }); }
-async function callClaude(system: string, user: string, max = 4000, model = BEST): Promise<string> {
+async function callClaude(sb: any, system: string, user: string, max = 4000, model = BEST): Promise<string> {
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST', headers: { 'x-api-key': ANTHROPIC_KEY!, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
     body: JSON.stringify({ model, max_tokens: max, system, messages: [{ role: 'user', content: user }] }),
   });
   const o = await r.json();
-  if (o.error) { if (model !== FALLBACK && /model|not_found|permission/i.test(o.error.message || '')) return callClaude(system, user, max, FALLBACK); throw new Error(o.error.message || 'anthropic'); }
+  if (o.error) { if (model !== FALLBACK && /model|not_found|permission/i.test(o.error.message || '')) return callClaude(sb, system, user, max, FALLBACK); throw new Error(o.error.message || 'anthropic'); }
+    logAiCost(sb, { fn: 'research-writing', model, usage: o.usage });
   return (o.content || []).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n').trim();
 }
 function bibKey(authors: any, year: any, used: Set<string>) {
@@ -76,7 +78,7 @@ Deno.serve(async (req) => {
       const sys = 'You are a senior author planning a research manuscript for a specific journal. Design an outline grounded ONLY in the provided real results — never invent findings or numbers. Return ONLY JSON: {"title":"paper title","abstract":"150-220 word abstract using only the real results","keywords":["5-6"],"sections":[{"key":"introduction|related_work|method|results|discussion|conclusion|<slug>","heading":"Section heading","points":["3-6 bullet points to cover"],"cite_keys":["bib keys to cite here"],"figure_keys":["figure keys to place here"]}]}. Include the standard sections (Introduction, Related Work, Method, Results, Discussion, Conclusion) adapted to the journal. COMPLETENESS IS MANDATORY: every figure key in AVAILABLE FIGURES must appear in exactly ONE section\'s figure_keys — do not omit any figure. The Results section\'s points must cover EVERY quantitative result/metric in the RESULTS block (all detectors, all fusion variants, all numbers) — none may be left out.';
       const u = `${research}\n\nTARGET JOURNAL: ${journal.name || '(unspecified)'} — family ${journal.family}; scope: ${journal.scope || 'n/a'}\n\nAVAILABLE FIGURES: ${figures.map((f) => f.key + ' = ' + f.caption).join(' | ') || '(none)'}\n\nLITERATURE (cite by key):\n${literature.map((l) => `${l.key}: ${l.title} (${l.year || 'n.d.'})`).join('\n') || '(none)'}`;
       const _lang = await loadProjectLang(sb, projectId);
-      const raw = await callClaude(sys + langDirective(_lang), u, 3000, model); await sb.rpc('ai_usage_bump');
+      const raw = await callClaude(sb, sys + langDirective(_lang), u, 3000, model); await sb.rpc('ai_usage_bump');
       const m = raw.match(/\{[\s\S]*\}/); if (!m) return json({ error: 'outline returned no JSON' }, 502);
       let ol: any; try { ol = JSON.parse(m[0]); } catch (e) { return json({ error: 'bad outline JSON: ' + e }, 502); }
       const context = { research, results: resultsTxt, literature, figures, journal, title: ol.title, abstract: ol.abstract, keywords: ol.keywords };
@@ -92,7 +94,7 @@ Deno.serve(async (req) => {
       const sys = 'You are writing ONE section of a research manuscript in LaTeX. Ground every claim ONLY in the provided research + results — NEVER invent numbers or findings; if something is unknown write "[TODO: ...]". Report ALL relevant numbers/metrics from the results that belong in this section — for a Results section, present EVERY detector/fusion metric (e.g. in a table); do not omit any. Cite with \\cite{key} using ONLY the given bib keys. You MUST place EVERY figure listed in ASSIGNED FIGURES — one \\begin{figure}[htbp] ... \\includegraphics[width=\\linewidth]{key.png} ... \\caption{...} \\label{fig:key} \\end{figure} per assigned key — and reference each with \\ref{fig:key}. Output ONLY the LaTeX body for this one section (start with \\section{...}); no preamble, no document wrapper, no code fences.';
       const u = `TARGET JOURNAL: ${(ctx.journal && ctx.journal.name) || 'generic'}\n\nRESEARCH & RESULTS (the only source of truth):\n${ctx.research || ''}\n\nAVAILABLE BIB KEYS: ${(ctx.literature || []).map((l: any) => l.key).join(', ') || '(none)'}\nASSIGNED FIGURES (place ALL of these): ${(sec.figure_keys || []).map((k: string) => { const f = (ctx.figures || []).find((x: any) => x.key === k); return k + (f ? ' ("' + f.caption + '")' : ''); }).join(' | ') || '(none)'}\n\nWRITE THIS SECTION:\nHeading: ${sec.heading}\nCover these points:\n- ${(sec.points || []).join('\n- ')}\nSuggested citations: ${(sec.cite_keys || []).join(', ')}`;
       const _lang = await loadProjectLang(sb, projectId);
-      const latex = await callClaude(sys + langDirective(_lang), u, 3500, model); await sb.rpc('ai_usage_bump');
+      const latex = await callClaude(sb, sys + langDirective(_lang), u, 3500, model); await sb.rpc('ai_usage_bump');
       return json({ ok: true, key: sec.key, latex: latex.replace(/^```(latex)?/i, '').replace(/```$/, '').trim() });
     }
 

@@ -7,18 +7,20 @@
 // Deploy:  supabase functions deploy research-integrity
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 import { assertEntitled, clampModel } from '../_shared/entitlement.ts';
+import { logAiCost } from '../_shared/aicost.ts';
 import { langDirective, loadProjectLang } from '../_shared/lang.ts';
 
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type', 'Access-Control-Allow-Methods': 'POST, OPTIONS' };
 const ANTHROPIC_KEY = Deno.env.get('ANTHROPIC_API_KEY');
 const MODEL = 'claude-sonnet-4-6';
 function json(b: unknown, s = 200) { return new Response(JSON.stringify(b), { status: s, headers: { ...CORS, 'Content-Type': 'application/json' } }); }
-async function callClaude(system: string, user: string, max: number, model: string): Promise<string> {
+async function callClaude(sb: any, system: string, user: string, max: number, model: string): Promise<string> {
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST', headers: { 'x-api-key': ANTHROPIC_KEY!, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
     body: JSON.stringify({ model, max_tokens: max, system, messages: [{ role: 'user', content: user }] }),
   });
   const o = await r.json(); if (o.error) throw new Error(o.error.message || 'anthropic');
+  logAiCost(sb, { fn: 'research-integrity', model, usage: o.usage });   // every paid call is recorded (migration-113)
   return (o.content || []).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n').trim();
 }
 
@@ -77,7 +79,7 @@ Deno.serve(async (req) => {
     const sys = "You are a rigorous research-integrity reviewer. Compare the MANUSCRIPT against the project's real ARTIFACTS (data files, result-log, library) and report ONLY genuine integrity problems. Check: (1) untraceable_number — a reported number that appears in NO artifact AND is not a legitimate derivation (mean/ratio/rounding of artifact values) — be conservative, do NOT flag a number you can plausibly derive; (2) figure_data — a figure/table CLAIM that contradicts its underlying data; (3) stat_flag — impossible/suspect stats (NaN, p>1, negative variance, inconsistent N); (4) citation — a citation not present in the library and not obviously real; (5) cross_inconsistency — the same metric reported with different values in different places. For each finding set ref_number to the exact number if numeric. NEVER invent corrections; ground every finding in a named artifact. Return ONLY JSON: {\"findings\":[{\"kind\":\"untraceable_number|figure_data|stat_flag|citation|cross_inconsistency\",\"severity\":\"high|medium|low\",\"claim\":\"<the flagged claim/number>\",\"location\":\"<section/where in the manuscript>\",\"evidence\":\"<what it was checked against + the artifact values>\",\"suggestion\":\"<what to verify/fix>\",\"ref_number\":\"<the number or empty>\"}]} — [] if nothing is wrong." + langDirective(lang);
     const user = `MANUSCRIPT:\n${manuscript.slice(0, 15000)}\n\nDATA ARTIFACTS (CSV / result-log — the ground truth for numbers):\n${artAll.slice(0, 11000) || '(none registered)'}\n\nLIBRARY (citable sources):\n${sourcesText.slice(0, 3000) || '(none)'}\n\nDETERMINISTIC PRE-FILTER — manuscript numbers with NO artifact match (candidates; JUDGE each, a legitimate derivation is NOT a finding):\n${untraceable.join(', ') || '(none)'}`;
 
-    const raw = await callClaude(sys, user, 3500, model);
+    const raw = await callClaude(sb, sys, user, 3500, model);
     const m = raw.match(/\{[\s\S]*\}/); if (!m) return json({ error: 'reviewer returned no JSON' }, 502);
     let parsed: any; try { parsed = JSON.parse(m[0]); } catch (_e) { return json({ error: 'reviewer JSON parse failed' }, 502); }
     const findings: any[] = Array.isArray(parsed.findings) ? parsed.findings.slice(0, 40) : [];

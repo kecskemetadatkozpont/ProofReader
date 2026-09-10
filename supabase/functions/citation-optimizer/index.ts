@@ -16,6 +16,7 @@
 //          fall back to the shared unauthenticated pool + 429 backoff).
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { assertActive, assertBudget, resolveModel } from '../_shared/entitlement.ts';
+import { logAiCost } from '../_shared/aicost.ts';
 import { langDirective, loadProjectLang } from '../_shared/lang.ts';
 
 const ANTHROPIC_KEY = Deno.env.get('ANTHROPIC_API_KEY');
@@ -55,7 +56,7 @@ async function s2batch(refs: string[]): Promise<any[]> {
   throw new Error('s2 batch 429');
 }
 
-async function callClaude(model: string, content: string, maxTokens: number): Promise<string> {
+async function callClaude(sb: any, model: string, content: string, maxTokens: number): Promise<string> {
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'x-api-key': ANTHROPIC_KEY!, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
@@ -63,6 +64,7 @@ async function callClaude(model: string, content: string, maxTokens: number): Pr
   });
   const o = await r.json();
   if (o.error) throw new Error(o.error.message || 'anthropic');
+  logAiCost(sb, { fn: 'citation-optimizer', model, usage: o.usage });   // every paid call is recorded (migration-113)
   return (o.content || []).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n');
 }
 function parseJson(text: string, fallback: any): any { const m = String(text).match(/[\[{][\s\S]*[\]}]/); if (!m) return fallback; try { return JSON.parse(m[0]); } catch { return fallback; } }
@@ -165,7 +167,7 @@ ${lines}
 Return ONLY JSON: {"classifications":[{"i":0,"intent":"method"}],"contributions":[{"label":"reconstruction anomaly score","count":12}],"summary":"..."}` + langDirective(_lang);
         try {
           const model = await resolveModel(sb);
-          const out = await callClaude(model, prompt, 1600);
+          const out = await callClaude(sb, model, prompt, 1600);
           const cls = parseJson(out, {});
           const classifications = Array.isArray(cls.classifications) ? cls.classifications : [];
           classifications.forEach((c: any) => { const k = String(c && c.intent || '').toLowerCase(); if (mix[k] !== undefined) mix[k]++; if (typeof c.i === 'number') intentByIdx[c.i] = k; });
@@ -210,7 +212,7 @@ Write a concise citation strategy in markdown (<=180 words) to optimize the rese
 - 2-3 concrete, actionable recommendations ("When you introduce X, cite <paper> for its <contribution>, because that is how the field cites it"),
 - name any uncrowded angle they could claim (e.g. if contrast is rare).
 Return ONLY the markdown, no preamble.` + langDirective(_lang);
-        try { const model = await resolveModel(sb); strategy = await callClaude(model, prompt, 1200); } catch (_e) { strategy = ''; }
+        try { const model = await resolveModel(sb); strategy = await callClaude(sb, model, prompt, 1200); } catch (_e) { strategy = ''; }
       }
       await sb.from('citation_reports').update({ status: 'done', strategy, intent_totals: totals, stats: { papers: (insights || []).length, resolved, contexts: ctxCount, influential: infl }, updated_at: new Date().toISOString() }).eq('id', report_id);
       return json({ ok: true, strategy, intent_totals: totals, stats: { papers: (insights || []).length, resolved, contexts: ctxCount, influential: infl } });

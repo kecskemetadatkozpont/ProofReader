@@ -68,3 +68,32 @@ export async function clampModel(sb: any, preferred: string): Promise<string> {
   const { data: ok } = await sb.rpc('model_allowed', { p_model: preferred });
   return ok === true ? preferred : await resolveModel(sb);
 }
+
+// ---------------------------------------------------------------------------
+// Course-role dimension (migration-66 course module). Same fail-CLOSED
+// philosophy as the gates above: any RPC error denies; the course RPCs
+// (course_is_member / course_is_instructor / course_role) are SECURITY DEFINER
+// helpers that resolve auth.uid() through the caller-JWT client.
+// ---------------------------------------------------------------------------
+
+/** Gate 3 (course membership). Returns a 403 Response to return-early on denial, or null to proceed. */
+export async function assertCourseMember(sb: any, courseId: string): Promise<Response | null> {
+  const { data, error } = await sb.rpc('course_is_member', { cid: courseId });
+  if (error || data !== true) return deny('Nem vagy tagja ennek a kurzusnak.', 403);
+  return null;
+}
+
+/** Instructor gate (oktato/demonstrator role, course owner, or admin — via course_is_instructor). */
+export async function assertCourseInstructor(sb: any, courseId: string): Promise<Response | null> {
+  const { data, error } = await sb.rpc('course_is_instructor', { cid: courseId });
+  if (error || data !== true) return deny('Ehhez oktatói szerep kell.', 403);
+  return null;
+}
+
+/** Effective model for a course caller: students get courses.student_model (course-level model policy), instructors their own resolveModel(). Fail-closed to CHEAPEST. */
+export async function resolveCourseModel(sb: any, courseId: string): Promise<string> {
+  const { data: role } = await sb.rpc('course_role', { cid: courseId });
+  if (role === 'oktato' || role === 'demonstrator') return resolveModel(sb);
+  const { data: c } = await sb.from('courses').select('student_model').eq('id', courseId).maybeSingle();
+  return (c && c.student_model) || CHEAPEST;
+}

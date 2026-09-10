@@ -12,7 +12,7 @@ type Usage = { input_tokens?: number; output_tokens?: number } | null | undefine
 
 export function logAiCost(
   sb: any,
-  opts: { fn: string; model: string; project_id?: string | null; usage?: Usage; input?: number; output?: number },
+  opts: { fn: string; model: string; project_id?: string | null; usage?: Usage; input?: number; output?: number; user_id?: string | null },
 ): void {
   try {
     const inTok = Math.max(0, Math.round(opts.input ?? opts.usage?.input_tokens ?? 0));
@@ -24,6 +24,7 @@ export function logAiCost(
       p_model: String(opts.model || '?').slice(0, 80),
       p_in: inTok,
       p_out: outTok,
+      p_user: opts.user_id ?? null,   // honoured ONLY for the service role (migration-115) — cron spend is recorded too
     }).then(() => {}, () => {});   // ignore all errors (pre-migration, RLS, etc.)
   } catch { /* never affect the request */ }
 }

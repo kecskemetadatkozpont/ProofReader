@@ -14,6 +14,7 @@
 // Secrets: ANTHROPIC_API_KEY (reused); CONSENSUS_MCP_TOKEN (optional, grounds the review).
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { assertEntitled, assertActive, resolveModel } from '../_shared/entitlement.ts';
+import { logAiCost } from '../_shared/aicost.ts';
 import { langDirective, loadProjectLang } from '../_shared/lang.ts';
 
 const ANTHROPIC_KEY = Deno.env.get('ANTHROPIC_API_KEY');
@@ -267,13 +268,14 @@ ${head}For each paper decide: "include" (relevant to the question and plausibly 
 Return ONLY a JSON array, one object per paper in order: [{"i":0,"decision":"include|maybe|exclude","reason":"...","score":0,"signals":{"has_github":false,"has_dataset":false}}]`;
 }
 
-async function callClaude(model: string, system: string, content: any, useMcp: boolean, maxTokens: number) {
+async function callClaude(sb: any, model: string, system: string, content: any, useMcp: boolean, maxTokens: number) {
   const headers: Record<string, string> = { 'x-api-key': ANTHROPIC_KEY!, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' };
   if (useMcp) headers['anthropic-beta'] = 'mcp-client-2025-04-04';
   const body: Record<string, unknown> = { model, max_tokens: maxTokens, system, messages: [{ role: 'user', content }] };
   if (useMcp) body.mcp_servers = [{ type: 'url', url: CONSENSUS_MCP_URL, name: 'consensus', authorization_token: CONSENSUS_TOKEN }];
   const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers, body: JSON.stringify(body) });
   const o = await r.json();
+  logAiCost(sb, { fn: 'research-study', model, usage: o.usage });
   if (o.error) throw new Error(o.error.message || 'anthropic');
   return (o.content || []).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n');
 }
@@ -282,7 +284,7 @@ function parseDecisions(text: string): any[] {
   try { return JSON.parse(m[0]); } catch { return []; }
 }
 // AI-prefill the whole 4-step funnel config from the project + the study's question(s) — the user just fine-tunes.
-async function planStudy(study: any, proj: any, model: string): Promise<any> {
+async function planStudy(sb: any, study: any, proj: any, model: string): Promise<any> {
   const kw = ((proj && proj.keywords) || []).join(', ');
   const prompt = `You are configuring an Elicit-style 4-step literature screening funnel so a researcher only fine-tunes it. Tailor EVERYTHING to the question(s) below.
 
@@ -300,7 +302,7 @@ Return ONLY JSON, no prose. EVERY step must have non-empty include AND exclude a
   let out = '';
   // 2600 tokens (was 1800): the full 4-step JSON with verbose criteria could TRUNCATE at 1800 → the regex then
   // grabbed an incomplete object → JSON.parse threw → planStudy returned {} → step-1 keywords stayed EMPTY.
-  try { out = await callClaude(model, '', prompt, false, 2600); } catch { return {}; }
+  try { out = await callClaude(sb, model, '', prompt, false, 2600); } catch { return {}; }
   const m = out.match(/\{[\s\S]*\}/); if (!m) return {};
   try { return JSON.parse(m[0]); } catch { return {}; }
 }
@@ -309,14 +311,14 @@ Return ONLY JSON, no prose. EVERY step must have non-empty include AND exclude a
 // planStudy did not populate step-1 keywords — an empty keyword set makes openalexUnion/Elicit fall back to a
 // single raw-question query, which returns almost nothing for a long or non-English question (→ the funnel
 // finished with 3-4 papers in seconds). One small, strict-contract Claude call, so it's cheap and reliable.
-async function deriveKeywords(question: string, model: string): Promise<string[]> {
+async function deriveKeywords(sb: any, question: string, model: string): Promise<string[]> {
   const q = String(question || '').slice(0, 1200);
   if (!q.trim()) return [];
   const prompt = `From the research question below, produce 8 precise ENGLISH search keywords/phrases for the OpenAlex academic search API (translate to English if the question is in another language). Each 1-4 words, concrete, no punctuation. Cover the core concepts: population, intervention/variable, and outcome.
 Question: "${q}"
 Return ONLY a JSON array of strings, e.g. ["learning agility","leadership effectiveness","longitudinal study"]. No prose.`;
   let out = '';
-  try { out = await callClaude(model, '', prompt, false, 500); } catch { return []; }
+  try { out = await callClaude(sb, model, '', prompt, false, 500); } catch { return []; }
   const m = out.match(/\[[\s\S]*\]/); if (!m) return [];
   try {
     const arr = JSON.parse(m[0]);
@@ -326,7 +328,7 @@ Return ONLY a JSON array of strings, e.g. ["learning agility","leadership effect
 }
 
 // Turn each project Idea into ONE systematic-review-ready question (+ PICO, criteria, extraction). One Claude call.
-async function planSR(ideas: any[], proj: any, model: string, lang: string): Promise<any[]> {
+async function planSR(sb: any, ideas: any[], proj: any, model: string, lang: string): Promise<any[]> {
   if (!ideas.length) return [];
   const list = ideas.map((i, k) => `[${k}] ${String(i.question || '').slice(0, 600)}${i.hypothesis ? ' | hypothesis: ' + String(i.hypothesis).slice(0, 300) : ''}`).join('\n');
   const prompt = `You are preparing systematic reviews. For EACH research idea below, produce ONE systematic-review-ready research question with a PICO frame, abstract-screening inclusion criteria, and data-extraction questions. Tailor to the project field.
@@ -338,7 +340,7 @@ ${list}
 Return ONLY a JSON array — one object per idea, and include the bracket index as "idx":
 [{ "idx": <the [index]>, "question": "a well-formed systematic-review question (<=250 chars)", "pico": {"population":"...","intervention":"...","comparison":"...","outcome":"..."}, "abstract_criteria": ["3-5 short inclusion criteria"], "extraction_questions": ["3-5 short data-extraction questions"], "study_type": "interventional|observational|qualitative|mixed" }]`;
   let out = '';
-  try { out = await callClaude(model, langDirective(lang), prompt, false, 3500); } catch { return []; }
+  try { out = await callClaude(sb, model, langDirective(lang), prompt, false, 3500); } catch { return []; }
   const m = out.match(/\[[\s\S]*\]/); if (!m) return [];
   try { const arr = JSON.parse(m[0]); return Array.isArray(arr) ? arr : []; } catch { return []; }
 }
@@ -366,11 +368,11 @@ Deno.serve(async (req) => {
       if (!qs.length) return json({ error: 'no questions' }, 400);
       const modelP = await resolveModel(sb);
       const joined = qs.join('\n\n');
-      const plan = await planStudy({ question: joined, title: qs[0] }, proj, modelP);
+      const plan = await planStudy(sb, { question: joined, title: qs[0] }, proj, modelP);
       // never leave step-1 keywords empty (would collapse the funnel to a single raw-question query)
       if (!plan.step1 || typeof plan.step1 !== 'object') plan.step1 = {};
       const kws = (plan.step1.keywords || []).map((k: any) => String(k || '').trim()).filter(Boolean);
-      if (!kws.length) { const d = await deriveKeywords(joined, modelP); if (d.length) plan.step1.keywords = d; }
+      if (!kws.length) { const d = await deriveKeywords(sb, joined, modelP); if (d.length) plan.step1.keywords = d; }
       return json({ ok: true, plan, joined_question: joined.slice(0, 4000) });
     }
 
@@ -387,7 +389,7 @@ Deno.serve(async (req) => {
       const { data: ideas } = await sb.from('research_ideas').select('id,question,hypothesis').eq('project_id', project_id).neq('status', 'rejected').order('created_at', { ascending: true }).limit(12);
       if (!ideas || !ideas.length) return json({ ok: true, created: 0, note: 'no ideas' });
       const _lang = await loadProjectLang(sb, project_id);
-      const cands = await planSR(ideas, proj, model0, _lang);
+      const cands = await planSR(sb, ideas, proj, model0, _lang);
       let created = 0;
       for (const c of cands) {
         const idx = (typeof c.idx === 'number') ? c.idx : -1;
@@ -422,7 +424,7 @@ Order them from the closest faithful rewrite to the most specific/scoped.
 Original question: "${q.slice(0, 800)}"
 Return ONLY JSON, no prose: {"detected_language":"<language name>","suggestions":["question 1","question 2","question 3"]}`;
       let out = '';
-      try { out = await callClaude(model, langDirective(_lang), prompt, false, 900); } catch { return json({ error: 'AI is unavailable — try again.' }, 502); }
+      try { out = await callClaude(sb, model, langDirective(_lang), prompt, false, 900); } catch { return json({ error: 'AI is unavailable — try again.' }, 502); }
       const m = out.match(/\{[\s\S]*\}/);
       let parsed: any = {};
       if (m) { try { parsed = JSON.parse(m[0]); } catch { parsed = {}; } }
@@ -455,7 +457,7 @@ Papers (index in brackets):
 ${list}
 For EACH paper write AT MOST TWO sentences. Return ONLY a JSON array: [{"i":0,"relevance":"<=2 sentences on why it is relevant to THIS project>"}]`;
         let txt = '';
-        try { txt = await callClaude(model, langDirective(_lang), prompt, false, 2400); } catch { continue; }
+        try { txt = await callClaude(sb, model, langDirective(_lang), prompt, false, 2400); } catch { continue; }
         const arr = parseDecisions(txt) as any[];
         for (const it of arr) {
           const idx = typeof it.i === 'number' ? it.i : -1;
@@ -489,7 +491,7 @@ ALWAYS return 1-2 clarifying questions, even when the user gave an instruction (
 Return ONLY JSON, no prose:
 {"summary":"one concise sentence: what this file is and its apparent role","questions":["short specific clarifying question 1","optional question 2"]}`;
       let out = '';
-      try { out = await callClaude(model, langDirective(_lang), prompt, false, 700); } catch { return json({ error: 'AI is unavailable — try again.' }, 502); }
+      try { out = await callClaude(sb, model, langDirective(_lang), prompt, false, 700); } catch { return json({ error: 'AI is unavailable — try again.' }, 502); }
       const m = out.match(/\{[\s\S]*\}/);
       let parsed: any = {};
       if (m) { try { parsed = JSON.parse(m[0]); } catch { parsed = {}; } }
@@ -532,7 +534,7 @@ Return ONLY JSON, no prose:
         : '## Overview, ## Key themes and findings, ## Methods and datasets, ## Gaps (research gaps), ## Conclusion';
       const refsHeading = _lang === 'hu' ? 'Hivatkozások' : 'References';
       const sys = `You are writing a concise structured literature REVIEW (Markdown) for the research question: ${study.question || study.title}. Use ONLY the ${ids.length} included papers below; cite them as [n]. Sections: ${sections}. ${useMcp ? 'Ground non-trivial claims with the Consensus tools and cite the papers.' : ''} Be specific and synthesize across papers — do not just list them. End with a ## ${refsHeading} list.` + langDirective(_lang);
-      const md = await callClaude(REVIEW_MODEL, sys, `Included papers:\n\n${list}\n\nWrite the review now.`, useMcp, 8192);
+      const md = await callClaude(sb, REVIEW_MODEL, sys, `Included papers:\n\n${list}\n\nWrite the review now.`, useMcp, 8192);
       const slug = String(study.title || 'study').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'study';
       const sid8 = String(study_id).replace(/-/g, '').slice(0, 8);   // #9b: stable per-study id in the filename (unique + traceable, idempotent on re-run)
       const path = 'studies/' + slug + '-' + sid8 + '-review.md';
@@ -547,7 +549,7 @@ Return ONLY JSON, no prose:
     // ---------------- plan: Claude pre-fills the funnel config for every step (the user fine-tunes) ----------------
     if (action === 'plan') {
       const { data: proj } = await sb.from('research_projects').select('title,field,goal,keywords').eq('id', study.project_id).maybeSingle();
-      const plan = await planStudy(study, proj || {}, model);
+      const plan = await planStudy(sb, study, proj || {}, model);
       for (const n of [1, 2, 3]) {
         const sp = plan['step' + n]; if (!sp || typeof sp !== 'object') continue;
         const { data: row } = await sb.from('research_study_steps').select('config').eq('study_id', study_id).eq('step', n).maybeSingle();
@@ -575,7 +577,7 @@ Return ONLY JSON, no prose:
         const c1: any = (s1k && s1k.config) || {};
         const kws = (c1.keywords || []).map((k: any) => String(k || '').trim()).filter(Boolean);
         if (!kws.length) {
-          const derived = await deriveKeywords(study.question || study.title || '', model);
+          const derived = await deriveKeywords(sb, study.question || study.title || '', model);
           if (derived.length) { c1.keywords = derived; await sb.from('research_study_steps').update({ config: c1 }).eq('study_id', study_id).eq('step', 1); }
         }
       }
@@ -611,7 +613,7 @@ Return ONLY JSON, no prose:
         // NOW and persist them, so the sweep is broad, reruns reuse them, and the UI shows what was searched.
         const kwNow = (config.keywords || []).map((k: any) => String(k || '').trim()).filter(Boolean);
         if (!kwNow.length) {
-          const derived = await deriveKeywords(q, model);
+          const derived = await deriveKeywords(sb, q, model);
           if (derived.length) {
             config.keywords = derived;
             await sb.from('research_study_steps').update({ config: Object.assign({}, config, { keywords: derived }) }).eq('study_id', study_id).eq('step', 1);
@@ -767,7 +769,7 @@ async function screenAndWrite(sb: any, study: any, study_id: string, step: numbe
   }
   content.push({ type: 'text', text: `\nReturn the JSON array now (one object per paper, ${inputs.length} objects, field "i" = paper index).` });
   let decisions: any[] = [];
-  try { decisions = parseDecisions(await callClaude(model, sys, content, false, exq.length ? 4096 : 2048)); } catch { decisions = []; }
+  try { decisions = parseDecisions(await callClaude(sb, model, sys, content, false, exq.length ? 4096 : 2048)); } catch { decisions = []; }
   const byIdx: Record<number, any> = {}; decisions.forEach((d: any) => { if (typeof d.i === 'number') byIdx[d.i] = d; });
   const out: any[] = [];
   for (let i = 0; i < inputs.length; i++) {

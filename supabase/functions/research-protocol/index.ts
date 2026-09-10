@@ -1,5 +1,6 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 import { assertEntitled, clampModel } from '../_shared/entitlement.ts';
+import { logAiCost } from '../_shared/aicost.ts';
 import { langDirective, loadProjectLang } from '../_shared/lang.ts';
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type', 'Access-Control-Allow-Methods': 'POST, OPTIONS' };
 const ANTHROPIC_KEY = Deno.env.get('ANTHROPIC_API_KEY');
@@ -23,12 +24,13 @@ Return ONLY a JSON object, no prose, no markdown fences:
 ]}
 Keep it 6–12 steps. Be specific but CONCISE (instruction ≤ 2 sentences; ≤ 4 items per array). Set needs_approval conservatively (prefer true for anything expensive or destructive). Output must be a single, complete, valid JSON object.`;
 
-async function callClaude(system: string, user: string, model: string): Promise<string> {
+async function callClaude(sb: any, system: string, user: string, model: string): Promise<string> {
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST', headers: { 'x-api-key': ANTHROPIC_KEY!, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
     body: JSON.stringify({ model, max_tokens: 8000, system, messages: [{ role: 'user', content: user }] }),
   });
   const o = await r.json(); if (o.error) throw new Error(o.error.message || 'anthropic');
+  logAiCost(sb, { fn: 'research-protocol', model, usage: o.usage });   // every paid call is recorded (migration-113)
   return (o.content || []).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n').trim();
 }
 
@@ -113,7 +115,7 @@ Deno.serve(async (req) => {
         + (appendTo && existingStepsTxt ? `\nSTEPS ALREADY IN THE PROTOCOL (do NOT repeat these — generate NEW, COMPLEMENTARY steps that extend the plan for the newly selected sources):\n${existingStepsTxt}\n` : '')
         + `\nSELECTED LITERATURE (${lit.length}):\n${litTxt}\n\nDATASETS ALREADY REGISTERED:\n${dsTxt}\n\n${appendTo ? 'Generate the ADDITIONAL executable steps' : 'Plan the executable protocol now'}, integrating ALL the selected sources and the systematic-review evidence above.`;
 
-      const raw = await callClaude(SYS + langDirective(_lang), user, model);
+      const raw = await callClaude(sb, SYS + langDirective(_lang), user, model);
       const m = raw.match(/\{[\s\S]*\}/);
       if (!m) return json({ error: 'model did not return JSON' }, 502);
       let parsed: any; try { parsed = JSON.parse(m[0]); } catch (e) { return json({ error: 'bad JSON from model: ' + e }, 502); }
@@ -196,7 +198,7 @@ Deno.serve(async (req) => {
       const sys = `You are Publify's protocol co-pilot in a research command center. You know the whole project state (below) — ideas, gaps, studies, literature, existing tasks. The researcher chats with you to CREATE or MODIFY executable protocol tasks that a Claude agent will later run on a machine. Reply conversationally and BRIEFLY (1-3 sentences). When they ask to add/build tasks, propose concrete NEW steps grounded in the gaps/studies/goal above. Return ONLY a JSON object, no prose, no fences: {"reply":"<short conversational reply>","steps":[{"title":"<imperative>","kind":"data|preprocess|train|eval|analysis|figure|writeup|custom","instruction":"<concrete, <=2 sentences>","inputs":[],"expected_outputs":[],"acceptance":[],"command_hint":"","est_minutes":<int>,"depends_on":[],"needs_approval":<bool>}]}. Use steps:[] when no task is requested (pure discussion/answer). At most 4 steps per turn.`;
       const u = `${ctx}\n\nCONVERSATION SO FAR:\n${history.map((m: any) => `${m.role === 'me' ? 'Researcher' : 'You'}: ${String(m.content || '').slice(0, 500)}`).join('\n')}\nResearcher: ${message}\n\nReply now (JSON only).`;
       let raw = '';
-      try { raw = await callClaude(sys + langDirective(_lang), u, model); } catch (_e) { return json({ error: 'AI unavailable — try again.' }, 502); }
+      try { raw = await callClaude(sb, sys + langDirective(_lang), u, model); } catch (_e) { return json({ error: 'AI unavailable — try again.' }, 502); }
       const mm = raw.match(/\{[\s\S]*\}/);
       let parsed: any = {}; try { parsed = mm ? JSON.parse(mm[0]) : {}; } catch (_e) { parsed = { reply: raw.slice(0, 400), steps: [] }; }
       return json({ ok: true, reply: String(parsed.reply || '…'), steps: Array.isArray(parsed.steps) ? parsed.steps.slice(0, 4) : [], protocol_id: prot ? prot.id : null });
@@ -213,7 +215,7 @@ Deno.serve(async (req) => {
       const ctx = (pq.data && pq.data.context_snapshot) || {};
       const sys = 'You are improving ONE step of an executable research protocol. Keep its intent; make it more precise and runnable. Return ONLY a JSON object: {"title","kind","instruction","inputs":[],"expected_outputs":[],"acceptance":[],"command_hint":"","est_minutes":N,"needs_approval":bool}. Be concise.';
       const u = `PROTOCOL GOAL: ${(pq.data && pq.data.goal) || ''}\nIDEA: ${(ctx.idea && ctx.idea.question) || ''}\n\nCURRENT STEP:\n${JSON.stringify({ title: s.title, kind: s.kind, ...sx }, null, 1)}\n\n${hint ? 'FOCUS: ' + hint + '\n\n' : ''}Return the improved step.`;
-      const raw = await callClaude(sys + langDirective(_lang), u, model); const m = raw.match(/\{[\s\S]*\}/);
+      const raw = await callClaude(sb, sys + langDirective(_lang), u, model); const m = raw.match(/\{[\s\S]*\}/);
       if (!m) return json({ error: 'model returned no JSON' }, 502);
       let p: any; try { p = JSON.parse(m[0]); } catch (e) { return json({ error: 'bad JSON: ' + e }, 502); }
       return json({ ok: true, step: p });
@@ -230,7 +232,7 @@ Deno.serve(async (req) => {
       const filesTxt = files.length ? `\n\nThe researcher provided these data sources for these tasks. Generate a small pipeline that LOADS and PROCESSES this specific data — a "data" step first (uploaded files are attached to it; for a URL, the data step must DOWNLOAD/stream it from that URL), then the preprocessing/analysis/eval steps that consume it. Reference the names/URLs in the instructions.\n${files.map((f: any) => f.url ? `- ${String(f.name || 'dataset')} — available at URL: ${String(f.url).slice(0, 400)} (download/stream it in the data step)${f.note ? ' — ' + String(f.note).slice(0, 200) : ''}` : `- ${String(f.name || 'file')} (uploaded${f.mime ? ', ' + f.mime : ''}${f.size ? ', ' + Math.round(f.size / 1024) + ' KB' : ''})${f.note ? ' — ' + String(f.note).slice(0, 200) : ''}`).join('\n')}` : '';
       const sys = `Propose NEW steps to add to an existing executable research protocol. Return ONLY a JSON object {"steps":[{"title","kind","instruction","inputs":[],"expected_outputs":[],"acceptance":[],"command_hint":"","est_minutes":N,"depends_on":[],"needs_approval":bool}]}. Use depends_on with the 1-based positions of EXISTING steps if relevant. At most ${count} steps, concise. When data files are provided, the FIRST step must be kind:"data" (data ingestion/validation of those files).`;
       const u = `PROTOCOL GOAL: ${(pq.data && pq.data.goal) || ''}\nIDEA: ${(ctx.idea && ctx.idea.question) || ''}\n\nEXISTING STEPS:\n${ex.map((e: any) => `${e.ord}. [${e.kind}] ${e.title}`).join('\n') || '(none)'}\n\nADD STEPS FOR: ${prompt || '(process the uploaded data below)'}${filesTxt}`;
-      const raw = await callClaude(sys + langDirective(_lang), u, model); const m = raw.match(/\{[\s\S]*\}/);
+      const raw = await callClaude(sb, sys + langDirective(_lang), u, model); const m = raw.match(/\{[\s\S]*\}/);
       if (!m) return json({ error: 'model returned no JSON' }, 502);
       let p: any; try { p = JSON.parse(m[0]); } catch (e) { return json({ error: 'bad JSON: ' + e }, 502); }
       return json({ ok: true, steps: (Array.isArray(p.steps) ? p.steps : []).slice(0, count) });
@@ -244,7 +246,7 @@ Deno.serve(async (req) => {
       const s = stq.data; const sx = s.spec || {};
       const sys = 'Split ONE protocol step into 2–4 smaller, ordered sub-steps that together accomplish it. Return ONLY {"steps":[{"title","kind","instruction","inputs":[],"expected_outputs":[],"acceptance":[],"command_hint":"","est_minutes":N,"needs_approval":bool}]}. Concise; each sub-step runnable on its own.';
       const u = `STEP TO SPLIT:\n${JSON.stringify({ title: s.title, kind: s.kind, ...sx }, null, 1)}`;
-      const raw = await callClaude(sys + langDirective(_lang), u, model); const m = raw.match(/\{[\s\S]*\}/);
+      const raw = await callClaude(sb, sys + langDirective(_lang), u, model); const m = raw.match(/\{[\s\S]*\}/);
       if (!m) return json({ error: 'model returned no JSON' }, 502);
       let p: any; try { p = JSON.parse(m[0]); } catch (e) { return json({ error: 'bad JSON: ' + e }, 502); }
       return json({ ok: true, steps: (Array.isArray(p.steps) ? p.steps : []).slice(0, 4) });
@@ -266,7 +268,7 @@ For EVERY clarifying question you MUST also offer 2–4 concrete suggested ANSWE
 As soon as the researcher's answers give you enough to sharpen the task, POPULATE "suggestion" with the concrete field values (only the fields you would actually change; kind must be one of: ${KINDS}) — do this proactively; the app auto-fills the form from it. Never invent file contents you were not told about.`;
       const user = `Current task draft:\n${taskTxt}\n\n${filesTxt ? `Files attached to this task:\n${filesTxt}\n\n` : ''}${history.length ? `Conversation so far:\n${history.map((m: any) => `${m.role === 'user' ? 'Researcher' : 'Assistant'}: ${String(m.content || '').slice(0, 1500)}`).join('\n')}\n\n` : ''}Researcher: ${msg || '(They just opened the assistant or attached a file and have not typed anything. Greet in one short sentence, then — if a file is attached or the task is vague — ask your clarifying questions with suggested-answer options.)'}\n\nReturn ONLY JSON: {"reply":"<your conversational reply>","questions":[{"q":"<clarifying question>","options":["<2-4 short suggested answers to pick from>"]}],"suggestion":{<the task fields to fill: "title"?, "kind"?, "instruction"?, "inputs"?:[], "expected_outputs"?:[], "acceptance"?:[], "command_hint"? — or {} if not enough info yet>}}`;
       let out = '';
-      try { out = await callClaude(system + langDirective(_lang), user, model); } catch (_e) { return json({ error: 'AI is unavailable — try again.' }, 502); }
+      try { out = await callClaude(sb, system + langDirective(_lang), user, model); } catch (_e) { return json({ error: 'AI is unavailable — try again.' }, 502); }
       const mm = out.match(/\{[\s\S]*\}/); let p: any = {};
       if (mm) { try { p = JSON.parse(mm[0]); } catch { p = {}; } }
       const sug = (p.suggestion && typeof p.suggestion === 'object' && Object.keys(p.suggestion).length) ? p.suggestion : null;
@@ -298,7 +300,7 @@ As soon as the researcher's answers give you enough to sharpen the task, POPULAT
       const system = `You are Publify's Protocol assistant. You can see the ENTIRE executable research protocol — every task with its kind, status, instruction, result, error, and notes. Answer the researcher's question about ANY or ALL of the tasks: current status, what the runner did and why, why a task failed, what is waiting for approval, and what to do next. Be concise and specific; reference tasks by their number (e.g. "Task 3"). Never invent results you cannot see in the snapshot.`;
       const user = `PROTOCOL: ${(pq.data && pq.data.title) || ''}${(pq.data && pq.data.goal) ? '\nGOAL: ' + pq.data.goal : ''}\n\nALL TASKS (${steps.length}):\n${snap || '(no tasks yet)'}\n\n${history.length ? 'Conversation so far:\n' + history.map((m: any) => `${m.role === 'user' ? 'Researcher' : 'Assistant'}: ${String(m.content || '').slice(0, 1500)}`).join('\n') + '\n\n' : ''}Researcher: ${msg || 'Give me a brief status of the protocol — what is done, running, blocked, or waiting for approval, and what I should look at next.'}`;
       let out = '';
-      try { out = await callClaude(system + langDirective(_lang), user, model); } catch (_e) { return json({ error: 'AI is unavailable — try again.' }, 502); }
+      try { out = await callClaude(sb, system + langDirective(_lang), user, model); } catch (_e) { return json({ error: 'AI is unavailable — try again.' }, 502); }
       return json({ ok: true, reply: out });
     }
 

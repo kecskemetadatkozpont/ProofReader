@@ -1,5 +1,6 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 import { assertEntitled, clampModel } from '../_shared/entitlement.ts';
+import { logAiCost } from '../_shared/aicost.ts';
 import { encodeBase64 } from 'jsr:@std/encoding@1/base64';
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type', 'Access-Control-Allow-Methods': 'POST, OPTIONS' };
 const ANTHROPIC_KEY = Deno.env.get('ANTHROPIC_API_KEY');
@@ -7,8 +8,10 @@ const MODEL = 'claude-haiku-4-5-20251001';
 const PDF_MAX = 4 * 1024 * 1024;   // edge isolate OOMs (HTTP 546) base64-ing + sending larger PDFs to Claude; bigger ones fall back to the abstract
 function json(b: unknown, s = 200) { return new Response(JSON.stringify(b), { status: s, headers: { ...CORS, 'Content-Type': 'application/json' } }); }
 async function callClaude(sb: any, system: string, content: any, maxTokens: number) {
-  const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'x-api-key': ANTHROPIC_KEY!, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' }, body: JSON.stringify({ model: await clampModel(sb, 'claude-haiku-4-5-20251001'), max_tokens: maxTokens, system, messages: [{ role: 'user', content }] }) });
+  const model = await clampModel(sb, 'claude-haiku-4-5-20251001');
+  const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'x-api-key': ANTHROPIC_KEY!, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' }, body: JSON.stringify({ model, max_tokens: maxTokens, system, messages: [{ role: 'user', content }] }) });
   const o = await r.json(); if (o.error) throw new Error(o.error.message || 'anthropic');
+  logAiCost(sb, { fn: 'tts-translate', model, usage: o.usage });
   return (o.content || []).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n');
 }
 async function fetchPdfBlock(url: string): Promise<any | null> {

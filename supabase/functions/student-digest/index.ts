@@ -12,6 +12,7 @@
 // Deploy:  supabase functions deploy student-digest
 // Secrets: ANTHROPIC_API_KEY (shared with research-chat). Optional: STUDENT_DIGEST_MODEL, STUDENT_DIGEST_MAX_TOKENS.
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { logAiCost } from '../_shared/aicost.ts';
 
 const ANTHROPIC_KEY = Deno.env.get('ANTHROPIC_API_KEY');
 const URL = Deno.env.get('SUPABASE_URL')!;
@@ -121,6 +122,9 @@ async function generateReport(rc: any, svc: any, studentId: string, day: string)
     const { data: sv } = await svc.from('phd_supervisions').select('supervisor_id').eq('student_id', studentId).eq('status', 'accepted').limit(1).maybeSingle();
     supId = (sv && sv.supervisor_id) || null;
   }
+  // The daily batch runs as the SERVICE ROLE (no auth.uid()), so the spend is attributed explicitly —
+  // otherwise this scheduled job burns credit with no trace at all (migration-115).
+  logAiCost(rc, { fn: 'student-digest', model: MODEL, usage: out.usage, user_id: supId || stu.supervisor_id || null });
 
   const { error: upErr } = await svc.from('student_daily_reports').upsert(
     { student_id: studentId, day, supervisor_id: supId, summary, ...counts, generated_at: new Date().toISOString(), model: MODEL },
