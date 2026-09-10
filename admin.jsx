@@ -370,7 +370,7 @@
   }
   function UserDrawer(props) {
     var u = props.user, agg = props.agg, onClose = props.onClose, onPreview = props.onPreview, onAction = props.onAction, onSetModel = props.onSetModel, onSetWorkflows = props.onSetWorkflows, onSetFigures = props.onSetFigures, onSetDailyCap = props.onSetDailyCap;
-    var onSetFeature = props.onSetFeature, onSetAllowlist = props.onSetAllowlist, catalog = props.catalog || [];
+    var onSetFeature = props.onSetFeature, onSetAllowlist = props.onSetAllowlist, onSetJudge = props.onSetJudge, catalog = props.catalog || [];
     // (onSaveIds / onSyncMtmt are read straight off props inside ResearcherIds)
     var open = !!u;
     useEffect(function () { if (!open) return; var onKey = function (e) { if (e.key === 'Escape') onClose(); }; window.addEventListener('keydown', onKey); return function () { window.removeEventListener('keydown', onKey); }; }, [open]);
@@ -396,6 +396,14 @@
               h('select', { value: u.ai_model || '', onChange: function (e) { onSetModel(u.id, e.target.value); }, style: { width: '100%', height: 36, border: '1px solid var(--line)', borderRadius: 8, padding: '0 10px', fontFamily: 'inherit', fontSize: 13, background: 'var(--surface)', color: 'inherit' } },
                 AI_MODELS.filter(function (m) { var al = u.model_allowlist || null; return m[0] === '' || al === null || al.indexOf(m[0]) >= 0; })
                   .map(function (m) { return h('option', { key: m[0], value: m[0] }, m[0] === '' ? 'Default (cheapest allowed)' : m[1]); }))
+            ),
+            h('div', { style: { marginBottom: 16 } },
+              h('div', { style: { fontSize: 12, fontWeight: 700, color: 'var(--muted)', marginBottom: 5 } }, 'Bíró-modell (értékelés) — a munkát végző modelltől elkülönítve'),
+              h('select', { value: u.judge_model || '', onChange: function (e) { onSetJudge(u.id, e.target.value); }, style: { width: '100%', height: 36, border: '1px solid var(--line)', borderRadius: 8, padding: '0 10px', fontFamily: 'inherit', fontSize: 13, background: 'var(--surface)', color: 'inherit' } },
+                AI_MODELS.filter(function (m) { var al = u.model_allowlist || null; return m[0] === '' || al === null || al.indexOf(m[0]) >= 0; })
+                  .map(function (m) { return h('option', { key: m[0], value: m[0] }, m[0] === '' ? 'Automatikus (a legjobb engedélyezett)' : m[1]); })),
+              h('div', { style: { fontSize: 11, color: 'var(--faint)', marginTop: 4, lineHeight: 1.4 } },
+                'Az értékelő hívások (rubrika, lépés-ellenőrzés) ezen a modellen futnak. Ha megegyezik a fenti munka-modellel, az ítélet nem független — a felületen figyelmeztetés jelenik meg. (migration-116)')
             ),
             h('div', { style: { marginBottom: 16 } },
               h('div', { style: { fontSize: 12, fontWeight: 700, color: 'var(--muted)', marginBottom: 5 } }, 'Daily AI cap (requests/day) — empty = global default (200)'),
@@ -886,6 +894,15 @@
         loadData();
       }, function () { if (done) done(); window.PRUI.toast('Hálózati hiba a szinkron közben.', { kind: 'error' }); });
     }
+    function setJudge(uid, model) {
+      var m = model || null;
+      setProfiles(function (list) { return list.map(function (u) { return u.id === uid ? Object.assign({}, u, { judge_model: m }) : u; }); });
+      setSelUser(function (u) { return u && u.id === uid ? Object.assign({}, u, { judge_model: m }) : u; });
+      sb.from('profiles').update({ judge_model: m }).eq('id', uid).then(function (r) {
+        if (r && r.error) { window.PRUI.toast('Birio-modell mentese sikertelen (fut a migration-116?): ' + r.error.message, { kind: 'error' }); loadData(); }
+        else window.PRUI.toast('Biro-modell: ' + (m || 'automatikus'), { kind: 'ok' });
+      });
+    }
     function setWorkflows(uid, on) {
       setProfiles(function (list) { return list.map(function (u) { return u.id === uid ? Object.assign({}, u, { can_workflows: on }) : u; }); });
       setSelUser(function (u) { return u && u.id === uid ? Object.assign({}, u, { can_workflows: on }) : u; });
@@ -1084,7 +1101,7 @@
         h(ClientErrors),
         h(BugReports)
       ),
-      h(UserDrawer, { user: selUser, agg: selUser ? aggFor(selUser.id) : { projects: [], storage: 0, chars: 0, requests: 0 }, onClose: function () { setSelUser(null); }, onPreview: function (p) { setPreview(p); }, onAction: setStatus, onSetModel: setModel, onSetWorkflows: setWorkflows, onSetFigures: setFigures, onSetDailyCap: setDailyCap, onSetFeature: setFeature, onSetAllowlist: setAllowlist, onSaveIds: saveResearchIds, onSyncMtmt: syncMtmt, catalog: catalog }),
+      h(UserDrawer, { user: selUser, agg: selUser ? aggFor(selUser.id) : { projects: [], storage: 0, chars: 0, requests: 0 }, onClose: function () { setSelUser(null); }, onPreview: function (p) { setPreview(p); }, onAction: setStatus, onSetModel: setModel, onSetWorkflows: setWorkflows, onSetFigures: setFigures, onSetDailyCap: setDailyCap, onSetFeature: setFeature, onSetAllowlist: setAllowlist, onSetJudge: setJudge, onSaveIds: saveResearchIds, onSyncMtmt: syncMtmt, catalog: catalog }),
       preview && h(ProjectPreview, { project: preview, onClose: function () { setPreview(null); } })
     );
   }

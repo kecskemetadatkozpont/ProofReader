@@ -63,6 +63,18 @@ export async function resolveModel(sb: any): Promise<string> {
   return (typeof data === 'string' && data) ? data : CHEAPEST;
 }
 
+/** The model for AI-as-JUDGE work (rubric scoring, step verification) — deliberately NOT the worker model.
+ *  Fail-OPEN by design: if migration-116 has not been applied yet it degrades to the caller's worker model,
+ *  so this ships safely before the migration. This is a model choice, not a security gate — and when it does
+ *  degrade, the caller reports `self_judged`, so the user SEES that the separation is not in effect. */
+export async function resolveJudgeModel(sb: any): Promise<string> {
+  try {
+    const { data, error } = await sb.rpc('effective_judge_model');
+    if (!error && typeof data === 'string' && data) return data;
+  } catch { /* pre-migration / RPC error → degrade, never block */ }
+  return await resolveModel(sb);
+}
+
 /** For fns that intentionally pin a tier: keep it only if the caller may use it, else downgrade to their effective model. */
 export async function clampModel(sb: any, preferred: string): Promise<string> {
   const { data: ok } = await sb.rpc('model_allowed', { p_model: preferred });

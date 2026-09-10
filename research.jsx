@@ -5302,6 +5302,22 @@
     var pcScroll = useRef(null);
     var rvS = useState(null), rvMd = rvS[0], setRvMd = rvS[1];   // full-report reader markdown
     var dsS = useState(null), dropStep = dsS[0], setDropStep = dsS[1];   // step id a file is being dragged over
+    // Független ellenőrzés: a lépés SAJÁT elfogadási kritériumaihoz mérve, külön bíró-modellel.
+    // A verdikt a step.result.verdict-be kerül, tehát újratöltés után is látszik.
+    var vfS = useState(null), verifying = vfS[0], setVerifying = vfS[1];
+    function runVerify(s) {
+      if (verifying) return;
+      setVerifying(s.id);
+      sb.functions.invoke('research-protocol', { body: { action: 'verify', project_id: props.projectId || (props.project && props.project.id), step_id: s.id } })
+        .then(function (r) {
+          setVerifying(null);
+          var d = r && r.data;
+          if (!d || d.error) { window.PRUI.toast((d && d.error) || 'Az ellenőrzés nem futott le.', { kind: 'error' }); return; }
+          if (d.note === 'no_criteria') { window.PRUI.toast('Ennek a lépésnek nincsenek elfogadási kritériumai — előbb adj meg néhányat.', { kind: 'warn' }); return; }
+          if (d.note === 'no_evidence') { window.PRUI.toast('A lépés nem hagyott maga után bizonyítékot.', { kind: 'warn' }); }
+          load();
+        }, function () { setVerifying(null); window.PRUI.toast('Hálózati hiba az ellenőrzés közben.', { kind: 'error' }); });
+    }
     var usS = useState(null), upStep = usS[0], setUpStep = usS[1];       // { id, msg } while uploading onto a step
     var pvS = useState('overview'), pview = pvS[0], setPview = pvS[1];   // sub-view: 'overview' | 'steps'
     var lbS = useState(null), lb = lbS[0], setLb = lbS[1];               // figure lightbox { src, cap }
@@ -6297,6 +6313,7 @@
         h('h3', null, 'Steps (' + steps.length + ')', ce ? h('span', { style: { marginLeft: 10, fontSize: 10.5, color: 'var(--faint)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 } }, '⤓ drop files on a task to attach') : null, ce ? h('button', { className: 'btn', style: { marginLeft: 'auto', padding: '3px 9px', fontSize: 11.5, flex: 'none' }, onClick: function () { setEditing({ step: {}, isNew: true, after: null }); } }, '+ Add task') : null),
         steps.length ? steps.map(function (s, i) {
           var open = !!exp[s.id]; var pst = PST[s.status] || PST.todo; var sx = s.spec || {};
+          var vd = (s.result && s.result.verdict) || null;   // független bírálat a lépés saját kritériumaihoz
           return h('div', {
             key: s.id,
             style: Object.assign({ borderBottom: '1px solid var(--soft)', padding: '8px 0' },
@@ -6314,13 +6331,40 @@
               (sx.attachments && sx.attachments.length) ? h('span', { className: 'chip', style: { fontSize: 10, flex: 'none' }, title: sx.attachments.map(function (a) { return a.name; }).join(', ') }, '📎 ' + sx.attachments.length) : null,
               s.needs_approval ? h('span', { className: 'chip c-warn', style: { fontSize: 10, flex: 'none' }, title: 'Requires your approval before the runner executes it' }, '⏸') : null,
               (s.depends_on && s.depends_on.length) ? h('span', { style: { fontSize: 10.5, color: 'var(--faint)', flex: 'none' }, title: 'Runs after these steps' }, 'after ' + s.depends_on.join(',')) : null,
-              h('span', { className: 'chip ' + pst[0], style: { fontSize: 10, flex: 'none' } }, pst[1])
+              h('span', { className: 'chip ' + pst[0], style: { fontSize: 10, flex: 'none' } }, pst[1]),
+              vd ? h('span', {
+                className: 'chip ' + (vd.verdict === 'met' ? 'c-ok' : vd.verdict === 'weak' ? 'c-warn' : vd.verdict === 'not_met' ? 'c-bad' : ''),
+                style: { fontSize: 10, flex: 'none' },
+                title: 'Független ellenőrzés a lépés saját elfogadási kritériumaihoz' + (vd.judge_model ? ' · bíró: ' + vd.judge_model : '')
+              }, (vd.verdict === 'met' ? '✓ Kritériumok teljesülnek' : vd.verdict === 'weak' ? '◐ Részben' : vd.verdict === 'not_met' ? '✗ Nem teljesül' : '? Nem ítélhető')
+                 + (vd.total != null ? ' (' + Math.round(vd.total) + ')' : '')) : null,
+              (s.status === 'done' || s.status === 'failed') ? h('button', {
+                className: 'lchip', style: { fontSize: 10.5, flex: 'none' }, disabled: verifying === s.id,
+                title: 'A lépés eredményét egy FÜGGETLEN bíró méri a saját elfogadási kritériumaihoz — az „ok\" önbevallást figyelmen kívül hagyva',
+                onClick: function () { runVerify(s); }
+              }, verifying === s.id ? '⏳ Ellenőrzés…' : '🔍 Ellenőrzés') : null
             ),
             open ? h('div', { style: { margin: '6px 0 2px 28px', fontSize: 12.5, color: 'var(--muted)', lineHeight: 1.5 } },
               sx.instruction ? h('div', null, sx.instruction) : null,
               (sx.inputs && sx.inputs.length) ? h('div', { style: { marginTop: 4 } }, h('b', null, 'Inputs: '), sx.inputs.join(', ')) : null,
               (sx.expected_outputs && sx.expected_outputs.length) ? h('div', null, h('b', null, 'Outputs: '), sx.expected_outputs.join(', ')) : null,
               (sx.acceptance && sx.acceptance.length) ? h('div', null, h('b', null, 'Done when: '), sx.acceptance.join('; ')) : null,
+              vd ? h('div', { style: { marginTop: 6, padding: '6px 8px', borderRadius: 7, background: 'var(--soft)' } },
+                h('div', { style: { fontSize: 11.5, fontWeight: 700, marginBottom: 3 } },
+                  '🔍 Független ellenőrzés' + (vd.total != null ? ' — ' + Math.round(vd.total) + ' pont' : ''),
+                  vd.partial ? h('span', { style: { fontWeight: 400, color: 'var(--faint)' } }, '  · a kritériumok ' + Math.round((vd.coverage || 0) * 100) + '%-át fedi') : null),
+                (vd.self_judged === true) ? h('div', { style: { fontSize: 11, color: 'var(--warn, #b4690e)', marginBottom: 3 } }, '⚠️ A bíró ugyanaz a modell, amelyik a munkát végezte — az ítélet nem független.') : null,
+                (vd.self_judged === null) ? h('div', { style: { fontSize: 11, color: 'var(--faint)', marginBottom: 3 } }, 'A lépést végrehajtó modell nem ismert, ezért a bíró függetlensége nem igazolható.') : null,
+                (vd.items || []).map(function (it, k) {
+                  var crit = /^acc(\d+)$/.test(it.key) ? (sx.acceptance || [])[+it.key.slice(3)] : (/^out(\d+)$/.test(it.key) ? 'Kimenet: ' + ((sx.expected_outputs || [])[+it.key.slice(3)] || '') : it.key);
+                  return h('div', { key: k, style: { fontSize: 11.5, lineHeight: 1.45, marginTop: 3 } },
+                    h('b', { style: { color: it.score == null ? 'var(--faint)' : (it.score >= 41 ? 'var(--ok)' : it.score >= 25 ? 'var(--warn, #b4690e)' : 'var(--bad, #b3261e)') } },
+                      (it.score == null ? '—' : it.score) + ' · '),
+                    h('span', null, String(crit || '').slice(0, 110)),
+                    it.reasoning ? h('div', { style: { color: 'var(--faint)', marginLeft: 10 } }, it.reasoning) : null);
+                }),
+                h('div', { style: { fontSize: 10.5, color: 'var(--faint)', marginTop: 4 } },
+                  'A pontszám a kritériumhoz mérve: 41 fölött teljesül, 25–40 részben. Az „ok" önbevallás nem számít bizonyítéknak.')) : null,
               sx.command_hint ? h('div', { style: { marginTop: 4, fontFamily: 'monospace', fontSize: 11.5, background: 'var(--soft)', padding: '4px 7px', borderRadius: 6, whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, sx.command_hint) : null,
               sx.est_minutes ? h('span', { style: { fontSize: 11, color: 'var(--faint)' } }, '~' + sx.est_minutes + ' min') : null,
               (sx.attachments && sx.attachments.length) ? h('div', { style: { marginTop: 6 } },

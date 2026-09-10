@@ -178,10 +178,20 @@ Deno.serve(async (req) => {
         { name: 'read_file', description: 'Read a file from the session workspace.', input_schema: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } },
         { name: 'list_files', description: 'List the files in the session workspace.', input_schema: { type: 'object', properties: {} } },
       ];
-      const sysW = systemFull + ' You are in WORKFLOW mode: complete the task autonomously across multiple steps. Save every deliverable with write_file (Markdown); use list_files/read_file to inspect the workspace. Keep going until the task is done, then give a short summary of what you produced.';
+      // Execution protocol — adapted from ResearchClawBench (InternScience, MIT) arXiv:2606.07591.
+      // Only goes where a REAL tool loop exists (workflow mode); a one-shot call would just fake tool use.
+      const sysW = systemFull + ' You are in WORKFLOW mode: complete the task autonomously across multiple steps. Save every deliverable with write_file (Markdown); use list_files/read_file to inspect the workspace. Keep going until the task is done, then give a short summary of what you produced.'
+        + '\n\n## Execution protocol\n'
+        + 'There is no human on the other end of this run. Nobody will answer a question, grant a permission or clarify an ambiguity. If something is unclear, make the most reasonable assumption, write it down in the deliverable, and continue.\n'
+        + '1. ALWAYS ACT. While the deliverable is not saved, every turn must contain at least one tool call (write_file / read_file / list_files). A turn with text only ends the run.\n'
+        + '2. NEVER ASK. No questions, no requests for confirmation.\n'
+        + '3. PUSH THROUGH. Do not stop because something is hard or ambiguous.\n'
+        + '4. NEVER FINISH EARLY. You are done only when the deliverable actually exists in the workspace (write_file), not when you have described it.\n'
+        + '5. DO NOT FAKE SUCCESS. If something could not be done, say so explicitly and state what is missing. An honest partial result is worth more than a false "done".';
       const convo: any[] = messages.slice();
       const steps: any[] = [];
       let finalText = '';
+      let nudged = false;   // a terelő kör LEGFELJEBB egyszer fut (költség-korlát)
       const wfAcc = makeUsageAccumulator();
       for (let iter = 0; iter < 14; iter++) {
         const wfBody: any = { model, max_tokens: MAX_TOKENS, system: sysW, tools: TOOLS, messages: convo };
@@ -193,7 +203,18 @@ Deno.serve(async (req) => {
         const blocks = o.content || [];
         const tp = blocks.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n').trim();
         if (tp) finalText = tp;
-        if (o.stop_reason !== 'tool_use') break;
+        if (o.stop_reason !== 'tool_use') {
+          // A ciklus eddig akkor is kilépett, ha EGYETLEN write_file sem történt — a felhasználó „kész"
+          // összefoglalót kapott nulla leszállítandóval. Egy terelő kör, mielőtt feladjuk.
+          const wroteAny = steps.some((x) => x.tool === 'write_file');
+          if (!wroteAny && !nudged && iter < 11) {
+            nudged = true;
+            convo.push({ role: 'assistant', content: blocks });
+            convo.push({ role: 'user', content: 'Nothing was saved to the workspace, so from the user\'s point of view nothing was produced. Save the deliverable now with write_file (Markdown). Do not reply with text only.' });
+            continue;
+          }
+          break;
+        }
         convo.push({ role: 'assistant', content: blocks });
         const results: any[] = [];
         for (const b of blocks) {
@@ -217,7 +238,10 @@ Deno.serve(async (req) => {
         convo.push({ role: 'user', content: results });
       }
       const wrote = steps.filter((s) => s.tool === 'write_file').map((s) => s.path);
-      const summary = (wrote.length ? ('🛠 **Workflow kész** — ' + wrote.length + ' fájl: ' + wrote.join(', ') + '\n\n') : '') + (finalText || 'Kész.');
+      const summary = (wrote.length
+        ? ('🛠 **Workflow kész** — ' + wrote.length + ' fájl: ' + wrote.join(', ') + '\n\n')
+        : '⚠️ **A workflow nem mentett fájlt** — az alábbi csak szöveges válasz, a munkaterületen nem jött létre leszállítandó.\n\n')
+        + (finalText || 'Kész.');
       await sb.from('user_chat_messages').insert({ chat_id, role: 'assistant', content: summary });
       await sb.from('user_chats').update({ updated_at: new Date().toISOString() }).eq('id', chat_id);
       logAiCost(sb, { fn: 'claude-session:workflow', model, input: wfAcc.input, output: wfAcc.output });

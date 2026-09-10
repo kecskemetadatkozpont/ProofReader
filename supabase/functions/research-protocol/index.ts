@@ -2,6 +2,7 @@ import { createClient } from 'jsr:@supabase/supabase-js@2';
 import { assertEntitled, clampModel } from '../_shared/entitlement.ts';
 import { logAiCost } from '../_shared/aicost.ts';
 import { langDirective, loadProjectLang } from '../_shared/lang.ts';
+import { scoreRubric, verdictOf } from '../_shared/rubric.ts';
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type', 'Access-Control-Allow-Methods': 'POST, OPTIONS' };
 const ANTHROPIC_KEY = Deno.env.get('ANTHROPIC_API_KEY');
 const MODEL = 'claude-sonnet-4-6';   // planning quality matters for the protocol
@@ -219,6 +220,71 @@ Deno.serve(async (req) => {
       if (!m) return json({ error: 'model returned no JSON' }, 502);
       let p: any; try { p = JSON.parse(m[0]); } catch (e) { return json({ error: 'bad JSON: ' + e }, 502); }
       return json({ ok: true, step: p });
+    }
+
+    // ---- verify: score a FINISHED step against its OWN acceptance criteria, with an independent judge.
+    //      The point of this action is what it deliberately ignores: `result.ok`. The runner marks a step
+    //      done from the executing agent's own declaration; here the criteria are re-checked against the
+    //      evidence the step actually left behind.
+    if (action === 'verify') {
+      const stepId = String(body.step_id || '');
+      if (!stepId) return json({ error: 'step_id required' }, 400);
+      const stq = await sb.from('research_protocol_steps').select('id,protocol_id,ord,title,kind,spec,status,result').eq('id', stepId).maybeSingle();
+      const step: any = stq.data;
+      if (stq.error || !step) return json({ error: 'step not found' }, 404);
+      const pq2 = await sb.from('research_protocols').select('id,project_id,goal').eq('id', step.protocol_id).maybeSingle();
+      if (!pq2.data || pq2.data.project_id !== projectId) return json({ error: 'forbidden' }, 403);
+      if (step.status !== 'done' && step.status !== 'failed') return json({ error: 'step_not_finished' }, 409);
+
+      const sx = step.spec || {}, res = step.result || {};
+      const items: any[] = [];
+      (Array.isArray(sx.acceptance) ? sx.acceptance : []).forEach((a: any, i: number) => {
+        const t = String(a || '').trim(); if (t) items.push({ key: 'acc' + i, content: t, weight: 1 });
+      });
+      (Array.isArray(sx.expected_outputs) ? sx.expected_outputs : []).forEach((o: any, i: number) => {
+        const t = String(o || '').trim();
+        if (t) items.push({ key: 'out' + i, weight: 0.5, keywords: [t],
+          content: 'The expected output "' + t + '" actually exists and is what the step was supposed to produce.' });
+      });
+      if (!items.length) return json({ ok: true, note: 'no_criteria' });
+
+      // The candidate is EVIDENCE only. `result.ok` is excluded on purpose — that is the self-declaration
+      // this whole action exists to stop trusting.
+      const parts: string[] = [];
+      if (res.evidence && typeof res.evidence === 'object') parts.push('### Evidence claimed by the step\n' + JSON.stringify(res.evidence, null, 1).slice(0, 4000));
+      if (res.metrics && typeof res.metrics === 'object') parts.push('### Metrics\n' + JSON.stringify(res.metrics, null, 1).slice(0, 2000));
+      if (Array.isArray(res.artifacts) && res.artifacts.length) parts.push('### Artifacts produced\n' + res.artifacts.map(String).join('\n').slice(0, 1500));
+      if (res.note) parts.push('### Step note\n' + String(res.note).slice(0, 800));
+      if (res.error) parts.push('### Reported error\n' + String(res.error).slice(0, 800));
+      if (res.no_verdict) parts.push('### NOTE\nThe step produced no machine-readable verdict on its final line.');
+      if (res.log_tail) parts.push('### Execution log (tail)\n' + String(res.log_tail).slice(0, 6000));
+      const candidate = parts.join('\n\n').trim();
+      if (!candidate) return json({ ok: true, note: 'no_evidence', verdict: { verdict: 'not_met', total: 0, at: new Date().toISOString(),
+        items: items.map((i) => ({ key: i.key, score: 0, status: 'scored', reasoning: 'The step left no evidence at all behind.' })) } });
+
+      const context = ['STEP: ' + (step.title || ''), 'KIND: ' + (step.kind || ''),
+        sx.instruction ? 'INSTRUCTION: ' + String(sx.instruction) : '',
+        (Array.isArray(sx.inputs) && sx.inputs.length) ? 'INPUTS: ' + sx.inputs.map(String).join(', ') : ''].filter(Boolean).join('\n');
+
+      let r: any;
+      try {
+        r = await scoreRubric(sb, {
+          fn: 'research-protocol:verify', items, candidate, context, project_id: projectId, lang: _lang,
+          reference_label: "the step's own acceptance criterion is demonstrably met by the evidence in the step output",
+          author_model: null,   // the runner does not record which model executed the step → unknown, not "independent"
+        });
+      } catch (e) { return json({ error: String(e).slice(0, 200) }, 400); }
+
+      const verdict = {
+        at: new Date().toISOString(), judge_model: r.judge_model, self_judged: r.self_judged,
+        total: r.total, coverage: r.coverage, partial: r.partial, calls: r.calls,
+        items: r.items.map((i: any) => ({ key: i.key, score: i.score, reasoning: i.reasoning, status: i.status })),
+        verdict: verdictOf(r.total),
+      };
+      // Merge into result — log_tail/metrics must survive. A later RE-RUN of the step overwrites `result`
+      // wholesale (protocol-runner), which correctly drops this verdict: it referred to the previous output.
+      await sb.from('research_protocol_steps').update({ result: { ...res, verdict } }).eq('id', step.id);
+      return json({ ok: true, verdict });
     }
 
     if (action === 'append_steps') {

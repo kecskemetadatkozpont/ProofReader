@@ -90,13 +90,38 @@ async function runStep(s) {
     (sx.expected_outputs?.length ? `EXPECTED OUTPUTS: ${sx.expected_outputs.join(', ')}\n` : '') +
     (sx.acceptance?.length ? `ACCEPTANCE CRITERIA: ${sx.acceptance.join('; ')}\n` : '') +
     (sx.command_hint ? `SUGGESTED COMMAND: ${sx.command_hint}\n` : '') +
-    `\nDo the work end-to-end. Verify the acceptance criteria. On the FINAL line print ONLY a JSON object: ` +
-    `{"ok":true|false,"metrics":{...},"artifacts":["relative/paths"],"note":"one line"}.`;
+    // Execution protocol — adapted from ResearchClawBench (InternScience, MIT) arXiv:2606.07591,
+    // instructions_tmpl.py. Point 5 is NOT from RCB: rules 1-4 alone push a model toward FAKING success,
+    // so the honesty clause has to travel with them.
+    `\n## Execution protocol\n` +
+    `There is no human on the other end of this run. Nobody will answer a question, grant a permission or\n` +
+    `clarify an ambiguity. If something is unclear, make the most reasonable assumption, write the assumption\n` +
+    `down in your output, and continue.\n\n` +
+    `1. ALWAYS ACT. As long as the deliverable is not finished, keep working with your tools.\n` +
+    `2. NEVER ASK. No questions, no requests for confirmation, no "let me know if you want me to continue".\n` +
+    `3. PUSH THROUGH. A failing script gets debugged. A missing package gets installed. Unclear data gets a\n` +
+    `   documented assumption. Do not stop because something is hard.\n` +
+    `4. NEVER FINISH EARLY. You are done only when the expected outputs actually exist and you have verified\n` +
+    `   them. Do not declare success on the basis of intent.\n` +
+    `5. DO NOT FAKE SUCCESS. If you could not complete something, say so explicitly and state exactly what is\n` +
+    `   missing. A partial, honestly-reported result is worth more than a false "done" — the criteria are\n` +
+    `   independently re-checked in Publify, so an unfounded "ok" will be caught.\n` +
+    `\nDo the work end-to-end, then VERIFY each acceptance criterion against the real output (not against your\n` +
+    `intent). On the FINAL line print ONLY a JSON object:\n` +
+    `{"ok":true|false,"metrics":{...},"artifacts":["relative/paths"],"evidence":{"<acceptance criterion>":"<what proves it, e.g. a file path + the measured value>"},"note":"one line"}\n` +
+    `Set ok:false if any criterion is unproven.`;
   const { err, stdout } = await runClaude(prompt);
   const result = { log_tail: stdout.slice(-3000) };
-  try { const m = stdout.match(/\{[\s\S]*\}\s*$/); if (m) Object.assign(result, JSON.parse(m[0])); } catch { /* leave log_tail only */ }
-  const ok = result.ok !== false && !err;
-  await patchStep(s.id, { status: ok ? 'done' : 'failed', finished_at: nowISO(), result: { ...result, error: ok ? null : (err ? String(err) : 'step reported failure') } });
+  let declared = false;   // sikerült-e egyáltalán kiolvasni a lépés záró nyilatkozatát
+  try {
+    const m = stdout.match(/\{[\s\S]*\}\s*$/);
+    if (m) { Object.assign(result, JSON.parse(m[0])); declared = typeof result.ok === 'boolean'; }
+  } catch { /* leave log_tail only */ }
+  // Eddig `result.ok !== false` volt a feltétel: ha a záró JSON-t egyáltalán nem sikerült kiparse-olni,
+  // az `ok` undefined maradt, és a lépés CSENDBEN 'done' lett. A hiányzó nyilatkozat nem siker.
+  if (!declared) result.no_verdict = true;
+  const ok = declared && result.ok === true && !err;
+  await patchStep(s.id, { status: ok ? 'done' : 'failed', finished_at: nowISO(), result: { ...result, error: ok ? null : (err ? String(err) : (declared ? 'step reported failure' : 'no machine-readable verdict on the final line')) } });
   console.log(`  step ${s.ord} (${s.title}) → ${ok ? 'done' : 'FAILED'}`);
   return ok;
 }
