@@ -56,6 +56,31 @@
   // ---- PDF text extraction (pdf.js, lazily loaded from the CDN — no page-level script tag needed) ----
   // Without this an attached paper reached the model as a FILENAME only: readStaged skipped binaries and the
   // chat edge never reads research_files. Extracting here is what makes "attach the PDF" actually work.
+  // Postgres/JSON-kompatibilis szöveg. PDF-ből kinyert szövegben rendszeresen van NUL karakter és
+  // magányos surrogate (törött font-kódolás, ligatúrák) — mindkettő ELUTASÍTJA az egész mentést:
+  //   \u0000        → 22P05 „\u0000 cannot be converted to text"
+  //   magányos D800  → PGRST102 „Empty or invalid json"
+  // Emiatt bukott el csendben a teljes fájlfeltöltés; a felület csak annyit mondott, hogy „nem sikerült".
+  function cleanText(v) {
+    var t = String(v == null ? '' : v);
+    // gyors út: ha nincs benne se vezérlő, se surrogate, nincs mit tenni
+    if (!/[\u0000-\u0008\u000B\u000C\u000E-\u001F\uD800-\uDFFF\uFFFE\uFFFF]/.test(t)) return t;
+    t = t.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, ' ');       // vezérlők (tab/újsor marad)
+    // Surrogate-ek: az ÉRVÉNYES párok (emoji, ritka írásjelek) maradnak, csak a magányosak esnek ki.
+    var out = [], i = 0, n = t.length;
+    for (; i < n; i++) {
+      var c = t.charCodeAt(i);
+      if (c >= 0xD800 && c <= 0xDBFF) {
+        var d = (i + 1 < n) ? t.charCodeAt(i + 1) : 0;
+        if (d >= 0xDC00 && d <= 0xDFFF) { out.push(t.charAt(i), t.charAt(i + 1)); i++; }
+        continue;                                                              // magányos magas → el
+      }
+      if (c >= 0xDC00 && c <= 0xDFFF) continue;                                // magányos alacsony → el
+      if (c === 0xFFFE || c === 0xFFFF) continue;
+      out.push(t.charAt(i));
+    }
+    return out.join('');
+  }
   var PDF_TEXT_CAP = 200000;   // stored text cap; the conversation seed takes a much smaller excerpt
   function ensurePdfJs() {
     if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
@@ -82,7 +107,7 @@
           .catch(function () { });   // one unreadable page must not lose the rest
       })(i);
       return chain.then(function () {
-        var full = String(text || '').replace(/-\s*\n\s*/g, '').replace(/[ \t]+/g, ' ').trim();
+        var full = cleanText(text).replace(/-\s*\n\s*/g, '').replace(/[ \t]+/g, ' ').trim();
         return { text: full.slice(0, PDF_TEXT_CAP), pages: pdf.numPages, read: n, capped: full.length > PDF_TEXT_CAP };
       });
     });
@@ -128,7 +153,7 @@
       if (!isTextFile(f) || f.size > 400 * 1024) { base.extracted = false; base.skipReason = (isTextFile(f) ? 'too_large' : 'binary'); return Promise.resolve(base); }
       return new Promise(function (res) {
         var rd = new FileReader();
-        rd.onload = function () { base.content = String(rd.result || '').slice(0, 400 * 1024); if (base.mime === 'application/octet-stream') base.mime = 'text/plain'; res(base); };
+        rd.onload = function () { base.content = cleanText(rd.result).slice(0, 400 * 1024); if (base.mime === 'application/octet-stream') base.mime = 'text/plain'; res(base); };
         rd.onerror = function () { res(base); };
         rd.readAsText(f);
       });
@@ -148,7 +173,7 @@
     return Promise.all(staged.map(function (f) {
       var path = 'uploads/' + f.name;
       return sb.from('research_files').upsert({
-        project_id: pid, path: path, content: f.content || '', mime: f.mime || 'text/plain',
+        project_id: pid, path: cleanText(path), content: cleanText(f.content), mime: f.mime || 'text/plain',
         size: f.size || (f.content || '').length, source: 'upload', created_by: u, updated_by: u, updated_at: nowIso()
       }, { onConflict: 'project_id,path' }).then(function (r) { return { name: f.name, size: f.size, path: path, mime: f.mime, ok: !(r && r.error), err: r && r.error && r.error.message }; });
     }));
@@ -166,7 +191,7 @@
     var caveat = unread.length
       ? '\n\n(Amit NEM tudok elolvasni: ' + unread.map(function (f) { return f.name + ' — ' + (PDF_ERR[f.skipReason] || 'ismeretlen ok'); }).join('; ') + '.)'
       : '';
-    if (!withText.length) return head + caveat;
+    if (!withText.length) return cleanText(head + caveat);
     var budget = CTX_TOTAL, parts = [];
     withText.forEach(function (f) {
       if (budget <= 200) return;
@@ -176,7 +201,7 @@
       var cov = f.pdfPages ? (' (' + (f.pdfRead && f.pdfRead < f.pdfPages ? 'az első ' + f.pdfRead + ' oldal a(z) ' + f.pdfPages + '-ból' : f.pdfPages + ' oldal') + (f.capped ? ', a szöveg hosszban is vágva' : '') + ')') : '';
       parts.push('--- ' + f.name + cov + ' ---\n' + body + (String(f.content).length > body.length ? '\n…(itt megszakad — a hosszabb szöveg a projekt fájljai között van, de ebben a beszélgetésben csak ez a részlet érhető el)' : ''));
     });
-    return head + '\n\n' + parts.join('\n\n') + caveat;
+    return cleanText(head + '\n\n' + parts.join('\n\n') + caveat);
   }
   // ===================== KIINDULÁS SAJÁT MTMT-PUBLIKÁCIÓBÓL =====================
   // A felhasználó nem csak fájlt csatolhat: hivatkozhat a saját MTMT-publikációjára. Ilyenkor megpróbáljuk
@@ -293,7 +318,7 @@
       var src = prep.pdfText || prep.abstract || '';
       if (src) excerpt = src.slice(0, room) + (src.length > room ? '\n…(itt megszakad)' : '');
     }
-    return fixed + excerpt;
+    return cleanText(fixed + excerpt);
   }
   // Durable context: research-agents passes research_projects.goal UNTRUNCATED into every agent's system prompt
   // on EVERY turn, while the seed message only reaches the model on the first one. Without this the paper fell
@@ -303,7 +328,7 @@
     var src = prep.abstract || prep.pdfText || '';
     return 'Kiindulási publikáció (a kutató sajátja): "' + (p.title || '—') + '" — ' + [pubAuthors(p), p.year, p.journal, p.doi ? 'DOI ' + p.doi : ''].filter(Boolean).join(', ') + '. '
       + 'A kutatás célja: ebből a munkából továbblépni.'
-      + (src ? ' A cikk lényege: ' + src.slice(0, 2200) : '')
+      + (src ? ' A cikk lényege: ' + cleanText(src).slice(0, 2200) : '')
       + (prep.pdfText ? ' (A teljes kinyert szöveg a projekt fájljai közt: uploads/mtmt-' + (p.mtid || '') + '.md)' : '');
   }
   function loadFiles(pid) {
@@ -313,7 +338,7 @@
   }
   function saveFile(pid, path, content, source) {
     var u = uid();
-    return sb.from('research_files').upsert({ project_id: pid, path: path, content: content || '', mime: /\.tex$/.test(path) ? 'text/x-tex' : 'text/markdown', size: (content || '').length, source: source || 'ai', created_by: u, updated_by: u, updated_at: nowIso() }, { onConflict: 'project_id,path' });
+    return sb.from('research_files').upsert({ project_id: pid, path: cleanText(path), content: cleanText(content), mime: /\.tex$/.test(path) ? 'text/x-tex' : 'text/markdown', size: (content || '').length, source: source || 'ai', created_by: u, updated_by: u, updated_at: nowIso() }, { onConflict: 'project_id,path' });
   }
   // every research-* edge REQUIRES the caller's user JWT (auth.uid() gates entitlement) — a service role cannot
   // stand in, so the orchestrator runs in the browser under the user's session and forwards the access token.
@@ -1141,7 +1166,12 @@
           var okd = up.filter(function (x) { return x.ok; });
           if (props.onFilesChanged) props.onFilesChanged();
           var names = okd.map(function (x) { return x.name; }).join(', ');
-          if (!names) { setBusy(false); toast('A fájl feltöltése nem sikerült.', false); return; }
+          if (!names) {
+            setBusy(false);
+            var why = (up.filter(function (x) { return x.err; })[0] || {}).err;
+            toast('A fájl feltöltése nem sikerült' + (why ? ': ' + String(why).slice(0, 90) : '.'), false);
+            return;
+          }
           var okNames = {}; okd.forEach(function (x) { okNames[x.name] = 1; });
           var body = stagedContextMsg(staged.filter(function (f) { return okNames[f.name]; }), 'Feltöltöttem: ' + names);
           sb.from('research_messages').insert({ chat_id: props.chatId, role: 'user', content: body }).then(function () {
@@ -1158,6 +1188,12 @@
       // multiple-choice clarifying questions: parse (fence OR bare JSON), render as pills on the LAST assistant turn
       var pq = apParseQuestions(m.content);
       var showQ = isLast && !busy && pq.qs.length;
+      // Ha az asszisztens a cikk PDF-jét kéri, ne kelljen külön megkeresni a 📎 gombot:
+      // a kérdés alatt ott a feltöltés, és a „feltöltöm" opció maga nyitja a fájlválasztót.
+      var UP_RE = /pdf|feltölt|csatol|upload|attach/i;
+      var wantsFile = showQ && pq.qs.some(function (qq) {
+        return UP_RE.test(qq.q || '') || (qq.options || []).some(function (o) { return UP_RE.test(o); });
+      });
       var bodyHtml = mdSafe(pq.clean || (pq.qs.length ? '' : m.content));
       return h('div', { key: m.id, className: 'ap-turn ai' },
         h('span', { className: 'ap-av ai' }, 'AI'),
@@ -1174,9 +1210,19 @@
                   h('div', { className: 'ap-q-label' }, (pq.qs.length > 1 ? ((qi + 1) + '. ') : '') + qq.q, qq.multi ? h('span', { className: 'ap-q-multi' }, 'több is választható') : null),
                   h('div', { className: 'ap-q-opts' }, qq.options.map(function (o, oi) {
                     var on = sel.indexOf(o) >= 0;
-                    return h('button', { className: 'ap-q-opt' + (on ? ' on' : ''), key: oi, 'aria-pressed': on, onClick: function () { toggleQ(qk, o, qq.multi); } }, (on ? '✓ ' : '') + o);
+                    var isUp = /feltölt|csatol|upload|attach/i.test(o);
+                    return h('button', {
+                      className: 'ap-q-opt' + (on ? ' on' : '') + (isUp ? ' up' : ''), key: oi, 'aria-pressed': on,
+                      title: isUp ? 'Fájlválasztó megnyitása' : null,
+                      onClick: function () { if (isUp) { pickFile(); return; } toggleQ(qk, o, qq.multi); }
+                    }, (isUp ? '📎 ' : (on ? '✓ ' : '')) + o);
                   })));
               }),
+              wantsFile ? h('div', { className: 'ap-q-up', onClick: pickFile, role: 'button', tabIndex: 0,
+                onKeyDown: function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pickFile(); } } },
+                h('span', { className: 'ap-q-up-ic' }, '📎'),
+                h('span', null, h('b', null, 'Csatold ide a cikk PDF-jét'),
+                  h('small', null, 'Kattints a tallózáshoz — a szövegét kinyerem, és onnantól abból dolgozom.'))) : null,
               h('textarea', { className: 'ap-q-note', rows: 1, value: note, placeholder: 'Egyéb / pontosítás (opcionális)…', onChange: function (e) { setNote(m.id, e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); if (canSend) sendQBlock(m.id, pq.qs); } } }),
               h('div', { className: 'ap-q-send' },
                 h('span', { className: 'ap-q-hint' }, totalSel ? (totalSel + ' kiválasztva') : (note.trim() ? 'saját válasz' : 'Válassz — nyugodtan gondold át')),
