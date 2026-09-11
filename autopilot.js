@@ -1047,6 +1047,34 @@
     var alive = useRef(true), scrollRef = useRef(null), taRef = useRef(null), autoStreamed = useRef(false), atBottom = useRef(true), streamingRef = useRef(false);
     useEffect(function () { return function () { alive.current = false; }; }, []);
 
+    // Kijelölés → ötlet (a Research-chat mintájára): egy buborékban kijelölt részletből ötlet lesz — az AI fogalmaz belőle
+    // kutatási ötletet, vagy szó szerint mentjük. Mindkettő a brief oldalsáv „Ötletek" listájára kerül.
+    var spS = useState(null), selPop = spS[0], setSelPop = spS[1];   // { text, x, y } — the floating toolbar above the selection
+    var sbS = useState(''), selBusy = sbS[0], setSelBusy = sbS[1];   // '' | 'ai' | 'own'
+    var selBusyRef = useRef('');
+    function onThreadMouseUp() {
+      if (!props.onIdeaFromSel || selBusyRef.current) return;
+      setTimeout(function () {
+        var s = window.getSelection ? window.getSelection() : null, root = scrollRef.current;
+        var txt = s ? String(s).trim() : '';
+        // only a selection lying wholly inside the thread — a drag that started in the brief panel is not a chat quote
+        if (!txt || txt.length < 4 || !root || !s.rangeCount || !root.contains(s.anchorNode) || !root.contains(s.focusNode)) { setSelPop(null); return; }
+        try { var rc = s.getRangeAt(0).getBoundingClientRect(); setSelPop({ text: txt, x: rc.left + rc.width / 2, y: rc.top }); } catch (e) { setSelPop(null); }
+      }, 1);
+    }
+    useEffect(function () {   // a click anywhere else dismisses the toolbar (unless it is mid-save)
+      if (!selPop) return;
+      function away(e) { if (selBusyRef.current) return; if (e.target && e.target.closest && e.target.closest('.ap-selpop')) return; setSelPop(null); }
+      document.addEventListener('mousedown', away);
+      return function () { document.removeEventListener('mousedown', away); };
+    }, [selPop]);
+    function ideaFromSel(mode) {
+      if (!selPop || selBusyRef.current) return;
+      selBusyRef.current = mode; setSelBusy(mode);
+      function done() { selBusyRef.current = ''; if (!alive.current) return; setSelBusy(''); setSelPop(null); try { window.getSelection().removeAllRanges(); } catch (e) { } }
+      Promise.resolve(props.onIdeaFromSel(selPop.text, mode)).then(done, done);
+    }
+
     // loadMsgs is side-effect-free (fetch + setMsgs only) — the seed-reply decision lives in the mount effect,
     // so it can never double-fire alongside the explicit streamReply() in sendText/onFile.
     function loadMsgs(cid) {
@@ -1063,7 +1091,7 @@
       });
     }, [props.chatId]);
     useEffect(function () { var el = scrollRef.current; if (el && atBottom.current) el.scrollTop = el.scrollHeight; }, [msgs.length, streaming, busy]);
-    function onScroll() { var el = scrollRef.current; if (!el) return; atBottom.current = (el.scrollHeight - el.scrollTop - el.clientHeight) < 60; }
+    function onScroll() { var el = scrollRef.current; if (!el) return; atBottom.current = (el.scrollHeight - el.scrollTop - el.clientHeight) < 60; if (selPop && !selBusyRef.current) setSelPop(null); }
 
     function streamReply(cid) {
       if (streamingRef.current) return;                                  // re-entrancy guard: never two concurrent streams
@@ -1245,7 +1273,7 @@
     return h('div', { className: 'ap-card ap-chat' },
       h('div', { className: 'ap-chat-h' }, h('span', { className: 'ap-av ai' }, 'AI'), h('b', null, 'Kutatási asszisztens'), h('span', { className: 'prj' }, props.projectTitle || ''),
         props.onDiscard ? h('button', { className: 'ap-discard', title: 'A projekt, a beszélgetés és a fájlok elvetése', onClick: props.onDiscard }, 'Elvetés') : null),
-      h('div', { className: 'ap-thread', ref: scrollRef, onScroll: onScroll },
+      h('div', { className: 'ap-thread', ref: scrollRef, onScroll: onScroll, onMouseUp: onThreadMouseUp },
         msgs.map(function (m, i) { return turn(m, i === msgs.length - 1); }),
         streaming ? h('div', { className: 'ap-turn ai', key: 'stream' }, h('span', { className: 'ap-av ai' }, 'AI'),
           h('div', { style: { minWidth: 0, flex: 1 } },
@@ -1259,6 +1287,9 @@
             })) : null,
             (streaming.text || !(streaming.lanes && streaming.lanes.length)) ? h('div', { className: 'ap-bub', dangerouslySetInnerHTML: { __html: mdSafe(apHideJson(streaming.text || '')) } }) : null)) : null,
         (busy && !streaming) ? h('div', { className: 'ap-turn ai', key: 'typing' }, h('span', { className: 'ap-av ai' }, 'AI'), h('div', { className: 'ap-typing' }, h('i'), h('i'), h('i'))) : null),
+      selPop ? h('div', { className: 'ap-selpop', role: 'toolbar', 'aria-label': 'Kijelölt szöveg → ötlet', style: { left: Math.max(170, Math.min(window.innerWidth - 170, selPop.x)), top: Math.max(8, selPop.y - 46) }, onMouseDown: function (e) { e.preventDefault(); } },
+        h('button', { className: 'ap-selpop-b ai', disabled: !!selBusy, title: 'Az AI a kijelölt részletből 1–3 kutatási ötletet fogalmaz meg (kérdés + hipotézis)', onClick: function () { ideaFromSel('ai'); } }, selBusy === 'ai' ? '⏳ Generálás…' : '✦ Ötlet generálása'),
+        h('button', { className: 'ap-selpop-b', disabled: !!selBusy, title: 'A kijelölt szöveg szó szerint kerül az ötletek közé', onClick: function () { ideaFromSel('own'); } }, selBusy === 'own' ? 'Mentés…' : '✚ Mentés ötletként')) : null,
       err ? h('div', { className: 'ap-cerr' },
         h('span', { className: 'ap-cerr-t' }, err),
         h('button', { className: 'ap-cerr-retry', disabled: busy, title: 'Az utolsó üzenet újraküldése', onClick: function () { if (busy) return; setErr(''); replyNow(props.chatId); } }, '↻ Újraküldés')) : null,
@@ -1275,6 +1306,7 @@
     var edS = useState(null), editing = edS[0], setEditing = edS[1];   // 'goal' | 'keywords' | null
     var vS = useState(''), draft = vS[0], setDraft = vS[1];
     var sgS = useState(false), sgBusy = sgS[0], setSgBusy = sgS[1];
+    var oiS = useState({}), openIds = oiS[0], setOpenIds = oiS[1];   // idea id → expanded (full question + hypothesis + rationale)
 
     function startEdit(k) { setEditing(k); setDraft(k === 'keywords' ? (p.keywords || []).join(', ') : (p[k] || '')); }
     function saveEdit() {
@@ -1291,7 +1323,7 @@
       Promise.resolve(props.onSuggestIdeas && props.onSuggestIdeas()).then(function () { setSgBusy(false); }, function () { setSgBusy(false); });
     }
 
-    var hasGoal = !!(p.goal && p.goal.trim()), hasKw = (p.keywords || []).length > 0, hasFiles = files.length > 0, hasIdeas = (props.ideasCount || 0) > 0;
+    var hasGoal = !!(p.goal && p.goal.trim()), hasKw = (p.keywords || []).length > 0, hasFiles = files.length > 0, ideas = props.ideas || [], hasIdeas = ideas.length > 0;
     var filled = [hasGoal, hasKw, hasFiles, hasIdeas].filter(Boolean).length;
     var pct = Math.round(filled / 4 * 100);
 
@@ -1309,6 +1341,19 @@
         h('div', { style: { display: 'flex', gap: 8, marginTop: 8 } },
           h('button', { className: 'btn pri sm', onClick: saveEdit }, 'Mentés'),
           h('button', { className: 'btn sm', onClick: function () { setEditing(null); } }, 'Mégse')));
+    }
+
+    function toggleIdea(id) { setOpenIds(function (m) { var n = Object.assign({}, m); if (n[id]) delete n[id]; else n[id] = 1; return n; }); }
+    var SRC_LBL = { own: 'saját szöveg', chat: 'AI · a chatből' };
+    function ideaItem(it) {
+      var open = !!openIds[it.id], fresh = !!(props.freshIds && props.freshIds[it.id]);
+      return h('div', { key: it.id, className: 'ap-idi' + (fresh ? ' fresh' : '') },
+        h('div', { className: 'ap-idi-top' },
+          h('span', { className: 'ap-idi-src' + (it.source === 'own' ? ' own' : '') }, SRC_LBL[it.source] || 'AI'),
+          props.onRemoveIdea ? h('button', { className: 'ap-idi-x', title: 'Eltávolítás az ötletek közül', 'aria-label': 'Ötlet eltávolítása', onClick: function () { props.onRemoveIdea(it); } }, '×') : null),
+        h('div', { className: 'ap-idi-q' + (open ? ' open' : ''), role: 'button', tabIndex: 0, title: open ? 'Összecsukás' : 'Teljes leírás', onClick: function () { toggleIdea(it.id); }, onKeyDown: function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleIdea(it.id); } } }, it.question || '—'),
+        it.hypothesis ? h('div', { className: 'ap-idi-h' + (open ? ' open' : '') }, h('b', null, 'Hipotézis: '), it.hypothesis) : null,
+        (open && it.rationale) ? h('div', { className: 'ap-idi-r' }, it.rationale) : null);
     }
 
     return h('div', { className: 'ap-card ap-brief' },
@@ -1330,10 +1375,12 @@
           : h('div', { className: 'ap-bfv empty' }, 'Tölts fel adatot vagy dokumentumot a chatben (📎)'),
         null),
 
-      row('ideas', 'Ötletek', hasIdeas,
+      row('ideas', 'Ötletek' + (hasIdeas ? ' · ' + ideas.length : ''), hasIdeas,
         h('div', null,
-          h('div', { className: 'ap-bfv' + (hasIdeas ? '' : ' empty') }, hasIdeas ? (props.ideasCount + ' ötlet-jelölt az Ideas-listán') : 'Még nincs ötlet kinyerve'),
-          h('button', { className: 'ap-bfedit', disabled: sgBusy, onClick: suggest }, sgBusy ? h('span', null, h('span', { className: 'spin' }), ' Generálás…') : '✦ Ötletek a beszélgetésből')),
+          hasIdeas ? h('div', { className: 'ap-idl' }, ideas.map(ideaItem))
+            : h('div', { className: 'ap-bfv empty' }, 'Még nincs ötlet. Kérj ötleteket a beszélgetésből, vagy jelölj ki egy részletet a chatben.'),
+          h('button', { className: 'ap-bfedit', disabled: sgBusy, onClick: suggest }, sgBusy ? h('span', null, h('span', { className: 'spin' }), ' Generálás…') : '✦ Ötletek a beszélgetésből'),
+          h('div', { className: 'ap-bfhint' }, 'Tipp: jelölj ki szöveget a chatben — a felugró gombbal ötletet generálhatsz belőle, vagy szó szerint elmentheted.')),
         null),
 
       h('div', { className: 'ap-brief-cta' },
@@ -3091,15 +3138,27 @@
     var pS = useState(null), project = pS[0], setProject = pS[1];
     var cS = useState(null), chatId = cS[0], setChatId = cS[1];
     var fS = useState([]), files = fS[0], setFiles = fS[1];
-    var icS = useState(0), ideasCount = icS[0], setIdeasCount = icS[1];
+    var idlS = useState([]), ideas = idlS[0], setIdeas = idlS[1];   // the brief's idea list — the side panel shows the ideas themselves, not a count
+    var frS = useState({}), freshIds = frS[0], setFreshIds = frS[1];  // just-added idea ids → flashed once so the user sees where they landed
+    var ideasPid = useRef(null);
     var crS = useState(false), creating = crS[0], setCreating = crS[1];
     var lS = useState(false), launching = lS[0], setLaunching = lS[1];
     // The default extraction questions are PRE-FILLED as real, removable entries — they used to be invisible
     // defaults injected at runtime, which is why they could not be deleted.
     var cfgS = useState({ tier: TIERS[0], maxPapers: '500', phases: PHASES.map(function (ph) { return !ph[3]; }), extractQuestions: EXTRACT_DEFAULTS.map(function (q) { return { text: q.text, answer_type: q.answer_type, source_mode: q.source_mode }; }) }), cfg = cfgS[0], setCfg = cfgS[1];   // WIP phases default OFF
 
-    function refreshIdeas(pid) {
-      sb.from('research_ideas').select('id', { count: 'exact', head: true }).eq('project_id', pid).then(function (r) { setIdeasCount((r && r.count) || 0); });
+    function refreshIdeas(pid, markIds) {
+      ideasPid.current = pid;
+      // the brief lists the CANDIDATE ideas: gaps (source='gap') belong to the Research Gap phase, rejected ones are gone
+      return sb.from('research_ideas').select('id,question,hypothesis,rationale,source,status,created_at').eq('project_id', pid)
+        .neq('status', 'rejected').or('source.is.null,source.neq.gap').order('created_at', { ascending: false }).limit(60).then(function (r) {
+          if (ideasPid.current !== pid) return;   // the user switched project meanwhile
+          setIdeas((r && r.data) || []);
+          if (markIds && markIds.length) {
+            var m = {}; markIds.forEach(function (id) { m[id] = 1; }); setFreshIds(m);
+            setTimeout(function () { setFreshIds({}); }, 4500);
+          }
+        });
     }
     function refreshFiles(pid) { loadFiles(pid).then(setFiles); }
     // a partial create failed after the project row existed → delete it so abandonment never orphans a project
@@ -3146,25 +3205,62 @@
       function go(ok) {
         if (!ok) return;
         if (proj) sb.from('research_projects').delete().eq('id', proj.id);
-        setProject(null); setChatId(null); setFiles([]); setIdeasCount(0); setView('launcher');
+        setProject(null); setChatId(null); setFiles([]); setIdeas([]); setView('launcher');
       }
       if (window.PRUI && window.PRUI.confirm) window.PRUI.confirm({ title: 'Elveted ezt a projektet?', confirmLabel: 'Elvetés', danger: true }).then(go);
       else go(window.confirm('Elveted ezt a projektet? A beszélgetés és a feltöltött fájlok törlődnek.'));
     }
 
-    function suggestIdeas() {
+    // ✦ ideas from the whole conversation (brief panel) OR from one selected passage (chat toolbar) — the same
+    // research-ai 'suggest' action, which dedups against the existing ideas and returns the inserted rows.
+    function suggestIdeas(selText) {
       if (!project) return Promise.resolve();
+      var pid = project.id;
+      function run(transcript) {
+        return sb.functions.invoke('research-ai', { body: { action: 'suggest', project_id: pid, text: transcript } }).then(function (res) {
+          if (res && res.error) {
+            var st = res.error.context && res.error.context.status;
+            toast(st === 429 ? 'Elérted a napi AI-keretet — holnap újra próbálhatod.' : st === 403 ? 'Ehhez az AI-funkcióhoz nincs jogosultságod — szólj az adminnak.' : 'Az ötlet-generálás nem sikerült' + (st ? ' (' + st + ')' : '') + '.', false);
+            return;
+          }
+          var d = res && res.data;
+          if (d && d.count) { toast('✓ ' + d.count + ' új ötlet — oldalt, az Ötletek alatt'); refreshIdeas(pid, (d.ideas || []).map(function (x) { return x.id; })); }
+          else toast(selText ? 'Ebből a részletből nem született új ötlet (lehet, hogy már szerepel a listán).' : 'Ebből a beszélgetésből nem született új ötlet.');
+        }, function () { toast('Az AI-hívás nem sikerült.', false); });
+      }
+      // a selection travels on its own: the model grounds its ideas in "what was discussed", so here the quoted
+      // passage IS the discussion (the project goal still goes along inside research-ai)
+      if (selText) return run('User (a beszélgetésből kijelölt részlet — ebből fogalmazz meg kutatási ötletet):\n' + String(selText).slice(0, 8000));
       return sb.from('research_messages').select('role,content').eq('chat_id', chatId).order('created_at', { ascending: true }).then(function (r) {
         var m = (r && r.data) || [];
         if (!m.length) { toast('Beszélgess előbb a projektről — abból javaslok ötleteket.'); return; }
-        var transcript = m.slice(-16).map(function (x) { return (x.role === 'assistant' ? 'AI: ' : 'User: ') + String(x.content || ''); }).join('\n\n').slice(0, 12000);
-        return sb.functions.invoke('research-ai', { body: { action: 'suggest', project_id: project.id, text: transcript } }).then(function (res) {
-          if (res && res.error) { toast('Az AI nincs konfigurálva (research-ai / ANTHROPIC_API_KEY).', false); return; }
-          var d = res && res.data;
-          if (d && d.count) { toast('✓ ' + d.count + ' új ötlet az Ideas-listán'); refreshIdeas(project.id); }
-          else toast('Ebből a beszélgetésből nem született új ötlet.');
-        }, function () { toast('Az AI-hívás nem sikerült.', false); });
+        return run(m.slice(-16).map(function (x) { return (x.role === 'assistant' ? 'AI: ' : 'User: ') + String(x.content || ''); }).join('\n\n').slice(0, 12000));
       });
+    }
+    // ✚ the selected passage verbatim (same row shape as the Research chat's "To idea")
+    function addIdeaText(text) {
+      if (!project) return Promise.resolve();
+      var pid = project.id, q = String(text || '').trim().slice(0, 8000);
+      if (!q) return Promise.resolve();
+      return sb.from('research_ideas').insert({ project_id: pid, source: 'own', question: q, created_by: uid(), status: 'candidate' }).select('id').maybeSingle().then(function (r) {
+        if (r && r.error) { toast('Nem sikerült menteni: ' + r.error.message, false); return; }
+        toast('✓ Ötlet mentve — oldalt, az Ötletek alatt'); refreshIdeas(pid, (r && r.data) ? [r.data.id] : []);
+      }, function () { toast('Nem sikerült menteni.', false); });
+    }
+    function removeIdea(it) {
+      if (!project || !it) return;
+      var pid = project.id, q = String(it.question || '').slice(0, 70);
+      function go(ok) {
+        if (!ok) return;
+        setIdeas(function (a) { return a.filter(function (x) { return x.id !== it.id; }); });   // optimistic; the refresh reconciles
+        sb.from('research_ideas').delete().eq('id', it.id).eq('project_id', pid).then(function (r) {
+          if (r && r.error) toast('Nem sikerült eltávolítani: ' + r.error.message, false);
+          refreshIdeas(pid);
+        }, function () { refreshIdeas(pid); });
+      }
+      var title = 'Eltávolítod ezt az ötletet? „' + q + (String(it.question || '').length > 70 ? '…' : '') + '"';
+      if (window.PRUI && window.PRUI.confirm) window.PRUI.confirm({ title: title, confirmLabel: 'Eltávolítás', danger: true }).then(go);
+      else go(window.confirm(title));
     }
 
     function doLaunch() {
@@ -3204,13 +3300,13 @@
 
     function exitToLauncher() {
       try { history.replaceState(null, '', 'Autopilot.html'); } catch (e) { }
-      setRunId(null); setProject(null); setChatId(null); setFiles([]); setIdeasCount(0); setView('launcher');
+      setRunId(null); setProject(null); setChatId(null); setFiles([]); setIdeas([]); setView('launcher');
     }
     function openRun(rid) { try { history.replaceState(null, '', 'Autopilot.html?run=' + encodeURIComponent(rid)); } catch (e) { } setRunId(rid); setView('dashboard'); }
     // reopen a started-but-not-launched brief from the sidebar: load the project + its brief chat back into the brief step
     function openBrief(pid, cid) {
       if (!pid) return;
-      setChatId(cid || null); setFiles([]); setIdeasCount(0);
+      setChatId(cid || null); setFiles([]); setIdeas([]);
       sb.from('research_projects').select('id,title,goal,keywords,student_id,field,status,stage').eq('id', pid).maybeSingle().then(function (r) {
         var p = r && r.data; if (!p) { toast('A projekt nem elérhető.', false); return; }
         setProject(p); setView('brief'); refreshFiles(pid); refreshIdeas(pid);
@@ -3218,7 +3314,7 @@
       });
     }
     // back to the launcher list WITHOUT discarding the current brief (distinct from Discard, which deletes)
-    function backToList() { try { history.replaceState(null, '', 'Autopilot.html'); } catch (e) { } setRunId(null); setProject(null); setChatId(null); setFiles([]); setIdeasCount(0); setView('launcher'); }
+    function backToList() { try { history.replaceState(null, '', 'Autopilot.html'); } catch (e) { } setRunId(null); setProject(null); setChatId(null); setFiles([]); setIdeas([]); setView('launcher'); }
     // the dashboard is a full-screen surface (own header + controls) — resumable via ?run=<id>
     if (view === 'dashboard') return h(Dashboard, { runId: runId, onExit: exitToLauncher });
 
@@ -3234,9 +3330,10 @@
       h(SideProjects, { onOpenBrief: openBrief, onOpenRun: openRun }),
       h('div', { className: 'ap-launch-main' }, h(Launcher, { creating: creating, onStart: startProject })));
     else if (view === 'brief') body = h('div', { className: 'ap-split' },
-      h(Chat, { projectId: project.id, chatId: chatId, projectTitle: project.title, onReply: function () { }, onFilesChanged: function () { refreshFiles(project.id); }, onDiscard: discardProject }),
+      h(Chat, { projectId: project.id, chatId: chatId, projectTitle: project.title, onReply: function () { }, onFilesChanged: function () { refreshFiles(project.id); }, onDiscard: discardProject,
+        onIdeaFromSel: function (t, mode) { return mode === 'ai' ? suggestIdeas(t) : addIdeaText(t); } }),
       h(BriefPanel, {
-        project: project, files: files, ideasCount: ideasCount,
+        project: project, files: files, ideas: ideas, freshIds: freshIds, onRemoveIdea: removeIdea,
         onPatched: function (patch) { setProject(Object.assign({}, project, patch)); },
         onSuggestIdeas: suggestIdeas, onReview: function () { setView('launch'); }
       }));
