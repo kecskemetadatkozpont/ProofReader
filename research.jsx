@@ -6333,7 +6333,7 @@
               (s.depends_on && s.depends_on.length) ? h('span', { style: { fontSize: 10.5, color: 'var(--faint)', flex: 'none' }, title: 'Runs after these steps' }, 'after ' + s.depends_on.join(',')) : null,
               h('span', { className: 'chip ' + pst[0], style: { fontSize: 10, flex: 'none' } }, pst[1]),
               vd ? h('span', {
-                className: 'chip ' + (vd.verdict === 'met' ? 'c-ok' : vd.verdict === 'weak' ? 'c-warn' : vd.verdict === 'not_met' ? 'c-bad' : ''),
+                className: 'chip ' + (vd.verdict === 'met' ? 'c-ok' : vd.verdict === 'weak' ? 'c-warn' : vd.verdict === 'not_met' ? 'c-danger' : 'c-grey'),
                 style: { fontSize: 10, flex: 'none' },
                 title: 'Független ellenőrzés a lépés saját elfogadási kritériumaihoz' + (vd.judge_model ? ' · bíró: ' + vd.judge_model : '')
               }, (vd.verdict === 'met' ? '✓ Kritériumok teljesülnek' : vd.verdict === 'weak' ? '◐ Részben' : vd.verdict === 'not_met' ? '✗ Nem teljesül' : '? Nem ítélhető')
