@@ -103,7 +103,9 @@ async function callJudge(model: string, sysText: string, sharedText: string, ite
   const body = {
     model,
     max_tokens: 600,
-    temperature: 0,
+    // No `temperature`: the newer models reject it ("temperature is deprecated for this model"), and the
+    // first live run failed on exactly that. Consistency comes from the anchored scale + the hard rules,
+    // not from a sampling parameter.
     // Two cache breakpoints: the system prompt and the shared material. Only the trailing criterion varies,
     // so items 2..N read the (identical) prefix from cache instead of paying for it again.
     system: [{ type: 'text', text: sysText, cache_control: { type: 'ephemeral' } }],

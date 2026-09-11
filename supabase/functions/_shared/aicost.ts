@@ -18,14 +18,23 @@ export function logAiCost(
     const inTok = Math.max(0, Math.round(opts.input ?? opts.usage?.input_tokens ?? 0));
     const outTok = Math.max(0, Math.round(opts.output ?? opts.usage?.output_tokens ?? 0));
     if (!inTok && !outTok) return;   // nothing to record (e.g. a failed call)
-    sb.rpc('ai_cost_log', {
+    const args: Record<string, unknown> = {
       p_project: opts.project_id ?? null,
       p_fn: String(opts.fn || '?').slice(0, 64),
       p_model: String(opts.model || '?').slice(0, 80),
       p_in: inTok,
       p_out: outTok,
-      p_user: opts.user_id ?? null,   // honoured ONLY for the service role (migration-115) — cron spend is recorded too
-    }).then(() => {}, () => {});   // ignore all errors (pre-migration, RLS, etc.)
+    };
+    // p_user only exists after migration-115. Sending it UNCONDITIONALLY made every call resolve to a
+    // non-existent 6-arg signature (PGRST202) — and the fail-open handler hid that ALL cost logging had
+    // stopped. So: only the service-role path sends it, and it falls back to the 5-arg call if 115 is missing.
+    if (opts.user_id) args.p_user = opts.user_id;
+    sb.rpc('ai_cost_log', args).then((r: any) => {
+      if (r && r.error && args.p_user !== undefined) {
+        const rest = Object.assign({}, args); delete rest.p_user;
+        sb.rpc('ai_cost_log', rest).then(() => {}, () => {});
+      }
+    }, () => {});   // never affect the request
   } catch { /* never affect the request */ }
 }
 
