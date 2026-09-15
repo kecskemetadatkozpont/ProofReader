@@ -3336,7 +3336,7 @@
     if (!o.length) return '';
     return ['', '**Eddigi eredmény' + (res.ok === true ? ' (a futtató szerint sikeres — ellenőrizendő)' : res.ok === false ? ' (a futtató szerint sikertelen)' : '') + ':**'].concat(o).join('\n');
   }
-  function apBuildAgentPack(o) {
+  function apLoadPack(o) {
     function P(q) { return q ? Promise.resolve(q).then(function (v) { return v; }, function () { return null; }) : Promise.resolve(null); }
     var dp = o.day.split('-'), d0 = new Date(+dp[0], +dp[1] - 1, +dp[2]), d1 = new Date(+dp[0], +dp[1] - 1, +dp[2] + 1);
     var runs = o.runs.slice().sort(function (a, b) { return String(a.project_id).localeCompare(String(b.project_id)) || String(a.created_at || '').localeCompare(String(b.created_at || '')); });
@@ -3370,122 +3370,141 @@
               review: ((x[3] && x[3].data) || [])[0] || null, exq: exq, cells: (y[1] && y[1].data) || [], prot: x[5] && x[5].data, steps: (x[6] && x[6].data) || [] };
           });
         });
-      })).then(function (packs) { return packRender(o, projects, picks, packs); });
+      })).then(function (packs) { return { owner: o.owner, uni: o.uni, projects: projects, picks: picks, packs: packs }; });
     });
   }
-  function packRender(o, projects, picks, packs) {
-    var DONE = { done: 1, skipped: 1 }, sNum = {}, sN = 0, now = Date.now();
+  // groups: [{ owner, uni, runs }] — one or more researchers of the same day, rendered into ONE file
+  function apBuildAgentPack(groups, day) {
+    return Promise.all(groups.map(function (g) { return apLoadPack({ owner: g.owner, uni: g.uni, day: day, runs: g.runs }); }))
+      .then(function (loaded) { return packRenderAll(loaded, day); });
+  }
+  function packRenderAll(groups, day) {
+    var DONE = { done: 1, skipped: 1 }, sNum = {}, sN = 0, now = Date.now(), multi = groups.length > 1;
+    function hd(n) { return new Array(Math.min(6, n + (multi ? 1 : 0)) + 1).join('#') + ' '; }   // one level deeper per researcher when several
     function sref(id) { if (!sNum[id]) sNum[id] = 'S' + (++sN); return sNum[id]; }
-    packs.forEach(function (pk) { pk.inc.forEach(function (p) { sref(p.source_id); }); });
-    var nSteps = 0, nOpen = 0;
-    packs.forEach(function (pk) { pk.steps.forEach(function (st) { nSteps++; if (!DONE[st.status]) nOpen++; }); });
-    var dp = o.day.split('-'), dayLong = new Date(+dp[0], +dp[1] - 1, +dp[2]).toLocaleDateString('hu-HU', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' });
-    var name = (o.owner && o.owner.name) || 'a kutató', L = [];
-    L.push('# Publify — agent-csomag: ' + name, '');
-    L.push('> Kutató: **' + name + '** · ' + (o.uni || '—') + '  ', '> Nap: **' + dayLong + '** · Készült: ' + new Date().toLocaleString('hu-HU') + '  ',
-      '> Tartalom: ' + packs.length + ' Autopilot-futás · ' + Object.keys(projects).length + ' projekt · ' + nSteps + ' protokoll-lépés (' + nOpen + ' nyitott) · ' + sN + ' beválasztott forrás', '');
-    L.push(PACK_BRIEF.replace('{NAME}', name).replace('{DAY}', dayLong), '');
-    L.push('## 2. Összesítő', '', '| Projekt | Futás | Állapot most | Fázis most | Beválasztott forrás | Protokoll-lépés (nyitott / összes) |', '|---|---|---|---|---:|---:|');
-    packs.forEach(function (pk) {
-      var r = pk.run, ph = (r.phases || [])[r.phase_index] || {}, open = pk.steps.filter(function (st) { return !DONE[st.status]; }).length;
-      L.push('| ' + mdCell((projects[r.project_id] || {}).title || 'Projekt') + ' | ' + r.id.slice(0, 8) + ' | ' + KIND_LAB[nowKind(r, now)] + ' | ' + mdCell(ph.label || ph.key || '—') + ' | ' + pk.inc.length + ' | ' + open + ' / ' + pk.steps.length + ' |');
+    groups.forEach(function (g) { g.packs.forEach(function (pk) { pk.inc.forEach(function (p) { sref(p.source_id); }); }); });
+    var nSteps = 0, nOpen = 0, nRuns = 0, nProj = 0;
+    groups.forEach(function (g) { nRuns += g.packs.length; nProj += Object.keys(g.projects).length; g.packs.forEach(function (pk) { pk.steps.forEach(function (st) { nSteps++; if (!DONE[st.status]) nOpen++; }); }); });
+    var dp = day.split('-'), dayLong = new Date(+dp[0], +dp[1] - 1, +dp[2]).toLocaleDateString('hu-HU', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' });
+    var names = groups.map(function (g) { return (g.owner && g.owner.name) || 'ismeretlen kutató'; });
+    var L = [];
+    L.push('# Publify — agent-csomag: ' + (multi ? names.length + ' kutató' : names[0]), '');
+    L.push('> Kutató' + (multi ? 'k' : '') + ': ' + groups.map(function (g, i) { return '**' + names[i] + '** (' + (g.uni || '—') + ')'; }).join(', ') + '  ',
+      '> Nap: **' + dayLong + '** · Készült: ' + new Date().toLocaleString('hu-HU') + '  ',
+      '> Tartalom: ' + nRuns + ' Autopilot-futás · ' + nProj + ' projekt · ' + nSteps + ' protokoll-lépés (' + nOpen + ' nyitott) · ' + sN + ' beválasztott forrás', '');
+    var brief = PACK_BRIEF.replace('{NAME}', multi ? ('a kiválasztott kutatók (' + names.join(', ') + ')') : names[0]).replace('{DAY}', dayLong);
+    if (multi) brief = brief.replace('A feladatod három részből áll, ebben a sorrendben.',
+      '**A csomag ' + names.length + ' kutató anyagát tartalmazza — mindegyiküket külön kezeld.** Kutatónként (és azon belül projektenként) külön protokoll-jelentés, folyóirat-választás és kézirat készüljön; a leadandókat kutatónként külön mappába tedd (`<kutató-név>/01_…`). Különböző kutatók eredményeit ne vond össze egy cikkbe, és ne használd fel egymás adatait. Az irodalmi azonosítók ([S#]) a teljes csomagban egyediek, ezért a forrásokat szabadon hivatkozhatod.\n\nA feladatod — kutatónként — három részből áll, ebben a sorrendben.');
+    L.push(brief, '');
+    L.push('## 2. Összesítő', '', '| ' + (multi ? 'Kutató | ' : '') + 'Projekt | Futás | Állapot most | Fázis most | Beválasztott forrás | Protokoll-lépés (nyitott / összes) |', '|' + (multi ? '---|' : '') + '---|---|---|---|---:|---:|');
+    groups.forEach(function (g, gi) {
+      g.packs.forEach(function (pk) {
+        var r = pk.run, ph = (r.phases || [])[r.phase_index] || {}, open = pk.steps.filter(function (st) { return !DONE[st.status]; }).length;
+        L.push('| ' + (multi ? mdCell(names[gi]) + ' | ' : '') + mdCell((g.projects[r.project_id] || {}).title || 'Projekt') + ' | ' + r.id.slice(0, 8) + ' | ' + KIND_LAB[nowKind(r, now)] + ' | ' + mdCell(ph.label || ph.key || '—') + ' | ' + pk.inc.length + ' | ' + open + ' / ' + pk.steps.length + ' |');
+      });
     });
     L.push('');
-    var curProj = null, secN = 2;
-    packs.forEach(function (pk) {
-      var r = pk.run, proj = projects[r.project_id] || {};
-      if (r.project_id !== curProj) {
-        curProj = r.project_id; secN++;
-        L.push('---', '', '## ' + secN + '. Projekt: ' + (mdOne(proj.title) || 'Projekt'), '');
-        if (proj.goal) L.push('- **Cél / kutatási irány:** ' + mdOne(proj.goal, 4000));
-        if (proj.field) L.push('- **Terület:** ' + mdOne(proj.field));
-        if (proj.keywords && proj.keywords.length) L.push('- **Kulcsszavak:** ' + proj.keywords.join(', '));
-        if (proj.language) L.push('- **Projekt nyelve:** ' + proj.language);
-        L.push('- **Publify:** ' + location.href.replace(/[?#].*$/, '').replace(/[^/]*$/, '') + 'Research.html?project=' + proj.id);
-        var jp = picks.filter(function (x) { return x.project_id === r.project_id; });
-        if (jp.length) {
-          L.push('', '**A projektben már felmerült folyóirat-jelöltek** (értékeld őket a B) részben):');
-          jp.forEach(function (x) { L.push('- ' + mdOne(x.title || x.name || x.journal_title || x.journal || JSON.stringify(x).slice(0, 200)) + (x.issn ? ' (ISSN ' + x.issn + ')' : '') + (x.note || x.reason ? ' — ' + mdOne(x.note || x.reason, 300) : '')); });
-        }
-        L.push('');
-      }
-      var ph = (r.phases || [])[r.phase_index] || {};
-      L.push('### Autopilot-futás ' + r.id.slice(0, 8) + ' — ' + KIND_LAB[nowKind(r, now)] + ' (' + (ph.label || ph.key || '—') + ')', '');
-      if (r.status === 'failed' && r.error) L.push('> Hiba: ' + mdOne(r.error, 500), '');
-      if (r.status === 'awaiting_approval' && r.gate) L.push('> Döntésre vár: **' + mdOne(r.gate.title) + '** — ' + mdOne(r.gate.detail, 400), '');
-      L.push('**Fázisok:**');
-      (r.phases || []).filter(function (x) { return x.enabled !== false && x.status !== 'wip'; }).forEach(function (x) { L.push('- ' + (x.label || x.key) + ': ' + (PH_ST[x.status] || x.status) + (x.result ? ' — ' + mdOne(x.result, 300) : '')); });
-      L.push('');
-      if (pk.events.length) {
-        L.push('**Aznap történt (' + pk.events.length + ' esemény):**');
-        pk.events.slice(-60).forEach(function (e) { L.push('- ' + timeOf(e.created_at) + (e.phase ? ' · ' + e.phase : '') + (e.level === 'error' ? ' · HIBA' : '') + ' — ' + mdOne(e.message, 300)); });
-        L.push('');
-      }
-      var dev = r.config && r.config.develop_idea_id, idea = pk.ideas.filter(function (i) { return i.id === dev; })[0];
-      if (idea) {
-        L.push('#### Kidolgozott kutatási ötlet', '', '- **Kérdés:** ' + mdOne(idea.question, 2000));
-        if (idea.hypothesis) L.push('- **Hipotézis:** ' + mdOne(idea.hypothesis, 2000));
-        if (idea.rationale) L.push('- **Indoklás:** ' + mdOne(idea.rationale, 2000));
-        L.push('');
-      } else {
-        // older runs did not record which idea they develop → give the agent the project's ideas instead of nothing
-        var plain = pk.ideas.filter(function (i) { return i.source !== 'gap'; });
-        if (plain.length) {
-          L.push('#### A projekt kutatási ötletei (a futás nem rögzítette, melyiket dolgozza ki)', '');
-          plain.slice(0, 8).forEach(function (i, ii) { L.push((ii + 1) + '. **' + mdOne(i.question, 600) + '**' + (i.hypothesis ? '  \n   Hipotézis: ' + mdOne(i.hypothesis, 600) : '')); });
+    var secN = 2;
+    groups.forEach(function (g, gi) {
+      var projects = g.projects, picks = g.picks, curProj = null;
+      if (multi) { secN++; L.push('---', '', '## ' + secN + '. Kutató: ' + names[gi] + ' (' + (g.uni || '—') + ')', ''); }
+      g.packs.forEach(function (pk) {
+        var r = pk.run, proj = projects[r.project_id] || {};
+        if (r.project_id !== curProj) {
+          curProj = r.project_id;
+          if (!multi) secN++;
+          L.push(multi ? '' : '---', '', hd(2) + (multi ? '' : secN + '. ') + 'Projekt: ' + (mdOne(proj.title) || 'Projekt'), '');
+          if (proj.goal) L.push('- **Cél / kutatási irány:** ' + mdOne(proj.goal, 4000));
+          if (proj.field) L.push('- **Terület:** ' + mdOne(proj.field));
+          if (proj.keywords && proj.keywords.length) L.push('- **Kulcsszavak:** ' + proj.keywords.join(', '));
+          if (proj.language) L.push('- **Projekt nyelve:** ' + proj.language);
+          L.push('- **Publify:** ' + location.href.replace(/[?#].*$/, '').replace(/[^/]*$/, '') + 'Research.html?project=' + proj.id);
+          var jp = picks.filter(function (x) { return x.project_id === r.project_id; });
+          if (jp.length) {
+            L.push('', '**A projektben már felmerült folyóirat-jelöltek** (értékeld őket a B) részben):');
+            jp.forEach(function (x) { L.push('- ' + mdOne(x.title || x.name || x.journal_title || x.journal || JSON.stringify(x).slice(0, 200)) + (x.issn ? ' (ISSN ' + x.issn + ')' : '') + (x.note || x.reason ? ' — ' + mdOne(x.note || x.reason, 300) : '')); });
+          }
           L.push('');
         }
-      }
-      var gapsAll = pk.ideas.filter(function (i) { return i.source === 'gap'; }), gapsMine = gapsAll.filter(function (i) { return r.study_id && i.study_id === r.study_id; });
-      var gaps = gapsMine.length ? gapsMine : gapsAll;
-      if (gaps.length) {
-        L.push('#### Kutatási rések (' + gaps.length + ')', '');
-        gaps.forEach(function (g, gi) { L.push((gi + 1) + '. **' + mdOne(g.question, 600) + '**' + (g.gap_type ? ' `' + g.gap_type + '`' : '') + (g.novelty != null ? ' · újdonság ' + g.novelty + '/100' : '') + (g.rationale ? '  \n   ' + mdOne(g.rationale, 900) : '')); });
+        var ph = (r.phases || [])[r.phase_index] || {};
+        L.push(hd(3) + 'Autopilot-futás ' + r.id.slice(0, 8) + ' — ' + KIND_LAB[nowKind(r, now)] + ' (' + (ph.label || ph.key || '—') + ')', '');
+        if (r.status === 'failed' && r.error) L.push('> Hiba: ' + mdOne(r.error, 500), '');
+        if (r.status === 'awaiting_approval' && r.gate) L.push('> Döntésre vár: **' + mdOne(r.gate.title) + '** — ' + mdOne(r.gate.detail, 400), '');
+        L.push('**Fázisok:**');
+        (r.phases || []).filter(function (x) { return x.enabled !== false && x.status !== 'wip'; }).forEach(function (x) { L.push('- ' + (x.label || x.key) + ': ' + (PH_ST[x.status] || x.status) + (x.result ? ' — ' + mdOne(x.result, 300) : '')); });
         L.push('');
-      }
-      if (pk.inc.length) {
-        L.push('#### Beválasztott irodalom (' + pk.inc.length + ' / ' + pk.screened + ' átszűrt)', '');
-        pk.inc.forEach(function (p) {
-          var sr = pk.srcs[p.source_id] || {};
-          var au = Array.isArray(sr.authors) ? sr.authors.map(rdText).slice(0, 6).join(', ') + (sr.authors.length > 6 ? ' et al.' : '') : (sr.authors ? mdOne(sr.authors, 200) : '');
-          L.push('- **[' + sref(p.source_id) + ']** ' + (au ? au + ' ' : '') + (sr.year ? '(' + sr.year + '). ' : '') + '*' + mdOne(sr.title || 'Cím nélkül') + '*' + (sr.venue ? '. ' + mdOne(sr.venue) : '') + (sr.doi ? '. https://doi.org/' + String(sr.doi).replace(/^https?:\/\/(dx\.)?doi\.org\//, '') : (sr.url ? '. ' + sr.url : '')) + (sr.cited_by != null ? ' · ' + sr.cited_by + ' hivatkozás' : ''));
-          if (sr.abstract) L.push('  > ' + mdOne(sr.abstract, 900));
-        });
-        L.push('');
-      }
-      if (pk.review && pk.review.content) {
-        L.push('#### Szisztematikus áttekintés (' + String(pk.review.path || '').split('/').pop() + ')', '');
-        L.push(String(pk.review.content).replace(/^(#{1,6})\s/gm, function (m, g) { return new Array(Math.min(6, g.length + 4) + 1).join('#') + ' '; }).trim(), '');
-      }
-      if (pk.exq.length) {
-        L.push('#### Kivonatolt adatok (' + pk.exq.length + ' kérdés)', '');
-        pk.exq.forEach(function (q) {
-          var cs = pk.cells.filter(function (c) { return c.question_id === q.id; });
-          var done = cs.filter(function (c) { return c.status === 'done'; }), na = cs.filter(function (c) { return c.status === 'na'; }).length, err = cs.filter(function (c) { return c.status === 'error'; }).length;
-          L.push('**' + mdOne(q.text) + '** — ' + done.length + ' válasz' + (na ? ' · ' + na + ' cikkben nincs adat' : '') + (err ? ' · ' + err + ' hibás cella' : ''));
-          done.forEach(function (c) { L.push('- [' + sref(c.source_id) + '] ' + mdOne(c.answer, 600) + (c.quote ? ' — „' + mdOne(c.quote, 300) + '”' : '') + (c.location && (c.location.page || c.location.section || c.location.figure) ? ' (' + [c.location.page ? 'o. ' + c.location.page : '', c.location.section || '', c.location.figure || ''].filter(Boolean).join(', ') + ')' : '')); });
+        if (pk.events.length) {
+          L.push('**Aznap történt (' + pk.events.length + ' esemény):**');
+          pk.events.slice(-60).forEach(function (e) { L.push('- ' + timeOf(e.created_at) + (e.phase ? ' · ' + e.phase : '') + (e.level === 'error' ? ' · HIBA' : '') + ' — ' + mdOne(e.message, 300)); });
           L.push('');
-        });
-      }
-      if (pk.steps.length) {
-        var ordToTitle = {}; pk.steps.forEach(function (st) { ordToTitle[st.ord] = st.title; });
-        L.push('#### Protokoll: ' + (mdOne(pk.prot && pk.prot.title) || '—') + ' (' + pk.steps.length + ' lépés, ' + pk.steps.filter(function (st) { return !DONE[st.status]; }).length + ' nyitott)', '');
-        if (pk.prot && pk.prot.goal) L.push('**Cél:** ' + mdOne(pk.prot.goal, 3000), '');
-        pk.steps.forEach(function (st) {
-          var sp = st.spec || {};
-          L.push('##### ' + st.ord + '. ' + (mdOne(st.title) || 'Lépés'), '');
-          L.push('`' + (st.kind || 'lépés') + ' · ' + (st.assignee === 'human' ? 'Human' : 'AI') + ' · ' + (st.status || '—') + '`' + (sp.est_minutes ? ' · becsült idő: ' + sp.est_minutes + ' perc' : '') + (st.needs_approval ? ' · ⚠ **Jóváhagyást kér**' : ''));
-          var deps = (st.depends_on || []).map(function (dd) { return dd + '. ' + mdOne(ordToTitle[dd] || '', 60); });
-          if (deps.length) L.push('', '- Függ: ' + deps.join('; '));
-          if (sp.instruction) L.push('', '**Utasítás:**', String(sp.instruction).trim());
-          if (rdList(sp.inputs).length) L.push('', '**Bemenetek:**', rdList(sp.inputs).map(function (t) { return '- ' + t; }).join('\n'));
-          if (rdList(sp.expected_outputs).length) L.push('', '**Elvárt kimenetek:**', rdList(sp.expected_outputs).map(function (t) { return '- ' + t; }).join('\n'));
-          if (rdList(sp.acceptance).length) L.push('', '**Elfogadási kritériumok:**', rdList(sp.acceptance).map(function (t) { return '- ' + t; }).join('\n'));
-          if (sp.command_hint) L.push('', '**Javasolt parancs:**', '```bash', String(sp.command_hint).trim(), '```');
-          var rm = packResultMd(st.result); if (rm) L.push(rm);
+        }
+        var dev = r.config && r.config.develop_idea_id, idea = pk.ideas.filter(function (i) { return i.id === dev; })[0];
+        if (idea) {
+          L.push(hd(4) + 'Kidolgozott kutatási ötlet', '', '- **Kérdés:** ' + mdOne(idea.question, 2000));
+          if (idea.hypothesis) L.push('- **Hipotézis:** ' + mdOne(idea.hypothesis, 2000));
+          if (idea.rationale) L.push('- **Indoklás:** ' + mdOne(idea.rationale, 2000));
           L.push('');
-        });
-      }
+        } else {
+          // older runs did not record which idea they develop → give the agent the project's ideas instead of nothing
+          var plain = pk.ideas.filter(function (i) { return i.source !== 'gap'; });
+          if (plain.length) {
+            L.push(hd(4) + 'A projekt kutatási ötletei (a futás nem rögzítette, melyiket dolgozza ki)', '');
+            plain.slice(0, 8).forEach(function (i, ii) { L.push((ii + 1) + '. **' + mdOne(i.question, 600) + '**' + (i.hypothesis ? '  \n   Hipotézis: ' + mdOne(i.hypothesis, 600) : '')); });
+            L.push('');
+          }
+        }
+        var gapsAll = pk.ideas.filter(function (i) { return i.source === 'gap'; }), gapsMine = gapsAll.filter(function (i) { return r.study_id && i.study_id === r.study_id; });
+        var gaps = gapsMine.length ? gapsMine : gapsAll;
+        if (gaps.length) {
+          L.push(hd(4) + 'Kutatási rések (' + gaps.length + ')', '');
+          gaps.forEach(function (gp, gpi) { L.push((gpi + 1) + '. **' + mdOne(gp.question, 600) + '**' + (gp.gap_type ? ' `' + gp.gap_type + '`' : '') + (gp.novelty != null ? ' · újdonság ' + gp.novelty + '/100' : '') + (gp.rationale ? '  \n   ' + mdOne(gp.rationale, 900) : '')); });
+          L.push('');
+        }
+        if (pk.inc.length) {
+          L.push(hd(4) + 'Beválasztott irodalom (' + pk.inc.length + ' / ' + pk.screened + ' átszűrt)', '');
+          pk.inc.forEach(function (p) {
+            var sr = pk.srcs[p.source_id] || {};
+            var au = Array.isArray(sr.authors) ? sr.authors.map(rdText).slice(0, 6).join(', ') + (sr.authors.length > 6 ? ' et al.' : '') : (sr.authors ? mdOne(sr.authors, 200) : '');
+            L.push('- **[' + sref(p.source_id) + ']** ' + (au ? au + ' ' : '') + (sr.year ? '(' + sr.year + '). ' : '') + '*' + mdOne(sr.title || 'Cím nélkül') + '*' + (sr.venue ? '. ' + mdOne(sr.venue) : '') + (sr.doi ? '. https://doi.org/' + String(sr.doi).replace(/^https?:\/\/(dx\.)?doi\.org\//, '') : (sr.url ? '. ' + sr.url : '')) + (sr.cited_by != null ? ' · ' + sr.cited_by + ' hivatkozás' : ''));
+            if (sr.abstract) L.push('  > ' + mdOne(sr.abstract, 900));
+          });
+          L.push('');
+        }
+        if (pk.review && pk.review.content) {
+          L.push(hd(4) + 'Szisztematikus áttekintés (' + String(pk.review.path || '').split('/').pop() + ')', '');
+          var shift = multi ? 5 : 4;
+          L.push(String(pk.review.content).replace(/^(#{1,6})\s/gm, function (m, gg) { return new Array(Math.min(6, gg.length + shift) + 1).join('#') + ' '; }).trim(), '');
+        }
+        if (pk.exq.length) {
+          L.push(hd(4) + 'Kivonatolt adatok (' + pk.exq.length + ' kérdés)', '');
+          pk.exq.forEach(function (q) {
+            var cs = pk.cells.filter(function (c) { return c.question_id === q.id; });
+            var done = cs.filter(function (c) { return c.status === 'done'; }), na = cs.filter(function (c) { return c.status === 'na'; }).length, err = cs.filter(function (c) { return c.status === 'error'; }).length;
+            L.push('**' + mdOne(q.text) + '** — ' + done.length + ' válasz' + (na ? ' · ' + na + ' cikkben nincs adat' : '') + (err ? ' · ' + err + ' hibás cella' : ''));
+            done.forEach(function (c) { L.push('- [' + sref(c.source_id) + '] ' + mdOne(c.answer, 600) + (c.quote ? ' — „' + mdOne(c.quote, 300) + '”' : '') + (c.location && (c.location.page || c.location.section || c.location.figure) ? ' (' + [c.location.page ? 'o. ' + c.location.page : '', c.location.section || '', c.location.figure || ''].filter(Boolean).join(', ') + ')' : '')); });
+            L.push('');
+          });
+        }
+        if (pk.steps.length) {
+          var ordToTitle = {}; pk.steps.forEach(function (st) { ordToTitle[st.ord] = st.title; });
+          L.push(hd(4) + 'Protokoll: ' + (mdOne(pk.prot && pk.prot.title) || '—') + ' (' + pk.steps.length + ' lépés, ' + pk.steps.filter(function (st) { return !DONE[st.status]; }).length + ' nyitott)', '');
+          if (pk.prot && pk.prot.goal) L.push('**Cél:** ' + mdOne(pk.prot.goal, 3000), '');
+          pk.steps.forEach(function (st) {
+            var sp = st.spec || {};
+            L.push(hd(5) + st.ord + '. ' + (mdOne(st.title) || 'Lépés'), '');
+            L.push('`' + (st.kind || 'lépés') + ' · ' + (st.assignee === 'human' ? 'Human' : 'AI') + ' · ' + (st.status || '—') + '`' + (sp.est_minutes ? ' · becsült idő: ' + sp.est_minutes + ' perc' : '') + (st.needs_approval ? ' · ⚠ **Jóváhagyást kér**' : ''));
+            var deps = (st.depends_on || []).map(function (dd) { return dd + '. ' + mdOne(ordToTitle[dd] || '', 60); });
+            if (deps.length) L.push('', '- Függ: ' + deps.join('; '));
+            if (sp.instruction) L.push('', '**Utasítás:**', String(sp.instruction).trim());
+            if (rdList(sp.inputs).length) L.push('', '**Bemenetek:**', rdList(sp.inputs).map(function (t) { return '- ' + t; }).join('\n'));
+            if (rdList(sp.expected_outputs).length) L.push('', '**Elvárt kimenetek:**', rdList(sp.expected_outputs).map(function (t) { return '- ' + t; }).join('\n'));
+            if (rdList(sp.acceptance).length) L.push('', '**Elfogadási kritériumok:**', rdList(sp.acceptance).map(function (t) { return '- ' + t; }).join('\n'));
+            if (sp.command_hint) L.push('', '**Javasolt parancs:**', '```bash', String(sp.command_hint).trim(), '```');
+            var rm = packResultMd(st.result); if (rm) L.push(rm);
+            L.push('');
+          });
+        }
+      });
     });
     return L.join('\n');
   }
@@ -3689,7 +3708,7 @@
     var slS = useState({}), sel = slS[0], setSel = slS[1];
     var cS = useState({}), carry = cS[0], setCarry = cS[1];             // run_id → { state:'queued'|'running'|'ended', label, msg }
     var orS = useState(null), openRun = orS[0], setOpenRun = orS[1];    // run id shown in the detail drawer
-    var pkS = useState(''), packOwner = pkS[0], setPackOwner = pkS[1];   // researcher chosen for the agent package
+    var pkS = useState(null), packSel = pkS[0], setPackSel = pkS[1];    // agent package: null = every researcher of the day, else {owner_id: true}
     var pbS = useState(false), packBusy = pbS[0], setPackBusy = pbS[1];
     var tS = useState(0), setTick = tS[1];
     var drivers = useRef({}), queue = useRef([]), alive = useRef(true), carryRef = useRef({}), dataRef = useRef(null), monRef = useRef(mon), loadSeq = useRef(0), notesRef = useRef({});
@@ -3746,7 +3765,7 @@
     }
     function setMon(y, m) {
       var d = new Date(y, m, 1), nm = { y: d.getFullYear(), m: d.getMonth() }, n = new Date();
-      monRef.current = nm; setMonRaw(nm); setSel({}); setFilt('all');
+      monRef.current = nm; setMonRaw(nm); setSel({}); setFilt('all'); setPackSel(null);
       setSelDay(n.getFullYear() === nm.y && n.getMonth() === nm.m ? apDay(n) : apDay(d));
       load();
     }
@@ -3887,7 +3906,7 @@
       var flag = flagDay[key] || 0, isSel = selDay === key;
       var label = HU_MONTHS[mon.m] + ' ' + dn + '.: ' + (tot ? tot + ' futás volt aktív' : 'nem volt aktivitás') + (flag ? ', ' + flag + ' itt akadt el' : '');
       return h('button', { key: key, type: 'button', 'data-day': key, className: 'pc-day' + (tot ? '' : ' none') + (isSel ? ' sel' : '') + (key === todayKey ? ' today' : ''), 'aria-pressed': isSel ? 'true' : 'false', 'aria-label': label, title: label,
-        onClick: function () { setSelDay(key); setSel({}); setFilt('all'); } },
+        onClick: function () { setSelDay(key); setSel({}); setFilt('all'); setPackSel(null); } },
         h('span', { className: 'pc-dn' }, dn),
         flag ? h('span', { className: 'pc-flag', 'aria-hidden': 'true' }, flag) : null,
         tot ? h('span', { className: 'pc-cnt' }, tot + ' futás') : null,
@@ -3915,15 +3934,25 @@
     if (!isStuckView) items.forEach(function (r) { dayOwners[r.owner_id] = (dayOwners[r.owner_id] || 0) + 1; });
     function ownerName(id) { var uu = users[id] || {}; return uu.name || (uu.email ? String(uu.email).split('@')[0] : 'ismeretlen'); }
     var ownerIds = Object.keys(dayOwners).sort(function (a, b) { return ownerName(a).localeCompare(ownerName(b), 'hu'); });
-    var packFor = (packOwner && dayOwners[packOwner]) ? packOwner : ownerIds[0];
+    var selOwners = ownerIds.filter(function (id) { return packSel === null || !!packSel[id]; });
+    var allPack = selOwners.length === ownerIds.length;
+    function togglePack(id) {
+      setPackSel(function (cur) {
+        var n = {}; ownerIds.forEach(function (x) { if (cur === null || cur[x]) n[x] = true; });
+        if (n[id]) delete n[id]; else n[id] = true;
+        return n;
+      });
+    }
     function downloadPack() {
-      if (!packFor || packBusy) return;
-      var uu = users[packFor] || {}, list = items.filter(function (r) { return r.owner_id === packFor; });
+      if (!selOwners.length || packBusy) return;
+      var groups = selOwners.map(function (id) { var uu = users[id] || {}; return { owner: uu, uni: canonUni(uu.affiliation), runs: items.filter(function (r) { return r.owner_id === id; }) }; });
+      var nRuns = groups.reduce(function (a, g) { return a + g.runs.length; }, 0);
       setPackBusy(true);
-      apBuildAgentPack({ owner: uu, uni: canonUni(uu.affiliation), day: selDay, runs: list }).then(function (md) {
-        var fname = 'publify-agent-csomag_' + apSlug(ownerName(packFor)) + '_' + selDay + '.md';
+      apBuildAgentPack(groups, selDay).then(function (md) {
+        var who = selOwners.length === 1 ? apSlug(ownerName(selOwners[0])) : (selOwners.length + '-kutato');
+        var fname = 'publify-agent-csomag_' + who + '_' + selDay + '.md';
         apDownload(fname, md);
-        toast('⬇ ' + fname + ' — ' + list.length + ' futás, ' + Math.round(md.length / 1024) + ' KB');
+        toast('⬇ ' + fname + ' — ' + selOwners.length + ' kutató, ' + nRuns + ' futás, ' + Math.round(md.length / 1024) + ' KB');
         if (alive.current) setPackBusy(false);
       }, function (e) { toast('A csomag összeállítása nem sikerült: ' + ((e && e.message) || e), false); if (alive.current) setPackBusy(false); });
     }
@@ -4008,14 +4037,22 @@
         h('div', { className: 'pc-panel' },
           h('div', { className: 'pc-ph' }, h('h2', null, dayTitle), D ? h('span', { className: 'pc-phn' }, items.length + ' futás') : null),
           (!isStuckView && ownerIds.length) ? h('div', { className: 'pc-pack' },
-            h('span', { className: 'pc-pack-l' }, '🤖 Agent-csomag'),
-            ownerIds.length > 1
-              ? h('select', { className: 'pc-sel', value: packFor, 'aria-label': 'Kutató', onChange: function (e) { setPackOwner(e.target.value); } },
-                ownerIds.map(function (id) { return h('option', { key: id, value: id }, ownerName(id) + ' (' + dayOwners[id] + ' futás)'); }))
-              : h('b', null, ownerName(packFor) + ' (' + dayOwners[packFor] + ' futás)'),
-            h('button', { type: 'button', className: 'btn pri sm', disabled: packBusy, onClick: downloadPack,
-              title: 'A kutató aznap aktív futásainak teljes kontextusa, protokollja és eredményei egy .md fájlban, agent-megbízással' }, packBusy ? '⏳ Összeállítás…' : '⬇ Letöltés (.md)'),
-            h('span', { className: 'pc-pack-hint' }, 'Kontextus, irodalom, áttekintés, kivonatolt adatok és a protokoll — megbízással: végrehajtás → folyóirat-választás KPI-ok alapján → kézirat.')) : null,
+            h('div', { className: 'pc-pack-top' },
+              h('span', { className: 'pc-pack-l' }, '🤖 Agent-csomag'),
+              h('span', { className: 'pc-pack-n' }, selOwners.length + ' / ' + ownerIds.length + ' kutató kiválasztva'),
+              ownerIds.length > 1 ? h('button', { type: 'button', className: 'rd-link', onClick: function () { setPackSel(allPack ? {} : null); } }, allPack ? 'Egyik sem' : 'Mind') : null,
+              h('button', { type: 'button', className: 'btn pri sm', disabled: packBusy || !selOwners.length, onClick: downloadPack,
+                title: 'A kiválasztott kutatók aznap aktív futásainak teljes kontextusa, protokollja és eredményei egy .md fájlban, agent-megbízással' },
+                packBusy ? '⏳ Összeállítás…' : ('⬇ Letöltés (.md)' + (selOwners.length > 1 ? ' — ' + selOwners.length + ' kutató' : '')))),
+            h('div', { className: 'pc-pack-users', role: 'group', 'aria-label': 'Kutatók a csomagban' },
+              ownerIds.map(function (id) {
+                var on = selOwners.indexOf(id) >= 0;
+                return h('label', { key: id, className: 'pc-pu' + (on ? ' on' : '') },
+                  h('input', { type: 'checkbox', checked: on, onChange: function () { togglePack(id); } }),
+                  h('span', null, ownerName(id)),
+                  h('em', null, canonUni((users[id] || {}).affiliation) + ' · ' + dayOwners[id] + ' futás'));
+              })),
+            h('span', { className: 'pc-pack-hint' }, 'A kiválasztott kutatók anyaga egy fájlba kerül, kutatónként külön fejezetben: kontextus, irodalom, áttekintés, kivonatolt adatok és protokoll — megbízással: végrehajtás → folyóirat-választás KPI-ok alapján → kézirat, kutatónként külön.')) : null,
           items.length ? h('div', { className: 'st-bar' }, chip('all', 'Mind'), chip('stuck', 'Elakadt'), chip('gate', 'Jóváhagyásra vár'), chip('live', 'Fut'), chip('done', 'Végzett'), pc.cancel ? chip('cancel', 'Leállítva') : null) : null,
           selectable.length ? h('div', { className: 'st-bulk' },
             h('label', { className: 'st-all' }, h('input', { type: 'checkbox', checked: allOn, onChange: function () { if (allOn) setSel({}); else { var n = {}; selectable.forEach(function (r) { n[r.id] = 1; }); setSel(n); } } }), ' Elakadtak (' + selectable.length + ')'),
