@@ -22,6 +22,7 @@
     { key: 'compare', label: 'Version comparison', href: 'Compare.html' },
     { key: 'phd', label: 'Doctoral School', href: 'PhD.html' },
     { key: 'publications', label: 'Publications', href: 'Projects.html' },
+    { key: 'stuck', label: '🛡 Elakadt folyamatok', href: 'Autopilot.html?view=stuck', adminOnly: true },   // admin: every stuck Autopilot run, resumable centrally
     { key: 'admin', label: 'Admin', href: 'Admin.html', adminOnly: true }
   ];
   // nav key → feature_catalog key (migration-49). A nav item is hidden if the user isn't entitled.
@@ -61,7 +62,7 @@
   function pageKey() {
     var p = (location.pathname.split('/').pop() || '').toLowerCase();
     if (p.indexOf('profile') === 0) return 'profile';
-    if (p.indexOf('autopilot') === 0) return 'autopilot';
+    if (p.indexOf('autopilot') === 0) return /[?&]view=stuck\b/.test(location.search) ? 'stuck' : 'autopilot';
     if (p.indexOf('research') === 0) return 'research';
     if (p.indexOf('course') === 0 && p.indexOf('coursecanvas') !== 0) return 'course';
     if (p.indexOf('kanban') === 0) return 'kanban';
@@ -246,7 +247,7 @@
       document.documentElement.classList.toggle('pn-adminview', !!av);
       document.getElementById('pn-left').innerHTML = '<a class="pn-brand" href="' + withAv('Profile.html') + '" title="Open your profile"><span class="pn-mk"><i></i></span>Publify</a>'
         + (av ? '<span class="pn-as">👁 ' + esc(av.name || av.email || '') + '</span>' : '');
-      var SHORT = { profile: 'Profile', research: 'Research', course: 'Kurzus', autopilot: 'Autopilot', kanban: 'Tasks', memory: 'Memory', session: 'Chat', media: 'Media', compare: 'Compare', phd: 'Doctoral', publications: 'Publications', admin: 'Admin' };
+      var SHORT = { profile: 'Profile', research: 'Research', course: 'Kurzus', autopilot: 'Autopilot', stuck: '🛡 Elakadt', kanban: 'Tasks', memory: 'Memory', session: 'Chat', media: 'Media', compare: 'Compare', phd: 'Doctoral', publications: 'Publications', admin: 'Admin' };
       var barNav = LINKS.filter(function (l) { return linkVisible(l, admin) && (!l.newOnly || newd); }).map(function (l) {
         return '<a href="' + withAv(l.href) + '"' + (l.key === here ? ' class="on" aria-current="page"' : '') + '>' + esc(SHORT[l.key] || l.label) + '</a>';
       }).join('');

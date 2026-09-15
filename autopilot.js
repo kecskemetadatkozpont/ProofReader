@@ -3483,6 +3483,15 @@
     // defaults injected at runtime, which is why they could not be deleted.
     var cfgS = useState({ tier: TIERS[0], maxPapers: '500', phases: PHASES.map(function (ph) { return !ph[3]; }), extractQuestions: EXTRACT_DEFAULTS.map(function (q) { return { text: q.text, answer_type: q.answer_type, source_mode: q.source_mode }; }) }), cfg = cfgS[0], setCfg = cfgS[1];   // WIP phases default OFF
 
+    // The admin role arrives AFTER first paint (backend.js fetches the profile, then fires 'pr-profile'). Re-render on it,
+    // or admin-only entry points (the "🛡 Elakadt folyamatok" link) never appear for an admin.
+    var atS = useState(0), setAppTick = atS[1];
+    useEffect(function () {
+      function onProf() { setAppTick(function (x) { return x + 1; }); }
+      window.addEventListener('pr-profile', onProf);
+      return function () { window.removeEventListener('pr-profile', onProf); };
+    }, []);
+
     function refreshIdeas(pid, markIds) {
       ideasPid.current = pid;
       // the brief lists the CANDIDATE ideas: gaps (source='gap') belong to the Research Gap phase, rejected ones are gone
