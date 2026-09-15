@@ -873,7 +873,12 @@
     }
     // run the next small batch of PENDING cells (the funnel already filled the rest inline), then persist progress
     var batch = pending.slice(idx, idx + EXTRACT_BATCH);
-    return Promise.all(batch.map(function (pair) { return callEdge('research-extract', { action: 'run_cell', question_id: pair[0], source_id: pair[1] }).then(function (d) { return d; }, function () { return null; }); })).then(function () {
+    return Promise.all(batch.map(function (pair) { return callEdge('research-extract', { action: 'run_cell', question_id: pair[0], source_id: pair[1] }).then(function (d) { return d; }, function () { return null; }); })).then(function (res) {
+      // Every cell of the batch failed on the AI CALL itself (e.g. "credit balance is too low"): that is not a per-paper
+      // result. Throw → the driver retries this same batch, then fails the run with the real message (it used to write
+      // "AI nem adott értelmezhető választ" cells and keep going).
+      var aiErrs = (res || []).map(function (d) { return d && d.ai_error; }).filter(Boolean);
+      if (batch.length && aiErrs.length === batch.length) throw new Error('Kivonatolás: ' + aiErrs[0]);
       var nidx = idx + batch.length;
       return apStay(run, Object.assign({}, cur, { idx: nidx, iter: (cur.iter || 0) + 1 }), [{ phase: 'extract', level: 'run', message: 'Kivonatolás: ' + Math.min(nidx, total) + '/' + total + ' hiányzó cella' }]);
     });

@@ -85,7 +85,20 @@
   function cacheProfiles() { try { localStorage.setItem('proofreader:profiles', JSON.stringify(PROFILES)); } catch (e) { } }
 
   function cleanUrl() { return location.href.split('#')[0].split('?')[0]; }
-  function rebootInto(url) { if (sessionStorage.getItem('pr_reboot') === '2') return; sessionStorage.setItem('pr_reboot', '2'); location.replace(url || cleanUrl()); }
+  // Reboot target that KEEPS the page's own query (?run=, ?view=, ?project=…) and drops only the auth round-trip
+  // parameters. Rebooting into cleanUrl() stripped the whole query, so a deep link opened in a browser without a
+  // cached user landed on the page's default view. (OAuth/email redirectTo still use cleanUrl — allow-listed URLs.)
+  var AUTH_QUERY = ['code', 'state', 'error', 'error_code', 'error_description', 'access_token', 'refresh_token', 'expires_in', 'expires_at', 'token_type', 'token_hash', 'provider_token', 'provider_refresh_token'];
+  function bootUrl() {
+    try {
+      var u = new URL(location.href);
+      if (u.searchParams.has('token_hash')) u.searchParams.delete('type');   // email-OTP links pair type with token_hash
+      AUTH_QUERY.forEach(function (k) { u.searchParams.delete(k); });
+      var q = u.searchParams.toString();
+      return u.origin + u.pathname + (q ? '?' + q : '');
+    } catch (e) { return cleanUrl(); }
+  }
+  function rebootInto(url) { if (sessionStorage.getItem('pr_reboot') === '2') return; sessionStorage.setItem('pr_reboot', '2'); location.replace(url || bootUrl()); }
 
   function signInWithGoogle() {
     localStorage.removeItem(MODE_KEY);
@@ -182,7 +195,7 @@
       if (/(?:^|[#&])type=recovery/.test(location.hash || '')) { try { sb.realtime.setAuth(s.access_token); } catch (e) { } showRecovery(); return; }
       try { sb.realtime.setAuth(s.access_token); } catch (e) { }   // RLS-protected realtime (postgres_changes) needs the user JWT, not the anon key
       var u = userFromSession(s); if (u) writeMyUser(u);
-      if (mode !== 'cloud') { rebootInto(cleanUrl()); return; }   // pending/signin → become cloud
+      if (mode !== 'cloud') { rebootInto(bootUrl()); return; }   // pending/signin → become cloud
       sessionStorage.removeItem('pr_reboot');
       if (u && me) { me = Object.assign(me, u); PROFILES[me.id] = me; }
       ensureProfile(me);
@@ -199,7 +212,7 @@
       }).catch(function () { });
     } else {
       // no real session
-      if (mode === 'cloud') { clearMyUser(); rebootInto(cleanUrl()); return; }   // stale cache → sign out
+      if (mode === 'cloud') { clearMyUser(); rebootInto(bootUrl()); return; }   // stale cache → sign out
       if (mode === 'pending') { showSigninError(authErr || 'Sign-in didn’t complete. Please try again.'); }
     }
   }).catch(function (e) {
@@ -209,7 +222,7 @@
   sb.auth.onAuthStateChange(function (event, session) {
     if (session && session.access_token) { try { sb.realtime.setAuth(session.access_token); } catch (e) { } }   // keep realtime authed across token refreshes
     if (event === 'PASSWORD_RECOVERY') { showRecovery(); return; }   // arrived via the reset-password email link
-    if (event === 'SIGNED_IN' && session) { writeMyUser(userFromSession(session)); if (mode !== 'cloud') rebootInto(cleanUrl()); }
+    if (event === 'SIGNED_IN' && session) { writeMyUser(userFromSession(session)); if (mode !== 'cloud') rebootInto(bootUrl()); }
     if (event === 'SIGNED_OUT') { clearMyUser(); }
   });
 
@@ -350,7 +363,7 @@
       var b = this; b.disabled = true; b.textContent = 'Saving…';
       sb.auth.updateUser({ password: v }).then(function (r) {
         if (r && r.error) { b.disabled = false; b.textContent = 'Set password'; err(r.error.message); return; }
-        rebootInto(cleanUrl());
+        rebootInto(bootUrl());
       }, function (er) { b.disabled = false; b.textContent = 'Set password'; err((er && er.message) || 'Could not set the password.'); });
     };
   }

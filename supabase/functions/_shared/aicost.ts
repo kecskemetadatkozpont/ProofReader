@@ -24,17 +24,21 @@ export function logAiCost(
       p_model: String(opts.model || '?').slice(0, 80),
       p_in: inTok,
       p_out: outTok,
+      // ALWAYS name p_user (null on a normal user call — the SQL pins those to auth.uid() anyway). The live DB has
+      // BOTH overloads (5-arg migration-113 + 6-arg migration-115), and a call WITHOUT p_user is ambiguous for
+      // PostgREST (PGRST203) → nothing was recorded, and the swallowed error hid it: almost every cost row was lost.
+      // Naming it resolves to the 6-arg function; only if that one is missing (PGRST202) do we fall back to 5 args.
+      p_user: opts.user_id ?? null,
     };
-    // p_user only exists after migration-115. Sending it UNCONDITIONALLY made every call resolve to a
-    // non-existent 6-arg signature (PGRST202) — and the fail-open handler hid that ALL cost logging had
-    // stopped. So: only the service-role path sends it, and it falls back to the 5-arg call if 115 is missing.
-    if (opts.user_id) args.p_user = opts.user_id;
     sb.rpc('ai_cost_log', args).then((r: any) => {
-      if (r && r.error && args.p_user !== undefined) {
+      if (!r || !r.error) return;
+      if (r.error.code === 'PGRST202') {
         const rest = Object.assign({}, args); delete rest.p_user;
-        sb.rpc('ai_cost_log', rest).then(() => {}, () => {});
+        sb.rpc('ai_cost_log', rest).then((r2: any) => { if (r2 && r2.error) console.warn('[aicost] ai_cost_log (5-arg) failed:', r2.error.code, r2.error.message); }, () => {});
+      } else {
+        console.warn('[aicost] ai_cost_log failed:', r.error.code, r.error.message);   // fail-open, but never silent again
       }
-    }, () => {});   // never affect the request
+    }, (e: any) => { console.warn('[aicost] ai_cost_log threw:', String(e)); });   // never affect the request
   } catch { /* never affect the request */ }
 }
 

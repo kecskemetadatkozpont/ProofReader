@@ -124,14 +124,17 @@ Rules:
       }];
       if (pdfBlock) content.push(pdfBlock);
 
-      let parsed: any = null;
-      try { parsed = parseObj(await callClaude(sb, model, sys, content, 900)); } catch (e) { parsed = null; }
+      // An API failure (credit, rate limit, overload, network) is NOT "the model gave an unreadable answer": keep the
+      // real message on the cell, and report it as ai_error so the Autopilot can stop instead of filling error cells.
+      let parsed: any = null, aiErr = '', aiText = '';
+      try { aiText = await callClaude(sb, model, sys, content, 900); } catch (e) { aiErr = String((e as any)?.message || e).slice(0, 300); }
+      if (!aiErr) { try { parsed = parseObj(aiText); } catch { parsed = null; } }
 
       const nowIso = new Date().toISOString();
       const fingerprint = await sha256([q.text, sourceId, model, q.source_mode].join('|'));
       let row: any;
       if (!parsed) {
-        row = { answer: null, quote: null, location: { basis }, confidence: 'na', status: 'error', error: 'AI nem adott értelmezhető választ', model, fingerprint, updated_at: nowIso };
+        row = { answer: null, quote: null, location: { basis }, confidence: 'na', status: 'error', error: aiErr ? ('AI-hiba: ' + aiErr) : 'AI nem adott értelmezhető választ', model, fingerprint, updated_at: nowIso };
       } else if (!parsed.found) {
         row = { answer: null, quote: null, location: { basis }, confidence: 'na', status: 'na', error: null, model, fingerprint, updated_at: nowIso };
       } else {
@@ -148,7 +151,7 @@ Rules:
         .upsert(Object.assign({ question_id: questionId, source_id: sourceId, project_id: q.project_id }, row), { onConflict: 'question_id,source_id' })
         .select('*').maybeSingle();
       if (upErr) return json({ error: 'cell save failed: ' + upErr.message }, 500);
-      return json({ ok: true, cell: up, basis });
+      return json(aiErr ? { ok: true, cell: up, basis, ai_error: aiErr } : { ok: true, cell: up, basis });
     }
 
     return json({ error: 'unknown action: ' + action }, 400);
