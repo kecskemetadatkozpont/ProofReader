@@ -677,6 +677,36 @@
     );
   }
 
+  // ---------- 🛡 stuck Autopilot runs → the central resume page (Autopilot.html?view=stuck) ----------
+  // The resume itself lives on the Autopilot page: the pipeline is client-driven, and only that page loads the phase steppers.
+  function StuckRunsCard() {
+    var sS = useState(null), s = sS[0], setS = sS[1];
+    useEffect(function () {
+      sb.from('research_autopilot_runs').select('status,driver_beat,updated_at').in('status', ['running', 'failed', 'paused', 'awaiting_approval']).limit(1000).then(function (r) {
+        if (r && r.error) { setS({ err: r.error.message }); return; }
+        var c = { failed: 0, orphan: 0, gate: 0, paused: 0, live: 0 }, now = Date.now();
+        ((r && r.data) || []).forEach(function (x) {
+          if (x.status === 'failed') c.failed++;
+          else if (x.status === 'paused') c.paused++;
+          else if (x.status === 'awaiting_approval') c.gate++;
+          else { var b = Date.parse(x.driver_beat || x.updated_at || 0); if (!b || now - b > 180000) c.orphan++; else c.live++; }   // same 3-min rule as the page
+        });
+        setS(c);
+      }, function () { setS({ err: 'hálózati hiba' }); });
+    }, []);
+    var attn = s && !s.err ? s.failed + s.orphan + s.gate + s.paused : 0;
+    return h(React.Fragment, null,
+      h('div', { className: 'sec-h' }, h('h2', null, '🛡 Elakadt Autopilot-folyamatok'),
+        (s && !s.err && attn) ? h('span', { className: 'count' }, attn + ' figyelmet igényel') : null,
+        h('a', { className: 'btn', href: 'Autopilot.html?view=stuck', style: { marginLeft: 'auto', textDecoration: 'none' } }, 'Megnyitás és folytatás →')),
+      s === null ? h('div', { className: 'panel', style: { padding: 14, color: 'var(--muted)' } }, 'Betöltés…')
+        : s.err ? h('div', { className: 'panel', style: { padding: 14, color: 'var(--muted)' } }, 'Nem sikerült betölteni: ' + s.err)
+          : h('div', { className: 'stats' },
+            [['Hibára futott', s.failed, true], ['Senki nem futtatja', s.orphan, true], ['Jóváhagyásra vár', s.gate, true], ['Szüneteltetve', s.paused, false], ['Fut most', s.live, false]].map(function (it) {
+              return h('div', { key: it[0], className: 'stat' + (it[2] && it[1] ? ' alert' : '') }, h('div', { className: 'n' }, it[1]), h('div', { className: 'l' }, it[0]));
+            })));
+  }
+
   // ---------- 💰 AI cost / token report (migration-113) ----------
   // Reads the is_admin()-gated aggregate RPCs (ai_cost_summary / _by_user / _by_project). Graceful when the
   // migration isn't applied yet (RPC errors → "apply migration-113" notice). Real-time: every AI edge logs each call.
@@ -1042,6 +1072,7 @@
           reviewReqs.length ? h('div', { className: 'stat alert' }, h('div', { className: 'n' }, reviewReqs.length), h('div', { className: 'l' }, 'Függő review-k')) : null
         ),
 
+        h(StuckRunsCard, null),
         h(GlobalTaskBoard, { profiles: profiles }),
         h(AiCostReport, null),
 
