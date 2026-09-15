@@ -3272,9 +3272,227 @@
     return page(0);
   }
 
+  // ======================================================================= AGENT PACKAGE (admin → another agent)
+  // One researcher's day in ONE markdown file: every run that was active that day with its full context (project, chosen
+  // idea, gaps, included literature with abstracts, the review, the extraction matrix, the protocol with specs and results
+  // so far) plus a brief that tells an agent to (A) execute the protocol with evidence, (B) pick a journal by its KPIs,
+  // (C) write the manuscript for that journal from verified results only.
+  function apDownload(name, text) {
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([text], { type: 'text/markdown;charset=utf-8' }));
+    a.download = name; document.body.appendChild(a); a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+  }
+  function apSlug(x) { return String(x || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'kutato'; }
+  function mdCell(v) { return String(v == null ? '' : v).replace(/\|/g, '\\|').replace(/\s*\n\s*/g, ' '); }
+  function mdOne(v, cap) { var t = String(v || '').trim().replace(/\s*\n+\s*/g, ' '); return cap && t.length > cap ? t.slice(0, cap) + '…' : t; }
+  var PACK_BRIEF = [
+    '## 1. Megbízás az agentnek',
+    '',
+    'Kutatási agent vagy. Ez a csomag {NAME} Publify-projektjeinek a(z) {DAY} napon aktív futásait tartalmazza, teljes kontextussal: a kutatási célt, a kidolgozott ötletet és a kutatási réseket, a beválasztott irodalmat (absztraktokkal), a szisztematikus áttekintést, a kivonatolt adatokat és a végrehajtandó protokollt, a már elkészült eredményekkel együtt.',
+    '',
+    'A feladatod három részből áll, ebben a sorrendben.',
+    '',
+    '### A) Hajtsd végre a protokollt',
+    '1. Minden projektnél először olvasd el a kontextust, a kidolgozott ötletet és a réseket. A lépések csak ebben a keretben értelmezhetők.',
+    '2. A lépéseket a „Függ” mező szerinti sorrendben hajtsd végre. A kész lépések eredményét használd fel, ne ismételd meg őket — de ellenőrizd az artefaktumaikat: a futtató önbevallása („sikeres”) önmagában nem bizonyíték.',
+    '3. Egy lépés akkor kész, ha teljesülnek az **Elfogadási kritériumai**. Kritériumonként mutass konkrét bizonyítékot (fájl, szám, ábra, log). Ami nem teljesül, azt írd le, és ne jelentsd késznek.',
+    '4. **Ne találj ki adatot, eredményt vagy hivatkozást.** Ha egy bemenet (adat, fájl, hozzáférés) hiányzik, a lépés *blokkolt*: írd le, mi kell hozzá, és haladj tovább azokkal a lépésekkel, amelyek nem függenek tőle.',
+    '5. A „Jóváhagyást kér” jelölésű lépések előtt állj meg, és kérj jóváhagyást. A „Human” felelősű lépéseket ne szimuláld: készítsd elő mindazt, amire a kutatónak szüksége lesz.',
+    '',
+    '### B) Válassz folyóiratot a KPI-ok alapján',
+    '1. A **ténylegesen elért** eredmények és a téma alapján állíts össze 3–5 jelöltet. A csomagban szereplő folyóirat-jelölteket is értékeld.',
+    '2. Minden jelöltnél gyűjtsd össze, és forrással igazold (a folyóirat honlapja, Scimago/SJR, Scopus CiteScore, Clarivate JCR, DOAJ) a KPI-okat: kvartilis (SJR és JCR), impakt faktor, CiteScore, elfogadási arány, az első döntésig eltelt idő, a megjelenésig eltelt idő, APC és open access modell, indexelés, valamint a scope-illeszkedés (aims & scope).',
+    '3. Válaszd ki a legjobbat, és indokold egy táblázatban. Ne a legmagasabb impaktot hajszold: olyan folyóiratot válassz, amely a témához illik, és ahol az eredmények erőssége és újdonsága alapján reális az elfogadás. Ha az eredmények gyengék vagy hiányosak, ezt mondd ki, és ennek megfelelő szintet javasolj.',
+    '',
+    '### C) Írd meg a kéziratot a kiválasztott folyóiratnak',
+    '1. Keresd meg és kövesd a folyóirat aktuális szerzői útmutatóját: cikktípus, szerkezet, terjedelmi és absztrakt-korlátok, hivatkozási stílus, ábrák és táblázatok formai követelményei, kötelező nyilatkozatok (adat-elérhetőség, érdekütközés, finanszírozás, generatív AI használata), highlights és graphical abstract, ha kérik.',
+    '2. **Kizárólag az A) részben igazolt eredményekre építs.** Minden szám, ábra és állítás legyen visszavezethető egy protokoll-lépés kimenetére. Ami blokkolt maradt, az korlát vagy jövőbeli munka, nem eredmény.',
+    '3. A hivatkozásokat a csomag forráslistájából vedd ([S#] azonosítók), a DOI-t ellenőrizve. Új forrást csak ellenőrizhető DOI-val adj hozzá.',
+    '4. A kutatási rést és az újdonságot a csomag rés-kártyái és a szisztematikus áttekintés alapján fogalmazd meg, és jelöld, mit tesz hozzá a munka az irodalomhoz.',
+    '5. A kézirat nyelve a folyóirat nyelve (jellemzően angol). A szerzőket, affiliációkat és a finanszírozást ne találd ki: hagyj helyőrzőt, és vedd fel a nyitott kérdések közé.',
+    '',
+    '### Leadandó',
+    '1. `01_protokoll_jelentes.md` — lépésenként: állapot (kész / részben kész / blokkolt), mit csináltál, bizonyíték kritériumonként, eltérések, blokkolók.',
+    '2. `02_folyoirat_valasztas.md` — a jelöltek KPI-táblázata forrásokkal, a választás indoklása és a kizárt jelöltek oka.',
+    '3. `03_kezirat/` — a kézirat a folyóirat formátumában (a folyóirat LaTeX- vagy Word-sablonjával), ábrák, táblázatok, hivatkozáslista.',
+    '4. `04_cover_letter.md` — kísérőlevél a szerkesztőnek.',
+    '5. `05_reprodukcio/` — kód, környezet, futtatási parancsok, és hogy melyik eredmény melyik lépésből származik.',
+    '6. `06_nyitott_kerdesek.md` — amit a kutatónak kell eldöntenie vagy pótolnia (adat, jóváhagyás, szerzők, finanszírozás, etikai engedély).'
+  ].join('\n');
+  function packResultMd(res) {
+    if (!res || typeof res !== 'object') return '';
+    var o = [];
+    if (res.summary) o.push(String(res.summary).trim());
+    if (res.metrics && typeof res.metrics === 'object' && Object.keys(res.metrics).length) o.push('- Metrikák: `' + JSON.stringify(res.metrics).slice(0, 1500) + '`');
+    if (res.acceptance_check) o.push('- Kritérium-ellenőrzés: ' + (typeof res.acceptance_check === 'string' ? res.acceptance_check : '`' + JSON.stringify(res.acceptance_check).slice(0, 1500) + '`'));
+    if (res.deviations && (typeof res.deviations === 'string' ? res.deviations.trim() : rdList(res.deviations).length)) o.push('- Eltérések: ' + (typeof res.deviations === 'string' ? res.deviations : rdList(res.deviations).join('; ')));
+    if (rdList(res.artifacts).length) o.push('- Artefaktumok: ' + rdList(res.artifacts).slice(0, 30).join(', '));
+    if (rdList(res.figures).length) o.push('- Ábrák: ' + rdList(res.figures).slice(0, 20).join(', '));
+    if (res.verdict && res.verdict.verdict) o.push('- Független ellenőrzés (bíró-modell): ' + res.verdict.verdict + (res.verdict.total != null ? ' (' + res.verdict.total + '/100)' : ''));
+    if (res.error) o.push('- Hiba: ' + String(res.error).slice(0, 600));
+    if (res.report) o.push('', '<details><summary>Futtatói jelentés</summary>', '', String(res.report).slice(0, 5000), '', '</details>');
+    // an empty / bookkeeping-only result object must NOT read as "this step already has a result"
+    if (!o.length) return '';
+    return ['', '**Eddigi eredmény' + (res.ok === true ? ' (a futtató szerint sikeres — ellenőrizendő)' : res.ok === false ? ' (a futtató szerint sikertelen)' : '') + ':**'].concat(o).join('\n');
+  }
+  function apBuildAgentPack(o) {
+    function P(q) { return q ? Promise.resolve(q).then(function (v) { return v; }, function () { return null; }) : Promise.resolve(null); }
+    var dp = o.day.split('-'), d0 = new Date(+dp[0], +dp[1] - 1, +dp[2]), d1 = new Date(+dp[0], +dp[1] - 1, +dp[2] + 1);
+    var runs = o.runs.slice().sort(function (a, b) { return String(a.project_id).localeCompare(String(b.project_id)) || String(a.created_at || '').localeCompare(String(b.created_at || '')); });
+    var pids = runs.map(function (r) { return r.project_id; }).filter(function (x, i, a) { return x && a.indexOf(x) === i; });
+    return Promise.all([
+      P(sb.from('research_projects').select('*').in('id', pids)),
+      P(sb.from('research_journal_picks').select('*').in('project_id', pids))
+    ]).then(function (base) {
+      var projects = {}; ((base[0] && base[0].data) || []).forEach(function (p) { projects[p.id] = p; });
+      var picks = (base[1] && base[1].data) || [];
+      return Promise.all(runs.map(function (r) {
+        var sid = r.study_id, s8 = String(sid || '').slice(0, 8);
+        return Promise.all([
+          P(sb.from('research_autopilot_events').select('created_at,phase,level,message').eq('run_id', r.id).gte('created_at', d0.toISOString()).lt('created_at', d1.toISOString()).order('id', { ascending: true }).limit(500)),
+          P(sb.from('research_ideas').select('id,question,hypothesis,rationale,novelty,source,gap_type,study_id').eq('project_id', r.project_id).neq('status', 'rejected').order('created_at', { ascending: true }).limit(200)),
+          sid ? apFetchAll(function () { return sb.from('research_study_papers').select('id,source_id,step,decision,overridden').eq('study_id', sid).order('id', { ascending: true }); }).then(null, function () { return []; }) : Promise.resolve([]),
+          P(sid ? sb.from('research_files').select('path,content,updated_at').eq('project_id', r.project_id).ilike('path', 'studies/%-' + s8 + '-review.md').order('updated_at', { ascending: false }).limit(1) : null),
+          P(sid ? sb.from('research_extraction_questions').select('id,text,ord').eq('study_id', sid).order('ord', { ascending: true }) : null),
+          P(r.protocol_id ? sb.from('research_protocols').select('id,title,goal,status').eq('id', r.protocol_id).maybeSingle() : null),
+          P(r.protocol_id ? sb.from('research_protocol_steps').select('id,ord,title,kind,status,assignee,needs_approval,depends_on,spec,result').eq('protocol_id', r.protocol_id).order('ord', { ascending: true }) : null)
+        ]).then(function (x) {
+          var deep = {};
+          (x[2] || []).forEach(function (p) { var c = deep[p.source_id]; if (!c || (p.step || 0) >= (c.step || 0)) deep[p.source_id] = p; });
+          var inc = Object.keys(deep).map(function (k) { return deep[k]; }).filter(function (p) { return p.decision === 'include' || (p.overridden && p.decision !== 'exclude'); });
+          var ids = inc.map(function (p) { return p.source_id; }), exq = (x[4] && x[4].data) || [], jobs = [];
+          for (var i = 0; i < ids.length; i += 100) jobs.push(P(sb.from('research_sources').select('id,title,authors,year,venue,doi,url,abstract,cited_by').in('id', ids.slice(i, i + 100))));
+          var cq = exq.length ? P(sb.from('research_extraction_cells').select('question_id,source_id,status,answer,quote,location').in('question_id', exq.map(function (q) { return q.id; }))) : Promise.resolve(null);
+          return Promise.all([Promise.all(jobs), cq]).then(function (y) {
+            var srcs = {}; y[0].forEach(function (res) { ((res && res.data) || []).forEach(function (sr) { srcs[sr.id] = sr; }); });
+            return { run: r, events: (x[0] && x[0].data) || [], ideas: (x[1] && x[1].data) || [], inc: inc, screened: Object.keys(deep).length, srcs: srcs,
+              review: ((x[3] && x[3].data) || [])[0] || null, exq: exq, cells: (y[1] && y[1].data) || [], prot: x[5] && x[5].data, steps: (x[6] && x[6].data) || [] };
+          });
+        });
+      })).then(function (packs) { return packRender(o, projects, picks, packs); });
+    });
+  }
+  function packRender(o, projects, picks, packs) {
+    var DONE = { done: 1, skipped: 1 }, sNum = {}, sN = 0, now = Date.now();
+    function sref(id) { if (!sNum[id]) sNum[id] = 'S' + (++sN); return sNum[id]; }
+    packs.forEach(function (pk) { pk.inc.forEach(function (p) { sref(p.source_id); }); });
+    var nSteps = 0, nOpen = 0;
+    packs.forEach(function (pk) { pk.steps.forEach(function (st) { nSteps++; if (!DONE[st.status]) nOpen++; }); });
+    var dp = o.day.split('-'), dayLong = new Date(+dp[0], +dp[1] - 1, +dp[2]).toLocaleDateString('hu-HU', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' });
+    var name = (o.owner && o.owner.name) || 'a kutató', L = [];
+    L.push('# Publify — agent-csomag: ' + name, '');
+    L.push('> Kutató: **' + name + '** · ' + (o.uni || '—') + '  ', '> Nap: **' + dayLong + '** · Készült: ' + new Date().toLocaleString('hu-HU') + '  ',
+      '> Tartalom: ' + packs.length + ' Autopilot-futás · ' + Object.keys(projects).length + ' projekt · ' + nSteps + ' protokoll-lépés (' + nOpen + ' nyitott) · ' + sN + ' beválasztott forrás', '');
+    L.push(PACK_BRIEF.replace('{NAME}', name).replace('{DAY}', dayLong), '');
+    L.push('## 2. Összesítő', '', '| Projekt | Futás | Állapot most | Fázis most | Beválasztott forrás | Protokoll-lépés (nyitott / összes) |', '|---|---|---|---|---:|---:|');
+    packs.forEach(function (pk) {
+      var r = pk.run, ph = (r.phases || [])[r.phase_index] || {}, open = pk.steps.filter(function (st) { return !DONE[st.status]; }).length;
+      L.push('| ' + mdCell((projects[r.project_id] || {}).title || 'Projekt') + ' | ' + r.id.slice(0, 8) + ' | ' + KIND_LAB[nowKind(r, now)] + ' | ' + mdCell(ph.label || ph.key || '—') + ' | ' + pk.inc.length + ' | ' + open + ' / ' + pk.steps.length + ' |');
+    });
+    L.push('');
+    var curProj = null, secN = 2;
+    packs.forEach(function (pk) {
+      var r = pk.run, proj = projects[r.project_id] || {};
+      if (r.project_id !== curProj) {
+        curProj = r.project_id; secN++;
+        L.push('---', '', '## ' + secN + '. Projekt: ' + (mdOne(proj.title) || 'Projekt'), '');
+        if (proj.goal) L.push('- **Cél / kutatási irány:** ' + mdOne(proj.goal, 4000));
+        if (proj.field) L.push('- **Terület:** ' + mdOne(proj.field));
+        if (proj.keywords && proj.keywords.length) L.push('- **Kulcsszavak:** ' + proj.keywords.join(', '));
+        if (proj.language) L.push('- **Projekt nyelve:** ' + proj.language);
+        L.push('- **Publify:** ' + location.href.replace(/[?#].*$/, '').replace(/[^/]*$/, '') + 'Research.html?project=' + proj.id);
+        var jp = picks.filter(function (x) { return x.project_id === r.project_id; });
+        if (jp.length) {
+          L.push('', '**A projektben már felmerült folyóirat-jelöltek** (értékeld őket a B) részben):');
+          jp.forEach(function (x) { L.push('- ' + mdOne(x.title || x.name || x.journal_title || x.journal || JSON.stringify(x).slice(0, 200)) + (x.issn ? ' (ISSN ' + x.issn + ')' : '') + (x.note || x.reason ? ' — ' + mdOne(x.note || x.reason, 300) : '')); });
+        }
+        L.push('');
+      }
+      var ph = (r.phases || [])[r.phase_index] || {};
+      L.push('### Autopilot-futás ' + r.id.slice(0, 8) + ' — ' + KIND_LAB[nowKind(r, now)] + ' (' + (ph.label || ph.key || '—') + ')', '');
+      if (r.status === 'failed' && r.error) L.push('> Hiba: ' + mdOne(r.error, 500), '');
+      if (r.status === 'awaiting_approval' && r.gate) L.push('> Döntésre vár: **' + mdOne(r.gate.title) + '** — ' + mdOne(r.gate.detail, 400), '');
+      L.push('**Fázisok:**');
+      (r.phases || []).filter(function (x) { return x.enabled !== false && x.status !== 'wip'; }).forEach(function (x) { L.push('- ' + (x.label || x.key) + ': ' + (PH_ST[x.status] || x.status) + (x.result ? ' — ' + mdOne(x.result, 300) : '')); });
+      L.push('');
+      if (pk.events.length) {
+        L.push('**Aznap történt (' + pk.events.length + ' esemény):**');
+        pk.events.slice(-60).forEach(function (e) { L.push('- ' + timeOf(e.created_at) + (e.phase ? ' · ' + e.phase : '') + (e.level === 'error' ? ' · HIBA' : '') + ' — ' + mdOne(e.message, 300)); });
+        L.push('');
+      }
+      var dev = r.config && r.config.develop_idea_id, idea = pk.ideas.filter(function (i) { return i.id === dev; })[0];
+      if (idea) {
+        L.push('#### Kidolgozott kutatási ötlet', '', '- **Kérdés:** ' + mdOne(idea.question, 2000));
+        if (idea.hypothesis) L.push('- **Hipotézis:** ' + mdOne(idea.hypothesis, 2000));
+        if (idea.rationale) L.push('- **Indoklás:** ' + mdOne(idea.rationale, 2000));
+        L.push('');
+      } else {
+        // older runs did not record which idea they develop → give the agent the project's ideas instead of nothing
+        var plain = pk.ideas.filter(function (i) { return i.source !== 'gap'; });
+        if (plain.length) {
+          L.push('#### A projekt kutatási ötletei (a futás nem rögzítette, melyiket dolgozza ki)', '');
+          plain.slice(0, 8).forEach(function (i, ii) { L.push((ii + 1) + '. **' + mdOne(i.question, 600) + '**' + (i.hypothesis ? '  \n   Hipotézis: ' + mdOne(i.hypothesis, 600) : '')); });
+          L.push('');
+        }
+      }
+      var gapsAll = pk.ideas.filter(function (i) { return i.source === 'gap'; }), gapsMine = gapsAll.filter(function (i) { return r.study_id && i.study_id === r.study_id; });
+      var gaps = gapsMine.length ? gapsMine : gapsAll;
+      if (gaps.length) {
+        L.push('#### Kutatási rések (' + gaps.length + ')', '');
+        gaps.forEach(function (g, gi) { L.push((gi + 1) + '. **' + mdOne(g.question, 600) + '**' + (g.gap_type ? ' `' + g.gap_type + '`' : '') + (g.novelty != null ? ' · újdonság ' + g.novelty + '/100' : '') + (g.rationale ? '  \n   ' + mdOne(g.rationale, 900) : '')); });
+        L.push('');
+      }
+      if (pk.inc.length) {
+        L.push('#### Beválasztott irodalom (' + pk.inc.length + ' / ' + pk.screened + ' átszűrt)', '');
+        pk.inc.forEach(function (p) {
+          var sr = pk.srcs[p.source_id] || {};
+          var au = Array.isArray(sr.authors) ? sr.authors.map(rdText).slice(0, 6).join(', ') + (sr.authors.length > 6 ? ' et al.' : '') : (sr.authors ? mdOne(sr.authors, 200) : '');
+          L.push('- **[' + sref(p.source_id) + ']** ' + (au ? au + ' ' : '') + (sr.year ? '(' + sr.year + '). ' : '') + '*' + mdOne(sr.title || 'Cím nélkül') + '*' + (sr.venue ? '. ' + mdOne(sr.venue) : '') + (sr.doi ? '. https://doi.org/' + String(sr.doi).replace(/^https?:\/\/(dx\.)?doi\.org\//, '') : (sr.url ? '. ' + sr.url : '')) + (sr.cited_by != null ? ' · ' + sr.cited_by + ' hivatkozás' : ''));
+          if (sr.abstract) L.push('  > ' + mdOne(sr.abstract, 900));
+        });
+        L.push('');
+      }
+      if (pk.review && pk.review.content) {
+        L.push('#### Szisztematikus áttekintés (' + String(pk.review.path || '').split('/').pop() + ')', '');
+        L.push(String(pk.review.content).replace(/^(#{1,6})\s/gm, function (m, g) { return new Array(Math.min(6, g.length + 4) + 1).join('#') + ' '; }).trim(), '');
+      }
+      if (pk.exq.length) {
+        L.push('#### Kivonatolt adatok (' + pk.exq.length + ' kérdés)', '');
+        pk.exq.forEach(function (q) {
+          var cs = pk.cells.filter(function (c) { return c.question_id === q.id; });
+          var done = cs.filter(function (c) { return c.status === 'done'; }), na = cs.filter(function (c) { return c.status === 'na'; }).length, err = cs.filter(function (c) { return c.status === 'error'; }).length;
+          L.push('**' + mdOne(q.text) + '** — ' + done.length + ' válasz' + (na ? ' · ' + na + ' cikkben nincs adat' : '') + (err ? ' · ' + err + ' hibás cella' : ''));
+          done.forEach(function (c) { L.push('- [' + sref(c.source_id) + '] ' + mdOne(c.answer, 600) + (c.quote ? ' — „' + mdOne(c.quote, 300) + '”' : '') + (c.location && (c.location.page || c.location.section || c.location.figure) ? ' (' + [c.location.page ? 'o. ' + c.location.page : '', c.location.section || '', c.location.figure || ''].filter(Boolean).join(', ') + ')' : '')); });
+          L.push('');
+        });
+      }
+      if (pk.steps.length) {
+        var ordToTitle = {}; pk.steps.forEach(function (st) { ordToTitle[st.ord] = st.title; });
+        L.push('#### Protokoll: ' + (mdOne(pk.prot && pk.prot.title) || '—') + ' (' + pk.steps.length + ' lépés, ' + pk.steps.filter(function (st) { return !DONE[st.status]; }).length + ' nyitott)', '');
+        if (pk.prot && pk.prot.goal) L.push('**Cél:** ' + mdOne(pk.prot.goal, 3000), '');
+        pk.steps.forEach(function (st) {
+          var sp = st.spec || {};
+          L.push('##### ' + st.ord + '. ' + (mdOne(st.title) || 'Lépés'), '');
+          L.push('`' + (st.kind || 'lépés') + ' · ' + (st.assignee === 'human' ? 'Human' : 'AI') + ' · ' + (st.status || '—') + '`' + (sp.est_minutes ? ' · becsült idő: ' + sp.est_minutes + ' perc' : '') + (st.needs_approval ? ' · ⚠ **Jóváhagyást kér**' : ''));
+          var deps = (st.depends_on || []).map(function (dd) { return dd + '. ' + mdOne(ordToTitle[dd] || '', 60); });
+          if (deps.length) L.push('', '- Függ: ' + deps.join('; '));
+          if (sp.instruction) L.push('', '**Utasítás:**', String(sp.instruction).trim());
+          if (rdList(sp.inputs).length) L.push('', '**Bemenetek:**', rdList(sp.inputs).map(function (t) { return '- ' + t; }).join('\n'));
+          if (rdList(sp.expected_outputs).length) L.push('', '**Elvárt kimenetek:**', rdList(sp.expected_outputs).map(function (t) { return '- ' + t; }).join('\n'));
+          if (rdList(sp.acceptance).length) L.push('', '**Elfogadási kritériumok:**', rdList(sp.acceptance).map(function (t) { return '- ' + t; }).join('\n'));
+          if (sp.command_hint) L.push('', '**Javasolt parancs:**', '```bash', String(sp.command_hint).trim(), '```');
+          var rm = packResultMd(st.result); if (rm) L.push(rm);
+          L.push('');
+        });
+      }
+    });
+    return L.join('\n');
+  }
+
   // ---- Admin run detail: what the run produced so far, and — at a gate — EXACTLY what an approval signs off ----
   var PH_ST = { done: '✓ kész', running: '⟳ fut', gate: '⏸ döntésre vár', wait: 'vár', pending: 'vár', skipped: 'kihagyva', failed: '✕ hiba' };
-  function rdText(x) { return (x && typeof x === 'object') ? (x.name || x.title || x.text || JSON.stringify(x)) : String(x == null ? '' : x); }
+  function rdText(x) { return (x && typeof x === 'object') ? (x.name || x.title || x.text || x.path || x.file || JSON.stringify(x)) : String(x == null ? '' : x); }
   function rdList(v) { return (Array.isArray(v) ? v : (v ? [v] : [])).map(rdText).filter(function (x) { return x.trim(); }); }
   function RunDetail(props) {
     var r = props.run, u = props.user || {}, p = props.project || {};
@@ -3471,6 +3689,8 @@
     var slS = useState({}), sel = slS[0], setSel = slS[1];
     var cS = useState({}), carry = cS[0], setCarry = cS[1];             // run_id → { state:'queued'|'running'|'ended', label, msg }
     var orS = useState(null), openRun = orS[0], setOpenRun = orS[1];    // run id shown in the detail drawer
+    var pkS = useState(''), packOwner = pkS[0], setPackOwner = pkS[1];   // researcher chosen for the agent package
+    var pbS = useState(false), packBusy = pbS[0], setPackBusy = pbS[1];
     var tS = useState(0), setTick = tS[1];
     var drivers = useRef({}), queue = useRef([]), alive = useRef(true), carryRef = useRef({}), dataRef = useRef(null), monRef = useRef(mon), loadSeq = useRef(0), notesRef = useRef({});
     function patchCarry(id, p) { setCarry(function (m) { var n = Object.assign({}, m); n[id] = Object.assign({}, n[id] || {}, p); carryRef.current = n; return n; }); }
@@ -3690,6 +3910,23 @@
     var selectable = shown.filter(function (r) { var k = stuckKind(r, now), c = carry[r.id]; return k && k !== 'live' && k !== 'gate' && !(c && c.state !== 'ended'); });   // gates: one by one, after reading them
     var selList = selectable.filter(function (r) { return sel[r.id]; });
     var allOn = selectable.length > 0 && selList.length === selectable.length;
+    // agent package: one researcher's whole day (every run of theirs that was active that day)
+    var dayOwners = {};
+    if (!isStuckView) items.forEach(function (r) { dayOwners[r.owner_id] = (dayOwners[r.owner_id] || 0) + 1; });
+    function ownerName(id) { var uu = users[id] || {}; return uu.name || (uu.email ? String(uu.email).split('@')[0] : 'ismeretlen'); }
+    var ownerIds = Object.keys(dayOwners).sort(function (a, b) { return ownerName(a).localeCompare(ownerName(b), 'hu'); });
+    var packFor = (packOwner && dayOwners[packOwner]) ? packOwner : ownerIds[0];
+    function downloadPack() {
+      if (!packFor || packBusy) return;
+      var uu = users[packFor] || {}, list = items.filter(function (r) { return r.owner_id === packFor; });
+      setPackBusy(true);
+      apBuildAgentPack({ owner: uu, uni: canonUni(uu.affiliation), day: selDay, runs: list }).then(function (md) {
+        var fname = 'publify-agent-csomag_' + apSlug(ownerName(packFor)) + '_' + selDay + '.md';
+        apDownload(fname, md);
+        toast('⬇ ' + fname + ' — ' + list.length + ' futás, ' + Math.round(md.length / 1024) + ' KB');
+        if (alive.current) setPackBusy(false);
+      }, function (e) { toast('A csomag összeállítása nem sikerült: ' + ((e && e.message) || e), false); if (alive.current) setPackBusy(false); });
+    }
     var dayTitle = isStuckView ? 'Most elakadt futások' : (function () { var p = selDay.split('-'); return new Date(+p[0], +p[1] - 1, +p[2]).toLocaleDateString('hu-HU', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' }); })();
 
     function chip(key, lab) {
@@ -3770,6 +4007,15 @@
           data && data.err ? h('div', { className: 'pc-err' }, 'Nem sikerült betölteni: ' + data.err) : null),
         h('div', { className: 'pc-panel' },
           h('div', { className: 'pc-ph' }, h('h2', null, dayTitle), D ? h('span', { className: 'pc-phn' }, items.length + ' futás') : null),
+          (!isStuckView && ownerIds.length) ? h('div', { className: 'pc-pack' },
+            h('span', { className: 'pc-pack-l' }, '🤖 Agent-csomag'),
+            ownerIds.length > 1
+              ? h('select', { className: 'pc-sel', value: packFor, 'aria-label': 'Kutató', onChange: function (e) { setPackOwner(e.target.value); } },
+                ownerIds.map(function (id) { return h('option', { key: id, value: id }, ownerName(id) + ' (' + dayOwners[id] + ' futás)'); }))
+              : h('b', null, ownerName(packFor) + ' (' + dayOwners[packFor] + ' futás)'),
+            h('button', { type: 'button', className: 'btn pri sm', disabled: packBusy, onClick: downloadPack,
+              title: 'A kutató aznap aktív futásainak teljes kontextusa, protokollja és eredményei egy .md fájlban, agent-megbízással' }, packBusy ? '⏳ Összeállítás…' : '⬇ Letöltés (.md)'),
+            h('span', { className: 'pc-pack-hint' }, 'Kontextus, irodalom, áttekintés, kivonatolt adatok és a protokoll — megbízással: végrehajtás → folyóirat-választás KPI-ok alapján → kézirat.')) : null,
           items.length ? h('div', { className: 'st-bar' }, chip('all', 'Mind'), chip('stuck', 'Elakadt'), chip('gate', 'Jóváhagyásra vár'), chip('live', 'Fut'), chip('done', 'Végzett'), pc.cancel ? chip('cancel', 'Leállítva') : null) : null,
           selectable.length ? h('div', { className: 'st-bulk' },
             h('label', { className: 'st-all' }, h('input', { type: 'checkbox', checked: allOn, onChange: function () { if (allOn) setSel({}); else { var n = {}; selectable.forEach(function (r) { n[r.id] = 1; }); setSel(n); } } }), ' Elakadtak (' + selectable.length + ')'),
