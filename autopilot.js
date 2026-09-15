@@ -3250,46 +3250,289 @@
     if (sec < 90) return 'most'; if (sec < 3600) return Math.round(sec / 60) + ' perce'; if (sec < 172800) return Math.round(sec / 3600) + ' órája';
     return Math.round(sec / 86400) + ' napja';
   }
+  // ---- Folyamat-naptár helpers ----
+  var HU_MONTHS = ['január', 'február', 'március', 'április', 'május', 'június', 'július', 'augusztus', 'szeptember', 'október', 'november', 'december'];
+  var HU_WD = ['H', 'K', 'Sze', 'Cs', 'P', 'Szo', 'V'];
+  var KIND_ORDER = ['failed', 'orphan', 'gate', 'paused', 'live', 'done', 'cancel'];
+  var KIND_LAB = { failed: 'Hibára futott', orphan: 'Senki nem futtatja', gate: 'Jóváhagyásra vár', paused: 'Szüneteltetve', live: 'Fut', done: 'Végzett', cancel: 'Leállítva' };
+  function apDay(x) { var d = x instanceof Date ? x : new Date(x); return isNaN(d) ? '' : d.toLocaleDateString('sv-SE'); }   // LOCAL YYYY-MM-DD
+  function nowKind(r, now) { var k = stuckKind(r, now); return k || (r.status === 'done' ? 'done' : 'cancel'); }
+  function timeOf(x) { try { return new Date(x).toLocaleTimeString('hu-HU', { hour: '2-digit', minute: '2-digit' }); } catch (e) { return ''; } }
+  // affiliation is free text ("Széchenyi István University, Hungary" / "Széchenyi István Egyetem (SZE)" …) → one key per school
+  function canonUni(a) {
+    var s = String(a || '').trim(); if (!s) return '— nincs megadva —';
+    var f = s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+    if (f.indexOf('szechenyi') >= 0) return 'Széchenyi István Egyetem (SZE)';
+    if (f.indexOf('neumann') >= 0) return 'Neumann János Egyetem (NJE)';
+    return s.replace(/\s+[—–-]\s+dem[oó].*$/i, '').replace(/,\s*(hungary|magyarország)\s*$/i, '').trim() || s;
+  }
+  function apFetchAll(mk) {   // PostgREST caps a response at 1000 rows → page until a short page
+    var out = [];
+    function page(from) { return mk().range(from, from + 999).then(function (r) { if (r && r.error) throw r.error; var d = (r && r.data) || []; out = out.concat(d); return d.length === 1000 ? page(from + 1000) : out; }); }
+    return page(0);
+  }
+
+  // ---- Admin run detail: what the run produced so far, and — at a gate — EXACTLY what an approval signs off ----
+  var PH_ST = { done: '✓ kész', running: '⟳ fut', gate: '⏸ döntésre vár', wait: 'vár', pending: 'vár', skipped: 'kihagyva', failed: '✕ hiba' };
+  function rdText(x) { return (x && typeof x === 'object') ? (x.name || x.title || x.text || JSON.stringify(x)) : String(x == null ? '' : x); }
+  function rdList(v) { return (Array.isArray(v) ? v : (v ? [v] : [])).map(rdText).filter(function (x) { return x.trim(); }); }
+  function RunDetail(props) {
+    var r = props.run, u = props.user || {}, p = props.project || {};
+    var dS = useState(null), d = dS[0], setD = dS[1];
+    var rvS = useState(false), showRev = rvS[0], setShowRev = rvS[1];
+    var closeRef = useRef(null);
+    useEffect(function () {
+      function onKey(e) { if (e.key === 'Escape') props.onClose(); }
+      window.addEventListener('keydown', onKey);
+      try { if (closeRef.current) closeRef.current.focus(); } catch (e) { }
+      return function () { window.removeEventListener('keydown', onKey); };
+    }, []);
+    useEffect(function () {
+      var live = true, sid = r.study_id, pid = r.project_id, s8 = String(sid || '').slice(0, 8);
+      function P(q) { return q ? Promise.resolve(q).then(function (v) { return v; }, function () { return null; }) : Promise.resolve(null); }
+      function merge(patch) { if (live) setD(function (old) { return Object.assign({}, (old && !old.err) ? old : {}, patch); }); }
+      // 1) the fast part first — protocol steps, events, review, ideas — so a protocol gate is readable at once
+      Promise.all([
+        P(sb.from('research_autopilot_events').select('id,created_at,phase,level,message').eq('run_id', r.id).order('id', { ascending: false }).limit(60)),
+        P(r.protocol_id ? sb.from('research_protocol_steps').select('id,ord,title,kind,status,assignee,needs_approval,spec').eq('protocol_id', r.protocol_id).order('ord', { ascending: true }) : null),
+        P(r.protocol_id ? sb.from('research_protocols').select('id,title,goal,status').eq('id', r.protocol_id).maybeSingle() : null),
+        P(sid ? sb.from('research_files').select('id,path,content,updated_at').eq('project_id', pid).ilike('path', 'studies/%-' + s8 + '-review.md').order('updated_at', { ascending: false }).limit(1) : null),
+        P(sb.from('research_ideas').select('id,question,novelty,source,study_id,created_at').eq('project_id', pid).neq('status', 'rejected').order('created_at', { ascending: false }).limit(80)),
+        P(sid ? sb.from('research_extraction_questions').select('id,text').eq('study_id', sid) : null)
+      ]).then(function (res) {
+        var exq = (res[5] && res[5].data) || [];
+        merge({ events: (res[0] && res[0].data) || [], steps: (res[1] && res[1].data) || [], prot: res[2] && res[2].data, review: ((res[3] && res[3].data) || [])[0] || null,
+          ideas: (res[4] && res[4].data) || [], exq: exq, papersLoading: !!sid, inc: [], maybe: [], exc: 0, screened: 0, srcs: {}, cells: {} });
+        // 2) the heavy part — every screening decision of the study (can be thousands of rows) + titles + extraction cells
+        return Promise.all([
+          sid ? apFetchAll(function () { return sb.from('research_study_papers').select('id,source_id,step,decision,overridden,reason,score').eq('study_id', sid).order('id', { ascending: true }); }).then(null, function () { return []; }) : Promise.resolve([]),
+          exq.length ? P(sb.from('research_extraction_cells').select('status').in('question_id', exq.map(function (q) { return q.id; }))) : Promise.resolve(null)
+        ]).then(function (r2) {
+          // the SAME include rule the pipeline uses: a paper counts by its DEEPEST screening step (override wins unless excluded)
+          var deep = {};
+          (r2[0] || []).forEach(function (x) { var c = deep[x.source_id]; if (!c || (x.step || 0) >= (c.step || 0)) deep[x.source_id] = x; });
+          var inc = [], maybe = [], exc = 0;
+          Object.keys(deep).forEach(function (k) { var x = deep[k]; if (x.decision === 'include' || (x.overridden && x.decision !== 'exclude')) inc.push(x); else if (x.decision === 'maybe') maybe.push(x); else exc++; });
+          maybe.sort(function (a, b) { return (b.score || 0) - (a.score || 0); });
+          var cc = {}; ((r2[1] && r2[1].data) || []).forEach(function (c) { cc[c.status] = (cc[c.status] || 0) + 1; });
+          var want = inc.slice(0, 40).concat(maybe.slice(0, 8)).map(function (x) { return x.source_id; });
+          return (want.length ? P(sb.from('research_sources').select('id,title,year,venue,url').in('id', want)) : Promise.resolve(null)).then(function (r3) {
+            var srcs = {}; ((r3 && r3.data) || []).forEach(function (x) { srcs[x.id] = x; });
+            merge({ inc: inc, maybe: maybe, exc: exc, screened: Object.keys(deep).length, srcs: srcs, cells: cc, papersLoading: false });
+          });
+        });
+      }).then(null, function (e) { if (live) setD({ err: (e && e.message) || String(e) }); });
+      return function () { live = false; };
+    }, [r.id, r.status, r.phase_index, r.protocol_id, r.study_id]);
+
+    var k = stuckKind(r, Date.now()), meta = STUCK_META[k] || null;
+    var ph = (r.phases || [])[r.phase_index] || {}, gate = r.status === 'awaiting_approval' ? (r.gate || {}) : null;
+    var ok = d && !d.err;
+    function srcLi(x) {
+      var sr = (d.srcs || {})[x.source_id] || {};
+      return h('li', { key: x.source_id, className: 'rd-src' },
+        sr.url ? h('a', { href: sr.url, target: '_blank', rel: 'noopener' }, sr.title || 'Forrás') : h('b', null, sr.title || 'Forrás'),
+        [sr.year, sr.venue].filter(Boolean).length ? h('span', { className: 'rd-sub' }, [sr.year, sr.venue].filter(Boolean).join(' · ')) : null,
+        x.reason ? h('span', { className: 'rd-why' }, String(x.reason).slice(0, 240)) : null);
+    }
+    function kv(label, items) { return items.length ? h('div', { className: 'rd-kv' }, h('span', null, label), h('ul', null, items.map(function (t, i) { return h('li', { key: i }, t); }))) : null; }
+    function stepCard(st, open) {
+      var sp = st.spec || {};
+      return h('details', { key: st.id, className: 'rd-step' + (st.needs_approval ? ' need' : ''), open: open },
+        h('summary', null,
+          h('span', { className: 'rd-ord' }, st.ord + '.'), h('b', null, st.title || 'Lépés'),
+          st.needs_approval ? h('span', { className: 'st-pill gate' }, 'Jóváhagyást kér') : null,
+          h('span', { className: 'rd-sub' }, [st.kind, st.assignee === 'human' ? 'Human' : 'AI', sp.est_minutes ? sp.est_minutes + ' perc' : null, st.status].filter(Boolean).join(' · '))),
+        sp.instruction ? h('p', { className: 'rd-p' }, String(sp.instruction)) : null,
+        kv('Bemenetek', rdList(sp.inputs)), kv('Elvárt kimenetek', rdList(sp.expected_outputs)), kv('Elfogadási kritériumok', rdList(sp.acceptance)),
+        sp.command_hint ? h('div', { className: 'rd-kv' }, h('span', null, 'Javasolt parancs'), h('code', { className: 'rd-code' }, String(sp.command_hint))) : null);
+    }
+    function approvalNote() {
+      if (!ok || !gate) return '';
+      if (gate.phase === 'protocol') return d.steps.filter(function (x) { return x.needs_approval; }).slice(0, 3).map(function (x) { return x.ord + '. ' + x.title; }).join('; ');
+      return d.inc.length + ' beválasztott cikkel';
+    }
+    function decision() {
+      if (!gate) return null;
+      var body, canApprove = true, why = null;
+      if (!d) body = h('div', { className: 'rd-load' }, h('span', { className: 'spin' }), ' A döntés tárgyának betöltése…');
+      else if (d.err) { body = h('div', { className: 'rd-err' }, 'Nem sikerült betölteni: ' + d.err); canApprove = false; }
+      else if (gate.phase === 'protocol') {
+        var need = d.steps.filter(function (x) { return x.needs_approval; }), rest = d.steps.filter(function (x) { return !x.needs_approval; });
+        body = h('div', { className: 'rd-col' },
+          d.prot ? h('div', { className: 'rd-sub' }, 'Protokoll: ', h('b', null, d.prot.title || '—'), ' · ' + d.steps.length + ' lépés') : null,
+          need.length ? h('div', { className: 'rd-steps' }, need.map(function (x) { return stepCard(x, true); }))
+            : h('div', { className: 'rd-sub' }, 'Nem található jóváhagyást kérő lépés — lehet, hogy közben valaki jóváhagyta.'),
+          rest.length ? h('details', { className: 'rd-more' }, h('summary', null, 'A protokoll többi lépése (' + rest.length + ')'), h('div', { className: 'rd-steps' }, rest.map(function (x) { return stepCard(x, false); }))) : null);
+      } else if ((gate.phase === 'literature' || gate.phase === 'sr' || gate.phase === 'extract') && d.papersLoading) {
+        body = h('div', { className: 'rd-load' }, h('span', { className: 'spin' }), ' A szűrési döntések betöltése…'); canApprove = false;
+      } else if (gate.phase === 'literature' || gate.phase === 'sr' || gate.phase === 'extract') {
+        canApprove = d.inc.length > 0;
+        if (!canApprove) why = 'Nincs beválasztott cikk, így jóváhagyás után a futás ugyanitt újra megállna. Előbb a projekt Irodalom kártyáján („Bírálat ›”) kell kézzel bevenni cikkeket.';
+        body = h('div', { className: 'rd-col' },
+          h('div', { className: 'rd-counts' }, h('span', null, h('b', null, d.inc.length), ' beválasztva'), h('span', null, h('b', null, d.maybe.length), ' talán'), h('span', null, h('b', null, d.exc), ' kizárva'), h('span', null, h('b', null, d.screened), ' átszűrve')),
+          d.inc.length ? h('div', null, h('div', { className: 'rd-lab' }, 'Jóváhagyással ezekkel a cikkekkel megy tovább'), h('ol', { className: 'rd-srcs' }, d.inc.slice(0, 40).map(srcLi)), d.inc.length > 40 ? h('div', { className: 'rd-sub' }, '…és még ' + (d.inc.length - 40)) : null)
+            : d.maybe.length ? h('div', null, h('div', { className: 'rd-lab' }, 'A legesélyesebb „talán” jelöltek — ezek közül lehet kézzel bevenni'), h('ol', { className: 'rd-srcs' }, d.maybe.slice(0, 8).map(srcLi))) : null);
+      } else body = h('div', { className: 'rd-sub' }, 'Ehhez a döntési ponthoz nincs részletező nézet — nézd meg a futás dashboardján.');
+      return h('section', { className: 'rd-card decide', 'aria-label': 'Erről döntesz' },
+        h('div', { className: 'rd-lab' }, 'Erről döntesz'),
+        h('h3', null, gate.title || 'Jóváhagyás'),
+        gate.detail ? h('p', { className: 'rd-sub' }, gate.detail) : null,
+        body,
+        why ? h('div', { className: 'rd-warn' }, why) : null,
+        h('div', { className: 'rd-acts' },
+          h('button', { type: 'button', className: 'btn pri sm', disabled: !ok || !canApprove || props.busy, onClick: function () { props.onResume(r, approvalNote()); } }, '✓ Jóváhagyom és folytatom'),
+          h('a', { className: 'btn sm', href: 'Research.html?project=' + encodeURIComponent(r.project_id), target: '_blank', rel: 'noopener' }, 'Megnyitás a Research-ben ↗')));
+    }
+    function stalled() {
+      if (!meta || !meta.act || k === 'gate') return null;
+      var lastEv = ok && d.events[0];
+      return h('section', { className: 'rd-card' },
+        h('div', { className: 'rd-lab' }, 'Miért áll'),
+        h('p', { className: 'rd-p' }, k === 'failed' ? (r.error || 'Ismeretlen hiba')
+          : k === 'orphan' ? ('Utolsó életjel: ' + agoHu(r.driver_beat || r.updated_at) + '. A futás „fut” állapotú, de a tulajdonos lapja nincs nyitva, így senki nem viszi tovább.')
+            : 'A tulajdonos szüneteltette.'),
+        lastEv ? h('div', { className: 'rd-sub' }, 'Utolsó esemény (' + timeOf(lastEv.created_at) + '): ' + lastEv.message) : null,
+        h('div', { className: 'rd-acts' }, h('button', { type: 'button', className: 'btn pri sm', disabled: props.busy, onClick: function () { props.onResume(r, ''); } }, meta.act)));
+    }
+    function phaseExtra(key) {
+      if (!ok) return null;
+      if (key === 'ideas') {
+        var dev = r.config && r.config.develop_idea_id, idea = d.ideas.filter(function (i) { return i.id === dev; })[0];
+        return h('div', { className: 'rd-sub' }, d.ideas.filter(function (i) { return i.source !== 'gap'; }).length + ' ötlet a projektben' + (idea ? ' · kidolgozásra kiválasztva: „' + String(idea.question || '').slice(0, 200) + '”' : ''));
+      }
+      if (key === 'literature' && d.papersLoading) return h('div', { className: 'rd-sub' }, 'Szűrési adatok betöltése…');
+      if (key === 'literature') return d.screened ? h('div', { className: 'rd-sub' }, d.screened + ' cikk átszűrve · ' + d.inc.length + ' beválasztva' + (d.inc.length ? ': ' + d.inc.slice(0, 3).map(function (x) { return '„' + String(((d.srcs[x.source_id] || {}).title) || '').slice(0, 70) + '”'; }).join(', ') + (d.inc.length > 3 ? '…' : '') : '')) : null;
+      if (key === 'sr') return d.review ? h('div', null,
+        h('button', { type: 'button', className: 'rd-link', 'aria-expanded': showRev ? 'true' : 'false', onClick: function () { setShowRev(!showRev); } }, (showRev ? '▾ ' : '▸ ') + 'Az áttekintés szövege (' + String(d.review.content || '').split(/\s+/).filter(Boolean).length + ' szó)'),
+        showRev ? h('div', { className: 'rd-rev report-doc', dangerouslySetInnerHTML: { __html: mdSafe(d.review.content || '') } }) : null) : null;
+      if (key === 'extract') return d.exq.length ? h('div', { className: 'rd-sub' }, d.exq.length + ' kérdés · ' + (d.cells.done || 0) + ' kitöltött · ' + (d.cells.na || 0) + ' nincs adat · ' + (d.cells.error || 0) + ' hibás cella') : null;
+      if (key === 'gap') {
+        var all = d.ideas.filter(function (i) { return i.source === 'gap'; }), mine = all.filter(function (i) { return r.study_id && i.study_id === r.study_id; });
+        var gaps = mine.length ? mine : all;
+        return gaps.length ? h('ul', { className: 'rd-mini' }, gaps.slice(0, 6).map(function (g) { return h('li', { key: g.id }, String(g.question || '').slice(0, 200)); })) : null;
+      }
+      if (key === 'protocol' && d.steps.length) {
+        var na = d.steps.filter(function (x) { return x.needs_approval; }).length;
+        return h('div', null,
+          h('div', { className: 'rd-sub' }, (d.prot && d.prot.title ? '„' + d.prot.title + '” · ' : '') + d.steps.length + ' lépés' + (na ? ' · ' + na + ' jóváhagyást kér' : '')),
+          (gate && gate.phase === 'protocol') ? null : h('details', { className: 'rd-more' }, h('summary', null, 'Lépések megnyitása'), h('div', { className: 'rd-steps' }, d.steps.map(function (x) { return stepCard(x, false); }))));
+      }
+      return null;
+    }
+    function results() {
+      var phs = (r.phases || []).filter(function (x) { return x.enabled !== false && x.status !== 'wip'; });
+      return h('section', { className: 'rd-card' },
+        h('div', { className: 'rd-lab' }, 'Eredmények fázisonként'),
+        !d ? h('div', { className: 'rd-load' }, h('span', { className: 'spin' }), ' Betöltés…') : null,
+        h('ol', { className: 'rd-phases' }, phs.map(function (x) {
+          return h('li', { key: x.key, className: 'rd-ph s-' + x.status },
+            h('div', { className: 'rd-ph-h' }, h('span', null, AP_ICON[x.key] || '•'), h('b', null, x.label || x.key), h('span', { className: 'rd-ph-st' }, PH_ST[x.status] || x.status)),
+            x.result ? h('div', { className: 'rd-sub' }, String(x.result)) : null,
+            (x.status === 'done' || x.status === 'gate' || x.status === 'running') ? phaseExtra(x.key) : null);
+        })));
+    }
+    function events() {
+      var ev = ok ? d.events : [];
+      return h('section', { className: 'rd-card' },
+        h('div', { className: 'rd-lab' }, 'Eseménynapló' + (ev.length ? ' — legutóbbi ' + ev.length : '')),
+        !d ? h('div', { className: 'rd-load' }, h('span', { className: 'spin' })) : ev.length ? h('ol', { className: 'rd-evs' }, ev.map(function (e) {
+          return h('li', { key: e.id, className: 'lv-' + e.level },
+            h('time', null, new Date(e.created_at).toLocaleString('hu-HU', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })),
+            h('span', null, (e.phase ? (AP_ICON[e.phase] || '') + ' ' : '') + e.message));
+        })) : h('div', { className: 'rd-sub' }, 'Nincs esemény.'));
+    }
+    var c = props.carry;
+    return h('div', { className: 'rd-scrim', onMouseDown: function (e) { if (e.target === e.currentTarget) props.onClose(); } },
+      h('aside', { className: 'rd-drawer', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'A futás részletei' },
+        h('div', { className: 'rd-head' },
+          h('div', { className: 'rd-hl' },
+            meta ? h('span', { className: 'st-pill ' + meta.cls }, meta.lab) : h('span', { className: 'st-pill ' + (r.status === 'done' ? 'ok' : 'mute') }, r.status === 'done' ? '✓ Végzett' : r.status === 'cancelled' ? 'Leállítva' : r.status),
+            h('h2', null, p.title || 'Projekt'),
+            h('div', { className: 'rd-sub' }, (u.name || '—') + ' · ' + canonUni(u.affiliation) + ' · most: ' + (AP_ICON[ph.key] || '') + ' ' + (ph.label || ph.key || '—'))),
+          h('button', { type: 'button', className: 'rd-x', ref: closeRef, 'aria-label': 'Bezárás', onClick: props.onClose }, '×')),
+        h('div', { className: 'rd-body' },
+          c ? h('div', { className: 'st-live' + (c.state === 'ended' ? ' end' : ''), role: 'status' }, c.state !== 'ended' ? h('span', { className: 'spin' }) : null, c.label ? h('b', null, c.label) : null, h('span', null, c.msg || '')) : null,
+          decision(), stalled(), results(), events(),
+          h('div', { className: 'rd-foot' }, h('a', { className: 'btn sm', href: 'Autopilot.html?run=' + encodeURIComponent(r.id), target: '_blank', rel: 'noopener' }, 'A futás dashboardja ↗')))));
+  }
+
+  // Calendar view of the Autopilot: a day cell = the runs that had ACTIVITY that day (their event log — not created/updated
+  // spans, which would paint idle days between a stall and a resume), coloured by each run's state NOW; a red badge marks
+  // runs that stalled that day. The day panel lists those runs with what happened that day, and resumes the stuck ones.
   function StuckCenter() {
-    var dS = useState(null), data = dS[0], setData = dS[1];     // null = loading | {err} | {rows, users, projects, last}
-    var fS = useState('attn'), filt = fS[0], setFilt = fS[1];
+    var t0 = new Date();
+    var mS = useState({ y: t0.getFullYear(), m: t0.getMonth() }), mon = mS[0], setMonRaw = mS[1];
+    var sdS = useState(apDay(t0)), selDay = sdS[0], setSelDay = sdS[1];   // 'YYYY-MM-DD' | 'stuck' (every stuck run, any day)
+    var dS = useState(null), data = dS[0], setData = dS[1];             // null | {err} | {runs, users, projects, byDay}
+    var fS = useState('all'), filt = fS[0], setFilt = fS[1];
+    var unS = useState(''), uni = unS[0], setUni = unS[1];
     var qS = useState(''), q = qS[0], setQ = qS[1];
     var slS = useState({}), sel = slS[0], setSel = slS[1];
-    var cS = useState({}), carry = cS[0], setCarry = cS[1];     // run_id → { state:'queued'|'running'|'ended', label, msg }
+    var cS = useState({}), carry = cS[0], setCarry = cS[1];             // run_id → { state:'queued'|'running'|'ended', label, msg }
+    var orS = useState(null), openRun = orS[0], setOpenRun = orS[1];    // run id shown in the detail drawer
     var tS = useState(0), setTick = tS[1];
-    var drivers = useRef({}), queue = useRef([]), alive = useRef(true), carryRef = useRef({}), dataRef = useRef(null);
+    var drivers = useRef({}), queue = useRef([]), alive = useRef(true), carryRef = useRef({}), dataRef = useRef(null), monRef = useRef(mon), loadSeq = useRef(0), notesRef = useRef({});
     function patchCarry(id, p) { setCarry(function (m) { var n = Object.assign({}, m); n[id] = Object.assign({}, n[id] || {}, p); carryRef.current = n; return n; }); }
     function adminName() { return (BE && BE.user && (BE.user.name || BE.user.email)) || 'admin'; }
     function carrying() { return Object.keys(carryRef.current).filter(function (id) { var c = carryRef.current[id]; return c && c.state !== 'ended'; }).length; }
 
     function load() {
-      var keepIds = Object.keys(carryRef.current);   // runs this tab touched stay listed even after they finish
-      var qs = [sb.from('research_autopilot_runs').select('*').in('status', ['running', 'failed', 'paused', 'awaiting_approval']).order('updated_at', { ascending: false }).limit(500)];
-      if (keepIds.length) qs.push(sb.from('research_autopilot_runs').select('*').in('id', keepIds));
-      return Promise.all(qs).then(function (res) {
-        if (res[0] && res[0].error) throw res[0].error;
-        var byId = {}; res.forEach(function (x) { ((x && x.data) || []).forEach(function (r) { byId[r.id] = r; }); });
-        var runs = Object.keys(byId).map(function (k) { return byId[k]; });
-        var oids = {}, pids = {}; runs.forEach(function (r) { oids[r.owner_id] = 1; pids[r.project_id] = 1; });
-        var rids = runs.map(function (r) { return r.id; }).slice(0, 150);
-        return Promise.all([
-          Object.keys(oids).length ? sb.from('profiles').select('id,name,email,affiliation').in('id', Object.keys(oids)) : { data: [] },
-          Object.keys(pids).length ? sb.from('research_projects').select('id,title').in('id', Object.keys(pids)) : { data: [] },
-          rids.length ? sb.from('research_autopilot_events').select('run_id,created_at,level,message').in('run_id', rids).order('created_at', { ascending: false }).limit(1500) : { data: [] }
-        ]).then(function (r2) {
-          var users = {}, projects = {}, last = {};
-          ((r2[0] && r2[0].data) || []).forEach(function (u) { users[u.id] = u; });
-          ((r2[1] && r2[1].data) || []).forEach(function (p) { projects[p.id] = p; });
-          ((r2[2] && r2[2].data) || []).forEach(function (e) { if (!last[e.run_id]) last[e.run_id] = e; });
-          if (!alive.current) return;
-          dataRef.current = { rows: runs, users: users, projects: projects, last: last };
-          setData(dataRef.current);
+      var seq = ++loadSeq.current, y = monRef.current.y, m = monRef.current.m;
+      var fromD = new Date(y, m, 1), toD = new Date(y, m + 1, 1), from = fromD.toISOString(), to = toD.toISOString();
+      var keepIds = Object.keys(carryRef.current);
+      return Promise.all([
+        apFetchAll(function () { return sb.from('research_autopilot_events').select('id,run_id,created_at,phase,level,message').gte('created_at', from).lt('created_at', to).order('id', { ascending: true }); }),
+        sb.from('research_autopilot_runs').select('*').in('status', ['running', 'failed', 'paused', 'awaiting_approval']).limit(500),
+        sb.from('research_autopilot_runs').select('*').gte('created_at', from).lt('created_at', to).limit(1000)
+      ]).then(function (res) {
+        if (res[1] && res[1].error) throw res[1].error;
+        var evs = res[0] || [], runs = {};
+        ((res[1] && res[1].data) || []).concat((res[2] && res[2].data) || []).forEach(function (r) { runs[r.id] = r; });
+        var need = {};
+        evs.forEach(function (e) { if (!runs[e.run_id]) need[e.run_id] = 1; });
+        keepIds.forEach(function (id) { if (!runs[id]) need[id] = 1; });
+        var ids = Object.keys(need), jobs = [];
+        for (var i = 0; i < ids.length; i += 100) jobs.push(sb.from('research_autopilot_runs').select('*').in('id', ids.slice(i, i + 100)));
+        return Promise.all(jobs).then(function (more) {
+          more.forEach(function (x) { ((x && x.data) || []).forEach(function (r) { runs[r.id] = r; }); });
+          var oids = {}, pids = {};
+          Object.keys(runs).forEach(function (id) { oids[runs[id].owner_id] = 1; pids[runs[id].project_id] = 1; });
+          var ol = Object.keys(oids), pl = Object.keys(pids), pj = [];
+          for (var k = 0; k < pl.length; k += 100) pj.push(sb.from('research_projects').select('id,title').in('id', pl.slice(k, k + 100)));
+          return Promise.all([ol.length ? sb.from('profiles').select('id,name,email,affiliation').in('id', ol) : { data: [] }].concat(pj)).then(function (r2) {
+            if (seq !== loadSeq.current || !alive.current) return;   // a newer load (e.g. month switch) owns the view
+            var users = {}, projects = {};
+            ((r2[0] && r2[0].data) || []).forEach(function (u) { users[u.id] = u; });
+            r2.slice(1).forEach(function (x) { ((x && x.data) || []).forEach(function (p) { projects[p.id] = p; }); });
+            var byDay = {}, fromT = fromD.getTime(), toT = toD.getTime();
+            evs.forEach(function (e) {
+              if (!runs[e.run_id]) return;   // the run was deleted since
+              var d = apDay(e.created_at), b = byDay[d] || (byDay[d] = {});
+              var a = b[e.run_id] || (b[e.run_id] = { n: 0, first: e.created_at, last: e.created_at, errs: 0, phases: [], lastMsg: '' });
+              a.n++; a.last = e.created_at; if (e.message) a.lastMsg = e.message;
+              if (e.level === 'error') a.errs++;
+              if (e.phase && a.phases.indexOf(e.phase) < 0) a.phases.push(e.phase);
+            });
+            Object.keys(runs).forEach(function (id) {   // a run started this month but with no event yet still belongs to its start day
+              var r = runs[id], ct = Date.parse(r.created_at || 0);
+              if (ct >= fromT && ct < toT) { var d = apDay(r.created_at), b = byDay[d] || (byDay[d] = {}); if (!b[id]) b[id] = { n: 0, first: r.created_at, last: r.created_at, errs: 0, phases: [], lastMsg: '' }; }
+            });
+            dataRef.current = { runs: runs, users: users, projects: projects, byDay: byDay };
+            setData(dataRef.current);
+          });
         });
-      }).then(null, function (e) { if (alive.current) setData({ err: (e && e.message) || String(e) }); });
+      }).then(null, function (e) { if (seq === loadSeq.current && alive.current) setData({ err: (e && e.message) || String(e) }); });
+    }
+    function setMon(y, m) {
+      var d = new Date(y, m, 1), nm = { y: d.getFullYear(), m: d.getMonth() }, n = new Date();
+      monRef.current = nm; setMonRaw(nm); setSel({}); setFilt('all');
+      setSelDay(n.getFullYear() === nm.y && n.getMonth() === nm.m ? apDay(n) : apDay(d));
+      load();
     }
     useEffect(function () {
       load();
-      var iv = setInterval(function () { if (!alive.current) return; setTick(function (x) { return x + 1; }); load(); }, 10000);
+      var iv = setInterval(function () { if (!alive.current) return; setTick(function (x) { return x + 1; }); load(); }, 15000);
       function onProf() { setTick(function (x) { return x + 1; }); }
       function onUnload(e) { if (carrying()) { e.preventDefault(); e.returnValue = ''; return ''; } }
       window.addEventListener('pr-profile', onProf);
@@ -3301,14 +3544,14 @@
       };
     }, []);
 
-    function rowById(id) { var d = dataRef.current; return d && d.rows ? d.rows.filter(function (r) { return r.id === id; })[0] : null; }
+    // ---- resume machinery (unchanged behaviour: lease-sharing headless drivers, 3 at a time) ----
+    function rowById(id) { var d = dataRef.current; return d && d.runs ? d.runs[id] : null; }
     function updateRow(row) {
       if (!row || !alive.current) return;
       setData(function (d) {
-        if (!d || !d.rows) return d;
-        var found = false, rows = d.rows.map(function (r) { if (r.id === row.id) { found = true; return Object.assign({}, r, row); } return r; });
-        if (!found) rows.push(row);
-        dataRef.current = Object.assign({}, d, { rows: rows });
+        if (!d || !d.runs) return d;
+        var runs = Object.assign({}, d.runs); runs[row.id] = Object.assign({}, runs[row.id] || {}, row);
+        dataRef.current = Object.assign({}, d, { runs: runs });
         return dataRef.current;
       });
     }
@@ -3320,12 +3563,13 @@
       if (window.PRUI && window.PRUI.confirm) return window.PRUI.confirm({ title: 'Folytatod a kijelölt futásokat?', body: body.join(' '), confirmLabel: 'Folytatás' });
       return Promise.resolve(window.confirm(body.join('\n\n')));
     }
-    function resumeRuns(list) {
+    function resumeRuns(list, onOk) {
       var now = Date.now();
       list = list.filter(function (r) { var k = stuckKind(r, now), c = carryRef.current[r.id]; return k && k !== 'live' && !(c && c.state !== 'ended'); });
       if (!list.length) return;
       confirmFor(list).then(function (ok) {
         if (!ok) return;
+        if (onOk) onOk();
         list.forEach(function (r) { patchCarry(r.id, { state: 'queued', msg: 'Sorra vár (egyszerre ' + STUCK_MAX_PARALLEL + ' futás halad)…', label: null }); queue.current.push(r); });
         setSel({});
         pump();
@@ -3341,9 +3585,9 @@
       patchCarry(r.id, { state: 'running', label: (AP_ICON[ph.key] || '') + ' ' + (ph.label || ph.key || ''), msg: 'Indítás…' });
       sb.from('research_autopilot_runs').update(patch).eq('id', r.id).eq('status', r.status).select('id').then(function (u) {
         if (u && u.error) { finish(r.id, null, 'Nem sikerült elindítani: ' + u.error.message); return; }
-        if (!u || !u.data || !u.data.length) { finish(r.id, null, 'Közben megváltozott az állapota — frissítsd a listát'); return; }
+        if (!u || !u.data || !u.data.length) { finish(r.id, null, 'Közben megváltozott az állapota — frissítsd a nézetet'); return; }
         // supabase-js builders are lazy — without .then() the insert never leaves the browser
-        apEmit(r, [{ phase: ph.key || null, level: 'sys', message: '▶ Admin-folytatás: ' + adminName() + (kind === 'gate' ? ' — jóváhagyva: ' + ((r.gate && r.gate.title) || '') : '') }]).then(function () { }, function () { });
+        apEmit(r, [{ phase: ph.key || null, level: 'sys', message: '▶ Admin-folytatás: ' + adminName() + (kind === 'gate' ? ' — jóváhagyva: ' + ((r.gate && r.gate.title) || '') + (notesRef.current[r.id] ? ' (' + notesRef.current[r.id] + ')' : '') : '') }]).then(function () { }, function () { });
         if (!alive.current) { delete drivers.current[r.id]; return; }
         drivers.current[r.id] = apHeadlessDriver(r.id, {
           onRow: function (row) {
@@ -3387,84 +3631,155 @@
 
     if (!apIsAdmin()) return h('div', { className: 'st-wrap' }, h('div', { className: 'st-empty' }, h('b', null, 'Ez a felület csak adminisztrátoroknak érhető el.'), h('div', { style: { marginTop: 10 } }, h('a', { className: 'btn sm', href: 'Autopilot.html' }, '‹ Vissza az Autopilothoz'))));
 
-    var now = Date.now(), rows = (data && data.rows) || [], users = (data && data.users) || {}, projects = (data && data.projects) || {}, last = (data && data.last) || {};
-    var counts = { attn: 0, failed: 0, orphan: 0, gate: 0, paused: 0, live: 0, carry: 0 };
-    rows.forEach(function (r) { var k = stuckKind(r, now); if (carry[r.id]) counts.carry++; if (!k) return; counts[k]++; if (k !== 'live') counts.attn++; });
+    // ---- derive ----
+    var now = Date.now(), D = (data && data.runs) ? data : null;
+    var runs = D ? D.runs : {}, users = D ? D.users : {}, projects = D ? D.projects : {}, byDay = D ? D.byDay : {};
     var qq = q.trim().toLowerCase();
-    var ORD = { failed: 1, orphan: 2, gate: 3, paused: 4, live: 5 };
-    var shown = rows.filter(function (r) {
-      var k = stuckKind(r, now), c = carry[r.id];
-      if (!k && !c) return false;
-      if (filt === 'attn') { if (!c && (!k || k === 'live')) return false; }
-      else if (filt === 'carry') { if (!c) return false; }
-      else if (k !== filt) return false;
+    function uniOfRun(r) { return canonUni((users[r.owner_id] || {}).affiliation); }
+    function passBase(r) {
+      if (!r) return false;
+      if (uni && uniOfRun(r) !== uni) return false;
       if (qq) { var u = users[r.owner_id] || {}, p = projects[r.project_id] || {}; if ((String(u.name || '') + ' ' + String(u.affiliation || '') + ' ' + String(p.title || '')).toLowerCase().indexOf(qq) < 0) return false; }
       return true;
-    }).sort(function (a, b) {
-      var ca = carry[a.id] ? (carry[a.id].state === 'ended' ? 1 : 0) : 2, cb = carry[b.id] ? (carry[b.id].state === 'ended' ? 1 : 0) : 2;
-      return (ca - cb) || ((ORD[stuckKind(a, now)] || 9) - (ORD[stuckKind(b, now)] || 9)) || String(b.updated_at || '').localeCompare(String(a.updated_at || ''));
+    }
+    var uniCount = {};
+    Object.keys(runs).forEach(function (id) { var k = uniOfRun(runs[id]); uniCount[k] = (uniCount[k] || 0) + 1; });
+    var uniList = Object.keys(uniCount).sort(function (a, b) { return (uniCount[b] - uniCount[a]) || a.localeCompare(b, 'hu'); });
+    var stuckC = { failed: 0, orphan: 0, gate: 0, paused: 0 }, stuckRuns = [], flagDay = {};
+    Object.keys(runs).forEach(function (id) {
+      var r = runs[id], k = stuckKind(r, now);
+      if (!k || k === 'live' || !passBase(r)) return;
+      stuckC[k]++; stuckRuns.push(r);
+      var d = apDay(r.driver_beat || r.updated_at || r.created_at); flagDay[d] = (flagDay[d] || 0) + 1;   // the day it stalled
     });
-    var selectable = shown.filter(function (r) { var k = stuckKind(r, now), c = carry[r.id]; return k && k !== 'live' && !(c && c.state !== 'ended'); });
-    var selList = selectable.filter(function (r) { return sel[r.id]; });
-    var allOn = selectable.length > 0 && selList.length === selectable.length;
     var active = carrying();
 
-    function chip(key, lab) {
-      return h('button', { key: key, type: 'button', className: 'st-chip' + (filt === key ? ' on' : ''), 'aria-pressed': filt === key ? 'true' : 'false', onClick: function () { setFilt(key); setSel({}); } }, lab, h('span', { className: 'n' }, counts[key] || 0));
+    // calendar grid (Monday first)
+    var first = new Date(mon.y, mon.m, 1), lead = (first.getDay() + 6) % 7, dim = new Date(mon.y, mon.m + 1, 0).getDate(), todayKey = apDay(new Date());
+    var cells = [], ci;
+    for (ci = 0; ci < lead; ci++) cells.push(null);
+    for (ci = 1; ci <= dim; ci++) cells.push(ci);
+    while (cells.length % 7) cells.push(null);
+    function dayCell(dn, idx) {
+      if (!dn) return h('span', { key: 'e' + idx, className: 'pc-day empty', 'aria-hidden': 'true' });
+      var key = apDay(new Date(mon.y, mon.m, dn)), acts = byDay[key] || {}, cnt = {}, tot = 0;
+      Object.keys(acts).forEach(function (rid) { var r = runs[rid]; if (!passBase(r)) return; var k = nowKind(r, now); cnt[k] = (cnt[k] || 0) + 1; tot++; });
+      var flag = flagDay[key] || 0, isSel = selDay === key;
+      var label = HU_MONTHS[mon.m] + ' ' + dn + '.: ' + (tot ? tot + ' futás volt aktív' : 'nem volt aktivitás') + (flag ? ', ' + flag + ' itt akadt el' : '');
+      return h('button', { key: key, type: 'button', 'data-day': key, className: 'pc-day' + (tot ? '' : ' none') + (isSel ? ' sel' : '') + (key === todayKey ? ' today' : ''), 'aria-pressed': isSel ? 'true' : 'false', 'aria-label': label, title: label,
+        onClick: function () { setSelDay(key); setSel({}); setFilt('all'); } },
+        h('span', { className: 'pc-dn' }, dn),
+        flag ? h('span', { className: 'pc-flag', 'aria-hidden': 'true' }, flag) : null,
+        tot ? h('span', { className: 'pc-cnt' }, tot + ' futás') : null,
+        h('span', { className: 'pc-bar' + (tot ? '' : ' ghost') }, KIND_ORDER.filter(function (k) { return cnt[k]; }).map(function (k) { return h('i', { key: k, className: 'k-' + k, style: { flexGrow: cnt[k] } }); })));
     }
+
+    // day panel
+    var isStuckView = selDay === 'stuck';
+    var dayActs = isStuckView ? {} : (byDay[selDay] || {});
+    var items = isStuckView ? stuckRuns.slice() : Object.keys(dayActs).map(function (rid) { return runs[rid]; }).filter(passBase);
+    if (isStuckView) Object.keys(carry).forEach(function (id) { var r = runs[id]; if (r && items.indexOf(r) < 0 && passBase(r)) items.push(r); });   // runs carried from here stay listed
+    var pc = { all: items.length, stuck: 0, gate: 0, live: 0, done: 0, cancel: 0 };
+    items.forEach(function (r) { var k = nowKind(r, now); if (k === 'failed' || k === 'orphan' || k === 'paused') pc.stuck++; else pc[k] = (pc[k] || 0) + 1; });
+    function passFilt(r) { if (filt === 'all') return true; var k = nowKind(r, now); return filt === 'stuck' ? (k === 'failed' || k === 'orphan' || k === 'paused') : k === filt; }
+    var shown = items.filter(passFilt).sort(function (a, b) {
+      var ca = carry[a.id] ? (carry[a.id].state === 'ended' ? 1 : 0) : 2, cb = carry[b.id] ? (carry[b.id].state === 'ended' ? 1 : 0) : 2;
+      return (ca - cb) || (KIND_ORDER.indexOf(nowKind(a, now)) - KIND_ORDER.indexOf(nowKind(b, now)))
+        || String((dayActs[b.id] || {}).last || b.updated_at || '').localeCompare(String((dayActs[a.id] || {}).last || a.updated_at || ''));
+    });
+    var selectable = shown.filter(function (r) { var k = stuckKind(r, now), c = carry[r.id]; return k && k !== 'live' && k !== 'gate' && !(c && c.state !== 'ended'); });   // gates: one by one, after reading them
+    var selList = selectable.filter(function (r) { return sel[r.id]; });
+    var allOn = selectable.length > 0 && selList.length === selectable.length;
+    var dayTitle = isStuckView ? 'Most elakadt futások' : (function () { var p = selDay.split('-'); return new Date(+p[0], +p[1] - 1, +p[2]).toLocaleDateString('hu-HU', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' }); })();
+
+    function chip(key, lab) {
+      return h('button', { key: key, type: 'button', className: 'st-chip' + (filt === key ? ' on' : ''), 'aria-pressed': filt === key ? 'true' : 'false', onClick: function () { setFilt(key); setSel({}); } }, lab, h('span', { className: 'n' }, pc[key] || 0));
+    }
+    function phaseName(k) { var p = AP_PHASES.filter(function (x) { return x.key === k; })[0]; return (p && p.label) || k; }
     function row(r) {
       var k = stuckKind(r, now), meta = STUCK_META[k] || null, c = carry[r.id], u = users[r.owner_id] || {}, p = projects[r.project_id] || {};
-      var ph = (r.phases || [])[r.phase_index] || {}, ev = last[r.id];
-      var detail = r.status === 'failed' ? (r.error || (ev && ev.message) || 'Ismeretlen hiba')
-        : r.status === 'awaiting_approval' ? (((r.gate && r.gate.title) || 'Jóváhagyás') + (r.gate && r.gate.detail ? ' — ' + r.gate.detail : ''))
-          : (ev ? ev.message : '—');
-      var busy = c && c.state !== 'ended', canSel = k && k !== 'live' && !busy;
+      var ph = (r.phases || [])[r.phase_index] || {}, act = isStuckView ? null : dayActs[r.id];
+      var detail = r.status === 'failed' ? (r.error || 'Ismeretlen hiba')
+        : r.status === 'awaiting_approval' ? (((r.gate && r.gate.title) || 'Jóváhagyás') + (r.gate && r.gate.detail ? ' — ' + r.gate.detail : '')) : null;
+      var busy = c && c.state !== 'ended', canSel = k && k !== 'live' && k !== 'gate' && !busy;
+      var pill = meta ? h('span', { className: 'st-pill ' + meta.cls }, meta.lab)
+        : h('span', { className: 'st-pill ' + (r.status === 'done' ? 'ok' : 'mute') }, r.status === 'done' ? '✓ Végzett' : r.status === 'cancelled' ? 'Leállítva' : r.status);
       return h('div', { key: r.id, className: 'st-row' + (busy ? ' carry' : '') },
         h('input', { type: 'checkbox', checked: !!sel[r.id], disabled: !canSel, 'aria-label': 'Kijelölés: ' + (p.title || 'futás'), onChange: function (e) { var on = e.target.checked; setSel(function (m) { var n = Object.assign({}, m); if (on) n[r.id] = 1; else delete n[r.id]; return n; }); } }),
-        h('div', { className: 'st-who' },
-          meta ? h('span', { className: 'st-pill ' + meta.cls }, meta.lab)
-            : h('span', { className: 'st-pill ' + (r.status === 'done' ? 'ok' : 'mute') }, r.status === 'done' ? '✓ Végzett' : r.status === 'cancelled' ? 'Leállítva' : r.status),
+        h('div', { className: 'st-who' }, pill,
           h('b', null, u.name || (u.email ? String(u.email).split('@')[0] : 'ismeretlen')),
-          h('span', null, u.affiliation || '—')),
+          h('span', null, uniOfRun(r))),
         h('div', { className: 'st-proj' },
           h('a', { href: 'Autopilot.html?run=' + encodeURIComponent(r.id), target: '_blank', rel: 'noopener', title: 'A futás dashboardja új lapon' }, (p.title || 'Projekt') + ' ↗'),
-          h('div', { className: 'st-det', title: detail }, detail)),
+          detail ? h('div', { className: 'st-det', title: detail }, 'Most: ' + detail) : null),
         h('div', { className: 'st-meta' },
           h('div', null, (AP_ICON[ph.key] || '') + ' ' + (ph.label || ph.key || '—')),
           h('div', null, 'utolsó jel: ' + agoHu(r.driver_beat || r.updated_at))),
         h('div', { className: 'st-act' },
           busy ? h('button', { type: 'button', className: 'btn sm', onClick: function () { pauseOne(r.id); } }, '⏸ Szüneteltetés')
-            : (meta && meta.act) ? h('button', { type: 'button', className: 'btn pri sm', onClick: function () { resumeRuns([r]); } }, meta.act)
-              : null),
+            : k === 'gate' ? h('button', { type: 'button', className: 'btn pri sm', onClick: function () { setOpenRun(r.id); } }, '🔎 Megnézem és döntök')
+              : (meta && meta.act) ? h('button', { type: 'button', className: 'btn pri sm', onClick: function () { resumeRuns([r]); } }, meta.act) : null,
+          (k === 'gate' && !busy) ? null : h('button', { type: 'button', className: 'btn sm', onClick: function () { setOpenRun(r.id); } }, '🔎 Részletek')),
+        act ? h('div', { className: 'st-day' },
+          h('span', null, h('b', null, 'Aznap '), act.n ? (timeOf(act.first) + (timeOf(act.last) !== timeOf(act.first) ? '–' + timeOf(act.last) : '')) : ('indítva ' + timeOf(act.first))),
+          act.n ? h('span', null, act.n + ' esemény') : null,
+          act.phases.length ? h('span', { title: act.phases.map(phaseName).join(' → ') }, act.phases.map(function (x) { return (AP_ICON[x] || '•') + ' ' + phaseName(x); }).join(' → ')) : null,
+          act.errs ? h('span', { className: 'err' }, '⚠ ' + act.errs + ' hiba') : null,
+          act.lastMsg ? h('span', { className: 'msg', title: act.lastMsg }, '„' + String(act.lastMsg).slice(0, 160) + '”') : null) : null,
         c ? h('div', { className: 'st-live' + (c.state === 'ended' ? ' end' : ''), role: 'status', 'aria-live': 'polite' },
           c.state !== 'ended' ? h('span', { className: 'spin' }) : null,
           c.label ? h('b', null, c.label) : null,
           h('span', null, c.msg || '')) : null);
     }
 
-    return h('div', { className: 'st-wrap' },
+    var drawerRun = openRun ? runs[openRun] : null;
+    return h(React.Fragment, null,
+      drawerRun ? h(RunDetail, { key: drawerRun.id, run: drawerRun, user: users[drawerRun.owner_id], project: projects[drawerRun.project_id], carry: carry[drawerRun.id],
+        busy: !!(carry[drawerRun.id] && carry[drawerRun.id].state !== 'ended'), onClose: function () { setOpenRun(null); },
+        onResume: function (run, note) { notesRef.current[run.id] = note || ''; resumeRuns([run], function () { setOpenRun(null); }); } }) : null,
+      h('div', { className: 'st-wrap pc-wrap' },
       h('div', { className: 'st-head' },
         h('div', null,
-          h('h1', null, '🛡 Elakadt folyamatok'),
-          h('div', { className: 'st-sub' }, 'Minden kutató Autopilot-futása, amely nem tud magától továbbhaladni: hibára futott, senki nem futtatja, emberi döntésre vár, vagy szüneteltették. Innen egyenként vagy együtt folytathatod őket.')),
+          h('h1', null, '🛡 Folyamat-naptár'),
+          h('div', { className: 'st-sub' }, 'Az Autopilot-futások napról napra: mi történt velük az adott napon, és hol tartanak most. Ami elakadt, innen folytatható — a folytatott futásokat ez a lap viszi a te fiókoddal (egyszerre ' + STUCK_MAX_PARALLEL + '), ezért amíg dolgoznak, ne zárd be.')),
         h('div', { style: { display: 'flex', gap: 8, alignItems: 'center' } },
           h('button', { type: 'button', className: 'btn sm', onClick: load }, '↻ Frissítés'),
           h('a', { className: 'btn sm', href: 'Autopilot.html' }, '‹ Autopilot'))),
-      h('div', { className: 'st-note' },
-        h('b', null, 'Hogyan működik: '), 'a folytatott futásokat ez a lap viszi tovább a te fiókoddal (egyszerre ' + STUCK_MAX_PARALLEL + '-at) — amíg dolgoznak, ne zárd be. A kutató a saját dashboardján élőben látja a haladást, az eseménynaplóba bekerül, hogy admin folytatta. Az AI-hívások a te napi keretedet terhelik.',
-        active ? h('span', { className: 'st-active' }, ' · Most ' + active + ' futás halad innen.') : null),
-      h('div', { className: 'st-bar' },
-        chip('attn', 'Figyelmet igényel'), chip('failed', 'Hibára futott'), chip('orphan', 'Senki nem futtatja'), chip('gate', 'Jóváhagyásra vár'), chip('paused', 'Szüneteltetve'), chip('live', 'Fut'),
-        counts.carry ? chip('carry', 'Innen folytatott') : null,
-        h('input', { className: 'st-q', value: q, placeholder: '🔍 Kutató, egyetem, projekt…', 'aria-label': 'Keresés', onChange: function (e) { setQ(e.target.value); } })),
-      selectable.length ? h('div', { className: 'st-bulk' },
-        h('label', { className: 'st-all' }, h('input', { type: 'checkbox', checked: allOn, onChange: function () { if (allOn) setSel({}); else { var n = {}; selectable.forEach(function (r) { n[r.id] = 1; }); setSel(n); } } }), ' Mind (' + selectable.length + ')'),
-        selList.length ? h('span', null, selList.length + ' kijelölve') : h('span', { className: 'st-hint' }, 'Jelöld ki, amelyeket együtt folytatnál'),
-        selList.length ? h('button', { type: 'button', className: 'btn pri sm', onClick: function () { resumeRuns(selList); } }, '▶ Kijelöltek folytatása (' + selList.length + ')') : null) : null,
-      data === null ? h('div', { className: 'st-empty' }, h('span', { className: 'spin' }), ' Betöltés…')
-        : data.err ? h('div', { className: 'st-empty' }, 'Nem sikerült betölteni: ' + data.err, ' ', h('button', { type: 'button', className: 'btn sm', onClick: load }, 'Újra'))
-          : shown.length ? h('div', { className: 'st-list' }, shown.map(row))
-            : h('div', { className: 'st-empty' }, filt === 'attn' ? '✓ Nincs elakadt folyamat.' : 'Ebben a csoportban nincs futás.'));
+      h('div', { className: 'pc-strip', role: 'region', 'aria-label': 'Most elakadt futások' },
+        h('b', { className: 'pc-strip-t' }, stuckTotal() ),
+        ['failed', 'orphan', 'gate', 'paused'].map(function (k) { return stuckC[k] ? h('span', { key: k, className: 'st-pill ' + STUCK_META[k].cls }, STUCK_META[k].lab + ' · ' + stuckC[k]) : null; }),
+        stuckRuns.length ? h('button', { type: 'button', className: 'btn sm' + (isStuckView ? ' pri' : ''), onClick: function () { setSelDay('stuck'); setFilt('all'); setSel({}); } }, 'Mind listázása →') : null,
+        active ? h('span', { className: 'st-active' }, '⟳ ' + active + ' futás halad innen') : null,
+        h('div', { className: 'pc-tools' },
+          h('select', { className: 'pc-sel', value: uni, 'aria-label': 'Egyetem', onChange: function (e) { setUni(e.target.value); setSel({}); } },
+            h('option', { value: '' }, 'Minden egyetem'),
+            uniList.map(function (x) { return h('option', { key: x, value: x }, x); })),
+          h('input', { className: 'st-q', value: q, placeholder: '🔍 Kutató, projekt…', 'aria-label': 'Keresés', onChange: function (e) { setQ(e.target.value); } }))),
+      h('div', { className: 'pc-top' },
+        h('div', { className: 'pc-cal' },
+          h('div', { className: 'pc-calh' },
+            h('button', { type: 'button', className: 'pc-nav', 'aria-label': 'Előző hónap', onClick: function () { setMon(mon.y, mon.m - 1); } }, '‹'),
+            h('b', null, mon.y + '. ' + HU_MONTHS[mon.m]),
+            h('button', { type: 'button', className: 'pc-nav', 'aria-label': 'Következő hónap', onClick: function () { setMon(mon.y, mon.m + 1); } }, '›'),
+            h('button', { type: 'button', className: 'btn sm', onClick: function () { var n = new Date(); setMon(n.getFullYear(), n.getMonth()); } }, 'Ma')),
+          h('div', { className: 'pc-wd', 'aria-hidden': 'true' }, HU_WD.map(function (w) { return h('span', { key: w }, w); })),
+          h('div', { className: 'pc-grid' }, cells.map(dayCell)),
+          h('div', { className: 'pc-legend' },
+            KIND_ORDER.map(function (k) { return h('span', { key: k }, h('i', { className: 'k-' + k }), KIND_LAB[k]); }),
+            h('span', null, h('em', { className: 'pc-flag inline' }, '2'), 'ennyi futás akadt el aznap')),
+          data && data.err ? h('div', { className: 'pc-err' }, 'Nem sikerült betölteni: ' + data.err) : null),
+        h('div', { className: 'pc-panel' },
+          h('div', { className: 'pc-ph' }, h('h2', null, dayTitle), D ? h('span', { className: 'pc-phn' }, items.length + ' futás') : null),
+          items.length ? h('div', { className: 'st-bar' }, chip('all', 'Mind'), chip('stuck', 'Elakadt'), chip('gate', 'Jóváhagyásra vár'), chip('live', 'Fut'), chip('done', 'Végzett'), pc.cancel ? chip('cancel', 'Leállítva') : null) : null,
+          selectable.length ? h('div', { className: 'st-bulk' },
+            h('label', { className: 'st-all' }, h('input', { type: 'checkbox', checked: allOn, onChange: function () { if (allOn) setSel({}); else { var n = {}; selectable.forEach(function (r) { n[r.id] = 1; }); setSel(n); } } }), ' Elakadtak (' + selectable.length + ')'),
+            selList.length ? h('span', null, selList.length + ' kijelölve') : h('span', { className: 'st-hint' }, 'Jelöld ki, amelyeket együtt folytatnál — a jóváhagyásra várókat egyenként, a részletek megnézése után'),
+            selList.length ? h('button', { type: 'button', className: 'btn pri sm', onClick: function () { resumeRuns(selList); } }, '▶ Kijelöltek folytatása (' + selList.length + ')') : null) : null,
+          !D ? h('div', { className: 'st-empty' }, data && data.err ? ('Nem sikerült betölteni: ' + data.err) : h('span', null, h('span', { className: 'spin' }), ' Betöltés…'))
+            : shown.length ? h('div', { className: 'st-list' }, shown.map(row))
+              : h('div', { className: 'st-empty' }, isStuckView ? '✓ Nincs elakadt futás.' : (items.length ? 'Ebben a csoportban nincs futás ezen a napon.' : 'Ezen a napon nem volt Autopilot-aktivitás' + ((uni || qq) ? ' a szűrőknek megfelelően' : '') + '.'))))));
+
+    function stuckTotal() { return stuckRuns.length ? ('Most elakadt: ' + stuckRuns.length + ' futás') : '✓ Most nincs elakadt futás'; }
   }
 
   function App() {
