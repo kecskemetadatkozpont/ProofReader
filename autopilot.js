@@ -3517,6 +3517,8 @@
     var r = props.run, u = props.user || {}, p = props.project || {};
     var dS = useState(null), d = dS[0], setD = dS[1];
     var rvS = useState(false), showRev = rvS[0], setShowRev = rvS[1];
+    var bpS = useState(0), bump = bpS[0], setBump = bpS[1];              // re-read after the admin included papers
+    var pkS = useState(null), picker = pkS[0], setPicker = pkS[1];       // { loading, srcs, sel, q, busy } — manual include picker
     var closeRef = useRef(null);
     useEffect(function () {
       function onKey(e) { if (e.key === 'Escape') props.onClose(); }
@@ -3548,19 +3550,21 @@
           // the SAME include rule the pipeline uses: a paper counts by its DEEPEST screening step (override wins unless excluded)
           var deep = {};
           (r2[0] || []).forEach(function (x) { var c = deep[x.source_id]; if (!c || (x.step || 0) >= (c.step || 0)) deep[x.source_id] = x; });
-          var inc = [], maybe = [], exc = 0;
-          Object.keys(deep).forEach(function (k) { var x = deep[k]; if (x.decision === 'include' || (x.overridden && x.decision !== 'exclude')) inc.push(x); else if (x.decision === 'maybe') maybe.push(x); else exc++; });
+          var inc = [], maybe = [], excl = [];
+          Object.keys(deep).forEach(function (k) { var x = deep[k]; if (x.decision === 'include' || (x.overridden && x.decision !== 'exclude')) inc.push(x); else if (x.decision === 'maybe') maybe.push(x); else excl.push(x); });
           maybe.sort(function (a, b) { return (b.score || 0) - (a.score || 0); });
+          excl.sort(function (a, b) { return (b.score || 0) - (a.score || 0); });
+          var exc = excl.length, cand = maybe.concat(excl);   // what an admin can still include by hand (deepest row per paper)
           var cc = {}; ((r2[1] && r2[1].data) || []).forEach(function (c) { cc[c.status] = (cc[c.status] || 0) + 1; });
           var want = inc.slice(0, 40).concat(maybe.slice(0, 8)).map(function (x) { return x.source_id; });
           return (want.length ? P(sb.from('research_sources').select('id,title,year,venue,url').in('id', want)) : Promise.resolve(null)).then(function (r3) {
             var srcs = {}; ((r3 && r3.data) || []).forEach(function (x) { srcs[x.id] = x; });
-            merge({ inc: inc, maybe: maybe, exc: exc, screened: Object.keys(deep).length, srcs: srcs, cells: cc, papersLoading: false });
+            merge({ inc: inc, maybe: maybe, exc: exc, cand: cand, screened: Object.keys(deep).length, srcs: srcs, cells: cc, papersLoading: false });
           });
         });
       }).then(null, function (e) { if (live) setD({ err: (e && e.message) || String(e) }); });
       return function () { live = false; };
-    }, [r.id, r.status, r.phase_index, r.protocol_id, r.study_id]);
+    }, [r.id, r.status, r.phase_index, r.protocol_id, r.study_id, bump]);
 
     var k = stuckKind(r, Date.now()), meta = STUCK_META[k] || null;
     var ph = (r.phases || [])[r.phase_index] || {}, gate = r.status === 'awaiting_approval' ? (r.gate || {}) : null;
@@ -3589,6 +3593,66 @@
       if (gate.phase === 'protocol') return d.steps.filter(function (x) { return x.needs_approval; }).slice(0, 3).map(function (x) { return x.ord + '. ' + x.title; }).join('; ');
       return d.inc.length + ' beválasztott cikkel';
     }
+    // Admin-side manual inclusion — the SAME write the researcher's "Bírálat" does: the paper's DEEPEST screening row
+    // becomes decision='include', overridden=true, which is exactly what the pipeline's include rule reads.
+    function openPicker() {
+      if (!ok || picker) return;
+      var cand = (d.cand || []).slice(0, 150), ids = cand.map(function (c) { return c.source_id; }), jobs = [];
+      setPicker({ loading: true, srcs: {}, sel: {}, q: '', busy: false });
+      for (var i = 0; i < ids.length; i += 100) jobs.push(sb.from('research_sources').select('id,title,year,venue,url').in('id', ids.slice(i, i + 100)).then(function (x) { return x; }, function () { return null; }));
+      Promise.all(jobs).then(function (res) {
+        var m = {}; res.forEach(function (x) { ((x && x.data) || []).forEach(function (sr) { m[sr.id] = sr; }); });
+        setPicker(function (p) { return p ? Object.assign({}, p, { loading: false, srcs: m }) : p; });
+      });
+    }
+    function pickToggle(id) { setPicker(function (p) { if (!p) return p; var sel = Object.assign({}, p.sel); if (sel[id]) delete sel[id]; else sel[id] = 1; return Object.assign({}, p, { sel: sel }); }); }
+    function includeSelected() {
+      if (!picker || picker.busy) return;
+      var ids = Object.keys(picker.sel);
+      if (!ids.length || !r.study_id) return;
+      var byId = {}; (d.cand || []).forEach(function (c) { byId[c.source_id] = c; });
+      setPicker(function (p) { return Object.assign({}, p, { busy: true }); });
+      Promise.all(ids.map(function (id) {
+        var c = byId[id];
+        if (!c) return Promise.resolve({ error: { message: 'ismeretlen cikk' } });
+        return sb.from('research_study_papers').update({ decision: 'include', overridden: true })
+          .eq('study_id', r.study_id).eq('source_id', id).eq('step', c.step).then(function (x) { return x; }, function (e) { return { error: e || { message: 'hiba' } }; });
+      })).then(function (res) {
+        var bad = res.filter(function (x) { return !x || x.error; }).length, okN = ids.length - bad;
+        setPicker(null); setBump(function (b) { return b + 1; });
+        if (props.onIncluded) props.onIncluded(r, okN, bad);
+      });
+    }
+    function pickerBlock() {
+      if (!picker) return h('button', { type: 'button', className: 'btn sm', disabled: !ok || !(d.cand || []).length, onClick: openPicker },
+        '✚ Cikkek beválasztása' + (ok && d.cand ? ' (' + d.cand.length + ' jelöltből)' : ''));
+      if (picker.loading) return h('div', { className: 'rd-load' }, h('span', { className: 'spin' }), ' Jelöltek betöltése…');
+      var qq = String(picker.q || '').trim().toLowerCase();
+      var rows = (d.cand || []).slice(0, 150).filter(function (c) {
+        if (!qq) return true;
+        var sr = picker.srcs[c.source_id] || {};
+        return (String(sr.title || '') + ' ' + String(sr.venue || '')).toLowerCase().indexOf(qq) >= 0;
+      });
+      var selN = Object.keys(picker.sel).length;
+      return h('div', { className: 'rd-pick' },
+        h('div', { className: 'rd-pick-h' },
+          h('input', { className: 'rd-pick-q', value: picker.q, placeholder: '🔍 Cím vagy folyóirat…', 'aria-label': 'Keresés a jelöltek között',
+            onChange: function (e) { var v = e.target.value; setPicker(function (p) { return Object.assign({}, p, { q: v }); }); } }),
+          h('span', { className: 'rd-sub' }, rows.length + ' jelölt · ' + selN + ' kijelölve')),
+        h('div', { className: 'rd-pick-list' }, rows.map(function (c) {
+          var sr = picker.srcs[c.source_id] || {}, on = !!picker.sel[c.source_id];
+          return h('label', { key: c.source_id, className: 'rd-pick-row' + (on ? ' on' : '') },
+            h('input', { type: 'checkbox', checked: on, onChange: function () { pickToggle(c.source_id); } }),
+            h('span', { className: 'rd-pick-t' },
+              h('b', null, sr.title || 'Cím nélkül'),
+              h('span', { className: 'rd-sub' }, [sr.year, sr.venue].filter(Boolean).join(' · ') + ' · ' + (c.decision === 'maybe' ? 'talán' : 'kizárva') + (c.score != null ? ' · pont: ' + c.score : '') + ' · ' + c.step + '. szűrés'),
+              c.reason ? h('span', { className: 'rd-why' }, String(c.reason).slice(0, 220)) : null));
+        })),
+        h('div', { className: 'rd-acts' },
+          h('button', { type: 'button', className: 'btn pri sm', disabled: !selN || picker.busy, onClick: includeSelected }, picker.busy ? '⏳ Mentés…' : '✓ Beválasztás (' + selN + ')'),
+          h('button', { type: 'button', className: 'btn sm', disabled: picker.busy, onClick: function () { setPicker(null); } }, 'Mégse')),
+        h('div', { className: 'rd-sub' }, 'A beválasztás ugyanaz, mintha a kutató tenné az Irodalom kártya „Bírálat" nézetében: a cikk felülbírált „included" lesz ebben a szálban.'));
+    }
     function decision() {
       if (!gate) return null;
       var body, canApprove = true, why = null;
@@ -3605,11 +3669,12 @@
         body = h('div', { className: 'rd-load' }, h('span', { className: 'spin' }), ' A szűrési döntések betöltése…'); canApprove = false;
       } else if (gate.phase === 'literature' || gate.phase === 'sr' || gate.phase === 'extract') {
         canApprove = d.inc.length > 0;
-        if (!canApprove) why = 'Nincs beválasztott cikk, így jóváhagyás után a futás ugyanitt újra megállna. Előbb a projekt Irodalom kártyáján („Bírálat ›”) kell kézzel bevenni cikkeket.';
+        if (!canApprove) why = 'Nincs beválasztott cikk, így jóváhagyás után a futás ugyanitt újra megállna. Válassz be cikkeket lent (vagy a projekt Irodalom kártyáján, „Bírálat ›”).';
         body = h('div', { className: 'rd-col' },
           h('div', { className: 'rd-counts' }, h('span', null, h('b', null, d.inc.length), ' beválasztva'), h('span', null, h('b', null, d.maybe.length), ' talán'), h('span', null, h('b', null, d.exc), ' kizárva'), h('span', null, h('b', null, d.screened), ' átszűrve')),
           d.inc.length ? h('div', null, h('div', { className: 'rd-lab' }, 'Jóváhagyással ezekkel a cikkekkel megy tovább'), h('ol', { className: 'rd-srcs' }, d.inc.slice(0, 40).map(srcLi)), d.inc.length > 40 ? h('div', { className: 'rd-sub' }, '…és még ' + (d.inc.length - 40)) : null)
-            : d.maybe.length ? h('div', null, h('div', { className: 'rd-lab' }, 'A legesélyesebb „talán” jelöltek — ezek közül lehet kézzel bevenni'), h('ol', { className: 'rd-srcs' }, d.maybe.slice(0, 8).map(srcLi))) : null);
+            : d.maybe.length ? h('div', null, h('div', { className: 'rd-lab' }, 'A legesélyesebb „talán” jelöltek — ezek közül lehet kézzel bevenni'), h('ol', { className: 'rd-srcs' }, d.maybe.slice(0, 8).map(srcLi))) : null,
+          pickerBlock());
       } else body = h('div', { className: 'rd-sub' }, 'Ehhez a döntési ponthoz nincs részletező nézet — nézd meg a futás dashboardján.');
       return h('section', { className: 'rd-card decide', 'aria-label': 'Erről döntesz' },
         h('div', { className: 'rd-lab' }, 'Erről döntesz'),
@@ -3618,7 +3683,8 @@
         body,
         why ? h('div', { className: 'rd-warn' }, why) : null,
         h('div', { className: 'rd-acts' },
-          h('button', { type: 'button', className: 'btn pri sm', disabled: !ok || !canApprove || props.busy, onClick: function () { props.onResume(r, approvalNote()); } }, '✓ Jóváhagyom és folytatom'),
+          h('button', { type: 'button', className: 'btn pri sm', disabled: !ok || !canApprove || props.busy, onClick: function () { props.onResume(r, approvalNote()); } },
+            '✓ Jóváhagyom és folytatom' + ((ok && gate.phase !== 'protocol' && d.inc.length) ? ' (' + d.inc.length + ' cikkel)' : '')),
           h('a', { className: 'btn sm', href: 'Research.html?project=' + encodeURIComponent(r.project_id), target: '_blank', rel: 'noopener' }, 'Megnyitás a Research-ben ↗')));
     }
     function stalled() {
@@ -3708,7 +3774,7 @@
     var slS = useState({}), sel = slS[0], setSel = slS[1];
     var cS = useState({}), carry = cS[0], setCarry = cS[1];             // run_id → { state:'queued'|'running'|'ended', label, msg }
     var orS = useState(null), openRun = orS[0], setOpenRun = orS[1];    // run id shown in the detail drawer
-    var pkS = useState(null), packSel = pkS[0], setPackSel = pkS[1];    // agent package: null = every researcher of the day, else {owner_id: true}
+    var pkS = useState(null), packSel = pkS[0], setPackSel = pkS[1];    // agent package: null = every run of the day, else {run_id: true}
     var pbS = useState(false), packBusy = pbS[0], setPackBusy = pbS[1];
     var tS = useState(0), setTick = tS[1];
     var drivers = useRef({}), queue = useRef([]), alive = useRef(true), carryRef = useRef({}), dataRef = useRef(null), monRef = useRef(mon), loadSeq = useRef(0), notesRef = useRef({});
@@ -3818,7 +3884,16 @@
     function startOne(r) {
       var kind = stuckKind(r, Date.now()), ph = (r.phases || [])[r.phase_index] || {};
       var patch = { status: 'running', error: null, updated_at: nowIso(), driver_token: null, driver_beat: null };
-      if (kind === 'gate') patch.gate = null;
+      if (kind === 'gate') {
+        patch.gate = null;
+        // the SR / extraction gates re-gate unless the phase cursor says the manual rescue already happened
+        var gph = (r.gate || {}).phase, cph2 = (r.phases || [])[r.phase_index];
+        if ((gph === 'sr' || gph === 'extract') && cph2) {
+          var php2 = r.phases.slice();
+          php2[r.phase_index] = Object.assign({}, cph2, { cursor: Object.assign({}, cph2.cursor || {}, { rescued: true }) });
+          patch.phases = php2;
+        }
+      }
       if (!r.started_at) patch.started_at = nowIso();
       drivers.current[r.id] = { stop: function () { } };   // hold the slot while the status update is in flight
       patchCarry(r.id, { state: 'running', label: (AP_ICON[ph.key] || '') + ' ' + (ph.label || ph.key || ''), msg: 'Indítás…' });
@@ -3934,25 +4009,37 @@
     if (!isStuckView) items.forEach(function (r) { dayOwners[r.owner_id] = (dayOwners[r.owner_id] || 0) + 1; });
     function ownerName(id) { var uu = users[id] || {}; return uu.name || (uu.email ? String(uu.email).split('@')[0] : 'ismeretlen'); }
     var ownerIds = Object.keys(dayOwners).sort(function (a, b) { return ownerName(a).localeCompare(ownerName(b), 'hu'); });
-    var selOwners = ownerIds.filter(function (id) { return packSel === null || !!packSel[id]; });
-    var allPack = selOwners.length === ownerIds.length;
-    function togglePack(id) {
+    // the package is chosen RUN by run (one researcher may have several that day); a researcher's checkbox toggles all of theirs
+    var runsByOwner = {}; if (!isStuckView) items.forEach(function (r) { (runsByOwner[r.owner_id] || (runsByOwner[r.owner_id] = [])).push(r); });
+    function packOn(r) { return packSel === null || !!packSel[r.id]; }
+    var selRuns = items.filter(packOn), allPack = selRuns.length === items.length;
+    var selOwners = ownerIds.filter(function (id) { return (runsByOwner[id] || []).some(packOn); });
+    function setPackRuns(ids, on) {
       setPackSel(function (cur) {
-        var n = {}; ownerIds.forEach(function (x) { if (cur === null || cur[x]) n[x] = true; });
-        if (n[id]) delete n[id]; else n[id] = true;
+        var n = {}; items.forEach(function (r) { if (cur === null || cur[r.id]) n[r.id] = true; });
+        ids.forEach(function (id) { if (on) n[id] = true; else delete n[id]; });
         return n;
       });
     }
+    function toggleRun(r) { setPackRuns([r.id], !packOn(r)); }
+    function toggleOwner(id) {
+      var rs = runsByOwner[id] || [], allOn = rs.every(packOn);
+      setPackRuns(rs.map(function (r) { return r.id; }), !allOn);
+    }
     function downloadPack() {
-      if (!selOwners.length || packBusy) return;
-      var groups = selOwners.map(function (id) { var uu = users[id] || {}; return { owner: uu, uni: canonUni(uu.affiliation), runs: items.filter(function (r) { return r.owner_id === id; }) }; });
-      var nRuns = groups.reduce(function (a, g) { return a + g.runs.length; }, 0);
+      if (!selRuns.length || packBusy) return;
+      var groups = selOwners.map(function (id) {
+        var uu = users[id] || {};
+        return { owner: uu, uni: canonUni(uu.affiliation), runs: (runsByOwner[id] || []).filter(packOn) };
+      });
       setPackBusy(true);
       apBuildAgentPack(groups, selDay).then(function (md) {
+        var one = selRuns.length === 1 ? selRuns[0] : null;
         var who = selOwners.length === 1 ? apSlug(ownerName(selOwners[0])) : (selOwners.length + '-kutato');
-        var fname = 'publify-agent-csomag_' + who + '_' + selDay + '.md';
+        var what = one ? '_' + apSlug(((projects[one.project_id] || {}).title || 'projekt')) : (selRuns.length > 1 ? '_' + selRuns.length + '-futas' : '');
+        var fname = 'publify-agent-csomag_' + who + what + '_' + selDay + '.md';
         apDownload(fname, md);
-        toast('⬇ ' + fname + ' — ' + selOwners.length + ' kutató, ' + nRuns + ' futás, ' + Math.round(md.length / 1024) + ' KB');
+        toast('⬇ ' + fname + ' — ' + selOwners.length + ' kutató, ' + selRuns.length + ' futás, ' + Math.round(md.length / 1024) + ' KB');
         if (alive.current) setPackBusy(false);
       }, function (e) { toast('A csomag összeállítása nem sikerült: ' + ((e && e.message) || e), false); if (alive.current) setPackBusy(false); });
     }
@@ -4002,7 +4089,12 @@
     return h(React.Fragment, null,
       drawerRun ? h(RunDetail, { key: drawerRun.id, run: drawerRun, user: users[drawerRun.owner_id], project: projects[drawerRun.project_id], carry: carry[drawerRun.id],
         busy: !!(carry[drawerRun.id] && carry[drawerRun.id].state !== 'ended'), onClose: function () { setOpenRun(null); },
-        onResume: function (run, note) { notesRef.current[run.id] = note || ''; resumeRuns([run], function () { setOpenRun(null); }); } }) : null,
+        onResume: function (run, note) { notesRef.current[run.id] = note || ''; resumeRuns([run], function () { setOpenRun(null); }); },
+        onIncluded: function (run, okN, bad) {
+          if (okN) apEmit(run, [{ phase: (run.gate && run.gate.phase) || 'literature', level: 'ok', message: '✅ ' + okN + ' cikk kézzel included — admin: ' + adminName() }]).then(function () { }, function () { });
+          toast(okN ? ('✓ ' + okN + ' cikk beválasztva' + (bad ? ' (' + bad + ' nem sikerült)' : '')) : 'Egyetlen cikket sem sikerült beválasztani.', !!okN);
+          load();
+        } }) : null,
       h('div', { className: 'st-wrap pc-wrap' },
       h('div', { className: 'st-head' },
         h('div', null,
@@ -4039,20 +4131,28 @@
           (!isStuckView && ownerIds.length) ? h('div', { className: 'pc-pack' },
             h('div', { className: 'pc-pack-top' },
               h('span', { className: 'pc-pack-l' }, '🤖 Agent-csomag'),
-              h('span', { className: 'pc-pack-n' }, selOwners.length + ' / ' + ownerIds.length + ' kutató kiválasztva'),
-              ownerIds.length > 1 ? h('button', { type: 'button', className: 'rd-link', onClick: function () { setPackSel(allPack ? {} : null); } }, allPack ? 'Egyik sem' : 'Mind') : null,
-              h('button', { type: 'button', className: 'btn pri sm', disabled: packBusy || !selOwners.length, onClick: downloadPack,
-                title: 'A kiválasztott kutatók aznap aktív futásainak teljes kontextusa, protokollja és eredményei egy .md fájlban, agent-megbízással' },
-                packBusy ? '⏳ Összeállítás…' : ('⬇ Letöltés (.md)' + (selOwners.length > 1 ? ' — ' + selOwners.length + ' kutató' : '')))),
-            h('div', { className: 'pc-pack-users', role: 'group', 'aria-label': 'Kutatók a csomagban' },
+              h('span', { className: 'pc-pack-n' }, selRuns.length + ' / ' + items.length + ' futás' + (ownerIds.length > 1 ? ' · ' + selOwners.length + ' / ' + ownerIds.length + ' kutató' : '')),
+              items.length > 1 ? h('button', { type: 'button', className: 'rd-link', onClick: function () { setPackSel(allPack ? {} : null); } }, allPack ? 'Egyik sem' : 'Mind') : null,
+              h('button', { type: 'button', className: 'btn pri sm', disabled: packBusy || !selRuns.length, onClick: downloadPack,
+                title: 'A kiválasztott futások teljes kontextusa, protokollja és eredményei egy .md fájlban, agent-megbízással' },
+                packBusy ? '⏳ Összeállítás…' : ('⬇ Letöltés (.md)' + (selRuns.length ? ' — ' + selRuns.length + ' futás' : '')))),
+            h('div', { className: 'pc-pack-users', role: 'group', 'aria-label': 'Kutatók és futásaik a csomagban' },
               ownerIds.map(function (id) {
-                var on = selOwners.indexOf(id) >= 0;
-                return h('label', { key: id, className: 'pc-pu' + (on ? ' on' : '') },
-                  h('input', { type: 'checkbox', checked: on, onChange: function () { togglePack(id); } }),
-                  h('span', null, ownerName(id)),
-                  h('em', null, canonUni((users[id] || {}).affiliation) + ' · ' + dayOwners[id] + ' futás'));
+                var rs = runsByOwner[id] || [], onAll = rs.every(packOn), onSome = rs.some(packOn);
+                return h('div', { key: id, className: 'pc-pu-grp' },
+                  h('label', { className: 'pc-pu' + (onSome ? ' on' : '') },
+                    h('input', { type: 'checkbox', checked: onAll, ref: function (el) { if (el) el.indeterminate = onSome && !onAll; }, onChange: function () { toggleOwner(id); } }),
+                    h('span', null, ownerName(id)),
+                    h('em', null, canonUni((users[id] || {}).affiliation) + ' · ' + rs.length + ' futás')),
+                  h('div', { className: 'pc-pu-runs' }, rs.map(function (r) {
+                    var pr = projects[r.project_id] || {}, ph = (r.phases || [])[r.phase_index] || {};
+                    return h('label', { key: r.id, className: 'pc-pr' + (packOn(r) ? ' on' : ''), title: (pr.title || 'Projekt') + ' — ' + KIND_LAB[nowKind(r, now)] },
+                      h('input', { type: 'checkbox', checked: packOn(r), onChange: function () { toggleRun(r); } }),
+                      h('span', null, pr.title || 'Projekt'),
+                      h('em', null, (AP_ICON[ph.key] || '') + ' ' + (ph.label || ph.key || '—') + ' · ' + KIND_LAB[nowKind(r, now)]));
+                  })));
               })),
-            h('span', { className: 'pc-pack-hint' }, 'A kiválasztott kutatók anyaga egy fájlba kerül, kutatónként külön fejezetben: kontextus, irodalom, áttekintés, kivonatolt adatok és protokoll — megbízással: végrehajtás → folyóirat-választás KPI-ok alapján → kézirat, kutatónként külön.')) : null,
+            h('span', { className: 'pc-pack-hint' }, 'Futásonként választhatsz: egy kutatónak több futása is lehet aznap. A kiválasztottak egy fájlba kerülnek, kutatónként külön fejezetben — kontextus, irodalom, áttekintés, kivonatolt adatok és protokoll, megbízással: végrehajtás → folyóirat-választás KPI-ok alapján → kézirat.')) : null,
           items.length ? h('div', { className: 'st-bar' }, chip('all', 'Mind'), chip('stuck', 'Elakadt'), chip('gate', 'Jóváhagyásra vár'), chip('live', 'Fut'), chip('done', 'Végzett'), pc.cancel ? chip('cancel', 'Leállítva') : null) : null,
           selectable.length ? h('div', { className: 'st-bulk' },
             h('label', { className: 'st-all' }, h('input', { type: 'checkbox', checked: allOn, onChange: function () { if (allOn) setSel({}); else { var n = {}; selectable.forEach(function (r) { n[r.id] = 1; }); setSel(n); } } }), ' Elakadtak (' + selectable.length + ')'),
