@@ -393,11 +393,22 @@
     .tm-you { color: var(--acc); font-weight: 600; }
     .tm-resp { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .tm-m .in.sm { max-width: 148px; }
+    .tm-m .tm-move { max-width: 126px; }
     .tm-av { width: 26px; height: 26px; border-radius: 50%; flex: none; display: grid; place-items: center;
       background: var(--surface-2, #232a38); font-size: 11px; font-weight: 700; letter-spacing: .02em; }
     .chip.role-po { border-color: #c084fc; color: #c084fc; }
     .chip.role-sm { border-color: #38bdf8; color: #38bdf8; }
     .tm-gap { margin: 0; font-size: 12.5px; color: var(--acc); }
+    .tm-note { margin: 0; font-size: 12.5px; padding: 6px 8px; border-radius: 8px;
+      background: rgba(124, 108, 246, .12); border: 1px solid var(--acc); }
+    .tm-ok { margin: 0; font-size: 12.5px; color: #3ecf8e; }
+    .tm-submit { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12.5px;
+      border-top: 1px solid var(--line, #262c3a); padding-top: 8px; }
+    .tm-submit .sp { flex: 1; }
+    .tm-review { border-color: var(--acc); }
+    .tm-review-list { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+    .tm-review-i { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px;
+      border: 1px solid var(--line, #262c3a); border-radius: 999px; font-size: 13px; }
     .tm-own { border-top: 1px solid var(--line, #262c3a); padding-top: 8px; }
     .tm-resp-row { display: flex; gap: 6px; }
     .tm-resp-row .in { flex: 1; min-width: 0; }
@@ -420,9 +431,9 @@
       .tm-sec-row .in.sm, .tm-m .in.sm { max-width: none; }
     }
   </style>
-  <script src="theme.js?v=1789674131"></script>
-  <script src="nav.js?v=1789674131"></script>
-  <script src="entitlements.js?v=1789674131"></script>
+  <script src="theme.js?v=1789675229"></script>
+  <script src="nav.js?v=1789675229"></script>
+  <script src="entitlements.js?v=1789675229"></script>
 </head>
 
 <body>
@@ -434,20 +445,20 @@
   <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
   <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="backend/config.js?v=1789674131"></script>
-  <script src="auth.js?v=1789674131"></script>
-  <script src="backend.js?v=1789674131"></script>
-  <script src="universities.js?v=1789674131"></script>
-  <script src="onboarding.js?v=1789674131"></script>
+  <script src="backend/config.js?v=1789675229"></script>
+  <script src="auth.js?v=1789675229"></script>
+  <script src="backend.js?v=1789675229"></script>
+  <script src="universities.js?v=1789675229"></script>
+  <script src="onboarding.js?v=1789675229"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
-  <script src="course-live.js?v=1789674131"></script>
-  <script src="course-roster.js?v=1789674131"></script>
-  <script src="course-teams.js?v=1789674131"></script>
-  <script type="text/babel" src="course.jsx?v=1789674131"></script>
+  <script src="course-live.js?v=1789675229"></script>
+  <script src="course-roster.js?v=1789675229"></script>
+  <script src="course-teams.js?v=1789675229"></script>
+  <script type="text/babel" src="course.jsx?v=1789675229"></script>
 
-  <script src="build.js?v=1789674131"></script>
-  <script src="version-badge.js?v=1789674131"></script>
+  <script src="build.js?v=1789675229"></script>
+  <script src="version-badge.js?v=1789675229"></script>
 </body>
 
 </html>

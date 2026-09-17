@@ -44,6 +44,8 @@
     useEffect(function () { setName(t.name); setGoal(t.goal || ''); }, [t.name, t.goal]);
     useEffect(function () { setResp((me && me.responsibility) || ''); }, [me && me.responsibility]);
 
+    var status = t.status || 'forming';
+    var approved = status === 'approved', submitted = status === 'submitted';
     var size = (t.members || []).length;
     var max = +cfg.max || 6, min = +cfg.min || 3;
     var hasPO = (t.members || []).some(function (m) { return m.role === 'po'; });
@@ -72,12 +74,15 @@
       });
     }
 
+    var teams = props.allTeams || [];
     return h('div', { className: 'co-card tm-card' + (mine ? ' mine' : '') + (t.locked ? ' locked' : '') },
       h('div', { className: 'tm-head' },
         editing
           ? h('input', { className: 'in', value: name, maxLength: 60, 'aria-label': 'Csapatnév', onChange: function (e) { setName(e.target.value); } })
           : h('h3', null, t.name),
         mine ? h('span', { className: 'chip ok' }, 'a te csapatod') : null,
+        approved ? h('span', { className: 'chip ok', title: 'Az oktató jóváhagyta — az összetétel befagyott' }, '✓ jóváhagyva')
+          : submitted ? h('span', { className: 'chip acc' }, '⏳ jóváhagyásra vár') : null,
         t.locked ? h('span', { className: 'chip', title: 'Az oktató zárolta: nem lehet be- és kilépni' }, '🔒 zárolt') : null,
         h('span', { className: 'sp' }),
         h('span', { className: 'tm-size' + (full ? ' full' : '') }, size + ' / ' + max + ' fő')),
@@ -87,7 +92,7 @@
 
       h('ul', { className: 'tm-members' }, (t.members || []).map(function (m) {
         var isMe = me && m.user_id === me.user_id;
-        var canSetRole = (mine || isInstr) && props.open;
+        var canSetRole = (isInstr || (mine && !approved)) && props.open;
         return h('li', { key: m.user_id, className: 'tm-m' + (isMe ? ' me' : '') },
           h(Avatar, { name: m.name }),
           h('div', { className: 'tm-m-main' },
@@ -97,12 +102,31 @@
             ? h('select', { className: 'in sm', value: m.role, 'aria-label': (m.name || '') + ' szerepe',
                 onChange: function (e) { setRole(m.user_id, e.target.value); } },
               ROLES.map(function (r) { return h('option', { key: r.k, value: r.k }, r.ic + ' ' + r.t); }))
-            : h('span', { className: 'chip role-' + m.role }, ROLE_BY[m.role].ic + ' ' + ROLE_BY[m.role].t));
+            : h('span', { className: 'chip role-' + m.role }, ROLE_BY[m.role].ic + ' ' + ROLE_BY[m.role].t),
+          isInstr ? h('select', { className: 'in sm tm-move', value: '', 'aria-label': (m.name || '') + ' áthelyezése',
+              onChange: function (e) { if (e.target.value) props.onMove(m, e.target.value === '-' ? null : e.target.value); } },
+            h('option', { value: '' }, 'Áthelyezés…'),
+            teams.filter(function (x) { return x.id !== t.id; }).map(function (x) {
+              return h('option', { key: x.id, value: x.id }, x.name + ' (' + (x.members || []).length + ')');
+            }),
+            h('option', { value: '-' }, '⨯ Kivesz a csapatból')) : null);
       })),
 
       gaps.length ? h('p', { className: 'tm-gap' }, '⚠ Még nincs ' + gaps.join(' és ') + ' a csapatban.') : null,
       size < min ? h('p', { className: 'tm-gap' }, 'Legalább ' + min + ' fő kell — most ' + size + ' vagytok.') : null,
+      t.review_note ? h('p', { className: 'tm-note' }, '↩ Az oktató visszaküldte: ' + t.review_note) : null,
 
+      (mine && !approved && props.open) ? h('div', { className: 'tm-submit' },
+        submitted
+          ? h('span', null, h('b', null, 'Beküldve jóváhagyásra.'), ' Amíg az oktató el nem bírálja, még visszavonhatod.')
+          : (size >= min && !gaps.length
+            ? h('span', null, 'Kész az összeállítás? Küldjétek be jóváhagyásra.')
+            : h('span', { className: 'co-note' }, 'Beküldéshez legalább ' + min + ' fő kell, Product Ownerrel és Scrum Masterrel.')),
+        h('span', { className: 'sp' }),
+        submitted
+          ? h('button', { type: 'button', className: 'btn sm', onClick: function () { props.onWithdraw(t); } }, 'Visszavonom')
+          : h('button', { type: 'button', className: 'btn pri sm', disabled: size < min || gaps.length > 0, onClick: function () { props.onSubmit(t); } }, '✓ Beküldjük jóváhagyásra')) : null,
+      (mine && approved) ? h('p', { className: 'tm-ok' }, '✓ Az oktató jóváhagyta a csapatot. Az összetétel innentől rögzített.') : null,
       mine ? h('div', { className: 'tm-own' },
         h('label', { className: 'form-l' }, 'Mit vállalsz a csapatban?'),
         h('div', { className: 'tm-resp-row' },
@@ -111,7 +135,7 @@
           h('button', { type: 'button', className: 'btn sm', onClick: saveResp }, 'Mentés'))) : null,
 
       h('div', { className: 'tm-actions' },
-        (mine && props.open) ? (editing
+        (mine && props.open && !approved) ? (editing
           ? h('span', null,
             h('button', { type: 'button', className: 'btn pri sm', onClick: saveTeam }, 'Mentés'),
             ' ',
@@ -120,8 +144,11 @@
         (!mine && !hasTeam && !isInstr && props.open && !full && !t.locked)
           ? h('button', { type: 'button', className: 'btn pri sm', onClick: function () { props.onJoin(t); } }, '+ Csatlakozom')
           : (!mine && !hasTeam && !isInstr && (full || t.locked) ? h('span', { className: 'co-note' }, t.locked ? 'zárolt' : 'betelt') : null),
-        mine && props.open ? h('button', { type: 'button', className: 'btn sm danger', onClick: function () { props.onLeave(t); } }, 'Kilépek') : null,
+        (mine && props.open && !approved) ? h('button', { type: 'button', className: 'btn sm danger', onClick: function () { props.onLeave(t); } }, 'Kilépek') : null,
         h('span', { className: 'sp' }),
+        isInstr && !approved ? h('button', { type: 'button', className: 'btn pri sm', onClick: function () { props.onReview(t, true); } }, '✓ Jóváhagyom') : null,
+        isInstr && submitted ? h('button', { type: 'button', className: 'btn sm', onClick: function () { props.onReview(t, false); } }, '↩ Visszaküldöm') : null,
+        isInstr && approved ? h('button', { type: 'button', className: 'btn sm', onClick: function () { props.onReview(t, false); } }, '↩ Visszanyitom') : null,
         isInstr ? h('button', { type: 'button', className: 'btn sm', onClick: function () { props.onLock(t); } }, t.locked ? 'Feloldás' : '🔒 Zárolás') : null,
         isInstr ? h('button', { type: 'button', className: 'btn sm danger', onClick: function () { props.onDelete(t); } }, '🗑') : null));
   }
@@ -198,7 +225,9 @@
       sb.rpc('course_team_create', { p_course: courseId, p_name: newName, p_goal: newGoal }).then(function (r) {
         setBusy(false);
         if (r && r.error) { toast(r.error.message, { kind: 'error' }); return; }
-        setNewName(''); setNewGoal(''); toast('✓ Csapat létrehozva — hívd a többieket!', { kind: 'ok' }); load();
+        setNewName(''); setNewGoal('');
+        toast(isInstr ? '✓ Csapat létrehozva — most oszd be a tagjait.' : '✓ Csapat létrehozva — hívd a többieket!', { kind: 'ok' });
+        load();
       });
     }
     function join(t) {
@@ -237,6 +266,43 @@
         load();
       });
     }
+    function submit(t) {
+      sb.rpc('course_team_submit', { p_course: courseId }).then(function (r) {
+        if (r && r.error) { toast(r.error.message, { kind: 'error' }); return; }
+        toast('✓ Beküldve — az oktató hagyja jóvá.', { kind: 'ok' }); load();
+      });
+    }
+    function withdraw() {
+      sb.rpc('course_team_withdraw', { p_course: courseId }).then(function (r) {
+        if (r && r.error) { toast(r.error.message, { kind: 'error' }); return; }
+        load();
+      });
+    }
+    function review(t, ok) {
+      if (ok) {
+        sb.rpc('course_team_review', { p_team: t.id, p_ok: true, p_note: null }).then(function (r) {
+          if (r && r.error) { toast(r.error.message, { kind: 'error' }); return; }
+          toast('✓ ' + t.name + ' jóváhagyva', { kind: 'ok' }); load();
+        });
+        return;
+      }
+      var note = window.prompt((t.status === 'approved' ? 'Visszanyitod a(z) „' : 'Visszaküldöd a(z) „') + t.name
+        + '” csapatot. Mit írjunk nekik? (nem kötelező)', '');
+      if (note === null) return;
+      sb.rpc('course_team_review', { p_team: t.id, p_ok: false, p_note: note }).then(function (r) {
+        if (r && r.error) { toast(r.error.message, { kind: 'error' }); return; }
+        toast('A csapat újra alakulhat.', { kind: 'ok' }); load();
+      });
+    }
+    function approveAll(n) {
+      confirmBox('Jóváhagyod mindet?', n + ' csapat vár jóváhagyásra. Mindegyik összetétele befagy — visszanyitni bármikor tudod.', 'Jóváhagyás', false).then(function (ok) {
+        if (!ok) return;
+        sb.rpc('course_teams_approve_all', { p_course: courseId }).then(function (r) {
+          if (r && r.error) { toast(r.error.message, { kind: 'error' }); return; }
+          toast('✓ ' + ((r.data || {}).approved || 0) + ' csapat jóváhagyva', { kind: 'ok' }); load();
+        });
+      });
+    }
     function autofill() {
       confirmBox('Beosztod a maradékot?', solo.length + ' hallgató még nincs csapatban. A rendszer előbb a hiányos csapatokat tölti fel, majd újakat nyit. Utána kézzel átrendezheted őket.', 'Beosztás', false).then(function (ok) {
         if (!ok) return;
@@ -250,8 +316,10 @@
     }
 
     var myTeam = me ? teams.filter(function (t) { return t.id === me.team_id; })[0] : null;
-    var cardProps = { cfg: cfg, courseId: courseId, isInstr: isInstr, open: open, hasTeam: !!me,
-      onChange: load, onJoin: join, onLeave: leave, onLock: lock, onDelete: del };
+    var cardProps = { cfg: cfg, courseId: courseId, isInstr: isInstr, open: open, hasTeam: !!me, allTeams: teams,
+      onChange: load, onJoin: join, onLeave: leave, onLock: lock, onDelete: del,
+      onSubmit: submit, onWithdraw: withdraw, onReview: review,
+      onMove: function (m, teamId) { move(m.user_id, teamId); } };
 
     return h('div', { className: 'tm-wrap' },
       h('div', { className: 'tm-top' },
@@ -263,18 +331,34 @@
         h('span', { className: 'sp' }),
         h('span', { className: 'chip' }, teams.length + ' csapat'),
         h('span', { className: 'chip' }, inTeams + ' fő csapatban'),
-        h('span', { className: 'chip' + (solo.length ? ' acc' : '') }, solo.length + ' csapat nélkül')),
+        h('span', { className: 'chip' + (solo.length ? ' acc' : '') }, solo.length + ' csapat nélkül'),
+        h('span', { className: 'chip ok' }, teams.filter(function (x) { return x.status === 'approved'; }).length + ' jóváhagyva')),
 
       !open ? h('div', { className: 'co-card tm-closed' },
         h('b', null, '🔒 A csapatalakítás lezárult.'),
         cfg.deadline ? ' A határidő ' + fmtDay(cfg.deadline) + ' volt.' : '',
         isInstr ? ' Oktatóként te továbbra is átrendezheted a csapatokat.' : ' Ha változtatnál, szólj az oktatónak.') : null,
 
+      (isInstr && teams.filter(function (x) { return x.status === 'submitted'; }).length)
+        ? h('div', { className: 'co-card tm-review' },
+          h('b', null, '⏳ ' + teams.filter(function (x) { return x.status === 'submitted'; }).length + ' csapat vár jóváhagyásra'),
+          h('p', { className: 'co-note' }, 'Beküldték az összeállításukat. Jóváhagyás után az összetételük befagy, és kaphatnak feladatot.'),
+          h('div', { className: 'tm-review-list' },
+            teams.filter(function (x) { return x.status === 'submitted'; }).map(function (x) {
+              return h('span', { key: x.id, className: 'tm-review-i' },
+                h('b', null, x.name), h('span', { className: 'co-note' }, (x.members || []).length + ' fő'),
+                h('button', { type: 'button', className: 'btn pri sm', onClick: function () { review(x, true); } }, '✓'),
+                h('button', { type: 'button', className: 'btn sm', onClick: function () { review(x, false); } }, '↩'));
+            })),
+          h('button', { type: 'button', className: 'btn sm', onClick: function () { approveAll(teams.filter(function (x) { return x.status === 'submitted'; }).length); } }, '✓ Mindet jóváhagyom'))
+        : null,
       isInstr ? h(ConfigBar, { cfg: cfg, courseId: courseId, onChange: load }) : null,
 
-      (!isInstr && !me && open) ? h('div', { className: 'co-card tm-new', ref: formRef },
-        h('b', null, '＋ Új csapat alapítása'),
-        h('p', { className: 'co-note' }, 'Adj neki nevet, és egy mondatban azt is, mivel foglalkoztok. A többiek ezután tudnak csatlakozni.'),
+      ((isInstr || !me) && open) ? h('div', { className: 'co-card tm-new', ref: formRef },
+        h('b', null, isInstr ? '＋ Új csapat létrehozása' : '＋ Új csapat alapítása'),
+        h('p', { className: 'co-note' }, isInstr
+          ? 'Üres csapat jön létre — te nem leszel a tagja. Utána a „Még csapat nélkül” listából, vagy a tagok melletti áthelyezéssel töltheted fel.'
+          : 'Adj neki nevet, és egy mondatban azt is, mivel foglalkoztok. A többiek ezután tudnak csatlakozni.'),
         h('div', { className: 'tm-new-row' },
           h('input', { className: 'in', value: newName, maxLength: 60, placeholder: 'Csapatnév', 'aria-label': 'Csapatnév', onChange: function (e) { setNewName(e.target.value); } }),
           h('input', { className: 'in', value: newGoal, maxLength: 200, placeholder: 'Mivel foglalkoztok? (nem kötelező)', 'aria-label': 'Csapat célja', onChange: function (e) { setNewGoal(e.target.value); } }),
