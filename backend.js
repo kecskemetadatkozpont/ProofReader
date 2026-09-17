@@ -282,53 +282,32 @@
     injectCss();
     var d = document.createElement('div'); d.id = 'pr-signin';
     d.innerHTML = '<div class="pr-card"><div class="pr-mk"><span></span></div>'
-      + '<h1>Sign in to Publify</h1><p>Sign in with your email and password, or your Google account. Your work syncs to the cloud.</p>'
+      + '<h1>Sign in to Publify</h1><p>New here? Create your account with Google — that is the only way to sign up. Already have a password? Use the form below.</p>'
       + (errMsg ? '<div class="pr-err">' + errMsg + '</div>' : '')
+      + '<button class="pr-g" id="pr-google">' + GBTN + 'Continue with Google</button>'
+      + '<div class="pr-or">or</div>'
       + '<form id="pr-pwform" autocomplete="on">'
       + '<input class="pr-in" id="pr-email" type="email" autocomplete="username" placeholder="name@institution.hu" aria-label="Email" />'
       + '<input class="pr-in" id="pr-pw" type="password" autocomplete="current-password" placeholder="Password" aria-label="Password" />'
       + '<button class="pr-primary" id="pr-pwbtn" type="submit">Sign in</button>'
       + '</form>'
-      + '<div style="text-align:center;margin-top:11px;font-size:13px"><a href="#" id="pr-toggle" style="font-weight:600;text-decoration:none">Don’t have an account yet? Sign up</a></div>'
       + '<div style="text-align:center;margin-top:6px;font-size:12.5px"><a href="#" id="pr-forgot" style="color:inherit;opacity:.75;text-decoration:none">Forgot your password?</a></div>'
-      + '<div class="pr-or">or</div>'
-      + '<button class="pr-g" id="pr-google">' + GBTN + 'Continue with Google</button>'
       + '<div class="pr-sep"></div>'
       + '<button class="pr-demo" id="pr-demo">Continue in demo mode (this browser only)</button>'
-      + '<div class="pr-note">Researchers: use the institutional email and password you were given. Demo mode keeps everything in this browser.</div></div>';
+      + '<div class="pr-note">Hallgatóknak: a „Continue with Google” gombbal lépj be. Researchers: use the institutional email and password you were given. Demo mode keeps everything in this browser.</div></div>';
     (document.body || document.documentElement).appendChild(d);
-    var isSignup = false;
     document.getElementById('pr-pwform').onsubmit = function (e) {
       e.preventDefault();
       var em = (document.getElementById('pr-email').value || '').trim(), pw = document.getElementById('pr-pw').value || '';
-      if (!em || !pw) { setOverlayErr(isSignup ? 'Enter your email and a password.' : 'Enter your email and password.'); return; }
+      if (!em || !pw) { setOverlayErr('Enter your email and password.'); return; }
       var btn = document.getElementById('pr-pwbtn');
-      if (isSignup) {
-        if (pw.length < 6) { setOverlayErr('The password must be at least 6 characters.'); return; }
-        btn.disabled = true; btn.textContent = 'Signing up…';
-        sb.auth.signUp({ email: em, password: pw, options: { data: { full_name: em.split('@')[0] }, emailRedirectTo: cleanUrl() } }).then(function (res) {
-          btn.disabled = false; btn.textContent = 'Sign up';
-          if (res && res.error) { setOverlayErr(res.error.message); return; }
-          if (res.data && res.data.session) return;   // (rare) auto-confirmed → onAuthStateChange reboots
-          setOverlayErr('');
-          var pEl = document.querySelector('#pr-signin p'); if (pEl) pEl.innerHTML = '✅ <b>Sign-up successful!</b> We sent a confirmation email — click the link in it, then sign in. On your first sign-in you’ll fill in your profile, and an admin will approve it.';
-        }, function (er) { btn.disabled = false; btn.textContent = 'Sign up'; setOverlayErr((er && er.message) || 'Sign-up failed.'); });
-        return;
-      }
+      // sign-up by e-mail + password is closed: we cannot send confirmation mail in bulk, so new accounts come
+      // through Google only (also switch off "Allow new users to sign up" for the e-mail provider in Supabase Auth)
       btn.disabled = true; btn.textContent = 'Signing in…';
       sb.auth.signInWithPassword({ email: em, password: pw }).then(function (res) {
         if (res && res.error) { btn.disabled = false; btn.textContent = 'Sign in'; setOverlayErr(/invalid|credential/i.test(res.error.message || '') ? 'Incorrect email or password.' : res.error.message); return; }
         // SIGNED_IN fires → onAuthStateChange reboots into cloud mode; keep the button disabled.
       }, function (er) { btn.disabled = false; btn.textContent = 'Sign in'; setOverlayErr((er && er.message) || 'Sign-in failed.'); });
-    };
-    document.getElementById('pr-toggle').onclick = function (e) {
-      e.preventDefault(); isSignup = !isSignup;
-      document.getElementById('pr-pwbtn').textContent = isSignup ? 'Sign up' : 'Sign in';
-      var h1 = document.querySelector('#pr-signin h1'); if (h1) h1.textContent = isSignup ? 'Create an account' : 'Sign in to Publify';
-      var pEl = document.querySelector('#pr-signin p'); if (pEl) pEl.textContent = isSignup ? 'Create a Publify account with your email and password — or continue with a Google account.' : 'Sign in with your email and password, or your Google account. Your work syncs to the cloud.';
-      var pwi = document.getElementById('pr-pw'); pwi.setAttribute('autocomplete', isSignup ? 'new-password' : 'current-password'); pwi.placeholder = isSignup ? 'Choose a password (min. 6 characters)' : 'Password';
-      this.textContent = isSignup ? 'Already have an account? Sign in' : 'Don’t have an account yet? Sign up';
-      setOverlayErr('');
     };
     document.getElementById('pr-forgot').onclick = function (e) {
       e.preventDefault();

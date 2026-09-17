@@ -209,6 +209,65 @@
     }, function () { btn.disabled = false; btn.textContent = 'Submit for approval'; });
   }
 
+  /* ---------- student path: course code instead of admin approval (migration-121) ----------
+   * A course roster is the proof that someone is a student on the course, so a student does not
+   * wait for an admin: they redeem the course code here, then claim their own Neptun code in the
+   * course page. The account status stays 'pending' — this opens the course, nothing else. */
+  var onCoursePage = /Course\.html/i.test(location.pathname || '');
+  function looksLikeEmailName(n) { return !n || /@/.test(n) || /^[a-z0-9._+-]+$/.test(n); }
+  function studentScreen(status) {
+    var nm = me.name && !looksLikeEmailName(me.name) ? me.name : '';
+    var html = ''
+      + '<div class="mk"><span></span></div>'
+      + '<h1>Csatlakozás a kurzushoz</h1>'
+      + '<p class="sub">Add meg a nevedet és az oktatódtól kapott kurzuskódot. Utána a Neptun-kódoddal azonosítod magad — adminisztrátori jóváhagyásra nem kell várnod.</p>'
+      + whoBlock()
+      + '<div class="field">'
+      + '  <label for="ob-sname">Teljes neved <span class="req">*</span></label>'
+      + '  <input id="ob-sname" autocomplete="name" placeholder="pl. Kiss Anna" value="' + esc(nm) + '" />'
+      + '  <div class="err" id="ob-sname-err">Írd be a neved, hogy az oktatód beazonosítson.</div>'
+      + '</div>'
+      + '<div class="field">'
+      + '  <label for="ob-scode">Kurzuskód <span class="req">*</span></label>'
+      + '  <input id="ob-scode" autocomplete="off" placeholder="az oktatódtól kaptad" />'
+      + '  <div class="err" id="ob-scode-err">Ezt a kódot nem ismerjük fel.</div>'
+      + '</div>'
+      + '<button class="primary" id="ob-sgo">Csatlakozom</button>'
+      + '<button class="ghost" id="pr-ob-other">Nem hallgató vagyok — kutatói fiókot kérek</button>'
+      + '<button class="ghost" id="pr-ob-signout">Kijelentkezés</button>';
+    mount(html, true); signOutBtn();
+    var other = document.getElementById('pr-ob-other');
+    if (other) other.onclick = function () { if (status === 'pending') pending(); else form(); };
+    var codeIn = document.getElementById('ob-scode');
+    try { var q = new URLSearchParams(location.search).get('join'); if (q) codeIn.value = q; } catch (e) { }
+    var btn = document.getElementById('ob-sgo');
+    function go() {
+      var nameV = (document.getElementById('ob-sname').value || '').trim();
+      var codeV = (codeIn.value || '').trim();
+      document.getElementById('ob-sname-err').classList.remove('on');
+      document.getElementById('ob-scode-err').classList.remove('on');
+      if (nameV.length < 3) { document.getElementById('ob-sname-err').classList.add('on'); return; }
+      if (!codeV) { document.getElementById('ob-scode-err').classList.add('on'); return; }
+      btn.disabled = true; btn.textContent = 'Csatlakozás…';
+      // the name is what the lecturer sees next to the Neptun code; status 'pending' keeps every other surface closed
+      sb.from('profiles').update({ name: nameV, is_student: true, status: status === 'incomplete' ? 'pending' : status })
+        .eq('id', me.id).then(function () {
+          return sb.rpc('course_join', { p_code: codeV });
+        }).then(function (r) {
+          if (r && r.error) {
+            btn.disabled = false; btn.textContent = 'Csatlakozom';
+            var e = document.getElementById('ob-scode-err');
+            e.textContent = /Érvénytelen/.test(r.error.message) ? 'Ezt a kódot nem ismerjük fel.' : r.error.message;
+            e.classList.add('on'); return;
+          }
+          me.name = nameV; unmount();
+          location.replace('Course.html?course=' + encodeURIComponent(r.data));
+        }, function () { btn.disabled = false; btn.textContent = 'Csatlakozom'; });
+    }
+    btn.onclick = go;
+    codeIn.onkeydown = function (e) { if (e.key === 'Enter') go(); };
+  }
+
   /* ---------- status screens ---------- */
   function statusScreen(opts) {
     var html = ''
@@ -228,7 +287,8 @@
   function pending() {
     statusScreen({ tag: 'Awaiting approval', fg: '#b45309', bg: '#fdf6e3', icon: icClock,
       title: "You're all set — pending approval",
-      body: 'Thanks! Your details were submitted. An administrator will review your account shortly. You\u2019ll get access as soon as it\u2019s approved.' });
+      body: 'Thanks! Your details were submitted. An administrator will review your account shortly. You\u2019ll get access as soon as it\u2019s approved.'
+        + '<br><br>Hallgatóként érkeztél? Ha van kurzuskódod, jóváhagyás nélkül is beléphetsz: <a href="Course.html">nyisd meg a kurzusodat</a>.' });
   }
   function rejected() {
     statusScreen({ tag: 'Not approved', fg: '#b42318', bg: '#fdeef0', icon: icX,
@@ -255,6 +315,13 @@
     // Admin access now lives in the React top bar (app.jsx / dashboard.jsx), gated on role,
     // so we no longer add the floating bottom-right button that overlapped the tweaks gear.
     if (status === 'approved') { unmount(); return; }
+    if (onCoursePage && (status === 'pending' || status === 'incomplete')) {
+      // already enrolled → let the course page through; it asks for the Neptun code itself
+      return sb.rpc('course_my_courses').then(function (r) {
+        if (r && !r.error && (r.data || []).length) { unmount(); return; }
+        studentScreen(status);
+      }, function () { studentScreen(status); });
+    }
     if (status === 'pending') return pending();
     if (status === 'rejected') return rejected();
     if (status === 'suspended') return suspended();
