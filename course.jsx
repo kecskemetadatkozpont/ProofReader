@@ -1173,6 +1173,8 @@
     var mcS = useState(null), mcpLab = mcS[0], setMcpLab = mcS[1];
     var adS = useState(isAdminUser()), admin = adS[0], setAdmin = adS[1];
     var stS = useState({}), stats = stS[0], setStats = stS[1];      // course_id → { oktato, hallgato } (only where the viewer may see all enrollments)
+    var lmS = useState(null), liveMode = lmS[0], setLiveMode = lmS[1];   // { kind: 'present'|'student'|'edit'|'browse', deck, session } — course-live.js
+    var lkS = useState(0), liveKey = lkS[0], setLiveKey = lkS[1];
 
     useEffect(function () { boot(); }, []);
     useEffect(function () {   // the admin role arrives after first paint (backend.js → 'pr-profile')
@@ -1211,9 +1213,25 @@
         setStats(m);
       }, function () { });
     }
+    function startPresent(deck) {
+      var L = window.PRCourseLive; if (!L || !courseId) return;
+      sb.from('course_live_sessions').select('*').eq('course_id', courseId).eq('status', 'live').maybeSingle().then(function (r) {
+        var cur = r && r.data;
+        if (cur && cur.deck_id === deck.id) { setLiveMode({ kind: 'present', deck: deck, session: cur }); return; }
+        var go = function (ok) {
+          if (!ok) return;
+          L.startSession({ id: courseId }, deck).then(function (s) { setLiveMode({ kind: 'present', deck: deck, session: s }); setLiveKey(function (k) { return k + 1; }); },
+            function (e) { toast('Nem sikerült elindítani: ' + ((e && e.message) || e), { kind: 'error' }); });
+        };
+        if (cur) {
+          if (window.PRUI && window.PRUI.confirm) window.PRUI.confirm({ title: 'Már fut egy élő előadás', body: 'Ha elindítod ezt, a másik élő alkalom véget ér.', confirmLabel: 'Indítás' }).then(go);
+          else go(window.confirm('Már fut egy élő előadás. Befejezed, és elindítod ezt?'));
+        } else go(true);
+      }, function () { toast('Hálózati hiba.', { kind: 'error' }); });
+    }
     function goHome() {
       try { history.replaceState(null, '', 'Course.html'); } catch (e) { }
-      setCourseId(null); setView('lab'); setPhase('home');
+      setCourseId(null); setView('lab'); setLiveMode(null); setPhase('home');
       if (me) loadCourses(me.id, null);
     }
     function selectCourse(cid, uid) {
@@ -1227,7 +1245,8 @@
         var instr = !!(res[0] && res[0].data === true);
         setIsInstr(instr);
         var lecs = ((res[1] || {}).data) || [];
-        setView(instr && !lecs.length ? 'members' : 'lab');   // a fresh course has nothing to teach yet → start with its people
+        setLiveMode(null);
+        setView(lecs.length ? 'lab' : 'live');   // no lab lectures yet → the slide decks / live lectures are the course's main surface
         setLectures(lecs);
         setLabs(((res[2] || {}).data) || []);
         var visible = lecs.filter(function (l) { return l.visible; });
@@ -1295,12 +1314,34 @@
           : h('h2', null, course.title || 'Kurzus'),
         isInstr ? chip(admin && !(myEnr && myEnr.role !== 'hallgato') ? 'Admin' : 'Előadó', 'acc', 'r') : (myEnr ? chip('Hallgató', '', 'r') : null),
         h('a', { className: 'btn sm', href: 'CourseCanvas.html?course=' + (courseId || '') }, '🖼 Évfolyam-vászon'),
-        isInstr ? h('span', { className: 'seg' }, [['lab', '🧪 Labor'], ['members', '👥 Résztvevők'], ['teach', '🎓 Oktatói pult']].map(function (t) {
-          return h('button', { key: t[0], className: view === t[0] ? 'on' : '', onClick: function () { setView(t[0]); } }, t[1]);
-        })) : null,
+        h('span', { className: 'seg' }, (isInstr
+          ? [['live', '🎞 Előadások'], ['lab', '🧪 Labor'], ['members', '👥 Résztvevők'], ['activity', '📊 Aktivitás'], ['teach', '🎓 Oktatói pult']]
+          : [['live', '🎞 Előadások'], ['lab', '🧪 Labor']]).map(function (t) {
+          return h('button', { key: t[0], className: (view === t[0] && !liveMode) ? 'on' : '', onClick: function () { setLiveMode(null); setView(t[0]); } }, t[1]);
+        })),
         h('span', { className: 'sp' }),
         h(CreditBars, { budgets: budgets })),
-      (view === 'members' && isInstr)
+      (window.PRCourseLive && !(liveMode && (liveMode.kind === 'present' || liveMode.kind === 'student')))
+        ? h(window.PRCourseLive.LiveBanner, { course: course, isInstr: isInstr, refreshKey: liveKey,
+          onJoin: function (deck, session) { setLiveMode({ kind: 'student', deck: deck, session: session }); },
+          onPresent: function (deck, session) { setLiveMode({ kind: 'present', deck: deck, session: session }); } }) : null,
+      (liveMode && window.PRCourseLive) ? (
+        liveMode.kind === 'present' ? h(window.PRCourseLive.PresenterView, { key: liveMode.session.id, course: course, deck: liveMode.deck, session: liveMode.session, meId: me.id,
+          onEnd: function () { setLiveMode(null); setView('live'); setLiveKey(function (k) { return k + 1; }); },
+          onExit: function () { setLiveMode(null); setView('live'); setLiveKey(function (k) { return k + 1; }); } })
+        : liveMode.kind === 'student' ? h(window.PRCourseLive.LiveStudentView, { key: liveMode.session.id, course: course, deck: liveMode.deck, session: liveMode.session, meId: me.id,
+          onLeave: function () { setLiveMode(null); setView('live'); setLiveKey(function (k) { return k + 1; }); } })
+        : liveMode.kind === 'edit' ? h(window.PRCourseLive.DeckEditor, { key: liveMode.deck.id, course: course, deck: liveMode.deck,
+          onClose: function () { setLiveMode(null); }, onPresent: function (d) { startPresent(d); } })
+        : h(window.PRCourseLive.DeckBrowser, { key: liveMode.deck.id, deck: liveMode.deck, onClose: function () { setLiveMode(null); } }))
+      : (view === 'live' && window.PRCourseLive)
+        ? h(window.PRCourseLive.DecksTab, { course: course, isInstr: isInstr, meId: me.id,
+          onPresent: function (d) { startPresent(d); },
+          onEdit: function (d) { setLiveMode({ kind: 'edit', deck: d }); },
+          onBrowse: function (d) { setLiveMode({ kind: 'browse', deck: d }); } })
+      : (view === 'activity' && isInstr && window.PRCourseLive)
+        ? h(window.PRCourseLive.ActivityTab, { course: course })
+      : (view === 'members' && isInstr)
         ? h(MembersTab, { course: course, admin: admin, meId: me.id, onChanged: function () { loadStats(courses, enrolls); } })
         : (view === 'teach' && isInstr)
         ? h(TeacherView, { course: course, labs: labs, lectures: lectures, meId: me.id })
