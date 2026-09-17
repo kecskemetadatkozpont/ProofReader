@@ -1,8 +1,8 @@
 /* Publify — Kurzus: névsor, hallgatói párosítás, pontok és jegyek (course-roster.js).
  * Loaded by Course.html before course.jsx; exposes window.PRCourseRoster.
  *
- * The Neptun export has no e-mail address, so we cannot create accounts for students. Instead the roster is imported
- * encrypted (name + Neptun code are pgp_sym_encrypt'd server side, matching runs on a keyed HMAC) and every student
+ * The Neptun export has no e-mail address, so we cannot create accounts for students. Instead only the Neptun codes are
+ * imported (encrypted server side, matching runs on a keyed HMAC — names are deliberately NOT stored) and every student
  * signs up themselves, joins with the course code and claims their own roster row by typing their Neptun code. That
  * claim is what ties an account to a grade. A code that is not on the roster becomes a request the lecturer approves.
  * Points come from lab grades + live-lecture participation; the grade follows a configurable point scale and can be
@@ -50,11 +50,10 @@
   // The export's header row is 'Név | Neptunkód | Képzés | Évfolyam | Felvételek száma | Felvett tárgy neve/kódja';
   // other faculties export slightly different labels, so the guess is a starting point the lecturer can correct.
   var FIELDS = [
-    { k: 'name', t: 'Név', re: /^(n[ée]v|hallgat[óo]|student|name)/i, req: true },
     { k: 'neptun', t: 'Neptun-kód', re: /neptun/i, req: true },
     { k: 'program', t: 'Képzés', re: /(k[ée]pz[ée]s|szak|program)/i },
     { k: 'subject', t: 'Tárgykód', re: /(t[áa]rgy|k[óo]d|subject)/i }
-  ];
+  ];   // no name column on purpose: the roster only needs the code, the account supplies the person
   function guessMap(headers) {
     var m = {}, used = {};
     FIELDS.forEach(function (f) {
@@ -100,19 +99,18 @@
       var m = parsed.map;
       return parsed.rows.map(function (r) {
         return { neptun: String(r[m.neptun] == null ? '' : r[m.neptun]).trim(),
-                 name: String(r[m.name] == null ? '' : r[m.name]).trim(),
                  program: m.program == null ? '' : String(r[m.program] == null ? '' : r[m.program]).trim(),
                  subject: m.subject == null ? '' : String(r[m.subject] == null ? '' : r[m.subject]).trim() };
-      }).filter(function (x) { return x.neptun && x.name; });
+      }).filter(function (x) { return x.neptun; });
     }
     function run() {
-      if (parsed.map.neptun == null || parsed.map.name == null) { setErr('A név és a Neptun-kód oszlopát meg kell adni.'); return; }
+      if (parsed.map.neptun == null) { setErr('A Neptun-kód oszlopát meg kell adni.'); return; }
       var rows = build();
       var bad = rows.filter(function (x) { return !looksLikeNeptun(x.neptun); }).length;
       if (!rows.length) { setErr('Egy használható sor sincs.'); return; }
-      confirmBox('Importálod a névsort?', rows.length + ' hallgató kerül fel a kurzus névsorába'
-        + (bad ? ' (' + bad + ' sor Neptun-kódja gyanús, ezeket a rendszer kihagyja)' : '')
-        + '. A név és a Neptun-kód titkosítva tárolódik; a hallgatók ezután a saját kódjukkal tudnak párosodni.', 'Importálás', false).then(function (ok) {
+      confirmBox('Importálod a névsort?', rows.length + ' Neptun-kód kerül fel a kurzus névsorába'
+        + (bad ? ' (' + bad + ' gyanús kódot a rendszer kihagy)' : '')
+        + '. Nevet nem tárolunk: a kódok titkosítva állnak, és a hallgatót a saját fiókja azonosítja, miután beírta a kódját.', 'Importálás', false).then(function (ok) {
         if (!ok) return;
         setBusy(true);
         // chunked: 474 rows in one statement is fine, but a slow link times out less often in batches
@@ -140,7 +138,7 @@
     return h('div', { className: 'co-card cr-import' },
       h('div', { className: 'cr-h' },
         h('div', null, h('b', null, '📋 Névsor importálása'),
-          h('p', { className: 'co-note' }, 'A Neptunból letöltött Excel-táblát (.xlsx) várja. A fájl a böngésződben nyílik meg; a szerverre már csak a név, a Neptun-kód, a képzés és a tárgykód megy fel, titkosítva.')),
+          h('p', { className: 'co-note' }, 'A Neptunból letöltött Excel-táblát (.xlsx) várja. A fájl a böngésződben nyílik meg, és onnan csak a Neptun-kód — titkosítva —, valamint a képzés és a tárgykód megy fel. A neveket a rendszer nem tárolja.')),
         h('span', { className: 'sp' }),
         h('button', { type: 'button', className: 'btn pri', disabled: busy, onClick: function () { fileRef.current && fileRef.current.click(); } }, busy ? 'Dolgozom…' : '⬆ Excel kiválasztása'),
         h('input', { ref: fileRef, type: 'file', accept: '.xlsx,.xls,.csv', style: { display: 'none' }, onChange: pick })),
@@ -211,7 +209,7 @@
     var mx = +val.max_points || 100;
     return h('div', { className: 'co-card cr-scale' },
       h('b', null, '🎯 Pontozás és ponthatárok'),
-      h('p', { className: 'co-note' }, 'A pont a labor-értékelésekből és az órai aktivitásból áll össze. Az aktivitás az elindított szavazások megválaszolt hányada — aki minden szavazásra válaszolt, a teljes aktivitási pontot kapja.'),
+      h('p', { className: 'co-note' }, 'A pont a labor-értékelésekből és az órai aktivitásból áll össze. Az aktivitás az elindított szavazások megválaszolt hányada — aki minden szavazásra válaszolt, a teljes aktivitási pontot kapja. Akinek még nincs pontja, az nem kap automatikus jegyet.'),
       h('div', { className: 'cr-scale-grid' },
         h('div', null, h('label', { className: 'form-l' }, 'Maximális pont'), h('input', { className: 'in', type: 'number', min: 1, value: val.max_points, onChange: function (e) { up('max_points', e.target.value); } })),
         h('div', null, h('label', { className: 'form-l' }, 'Ebből órai aktivitás'), h('input', { className: 'in', type: 'number', min: 0, value: val.activity_points, onChange: function (e) { up('activity_points', e.target.value); } })),
@@ -287,7 +285,7 @@
       else confirmBox('Elutasítod?', (q.user_name || 'A fiók') + ' nem fér hozzá a kurzus tartalmához. Később újra próbálkozhat.', 'Elutasítom', true).then(go);
     }
     function unclaim(row) {
-      confirmBox('Leválasztod a fiókot?', row.name + ' sora újra szabaddá válik, a hozzá kötött fiók pedig elveszti a hozzáférést, amíg újra nem párosítja magát.', 'Leválasztás', true).then(function (ok) {
+      confirmBox('Leválasztod a fiókot?', 'A(z) ' + row.neptun + ' kód sora újra szabaddá válik, ' + (row.user_name || 'a hozzá kötött fiók') + ' pedig elveszti a hozzáférést, amíg újra nem azonosítja magát.', 'Leválasztás', true).then(function (ok) {
         if (!ok) return;
         sb.rpc('course_roster_unclaim', { p_roster: row.id }).then(function (r) {
           if (r && r.error) { toast('Nem sikerült: ' + r.error.message, { kind: 'error' }); return; }
@@ -316,10 +314,10 @@
         var all = r.data || [];
         var list = subject ? all.filter(function (x) { return (x.subject_code || '') === subject; }) : all;
         if (!list.length) { toast('Ehhez nincs sor.', { kind: 'error' }); return; }
-        var head = ['Neptunkód', 'Név', 'Tárgykód', 'Pont', 'Jegy', 'Regisztrált'].join(';');
+        var head = ['Neptunkód', 'Tárgykód', 'Pont', 'Jegy', 'Regisztrált', 'Fiók'].join(';');
         var body = list.map(function (x) {
           // Hungarian Excel reads ';' columns and a decimal comma
-          return [x.neptun, x.name, x.subject_code || '', x.points == null ? '' : String(x.points).replace('.', ','), x.grade == null ? '' : x.grade, x.claimed ? 'igen' : 'nem'].map(csvCell).join(';');
+          return [x.neptun, x.subject_code || '', x.points == null ? '' : String(x.points).replace('.', ','), x.grade == null ? '' : x.grade, x.claimed ? 'igen' : 'nem', x.account || ''].map(csvCell).join(';');
         }).join('\n');
         var tag = (subject || 'teljes').replace(/[^\w.-]+/g, '_').slice(0, 40);
         download('jegyek_' + tag + '_' + new Date().toISOString().slice(0, 10) + '.csv', head + '\n' + body);
@@ -368,7 +366,7 @@
         h('div', { className: 'cr-h' },
           h('b', null, '👥 Névsor'),
           h('span', { className: 'sp' }),
-          h('input', { className: 'in sm', placeholder: 'Név vagy Neptun-kód…', value: term, 'aria-label': 'Keresés a névsorban', onChange: function (e) { setTerm(e.target.value); } }),
+          h('input', { className: 'in sm', placeholder: 'Neptun-kód vagy fiók neve…', value: term, 'aria-label': 'Keresés a névsorban', onChange: function (e) { setTerm(e.target.value); } }),
           h('button', { type: 'button', className: 'btn sm', disabled: busy, onClick: recalc }, '↻ Pontok'),
           h('button', { type: 'button', className: 'btn sm', onClick: function () { exportCsv(null); } }, '⬇ Jegyek (CSV)')),
         subjectKeys.length > 1 ? h('div', { className: 'cr-subj' },
@@ -381,22 +379,22 @@
           : !rows.length ? h('div', { className: 'soon' }, (st.total ? 'Ebben a szűrésben nincs találat.' : 'Még nincs névsor — importáld a Neptun-exportot.'))
             : h('div', { className: 'cr-table-wrap' }, h('table', { className: 'mem-table cr-table' },
               h('thead', null, h('tr', null,
-                h('th', null, 'Név'), h('th', null, 'Neptun'), h('th', null, 'Képzés'), h('th', null, 'Tárgykód'),
-                h('th', null, 'Fiók'), h('th', null, 'Pont'), h('th', null, 'Jegy'), h('th', null, ''))),
+                h('th', null, 'Neptun'), h('th', null, 'Képzés'), h('th', null, 'Tárgykód'),
+                h('th', null, 'Ki regisztrált'), h('th', null, 'Pont'), h('th', null, 'Jegy'), h('th', null, ''))),
               h('tbody', null, rows.map(function (r) {
                 return h('tr', { key: r.id, className: r.user_id ? '' : 'cr-unclaimed' },
-                  h('td', null, r.name, r.extra ? h('span', { className: 'chip', title: 'Oktatói jóváhagyással került a névsorba' }, ' utólag') : null),
-                  h('td', null, h('code', null, r.neptun)),
+                  h('td', null, h('code', null, r.neptun),
+                    r.extra ? h('span', { className: 'chip', title: 'Oktatói jóváhagyással került a névsorba' }, ' utólag') : null),
                   h('td', null, r.program || '—'),
                   h('td', null, r.subject_code || '—'),
-                  h('td', null, r.user_id ? h('span', { className: 'chip ok', title: fmtDate(r.claimed_at) }, '✓ ' + (r.user_name || 'regisztrált')) : h('span', { className: 'chip' }, 'nincs fiók')),
+                  h('td', null, r.user_id ? h('span', { className: 'chip ok', title: fmtDate(r.claimed_at) }, '✓ ' + (r.user_name || 'regisztrált')) : h('span', { className: 'chip' }, 'még senki')),
                   h('td', { className: 'cr-num' }, r.points == null ? '—' : (Math.round(r.points * 10) / 10).toString().replace('.', ',')),
                   h('td', null, r.user_id ? h('select', { className: 'in sm', value: r.grade == null ? '' : r.grade, 'aria-label': 'Jegy', onChange: function (e) { setGrade(r, e.target.value); } },
                     h('option', { value: '' }, '—'), [1, 2, 3, 4, 5].map(function (g) { return h('option', { key: g, value: g }, g); })) : '—',
                     r.manual ? h('span', { className: 'chip', title: 'Kézzel beírt jegy — az újraszámolás nem írja felül' }, ' kézi') : null),
                   h('td', { style: { textAlign: 'right' } }, r.user_id ? h('button', { type: 'button', className: 'btn sm', onClick: function () { unclaim(r); } }, 'Leválasztás') : null));
               })))),
-        h('p', { className: 'co-note cr-priv' }, '🔒 A nevek és a Neptun-kódok titkosítva vannak; ezen az oldalon és a CSV-letöltéskor fejti vissza őket a rendszer, és minden ilyen hozzáférést naplóz. A félév lezárása után érdemes törölni a névsort.'),
+        h('p', { className: 'co-note cr-priv' }, '🔒 A névsorban nincsenek nevek, csak titkosított Neptun-kódok; a név csak annál látszik, aki regisztrált, és az a saját fiókja neve. A kódokat ezen az oldalon és a CSV-letöltéskor fejti vissza a rendszer, és minden ilyen hozzáférést naplóz. A félév lezárása után érdemes törölni a névsort.'),
         h('div', { className: 'cr-f' }, h('button', { type: 'button', className: 'btn sm danger', onClick: purge }, '🗑 Névsor törlése'))));
   }
 
@@ -443,7 +441,7 @@
           onKeyDown: function (e) { if (e.key === 'Enter') submit(); } }),
         err ? h('p', { className: 'co-err', role: 'alert' }, err) : null,
         h('button', { type: 'button', className: 'btn pri', disabled: busy, onClick: submit }, busy ? 'Ellenőrzés…' : (pending ? 'Új kód beküldése' : 'Azonosítás')),
-        h('p', { className: 'co-note cr-priv' }, '🔒 A kódot titkosítva tároljuk, és csak arra használjuk, hogy a kurzus névsorához és a jegyedhez kössük. Az oktatód a névsort látja; a többi hallgató nem.')));
+        h('p', { className: 'co-note cr-priv' }, '🔒 A kódot titkosítva tároljuk, és csak arra használjuk, hogy a kurzus névsorához és a jegyedhez kössük. Az oktatód a kódodat és a fiókod nevét látja; a többi hallgató nem.')));
   }
 
   // ---------- student: own grade ----------
