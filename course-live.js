@@ -381,7 +381,8 @@
       if (f.size > 50 * 1024 * 1024) { toast('A fájl nagyobb 50 MB-nál — tömörítsd a képeket, vagy vedd ki a nagy videókat.', { kind: 'error' }); return; }
       setUp({ file: f, title: f.name.replace(/\.pptx$/i, '').replace(/[_-]+/g, ' '), busy: true, msg: 'A diák beolvasása…' });
       f.arrayBuffer().then(function (buf) { return parsePptx(buf); }).then(function (meta) {
-        setUp(function (u) { return u ? Object.assign({}, u, { meta: meta, busy: false, msg: '' }) : u; });
+        var first = meta[0] && meta[0].title;   // the title slide names the lecture better than a file name like "01_eloadas"
+        setUp(function (u) { return u ? Object.assign({}, u, { meta: meta, busy: false, msg: '', title: first ? String(first).slice(0, 200) : u.title }) : u; });
       }, function (err) { setUp(null); toast('A fájl nem olvasható: ' + ((err && err.message) || err), { kind: 'error' }); });
     }
     function upload() {
