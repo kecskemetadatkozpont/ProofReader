@@ -135,6 +135,9 @@
           h('button', { type: 'button', className: 'btn sm', onClick: saveResp }, 'Mentés'))) : null,
 
       h('div', { className: 'tm-actions' },
+        (approved && (mine || isInstr) && props.onOpenRoom)
+          ? h('button', { type: 'button', className: 'btn pri sm', onClick: function () { props.onOpenRoom(t); } },
+            isInstr ? '👁 Munkatér' : '🗂 Munkatér') : null,
         (mine && props.open && !approved) ? (editing
           ? h('span', null,
             h('button', { type: 'button', className: 'btn pri sm', onClick: saveTeam }, 'Mentés'),
@@ -318,7 +321,7 @@
     var myTeam = me ? teams.filter(function (t) { return t.id === me.team_id; })[0] : null;
     var cardProps = { cfg: cfg, courseId: courseId, isInstr: isInstr, open: open, hasTeam: !!me, allTeams: teams,
       onChange: load, onJoin: join, onLeave: leave, onLock: lock, onDelete: del,
-      onSubmit: submit, onWithdraw: withdraw, onReview: review,
+      onSubmit: submit, onWithdraw: withdraw, onReview: review, onOpenRoom: props.onOpenRoom,
       onMove: function (m, teamId) { move(m.user_id, teamId); } };
 
     return h('div', { className: 'tm-wrap' },
@@ -352,6 +355,8 @@
             })),
           h('button', { type: 'button', className: 'btn sm', onClick: function () { approveAll(teams.filter(function (x) { return x.status === 'submitted'; }).length); } }, '✓ Mindet jóváhagyom'))
         : null,
+      (isInstr && window.PRTeamRoom && teams.some(function (x) { return x.status === 'approved'; }))
+        ? h(window.PRTeamRoom.TeamsOverview, { courseId: courseId, onOpen: function (id) { props.onOpenRoom && props.onOpenRoom({ id: id }); } }) : null,
       isInstr ? h(ConfigBar, { cfg: cfg, courseId: courseId, onChange: load }) : null,
 
       ((isInstr || !me) && open) ? h('div', { className: 'co-card tm-new', ref: formRef },

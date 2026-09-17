@@ -1163,6 +1163,7 @@
     var enS = useState([]), enrolls = enS[0], setEnrolls = enS[1];
     var cidS = useState(null), courseId = cidS[0], setCourseId = cidS[1];
     var insS = useState(false), isInstr = insS[0], setIsInstr = insS[1];
+    var roomS = useState(null), teamRoom = roomS[0], setTeamRoom = roomS[1];   // open team workspace (course-team-room.js)
     var lkdS = useState({}), lockedMap = lkdS[0], setLockedMap = lkdS[1];   // course_id → enrollment still waiting for the Neptun claim
     var lockedRef = useRef({});   // selectCourse runs in the same tick as setLockedMap, so it reads the ref, not the state
     var vwS = useState('lab'), view = vwS[0], setView = vwS[1];
@@ -1342,7 +1343,7 @@
         h('span', { className: 'seg' }, (isInstr
           ? [['live', '🎞 Előadások'], ['lab', '🧪 Labor'], ['teams', '👥 Csapatok'], ['members', '👥 Résztvevők'], ['roster', '📋 Névsor és jegyek'], ['activity', '📊 Aktivitás'], ['teach', '🎓 Oktatói pult']]
           : [['live', '🎞 Előadások'], ['lab', '🧪 Labor'], ['teams', '👥 Csapatok']]).map(function (t) {
-          return h('button', { key: t[0], className: (view === t[0] && !liveMode) ? 'on' : '', onClick: function () { setLiveMode(null); setView(t[0]); } }, t[1]);
+          return h('button', { key: t[0], className: (view === t[0] && !liveMode) ? 'on' : '', onClick: function () { setLiveMode(null); setTeamRoom(null); setView(t[0]); } }, t[1]);
         })),
         h('span', { className: 'sp' }),
         h(CreditBars, { budgets: budgets })),
@@ -1368,8 +1369,10 @@
           onBrowse: function (d) { setLiveMode({ kind: 'browse', deck: d }); } })
       : (view === 'activity' && isInstr && window.PRCourseLive)
         ? h(window.PRCourseLive.ActivityTab, { course: course })
+      : (view === 'teams' && teamRoom && window.PRTeamRoom)
+        ? h(window.PRTeamRoom.TeamRoom, { key: teamRoom, teamId: teamRoom, meId: me.id, onClose: function () { setTeamRoom(null); } })
       : (view === 'teams' && window.PRCourseTeams)
-        ? h(window.PRCourseTeams.TeamsTab, { course: course, meId: me.id })
+        ? h(window.PRCourseTeams.TeamsTab, { course: course, meId: me.id, onOpenRoom: function (t) { setTeamRoom(t.id); } })
       : (view === 'roster' && isInstr && window.PRCourseRoster)
         ? h(window.PRCourseRoster.RosterTab, { course: course, onCourseChange: function () { refreshCourse(courseId); } })
       : (view === 'members' && isInstr)
