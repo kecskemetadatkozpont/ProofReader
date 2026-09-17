@@ -942,6 +942,7 @@
         onKeyDown: function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } } },
         h('div', { className: 'cc-top' },
           role ? chip(ROLE_HU[role] || role, role === 'hallgato' ? '' : 'acc', 'r') : (admin ? chip('Admin', 'warn', 'a') : null),
+          c.locked ? chip('🔒 Azonosítás szükséges', 'warn', 'l') : null,
           c.active ? null : chip('Archivált', '', 'x')),
         h('div', { className: 'cc-t' }, c.title),
         set.description ? h('div', { className: 'cc-d' }, set.description) : null,
@@ -1162,6 +1163,8 @@
     var enS = useState([]), enrolls = enS[0], setEnrolls = enS[1];
     var cidS = useState(null), courseId = cidS[0], setCourseId = cidS[1];
     var insS = useState(false), isInstr = insS[0], setIsInstr = insS[1];
+    var lkdS = useState({}), lockedMap = lkdS[0], setLockedMap = lkdS[1];   // course_id → enrollment still waiting for the Neptun claim
+    var lockedRef = useRef({});   // selectCourse runs in the same tick as setLockedMap, so it reads the ref, not the state
     var vwS = useState('lab'), view = vwS[0], setView = vwS[1];
     var lecS = useState([]), lectures = lecS[0], setLectures = lecS[1];
     var slS = useState(null), selLecture = slS[0], setSelLecture = slS[1];
@@ -1191,9 +1194,17 @@
     function loadCourses(uid, openId) {
       Promise.all([
         sb.from('courses').select('id,title,slug,active,settings,join_code,owner_id,created_at').order('created_at', { ascending: false }),
-        sb.from('course_enrollments').select('course_id,role,team,status').eq('user_id', uid).eq('status', 'active')
+        sb.from('course_enrollments').select('course_id,role,team,status').eq('user_id', uid).eq('status', 'active'),
+        sb.rpc('course_my_courses')   // migration-118: a student who has not claimed their roster row cannot read the course row itself
       ]).then(function (res) {
         var cs = ((res[0] || {}).data) || [], ens = ((res[1] || {}).data) || [];
+        var locked = {};
+        (((res[2] || {}).data) || []).forEach(function (m) {
+          if (!m.locked) return;
+          locked[m.course_id] = m;
+          if (!cs.some(function (c) { return c.id === m.course_id; })) cs.push({ id: m.course_id, title: m.title, active: true, settings: {}, locked: true });
+        });
+        setLockedMap(locked); lockedRef.current = locked;
         setEnrolls(ens); setCourses(cs);
         loadStats(cs, ens);
         var want = openId || urlCourse();
@@ -1213,6 +1224,15 @@
         setStats(m);
       }, function () { });
     }
+    // a settings change (e.g. the roster lock) must not bounce the lecturer out of the tab they are on,
+    // so this refreshes the single course row instead of reloading and re-selecting the course
+    function refreshCourse(cid) {
+      sb.from('courses').select('id,title,slug,active,settings,join_code,owner_id,created_at').eq('id', cid).maybeSingle().then(function (r) {
+        if (!r || r.error || !r.data) return;
+        setCourses(function (cs) { return cs.map(function (c) { return c.id === r.data.id ? Object.assign({}, c, r.data) : c; }); });
+      });
+    }
+    function claimDone() { delete lockedRef.current[courseId]; setPhase('loading'); loadCourses(me.id, courseId); }
     function startPresent(deck) {
       var L = window.PRCourseLive; if (!L || !courseId) return;
       sb.from('course_live_sessions').select('*').eq('course_id', courseId).eq('status', 'live').maybeSingle().then(function (r) {
@@ -1237,6 +1257,7 @@
     function selectCourse(cid, uid) {
       setCourseId(cid);
       try { history.replaceState(null, '', 'Course.html?course=' + encodeURIComponent(cid)); } catch (e) { }
+      if (lockedRef.current[cid] || lockedMap[cid]) { setPhase('claim'); return; }   // the Neptun claim is the only thing an unverified student sees
       Promise.all([
         sb.rpc('course_is_instructor', { cid: cid }),
         sb.from('course_lectures').select('*').eq('course_id', cid).order('ord', { ascending: true }),
@@ -1284,6 +1305,10 @@
     // cosmetic feature gate (nav.js + the server-side course RLS are the real boundaries)
     if (window.PREnt && window.PREnt.loaded() && !window.PREnt.can('page_course'))
       return h('div', { className: 'center' }, h('div', { className: 'box' }, h('div', { className: 'mk' }, h('span')), h('h1', null, 'Kurzus'), h('p', null, 'Ehhez az oldalhoz nincs hozzáférésed — kérj engedélyt az adminisztrátortól.')));
+    if (phase === 'claim' && window.PRCourseRoster)
+      return h('div', { className: 'co-wrap' },
+        h('div', { className: 'labtop card' }, h('button', { type: 'button', className: 'btn sm', onClick: goHome }, '‹ Kurzusok')),
+        h(window.PRCourseRoster.ClaimGate, { courseId: courseId, onVerified: claimDone }));
     if (phase === 'home') {
       var myRoles = {}; enrolls.forEach(function (e) { myRoles[e.course_id] = e.role; });
       return h(CourseHome, {
@@ -1315,12 +1340,14 @@
         isInstr ? chip(admin && !(myEnr && myEnr.role !== 'hallgato') ? 'Admin' : 'Előadó', 'acc', 'r') : (myEnr ? chip('Hallgató', '', 'r') : null),
         h('a', { className: 'btn sm', href: 'CourseCanvas.html?course=' + (courseId || '') }, '🖼 Évfolyam-vászon'),
         h('span', { className: 'seg' }, (isInstr
-          ? [['live', '🎞 Előadások'], ['lab', '🧪 Labor'], ['members', '👥 Résztvevők'], ['activity', '📊 Aktivitás'], ['teach', '🎓 Oktatói pult']]
+          ? [['live', '🎞 Előadások'], ['lab', '🧪 Labor'], ['members', '👥 Résztvevők'], ['roster', '📋 Névsor és jegyek'], ['activity', '📊 Aktivitás'], ['teach', '🎓 Oktatói pult']]
           : [['live', '🎞 Előadások'], ['lab', '🧪 Labor']]).map(function (t) {
           return h('button', { key: t[0], className: (view === t[0] && !liveMode) ? 'on' : '', onClick: function () { setLiveMode(null); setView(t[0]); } }, t[1]);
         })),
         h('span', { className: 'sp' }),
         h(CreditBars, { budgets: budgets })),
+      (!isInstr && window.PRCourseRoster && !liveMode && view === 'live')
+        ? h(window.PRCourseRoster.MyGradeCard, { courseId: courseId }) : null,
       (window.PRCourseLive && !(liveMode && (liveMode.kind === 'present' || liveMode.kind === 'student')))
         ? h(window.PRCourseLive.LiveBanner, { course: course, isInstr: isInstr, refreshKey: liveKey,
           onJoin: function (deck, session) { setLiveMode({ kind: 'student', deck: deck, session: session }); },
@@ -1341,6 +1368,8 @@
           onBrowse: function (d) { setLiveMode({ kind: 'browse', deck: d }); } })
       : (view === 'activity' && isInstr && window.PRCourseLive)
         ? h(window.PRCourseLive.ActivityTab, { course: course })
+      : (view === 'roster' && isInstr && window.PRCourseRoster)
+        ? h(window.PRCourseRoster.RosterTab, { course: course, onCourseChange: function () { refreshCourse(courseId); } })
       : (view === 'members' && isInstr)
         ? h(MembersTab, { course: course, admin: admin, meId: me.id, onChanged: function () { loadStats(courses, enrolls); } })
         : (view === 'teach' && isInstr)
