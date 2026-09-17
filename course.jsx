@@ -1340,8 +1340,8 @@
         isInstr ? chip(admin && !(myEnr && myEnr.role !== 'hallgato') ? 'Admin' : 'Előadó', 'acc', 'r') : (myEnr ? chip('Hallgató', '', 'r') : null),
         h('a', { className: 'btn sm', href: 'CourseCanvas.html?course=' + (courseId || '') }, '🖼 Évfolyam-vászon'),
         h('span', { className: 'seg' }, (isInstr
-          ? [['live', '🎞 Előadások'], ['lab', '🧪 Labor'], ['members', '👥 Résztvevők'], ['roster', '📋 Névsor és jegyek'], ['activity', '📊 Aktivitás'], ['teach', '🎓 Oktatói pult']]
-          : [['live', '🎞 Előadások'], ['lab', '🧪 Labor']]).map(function (t) {
+          ? [['live', '🎞 Előadások'], ['lab', '🧪 Labor'], ['teams', '👥 Csapatok'], ['members', '👥 Résztvevők'], ['roster', '📋 Névsor és jegyek'], ['activity', '📊 Aktivitás'], ['teach', '🎓 Oktatói pult']]
+          : [['live', '🎞 Előadások'], ['lab', '🧪 Labor'], ['teams', '👥 Csapatok']]).map(function (t) {
           return h('button', { key: t[0], className: (view === t[0] && !liveMode) ? 'on' : '', onClick: function () { setLiveMode(null); setView(t[0]); } }, t[1]);
         })),
         h('span', { className: 'sp' }),
@@ -1368,6 +1368,8 @@
           onBrowse: function (d) { setLiveMode({ kind: 'browse', deck: d }); } })
       : (view === 'activity' && isInstr && window.PRCourseLive)
         ? h(window.PRCourseLive.ActivityTab, { course: course })
+      : (view === 'teams' && window.PRCourseTeams)
+        ? h(window.PRCourseTeams.TeamsTab, { course: course, meId: me.id })
       : (view === 'roster' && isInstr && window.PRCourseRoster)
         ? h(window.PRCourseRoster.RosterTab, { course: course, onCourseChange: function () { refreshCourse(courseId); } })
       : (view === 'members' && isInstr)
