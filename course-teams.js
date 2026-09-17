@@ -60,7 +60,7 @@
       });
     }
     function setRole(userId, role) {
-      sb.rpc('course_team_set_role', { p_user: userId, p_role: role }).then(function (r) {
+      sb.rpc('course_team_set_role', { p_course: props.courseId, p_user: userId, p_role: role }).then(function (r) {
         if (r && r.error) { toast(r.error.message, { kind: 'error' }); return; }
         props.onChange();
       });

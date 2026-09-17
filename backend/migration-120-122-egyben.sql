@@ -1,3 +1,139 @@
+-- =====================================================================
+-- migration-120-122-egyben.sql  ·  Publify / Kurzus
+-- =====================================================================
+-- A még le nem futtatott migrációk egyben, futtatási sorrendben:
+--
+--   120 — Nulla pontnál ne adjon automatikus egyest a jegyszámítás
+--   121 — A kurzuskód beváltásához ne kelljen adminisztrátori jóváhagyás
+--   122 — Önszerveződő Scrum-csapatok (course_teams + course_team_members)
+--
+-- Előfeltétel: 66, 117, 118, 118b, 119 már lefutott.
+-- Futtatás: Supabase → SQL Editor → beilleszt → Run. Egy tranzakcióban fut,
+-- így ha bármelyik rész hibázik, semmi nem marad félkészen.
+-- Újrafuttatható: minden rész „create or replace” / „if not exists”.
+--
+-- Ellenőrzés utána (ezt futtasd külön, a Run után):
+--   select
+--     (select count(*) from information_schema.tables
+--       where table_name in ('course_teams','course_team_members'))            as tablak,
+--     (select count(*) from information_schema.routines
+--       where routine_name in ('course_teams_state','course_team_create',
+--                              'course_teams_autofill','course_join',
+--                              'course_grade_recalc'))                          as fuggvenyek;
+--   -- várt: tablak = 2, fuggvenyek = 5
+-- =====================================================================
+
+begin;
+
+
+-- =====================================================================
+-- 120. rész — Nulla pontnál ne adjon automatikus egyest a jegyszámítás
+-- forrás: migration-120-grade-zero-null.sql
+-- =====================================================================
+
+-- migration-120-grade-zero-null.sql
+-- A pontok újraszámolása ne írjon jegyet annak, akinek még nincs egy pontja sem.
+-- Enélkül a félév elején mindenki „1”-est kapna, ami félrevezető a hallgatói
+-- kártyán, és véletlenül exportálható is. Kézzel beírt jegyet ez sem érint.
+-- Előfeltétel: migration-118 + 119.
+
+create or replace function public.course_grade_recalc(p_course uuid) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare sc jsonb; n int := 0; act_max numeric; runs int;
+begin
+  if not course_is_instructor(p_course) then raise exception 'Nincs jogosultság'; end if;
+  sc := course_grade_scale(p_course);
+  act_max := coalesce((sc->>'activity_points')::numeric, 0);
+  select count(*) into runs from course_poll_runs where course_id = p_course;
+
+  with lab as (
+    select s.user_id, sum(g.points) as pts
+      from lab_grades g join lab_submissions s on s.id = g.submission_id
+     where g.course_id = p_course group by s.user_id),
+  act as (
+    select a.user_id, count(distinct a.run_id) as answered
+      from course_poll_answers a where a.course_id = p_course group by a.user_id),
+  base as (
+    select r.claimed_by as user_id,
+           coalesce(l.pts, 0) as lab,
+           case when runs > 0 then round(coalesce(a.answered, 0)::numeric / runs * act_max, 1) else 0 end as activity
+      from course_roster r
+      left join lab l on l.user_id = r.claimed_by
+      left join act a on a.user_id = r.claimed_by
+     where r.course_id = p_course and r.claimed_by is not null)
+  insert into course_grades (course_id, user_id, points, breakdown, grade, updated_by, updated_at)
+  select p_course, user_id, lab + activity,
+         jsonb_build_object('lab', lab, 'activity', activity),
+         case when lab + activity > 0 then grade_from_points(lab + activity, sc) else null end,
+         auth.uid(), now()
+    from base
+  on conflict (course_id, user_id) do update
+    set points = excluded.points, breakdown = excluded.breakdown,
+        grade = case when course_grades.manual then course_grades.grade else excluded.grade end,
+        updated_by = auth.uid(), updated_at = now()
+    where not course_grades.manual;
+  get diagnostics n = row_count;
+  insert into course_roster_access_log (course_id, actor, action, n) values (p_course, auth.uid(), 'grade', n);
+  return jsonb_build_object('updated', n, 'polls', runs, 'activity_points', act_max);
+end; $$;
+
+-- =====================================================================
+-- 121. rész — A kurzuskód beváltásához ne kelljen adminisztrátori jóváhagyás
+-- forrás: migration-121-student-join.sql
+-- =====================================================================
+
+-- migration-121-student-join.sql
+-- Hallgatói önkiszolgáló belépés: a kurzuskód beváltásához NEM kell adminisztrátori
+-- jóváhagyás. A hallgató regisztrál, beváltja a kurzuskódot, és a Neptun-kódjával
+-- azonosítja magát — a névsorban szereplő kód maga a bizonyíték, hogy felvette a tárgyat.
+--
+-- Miért biztonságos:
+--   * A fiók státusza NEM változik (marad 'incomplete'/'pending') → semmilyen kutatói
+--     vagy AI-funkciót nem nyit meg; azok külön az is_active()/entitlement-kapun mennek.
+--     A hallgató csak a kurzus tartalmát éri el, azt is csak a névsorhoz kötés után
+--     (migration-118: require_roster + course_is_member).
+--   * Felfüggesztett és elutasított fiók továbbra sem léphet be sehová.
+--   * A kurzuskód titok; a névsorhoz kötés pedig kulcsos HMAC-en megy (8 próba/óra).
+--
+-- Előfeltétel: migration-66 (course_join), 118 (névsor).
+-- Ellenőrzés: egy 'pending' fiókkal a course_join már nem 'A fiók még nincs jóváhagyva.'-t ad.
+
+create or replace function public.course_join(p_code text) returns uuid
+language plpgsql security definer set search_path = public as $$
+declare cid uuid; st text;
+begin
+  select status into st from profiles where id = auth.uid();
+  if st is null then raise exception 'Nincs profilod — jelentkezz be újra.'; end if;
+  if st in ('suspended', 'rejected') then
+    raise exception 'A fiókod nem aktív — fordulj az adminisztrátorhoz.';
+  end if;
+  -- 'incomplete' és 'pending' is beléphet: a kurzuskód + Neptun-kód a hallgatói azonosítás.
+  select id into cid from courses where join_code = p_code and active;
+  if cid is null then raise exception 'Érvénytelen kurzuskód'; end if;
+  -- review fix (migration-66): egy eltávolított (dropped) beiratkozás NEM éledhet újra a kóddal
+  insert into course_enrollments (course_id, user_id, role)
+    values (cid, auth.uid(), 'hallgato')
+    on conflict (course_id, user_id) do update set status = 'active'
+      where course_enrollments.status <> 'dropped';
+  if not found then
+    raise exception 'A kurzusból eltávolítottak — kérj új hozzáférést az oktatótól.';
+  end if;
+  return cid;
+end; $$;
+revoke all on function public.course_join(text) from public, anon;
+grant execute on function public.course_join(text) to authenticated;
+
+-- A hallgató a saját kurzusait akkor is lássa, ha a fiókja még jóváhagyásra vár:
+-- a course_my_courses (migration-118) ezt már definer-ként adja vissza, itt csak
+-- kiegészítjük azzal, hogy a kurzus kódját sosem adjuk ki hallgatónak.
+comment on function public.course_my_courses() is
+  'A bejelentkezett felhasználó aktív kurzusai + zárolt-e még a névsor-azonosítás miatt. Kurzuskódot nem ad vissza.';
+
+-- =====================================================================
+-- 122. rész — Önszerveződő Scrum-csapatok (course_teams + course_team_members)
+-- forrás: migration-122-course-teams.sql
+-- =====================================================================
+
 -- migration-122-course-teams.sql
 -- Önszerveződő Scrum-csapatok a kurzuson belül.
 --
@@ -340,3 +476,5 @@ grant execute on function
   public.course_teams_config(uuid, jsonb), public.course_team_move(uuid, uuid, uuid),
   public.course_team_delete(uuid), public.course_team_lock(uuid, boolean), public.course_teams_autofill(uuid)
 to authenticated;
+
+commit;
