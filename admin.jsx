@@ -626,59 +626,167 @@
   // own columns (session_workflow_mode→can_workflows, paper_figure→can_figures); the rest
   // write the profiles.features jsonb via onSetFeature. Admins are excluded (they bypass gates).
   function PermissionsPanel(props) {
+    // Jogosultság-kezelés: szűrés → kijelölés → sablon vagy egyedi kapcsoló.
+    // A módosítás admin RPC-n megy (migration-130), így egyszerre sok felhasználóra is alkalmazható.
     var catalog = props.catalog || [];
     var all = (props.profiles || []).filter(function (u) { return u.role !== 'admin'; });
-    var oS = useState(false), open = oS[0], setOpen = oS[1];
     var qS = useState(''), q = qS[0], setQ = qS[1];
-    if (!catalog.length) return null;   // migration-49 not applied yet → nothing to toggle
+    var affS = useState(''), affF = affS[0], setAffF = affS[1];
+    var stS = useState(''), stF = stS[0], setStF = stS[1];
+    var selS = useState({}), sel = selS[0], setSel = selS[1];
+    var prS = useState([]), presets = prS[0], setPresets = prS[1];
+    var bS = useState(''), busy = bS[0], setBusy = bS[1];
+    var mS = useState(''), msg = mS[0], setMsg = mS[1];
+    var capS = useState(''), cap = capS[0], setCap = capS[1];
+    var schemaS = useState(false), noSchema = schemaS[0], setNoSchema = schemaS[1];
+
+    useEffect(function () {
+      sb.rpc('admin_permissions_overview').then(function (r) {
+        if (r && r.error) { setNoSchema(true); return; }
+        setPresets(((r.data || {}).presets) || []);
+      });
+    }, []);
+
     var qq = q.trim().toLowerCase();
-    var users = all.filter(function (u) { return !qq || ((u.name || '') + ' ' + (u.email || '')).toLowerCase().indexOf(qq) >= 0; });
-    function featOn(u, f) {
-      if (f.key === 'session_workflow_mode') return !!u.can_workflows;
-      if (f.key === 'paper_figure') return !!u.can_figures;
-      if (u.features && Object.prototype.hasOwnProperty.call(u.features, f.key)) return !!u.features[f.key];
-      return !!f.default_on;
+    var affs = {};
+    all.forEach(function (u) { affs[canonAff(u.affiliation)] = 1; });
+    var users = all.filter(function (u) {
+      if (qq && ((u.name || '') + ' ' + (u.email || '')).toLowerCase().indexOf(qq) < 0) return false;
+      if (affF && canonAff(u.affiliation) !== affF) return false;
+      if (stF && u.status !== stF) return false;
+      return true;
+    });
+    var selIds = Object.keys(sel).filter(function (id) { return sel[id]; });
+    var selUsers = all.filter(function (u) { return sel[u.id]; });
+    function toggleUser(id) { setSel(function (m) { var n = Object.assign({}, m); if (n[id]) delete n[id]; else n[id] = true; return n; }); }
+    function selectAll(on) {
+      setSel(function () { var n = {}; if (on) users.forEach(function (u) { n[u.id] = true; }); return n; });
     }
-    function toggle(u, f) {
-      var on = !featOn(u, f);
-      if (f.key === 'session_workflow_mode') return props.onSetWorkflows(u.id, on);
-      if (f.key === 'paper_figure') return props.onSetFigures(u.id, on);
-      props.onSetFeature(u.id, f.key, on);
+    function featState(u, f) {   // 'on' | 'off' | 'default'
+      if (f.key === 'session_workflow_mode') return u.can_workflows ? 'on' : 'off';
+      if (f.key === 'paper_figure') return u.can_figures ? 'on' : 'off';
+      if (u.features && Object.prototype.hasOwnProperty.call(u.features, f.key)) return u.features[f.key] ? 'on' : 'off';
+      return 'default';
     }
-    return h('div', { className: 'perm-wrap' },
-      h('button', { className: 'perm-head', onClick: function () { setOpen(!open); }, 'aria-expanded': open ? 'true' : 'false' },
-        h('span', { className: 'perm-ic', 'aria-hidden': 'true' }, '🔐'),
-        h('span', { className: 'perm-t' }, 'Feature permissions'),
-        h('span', { className: 'perm-sub' }, all.length + ' user' + (all.length === 1 ? '' : 's') + ' · click a button to turn a feature on/off'),
-        h('span', { className: 'perm-cv', 'aria-hidden': 'true' }, open ? '▾' : '▸')
-      ),
-      open ? h('div', { className: 'perm-body' },
-        h('input', { className: 'perm-q', value: q, placeholder: '🔍 Filter users…', onChange: function (e) { setQ(e.target.value); } }),
-        h('div', { className: 'perm-legend' }, h('span', { className: 'perm-pill on', style: { pointerEvents: 'none' } }, h('span', { className: 'perm-dot' }), 'enabled'), h('span', { className: 'perm-pill', style: { pointerEvents: 'none' } }, h('span', { className: 'perm-dot' }), 'disabled'), h('span', { style: { fontSize: 11.5, color: 'var(--faint)' } }, 'Pages block the whole menu item; AI features are server-enforced.')),
-        users.length === 0 ? h('div', { className: 'empty', style: { padding: 20 } }, 'No users match.')
-          : h('div', { className: 'perm-list' }, users.map(function (u) {
-            return h('div', { className: 'perm-user', key: u.id },
-              h('div', { className: 'perm-uhead' },
-                h(Avatar, { u: u, size: 30 }),
-                h('div', { className: 'perm-uinfo' }, h('b', null, u.name || '—'), h('span', null, u.email)),
-                h('span', { className: 'perm-ustatus' }, h(Badge, { s: u.status }))
-              ),
-              h('div', { className: 'perm-pills' }, catalog.map(function (f) {
-                var on = featOn(u, f);
-                return h('button', {
-                  key: f.key, className: 'perm-pill' + (on ? ' on' : '') + (f.category === 'page' ? ' page' : ''),
-                  onClick: function () { toggle(u, f); },
-                  title: (f.category === 'page' ? 'Page access' : 'AI feature') + ' — ' + (on ? 'ON (click to disable)' : 'OFF (click to enable)')
-                }, h('span', { className: 'perm-dot', 'aria-hidden': 'true' }), f.label);
-              }))
-            );
-          }))
-      ) : null
-    );
+    function groupState(f) {     // a kijelölt felhasználók közös állapota
+      if (!selUsers.length) return '';
+      var s = featState(selUsers[0], f);
+      for (var i = 1; i < selUsers.length; i++) if (featState(selUsers[i], f) !== s) return 'mixed';
+      return s;
+    }
+    function effective(u, f) { var s = featState(u, f); return s === 'default' ? !!f.default_on : s === 'on'; }
+    function apply(fn, args, label) {
+      if (!selIds.length) { setMsg('Előbb jelölj ki felhasználókat.'); return; }
+      setBusy(label); setMsg('');
+      sb.rpc(fn, args).then(function (r) {
+        setBusy('');
+        if (r && r.error) { setMsg('Nem sikerült: ' + r.error.message); return; }
+        var n = (r.data && r.data.updated) || 0;
+        setMsg('✓ ' + label + ' — ' + n + ' felhasználón');
+        if (props.onReload) props.onReload();
+      });
+    }
+    function setFeatureBulk(f, value) {
+      apply('admin_set_feature', { p_users: selIds, p_key: f.key, p_value: value },
+        f.label + ' → ' + (value === null ? 'alapértelmezett' : value ? 'be' : 'ki'));
+    }
+    function applyPreset(p) {
+      apply('admin_apply_preset', { p_users: selIds, p_preset: p.id }, p.name + ' sablon');
+    }
+    function applyCap() {
+      var v = cap === '' ? null : parseInt(cap, 10);
+      if (v !== null && (isNaN(v) || v < 0)) { setMsg('A napi keret nem lehet negatív.'); return; }
+      apply('admin_set_cap', { p_users: selIds, p_cap: v }, 'napi AI-keret ' + (v === null ? '(alap)' : v));
+    }
+    function applyStatus(st) { apply('admin_set_status', { p_users: selIds, p_status: st }, 'állapot: ' + st); }
+
+    if (!catalog.length) return h('div', { className: 'panel', style: { padding: 18 } },
+      'A jogosultság-katalógus nem érhető el (migration-49).');
+
+    var cats = [['page', 'Oldalak — mit lát a menüben'], ['ai', 'AI-funkciók — a szerver is ellenőrzi']];
+    return h(React.Fragment, null,
+      h('div', { className: 'sec-h' }, h('h2', null, '🔐 Jogosultságok'),
+        h('span', { className: 'count' }, selIds.length ? selIds.length + ' kijelölve' : all.length + ' felhasználó')),
+      noSchema ? h('div', { className: 'panel', style: { padding: 14, marginBottom: 10 } },
+        h('b', null, 'A sablonok és a tömeges beállítás még nincs bekapcsolva. '),
+        'Futtasd le a ', h('code', null, 'backend/migration-130-permission-presets.sql'), ' fájlt — addig egyesével is állíthatsz jogosultságot.') : null,
+      h('div', { className: 'perm2' },
+        h('div', { className: 'perm2-list panel' },
+          h('div', { className: 'perm2-filters' },
+            h('input', { className: 'perm-q', value: q, placeholder: '🔍 Név vagy e-mail…', onChange: function (e) { setQ(e.target.value); } }),
+            h('select', { value: affF, onChange: function (e) { setAffF(e.target.value); } },
+              h('option', { value: '' }, 'Minden intézmény'),
+              Object.keys(affs).sort().map(function (a) { return h('option', { key: a, value: a }, a); })),
+            h('select', { value: stF, onChange: function (e) { setStF(e.target.value); } },
+              h('option', { value: '' }, 'Minden állapot'),
+              ['approved', 'pending', 'suspended', 'rejected', 'incomplete'].map(function (s) { return h('option', { key: s, value: s }, s); }))),
+          h('div', { className: 'perm2-bulkbar' },
+            h('button', { className: 'btn', onClick: function () { selectAll(true); } }, 'Mind (' + users.length + ')'),
+            h('button', { className: 'btn', onClick: function () { selectAll(false); } }, 'Kijelölés törlése')),
+          h('div', { className: 'perm2-users' }, users.map(function (u) {
+            return h('label', { key: u.id, className: 'perm2-u' + (sel[u.id] ? ' on' : '') },
+              h('input', { type: 'checkbox', checked: !!sel[u.id], onChange: function () { toggleUser(u.id); } }),
+              h(Avatar, { u: u, size: 26 }),
+              h('span', { className: 'perm2-un' },
+                h('b', null, u.name || '—'),
+                h('span', null, (u.affiliation || '—') + ' · ' + u.status + (u.is_student ? ' · hallgató' : ''))));
+          })),
+          users.length ? null : h('div', { className: 'empty', style: { padding: 18 } }, 'Nincs találat.')),
+
+        h('div', { className: 'perm2-edit' },
+          !selIds.length
+            ? h('div', { className: 'panel', style: { padding: 18, color: 'var(--muted)' } },
+              'Jelölj ki egy vagy több felhasználót a bal oldali listából. Utána sablont alkalmazhatsz rájuk, vagy funkciónként állíthatod a hozzáférést.')
+            : h(React.Fragment, null,
+              h('div', { className: 'panel perm2-sel' },
+                h('b', null, selIds.length === 1 ? (selUsers[0].name || selUsers[0].email) : selIds.length + ' kijelölt felhasználó'),
+                selIds.length > 1 ? h('div', { className: 'perm2-chips' }, selUsers.slice(0, 12).map(function (u) {
+                  return h('span', { key: u.id, className: 'perm2-chip' }, u.name || u.email);
+                }), selUsers.length > 12 ? h('span', { className: 'perm2-chip' }, '+' + (selUsers.length - 12)) : null) : null,
+                msg ? h('div', { className: 'perm2-msg' }, msg) : null),
+
+              presets.length ? h('div', { className: 'panel perm2-presets' },
+                h('div', { className: 'perm2-h' }, h('b', null, 'Szerepkör-sablonok'), h('span', null, 'egy kattintással a teljes készlet')),
+                presets.map(function (p) {
+                  return h('div', { key: p.id, className: 'perm2-preset' },
+                    h('div', null, h('b', null, p.name), h('span', null, p.description || '')),
+                    h('button', { className: 'btn pri', disabled: !!busy, onClick: function () { applyPreset(p); } }, 'Alkalmazom'));
+                })) : null,
+
+              h('div', { className: 'panel perm2-quick' },
+                h('div', { className: 'perm2-h' }, h('b', null, 'Gyors műveletek')),
+                h('div', { className: 'perm2-row' },
+                  h('span', null, 'Napi AI-keret'),
+                  h('input', { type: 'number', min: 0, max: 5000, value: cap, placeholder: 'pl. 20', onChange: function (e) { setCap(e.target.value); } }),
+                  h('button', { className: 'btn', disabled: !!busy, onClick: applyCap }, 'Beállítom')),
+                h('div', { className: 'perm2-row' },
+                  h('span', null, 'Fiók állapota'),
+                  ['approved', 'pending', 'suspended'].map(function (s) {
+                    return h('button', { key: s, className: 'btn', disabled: !!busy, onClick: function () { applyStatus(s); } }, s);
+                  }))),
+
+              cats.map(function (c) {
+                var list = catalog.filter(function (f) { return f.category === c[0]; });
+                if (!list.length) return null;
+                return h('div', { key: c[0], className: 'panel perm2-cat' },
+                  h('div', { className: 'perm2-h' }, h('b', null, c[1])),
+                  list.map(function (f) {
+                    var st = groupState(f);
+                    var eff = selUsers.length === 1 ? (effective(selUsers[0], f) ? 'bekapcsolva' : 'kikapcsolva') : '';
+                    return h('div', { key: f.key, className: 'perm2-feat' },
+                      h('div', { className: 'perm2-fn' },
+                        h('b', null, f.label),
+                        h('span', null, f.key + (f.enforced ? ' · szerveren kikényszerítve' : ' · menü-szintű')
+                          + (eff ? ' · most: ' + eff : ''))),
+                      h('div', { className: 'perm2-tri' },
+                        [['on', 'Be', true], ['default', 'Alap' + (f.default_on ? ' (be)' : ' (ki)'), null], ['off', 'Ki', false]].map(function (o) {
+                          return h('button', { key: o[0], className: 'perm2-t' + (st === o[0] ? ' on' : '') + (st === 'mixed' ? ' mixed' : ''),
+                            disabled: !!busy, onClick: function () { setFeatureBulk(f, o[2]); } }, o[1]);
+                        })));
+                  }));
+              })))));
   }
 
-  // ---------- 🛡 stuck Autopilot runs → the central resume page (Autopilot.html?view=stuck) ----------
-  // The resume itself lives on the Autopilot page: the pipeline is client-driven, and only that page loads the phase steppers.
   function StuckRunsCard() {
     var sS = useState(null), s = sS[0], setS = sS[1];
     useEffect(function () {
@@ -806,6 +914,19 @@
     var fcS = useState([]), catalog = fcS[0], setCatalog = fcS[1];   // feature_catalog (migration-49) drives the permission matrix
     var rqS = useState([]), reviewReqs = rqS[0], setReviewReqs = rqS[1];   // pending Elicit review requests (migration-109)
     var rqbS = useState({}), reqBusy = rqbS[0], setReqBusy = rqbS[1];      // req id → 'approving' | 'rejecting'
+    // az admin funkciói szekciókra bontva: oldalsáv + egy tartalom-terület (a lista régen egymás alatt futott)
+    var SECTIONS = [
+      { k: 'overview', ic: '📊', t: 'Áttekintés' },
+      { k: 'users', ic: '👥', t: 'Felhasználók' },
+      { k: 'perms', ic: '🔐', t: 'Jogosultságok' },
+      { k: 'tasks', ic: '✅', t: 'Feladatok' },
+      { k: 'stuck', ic: '🛡', t: 'Elakadt folyamatok' },
+      { k: 'cost', ic: '💰', t: 'AI-költség' },
+      { k: 'elicit', ic: '🧪', t: 'Elicit / MCP' },
+      { k: 'system', ic: '🐞', t: 'Hibák és bejelentések' }
+    ];
+    var secS = useState((function () { try { var v = new URLSearchParams(location.search).get('v'); return v || 'overview'; } catch (e) { return 'overview'; } })());
+    var sec = secS[0], setSec = secS[1];
     function toggleGroup(k) { setOpenGroups(function (m) { var n = Object.assign({}, m); n[k] = !n[k]; return n; }); }
     function loadReqs() {   // pending review requests; graceful if migration-109 isn't applied yet
       sb.from('research_review_requests').select('id,project_id,requested_by,research_question,params,status,created_at').eq('status', 'pending_approval').order('created_at', { ascending: true })
@@ -1062,8 +1183,22 @@
         me && h('div', { className: 'me' }, h(Avatar, { u: me, size: 28 }), h('span', { className: 'nm' }, me.name || me.email)),
         h('button', { className: 'so', onClick: signOut }, 'Sign out')
       ),
-      h('div', { className: 'wrap' },
-        h('div', { className: 'stats' },
+      h('div', { className: 'admin-shell' },
+        h('aside', { className: 'admin-rail' },
+          h('nav', null, SECTIONS.map(function (s) {
+            var badge = s.k === 'users' ? pending.length : s.k === 'overview' ? reviewReqs.length : 0;
+            return h('button', { key: s.k, type: 'button', className: 'arail-i' + (sec === s.k ? ' on' : ''),
+              onClick: function () { setSec(s.k); try { history.replaceState(null, '', '?v=' + s.k); } catch (e) { } } },
+              h('span', { className: 'ic', 'aria-hidden': 'true' }, s.ic),
+              h('span', { className: 'tx' }, s.t),
+              badge ? h('span', { className: 'bg' }, badge) : null);
+          })),
+          h('div', { className: 'arail-foot' },
+            h('div', null, profiles.length + ' felhasználó'),
+            h('div', null, projects.length + rprojects.length + ' projekt'))),
+        h('div', { className: 'wrap' },
+          sec === 'overview' ? h(React.Fragment, null,
+          h('div', { className: 'stats' },
           h('div', { className: 'stat' }, h('div', { className: 'n' }, profiles.length), h('div', { className: 'l' }, 'Registered users')),
           h('div', { className: 'stat' + (pending.length ? ' alert' : '') }, h('div', { className: 'n' }, pending.length), h('div', { className: 'l' }, 'Pending approval')),
           h('div', { className: 'stat' }, h('div', { className: 'n' }, profiles.filter(function (u) { return u.status === 'approved'; }).length), h('div', { className: 'l' }, 'Approved')),
@@ -1071,16 +1206,7 @@
           h('div', { className: 'stat' }, h('div', { className: 'n' }, fmtBytes(totalStorage)), h('div', { className: 'l' }, 'Total storage · ' + credits(totalChars) + ' credits')),
           reviewReqs.length ? h('div', { className: 'stat alert' }, h('div', { className: 'n' }, reviewReqs.length), h('div', { className: 'l' }, 'Függő review-k')) : null
         ),
-
-        h(StuckRunsCard, null),
-        h(GlobalTaskBoard, { profiles: profiles }),
-        h(AiCostReport, null),
-
-        h(ElicitMcpPanel, null),
-
-        h(PermissionsPanel, { profiles: profiles, catalog: catalog, onSetFeature: setFeature, onSetWorkflows: setWorkflows, onSetFigures: setFigures }),
-
-        h(React.Fragment, null,   // always visible so admins can find it (even with 0 pending requests)
+          h(React.Fragment, null,   // always visible so admins can find it (even with 0 pending requests)
           h('div', { className: 'sec-h' }, h('h2', null, '🔬 Függőben lévő Elicit review kérelmek'), h('span', { className: 'count' }, reviewReqs.length ? (reviewReqs.length + ' vár jóváhagyásra') : 'nincs függőben lévő kérés'), h('button', { className: 'btn', style: { marginLeft: 'auto', padding: '4px 10px', fontSize: 12 }, onClick: loadReqs }, '↻ Frissítés')),
           h('div', { className: 'panel' }, reviewReqs.length === 0
             ? h('div', { style: { padding: 16, color: 'var(--muted)', fontSize: 13, lineHeight: 1.5 } }, 'Nincs jóváhagyásra váró Elicit review kérelem. Amikor egy felhasználó „🔬 Elicit (jóváhagyással)" módban indít egy review-t, a kérése itt jelenik meg — jóváhagyhatod vagy elutasíthatod.')
@@ -1098,20 +1224,19 @@
                     h('button', { className: 'btn ok', disabled: !!b, onClick: function () { approveReq(req); } }, b === 'approving' ? '…' : '✓ Jóváhagyás'),
                     h('button', { className: 'btn dng', disabled: !!b, onClick: function () { rejectReq(req); } }, b === 'rejecting' ? '…' : '✕ Elutasítás'))));
               }))))
-        ),
-
-        pending.length > 0 && h(React.Fragment, null,
+        )) : null,
+          sec === 'users' ? h(React.Fragment, null,
+          pending.length > 0 && h(React.Fragment, null,
           h('div', { className: 'sec-h' }, h('h2', null, 'Pending registrations'), h('span', { className: 'count' }, pending.length + ' waiting')),
           h('div', { className: 'panel' }, h('table', null, h('thead', null, tableHead), h('tbody', null, pending.map(function (u) { return userRow(u, true); }))))
         ),
-
-        h('div', { className: 'sec-h' }, h('h2', null, 'Users by affiliation'),
+          h('div', { className: 'sec-h' }, h('h2', null, 'Users by affiliation'),
           h('span', { className: 'count' }, profiles.length + ' users · ' + affKeys.length + ' affiliations · ' + profiles.filter(function (u) { return u.is_researcher; }).length + ' researchers'),
           h('span', { style: { marginLeft: 'auto', display: 'inline-flex', gap: 8 } },
             h('button', { className: 'btn', onClick: function () { var m = {}; affKeys.forEach(function (k) { m[k] = true; }); setOpenGroups(m); } }, 'Expand all'),
             h('button', { className: 'btn', onClick: function () { setOpenGroups({}); } }, 'Collapse all'))
         ),
-        h('div', { className: 'panel' },
+          h('div', { className: 'panel' },
           profiles.length === 0
             ? h('div', { className: 'empty' }, 'No users yet.')
             : affKeys.map(function (k) {
@@ -1129,9 +1254,18 @@
               );
             })
         ),
-        h(ClientErrors),
-        h(BugReports)
-      ),
+          h(ClientErrors),
+          h(BugReports)) : null,
+          sec === 'perms' ? h(PermissionsPanel, { profiles: profiles, catalog: catalog, onSetFeature: setFeature, onSetWorkflows: setWorkflows, onSetFigures: setFigures, onReload: boot }) : null,
+          sec === 'tasks' ? h(React.Fragment, null,
+          h(GlobalTaskBoard, { profiles: profiles })) : null,
+          sec === 'stuck' ? h(React.Fragment, null,
+          h(StuckRunsCard, null)) : null,
+          sec === 'cost' ? h(React.Fragment, null,
+          h(AiCostReport, null)) : null,
+          sec === 'elicit' ? h(React.Fragment, null,
+          h(ElicitMcpPanel, null)) : null,
+          sec === 'system' ? h(React.Fragment, null, h(ClientErrors), h(BugReports)) : null)),
       h(UserDrawer, { user: selUser, agg: selUser ? aggFor(selUser.id) : { projects: [], storage: 0, chars: 0, requests: 0 }, onClose: function () { setSelUser(null); }, onPreview: function (p) { setPreview(p); }, onAction: setStatus, onSetModel: setModel, onSetWorkflows: setWorkflows, onSetFigures: setFigures, onSetDailyCap: setDailyCap, onSetFeature: setFeature, onSetAllowlist: setAllowlist, onSetJudge: setJudge, onSaveIds: saveResearchIds, onSyncMtmt: syncMtmt, catalog: catalog }),
       preview && h(ProjectPreview, { project: preview, onClose: function () { setPreview(null); } })
     );
