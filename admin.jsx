@@ -368,7 +368,49 @@
       h('div', { style: { fontSize: 11, color: 'var(--faint)', marginTop: 6, lineHeight: 1.45 } },
         'A profil-építés az MTMT azonosítóból tölti le és frissíti a publikációkat. Az ORCID-ot a rendszer tárolja és a profilon hivatkozza; publikáció-import belőle jelenleg nem történik.'));
   }
+  // Végleges törlés: előbb megmutatjuk, mi tartozik a fiókhoz, és csak begépelt e-mail után törlünk.
+  function DeleteBox(props) {
+    var u = props.user;
+    var fS = useState(null), fp = fS[0], setFp = fS[1];
+    var tS = useState(''), typed = tS[0], setTyped = tS[1];
+    var bS = useState(false), busy = bS[0], setBusy = bS[1];
+    var eS = useState(''), err = eS[0], setErr = eS[1];
+    useEffect(function () {
+      sb.rpc('admin_user_footprint', { p_user: u.id }).then(function (r) {
+        if (r && r.error) { setErr(r.error.message); setFp({}); return; }
+        setFp(r.data || {});
+      });
+    }, [u.id]);
+    function go() {
+      setBusy(true); setErr('');
+      sb.rpc('admin_delete_user', { p_user: u.id, p_confirm: typed }).then(function (r) {
+        setBusy(false);
+        if (r && r.error) { setErr(r.error.message); return; }
+        window.PRUI.toast('A profil törölve: ' + (u.email || u.name), { kind: 'ok' });
+        props.onDone();
+      });
+    }
+    var rows = fp ? [['Projekt', (fp.projects || 0) + (fp.research_projects || 0)], ['Kurzus', fp.courses || 0],
+      ['Csapat', fp.teams || 0], ['Feladat', fp.team_tasks || 0], ['Feltöltött fájl', fp.files || 0],
+      ['Üzenet', fp.messages || 0], ['Szavazat', fp.poll_answers || 0], ['Jegy', fp.grades || 0]] : [];
+    return h('div', { className: 'del-box' },
+      h('b', null, '🗑 Profil végleges törlése'),
+      h('p', null, 'A fiók és a profil megszűnik, a felhasználó nem tud belépni. A kurzusok, csapatok és feladatok megmaradnak — csak a személy tűnik el mellőlük. A művelet nem vonható vissza; enyhébb megoldás a felfüggesztés.'),
+      !fp ? h('p', { className: 'muted' }, 'Betöltés…')
+        : h('div', { className: 'del-grid' }, rows.filter(function (r) { return r[1]; }).map(function (r) {
+          return h('span', { key: r[0], className: 'del-chip' }, r[0] + ': ' + r[1]);
+        })),
+      h('label', null, 'A megerősítéshez írd be a fiók e-mail-címét:'),
+      h('input', { className: 'del-in', value: typed, placeholder: u.email || '', autoFocus: true,
+        onChange: function (e) { setTyped(e.target.value); setErr(''); } }),
+      err ? h('p', { className: 'del-err' }, err) : null,
+      h('div', { className: 'del-f' },
+        h('button', { className: 'btn', onClick: function () { props.setState(null); } }, 'Mégse'),
+        h('button', { className: 'btn dng', disabled: busy || !typed.trim(), onClick: go }, busy ? 'Törlés…' : 'Végleges törlés')));
+  }
+
   function UserDrawer(props) {
+    var dS = useState(null), del = dS[0], setDel = dS[1];
     var u = props.user, agg = props.agg, onClose = props.onClose, onPreview = props.onPreview, onAction = props.onAction, onSetModel = props.onSetModel, onSetWorkflows = props.onSetWorkflows, onSetFigures = props.onSetFigures, onSetDailyCap = props.onSetDailyCap;
     var onSetFeature = props.onSetFeature, onSetAllowlist = props.onSetAllowlist, onSetJudge = props.onSetJudge, catalog = props.catalog || [];
     // (onSaveIds / onSyncMtmt are read straight off props inside ResearcherIds)
@@ -389,8 +431,10 @@
               u.status === 'pending' && h('button', { className: 'btn ok', onClick: function () { onAction(u.id, 'approved'); } }, 'Approve'),
               u.status === 'pending' && h('button', { className: 'btn dng', onClick: function () { onAction(u.id, 'rejected'); } }, 'Reject'),
               (u.status === 'approved') && u.role !== 'admin' && h('button', { className: 'btn', onClick: function () { onAction(u.id, 'suspended'); } }, 'Suspend'),
-              (u.status === 'suspended' || u.status === 'rejected') && h('button', { className: 'btn ok', onClick: function () { onAction(u.id, 'approved'); } }, 'Reactivate')
+              (u.status === 'suspended' || u.status === 'rejected') && h('button', { className: 'btn ok', onClick: function () { onAction(u.id, 'approved'); } }, 'Reactivate'),
+              u.role !== 'admin' && h('button', { className: 'btn dng', style: { marginLeft: 'auto' }, onClick: function () { setDel(del ? null : { typed: '' }); } }, del ? 'Mégse' : '🗑 Profil törlése')
             ),
+            del ? h(DeleteBox, { user: u, state: del, setState: setDel, onDone: function () { setDel(null); onClose(); if (props.onDeleted) props.onDeleted(u.id); } }) : null,
             h('div', { style: { marginBottom: 16 } },
               h('div', { style: { fontSize: 12, fontWeight: 700, color: 'var(--muted)', marginBottom: 5 } }, 'Active AI model — research chat + analysis'),
               h('select', { value: u.ai_model || '', onChange: function (e) { onSetModel(u.id, e.target.value); }, style: { width: '100%', height: 36, border: '1px solid var(--line)', borderRadius: 8, padding: '0 10px', fontFamily: 'inherit', fontSize: 13, background: 'var(--surface)', color: 'inherit' } },
@@ -1266,7 +1310,7 @@
           sec === 'elicit' ? h(React.Fragment, null,
           h(ElicitMcpPanel, null)) : null,
           sec === 'system' ? h(React.Fragment, null, h(ClientErrors), h(BugReports)) : null)),
-      h(UserDrawer, { user: selUser, agg: selUser ? aggFor(selUser.id) : { projects: [], storage: 0, chars: 0, requests: 0 }, onClose: function () { setSelUser(null); }, onPreview: function (p) { setPreview(p); }, onAction: setStatus, onSetModel: setModel, onSetWorkflows: setWorkflows, onSetFigures: setFigures, onSetDailyCap: setDailyCap, onSetFeature: setFeature, onSetAllowlist: setAllowlist, onSetJudge: setJudge, onSaveIds: saveResearchIds, onSyncMtmt: syncMtmt, catalog: catalog }),
+      h(UserDrawer, { onDeleted: function (id) { setProfiles(function (l) { return l.filter(function (x) { return x.id !== id; }); }); }, user: selUser, agg: selUser ? aggFor(selUser.id) : { projects: [], storage: 0, chars: 0, requests: 0 }, onClose: function () { setSelUser(null); }, onPreview: function (p) { setPreview(p); }, onAction: setStatus, onSetModel: setModel, onSetWorkflows: setWorkflows, onSetFigures: setFigures, onSetDailyCap: setDailyCap, onSetFeature: setFeature, onSetAllowlist: setAllowlist, onSetJudge: setJudge, onSaveIds: saveResearchIds, onSyncMtmt: syncMtmt, catalog: catalog }),
       preview && h(ProjectPreview, { project: preview, onClose: function () { setPreview(null); } })
     );
   }

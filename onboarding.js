@@ -34,6 +34,9 @@
       + '#pr-ob .who b{font-size:14px;display:block} #pr-ob .who span{font-size:12.5px;color:var(--muted)}'
       + '#pr-ob label{display:block;font-size:12.5px;font-weight:700;color:var(--ink);margin:0 0 6px}'
       + '#pr-ob .opt{font-weight:500;color:var(--muted)}'
+      + '#pr-ob .ob-other{margin-top:14px;padding:10px 12px;border:1px solid #e6e8ee;border-radius:10px;'
+      + 'font-size:12.5px;line-height:1.5;color:var(--muted);text-align:center}'
+      + '#pr-ob .ob-other a{font-weight:700;color:#4f46e5;text-decoration:none}'
       + '#pr-ob .req{font-weight:600;color:var(--danger,#d92d20)}'
       + '#pr-ob .field{margin-bottom:16px;position:relative}'
       + '#pr-ob input{width:100%;height:42px;border:1px solid #d9dce3;border-radius:10px;padding:0 13px;font-family:inherit;font-size:14px;color:var(--ink);background:var(--surface)}'
@@ -238,11 +241,12 @@
       + '  <div class="err" id="ob-sneptun-err">A Neptun-kód 6 karakter: betűk és számok.</div>'
       + '</div>'
       + '<button class="primary" id="ob-sgo">Csatlakozom</button>'
-      + '<button class="ghost" id="pr-ob-other">Nem hallgató vagyok — kutatói fiókot kérek</button>'
+      + '<div class="ob-other">Nincs Neptun-kódod, mert oktató, kolléga vagy vendég vagy? '
+      + '<a href="#" id="pr-ob-other">Kérj kutatói fiókot</a> — ott nem kérünk Neptun-kódot.</div>'
       + '<button class="ghost" id="pr-ob-signout">Kijelentkezés</button>';
     mount(html, true); signOutBtn();
     var other = document.getElementById('pr-ob-other');
-    if (other) other.onclick = function () { if (status === 'pending') pending(); else form(); };
+    if (other) other.onclick = function (e) { e.preventDefault(); if (status === 'pending') pending(); else form(); };
     var codeIn = document.getElementById('ob-scode');
     var nepIn = document.getElementById('ob-sneptun');
     nepIn.oninput = function () { this.value = this.value.toUpperCase().replace(/[^A-Z0-9]/g, ''); };
