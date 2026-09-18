@@ -187,6 +187,32 @@
       h('p', { className: 'co-note' }, 'A határidő után — vagy ha lezárod — a hallgatók már nem alapítanak, nem lépnek be és nem lépnek ki. Te utána is átrendezheted a csapatokat.'));
   }
 
+  // ---------- lecture points (course-wide) ----------
+  // Points come from the live lectures: answering a poll, hitting a quiz answer, being there.
+  function PointsCard(props) {
+    var dS = useState(null), d = dS[0], setD = dS[1];
+    useEffect(function () {
+      sb.rpc('course_points', { p_course: props.courseId }).then(function (r) {
+        if (r && r.error) { setD({}); return; }
+        setD(r.data || {});
+      });
+    }, [props.courseId]);
+    if (!d || (!d.me && !(d.teams || []).length)) return null;
+    var me = d.me || {}, teams = d.teams || [];
+    var myRank = teams.map(function (t) { return t.team_id; }).indexOf(props.myTeamId);
+    return h('div', { className: 'co-card tm-points' },
+      h('div', { className: 'tm-points-me' },
+        h('div', null, h('b', null, Math.round(me.points || 0)), h('span', null, 'órai pontod')),
+        h('div', null, h('b', null, me.answers || 0), h('span', null, 'szavazatod')),
+        h('div', null, h('b', null, me.correct || 0), h('span', null, 'telitalálatod')),
+        myRank >= 0 ? h('div', null, h('b', null, (myRank + 1) + '.'), h('span', null, 'a csapatod helyezése')) : null),
+      teams.length ? h('div', { className: 'tm-lead' }, teams.slice(0, 5).map(function (t, i) {
+        return h('span', { key: t.team_id, className: 'tm-lead-i' + (t.team_id === props.myTeamId ? ' me' : '') },
+          h('b', null, (i + 1) + '.'), ' ' + t.name + ' · ' + Math.round(t.points) + ' pont');
+      })) : null,
+      h('p', { className: 'co-note' }, 'A pontok az előadásokon gyűlnek: minden megválaszolt szavazás, minden helyes kvízválasz és minden alkalom számít. A csapat pontja a tagok pontjainak összege.'));
+  }
+
   // ---------- main tab ----------
   function TeamsTab(props) {
     var courseId = props.course.id;
@@ -336,6 +362,8 @@
         h('span', { className: 'chip' }, inTeams + ' fő csapatban'),
         h('span', { className: 'chip' + (solo.length ? ' acc' : '') }, solo.length + ' csapat nélkül'),
         h('span', { className: 'chip ok' }, teams.filter(function (x) { return x.status === 'approved'; }).length + ' jóváhagyva')),
+
+      h(PointsCard, { courseId: courseId, myTeamId: me && me.team_id }),
 
       !open ? h('div', { className: 'co-card tm-closed' },
         h('b', null, '🔒 A csapatalakítás lezárult.'),
