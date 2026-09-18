@@ -23,8 +23,13 @@
   function initials(n) { return String(n || '?').split(/\s+/).map(function (w) { return w.charAt(0); }).join('').slice(0, 2).toUpperCase() || '?'; }
   function fmtDay(d) { if (!d) return '—'; try { return new Date(d).toLocaleDateString('hu-HU', { month: 'short', day: 'numeric' }); } catch (e) { return d; } }
   function fmtWhen(d) { if (!d) return 'még semmi'; try { return new Date(d).toLocaleString('hu-HU', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch (e) { return d; } }
-  function today() { return new Date().toISOString().slice(0, 10); }
-  function daysUntil(d) { if (!d) return null; return Math.round((new Date(d + 'T00:00:00') - new Date(today() + 'T00:00:00')) / 86400000); }
+  // dates are plain yyyy-mm-dd days, so every helper works in LOCAL time — toISOString() would shift
+  // the whole calendar back a day for anyone east of Greenwich (CET/CEST included)
+  function ymd(dt) { return dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0'); }
+  function parseDay(s) { var p = String(s || '').split('-'); return new Date(+p[0], (+p[1] || 1) - 1, +p[2] || 1); }
+  function addDays(s, n) { var d = parseDay(s); d.setDate(d.getDate() + n); return ymd(d); }
+  function today() { return ymd(new Date()); }
+  function daysUntil(d) { if (!d) return null; return Math.round((parseDay(d) - parseDay(today())) / 86400000); }
   function bytes(n) { if (!n && n !== 0) return ''; return n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' kB'; }
   function uuid() { return (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : ('x' + Date.now() + Math.random().toString(36).slice(2)); }
 
@@ -424,10 +429,7 @@
   function Calendar(props) {
     var sprint = props.sprint || {}, tasks = props.tasks, days = [];
     if (sprint.starts_on) {
-      for (var i = 0; i < 7; i++) {
-        var d = new Date(sprint.starts_on + 'T00:00:00'); d.setDate(d.getDate() + i);
-        days.push(d.toISOString().slice(0, 10));
-      }
+      for (var i = 0; i < 7; i++) days.push(addDays(sprint.starts_on, i));
     }
     var overdue = tasks.filter(function (t) { return t.due_on && t.status !== 'done' && daysUntil(t.due_on) < 0; });
     var undated = tasks.filter(function (t) { return !t.due_on; });
