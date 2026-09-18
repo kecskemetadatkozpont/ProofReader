@@ -280,23 +280,28 @@
     removeSplash();
     if (document.getElementById('pr-signin')) { if (errMsg) setOverlayErr(errMsg); return; }
     injectCss();
+    // Csak Google-fiókkal lehet belépni; a jelszavas űrlap vészhelyzetre maradt (?staff=1).
+    var staffMode = false;
+    try { staffMode = new URLSearchParams(location.search).get('staff') === '1'; } catch (e) { }
     var d = document.createElement('div'); d.id = 'pr-signin';
     d.innerHTML = '<div class="pr-card"><div class="pr-mk"><span></span></div>'
-      + '<h1>Sign in to Publify</h1><p>New here? Create your account with Google — that is the only way to sign up. Already have a password? Use the form below.</p>'
+      + '<h1>Belépés a Publify-ba</h1><p>Lépj be a Google-fiókoddal. Ez az egyetlen belépési mód — jelszót nem kell kitalálnod, és e-mailt sem kell megerősítened.</p>'
       + (errMsg ? '<div class="pr-err">' + errMsg + '</div>' : '')
       + '<button class="pr-g" id="pr-google">' + GBTN + 'Continue with Google</button>'
-      + '<div class="pr-or">or</div>'
-      + '<form id="pr-pwform" autocomplete="on">'
-      + '<input class="pr-in" id="pr-email" type="email" autocomplete="username" placeholder="name@institution.hu" aria-label="Email" />'
-      + '<input class="pr-in" id="pr-pw" type="password" autocomplete="current-password" placeholder="Password" aria-label="Password" />'
-      + '<button class="pr-primary" id="pr-pwbtn" type="submit">Sign in</button>'
-      + '</form>'
-      + '<div style="text-align:center;margin-top:6px;font-size:12.5px"><a href="#" id="pr-forgot" style="color:inherit;opacity:.75;text-decoration:none">Forgot your password?</a></div>'
+      + (staffMode
+        ? '<div class="pr-or">vagy jelszóval</div>'
+          + '<form id="pr-pwform" autocomplete="on">'
+          + '<input class="pr-in" id="pr-email" type="email" autocomplete="username" placeholder="name@institution.hu" aria-label="E-mail" />'
+          + '<input class="pr-in" id="pr-pw" type="password" autocomplete="current-password" placeholder="Jelszó" aria-label="Jelszó" />'
+          + '<button class="pr-primary" id="pr-pwbtn" type="submit">Belépés</button>'
+          + '</form>'
+          + '<div style="text-align:center;margin-top:6px;font-size:12.5px"><a href="#" id="pr-forgot" style="color:inherit;opacity:.75;text-decoration:none">Elfelejtett jelszó</a></div>'
+        : '')
       + '<div class="pr-sep"></div>'
-      + '<button class="pr-demo" id="pr-demo">Continue in demo mode (this browser only)</button>'
-      + '<div class="pr-note">Hallgatóknak: a „Continue with Google” gombbal lépj be. Researchers: use the institutional email and password you were given. Demo mode keeps everything in this browser.</div></div>';
+      + '<button class="pr-demo" id="pr-demo">Demó mód (csak ebben a böngészőben)</button>'
+      + '<div class="pr-note">Hallgatóknak: a „Continue with Google” gombbal lépj be. A demó mód mindent ebben a böngészőben tart.</div></div>';
     (document.body || document.documentElement).appendChild(d);
-    document.getElementById('pr-pwform').onsubmit = function (e) {
+    if (document.getElementById('pr-pwform')) document.getElementById('pr-pwform').onsubmit = function (e) {
       e.preventDefault();
       var em = (document.getElementById('pr-email').value || '').trim(), pw = document.getElementById('pr-pw').value || '';
       if (!em || !pw) { setOverlayErr('Enter your email and password.'); return; }
@@ -309,7 +314,7 @@
         // SIGNED_IN fires → onAuthStateChange reboots into cloud mode; keep the button disabled.
       }, function (er) { btn.disabled = false; btn.textContent = 'Sign in'; setOverlayErr((er && er.message) || 'Sign-in failed.'); });
     };
-    document.getElementById('pr-forgot').onclick = function (e) {
+    if (document.getElementById('pr-forgot')) document.getElementById('pr-forgot').onclick = function (e) {
       e.preventDefault();
       var em = (document.getElementById('pr-email').value || '').trim();
       if (!em) { setOverlayErr('Enter your email above, then click “Forgot your password”.'); return; }

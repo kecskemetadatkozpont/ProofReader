@@ -29,7 +29,8 @@
   // COSMETIC ONLY: the server enforces enforced=true features regardless. Fail-open when unloaded.
   var FEATURE_OF = {
     research: 'page_research', course: 'page_course', kanban: 'page_kanban', memory: 'page_memory', submissions: 'page_submissions',
-    session: 'page_session', media: 'page_media', compare: 'page_compare', phd: 'page_phd', publications: 'page_publications'
+    session: 'page_session', media: 'page_media', compare: 'page_compare', phd: 'page_phd', publications: 'page_publications',
+    autopilot: 'page_autopilot'
   };
   function linkVisible(l, admin) {
     if (l.adminOnly && !admin) return false;
