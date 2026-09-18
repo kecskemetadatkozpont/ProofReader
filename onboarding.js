@@ -220,7 +220,7 @@
     var html = ''
       + '<div class="mk"><span></span></div>'
       + '<h1>Csatlakozás a kurzushoz</h1>'
-      + '<p class="sub">Add meg a nevedet és az oktatódtól kapott kurzuskódot. Utána a Neptun-kódoddal azonosítod magad — adminisztrátori jóváhagyásra nem kell várnod.</p>'
+      + '<p class="sub">Add meg a nevedet, az oktatódtól kapott kurzuskódot és a Neptun-kódodat. A Neptun-kód köti a fiókodat a kurzus névsorához és a félév végi jegyedhez. Adminisztrátori jóváhagyásra nem kell várnod.</p>'
       + whoBlock()
       + '<div class="field">'
       + '  <label for="ob-sname">Teljes neved <span class="req">*</span></label>'
@@ -232,6 +232,11 @@
       + '  <input id="ob-scode" autocomplete="off" placeholder="az oktatódtól kaptad" />'
       + '  <div class="err" id="ob-scode-err">Ezt a kódot nem ismerjük fel.</div>'
       + '</div>'
+      + '<div class="field">'
+      + '  <label for="ob-sneptun">Neptun-kód <span class="req">*</span></label>'
+      + '  <input id="ob-sneptun" autocomplete="off" maxlength="8" placeholder="PL. AB12CD" style="text-transform:uppercase;letter-spacing:.1em" />'
+      + '  <div class="err" id="ob-sneptun-err">A Neptun-kód 6 karakter: betűk és számok.</div>'
+      + '</div>'
       + '<button class="primary" id="ob-sgo">Csatlakozom</button>'
       + '<button class="ghost" id="pr-ob-other">Nem hallgató vagyok — kutatói fiókot kérek</button>'
       + '<button class="ghost" id="pr-ob-signout">Kijelentkezés</button>';
@@ -239,16 +244,22 @@
     var other = document.getElementById('pr-ob-other');
     if (other) other.onclick = function () { if (status === 'pending') pending(); else form(); };
     var codeIn = document.getElementById('ob-scode');
+    var nepIn = document.getElementById('ob-sneptun');
+    nepIn.oninput = function () { this.value = this.value.toUpperCase().replace(/[^A-Z0-9]/g, ''); };
     try { var q = new URLSearchParams(location.search).get('join'); if (q) codeIn.value = q; } catch (e) { }
     var btn = document.getElementById('ob-sgo');
     function go() {
       var nameV = (document.getElementById('ob-sname').value || '').trim();
       var codeV = (codeIn.value || '').trim();
+      var nepV = (nepIn.value || '').trim().toUpperCase();
       document.getElementById('ob-sname-err').classList.remove('on');
       document.getElementById('ob-scode-err').classList.remove('on');
+      document.getElementById('ob-sneptun-err').classList.remove('on');
       if (nameV.length < 3) { document.getElementById('ob-sname-err').classList.add('on'); return; }
       if (!codeV) { document.getElementById('ob-scode-err').classList.add('on'); return; }
+      if (!/^[A-Z0-9]{5,8}$/.test(nepV)) { document.getElementById('ob-sneptun-err').classList.add('on'); return; }
       btn.disabled = true; btn.textContent = 'Csatlakozás…';
+      var courseId = null;
       // the name is what the lecturer sees next to the Neptun code; status 'pending' keeps every other surface closed
       sb.from('profiles').update({ name: nameV, is_student: true, status: status === 'incomplete' ? 'pending' : status })
         .eq('id', me.id).then(function () {
@@ -258,14 +269,33 @@
             btn.disabled = false; btn.textContent = 'Csatlakozom';
             var e = document.getElementById('ob-scode-err');
             e.textContent = /Érvénytelen/.test(r.error.message) ? 'Ezt a kódot nem ismerjük fel.' : r.error.message;
-            e.classList.add('on'); return;
+            e.classList.add('on'); throw new Error('stop');
+          }
+          courseId = r.data;
+          // a Neptun-kód mindig rögzül: ha szerepel a névsorban, azonnal párosít; ha nem, az oktatóhoz kerül
+          return sb.rpc('course_roster_claim', { p_course: courseId, p_code: nepV });
+        }).then(function (r2) {
+          var st = (r2 && r2.data && r2.data.status) || (r2 && r2.error ? 'error' : 'ok');
+          if (r2 && r2.error && !/névsor|jóváhagy/i.test(r2.error.message || '')) {
+            // a névsor még nincs importálva vagy más hiba: a belépést ettől nem akasztjuk meg
+            try { console.warn('Neptun-kód rögzítése:', r2.error.message); } catch (e) { }
+          }
+          if (st === 'taken') {
+            btn.disabled = false; btn.textContent = 'Csatlakozom';
+            var e2 = document.getElementById('ob-sneptun-err');
+            e2.textContent = 'Ezt a Neptun-kódot már egy másik fiók használja. Szólj az oktatódnak.';
+            e2.classList.add('on'); throw new Error('stop');
           }
           me.name = nameV; unmount();
-          location.replace('Course.html?course=' + encodeURIComponent(r.data));
-        }, function () { btn.disabled = false; btn.textContent = 'Csatlakozom'; });
+          location.replace('Course.html?course=' + encodeURIComponent(courseId));
+        }).catch(function (err) {
+          if (err && err.message === 'stop') return;
+          btn.disabled = false; btn.textContent = 'Csatlakozom';
+        });
     }
     btn.onclick = go;
-    codeIn.onkeydown = function (e) { if (e.key === 'Enter') go(); };
+    codeIn.onkeydown = function (e) { if (e.key === 'Enter') nepIn.focus(); };
+    nepIn.onkeydown = function (e) { if (e.key === 'Enter') go(); };
   }
 
   /* ---------- status screens ---------- */
