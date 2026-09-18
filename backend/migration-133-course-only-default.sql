@@ -19,11 +19,20 @@ on conflict (key) do nothing;
 
 -- ---- 2. a jelenlegi tényleges jogosultságok befagyasztása -------------------
 -- (csak nem-admin profilokra; az admin úgyis mindent lát)
-update profiles p
-   set features = (
-     select coalesce(jsonb_object_agg(f.key, coalesce((p.features ->> f.key)::boolean, f.default_on)), '{}'::jsonb)
-       from feature_catalog f)
- where coalesce(p.role, 'user') <> 'admin';
+-- FONTOS: a profiles táblán a guard_profile_update trigger minden nem-admin munkamenetben
+-- visszaírja a features mezőt — az SQL-szerkesztőben auth.uid() üres, tehát is_admin() hamis.
+-- A befagyasztás idejére ezért ki kell kapcsolni, különben csendben nem történik semmi
+-- (ezt tanultuk a 134-es javításból).
+do $$
+begin
+  alter table public.profiles disable trigger guard_profile_update;
+  update public.profiles p
+     set features = (
+       select coalesce(jsonb_object_agg(f.key, coalesce((p.features ->> f.key)::boolean, f.default_on)), '{}'::jsonb)
+         from feature_catalog f)
+   where coalesce(p.role, 'user') <> 'admin';
+  alter table public.profiles enable trigger guard_profile_update;
+end $$;
 
 -- ---- 3. új alapértelmezés: csak a kurzus ------------------------------------
 update feature_catalog set default_on = false
