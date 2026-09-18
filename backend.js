@@ -50,9 +50,22 @@
   // write_own_profile RLS (id must equal auth.uid()).
   function ensureProfile(u) {
     if (!u || !u.id) return;
-    sb.from('profiles').upsert({ id: u.id, email: u.email, name: u.name, avatar_url: u.avatar }, { onConflict: 'id' })
-      .then(function (r) { if (r && r.error) console.warn('[PR] profile upsert:', r.error.message); })
-      .catch(function () { });
+    // A név a FELHASZNÁLÓÉ: ha egyszer megadta (pl. a kurzusra lépéskor a hivatalos nevét),
+    // a következő indításkor nem írjuk felül a Google-fiók nevével. Csak akkor töltjük ki,
+    // ha még üres, vagy ha az e-mail elejéből származó ideiglenes név áll benne.
+    var fallback = (u.email || '').split('@')[0];
+    sb.from('profiles').select('id,name').eq('id', u.id).maybeSingle().then(function (r) {
+      if (r && r.error) { console.warn('[PR] profile check:', r.error.message); return; }
+      if (!r || !r.data) {
+        return sb.from('profiles').insert({ id: u.id, email: u.email, name: u.name, avatar_url: u.avatar })
+          .then(function (x) { if (x && x.error) console.warn('[PR] profile insert:', x.error.message); });
+      }
+      var patch = { email: u.email, avatar_url: u.avatar };
+      var cur = (r.data.name || '').trim();
+      if (!cur || cur === fallback) patch.name = u.name;
+      return sb.from('profiles').update(patch).eq('id', u.id)
+        .then(function (x) { if (x && x.error) console.warn('[PR] profile update:', x.error.message); });
+    }).catch(function () { });
   }
 
   /* ---- detect a return from the OAuth provider ---- */
