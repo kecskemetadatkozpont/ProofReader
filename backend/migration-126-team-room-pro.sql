@@ -125,7 +125,7 @@ returns table (id uuid, author uuid, author_name text, body text, created_at tim
 language plpgsql security definer set search_path = public as $$
 declare k record;
 begin
-  select * into k from team_tasks where id = p_task;
+  select * into k from team_tasks t where t.id = p_task;   -- minősítve: az „id” kimeneti mező is létezik
   if k is null or not team_can_read(k.team_id) then raise exception 'Nincs hozzáférésed'; end if;
   return query
     select c.id, c.author, p.name, c.body, c.created_at
