@@ -53,6 +53,61 @@
 
   // ---------- deck file + metadata ----------
   var bufCache = {};
+  // A diasor lehet .pptx vagy .pdf — a PDF oldalai ugyanúgy „diák”: ugyanaz a vetítés,
+  // szavazás, jegyzetlap. A PDF-et a pdf.js rajzolja ki (ugyanaz a verzió, mint az Autopilotban).
+  var PDFJS_URL = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js';
+  function ensurePdfJs() {
+    if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+    if (window._pdfjsLoading) return window._pdfjsLoading;
+    window._pdfjsLoading = new Promise(function (res, rej) {
+      var sc = document.createElement('script'); sc.src = PDFJS_URL;
+      sc.onload = function () {
+        if (!window.pdfjsLib) { window._pdfjsLoading = null; rej(new Error('A PDF-olvasó nem töltődött be.')); return; }
+        try { window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js'; } catch (e) { }
+        res(window.pdfjsLib);
+      };
+      sc.onerror = function () { window._pdfjsLoading = null; rej(new Error('A PDF-olvasót nem sikerült betölteni.')); };
+      document.head.appendChild(sc);
+    });
+    return window._pdfjsLoading;
+  }
+  function isPdfDeck(d) { return !!(d && (/\.pdf$/i.test(d.storage_path || '') || d.kind === 'pdf')); }
+  var pdfCache = {};
+  function loadPdfDoc(deck, buf) {
+    if (pdfCache[deck.id]) return pdfCache[deck.id];
+    pdfCache[deck.id] = ensurePdfJs().then(function (pdfjs) {
+      return pdfjs.getDocument({ data: buf.slice(0) }).promise;
+    }).catch(function (e) { delete pdfCache[deck.id]; throw e; });
+    return pdfCache[deck.id];
+  }
+  // oldalanként az első, elég hosszú szövegsor lesz a „dia címe”
+  function parsePdf(buf) {
+    return ensurePdfJs().then(function (pdfjs) {
+      return pdfjs.getDocument({ data: buf.slice(0) }).promise;
+    }).then(function (doc) {
+      var pages = [];
+      var chain = Promise.resolve();
+      for (var i = 1; i <= doc.numPages; i++) {
+        (function (n) {
+          chain = chain.then(function () {
+            return doc.getPage(n).then(function (pg) { return pg.getTextContent(); }).then(function (tc) {
+              var line = '', best = '';
+              (tc.items || []).some(function (it) {
+                var s = String(it.str || '').trim();
+                if (!s) return false;
+                if (!best) best = s;
+                if (s.length >= 4) { line = s; return true; }
+                return false;
+              });
+              pages.push({ title: (line || best || (n + '. oldal')).slice(0, 140), notes: '' });
+            }, function () { pages.push({ title: n + '. oldal', notes: '' }); });
+          });
+        })(i);
+      }
+      return chain.then(function () { return pages; });
+    });
+  }
+
   function loadDeckBuf(deck) {
     if (!bufCache[deck.id]) bufCache[deck.id] = sb.storage.from('course-media').download(deck.storage_path).then(function (r) {
       if (r.error) throw r.error; return r.data.arrayBuffer();
@@ -178,7 +233,55 @@
   }
 
   // ---------- slide stage: renders the whole deck once, shows one slide, scales to its box ----------
+  // PDF-diasor: az aktuális oldalt rajzoljuk vászonra, a méretet a keret adja
+  function PdfStage(props) {
+    var hostRef = useRef(null), cvRef = useRef(null), docRef = useRef(null);
+    var sS = useState('loading'), st = sS[0], setSt = sS[1];
+    var taskRef = useRef(null);
+    function draw() {
+      var doc = docRef.current, host = hostRef.current, cv = cvRef.current;
+      if (!doc || !host || !cv) return;
+      var n = Math.max(1, Math.min(doc.numPages, props.slide || 1));
+      doc.getPage(n).then(function (page) {
+        var vp0 = page.getViewport({ scale: 1 });
+        var W = host.clientWidth || 960, H = props.contain ? (host.clientHeight || 540) : Infinity;
+        var scale = Math.min(W / vp0.width, H === Infinity ? Infinity : H / vp0.height);
+        if (!isFinite(scale) || scale <= 0) scale = W / vp0.width;
+        var dpr = Math.min(2, window.devicePixelRatio || 1);
+        var vp = page.getViewport({ scale: scale * dpr });
+        cv.width = Math.round(vp.width); cv.height = Math.round(vp.height);
+        cv.style.width = Math.round(vp.width / dpr) + 'px';
+        cv.style.height = Math.round(vp.height / dpr) + 'px';
+        if (!props.contain) host.style.height = Math.round(vp.height / dpr) + 'px';
+        if (taskRef.current) { try { taskRef.current.cancel(); } catch (e) { } }
+        taskRef.current = page.render({ canvasContext: cv.getContext('2d'), viewport: vp });
+        return taskRef.current.promise.then(function () { setSt('ready'); }, function () { });
+      }, function () { setSt('error'); });
+    }
+    useEffect(function () {
+      if (!props.buf) return;
+      var alive = true; setSt('loading');
+      loadPdfDoc(props.deck, props.buf).then(function (doc) {
+        if (!alive) return; docRef.current = doc; draw();
+      }, function () { if (alive) setSt('error'); });
+      return function () { alive = false; };
+    }, [props.buf, props.deck && props.deck.id]);
+    useEffect(function () { draw(); }, [props.slide, props.contain]);
+    useEffect(function () {
+      if (!hostRef.current || !window.ResizeObserver) return;
+      var ro = new ResizeObserver(function () { draw(); });
+      ro.observe(hostRef.current);
+      return function () { ro.disconnect(); };
+    }, []);
+    return h('div', { ref: hostRef, className: 'cl-stage cl-pdfstage' + (props.contain ? ' contain' : '') },
+      h('canvas', { ref: cvRef, className: 'cl-pdfcanvas' }),
+      st === 'loading' ? h('div', { className: 'cl-stage-msg' }, 'Oldal betöltése…') : null,
+      st === 'error' ? h('div', { className: 'cl-stage-msg' }, 'Ezt az oldalt nem sikerült megjeleníteni.') : null,
+      props.children);
+  }
+
   function SlideStage(props) {
+    if (props.pdf) return h(PdfStage, props);
     var hostRef = useRef(null), innerRef = useRef(null), wrapsRef = useRef([]);
     var sS = useState('loading'), st = sS[0], setSt = sS[1];
     function show() {
@@ -506,12 +609,13 @@
     function pick(e) {
       var f = e.target.files && e.target.files[0]; e.target.value = '';
       if (!f) return;
-      if (!/\.pptx$/i.test(f.name)) { toast('.pptx fájlt várok (a régi .ppt formátumot nem tudom megnyitni).', { kind: 'error' }); return; }
+      var pdf = /\.pdf$/i.test(f.name);
+      if (!pdf && !/\.pptx$/i.test(f.name)) { toast('.pptx vagy .pdf fájlt várok (a régi .ppt formátumot nem tudom megnyitni).', { kind: 'error' }); return; }
       var target = up || {};
       setUp({ file: f, title: target.replace ? target.replace.title : '', meta: null, busy: true, msg: 'A diák beolvasása…',
         lecture: target.lecture || null, replace: target.replace || null, orig: f.size });
       // a tárhely 50 MB-ot enged fájlonként: a nagyobb diasorok képeit feltöltés előtt tömörítjük
-      var prep = f.size > SLIM_TRIGGER
+      var prep = (!pdf && f.size > SLIM_TRIGGER)
         ? (setUp(function (u) { return u ? Object.assign({}, u, { msg: 'Nagy fájl (' + fmtMB(f.size) + ') — tömörítés…' }) : u; }),
            slimPptx(f, function (m) { setUp(function (u) { return u ? Object.assign({}, u, { msg: m }) : u; }); })
              .then(function (res) {
@@ -520,7 +624,7 @@
                return use;
              }, function () { return f; }))
         : Promise.resolve(f);
-      prep.then(function (use) { return use.arrayBuffer(); }).then(function (buf) { return parsePptx(buf); }).then(function (meta) {
+      prep.then(function (use) { return use.arrayBuffer(); }).then(function (buf) { return pdf ? parsePdf(buf) : parsePptx(buf); }).then(function (meta) {
         var first = meta[0] && meta[0].title;
         setUp(function (u) {
           if (!u) return u;
@@ -541,7 +645,8 @@
         return;
       }
       var id = up.replace ? up.replace.id : uuid();
-      var path = course.id + '/' + props.meId + '/decks/' + uuid() + '.pptx';
+      var ext = /\.pdf$/i.test(up.file.name) ? '.pdf' : '.pptx';
+      var path = course.id + '/' + props.meId + '/decks/' + uuid() + ext;
       setUp(function (u) { return Object.assign({}, u, { busy: true, msg: 'Feltöltés…' }); });
       sb.storage.from('course-media').upload(path, up.file, { upsert: false }).then(function (r) {
         if (r && r.error) { setUp(function (u) { return Object.assign({}, u, { busy: false, msg: '' }); }); toast('A feltöltés nem sikerült: ' + r.error.message, { kind: 'error' }); return; }
@@ -585,7 +690,7 @@
     function deckCard(d, lecture) {
       return h('div', { key: d.id, className: 'co-card cl-deck' },
         h('div', { className: 'cl-deck-t' }, d.title),
-        h('div', { className: 'cl-deck-m' }, d.slide_count + ' dia',
+        h('div', { className: 'cl-deck-m' }, (isPdfDeck(d) ? '📕 PDF · ' : '') + d.slide_count + (isPdfDeck(d) ? ' oldal' : ' dia'),
           isInstr ? ' · ' + (pollCounts[d.id] || 0) + ' szavazás' : '',
           ' · ' + fmtDate(d.updated_at || d.created_at),
           (d.updated_at && d.updated_at !== d.created_at) ? ' · frissítve' : ''),
@@ -608,12 +713,12 @@
       h('div', { className: 'cl-decks-h' },
         h('div', null, h('h3', null, '🎞 Előadások'),
           h('p', { className: 'co-note' }, isInstr
-            ? 'Hozz létre alkalmakat, és tölts fel hozzájuk egy-egy diasort. A meglévő diasort bármikor frissítheted — a szavazások és a korábbi alkalmak megmaradnak.'
+            ? 'Hozz létre alkalmakat, és tölts fel hozzájuk egy-egy diasort (.pptx vagy .pdf). A meglévőt bármikor frissítheted — a szavazások és a korábbi alkalmak megmaradnak.'
             : 'Az alkalmak és a hozzájuk tartozó diák. Élő előadáskor fent megjelenik a csatlakozás gomb.')),
         h('span', { className: 'sp' }),
         isInstr ? h('button', { type: 'button', className: 'btn pri', onClick: function () { setNewLec({ title: '', held_at: '' }); } }, '＋ Új előadás') : null,
         isInstr ? h('button', { type: 'button', className: 'btn', disabled: !!up, onClick: function () { startUpload(null, null); } }, '⬆ Diasor feltöltése') : null,
-        h('input', { ref: fileRef, type: 'file', accept: '.pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation', style: { display: 'none' }, onChange: pick })),
+        h('input', { ref: fileRef, type: 'file', accept: '.pptx,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation', style: { display: 'none' }, onChange: pick })),
 
       newLec ? h('div', { className: 'co-card cl-newlec' },
         h('b', null, '＋ Új előadás'),
@@ -628,7 +733,7 @@
 
       up ? h('div', { className: 'co-card cl-upload' },
         h('b', null, up.replace ? '⟳ Diasor frissítése — ' + up.replace.title : (up.lecture ? '⬆ Diasor a(z) „' + up.lecture.title + '” előadáshoz' : '⬆ Új diasor')),
-        up.file ? h('p', { className: 'co-note' }, up.file.name + ' · ' + fmtMB(up.file.size)) : h('p', { className: 'co-note' }, 'Válaszd ki a .pptx fájlt.'),
+        up.file ? h('p', { className: 'co-note' }, up.file.name + ' · ' + fmtMB(up.file.size)) : h('p', { className: 'co-note' }, 'Válaszd ki a .pptx vagy .pdf fájlt.'),
         up.slim ? h('p', { className: 'cl-slim' + (up.file && up.file.size > MAX_DECK ? ' bad' : '') },
           up.slim.after < up.slim.before
             ? '🗜 Tömörítve: ' + fmtMB(up.slim.before) + ' → ' + fmtMB(up.slim.after)
@@ -638,7 +743,8 @@
           (up.file && up.file.size > MAX_DECK)
             ? ' — ez még mindig több a megengedett 50 MB-nál. Tömörítsd PowerPointban (Fájl → Információ → Médiaméret és teljesítmény), vagy bontsd szét alkalmakra.' : '') : null,
         up.meta ? h('div', null,
-          h('p', { className: 'co-note' }, up.meta.length + ' dia · ' + up.meta.filter(function (s) { return s.notes; }).length + ' dián előadói jegyzet'),
+          h('p', { className: 'co-note' }, up.meta.length + (/\.pdf$/i.test(up.file.name) ? ' oldal' : ' dia')
+            + (up.meta.filter(function (s) { return s.notes; }).length ? ' · ' + up.meta.filter(function (s) { return s.notes; }).length + ' dián előadói jegyzet' : '')),
           h('label', { className: 'form-l' }, 'Cím'),
           h('input', { className: 'in', value: up.title, onChange: function (e) { var v = e.target.value; setUp(function (u) { return Object.assign({}, u, { title: v }); }); } })) : null,
         up.msg ? h('p', { className: 'co-note' }, h('span', { className: 'cl-spin' }), ' ' + up.msg) : null,
@@ -698,7 +804,7 @@
       var alive = true; setBuf(null); setErr(''); setMeta(null);
       loadDeckBuf(deck).then(function (b) {
         if (!alive) return; setBuf(b);
-        parsePptx(b, deck.id).then(function (m) { if (alive) setMeta(m); }, function () { });
+        (isPdfDeck(deck) ? parsePdf(b) : parsePptx(b, deck.id)).then(function (m) { if (alive) setMeta(m); }, function () { });
       }, function (e) { if (alive) setErr((e && e.message) || String(e)); });
       return function () { alive = false; };
     }, [deck.id]);
@@ -744,7 +850,7 @@
       h('div', { className: 'cl-3col' },
         h(SlideRail, { titles: deck.slide_titles, count: count, slide: slide, badges: badges, onPick: go }),
         h('div', { className: 'cl-center' },
-          D.err ? h('div', { className: 'soon' }, 'A diasor nem tölthető le: ' + D.err) : h(SlideStage, { buf: D.buf, slide: slide }),
+          D.err ? h('div', { className: 'soon' }, 'A diasor nem tölthető le: ' + D.err) : h(SlideStage, { deck: deck, pdf: isPdfDeck(deck), buf: D.buf, slide: slide }),
           h('div', { className: 'cl-nav' },
             h('button', { type: 'button', className: 'btn', disabled: slide <= 1, onClick: function () { go(slide - 1); } }, '‹ Előző'),
             h('span', { className: 'cl-nav-n' }, slide + ' / ' + count),
@@ -867,7 +973,7 @@
         h(SlideRail, { titles: deck.slide_titles, count: count, slide: slide, badges: badges, onPick: go }),
         h('div', { className: 'cl-center' },
           h('div', { ref: stageBox, className: 'cl-projbox' + (projector ? ' on' : '') },
-            D.err ? h('div', { className: 'soon' }, 'A diasor nem tölthető le: ' + D.err) : h(SlideStage, { buf: D.buf, slide: slide, contain: projector },
+            D.err ? h('div', { className: 'soon' }, 'A diasor nem tölthető le: ' + D.err) : h(SlideStage, { deck: deck, pdf: isPdfDeck(deck), buf: D.buf, slide: slide, contain: projector },
               (projector && shownRun) ? h('div', { className: 'cl-overlay' }, h('div', { className: 'cl-ov-q' }, shownRun.question), shownRun.show_results ? h(PollResults, { run: shownRun, res: results[shownRun.id], big: true }) : h('div', { className: 'cl-ov-hint' }, 'Szavazz a saját gépeden a Kurzus oldalon · ' + ((results[shownRun.id] || {}).total || 0) + ' válasz')) : null),
             projector ? h('div', { className: 'cl-proj-nav' }, h('button', { type: 'button', onClick: function () { go(slide - 1); }, 'aria-label': 'Előző dia' }, '‹'), h('span', null, slide + ' / ' + count), h('button', { type: 'button', onClick: function () { go(slide + 1); }, 'aria-label': 'Következő dia' }, '›')) : null),
           h('div', { className: 'cl-nav' },
@@ -954,7 +1060,7 @@
       (!ended && !following) ? h('div', { className: 'cl-follow' }, h('span', null, 'Saját tempóban nézed a diákat — az előadó a ', h('b', null, liveSlide + '.'), ' dián tart.'), h('button', { type: 'button', className: 'btn pri sm', onClick: backToLive }, '↩ Vissza az élő diához')) : null,
       h('div', { className: 'cl-sgrid' },
         h('div', { className: 'cl-center' },
-          D.err ? h('div', { className: 'soon' }, 'A diasor nem tölthető le: ' + D.err) : h(SlideStage, { buf: D.buf, slide: view }),
+          D.err ? h('div', { className: 'soon' }, 'A diasor nem tölthető le: ' + D.err) : h(SlideStage, { deck: deck, pdf: isPdfDeck(deck), buf: D.buf, slide: view }),
           h('div', { className: 'cl-nav' },
             h('button', { type: 'button', className: 'btn', disabled: view <= 1, onClick: function () { go(view - 1); } }, '‹ Előző'),
             h('span', { className: 'cl-nav-n' }, view + ' / ' + count + (!ended && view !== liveSlide ? ' · élő: ' + liveSlide : '')),
@@ -983,7 +1089,7 @@
       h('div', { className: 'cl-bgrid' },
         h(SlideRail, { titles: deck.slide_titles, count: count, slide: slide, onPick: go }),
         h('div', { className: 'cl-center' },
-          D.err ? h('div', { className: 'soon' }, 'A diasor nem tölthető le: ' + D.err) : h(SlideStage, { buf: D.buf, slide: slide }),
+          D.err ? h('div', { className: 'soon' }, 'A diasor nem tölthető le: ' + D.err) : h(SlideStage, { deck: deck, pdf: isPdfDeck(deck), buf: D.buf, slide: slide }),
           h('div', { className: 'cl-nav' },
             h('button', { type: 'button', className: 'btn', disabled: slide <= 1, onClick: function () { go(slide - 1); } }, '‹ Előző'),
             h('span', { className: 'cl-nav-n' }, slide + ' / ' + count),
@@ -1105,7 +1211,7 @@
         })))) : null);
   }
 
-  window.__slim = slimPptx; window.__parse = parsePptx;   // teszt-horog (harness)
+  window.__slim = slimPptx; window.__parse = parsePptx; window.__parsePdf = parsePdf; window.__pdfjs = ensurePdfJs;   // teszt-horog (harness)
   window.PRCourseLive = { DecksTab: DecksTab, DeckEditor: DeckEditor, DeckBrowser: DeckBrowser, PresenterView: PresenterView, LiveStudentView: LiveStudentView, LiveBanner: LiveBanner, ActivityTab: ActivityTab, startSession: startSession,
     // internals exposed for the test harness only
     _parsePptx: parsePptx, _SlideStage: SlideStage, _PollForm: PollForm, _PollResults: PollResults, _AnswerForm: AnswerForm };
