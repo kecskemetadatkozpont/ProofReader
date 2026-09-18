@@ -358,45 +358,119 @@
 
   // ---------- decks tab ----------
   function DecksTab(props) {
+    // Előadások (alkalmak) és a hozzájuk tartozó diasorok. Egy előadás alá egy aktuális diasor
+    // tartozik: azt frissíteni lehet (a szavazások és a korábbi alkalmak a helyükön maradnak),
+    // nem kell újat feltölteni. A besorolatlan diasorok külön szakaszban, utólag beköthetők.
     var course = props.course, isInstr = props.isInstr;
     var dS = useState(null), decks = dS[0], setDecks = dS[1];
+    var lS = useState([]), lectures = lS[0], setLectures = lS[1];
     var pS = useState({}), pollCounts = pS[0], setPollCounts = pS[1];
-    var uS = useState(null), up = uS[0], setUp = uS[1];     // { file, title, meta, busy, msg }
+    var uS = useState(null), up = uS[0], setUp = uS[1];     // { file, title, meta, busy, msg, lecture, replace }
+    var nS = useState(null), newLec = nS[0], setNewLec = nS[1];   // { title, held_at }
     var eS = useState(''), schemaErr = eS[0], setSchemaErr = eS[1];
     var fileRef = useRef(null);
+
     function load() {
       sb.from('course_decks').select('*').eq('course_id', course.id).order('created_at', { ascending: false }).then(function (r) {
         if (r && r.error) { if (missingSchema(r.error)) setSchemaErr('missing'); else toast('A diasorok nem tölthetők be: ' + r.error.message, { kind: 'error' }); setDecks([]); return; }
         setSchemaErr(''); setDecks((r && r.data) || []);
-        if (isInstr) sb.from('course_slide_polls').select('deck_id').eq('course_id', course.id).then(function (pr) {
-          var m = {}; ((pr && pr.data) || []).forEach(function (x) { m[x.deck_id] = (m[x.deck_id] || 0) + 1; }); setPollCounts(m);
+        if (isInstr) sb.from('course_slide_polls').select('deck_id').eq('course_id', course.id).then(function (p) {
+          var m = {}; ((p && p.data) || []).forEach(function (x) { m[x.deck_id] = (m[x.deck_id] || 0) + 1; }); setPollCounts(m);
         });
+      });
+      sb.from('course_lectures').select('*').eq('course_id', course.id).order('ord', { ascending: true }).then(function (r) {
+        setLectures((r && r.data) || []);
       });
     }
     useEffect(function () { load(); }, [course.id]);
+
+    // ---- előadás (alkalom) ----
+    function createLecture() {
+      var t = (newLec && newLec.title || '').trim();
+      if (t.length < 2) { toast('Adj címet az előadásnak.', { kind: 'error' }); return; }
+      var ord = lectures.reduce(function (m, l) { return Math.max(m, l.ord || 0); }, 0) + 1;
+      sb.from('course_lectures').insert({ course_id: course.id, ord: ord, title: t.slice(0, 200),
+        held_at: (newLec.held_at || null), visible: true }).select('*').maybeSingle().then(function (r) {
+        if (r && r.error) { toast('Nem sikerült: ' + r.error.message, { kind: 'error' }); return; }
+        setNewLec(null); toast('✓ Előadás létrehozva', { kind: 'ok' }); load();
+      });
+    }
+    function renameLecture(l) {
+      var t = window.prompt('Az előadás címe:', l.title);
+      if (t === null) return;
+      sb.from('course_lectures').update({ title: t.trim().slice(0, 200) }).eq('id', l.id).then(function (r) {
+        if (r && r.error) { toast(r.error.message, { kind: 'error' }); return; }
+        load();
+      });
+    }
+    function setLectureDate(l, d) {
+      sb.from('course_lectures').update({ held_at: d || null }).eq('id', l.id).then(function () { load(); });
+    }
+    function toggleVisible(l) {
+      sb.from('course_lectures').update({ visible: !l.visible }).eq('id', l.id).then(function (r) {
+        if (r && r.error) { toast(r.error.message, { kind: 'error' }); return; }
+        load();
+      });
+    }
+    function delLecture(l) {
+      var mine = (decks || []).filter(function (d) { return d.lecture_id === l.id; });
+      confirmBox('Törlöd az előadást?', '„' + l.title + '” törlődik.' + (mine.length ? ' A hozzá tartozó ' + mine.length + ' diasor megmarad, csak besorolatlan lesz.' : ''), 'Törlés', true).then(function (ok) {
+        if (!ok) return;
+        sb.from('course_lectures').delete().eq('id', l.id).then(function (r) {
+          if (r && r.error) { toast(r.error.message, { kind: 'error' }); return; }
+          load();
+        });
+      });
+    }
+    function attach(deck, lectureId) {
+      sb.from('course_decks').update({ lecture_id: lectureId || null }).eq('id', deck.id).then(function (r) {
+        if (r && r.error) { toast(r.error.message, { kind: 'error' }); return; }
+        load();
+      });
+    }
+
+    // ---- diasor feltöltése / frissítése ----
     function pick(e) {
       var f = e.target.files && e.target.files[0]; e.target.value = '';
       if (!f) return;
-      if (!/\.pptx$/i.test(f.name)) { toast('Csak .pptx fájl tölthető fel (PowerPointban: Mentés másként → .pptx).', { kind: 'error' }); return; }
-      if (f.size > 50 * 1024 * 1024) { toast('A fájl nagyobb 50 MB-nál — tömörítsd a képeket, vagy vedd ki a nagy videókat.', { kind: 'error' }); return; }
-      setUp({ file: f, title: f.name.replace(/\.pptx$/i, '').replace(/[_-]+/g, ' '), busy: true, msg: 'A diák beolvasása…' });
+      if (!/\.pptx$/i.test(f.name)) { toast('.pptx fájlt várok (a régi .ppt formátumot nem tudom megnyitni).', { kind: 'error' }); return; }
+      if (f.size > 50 * 1024 * 1024) { toast('A fájl legfeljebb 50 MB lehet.', { kind: 'error' }); return; }
+      var target = up || {};
+      setUp({ file: f, title: target.replace ? target.replace.title : '', meta: null, busy: true, msg: 'A diák beolvasása…',
+        lecture: target.lecture || null, replace: target.replace || null });
       f.arrayBuffer().then(function (buf) { return parsePptx(buf); }).then(function (meta) {
-        var first = meta[0] && meta[0].title;   // the title slide names the lecture better than a file name like "01_eloadas"
-        setUp(function (u) { return u ? Object.assign({}, u, { meta: meta, busy: false, msg: '', title: first ? String(first).slice(0, 200) : u.title }) : u; });
+        var first = meta[0] && meta[0].title;
+        setUp(function (u) {
+          if (!u) return u;
+          return Object.assign({}, u, { meta: meta, busy: false, msg: '',
+            title: u.replace ? u.replace.title : (first ? String(first).slice(0, 200) : f.name.replace(/\.pptx$/i, '')) });
+        });
       }, function (err) { setUp(null); toast('A fájl nem olvasható: ' + ((err && err.message) || err), { kind: 'error' }); });
     }
+    function startUpload(lecture, replaceDeck) {
+      setUp({ file: null, meta: null, busy: false, msg: '', lecture: lecture || null, replace: replaceDeck || null });
+      setTimeout(function () { fileRef.current && fileRef.current.click(); }, 0);
+    }
     function upload() {
-      if (!up || up.busy || !up.meta) return;
-      var id = uuid(), path = course.id + '/' + props.meId + '/decks/' + id + '.pptx';
-      setUp(Object.assign({}, up, { busy: true, msg: 'Feltöltés (' + Math.round(up.file.size / 1024 / 1024 * 10) / 10 + ' MB)…' }));
-      sb.storage.from('course-media').upload(path, up.file, { contentType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', upsert: false }).then(function (r) {
-        if (r && r.error) throw r.error;
-        return sb.from('course_decks').insert({ id: id, course_id: course.id, title: (up.title || 'Előadás').trim().slice(0, 200), storage_path: path, file_size: up.file.size, slide_count: up.meta.length, slide_titles: up.meta.map(function (s) { return s.title; }) }).select('*').maybeSingle();
-      }).then(function (r) {
-        if (r && r.error) { sb.storage.from('course-media').remove([path]); throw r.error; }
-        toast('✓ Feltöltve: ' + up.meta.length + ' dia', { kind: 'ok' });
-        setUp(null); load();
-      }).catch(function (err) { setUp(function (u) { return u ? Object.assign({}, u, { busy: false, msg: '' }) : u; }); toast('A feltöltés nem sikerült: ' + ((err && err.message) || err), { kind: 'error' }); });
+      if (!up || up.busy || !up.meta || !up.file) return;
+      var id = up.replace ? up.replace.id : uuid();
+      var path = course.id + '/' + props.meId + '/decks/' + uuid() + '.pptx';
+      setUp(function (u) { return Object.assign({}, u, { busy: true, msg: 'Feltöltés…' }); });
+      sb.storage.from('course-media').upload(path, up.file, { upsert: false }).then(function (r) {
+        if (r && r.error) { setUp(function (u) { return Object.assign({}, u, { busy: false, msg: '' }); }); toast('A feltöltés nem sikerült: ' + r.error.message, { kind: 'error' }); return; }
+        var row = { title: (up.title || 'Előadás').trim().slice(0, 200), storage_path: path, file_size: up.file.size,
+          slide_count: up.meta.length, slide_titles: up.meta.map(function (s) { return s.title; }) };
+        var q = up.replace
+          ? sb.from('course_decks').update(Object.assign({ updated_at: new Date().toISOString() }, row)).eq('id', id).select('*').maybeSingle()
+          : sb.from('course_decks').insert(Object.assign({ id: id, course_id: course.id, created_by: props.meId,
+              lecture_id: up.lecture ? up.lecture.id : null }, row)).select('*').maybeSingle();
+        q.then(function (r2) {
+          if (r2 && r2.error) { setUp(function (u) { return Object.assign({}, u, { busy: false, msg: '' }); }); toast('Nem sikerült menteni: ' + r2.error.message, { kind: 'error' }); return; }
+          if (up.replace && up.replace.storage_path) sb.storage.from('course-media').remove([up.replace.storage_path]);
+          delete bufCache[id];
+          setUp(null); toast(up.replace ? '✓ A diasor frissítve' : '✓ Diasor feltöltve', { kind: 'ok' }); load();
+        });
+      });
     }
     function del(d) {
       confirmBox('Törlöd a diasort?', '„' + d.title + '” és a hozzá tartozó szavazások törlődnek. A korábbi élő alkalmak eredményei is elvesznek.', 'Törlés', true).then(function (ok) {
@@ -407,15 +481,67 @@
         });
       });
     }
+    function askReplace(d) {
+      var polls = pollCounts[d.id] || 0;
+      confirmBox('Frissíted a diasort?', 'Az új fájl lecseréli a mostanit — a szavazások, a korábbi alkalmak és a linkek megmaradnak.'
+        + (polls ? ' Figyelem: ' + polls + ' szavazás dia-sorszámhoz van kötve, ezért ha a diák sorrendje változik, nézd át őket.' : ''),
+        'Fájl kiválasztása', false).then(function (ok) { if (ok) startUpload(null, d); });
+    }
+
     if (schemaErr === 'missing') return h('div', { className: 'soon' }, h('b', null, 'Az élő előadás funkció még nincs bekapcsolva az adatbázisban. '), 'Az adminisztrátornak le kell futtatnia a ', h('code', null, 'backend/migration-117-course-live.sql'), ' fájlt a Supabase SQL-szerkesztőjében.');
+    if (decks === null) return h('div', { className: 'soon' }, 'Betöltés…');
+
+    var byLecture = {};
+    decks.forEach(function (d) { (byLecture[d.lecture_id || '-'] || (byLecture[d.lecture_id || '-'] = [])).push(d); });
+    var loose = byLecture['-'] || [];
+
+    function deckCard(d, lecture) {
+      return h('div', { key: d.id, className: 'co-card cl-deck' },
+        h('div', { className: 'cl-deck-t' }, d.title),
+        h('div', { className: 'cl-deck-m' }, d.slide_count + ' dia',
+          isInstr ? ' · ' + (pollCounts[d.id] || 0) + ' szavazás' : '',
+          ' · ' + fmtDate(d.updated_at || d.created_at),
+          (d.updated_at && d.updated_at !== d.created_at) ? ' · frissítve' : ''),
+        (d.slide_titles || []).length ? h('div', { className: 'cl-deck-first' }, d.slide_titles[0]) : null,
+        h('div', { className: 'cl-deck-a' },
+          isInstr ? h('button', { type: 'button', className: 'btn pri sm', onClick: function () { props.onPresent(d); } }, '▶ Élő vetítés') : null,
+          isInstr ? h('button', { type: 'button', className: 'btn sm', onClick: function () { props.onEdit(d); } }, '🗳 Szavazások') : null,
+          h('button', { type: 'button', className: 'btn sm', onClick: function () { props.onBrowse(d); } }, '👁 Megnézem'),
+          isInstr ? h('button', { type: 'button', className: 'btn sm', onClick: function () { askReplace(d); } }, '⟳ Frissítés') : null,
+          h('span', { className: 'sp' }),
+          (isInstr && !lecture && lectures.length) ? h('select', { className: 'in sm', value: '', 'aria-label': 'Előadáshoz rendelés',
+            onChange: function (e) { if (e.target.value) attach(d, e.target.value); } },
+            h('option', { value: '' }, 'Előadáshoz…'),
+            lectures.map(function (l) { return h('option', { key: l.id, value: l.id }, l.ord + '. ' + l.title); })) : null,
+          (isInstr && lecture) ? h('button', { type: 'button', className: 'btn sm', title: 'Leválasztás az előadásról', onClick: function () { attach(d, null); } }, '⇱') : null,
+          isInstr ? h('button', { type: 'button', className: 'btn sm danger', 'aria-label': 'Diasor törlése', onClick: function () { del(d); } }, '🗑') : null));
+    }
+
     return h('div', { className: 'cl-decks' },
       h('div', { className: 'cl-decks-h' },
-        h('div', null, h('h3', null, '🎞 Előadások'), h('p', { className: 'co-note' }, isInstr ? 'Tölts fel egy PowerPoint-diasort, rendelj a diákhoz szavazásokat, és vetítsd élőben: a hallgatók a saját gépükön követik, hol tartasz.' : 'Az előadások diái. Élő előadáskor fent megjelenik a csatlakozás gomb.')),
+        h('div', null, h('h3', null, '🎞 Előadások'),
+          h('p', { className: 'co-note' }, isInstr
+            ? 'Hozz létre alkalmakat, és tölts fel hozzájuk egy-egy diasort. A meglévő diasort bármikor frissítheted — a szavazások és a korábbi alkalmak megmaradnak.'
+            : 'Az alkalmak és a hozzájuk tartozó diák. Élő előadáskor fent megjelenik a csatlakozás gomb.')),
         h('span', { className: 'sp' }),
-        isInstr ? h('button', { type: 'button', className: 'btn pri', disabled: !!up, onClick: function () { fileRef.current && fileRef.current.click(); } }, '⬆ Diasor feltöltése (.pptx)') : null,
+        isInstr ? h('button', { type: 'button', className: 'btn pri', onClick: function () { setNewLec({ title: '', held_at: '' }); } }, '＋ Új előadás') : null,
+        isInstr ? h('button', { type: 'button', className: 'btn', disabled: !!up, onClick: function () { startUpload(null, null); } }, '⬆ Diasor feltöltése') : null,
         h('input', { ref: fileRef, type: 'file', accept: '.pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation', style: { display: 'none' }, onChange: pick })),
+
+      newLec ? h('div', { className: 'co-card cl-newlec' },
+        h('b', null, '＋ Új előadás'),
+        h('div', { className: 'cl-newlec-row' },
+          h('input', { className: 'in', autoFocus: true, value: newLec.title, maxLength: 200, placeholder: 'Az alkalom címe — pl. 2. alkalom: Gépi tanulás alapjai',
+            onChange: function (e) { var v = e.target.value; setNewLec(function (s) { return Object.assign({}, s, { title: v }); }); },
+            onKeyDown: function (e) { if (e.key === 'Enter') createLecture(); } }),
+          h('input', { className: 'in sm', type: 'date', value: newLec.held_at || '', 'aria-label': 'Az alkalom napja',
+            onChange: function (e) { var v = e.target.value; setNewLec(function (s) { return Object.assign({}, s, { held_at: v }); }); } }),
+          h('button', { type: 'button', className: 'btn', onClick: function () { setNewLec(null); } }, 'Mégse'),
+          h('button', { type: 'button', className: 'btn pri', onClick: createLecture }, 'Létrehozom'))) : null,
+
       up ? h('div', { className: 'co-card cl-upload' },
-        h('b', null, up.file.name),
+        h('b', null, up.replace ? '⟳ Diasor frissítése — ' + up.replace.title : (up.lecture ? '⬆ Diasor a(z) „' + up.lecture.title + '” előadáshoz' : '⬆ Új diasor')),
+        up.file ? h('p', { className: 'co-note' }, up.file.name) : h('p', { className: 'co-note' }, 'Válaszd ki a .pptx fájlt.'),
         up.meta ? h('div', null,
           h('p', { className: 'co-note' }, up.meta.length + ' dia · ' + up.meta.filter(function (s) { return s.notes; }).length + ' dián előadói jegyzet'),
           h('label', { className: 'form-l' }, 'Cím'),
@@ -423,20 +549,36 @@
         up.msg ? h('p', { className: 'co-note' }, h('span', { className: 'cl-spin' }), ' ' + up.msg) : null,
         h('div', { className: 'cl-form-f' },
           h('button', { type: 'button', className: 'btn', disabled: up.busy && !!up.meta, onClick: function () { setUp(null); } }, 'Mégse'),
-          h('button', { type: 'button', className: 'btn pri', disabled: up.busy || !up.meta, onClick: upload }, 'Feltöltés'))) : null,
-      decks === null ? h('div', { className: 'soon' }, 'Betöltés…')
-        : decks.length ? h('div', { className: 'cl-deck-grid' }, decks.map(function (d) {
-          return h('div', { key: d.id, className: 'co-card cl-deck' },
-            h('div', { className: 'cl-deck-t' }, d.title),
-            h('div', { className: 'cl-deck-m' }, d.slide_count + ' dia', isInstr ? ' · ' + (pollCounts[d.id] || 0) + ' szavazás' : '', ' · ' + fmtDate(d.created_at)),
-            (d.slide_titles || []).length ? h('div', { className: 'cl-deck-first' }, d.slide_titles[0]) : null,
-            h('div', { className: 'cl-deck-a' },
-              isInstr ? h('button', { type: 'button', className: 'btn pri sm', onClick: function () { props.onPresent(d); } }, '▶ Élő vetítés') : null,
-              isInstr ? h('button', { type: 'button', className: 'btn sm', onClick: function () { props.onEdit(d); } }, '🗳 Szavazások') : null,
-              h('button', { type: 'button', className: 'btn sm', onClick: function () { props.onBrowse(d); } }, '👁 Megnézem'),
-              h('span', { className: 'sp' }),
-              isInstr ? h('button', { type: 'button', className: 'btn sm danger', 'aria-label': 'Diasor törlése', onClick: function () { del(d); } }, '🗑') : null));
-        })) : h('div', { className: 'soon' }, isInstr ? 'Még nincs feltöltött diasor.' : 'Még nincs feltöltött előadás.'));
+          h('button', { type: 'button', className: 'btn pri', disabled: up.busy || !up.meta, onClick: upload }, up.replace ? 'Frissítem' : 'Feltöltés'))) : null,
+
+      lectures.length ? h('div', { className: 'cl-lectures' }, lectures.map(function (l) {
+        var mine = byLecture[l.id] || [];
+        return h('div', { key: l.id, className: 'cl-lec' + (l.visible ? '' : ' hidden') },
+          h('div', { className: 'cl-lec-h' },
+            h('span', { className: 'cl-lec-n' }, l.ord + '.'),
+            h('b', null, l.title),
+            l.held_at ? h('span', { className: 'chip' }, fmtDate(l.held_at).replace(/,.*$/, '')) : null,
+            !l.visible ? h('span', { className: 'chip' }, 'rejtve') : null,
+            h('span', { className: 'sp' }),
+            isInstr ? h('input', { className: 'in sm', type: 'date', value: l.held_at || '', 'aria-label': 'Az alkalom napja',
+              onChange: function (e) { setLectureDate(l, e.target.value); } }) : null,
+            isInstr ? h('button', { type: 'button', className: 'btn sm', onClick: function () { toggleVisible(l); } }, l.visible ? 'Elrejtem' : 'Láthatóvá teszem') : null,
+            isInstr ? h('button', { type: 'button', className: 'btn sm', onClick: function () { renameLecture(l); } }, '✎') : null,
+            isInstr ? h('button', { type: 'button', className: 'btn sm danger', onClick: function () { delLecture(l); } }, '🗑') : null),
+          mine.length ? h('div', { className: 'cl-deck-grid' }, mine.map(function (d) { return deckCard(d, l); }))
+            : h('div', { className: 'cl-lec-empty' },
+              h('span', { className: 'co-note' }, 'Ehhez az alkalomhoz még nincs diasor.'),
+              isInstr ? h('button', { type: 'button', className: 'btn pri sm', disabled: !!up, onClick: function () { startUpload(l, null); } }, '⬆ Diasor feltöltése') : null));
+      })) : null,
+
+      loose.length ? h('div', { className: 'cl-loose' },
+        lectures.length ? h('div', { className: 'cl-lec-h' }, h('b', null, 'Besorolatlan diasorok'),
+          h('span', { className: 'co-note' }, 'rendeld őket egy alkalomhoz')) : null,
+        h('div', { className: 'cl-deck-grid' }, loose.map(function (d) { return deckCard(d, null); }))) : null,
+
+      (!lectures.length && !loose.length) ? h('div', { className: 'soon' }, isInstr
+        ? 'Még nincs előadás. Hozd létre az elsőt a „＋ Új előadás” gombbal, majd tölts fel hozzá egy diasort.'
+        : 'Még nincs feltöltött előadás.') : null);
   }
 
   // ---------- slide rail ----------

@@ -1163,6 +1163,7 @@
     var enS = useState([]), enrolls = enS[0], setEnrolls = enS[1];
     var cidS = useState(null), courseId = cidS[0], setCourseId = cidS[1];
     var insS = useState(false), isInstr = insS[0], setIsInstr = insS[1];
+    var unrS = useState(0), unread = unrS[0], setUnread = unrS[1];   // olvasatlan hírfolyam-bejegyzések (jelvény a fülön)
     var roomS = useState(null), teamRoom = roomS[0], setTeamRoom = roomS[1];   // open team workspace (course-team-room.js)
     var lkdS = useState({}), lockedMap = lkdS[0], setLockedMap = lkdS[1];   // course_id → enrollment still waiting for the Neptun claim
     var lockedRef = useRef({});   // selectCourse runs in the same tick as setLockedMap, so it reads the ref, not the state
@@ -1341,9 +1342,10 @@
         isInstr ? chip(admin && !(myEnr && myEnr.role !== 'hallgato') ? 'Admin' : 'Előadó', 'acc', 'r') : (myEnr ? chip('Hallgató', '', 'r') : null),
         h('a', { className: 'btn sm', href: 'CourseCanvas.html?course=' + (courseId || '') }, '🖼 Évfolyam-vászon'),
         h('span', { className: 'seg' }, (isInstr
-          ? [['live', '🎞 Előadások'], ['lab', '🧪 Labor'], ['teams', '👥 Csapatok'], ['members', '👥 Résztvevők'], ['roster', '📋 Névsor és jegyek'], ['activity', '📊 Aktivitás'], ['teach', '🎓 Oktatói pult']]
-          : [['live', '🎞 Előadások'], ['lab', '🧪 Labor'], ['teams', '👥 Csapatok']]).map(function (t) {
-          return h('button', { key: t[0], className: (view === t[0] && !liveMode) ? 'on' : '', onClick: function () { setLiveMode(null); setTeamRoom(null); setView(t[0]); } }, t[1]);
+          ? [['feed', '📢 Hírfolyam'], ['live', '🎞 Előadások'], ['lab', '🧪 Labor'], ['teams', '👥 Csapatok'], ['members', '👥 Résztvevők'], ['roster', '📋 Névsor és jegyek'], ['activity', '📊 Aktivitás'], ['teach', '🎓 Oktatói pult']]
+          : [['feed', '📢 Hírfolyam'], ['live', '🎞 Előadások'], ['lab', '🧪 Labor'], ['teams', '👥 Csapatok']]).map(function (t) {
+          return h('button', { key: t[0], className: (view === t[0] && !liveMode) ? 'on' : '', onClick: function () { setLiveMode(null); setTeamRoom(null); setView(t[0]); } },
+            t[1], (t[0] === 'feed' && unread && view !== 'feed') ? h('span', { className: 'seg-badge' }, unread) : null);
         })),
         h('span', { className: 'sp' }),
         h(CreditBars, { budgets: budgets })),
@@ -1369,6 +1371,8 @@
           onBrowse: function (d) { setLiveMode({ kind: 'browse', deck: d }); } })
       : (view === 'activity' && isInstr && window.PRCourseLive)
         ? h(window.PRCourseLive.ActivityTab, { course: course })
+      : (view === 'feed' && window.PRCourseFeed)
+        ? h(window.PRCourseFeed.FeedTab, { course: course, onUnread: setUnread })
       : (view === 'teams' && teamRoom && window.PRTeamRoom)
         ? h(window.PRTeamRoom.TeamRoom, { key: teamRoom, teamId: teamRoom, meId: me.id, onClose: function () { setTeamRoom(null); } })
       : (view === 'teams' && window.PRCourseTeams)
