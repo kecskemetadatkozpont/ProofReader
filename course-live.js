@@ -83,6 +83,79 @@
       .map(function (b) { return paras(b).join('\n'); }).filter(Boolean).join('\n\n').trim();
   }
   var metaCache = {};
+  // ---------- pptx slimming ----------
+  // A legnagyobb .pptx fájlokat szinte mindig a beágyazott képek fújják fel: a diákra illesztett
+  // fotók gyakran eredeti, 4000 pixeles méretben utaznak. Feltöltés előtt ezeket átméretezzük és
+  // újratömörítjük — a dia látványa nem változik, mert a vetítés úgyis 1920 pixel széles.
+  // A videókat és hangokat NEM bántjuk: azokat a böngészőben nem lehet átkódolni.
+  var MAX_DECK = 50 * 1024 * 1024;    // a tároló fájlonkénti korlátja
+  var SLIM_TRIGGER = 12 * 1024 * 1024;  // efölött megpróbáljuk tömöríteni
+  function fmtMB(n) { return n > 1073741824 ? (n / 1073741824).toFixed(2) + ' GB' : (n / 1048576).toFixed(1) + ' MB'; }
+  var SLIM_MAX_W = 1920;        // ennél szélesebb képet nincs értelme megtartani
+  var SLIM_QUALITY = 0.82;
+  var SLIM_MIN_BYTES = 120 * 1024;   // ekkora kép alatt nem éri meg dolgozni
+
+  function hasAlpha(ctx, w, h) {
+    try {
+      var d = ctx.getImageData(0, 0, w, h).data;
+      for (var i = 3; i < d.length; i += 4 * 97) if (d[i] < 250) return true;   // ritkítva mintázunk
+      return false;
+    } catch (e) { return true; }
+  }
+  function shrinkImage(blob, name) {
+    return createImageBitmap(blob).then(function (bm) {
+      var scale = Math.min(1, SLIM_MAX_W / bm.width);
+      var w = Math.max(1, Math.round(bm.width * scale)), hh = Math.max(1, Math.round(bm.height * scale));
+      var cv = document.createElement('canvas'); cv.width = w; cv.height = hh;
+      var ctx = cv.getContext('2d');
+      ctx.drawImage(bm, 0, 0, w, hh);
+      try { bm.close(); } catch (e) { }
+      var png = /\.png$/i.test(name) && hasAlpha(ctx, w, hh);
+      return new Promise(function (res) {
+        cv.toBlob(function (out) { res(out || blob); }, png ? 'image/png' : 'image/jpeg', png ? undefined : SLIM_QUALITY);
+      });
+    }).catch(function () { return blob; });
+  }
+  // → { blob, before, after, images, media, skipped }
+  function slimPptx(file, onProgress) {
+    return loadScript(JSZIP_URL, 'JSZip').then(function (JSZip) {
+      return JSZip.loadAsync(file).then(function (zip) {
+        var media = [], bytesMedia = 0, imgs = [];
+        zip.forEach(function (path, entry) {
+          if (!/^ppt\/media\//i.test(path) || entry.dir) return;
+          if (/\.(png|jpe?g|gif|bmp|tiff?)$/i.test(path)) imgs.push(path);
+          else media.push(path);
+        });
+        var done = 0, saved = 0, touched = 0;
+        return imgs.reduce(function (p, path) {
+          return p.then(function () {
+            var entry = zip.file(path);
+            return entry.async('blob').then(function (b) {
+              done++;
+              if (onProgress) onProgress('Képek tömörítése… ' + done + ' / ' + imgs.length);
+              if (b.size < SLIM_MIN_BYTES) return;
+              return shrinkImage(b, path).then(function (out) {
+                if (out && out.size < b.size * 0.92) {
+                  saved += b.size - out.size; touched++;
+                  // a kiterjesztés marad: a pptx a kapcsolatokban név szerint hivatkozik a fájlra,
+                  // a PowerPoint és a megjelenítők a tartalom alapján ismerik fel a formátumot
+                  zip.file(path, out);
+                }
+              });
+            });
+          });
+        }, Promise.resolve()).then(function () {
+          media.forEach(function (path) { var f = zip.file(path); if (f && f._data && f._data.uncompressedSize) bytesMedia += f._data.uncompressedSize; });
+          if (onProgress) onProgress('Fájl összeállítása…');
+          return zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+        }).then(function (blob) {
+          return { blob: blob, before: file.size, after: blob.size, images: touched, total: imgs.length,
+                   mediaBytes: bytesMedia, mediaCount: media.length, saved: saved };
+        });
+      });
+    });
+  }
+
   function parsePptx(buf, cacheKey) {
     if (cacheKey && metaCache[cacheKey]) return metaCache[cacheKey];
     var p = loadScript(JSZIP_URL, 'JSZip').then(function (JSZip) { return JSZip.loadAsync(buf); }).then(function (z) {
@@ -434,11 +507,20 @@
       var f = e.target.files && e.target.files[0]; e.target.value = '';
       if (!f) return;
       if (!/\.pptx$/i.test(f.name)) { toast('.pptx fájlt várok (a régi .ppt formátumot nem tudom megnyitni).', { kind: 'error' }); return; }
-      if (f.size > 50 * 1024 * 1024) { toast('A fájl legfeljebb 50 MB lehet.', { kind: 'error' }); return; }
       var target = up || {};
       setUp({ file: f, title: target.replace ? target.replace.title : '', meta: null, busy: true, msg: 'A diák beolvasása…',
-        lecture: target.lecture || null, replace: target.replace || null });
-      f.arrayBuffer().then(function (buf) { return parsePptx(buf); }).then(function (meta) {
+        lecture: target.lecture || null, replace: target.replace || null, orig: f.size });
+      // a tárhely 50 MB-ot enged fájlonként: a nagyobb diasorok képeit feltöltés előtt tömörítjük
+      var prep = f.size > SLIM_TRIGGER
+        ? (setUp(function (u) { return u ? Object.assign({}, u, { msg: 'Nagy fájl (' + fmtMB(f.size) + ') — tömörítés…' }) : u; }),
+           slimPptx(f, function (m) { setUp(function (u) { return u ? Object.assign({}, u, { msg: m }) : u; }); })
+             .then(function (res) {
+               var use = res.after < f.size * 0.95 ? new File([res.blob], f.name, { type: f.type }) : f;
+               setUp(function (u) { return u ? Object.assign({}, u, { file: use, slim: res, msg: 'A diák beolvasása…' }) : u; });
+               return use;
+             }, function () { return f; }))
+        : Promise.resolve(f);
+      prep.then(function (use) { return use.arrayBuffer(); }).then(function (buf) { return parsePptx(buf); }).then(function (meta) {
         var first = meta[0] && meta[0].title;
         setUp(function (u) {
           if (!u) return u;
@@ -453,6 +535,11 @@
     }
     function upload() {
       if (!up || up.busy || !up.meta || !up.file) return;
+      if (up.file.size > MAX_DECK) {
+        toast('A fájl tömörítve is ' + fmtMB(up.file.size) + ' — a tárhely fájlonként 50 MB-ot enged. '
+          + 'Tipp: PowerPointban Fájl → Tömörítés (képek és média), vagy bontsd szét alkalmakra.', { kind: 'error' });
+        return;
+      }
       var id = up.replace ? up.replace.id : uuid();
       var path = course.id + '/' + props.meId + '/decks/' + uuid() + '.pptx';
       setUp(function (u) { return Object.assign({}, u, { busy: true, msg: 'Feltöltés…' }); });
@@ -541,7 +628,15 @@
 
       up ? h('div', { className: 'co-card cl-upload' },
         h('b', null, up.replace ? '⟳ Diasor frissítése — ' + up.replace.title : (up.lecture ? '⬆ Diasor a(z) „' + up.lecture.title + '” előadáshoz' : '⬆ Új diasor')),
-        up.file ? h('p', { className: 'co-note' }, up.file.name) : h('p', { className: 'co-note' }, 'Válaszd ki a .pptx fájlt.'),
+        up.file ? h('p', { className: 'co-note' }, up.file.name + ' · ' + fmtMB(up.file.size)) : h('p', { className: 'co-note' }, 'Válaszd ki a .pptx fájlt.'),
+        up.slim ? h('p', { className: 'cl-slim' + (up.file && up.file.size > MAX_DECK ? ' bad' : '') },
+          up.slim.after < up.slim.before
+            ? '🗜 Tömörítve: ' + fmtMB(up.slim.before) + ' → ' + fmtMB(up.slim.after)
+              + ' (' + up.slim.images + ' kép a ' + up.slim.total + '-ból/ből)'
+              + (up.slim.mediaCount ? ' · ' + up.slim.mediaCount + ' hang/videó érintetlen (' + fmtMB(up.slim.mediaBytes) + ')' : '')
+            : 'A fájlon már nem tudtam érdemben tömöríteni.',
+          (up.file && up.file.size > MAX_DECK)
+            ? ' — ez még mindig több a megengedett 50 MB-nál. Tömörítsd PowerPointban (Fájl → Információ → Médiaméret és teljesítmény), vagy bontsd szét alkalmakra.' : '') : null,
         up.meta ? h('div', null,
           h('p', { className: 'co-note' }, up.meta.length + ' dia · ' + up.meta.filter(function (s) { return s.notes; }).length + ' dián előadói jegyzet'),
           h('label', { className: 'form-l' }, 'Cím'),
@@ -1010,6 +1105,7 @@
         })))) : null);
   }
 
+  window.__slim = slimPptx; window.__parse = parsePptx;   // teszt-horog (harness)
   window.PRCourseLive = { DecksTab: DecksTab, DeckEditor: DeckEditor, DeckBrowser: DeckBrowser, PresenterView: PresenterView, LiveStudentView: LiveStudentView, LiveBanner: LiveBanner, ActivityTab: ActivityTab, startSession: startSession,
     // internals exposed for the test harness only
     _parsePptx: parsePptx, _SlideStage: SlideStage, _PollForm: PollForm, _PollResults: PollResults, _AnswerForm: AnswerForm };

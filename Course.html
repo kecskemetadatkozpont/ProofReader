@@ -742,12 +742,29 @@
     .cf-person.seen { border-color: #3ecf8e; color: inherit; }
     .cf-av { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: 9.5px;
       font-weight: 700; background: var(--surface-2, #232a38); }
+    .cf-att-pick { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .cf-att-pick .in.sm { flex: 1; min-width: 180px; }
+    .cf-picked { display: flex; flex-wrap: wrap; gap: 6px; }
+    .cf-picked .cf-chip { display: inline-flex; align-items: center; gap: 4px; }
+    .cf-x { background: none; border: 0; color: var(--muted); font-size: 15px; line-height: 1; cursor: pointer; padding: 0 3px; }
+    .cf-x:hover { color: #f5576c; }
+    .cf-atts { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; margin-top: 4px; }
+    .cf-att { border: 1px solid var(--line, #262c3a); border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; }
+    .cf-att-img, .cf-att-pdf { width: 100%; max-height: 220px; object-fit: cover; display: block; cursor: pointer;
+      background: rgba(140, 150, 175, .1); }
+    .cf-att-pdf { object-fit: contain; border-bottom: 1px solid var(--line, #262c3a); }
+    .cf-att-f { display: flex; align-items: center; gap: 6px; padding: 6px 8px; }
+    .cf-att-n { flex: 1; min-width: 0; background: none; border: 0; color: inherit; font: inherit; font-size: 12.5px;
+      text-align: left; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .cf-att-n:hover { text-decoration: underline; }
+    .cl-slim { margin: 4px 0 0; font-size: 12.5px; color: #3ecf8e; }
+    .cl-slim.bad { color: #f5a524; }
     .seg-badge { margin-left: 5px; min-width: 16px; height: 16px; padding: 0 5px; border-radius: 999px;
       background: var(--acc); color: #fff; font-size: 10.5px; display: inline-grid; place-items: center; }
   </style>
-  <script src="theme.js?v=1789717870"></script>
-  <script src="nav.js?v=1789717870"></script>
-  <script src="entitlements.js?v=1789717870"></script>
+  <script src="theme.js?v=1789719712"></script>
+  <script src="nav.js?v=1789719712"></script>
+  <script src="entitlements.js?v=1789719712"></script>
 </head>
 
 <body>
@@ -759,22 +776,22 @@
   <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
   <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="backend/config.js?v=1789717870"></script>
-  <script src="auth.js?v=1789717870"></script>
-  <script src="backend.js?v=1789717870"></script>
-  <script src="universities.js?v=1789717870"></script>
-  <script src="onboarding.js?v=1789717870"></script>
+  <script src="backend/config.js?v=1789719712"></script>
+  <script src="auth.js?v=1789719712"></script>
+  <script src="backend.js?v=1789719712"></script>
+  <script src="universities.js?v=1789719712"></script>
+  <script src="onboarding.js?v=1789719712"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
-  <script src="course-live.js?v=1789717870"></script>
-  <script src="course-roster.js?v=1789717870"></script>
-  <script src="course-feed.js?v=1789717870"></script>
-  <script src="course-teams.js?v=1789717870"></script>
-  <script src="course-team-room.js?v=1789717870"></script>
-  <script type="text/babel" src="course.jsx?v=1789717870"></script>
+  <script src="course-live.js?v=1789719712"></script>
+  <script src="course-roster.js?v=1789719712"></script>
+  <script src="course-feed.js?v=1789719712"></script>
+  <script src="course-teams.js?v=1789719712"></script>
+  <script src="course-team-room.js?v=1789719712"></script>
+  <script type="text/babel" src="course.jsx?v=1789719712"></script>
 
-  <script src="build.js?v=1789717870"></script>
-  <script src="version-badge.js?v=1789717870"></script>
+  <script src="build.js?v=1789719712"></script>
+  <script src="version-badge.js?v=1789719712"></script>
 </body>
 
 </html>
