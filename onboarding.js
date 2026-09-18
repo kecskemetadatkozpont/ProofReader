@@ -241,6 +241,7 @@
       + '  <div class="err" id="ob-sneptun-err">A Neptun-kód 6 karakter: betűk és számok.</div>'
       + '</div>'
       + '<button class="primary" id="ob-sgo">Csatlakozom</button>'
+      + '<button class="ghost" id="ob-slater">Most nincs nálam a Neptun-kód — később megadom</button>'
       + '<div class="ob-other">Nincs Neptun-kódod, mert oktató, kolléga vagy vendég vagy? '
       + '<a href="#" id="pr-ob-other">Kérj kutatói fiókot</a> — ott nem kérünk Neptun-kódot.</div>'
       + '<button class="ghost" id="pr-ob-signout">Kijelentkezés</button>';
@@ -252,7 +253,7 @@
     nepIn.oninput = function () { this.value = this.value.toUpperCase().replace(/[^A-Z0-9]/g, ''); };
     try { var q = new URLSearchParams(location.search).get('join'); if (q) codeIn.value = q; } catch (e) { }
     var btn = document.getElementById('ob-sgo');
-    function go() {
+    function go(skipNeptun) {
       var nameV = (document.getElementById('ob-sname').value || '').trim();
       var codeV = (codeIn.value || '').trim();
       var nepV = (nepIn.value || '').trim().toUpperCase();
@@ -261,7 +262,7 @@
       document.getElementById('ob-sneptun-err').classList.remove('on');
       if (nameV.length < 3) { document.getElementById('ob-sname-err').classList.add('on'); return; }
       if (!codeV) { document.getElementById('ob-scode-err').classList.add('on'); return; }
-      if (!/^[A-Z0-9]{5,8}$/.test(nepV)) { document.getElementById('ob-sneptun-err').classList.add('on'); return; }
+      if (!skipNeptun && !/^[A-Z0-9]{5,8}$/.test(nepV)) { document.getElementById('ob-sneptun-err').classList.add('on'); return; }
       btn.disabled = true; btn.textContent = 'Csatlakozás…';
       var courseId = null;
       // the name is what the lecturer sees next to the Neptun code; status 'pending' keeps every other surface closed
@@ -276,7 +277,9 @@
             e.classList.add('on'); throw new Error('stop');
           }
           courseId = r.data;
-          // a Neptun-kód mindig rögzül: ha szerepel a névsorban, azonnal párosít; ha nem, az oktatóhoz kerül
+          // a Neptun-kód rögzül: ha szerepel a névsorban, azonnal párosít; ha nem, az oktatóhoz kerül.
+          // Ha most nincs kéznél, a kurzus oldalán bármikor pótolható — az oktató látja, kinél hiányzik.
+          if (skipNeptun) return { data: { status: 'later' } };
           return sb.rpc('course_roster_claim', { p_course: courseId, p_code: nepV });
         }).then(function (r2) {
           var st = (r2 && r2.data && r2.data.status) || (r2 && r2.error ? 'error' : 'ok');
@@ -297,9 +300,14 @@
           btn.disabled = false; btn.textContent = 'Csatlakozom';
         });
     }
-    btn.onclick = go;
+    btn.onclick = function () { go(false); };
+    var later = document.getElementById('ob-slater');
+    if (later) later.onclick = function () {
+      later.disabled = true; later.textContent = 'Csatlakozás…';
+      go(true);
+    };
     codeIn.onkeydown = function (e) { if (e.key === 'Enter') nepIn.focus(); };
-    nepIn.onkeydown = function (e) { if (e.key === 'Enter') go(); };
+    nepIn.onkeydown = function (e) { if (e.key === 'Enter') go(false); };
   }
 
   /* ---------- status screens ---------- */

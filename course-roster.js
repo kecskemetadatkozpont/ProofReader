@@ -242,6 +242,7 @@
     var tS = useState(''), term = tS[0], setTerm = tS[1];
     var eS = useState(''), schema = eS[0], setSchema = eS[1];
     var leS = useState(''), loadErr = leS[0], setLoadErr = leS[1];
+    var msS = useState(null), missing = msS[0], setMissing = msS[1];   // kód nélkül csatlakozott hallgatók
     var bS = useState(false), busy = bS[0], setBusy = bS[1];
     var lS = useState(!!(course.settings && course.settings.require_roster)), lock = lS[0], setLock = lS[1];   // optimistic: the checkbox answers the click, the save follows
     useEffect(function () { setLock(!!(course.settings && course.settings.require_roster)); }, [course.settings && course.settings.require_roster]);
@@ -261,6 +262,7 @@
         setLoadErr(''); setRows(r.data || []);
       });
       sb.rpc('course_roster_requests_list', { p_course: courseId }).then(function (r) { setReqs((r && r.data) || []); });
+      loadMissing();
     }
     useEffect(function () { load(); }, [courseId]);
     useEffect(function () { var t = setTimeout(function () { load(filter, term); }, 300); return function () { clearTimeout(t); }; }, [term, filter]);
@@ -271,6 +273,18 @@
         if (r && r.error) { setLock(!on); toast('Nem sikerült: ' + r.error.message, { kind: 'error' }); return; }
         toast(on ? '✓ A kurzus tartalma zárolva azonosításig' : 'A zárolás kikapcsolva', { kind: 'ok' });
         (props.onCourseChange || function () { })();
+      });
+    }
+    function loadMissing() {
+      sb.rpc('course_missing_codes', { p_course: courseId }).then(function (r) {
+        if (r && r.error) { setMissing([]); return; }
+        setMissing(r.data || []);
+      });
+    }
+    function assign(userId, rosterId) {
+      sb.rpc('course_roster_assign', { p_roster: rosterId, p_user: userId }).then(function (r) {
+        if (r && r.error) { toast(r.error.message, { kind: 'error' }); return; }
+        toast('✓ Párosítva', { kind: 'ok' }); load(); loadMissing();
       });
     }
     function decide(q, ok) {
@@ -348,8 +362,9 @@
       h('div', { className: 'cr-stats' },
         [['Névsor', st.total || 0, 'fő'], ['Regisztrált', st.claimed || 0, 'fő'],
          ['Még hiányzik', Math.max(0, (st.total || 0) - (st.claimed || 0)), 'fő'],
-         ['Jóváhagyásra vár', st.pending || 0, 'fő'], ['Jegye van', st.graded || 0, 'fő']].map(function (x) {
-          return h('div', { key: x[0], className: 'co-card cr-stat' + (x[0] === 'Jóváhagyásra vár' && x[1] ? ' warn' : '') },
+         ['Jóváhagyásra vár', st.pending || 0, 'fő'], ['Kód nélkül', st.no_code || 0, 'fő'],
+         ['Jegye van', st.graded || 0, 'fő']].map(function (x) {
+          return h('div', { key: x[0], className: 'co-card cr-stat' + ((x[0] === 'Jóváhagyásra vár' || x[0] === 'Kód nélkül') && x[1] ? ' warn' : '') },
             h('b', null, x[1]), h('span', null, x[0]));
         })),
       loadErr ? h('p', { className: 'co-err', role: 'alert' }, loadErr) : null,
@@ -360,6 +375,21 @@
           h('span', null, h('b', null, 'A kurzus tartalma csak azonosítás után látható'),
             h('span', { className: 'co-note' }, 'Bekapcsolva a hallgató a kurzuskóddal belép, de a diákat és a szavazásokat csak azután éri el, hogy a Neptun-kódjával azonosította magát. Kikapcsolva bárki hozzáfér, aki ismeri a kurzuskódot — jegyet viszont csak azonosítás után tud kapni.')))),
       h(Requests, { list: reqs, onDecide: decide }),
+      (missing && missing.length) ? h('div', { className: 'co-card cr-missing' },
+        h('b', null, '🎫 Neptun-kód nélkül csatlakozott (' + missing.length + ')'),
+        h('p', { className: 'co-note' }, 'Ők beléptek a kurzuskóddal, de a Neptun-kódjukat még nem adták meg — a felületen emlékeztetőt látnak. Itt kézzel is a névsorhoz kötheted őket.'),
+        h('div', { className: 'cr-missing-list' }, missing.map(function (m) {
+          return h('div', { key: m.user_id, className: 'cr-missing-i' },
+            h('b', null, m.name || '—'),
+            m.pending ? h('span', { className: 'chip acc' }, 'megadott kód: ' + (m.typed_code || '—') + ' · jóváhagyásra vár') : null,
+            h('span', { className: 'sp' }),
+            h('select', { className: 'in sm', value: '', 'aria-label': (m.name || '') + ' párosítása',
+              onChange: function (e) { if (e.target.value) assign(m.user_id, e.target.value); } },
+              h('option', { value: '' }, 'Névsorhoz kötöm…'),
+              (rows || []).filter(function (r) { return !r.user_id; }).map(function (r) {
+                return h('option', { key: r.id, value: r.id }, r.neptun + (r.program ? ' · ' + r.program : ''));
+              })));
+        }))) : null,
       h(ImportCard, { courseId: courseId, onDone: load }),
       h(ScaleCard, { courseId: courseId, scale: scale, settings: course.settings || {}, onDone: props.onCourseChange || function () { }, onRecalc: recalc }),
       h('div', { className: 'co-card cr-list' },
@@ -444,6 +474,54 @@
         h('p', { className: 'co-note cr-priv' }, '🔒 A kódot titkosítva tároljuk, és csak arra használjuk, hogy a kurzus névsorához és a jegyedhez kössük. Az oktatód a kódodat és a fiókod nevét látja; a többi hallgató nem.')));
   }
 
+  // ---------- student: reminder when the Neptun code is still missing ----------
+  function ClaimBanner(props) {
+    var dS = useState(null), d = dS[0], setD = dS[1];
+    var oS = useState(false), open = oS[0], setOpen = oS[1];
+    var cS = useState(''), code = cS[0], setCode = cS[1];
+    var eS = useState(''), err = eS[0], setErr = eS[1];
+    var bS = useState(false), busy = bS[0], setBusy = bS[1];
+    function load() {
+      sb.rpc('course_my_roster', { p_course: props.courseId }).then(function (r) {
+        if (r && r.error) { setD({}); return; }
+        setD(r.data || {});
+      });
+    }
+    useEffect(load, [props.courseId]);
+    if (!d || d.verified) return null;
+    var pending = d.request === 'pending';
+    function submit() {
+      var c = code.trim().toUpperCase();
+      if (!/^[A-Z0-9]{5,8}$/.test(c)) { setErr('A Neptun-kód 6 karakter: betűk és számok.'); return; }
+      setBusy(true); setErr('');
+      sb.rpc('course_roster_claim', { p_course: props.courseId, p_code: c }).then(function (r) {
+        setBusy(false);
+        if (r && r.error) { setErr(r.error.message); return; }
+        var st = (r.data || {}).status;
+        if (st === 'taken') { setErr('Ezt a kódot már egy másik fiók használja. Szólj az oktatódnak.'); return; }
+        if (st === 'ok' || st === 'already') { toast('✓ Azonosítva — köszönjük!', { kind: 'ok' }); }
+        else { toast('A kódod az oktatóhoz került jóváhagyásra.', { kind: 'ok' }); }
+        setOpen(false); load(); if (props.onDone) props.onDone();
+      });
+    }
+    return h('div', { className: 'co-card cr-banner' + (pending ? ' pending' : '') },
+      h('div', { className: 'cr-banner-h' },
+        h('b', null, pending ? '⏳ A Neptun-kódod jóváhagyásra vár' : '🎫 Add meg a Neptun-kódodat'),
+        h('span', { className: 'co-note' }, pending
+          ? 'A megadott kód nem szerepel a névsorban, ezért az oktató dönt róla. Addig minden mást használhatsz.'
+          : 'Enélkül nem tudunk jegyet adni, és az órai pontjaid sem a te nevedhez futnak be. Egy perc az egész.'),
+        h('span', { className: 'sp' }),
+        h('button', { type: 'button', className: 'btn pri sm', onClick: function () { setOpen(!open); } },
+          open ? 'Bezárom' : (pending ? 'Másik kódot adok meg' : 'Megadom most'))),
+      open ? h('div', { className: 'cr-banner-f' },
+        h('input', { className: 'in cr-code', value: code, maxLength: 8, autoFocus: true, placeholder: 'PL. AB12CD',
+          'aria-label': 'Neptun-kód',
+          onChange: function (e) { setCode(e.target.value.toUpperCase()); setErr(''); },
+          onKeyDown: function (e) { if (e.key === 'Enter') submit(); } }),
+        h('button', { type: 'button', className: 'btn pri', disabled: busy, onClick: submit }, busy ? 'Ellenőrzés…' : 'Mentem'),
+        err ? h('p', { className: 'co-err' }, err) : null) : null);
+  }
+
   // ---------- student: own grade ----------
   function MyGradeCard(props) {
     var dS = useState(null), d = dS[0], setD = dS[1];
@@ -460,5 +538,5 @@
       d.note ? h('p', { className: 'co-note' }, d.note) : null);
   }
 
-  window.PRCourseRoster = { RosterTab: RosterTab, ClaimGate: ClaimGate, MyGradeCard: MyGradeCard, scaleOf: scaleOf };
+  window.PRCourseRoster = { RosterTab: RosterTab, ClaimGate: ClaimGate, ClaimBanner: ClaimBanner, MyGradeCard: MyGradeCard, scaleOf: scaleOf };
 })();

@@ -1349,6 +1349,8 @@
         })),
         h('span', { className: 'sp' }),
         h(CreditBars, { budgets: budgets })),
+      (!isInstr && window.PRCourseRoster && !liveMode && window.PRCourseRoster.ClaimBanner)
+        ? h(window.PRCourseRoster.ClaimBanner, { courseId: courseId }) : null,
       (!isInstr && window.PRCourseRoster && !liveMode && view === 'live')
         ? h(window.PRCourseRoster.MyGradeCard, { courseId: courseId }) : null,
       (window.PRCourseLive && !(liveMode && (liveMode.kind === 'present' || liveMode.kind === 'student')))
