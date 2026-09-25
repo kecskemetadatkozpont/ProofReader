@@ -532,25 +532,37 @@
       const targetsFor = (keyPath) => {
         const targets = [keyPath]; const kb = baseNoExt(keyPath);
         const ext = (keyPath.match(/\.[a-z0-9]+$/i) || [''])[0];
+        // Az .svg-t a pdfTeX nem tudja beolvasni, és egy ábrának gyakran van azonos nevű
+        // .png és .svg változata is — ha az .svg a .png nevén landolna, a fordítás
+        // „Not a PNG file” hibával áll meg.
+        if (/^\.svg$/i.test(ext)) return targets;
         refPaths.forEach((rp) => {
-          let t = rp; if (!/\.[a-z0-9]+$/i.test(t)) t = t + ext;   // graphicx may omit the extension
+          const hasExt = /\.[a-z0-9]+$/i.test(rp);
+          // Ha a hivatkozás más kiterjesztést nevez meg (pl. .png), akkor nem ez a fájl kell oda.
+          if (hasExt && !new RegExp('\\' + ext + '$', 'i').test(rp)) return;
+          const t = hasExt ? rp : rp + ext;               // graphicx elhagyhatja a kiterjesztést
           if (t !== keyPath && baseNoExt(t) === kb && targets.indexOf(t) < 0) targets.push(t);
         });
         return targets;
       };
       const pushBinary = (path, bytes) => { targetsFor(path).forEach((t) => out.push({ path: t, bytes: bytes })); };
 
+      // A fordítónak a sablon bináris kellékei is kellenek (MDPI: Definitions/logo-mdpi.eps),
+      // nem csak a képek és a PDF-ek — ezek 'bin' típussal érkeznek az importból.
+      const TEX_ASSET_RE = /\.(eps|ps|otf|ttf|pfb|afm|tfm|vf|enc|map)$/i;
+      const isCompileBin = (f, path) => f.type === 'image' || f.type === 'pdf' || (f.type === 'bin' && TEX_ASSET_RE.test(path));
       Object.keys(files).forEach((path) => {
         const f = files[path]; if (!f) return;
-        const isText = f.type === 'tex' || f.type === 'bib' || /\.(bbl|cls|sty|def|clo|cfg|tex|bib|ltx)$/i.test(path);
+        const isText = f.type === 'tex' || f.type === 'bib'
+          || /\.(bbl|cls|sty|def|clo|cfg|tex|bib|ltx|bst|bbx|cbx|lbx|fd)$/i.test(path);
         if (isText) { out.push({ path: rebase(path), text: f.content != null ? f.content : '' }); return; }
-        if ((f.type === 'image' || f.type === 'pdf') && f.dataURL) {
+        if (isCompileBin(f, path) && f.dataURL) {
           try { pushBinary(rebase(path), dataURLToBytes(f.dataURL)); } catch (e) { }
         }
       });
       // binaries that need fetching: bundled assets (.src), or cloud signed URLs (.storagePath)
       const toFetch = Object.keys(files).filter((p) => {
-        const f = files[p]; if (!f || (f.type !== 'image' && f.type !== 'pdf') || f.dataURL) return false;
+        const f = files[p]; if (!f || !isCompileBin(f, p) || f.dataURL) return false;
         return f.src || (f.storagePath && window.PR_SIGNED && window.PR_SIGNED[f.storagePath]);
       });
       await Promise.all(toFetch.map(async (p) => {
