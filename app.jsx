@@ -25,6 +25,24 @@
   // macOS és Windows szemét: ezeket csendben kihagyjuk, nem „kihagyott fájlként” jelentjük
   const JUNK_RE = /(^|\/)(\._[^/]*|\.DS_Store|Thumbs\.db|desktop\.ini)$|(^|\/)__MACOSX(\/|$)/i;
   const attachOK = () => !!(window.PRUploads && window.PRUploads.enabled);   // attachments require cloud storage
+  // A Feltöltés gomb fájlválasztójának szűrője MINDIG a fenti szabályokból készül. Kézzel karbantartott
+  // listával elcsúszik tőlük, és akkor a párbeszédablak kiszürkíti az érvényes fájlokat — így maradt ki
+  // eddig az .eps: az import már elfogadta, de kiválasztani nem lehetett.
+  const extsFrom = (re) => {
+    const out = [];
+    String(re.source).replace(/\\\.\(([^)]+)\)/g, (_, g) => {
+      g.split('|').forEach((e) => {
+        if (e.indexOf('?') < 0) { out.push(e); return; }
+        out.push(e.replace(/[a-z0-9]\?/gi, ''));   // jpe?g → jpg, docx? → doc
+        out.push(e.replace(/\?/g, ''));            // jpe?g → jpeg, docx? → docx
+      });
+      return '';
+    });
+    return out;
+  };
+  const ACCEPT_ATTR = [].concat(extsFrom(TEXT_EXT_RE), extsFrom(MEDIA_EXT_RE), extsFrom(LATEX_BIN_EXT_RE),
+    extsFrom(DATA_EXT_RE), extsFrom(ATTACH_EXT_RE))
+    .filter((e, i, a) => e && a.indexOf(e) === i).map((e) => '.' + e).concat(['image/*', 'application/pdf']).join(',');
   // Map a filename to its editor doc-type. .tex/.txt stay 'tex' (full LaTeX pipeline);
   // the rest are plain-text docs we display and edit but never feed to the LaTeX engine.
   function fileTypeOf(name) {
@@ -2204,7 +2222,7 @@
             <button className="btn" onClick={() => setShareOpen(true)}>
               <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4"><circle cx="4" cy="8" r="2" /><circle cx="12" cy="4" r="2" /><circle cx="12" cy="12" r="2" /><path d="M5.8 7l4.4-2.2M5.8 9l4.4 2.2" /></svg>Share
             </button>
-            <input ref={fileInput} type="file" multiple accept=".zip,.tex,.bib,.bbl,.bst,.cls,.sty,.txt,.md,.markdown,.pdf,application/pdf,.docx,.xlsx,.xls,.pptx,.csv,.tsv,.json,.yml,.yaml,.py,.npz,.npy,.mat,.h5,.hdf5,.pkl,.pt,.pth,.onnx,.parquet,image/*" style={{ display: 'none' }} onChange={onUpload} />
+            <input ref={fileInput} type="file" multiple accept={ACCEPT_ATTR} style={{ display: 'none' }} onChange={onUpload} />
             <input ref={reviewInput} type="file" accept=".json,application/json" style={{ display: 'none' }} onChange={onReviewFile} />
             <input ref={dirInput} type="file" multiple style={{ display: 'none' }} onChange={onUploadFolder} />
             <button className="btn btn-icon" title="Upload files" aria-label="Upload files" onClick={() => fileInput.current.click()}>
