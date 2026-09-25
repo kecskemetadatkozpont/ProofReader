@@ -789,6 +789,165 @@
           })) : null));
   }
 
+
+  // ---------- GitHub repo ----------
+  // A commitokat a böngésző kéri le a GitHub nyilvános API-jából (token nélkül, ezért nyilvános
+  // repóval megy), és a team_commits_upsert írja be. Így nincs szerveroldali titok és háttérfolyamat.
+  var GH_SYNC_MS = 10 * 60 * 1000;
+  function ghParts(url) {
+    var m = /^https:\/\/github\.com\/([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+)$/.exec(String(url || '').replace(/\.git$/, '').replace(/\/+$/, ''));
+    return m ? { owner: m[1], repo: m[2] } : null;
+  }
+  function ghFetchCommits(url) {
+    var p = ghParts(url);
+    if (!p) return Promise.reject(new Error('Hibás repó-cím'));
+    var api = 'https://api.github.com/repos/' + p.owner + '/' + p.repo + '/commits?per_page=100';
+    return fetch(api, { headers: { Accept: 'application/vnd.github+json' } }).then(function (r) {
+      if (r.status === 404) throw new Error('A repó nem található, vagy nem nyilvános.');
+      if (r.status === 403) throw new Error('A GitHub most nem ad több kérést erről a hálózatról (óránkénti korlát). Próbáld később.');
+      if (!r.ok) throw new Error('GitHub hiba: ' + r.status);
+      return r.json();
+    }).then(function (list) {
+      return (list || []).map(function (c) {
+        return {
+          sha: c.sha,
+          login: (c.author && c.author.login) || null,
+          name: (c.commit && c.commit.author && c.commit.author.name) || null,
+          message: String((c.commit && c.commit.message) || '').split('\n')[0].slice(0, 200),
+          url: c.html_url,
+          at: (c.commit && c.commit.author && c.commit.author.date) || null
+        };
+      });
+    });
+  }
+
+  function RepoView(props) {
+    var dS = useState(null), data = dS[0], setData = dS[1];
+    var eS = useState(''), schema = eS[0], setSchema = eS[1];
+    var uS = useState(''), url = uS[0], setUrl = uS[1];
+    var bS = useState(''), busy = bS[0], setBusy = bS[1];
+    var mS = useState(''), msg = mS[0], setMsg = mS[1];
+    var lS = useState(''), login = lS[0], setLogin = lS[1];
+
+    function load(andSync) {
+      sb.rpc('team_repo_state', { p_team: props.teamId }).then(function (r) {
+        if (r && r.error) { if (missingSchema(r.error)) setSchema('missing'); return; }
+        var d = r.data || {};
+        setData(d); setUrl(d.repo_url || '');
+        var me = (d.members || []).filter(function (m) { return m.user_id === props.meId; })[0];
+        setLogin((me && me.github_login) || '');
+        if (andSync && d.repo_url && d.can_write) {
+          var age = d.synced_at ? (Date.now() - new Date(d.synced_at).getTime()) : Infinity;
+          if (age > GH_SYNC_MS) sync(d.repo_url, true);
+        }
+      });
+    }
+    useEffect(function () { load(true); }, [props.teamId]);
+
+    function sync(u, quiet) {
+      setBusy('sync'); if (!quiet) setMsg('');
+      ghFetchCommits(u || (data && data.repo_url)).then(function (commits) {
+        return sb.rpc('team_commits_upsert', { p_team: props.teamId, p_commits: commits }).then(function (r) {
+          setBusy('');
+          if (r && r.error) { setMsg(r.error.message); return; }
+          if (!quiet) setMsg('✓ ' + ((r.data || {}).received || 0) + ' commit beolvasva');
+          load(false);
+        });
+      }, function (e) { setBusy(''); setMsg((e && e.message) || String(e)); });
+    }
+    function saveRepo() {
+      setBusy('repo'); setMsg('');
+      sb.rpc('team_repo_set', { p_team: props.teamId, p_url: url }).then(function (r) {
+        setBusy('');
+        if (r && r.error) { setMsg(r.error.message); return; }
+        var u = (r.data || {}).repo_url;
+        setMsg(u ? '✓ Repó beállítva' : 'A repó leválasztva');
+        if (u) sync(u, false); else load(false);
+      });
+    }
+    function saveLogin(userId, value) {
+      sb.rpc('team_github_login', { p_team: props.teamId, p_login: value, p_user: userId || null }).then(function (r) {
+        if (r && r.error) { toast(r.error.message, { kind: 'error' }); return; }
+        toast('✓ Mentve', { kind: 'ok' }); load(false);
+      });
+    }
+
+    if (schema === 'missing') return h('div', { className: 'soon' },
+      h('b', null, 'A GitHub-kapcsolat még nincs bekapcsolva az adatbázisban. '),
+      'Az adminisztrátornak le kell futtatnia a ', h('code', null, 'backend/migration-137-team-github.sql'), ' fájlt.');
+    if (!data) return h('div', { className: 'soon' }, 'Betöltés…');
+
+    var canWrite = !!data.can_write, repo = data.repo_url;
+    var members = data.members || [], commits = data.commits || [], unmatched = data.unmatched || [];
+    var maxC = Math.max.apply(null, members.map(function (m) { return m.commits; }).concat([1]));
+
+    return h('div', { className: 'tr-repo' },
+      h('div', { className: 'co-card tr-repo-h' },
+        h('div', null,
+          h('b', null, '🐙 GitHub-repó'),
+          h('p', { className: 'co-note' }, repo
+            ? 'A commitokat a csapat tagjaihoz kötjük a GitHub-felhasználónevük alapján. Nyilvános repóval működik; privátnál csak a link marad.'
+            : 'Add meg, melyik repóban dolgoztok. Innentől látszik, ki mit tett hozzá, és a haladás is követhető.')),
+        h('span', { className: 'sp' }),
+        repo ? h('a', { className: 'btn sm', href: repo, target: '_blank', rel: 'noopener' }, 'Megnyitom a GitHubon') : null,
+        (repo && canWrite) ? h('button', { type: 'button', className: 'btn sm', disabled: !!busy, onClick: function () { sync(null, false); } },
+          busy === 'sync' ? 'Szinkron…' : '↻ Szinkronizálás') : null),
+
+      canWrite ? h('div', { className: 'co-card tr-repo-set' },
+        h('label', { className: 'form-l' }, 'A csapat repója'),
+        h('div', { className: 'tr-repo-row' },
+          h('input', { className: 'in', value: url, placeholder: 'https://github.com/felhasznalo/repo',
+            onChange: function (e) { setUrl(e.target.value); setMsg(''); },
+            onKeyDown: function (e) { if (e.key === 'Enter') saveRepo(); } }),
+          h('button', { type: 'button', className: 'btn pri', disabled: busy === 'repo', onClick: saveRepo },
+            repo && url === repo ? 'Mentve' : 'Mentem')),
+        msg ? h('p', { className: 'tr-repo-msg' }, msg) : null,
+        h('div', { className: 'tr-repo-me' },
+          h('span', { className: 'co-note' }, 'A te GitHub-felhasználóneved:'),
+          h('input', { className: 'in sm', value: login, placeholder: 'pl. kissanna',
+            onChange: function (e) { setLogin(e.target.value); },
+            onKeyDown: function (e) { if (e.key === 'Enter') saveLogin(null, login); } }),
+          h('button', { type: 'button', className: 'btn sm', onClick: function () { saveLogin(null, login); } }, 'Mentem'),
+          h('span', { className: 'co-note' }, 'enélkül a commitjaid nem kötődnek hozzád'))) : null,
+
+      repo ? h('div', { className: 'tr-dash-cards' },
+        [['Commit összesen', data.total || 0, ''], ['Ezen a héten', data.week || 0, (data.week ? 'ok' : '')],
+         ['Utolsó szinkron', data.synced_at ? fmtWhen(data.synced_at) : '—', ''],
+         ['Név nélkül', unmatched.reduce(function (s, u2) { return s + u2.commits; }, 0), unmatched.length ? 'acc' : '']].map(function (x) {
+          return h('div', { key: x[0], className: 'tr-kpi' + (x[2] ? ' ' + x[2] : '') },
+            h('b', { style: typeof x[1] === 'string' && x[1].length > 6 ? { fontSize: 14 } : null }, x[1]), h('span', null, x[0]));
+        })) : null,
+
+      repo ? h('div', { className: 'co-card' },
+        h('b', null, 'Ki mennyit commitolt'),
+        h('div', { className: 'tr-dash-rows' }, members.map(function (m) {
+          return h('div', { key: m.user_id, className: 'tr-dash-row' },
+            h('span', { className: 'tr-who' }, h(Avatar, { name: m.name, sm: true }), m.name),
+            h('span', { className: 'tr-dash-bars' },
+              h('span', { className: 'tr-dbar done', style: { width: (m.commits / maxC * 100) + '%' } })),
+            h('span', { className: 'tr-dash-n' }, m.commits + ' commit'),
+            h('span', { className: 'tr-dash-n co-note' }, m.github_login
+              ? '@' + m.github_login + (m.last_commit ? ' · ' + fmtWhen(m.last_commit) : '')
+              : (props.isInstr || m.user_id === props.meId
+                ? h('input', { className: 'in sm', placeholder: 'GitHub-név…',
+                    onKeyDown: function (e) { if (e.key === 'Enter') saveLogin(m.user_id, e.target.value); } })
+                : 'nincs megadva GitHub-név')));
+        })),
+        unmatched.length ? h('p', { className: 'co-note' }, 'Nem azonosított szerzők: '
+          + unmatched.map(function (u2) { return (u2.login || 'ismeretlen') + ' (' + u2.commits + ')'; }).join(', ')
+          + ' — ha valamelyik a csapat tagja, írjátok be a GitHub-nevét fent.') : null) : null,
+
+      repo ? h('div', { className: 'co-card' },
+        h('b', null, 'Legutóbbi commitok'),
+        commits.length ? h('div', { className: 'tr-commits' }, commits.map(function (c) {
+          return h('a', { key: c.sha, className: 'tr-commit', href: c.url || repo, target: '_blank', rel: 'noopener' },
+            h('span', { className: 'tr-c-sha' }, (c.sha || '').slice(0, 7)),
+            h('span', { className: 'tr-c-msg' }, c.message || '(nincs üzenet)'),
+            h('span', { className: 'tr-c-who' }, c.user_name || (c.login ? '@' + c.login : c.name || '—')),
+            h('span', { className: 'tr-c-at co-note' }, c.at ? fmtWhen(c.at) : ''));
+        })) : h('p', { className: 'co-note' }, 'Még nincs beolvasott commit. Nyomj a „Szinkronizálás” gombra.')) : null);
+  }
+
   // ---------- the room ----------
   var VIEWS = [
     { k: 'dash', t: 'Irányítópult', ic: '📈' },
@@ -797,6 +956,7 @@
     { k: 'calendar', t: 'Naptár', ic: '📅' },
     { k: 'chat', t: 'Chat', ic: '💬' },
     { k: 'docs', t: 'Dokumentumok', ic: '🗄' },
+    { k: 'repo', t: 'GitHub', ic: '🐙' },
     { k: 'planning', t: 'Planning', ic: '🧭' },
     { k: 'daily', t: 'Daily', ic: '☀️' },
     { k: 'retro', t: 'Retro', ic: '🔁' },
@@ -916,6 +1076,7 @@
                   onChange: load, onOpenTask: setOpenId })
                 : view === 'docs' ? h(Docs, { teamId: props.teamId, meId: props.meId, courseId: team.course_id,
                     canWrite: canWrite, onChange: load })
+                  : view === 'repo' ? h(RepoView, { teamId: props.teamId, meId: props.meId, isInstr: asAdmin })
                   : view === 'dash' ? h(Dashboard, { teamId: props.teamId, tasks: all, refresh: data })
                     : view === 'stats' ? h(Stats, { stats: data.stats })
                       : h(Ceremony, { kind: view, teamId: props.teamId, canWrite: canWrite, events: events, members: members,
@@ -930,10 +1091,15 @@
   function TeamsOverview(props) {
     var rS = useState(null), rows = rS[0], setRows = rS[1];
     var sS = useState('risk'), sort = sS[0], setSort = sS[1];
+    var gS = useState({}), repos = gS[0], setRepos = gS[1];   // csapat → GitHub-állapot
     useEffect(function () {
       sb.rpc('course_teams_overview', { p_course: props.courseId }).then(function (r) {
         if (r && r.error) { setRows([]); return; }
         setRows(r.data || []);
+      });
+      sb.rpc('course_repos_overview', { p_course: props.courseId }).then(function (r) {
+        if (r && r.error) return;
+        var m = {}; (r.data || []).forEach(function (x) { m[x.team_id] = x; }); setRepos(m);
       });
     }, [props.courseId]);
     if (!rows) return h('div', { className: 'soon' }, 'Betöltés…');
@@ -983,6 +1149,12 @@
             h('span', { className: 'tr-ring', style: { '--p': pct } }, h('span', null, pct + '%')),
             h('b', null, r.name),
             h('span', { className: 'tr-chip acc' }, Math.round(r.points || 0) + ' pont')),
+          (repos[r.team_id] && repos[r.team_id].repo_url) ? h('div', { className: 'tr-ovc-m' },
+            h('a', { className: 'tr-chip', href: repos[r.team_id].repo_url, target: '_blank', rel: 'noopener' }, '🐙 repó'),
+            h('span', { className: 'tr-chip' }, repos[r.team_id].commits + ' commit'),
+            repos[r.team_id].week ? h('span', { className: 'tr-chip ok' }, repos[r.team_id].week + ' a héten') : null,
+            repos[r.team_id].unlinked ? h('span', { className: 'tr-chip acc' }, repos[r.team_id].unlinked + ' GitHub-név hiányzik') : null)
+            : (repos[r.team_id] ? h('div', { className: 'tr-ovc-m' }, h('span', { className: 'tr-chip' }, '🐙 nincs repó')) : null),
           h('div', { className: 'tr-ovc-m' },
             h('span', { className: 'tr-chip' }, '👥 ' + r.members),
             h('span', { className: 'tr-chip' }, '🗂 ' + r.done + '/' + r.tasks),
