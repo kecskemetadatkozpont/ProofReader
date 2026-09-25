@@ -5,16 +5,25 @@
   const Collab = window.Collab;
 
   // Importable text formats (LaTeX sources + build artifacts like .bbl + Markdown notes).
-  const TEXT_EXT_RE = /\.(tex|bib|cls|sty|txt|bbl|bst|md|markdown)$/i;
+  // .clo/.def/.fd/.ltx/.dtx/.ins: osztály- és csomagdarabok, amiket a sablonok (pl. MDPI) behúznak.
+  const TEXT_EXT_RE = /\.(tex|bib|cls|sty|txt|bbl|bst|md|markdown|clo|def|fd|ltx|dtx|ins|bbx|cbx|lbx|tikz|pgf)$/i;
   // ---- one import policy for EVERY path (file picker, folder upload, ZIP) so they can never drift apart ----
   const MEDIA_EXT_RE = /\.(png|jpe?g|gif|svg|webp|pdf)$/i;                 // rendered + usable by the LaTeX compiler
+  // Bináris LaTeX-kellékek: a böngésző nem rajzolja ki őket, de a fordításhoz és a csomag
+  // letöltéséhez kellenek — pl. a folyóirat-sablonok logói (MDPI: Definitions/logo-mdpi.eps).
+  // Korábban ezek kimaradtak az importból, és emiatt a .tex hivatkozásuk „file not found”-ra futott.
+  const LATEX_BIN_EXT_RE = /\.(eps|ps|otf|ttf|pfb|afm|tfm|vf|enc|map)$/i;
   // Data/scripts: kept as plain-text docs (type 'md' — never fed to the LaTeX engine, unlike fileTypeOf's 'tex'
   // fallback) and capped, because text lives INLINE in the project payload.
-  const DATA_EXT_RE = /\.(csv|tsv|json|ya?ml|py|r|sh|cfg|ini|toml|log|bibtex)$/i;
+  // A kiterjesztés nélküli, bevett szövegfájlok (LICENSE, README, Makefile…) és a riport-HTML is
+  // ide tartoznak: reprodukciós csomagokban gyakoriak, és eddig csendben kimaradtak.
+  const DATA_EXT_RE = /(\.(csv|tsv|json|ya?ml|py|r|sh|cfg|ini|toml|log|bibtex|html?|ipynb|gitignore|gitattributes)$)|(^(LICENSE|LICENCE|README|CITATION|Makefile|Dockerfile|CHANGELOG)$)/i;
   const DATA_LIMIT = 512 * 1024;
   // Binary research artifacts (numpy archives, models, datasets, archives). Never rendered, never compiled — they
   // live in cloud storage, are downloadable from the file tree, and travel in the project export.
-  const ATTACH_EXT_RE = /\.(npz|npy|mat|h5|hdf5|nc|pkl|pickle|pt|pth|ckpt|safetensors|onnx|parquet|feather|arrow|zip|gz|tgz|tar|7z|xz|bz2|db|sqlite|dat|bin)$/i;
+  const ATTACH_EXT_RE = /\.(npz|npy|mat|h5|hdf5|nc|pkl|pickle|pt|pth|ckpt|safetensors|onnx|parquet|feather|arrow|zip|gz|tgz|tar|7z|xz|bz2|db|sqlite|dat|bin|docx?|xlsx?|pptx?|odt|ods|odp|rtf)$/i;
+  // macOS és Windows szemét: ezeket csendben kihagyjuk, nem „kihagyott fájlként” jelentjük
+  const JUNK_RE = /(^|\/)(\._[^/]*|\.DS_Store|Thumbs\.db|desktop\.ini)$|(^|\/)__MACOSX(\/|$)/i;
   const attachOK = () => !!(window.PRUploads && window.PRUploads.enabled);   // attachments require cloud storage
   // Map a filename to its editor doc-type. .tex/.txt stay 'tex' (full LaTeX pipeline);
   // the rest are plain-text docs we display and edit but never feed to the LaTeX engine.
@@ -1223,11 +1232,13 @@
           const rel = strip ? x.rel.slice(strip.length) : x.rel;
           if (!rel) return;
           const base = rel.split('/').pop();
+          if (JUNK_RE.test(rel)) return;                                   // macOS/Windows szemét: csendben
           const isTex = TEXT_EXT_RE.test(base), isBin = ZIP_BIN_RE.test(base), isData = !isTex && !isBin && ZIP_DATA_RE.test(base);
-          const isAttach = !isTex && !isBin && !isData && ATTACH_EXT_RE.test(base);
+          const isAsset = !isTex && !isBin && !isData && LATEX_BIN_EXT_RE.test(base);   // pl. a sablon .eps logói
+          const isAttach = !isTex && !isBin && !isData && !isAsset && ATTACH_EXT_RE.test(base);
           const isText = isTex || isData;
           const size = (x.ent._data && x.ent._data.uncompressedSize) || 0;
-          if (!isText && !isBin && !isAttach) { nSkipped++; uAdd(base, size, 'skipped', 'Nem támogatott formátum'); return; }
+          if (!isText && !isBin && !isAsset && !isAttach) { nSkipped++; uAdd(base, size, 'skipped', 'Nem támogatott formátum'); return; }
           if (isAttach && !attachOK()) { nSkipped++; uAdd(base, size, 'skipped', 'Melléklethez felhő-tároló kell'); return; }
           if (isData && size > ZIP_DATA_LIMIT) { nSkipped++; uAdd(base, size, 'skipped', 'Adatfájl 512 KB felett'); return; }
           if (size > SIZE_LIMIT) { nSkipped++; uAdd(base, size, 'skipped', '50 MB felett'); return; }
@@ -1237,7 +1248,7 @@
           let acc = '';
           segs.forEach((sg) => { acc = acc ? acc + '/' + sg : sg; if (!folders.includes(acc)) newFolders.add(acc); });
           if (isTex && /\.tex$/i.test(base)) { if (!firstTex) firstTex = path; if (!mainTex && /^main/i.test(base)) mainTex = path; }
-          items.push({ path: path, ent: x.ent, isText: isText, isData: isData, isAttach: isAttach, base: base, size: size });
+          items.push({ path: path, ent: x.ent, isText: isText, isData: isData, isAttach: isAttach, isAsset: isAsset, base: base, size: size });
         });
         if (!items.length) {
           uSet(zid, { status: 'skipped', reason: 'nincs importálható fájl' });
@@ -1269,7 +1280,7 @@
             }, (er) => { uSet(uid, { status: 'error', reason: (er && er.message) || 'kicsomagolási hiba' }); step(); });
           } else {
             it.ent.async('blob').then((blob) => {
-              putBinary(it.path, blob, it.isAttach ? 'bin' : (/\.pdf$/i.test(it.base) ? 'pdf' : 'image'), it.base, null, uid);
+              putBinary(it.path, blob, (it.isAttach || it.isAsset) ? 'bin' : (/\.pdf$/i.test(it.base) ? 'pdf' : 'image'), it.base, null, uid);
               step();
             }, (er) => { uSet(uid, { status: 'error', reason: (er && er.message) || 'kicsomagolási hiba' }); step(); });
           }
@@ -1283,13 +1294,15 @@
       list.forEach((file) => {
         if (/\.zip$/i.test(file.name)) { importZip(file, dir); return; }   // submission package → extract in place
         if (window.PROffice && window.PROffice.isOffice(file.name)) { importOfficeFile(file, dir); return; }
+        if (JUNK_RE.test(file.name)) return;
         const isTex = TEXT_EXT_RE.test(file.name);
         const isImg = MEDIA_EXT_RE.test(file.name);
         const isPdf = /\.pdf$/i.test(file.name);
         const isData = !isTex && !isImg && DATA_EXT_RE.test(file.name);
-        const isAttach = !isTex && !isImg && !isData && ATTACH_EXT_RE.test(file.name);
+        const isAsset = !isTex && !isImg && !isData && LATEX_BIN_EXT_RE.test(file.name);
+        const isAttach = !isTex && !isImg && !isData && !isAsset && ATTACH_EXT_RE.test(file.name);
         const isText = isTex || isData;
-        if (!isText && !isImg && !isAttach) { uAdd(file.name, file.size, 'skipped', 'Unsupported format'); return; }
+        if (!isText && !isImg && !isAsset && !isAttach) { uAdd(file.name, file.size, 'skipped', 'Unsupported format'); return; }
         if (isAttach && !attachOK()) { uAdd(file.name, file.size, 'skipped', 'Melléklethez felhő-tároló kell'); return; }
         if (isData && file.size > DATA_LIMIT) { uAdd(file.name, file.size, 'skipped', 'Adatfájl 512 KB felett'); return; }
         if (!isText && file.size > SIZE_LIMIT) { uAdd(file.name, file.size, 'skipped', 'Larger than 50 MB'); return; }
@@ -1307,7 +1320,7 @@
           r.onerror = () => uSet(uid, { status: 'error', reason: 'Could not read file' });
           r.readAsText(file);
         } else {
-          putBinary(path, file, isAttach ? 'bin' : (isPdf ? 'pdf' : 'image'), file.name);
+          putBinary(path, file, (isAttach || isAsset) ? 'bin' : (isPdf ? 'pdf' : 'image'), file.name);
         }
         if (dir) setExpanded((s) => new Set(s).add(dir));
       });
@@ -1327,19 +1340,21 @@
       if (!list.length) return;
       const newFolders = new Set();
       const reserved = {};
-      let skipped = 0, firstTex = null;
+      let skipped = 0, firstTex = null; const skippedNames = [];
       const items = [];
       list.forEach((file) => {
         const rel = (file.webkitRelativePath || file.name).replace(/\\/g, '/');
         const isTex = TEXT_EXT_RE.test(file.name);
         const isImg = MEDIA_EXT_RE.test(file.name);
         const isData = !isTex && !isImg && DATA_EXT_RE.test(file.name);
-        const isAttach = !isTex && !isImg && !isData && ATTACH_EXT_RE.test(file.name);
+        const isAsset = !isTex && !isImg && !isData && LATEX_BIN_EXT_RE.test(file.name);
+        const isAttach = !isTex && !isImg && !isData && !isAsset && ATTACH_EXT_RE.test(file.name);
         const isText = isTex || isData;
-        if (!isText && !isImg && !isAttach) { skipped++; uAdd(file.name, file.size, 'skipped', 'Unsupported format'); return; }
-        if (isAttach && !attachOK()) { skipped++; uAdd(file.name, file.size, 'skipped', 'Melléklethez felhő-tároló kell'); return; }
-        if (isData && file.size > DATA_LIMIT) { skipped++; uAdd(file.name, file.size, 'skipped', 'Adatfájl 512 KB felett'); return; }
-        if (file.size > SIZE_LIMIT) { skipped++; uAdd(file.name, file.size, 'skipped', 'Larger than 50 MB'); return; }
+        if (JUNK_RE.test(rel)) return;
+        if (!isText && !isImg && !isAsset && !isAttach) { skipped++; skippedNames.push(file.name); uAdd(file.name, file.size, 'skipped', 'Unsupported format'); return; }
+        if (isAttach && !attachOK()) { skipped++; skippedNames.push(file.name); uAdd(file.name, file.size, 'skipped', 'Melléklethez felhő-tároló kell'); return; }
+        if (isData && file.size > DATA_LIMIT) { skipped++; skippedNames.push(file.name); uAdd(file.name, file.size, 'skipped', 'Adatfájl 512 KB felett'); return; }
+        if (file.size > SIZE_LIMIT) { skipped++; skippedNames.push(file.name); uAdd(file.name, file.size, 'skipped', 'Larger than 50 MB'); return; }
         const path = uniquePath((p) => !!filesRef.current[p] || reserved[p], dir ? dir + '/' + rel : rel);
         reserved[path] = 1; filesRef.current = { ...filesRef.current, [path]: {} };
         const segs = path.split('/'); segs.pop();
@@ -1347,9 +1362,11 @@
         segs.forEach((s) => { acc = acc ? acc + '/' + s : s; if (!folders.includes(acc)) newFolders.add(acc); });
         const makeActive = isTex && /\.tex$/i.test(file.name) && !firstTex;
         if (makeActive) firstTex = path;
-        items.push({ file, path, isText, isData, isAttach, makeActive });
+        items.push({ file, path, isText, isData, isAttach, isAsset, makeActive });
       });
-      const note = (n) => window.PRUI.toast(n + ' file' + (n === 1 ? '' : 's') + ' skipped — LaTeX sources, images/PDFs (<50 MB), data files (<512 KB) and binary attachments are imported; anything else is not.');
+      const note = (n) => window.PRUI.toast(n + ' fájl kimaradt: ' + skippedNames.slice(0, 4).join(', ')
+        + (skippedNames.length > 4 ? ' és még ' + (skippedNames.length - 4) : '')
+        + ' — a feltöltési lista mutatja, miért. Importálható: LaTeX-források és kellékek (.tex, .cls, .sty, .bst, .bbl, .eps), képek/PDF (<50 MB), adatfájlok (<512 KB), mellékletek.', { kind: 'error' });
       if (!items.length) { if (skipped) note(skipped); return; }
       if (newFolders.size) setFolders((fs) => { const set = new Set(fs); newFolders.forEach((f) => set.add(f)); return Array.from(set); });
       setExpanded((s) => { const n = new Set(s); if (dir) n.add(dir); newFolders.forEach((f) => n.add(f)); return n; });
@@ -1366,7 +1383,7 @@
           r.onerror = () => uSet(uid, { status: 'error', reason: 'Could not read file' });
           r.readAsText(it.file);
         } else {
-          putBinary(it.path, it.file, it.isAttach ? 'bin' : (/\.pdf$/i.test(it.file.name) ? 'pdf' : 'image'), it.file.name);
+          putBinary(it.path, it.file, (it.isAttach || it.isAsset) ? 'bin' : (/\.pdf$/i.test(it.file.name) ? 'pdf' : 'image'), it.file.name);
         }
       });
       if (skipped) setTimeout(() => note(skipped), 120);
