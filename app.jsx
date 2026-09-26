@@ -2765,7 +2765,12 @@
           // permanently pinned to a project that was never created (the short-circuit above redirects to it forever).
           let saved = true;
           if (window.PRStore.flushNow) { try { saved = await window.PRStore.flushNow(proj.id); } catch (e) { saved = false; } }
-          if (saved) { try { await sb.from('research_drafts').update({ editor_project_id: proj.id, status: 'imported', updated_at: new Date().toISOString() }).eq('id', draftId); } catch (e) { } }
+          if (saved) {
+            try { await sb.from('research_drafts').update({ editor_project_id: proj.id, status: 'imported', updated_at: new Date().toISOString() }).eq('id', draftId); } catch (e) { }
+            // A behúzott draft ahhoz a kutatási projekthez tartozik, amelyikben készült — így a
+            // publikáció kártyáján is látszik a származása (migration-138; ha még nincs, csak kimarad).
+            if (data.project_id) { try { await sb.rpc('pr_set_research_link', { p_project: proj.id, p_research: data.project_id }); } catch (e) { } }
+          }
           else console.warn('[PR] draft import: project not yet confirmed, draft left unstamped');
           location.replace(location.pathname + '?p=' + proj.id); return;
         }

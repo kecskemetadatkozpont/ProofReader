@@ -405,6 +405,51 @@ function MiniPage({ project }) {
   );
 }
 // Submission / publication links for one publication: where it was sent, and — once accepted — where it lives.
+/* Melyik kutatási projekthez tartozik ez a publikáció? (migration-138)
+   A kapcsolat a projects.research_project_id oszlopban él, amit csak a pr_set_research_link RPC ír —
+   a projekt-mentés (pr_save_project) a data blobot cseréli, így azt nem tudja letörölni. */
+function ResearchLinkModal({ project, current, onClose, onSaved }) {
+  const [list, setList] = useState(null);
+  const [val, setVal] = useState(current || '');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const sb = window.PR_BACKEND && window.PR_BACKEND.sb;
+  useEffect(() => {
+    if (!sb) { setList([]); return; }
+    sb.from('research_projects').select('id,title').order('updated_at', { ascending: false }).limit(100)
+      .then((r) => setList((r && r.data) || []), () => setList([]));
+  }, []);
+  const save = () => {
+    if (!sb) return; setBusy(true); setErr('');
+    sb.rpc('pr_set_research_link', { p_project: project.id, p_research: val || null }).then((r) => {
+      setBusy(false);
+      if (r && r.error) { setErr(r.error.message); return; }
+      onSaved();
+    });
+  };
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="modal" style={{ width: 520 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head"><h3>Kutatási projekt</h3><p>Ha ez a publikáció egy kutatási projekt része, válaszd ki — akkor a kutatás Írás fülén is ott lesz a kártyája.</p></div>
+        <div className="modal-body">
+          {list === null
+            ? <div className="usage-sub">Betöltés…</div>
+            : <select className="text-input" value={val} onChange={(e) => setVal(e.target.value)}>
+                <option value="">Önálló publikáció (nem tartozik kutatási projekthez)</option>
+                {list.map((r) => <option key={r.id} value={r.id}>{r.title}</option>)}
+              </select>}
+          {list !== null && !list.length && <div className="usage-sub" style={{ marginTop: 10 }}>Nincs elérhető kutatási projekted — a Research menüben tudsz létrehozni egyet.</div>}
+          {err && <div className="usage-sub" style={{ marginTop: 10, color: 'var(--danger)' }}>{err}</div>}
+        </div>
+        <div className="modal-foot">
+          <button className="btn-ghost" onClick={onClose}>Mégse</button>
+          <button className="btn-primary" disabled={busy} onClick={save}>{busy ? 'Mentés…' : 'Mentés'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function LinksModal({ project, onClose, onSave }) {
   const [sub, setSub] = useState(project.submitUrl || '');
   const [pub, setPub] = useState(project.pubUrl || '');
@@ -432,7 +477,7 @@ function LinksModal({ project, onClose, onSave }) {
   );
 }
 
-function Card({ project, me, onOpen, onRename, onDuplicate, onDelete, onShare, onStatus, onLinks }) {
+function Card({ project, me, onOpen, onRename, onDuplicate, onDelete, onShare, onStatus, onLinks, rlink, onResearch }) {
   const status = project.status || 'Drafting';
   const stColor = STAGE_COLOR[status] || '#8a92a0';
   const [renaming, setRenaming] = useState(false);
@@ -467,6 +512,19 @@ function Card({ project, me, onOpen, onRename, onDuplicate, onDelete, onShare, o
           <span>Edited {relTime(project.updated)}</span>
           <span className="sep" /><span>{fileCount} file{fileCount === 1 ? '' : 's'}</span>
           {sentences != null && <><span className="sep" /><span>{sentences} sentences</span></>}
+        </div>
+        {/* Önálló publikáció, vagy egy kutatási projekthez tartozik? (migration-138) */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          {rlink && rlink.research_project_id
+            ? <a href={'Research.html?project=' + encodeURIComponent(rlink.research_project_id)}
+                 onClick={(e) => e.stopPropagation()} style={{ ...jStyle, color: 'var(--accent)' }}
+                 title={rlink.research_title ? 'Kutatási projekt: ' + rlink.research_title : 'Egy kutatási projekthez tartozik (annak részleteihez nincs hozzáférésed)'}>
+                🔬 {rlink.research_title || 'Kutatási projekt'}
+              </a>
+            : <span style={{ ...jStyle, color: 'var(--muted)' }} title="Ez a publikáció nem tartozik kutatási projekthez">Önálló publikáció</span>}
+          {isOwner && onResearch && <button onClick={(e) => { e.stopPropagation(); onResearch(); }}
+            style={{ ...jStyle, background: 'transparent', border: '1px dashed var(--line)', cursor: 'pointer', font: 'inherit', fontSize: 11, fontWeight: 600, color: 'var(--faint)' }}
+            title="Kutatási projekt megadása vagy módosítása">⛓</button>}
         </div>
         {project.journal && (isUrl(project.journal)
           ? <a href={project.journal} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} style={jStyle} title={project.journal}>↗ {journalLabel(project.journal)}</a>
@@ -557,6 +615,8 @@ function App() {
   const [shareId, setShareId] = useState(null);
   const draftRef = useRef(null);   // {id,tpl} of a create attempt whose server save failed — retried, never duplicated
   const [linksId, setLinksId] = useState(null);   // publication whose submission/publication links are being edited
+  const [rlinks, setRlinks] = useState({});      // project_id -> {research_project_id, research_title} (migration-138)
+  const [researchId, setResearchId] = useState(null);   // publication whose research link is being edited
   const [tab, setTab] = useState('all');
   const [isAdmin, setIsAdmin] = useState(() => !!(window.PR_BACKEND && window.PR_BACKEND.user && window.PR_BACKEND.user.role === 'admin'));
   const [, force] = useState(0);
@@ -590,6 +650,18 @@ function App() {
     Store.seedIfEmpty(); setProjects(Store.listFor(me.id));
   }, [me]);
   useEffect(() => { refresh(); }, [me]);
+  // Melyik publikáció melyik kutatási projekthez tartozik — egy hívás, a kártyák chipjéhez.
+  const loadRlinks = useCallback(() => {
+    const sb = window.PR_BACKEND && window.PR_BACKEND.sb;
+    if (!sb || !window.PR_BACKEND.user) return;
+    sb.rpc('pr_publication_links').then((r) => {
+      if (r && r.error) return;                       // migráció még nincs lefuttatva → nincs chip-adat
+      const m = {}; ((r && r.data) || []).forEach((x) => { m[x.project_id] = x; });
+      setRlinks(m);
+    }, () => { });
+  }, []);
+  useEffect(() => { loadRlinks(); }, [loadRlinks, me]);
+  useEffect(() => { let n = 0; const iv = setInterval(() => { n++; if ((window.PR_BACKEND && window.PR_BACKEND.user) || n > 15) { clearInterval(iv); loadRlinks(); } }, 500); return () => clearInterval(iv); }, [loadRlinks]);
   useEffect(() => Store.subscribe(refresh), [refresh]);
   useEffect(() => { const c = () => setAcctOpen(false); window.addEventListener('click', c); return () => window.removeEventListener('click', c); }, []);
   useEffect(() => { const h = (e) => setIsAdmin(!!(e.detail && e.detail.role === 'admin')); window.addEventListener('pr-profile', h); return () => window.removeEventListener('pr-profile', h); }, []);
@@ -687,6 +759,8 @@ function App() {
                   <Card key={p.id} project={p} me={me} onOpen={() => open(p.id)}
                     onShare={() => setShareId(p.id)}
                     onLinks={() => setLinksId(p.id)}
+                    rlink={rlinks[p.id]}
+                    onResearch={() => setResearchId(p.id)}
                     onRename={(t) => { Store.rename(p.id, t); refresh(); }}
                     onStatus={(s) => { const pr = Store.get(p.id); if (pr) { pr.status = s; Store.save(pr); refresh(); } }}
                     onDuplicate={() => { Store.duplicate(p.id); refresh(); }}
@@ -699,6 +773,8 @@ function App() {
       {modal === 'usage' && <UsageModal me={me} onClose={() => setModal(null)} />}
       {modal === 'activity' && <ActivityModal projects={projects} onClose={() => setModal(null)} />}
       {shareProject && <ShareModal project={shareProject} me={me} onClose={() => setShareId(null)} onChange={() => { force((n) => n + 1); refresh(); }} />}
+      {researchId && <ResearchLinkModal project={{ id: researchId }} current={(rlinks[researchId] || {}).research_project_id || ''}
+        onClose={() => setResearchId(null)} onSaved={() => { setResearchId(null); loadRlinks(); }} />}
       {linksProject && <LinksModal project={linksProject} onClose={() => setLinksId(null)} onSave={(v) => { if (Store.setLinks) Store.setLinks(linksId, v); else { const pr = Store.get(linksId); if (pr) { pr.submitUrl = v.submitUrl; pr.pubUrl = v.pubUrl; Store.save(pr); } }   /* tolerate a stale cached store */ setLinksId(null); force((n) => n + 1); refresh(); }} />}
     </div>
   );

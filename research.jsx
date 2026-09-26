@@ -2983,6 +2983,101 @@
     );
   }
 
+  /* ---------- Publikációk (Írás fül ↔ Publikációk oldal) ----------
+     Egy kutatási projekthez tartozó LaTeX-publikációk kártyái. Innen lehet ÚJAT létrehozni és egy
+     meglévő, még önálló publikációt IDECSATOLNI. A kapcsolat a projects.research_project_id oszlopban
+     él (migration-138) — szándékosan nem a projekt-blobban, mert azt a mentés egészében felülírja. */
+  var PUB_STATUS_CHIP = { 'Drafting': 'c-grey', 'Submitted': 'c-acc', 'Under review': 'c-warn', 'Revising': 'c-warn', 'Accepted': 'c-ok', 'Rejected': 'c-danger' };
+  function noSuchFn(err) { var c = (err && err.code) || ''; return c === 'PGRST202' || c === '42883' || c === '42703'; }
+  function PubLinksPanel(props) {
+    var pid = props.projectId, ce = props.canEdit;
+    var lS = useState(null), list = lS[0], setList = lS[1];
+    var tS = useState(''), title = tS[0], setTitle = tS[1];
+    var bS = useState(false), busy = bS[0], setBusy = bS[1];
+    var cS = useState(true), cap = cS[0], setCap = cS[1];              // migration-138 lefutott-e
+    var aS = useState(null), attach = aS[0], setAttach = aS[1];        // [{id,title}] vagy null = zárva
+    var vS = useState(''), attachId = vS[0], setAttachId = vS[1];
+    var alive = useRef(true);
+    useEffect(function () { alive.current = true; return function () { alive.current = false; }; }, []);
+    function load() {
+      if (!sb || !pid) return;
+      sb.rpc('pr_research_publications', { p_research: pid }).then(function (r) {
+        if (!alive.current) return;
+        if (r && r.error) { if (noSuchFn(r.error)) setCap(false); setList([]); return; }
+        setCap(true); setList((r && r.data) || []);
+      });
+    }
+    useEffect(function () { load(); }, [pid]);
+    function create() {
+      var v = String(title || '').trim(); if (!v || busy) return;
+      setBusy(true);
+      sb.rpc('pr_create_publication', { p_research: pid, p_title: v, p_journal: props.journal || null }).then(function (r) {
+        if (!alive.current) return; setBusy(false);
+        if (r && r.error) { window.PRUI.toast('Nem sikerült létrehozni: ' + r.error.message, { kind: 'error' }); return; }
+        setTitle(''); load(); window.PRUI.toast('Publikáció létrehozva — a Publikációk oldalon is megjelenik', { kind: 'success' });
+      });
+    }
+    function openAttach() {
+      sb.from('projects').select('id,title,updated_at').is('deleted_at', null).is('research_project_id', null)
+        .order('updated_at', { ascending: false }).limit(60).then(function (r) {
+          if (!alive.current) return;
+          if (r && r.error) { window.PRUI.toast('Nem sikerült betölteni a publikációkat: ' + r.error.message, { kind: 'error' }); return; }
+          setAttach((r && r.data) || []); setAttachId('');
+        });
+    }
+    function setLink(projectId, research) {
+      sb.rpc('pr_set_research_link', { p_project: projectId, p_research: research }).then(function (r) {
+        if (!alive.current) return;
+        if (r && r.error) { window.PRUI.toast('Nem sikerült: ' + r.error.message, { kind: 'error' }); return; }
+        setAttach(null); load();
+        window.PRUI.toast(research ? 'Publikáció csatolva' : 'Publikáció leválasztva', { kind: 'success' });
+      });
+    }
+    if (!cap) {
+      return h('div', { className: 'panel' },
+        h('h3', { style: { marginTop: 0 } }, '📄 Publikációk'),
+        h('div', { style: { fontSize: 12.5, color: 'var(--warn)' } },
+          '⚠ Ehhez a funkcióhoz a migration-138-publication-research-link.sql lefuttatása kell.'));
+    }
+    var rows = list || [];
+    return h('div', { className: 'panel' },
+      h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 8 } },
+        h('h3', { style: { margin: 0, flex: 1, minWidth: 140 } }, '📄 Publikációk',
+          rows.length ? h('span', { style: { fontWeight: 400, color: 'var(--faint)', fontSize: 13 } }, ' · ' + rows.length) : null),
+        ce ? h('button', { className: 'btn', style: { padding: '4px 10px' }, onClick: function () { attach ? setAttach(null) : openAttach(); } },
+          attach ? 'Mégsem' : '🔗 Meglévő csatolása') : null),
+      h('p', { style: { fontSize: 12.5, color: 'var(--muted)', lineHeight: 1.5, margin: '0 0 10px' } },
+        'Az itt létrehozott publikációk a Publikációk menüben is megjelennek, és a kártyájuk mutatja, hogy ehhez a kutatási projekthez tartoznak.'),
+      attach ? h('div', { style: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10, padding: 10, background: 'var(--surface-2)', borderRadius: 10 } },
+        h('select', { className: 'field', style: { minWidth: 240, flex: 1 }, value: attachId, onChange: function (e) { setAttachId(e.target.value); } },
+          h('option', { value: '' }, attach.length ? '— válassz egy önálló publikációt —' : '(nincs csatolható önálló publikációd)'),
+          attach.map(function (x) { return h('option', { key: x.id, value: x.id }, x.title || 'Névtelen'); })),
+        h('button', { className: 'btn pri', disabled: !attachId, onClick: function () { if (attachId) setLink(attachId, pid); } }, 'Csatolás')
+      ) : null,
+      list === null ? h('div', { style: { fontSize: 12.5, color: 'var(--faint)' } }, 'Betöltés…')
+        : (rows.length ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 8 } }, rows.map(function (x) {
+          return h('div', { key: x.project_id, style: { border: '1px solid var(--line)', borderRadius: 10, padding: '9px 11px', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' } },
+            h('div', { style: { flex: 1, minWidth: 180 } },
+              h('div', { style: { fontWeight: 600, fontSize: 13.5 } }, x.title),
+              h('div', { style: { fontSize: 11.5, color: 'var(--faint)', display: 'flex', gap: 7, flexWrap: 'wrap', marginTop: 2 } },
+                h('span', null, (x.files || 0) + ' fájl'),
+                x.journal ? h('span', null, '· ' + x.journal) : null,
+                x.owner_name ? h('span', null, '· ' + x.owner_name) : null)),
+            h('span', { className: 'chip ' + (PUB_STATUS_CHIP[x.status] || 'c-grey') }, x.status || 'Drafting'),
+            x.can_open ? h('a', { className: 'btn pri', style: { textDecoration: 'none', padding: '4px 10px' }, href: 'ProofReader.html?p=' + encodeURIComponent(x.project_id) }, 'Megnyitás')
+              : h('span', { style: { fontSize: 11.5, color: 'var(--faint)' } }, 'nincs hozzáférésed'),
+            x.can_unlink ? h('button', { className: 'btn', style: { padding: '4px 9px' }, title: 'Leválasztás a kutatási projektről (a publikáció megmarad)', onClick: function () { setLink(x.project_id, null); } }, '⛓ Leválasztás') : null);
+        })) : h('div', { style: { fontSize: 12.5, color: 'var(--faint)' } }, 'Még nincs publikáció ehhez a kutatási projekthez.')),
+      ce ? h('div', { style: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 12, paddingTop: 11, borderTop: '1px solid var(--line)' } },
+        h('input', {
+          className: 'field', style: { flex: 1, minWidth: 220 }, placeholder: 'Új publikáció címe…', value: title,
+          onChange: function (e) { setTitle(e.target.value); },
+          onKeyDown: function (e) { if (e.key === 'Enter') create(); }
+        }),
+        h('button', { className: 'btn pri', disabled: busy || !String(title || '').trim(), onClick: create }, busy ? 'Létrehozás…' : '＋ Új publikáció')
+      ) : null);
+  }
+
   // ---------- Writing (R6 bridge) ----------
   function WritingPanel(props) {
     var p = props.project; var pid = p.id; var ce = props.canEdit;
@@ -3155,6 +3250,7 @@
     var selPick = picks.filter(function (x) { return x.id === jid; })[0];
     var nFig = draft && draft.files ? Object.keys(draft.files).filter(function (k) { return /\.png$/.test(k); }).length : 0;
     return h('div', null,
+      h(PubLinksPanel, { projectId: pid, canEdit: ce, journal: selPick ? selPick.title : '' }),
       h('div', { className: 'panel' },
         h('h3', { style: { marginTop: 0 } }, '✍️ Writing — draft manuscript'),
         h('p', { style: { fontSize: 13, color: 'var(--muted)', lineHeight: 1.5 } }, 'Assembles a full draft paper from your executed results + the selected journal, with the best model (Claude Opus), grounded only in your real results (no invented numbers). The draft opens as a compilable project in the LaTeX editor.'),
