@@ -133,7 +133,7 @@
       const data = ctx.getFileData(pane.file);
       const url = ctx.getFileURL(pane.file);
       if (!data && !url) return <Missing label="PDF" />;
-      return <PdfView data={data} url={url} />;
+      return <PdfView data={data} url={url} pane={pane} ctx={ctx} />;
     }
     if (pane.kind === 'image') {
       const url = ctx.getFileURL(pane.file);
@@ -522,9 +522,98 @@
     const dec = decodeURIComponent(body); const b = new Uint8Array(dec.length); for (let j = 0; j < dec.length; j++) b[j] = dec.charCodeAt(j); return b;
   }
   /* PDF.js canvas renderer — renders from raw bytes (blob/data URLs are blocked in sandboxed previews). */
-  function PdfView({ data, url, bytes }) {
+  /* Sima PDF-nézet (feltöltött és beküldési-csomagbeli PDF-ek).
+     Szövegréteggel: így ezeken is lehet MONDATOT kijelölni, és — Alt/⌥ vagy a ⬚ gomb
+     segítségével — ÁBRÁT, TÁBLÁZATOT, EGYENLETET területként megjelölni, majd megjegyzést
+     vagy ToDo-t fűzni hozzá. A horgony itt a lapszám + arányos téglalap (a PDF-nek nincs
+     forrásszövege, amihez karakterpozícióval lehetne kötni). */
+  function PdfView({ data, url, bytes, pane, ctx }) {
     const ref = useRef(null);
     const [state, setState] = useState('loading'); // loading | done | error
+    const [regionOn, setRegionOn] = useState(false);
+    const regionRef = useRef(false); regionRef.current = regionOn;
+    const filePath = pane && pane.file;
+    const canAnn = !!(ctx && ctx.canComment && ctx.onPdfSelect && filePath);
+    const annList = (canAnn && ctx.regionAnns) ? ctx.regionAnns(filePath) : [];
+    const annKey = JSON.stringify(annList);
+
+    function labelFor(txt) {
+      let m = /(Figure|Fig\.|Table|Scheme|Ábra|Táblázat)\s*([0-9]+[a-z]?)/i.exec(txt);
+      if (m) return m[1].replace(/\.$/, '') + ' ' + m[2];
+      m = /^\s*\(\s*([0-9]+[a-z]?)\s*\)/.exec(txt) || /\(\s*([0-9]+[a-z]?)\s*\)\s*$/.exec(txt);
+      if (m) return 'Egyenlet (' + m[1] + ')';
+      return null;
+    }
+    function applyRegions() {
+      const root = ref.current; if (!root) return;
+      root.querySelectorAll('.ct-region').forEach((el) => el.remove());
+      (annList || []).forEach((a) => {
+        const pageEl = root.querySelector('.ct-page[data-page="' + a.page + '"]'); if (!pageEl) return;
+        const d = document.createElement('div');
+        d.className = 'ct-region' + (a.kind === 'todo' ? ' todo' : '') + (a.status === 'resolved' || a.status === 'done' ? ' done' : '');
+        d.style.left = (a.rect[0] * 100) + '%'; d.style.top = (a.rect[1] * 100) + '%';
+        d.style.width = (a.rect[2] * 100) + '%'; d.style.height = (a.rect[3] * 100) + '%';
+        d.title = (a.label ? a.label + ' — ' : '') + (a.body || '').slice(0, 200);
+        const tag = document.createElement('span'); tag.className = 'ct-region-tag';
+        tag.textContent = (a.kind === 'todo' ? '☑ ' : '💬 ') + (a.label || 'megjegyzés');
+        d.appendChild(tag);
+        d.addEventListener('click', (ev) => { ev.stopPropagation(); if (ctx.onOpenRegion) ctx.onOpenRegion(a); });
+        pageEl.appendChild(d);
+      });
+    }
+    // téglalap-húzás (ábra / táblázat / egyenlet)
+    function startRegion(e) {
+      if (!canAnn || !(e.altKey || regionRef.current)) return;
+      const pageEl = e.target.closest && e.target.closest('.ct-page'); if (!pageEl) return;
+      e.preventDefault(); e.stopPropagation();
+      try { window.getSelection().removeAllRanges(); } catch (er) { }
+      const pr = pageEl.getBoundingClientRect(); const x0 = e.clientX, y0 = e.clientY;
+      const box = document.createElement('div'); box.className = 'ct-regionsel'; pageEl.appendChild(box);
+      const put = (ev) => {
+        const l = Math.min(x0, ev.clientX), tp = Math.min(y0, ev.clientY);
+        const w = Math.abs(ev.clientX - x0), hh = Math.abs(ev.clientY - y0);
+        box.style.left = ((l - pr.left) / pr.width * 100) + '%'; box.style.top = ((tp - pr.top) / pr.height * 100) + '%';
+        box.style.width = (w / pr.width * 100) + '%'; box.style.height = (hh / pr.height * 100) + '%';
+        return { l, t: tp, w, h: hh };
+      };
+      const move = (ev) => put(ev);
+      const up = (ev) => {
+        window.removeEventListener('mousemove', move);
+        const g = put(ev); try { box.remove(); } catch (er) { }
+        if (g.w < 14 || g.h < 10) return;
+        const txt = [];
+        pageEl.querySelectorAll('.ct-textlayer > span').forEach((sp) => {
+          const r = sp.getBoundingClientRect();
+          if (r.right < g.l || r.left > g.l + g.w || r.bottom < g.t || r.top > g.t + g.h) return;
+          txt.push(sp.textContent || '');
+        });
+        const text = txt.join(' ').replace(/\s+/g, ' ').trim();
+        setTimeout(() => ctx.onPdfSelect(pane, {
+          page: +pageEl.dataset.page, rect: [(g.l - pr.left) / pr.width, (g.t - pr.top) / pr.height, g.w / pr.width, g.h / pr.height],
+          text, label: labelFor(text), at: { x: ev.clientX, y: g.t },
+        }), 0);
+      };
+      window.addEventListener('mousemove', move);
+      window.addEventListener('mouseup', up, { once: true });
+    }
+    // szöveg-kijelölés → ugyanaz a sáv, a kijelölés befoglaló téglalapjával horgonyozva
+    function onUp(e) {
+      if (!canAnn || e.detail >= 2) return;
+      const sel = window.getSelection();
+      if (!sel || !sel.rangeCount || sel.isCollapsed || !sel.toString().trim()) return;
+      const range = sel.getRangeAt(0);
+      let node = range.commonAncestorContainer; if (node.nodeType !== 1) node = node.parentElement;
+      const pageEl = node && node.closest ? node.closest('.ct-page') : null;
+      if (!pageEl || !ref.current.contains(pageEl)) return;
+      const pr = pageEl.getBoundingClientRect(); const rr = range.getBoundingClientRect();
+      const text = sel.toString().replace(/\s+/g, ' ').trim();
+      ctx.onPdfSelect(pane, {
+        page: +pageEl.dataset.page,
+        rect: [(rr.left - pr.left) / pr.width, (rr.top - pr.top) / pr.height, rr.width / pr.width, rr.height / pr.height],
+        text, label: null, at: { x: rr.left + rr.width / 2, y: rr.top },
+      });
+    }
+
     useEffect(() => {
       let cancelled = false; const lib = window.pdfjsLib; const cont = ref.current;
       if (!cont) return;
@@ -544,22 +633,49 @@
             const page = await pdf.getPage(n); if (cancelled) return;
             const base = page.getViewport({ scale: 1 });
             const scale = Math.min(2.0, width / base.width);
+            const cssVp = page.getViewport({ scale });
             const vp = page.getViewport({ scale: scale * dpr });
+            // laponként külön burok, hogy a téglalap-jelölés és a szövegréteg ráülhessen
+            const wrap = document.createElement('div');
+            wrap.className = 'ct-page pdf-plain-page'; wrap.dataset.page = n;
+            wrap.style.width = Math.floor(cssVp.width) + 'px'; wrap.style.height = Math.floor(cssVp.height) + 'px';
             const canvas = document.createElement('canvas');
             canvas.className = 'pdf-page';
             canvas.width = vp.width; canvas.height = vp.height;
-            canvas.style.width = (vp.width / dpr) + 'px';
-            cont.appendChild(canvas);
+            canvas.style.width = Math.floor(cssVp.width) + 'px'; canvas.style.height = Math.floor(cssVp.height) + 'px';
+            wrap.appendChild(canvas); cont.appendChild(wrap);
             await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
             if (cancelled) return;
+            if (canAnn && lib.renderTextLayer) {
+              try {
+                const tl = document.createElement('div'); tl.className = 'ct-textlayer';
+                tl.style.width = Math.floor(cssVp.width) + 'px'; tl.style.height = Math.floor(cssVp.height) + 'px';
+                tl.style.setProperty('--scale-factor', scale); tl.style.setProperty('--total-scale-factor', scale);
+                wrap.appendChild(tl);
+                const tc = await page.getTextContent();
+                await lib.renderTextLayer({ textContent: tc, container: tl, viewport: cssVp, textDivs: [] }).promise;
+                // pdf.js 3.x: az endOfContent segéd nélkül a húzásos kijelölés egész bekezdéseket ragad meg
+                const eoc = document.createElement('div'); eoc.className = 'endOfContent'; tl.appendChild(eoc);
+                tl.addEventListener('mousedown', (ev) => { const b2 = tl.getBoundingClientRect(); const r = b2.height ? Math.max(0, Math.min(1, (ev.clientY - b2.top) / b2.height)) : 0; eoc.style.top = (r * 100).toFixed(2) + '%'; eoc.classList.add('active'); });
+                const clr = () => { eoc.style.top = ''; eoc.classList.remove('active'); };
+                tl.addEventListener('mouseup', clr); tl.addEventListener('mouseleave', clr);
+              } catch (er) { }
+            }
           }
           setState('done');
+          applyRegions();
         } catch (e) { clearTimeout(watchdog); if (!cancelled) setState('error'); }
       })();
       return () => { cancelled = true; clearTimeout(watchdog); };
-    }, [data, url, bytes]);
+    }, [data, url, bytes, canAnn]);
+    useEffect(() => { applyRegions(); }, [annKey, state]);
+
     return <div className="pdf-view-wrap">
-      <div className="pdf-view" ref={ref} />
+      <div className={'pdf-view' + (regionOn ? ' region-mode' : '')} ref={ref}
+        onMouseDown={startRegion} onMouseUp={onUp} />
+      {canAnn && state === 'done' && <button className={'pdf-region-btn' + (regionOn ? ' on' : '')}
+        title="Terület kijelölése megjegyzéshez: ábra, táblázat, egyenlet (vagy Alt/⌥ + húzás)"
+        onMouseDown={(e) => e.stopPropagation()} onClick={() => setRegionOn((v) => !v)}>⬚ Terület</button>}
       {state === 'loading' && <div className="pdf-status">Loading PDF…</div>}
       {state === 'error' && <div className="pdf-status">Couldn’t render this PDF inline.{url ? <> <a href={url} target="_blank" rel="noopener">Open in a new tab ↗</a></> : null}</div>}
     </div>;
@@ -1060,7 +1176,7 @@
           onDragOver={onDragOver} onDragLeave={(e) => { if (!bodyRef.current || !bodyRef.current.contains(e.relatedTarget)) setDz(null); }}
           onDrop={(e) => { e.preventDefault(); const sid = e.dataTransfer.getData('text/plain'); const z = dz; setDz(null); if (sid && z && sid !== pane.id) ctx.onMovePane(sid, pane.id, z); ctx.onDragEnd(); }}>
           <PaneBody pane={pane} ctx={ctx} />
-          {syncable && ctx.isCurProj(pane.docId) && ctx.canComment && ctx.selPaneId === pane.id && ctx.selQuote &&
+          {((syncable && ctx.isCurProj(pane.docId)) || (pane.kind === 'pdf' && !!pane.file)) && ctx.canComment && ctx.selPaneId === pane.id && ctx.selQuote &&
             <window.Collab.SelectionToolbar pos={ctx.selPos} quote={ctx.selQuote}
               onComment={() => ctx.onComment(pane)} onTodo={() => ctx.onTodo(pane)} onClose={ctx.onCloseSel} />}
           {dz && <div className={'ws-dropzone dz-' + dz}><div className="ws-drop-hint">{dz === 'center' ? 'Swap' : 'Move here'}</div></div>}

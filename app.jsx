@@ -1959,6 +1959,18 @@
     const reviewAnns = useMemo(() => displayAnns.filter((a) => a.kind === 'review'), [displayAnns]);
     // FONTOS: a displayAnns UTÁN kell definiálni — fölötte a useCallback a még üres listát
     // zárná magába (Babel var-ra fordít, így nem hibázik, csak soha nem frissül).
+    /* Kijelölés egy sima PDF-ben (feltöltött vagy beküldési csomagbeli): a horgony a
+       lapszám + arányos téglalap, mert a PDF-nek nincs forrásszövege. Szöveg-kijelölésnél a
+       kijelölés befoglaló téglalapja, területjelölésnél a húzott doboz. */
+    const onPdfSelect = useCallback((pane, info) => {
+      if (!pane || !pane.file) return;
+      selRange.current = { start: 0, end: 0 };
+      selDocRef.current = pane.file;
+      pendingRegion.current = { page: info.page, rect: info.rect, label: info.label || null, text: String(info.text || '').slice(0, 300) };
+      setSelQuote(info.label || (info.text ? String(info.text).slice(0, 60) : 'kijelölt terület'));
+      setSelPos({ top: Math.max(56, (info.at && info.at.y || 120) - 46), left: Math.max(130, Math.min(window.innerWidth - 130, (info.at && info.at.x) || 300)) });
+      setSelPaneId(pane.id);
+    }, []);
     const regionAnnsFor = useCallback((docId) => displayAnns
       .filter((a) => a.anchor && a.anchor.region && a.anchor.region.rect && (a.anchor.file || active) === docId)
       .map((a) => ({ id: a.id, kind: a.kind, status: a.status, body: a.body || '', label: a.anchor.region.label,
@@ -2452,7 +2464,7 @@
               getFileURL, getFileData, onPrint: onPrintDoc, onWord: onWordDoc, listFiles: listProjFiles, externalDocs: externalDocsList,
               selPaneId, selQuote, selPos, onComment: () => startAnnotation('comment'), onTodo: () => startAnnotation('todo'),
               onCloseSel: () => { setSelQuote(''); setSelPaneId(null); pendingRegion.current = null; },
-              onRegionSelect, regionAnns: regionAnnsFor, onOpenRegion
+              onRegionSelect, onPdfSelect, regionAnns: regionAnnsFor, onOpenRegion
             }} />
           </div>
 
