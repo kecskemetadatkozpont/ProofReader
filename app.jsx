@@ -1175,7 +1175,20 @@
       const range = sel.getRangeAt(0);
       if (!root.contains(range.commonAncestorContainer)) return;
       const comp = getCompiled(pane.docId); if (!comp || !isCurProj(pane.docId)) return;
-      const sents = comp.sentences.filter((s) => { const el = root.querySelector('.sent[data-sid="' + s.id + '"]'); return el && range.intersectsNode(el); });
+      // Melyik mondatokat érinti a kijelölés? Az ELŐNÉZETBEN egy mondat EGY .sent elem, a fordított
+      // PDF-en viszont a pdf.js szavanként külön span-t rak le ugyanazzal a sid-del. A mondat első
+      // span-jára kérdezni (querySelector) ezért csak akkor talált, ha a kijelölés történetesen a mondat
+      // ELSŐ szavát is tartalmazta — emiatt nem jött fel a Komment/ToDo sáv a PDF-en. Most azokból az
+      // elemekből gyűjtjük a sid-eket, amiket a kijelölés ténylegesen metsz; ez mindkét panelben működik.
+      const sidsHit = Object.create(null);
+      let scope = range.commonAncestorContainer;
+      if (scope && scope.nodeType !== 1) scope = scope.parentElement;
+      if (!scope || !root.contains(scope)) scope = root;
+      for (let el = scope; el && el !== root.parentNode; el = el.parentElement) {   // egyetlen szón belüli kijelölés
+        if (el.classList && el.classList.contains('sent') && el.dataset && el.dataset.sid != null) sidsHit[el.dataset.sid] = 1;
+      }
+      if (scope.querySelectorAll) scope.querySelectorAll('.sent[data-sid]').forEach((el) => { if (range.intersectsNode(el)) sidsHit[el.dataset.sid] = 1; });
+      const sents = comp.sentences.filter((s) => sidsHit[s.id] != null);
       if (!sents.length) { setSelPaneId(null); return; }
       const spanStart = Math.min.apply(null, sents.map((s) => s.start));
       const spanEnd = Math.max.apply(null, sents.map((s) => s.end));
