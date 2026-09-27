@@ -1235,6 +1235,15 @@
         if (sents.length) {
           start = Math.min.apply(null, sents.map((s) => s.start));
           end = Math.max.apply(null, sents.map((s) => s.end));
+          // Végső korlát: ha a horgony így is aránytalanul hosszú lenne (a szó→mondat
+          // illesztés szórása miatt), csak a LEGTÖBB találatot adó mondatra szűkítünk —
+          // különben egy képlet megjegyzése a fél dokumentumot kiemelné.
+          if (end - start > 1200) {
+            let bestSid = null, bc = -1;
+            Object.keys(counts).forEach((k) => { if (counts[k] > bc) { bc = counts[k]; bestSid = k; } });
+            const s1 = comp.sentences.filter((s) => String(s.id) === String(bestSid))[0];
+            if (s1) { start = s1.start; end = s1.end; }
+          }
         }
       }
       selRange.current = { start: start, end: end };
