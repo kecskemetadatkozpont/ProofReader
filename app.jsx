@@ -350,9 +350,15 @@
     }, []);
     const removePackageFiles = useCallback((version) => {
       const base = PKG_DIR + '/v' + version + '/';
-      setFiles((f) => { const c = {}; Object.keys(f).forEach((k) => { if (k.indexOf(base) !== 0) c[k] = f[k]; }); return c; });
+      let left = 0;
+      setFiles((f) => {
+        const c = {};
+        Object.keys(f).forEach((k) => { if (k.indexOf(base) !== 0) { c[k] = f[k]; if (k.indexOf(PKG_DIR + '/') === 0) left++; } });
+        return c;
+      });
       setOrder((o) => o.filter((p) => p.indexOf(base) !== 0));
-      setFolders((fl) => fl.filter((d) => d !== base.slice(0, -1) && d.indexOf(base) !== 0));
+      // az utolsó csomag törlésekor az üres gyűjtőmappa se maradjon ott
+      setFolders((fl) => fl.filter((d) => d !== base.slice(0, -1) && d.indexOf(base) !== 0 && !(left === 0 && d === PKG_DIR)));
     }, []);
     useEffect(() => { try { if (window.PR_SB && me && me.id) window.PR_SB.from('profiles').select('can_figures').eq('id', me.id).maybeSingle().then((r) => { if (r && r.data) setCanFigures(!!r.data.can_figures); }, function () { }); } catch (e) { } }, []);
     useEffect(() => { const h = (e) => setIsAdmin(!!(e.detail && e.detail.role === 'admin')); window.addEventListener('pr-profile', h); return () => window.removeEventListener('pr-profile', h); }, []);
