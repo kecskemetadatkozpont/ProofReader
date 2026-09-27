@@ -360,6 +360,33 @@
       // az utolsó csomag törlésekor az üres gyűjtőmappa se maradjon ott
       setFolders((fl) => fl.filter((d) => d !== base.slice(0, -1) && d.indexOf(base) !== 0 && !(left === 0 && d === PKG_DIR)));
     }, []);
+    /* Önjavítás: a fa-bejegyzések a projekt blobjában élnek, és egy párhuzamos mentés
+       (másik lap, régebbi pillanatkép) elmoshatja őket. Ezért minden betöltéskor
+       összevetjük a csomagok TÁBLÁJÁVAL: ami hiányzik, azt pótoljuk, ami már nincs meg
+       csomagként, azt kivesszük. A manifestet csak akkor kérjük le, ha tényleg hiányzik. */
+    const syncPackageTree = useCallback(() => {
+      const sb = window.PR_BACKEND && window.PR_BACKEND.sb;
+      if (!sb || !projectId) return;
+      sb.rpc('sp_list', { p_project: projectId }).then((r) => {
+        if (!r || r.error || !Array.isArray(r.data)) return;
+        const versions = r.data.map((x) => x.version);
+        const cur = filesRef.current || {};
+        const have = {};
+        Object.keys(cur).forEach((k) => { const m = /^Beküldési csomagok\/v(\d+)\//.exec(k); if (m) have[+m[1]] = 1; });
+        // eltűnt csomagok bejegyzéseinek kitakarítása
+        Object.keys(have).forEach((v) => { if (versions.indexOf(+v) < 0) removePackageFiles(+v); });
+        // hiányzó csomagok pótlása
+        versions.filter((v) => !have[v]).forEach((v) => {
+          const row = r.data.filter((x) => x.version === v)[0];
+          sb.rpc('sp_get', { p_id: row.id }).then((g) => {
+            if (!g || g.error || !g.data) return;
+            addPackageFiles(v, g.data.manifest);
+          });
+        });
+      }, () => { });
+    }, [projectId, addPackageFiles]);
+    useEffect(() => { const id = setTimeout(syncPackageTree, 2500); return () => clearTimeout(id); }, [syncPackageTree]);
+
     useEffect(() => { try { if (window.PR_SB && me && me.id) window.PR_SB.from('profiles').select('can_figures').eq('id', me.id).maybeSingle().then((r) => { if (r && r.data) setCanFigures(!!r.data.can_figures); }, function () { }); } catch (e) { } }, []);
     useEffect(() => { const h = (e) => setIsAdmin(!!(e.detail && e.detail.role === 'admin')); window.addEventListener('pr-profile', h); return () => window.removeEventListener('pr-profile', h); }, []);
     const [voiceOpen, setVoiceOpen] = useState(false);
