@@ -1213,6 +1213,36 @@
     }, [getCompiled, isCurProj, getSource]);
     const previewElByPane = (pid) => previewEls.current[pid] || null;
 
+    /* ---- terület-kijelölés a fordított PDF-en: ábra, táblázat, egyenlet ----
+       A PDF szövegrétege szavakra bomlik, ezért egy ábrához vagy képlethez nem lehet
+       „mondatot” jelölni. A panel visszaadja a lapszámot, az arányos téglalapot és azt,
+       mely mondatok szövege esik bele — az utóbbiból lesz a forrásbeli horgony. */
+    const pendingRegion = useRef(null);
+    const onRegionSelect = useCallback((pane, info) => {
+      const docId = pane.docId;
+      const comp = getCompiled(docId);
+      let start = 0, end = 0;
+      if (comp && info.sids && info.sids.length) {
+        const ids = Object.create(null); info.sids.forEach((s) => { ids[s] = 1; });
+        const sents = comp.sentences.filter((s) => ids[s.id] != null);
+        if (sents.length) {
+          start = Math.min.apply(null, sents.map((s) => s.start));
+          end = Math.max.apply(null, sents.map((s) => s.end));
+        }
+      }
+      selRange.current = { start: start, end: end };
+      selDocRef.current = docId;
+      pendingRegion.current = { page: info.page, rect: info.rect, label: info.label || null, text: String(info.text || '').slice(0, 300) };
+      setSelQuote(info.label || (info.text ? String(info.text).slice(0, 60) : 'kijelölt terület'));
+      setSelPos({ top: Math.max(56, (info.at && info.at.y || 120) - 46), left: Math.max(130, Math.min(window.innerWidth - 130, (info.at && info.at.x) || 300)) });
+      setSelPaneId(pane.id);
+    }, [getCompiled]);
+    const regionAnnsFor = useCallback((docId) => displayAnns
+      .filter((a) => a.anchor && a.anchor.region && a.anchor.region.rect && (a.anchor.file || active) === docId)
+      .map((a) => ({ id: a.id, kind: a.kind, status: a.status, body: a.body || '', label: a.anchor.region.label,
+        page: a.anchor.region.page, rect: a.anchor.region.rect })), [displayAnns, active]);
+    const onOpenRegion = useCallback((a) => { setDrawer({ open: true, tab: a.kind === 'todo' ? 'todos' : 'comments' }); }, []);
+
     /* ---- file upload (into the selected folder) ---- */
     const fileInput = useRef(null);
     function uAdd(name, size, status, reason) { const id = 'u' + (++uploadSeq.current); setUploads((l) => [...l, { id: id, name: name, size: size || 0, status: status || 'queued', reason: reason || '' }]); return id; }
@@ -1683,6 +1713,7 @@
     // parser, so offered keys and "Title (Year)" hints can never drift apart).
     const displayAnns = useMemo(() => annotations.map((a) => {
       if (!a.anchor || a.anchor.file !== active) return a;
+      if (a.anchor.region) return a;   // terület-jegyzet: a horgony a téglalap, nem a szöveg — ne mozgassuk
       const cur = source.slice(a.anchor.start, a.anchor.end);
       if (cur === a.anchor.quote) return a;
       const at = a.anchor.quote ? source.indexOf(a.anchor.quote) : -1;
@@ -1800,7 +1831,11 @@
       const r = selRange.current;
       const file = selDocRef.current && isCurProj(selDocRef.current) ? selDocRef.current : active;
       const src = getSource(file);
-      setDraft({ kind: kind, anchor: { file: file, start: r.start, end: r.end, quote: src.slice(r.start, r.end) } });
+      // Terület-jegyzet (ábra/táblázat/egyenlet a fordított PDF-en): a szövegbeli horgony
+      // megmarad (így a fiókban és a forrásban is ott a jelölés), mellé kerül a téglalap.
+      const reg = pendingRegion.current; pendingRegion.current = null;
+      const quote = reg ? (reg.label || reg.text || 'kijelölt terület') : src.slice(r.start, r.end);
+      setDraft({ kind: kind, anchor: Object.assign({ file: file, start: r.start, end: r.end, quote: quote }, reg ? { region: reg } : null) });
       setSelQuote(''); setSelPaneId(null); setPreviewSel(null); setDrawer({ open: true, tab: kind === 'todo' ? 'todos' : 'comments' });
     }
     /* selection inside a source pane */
@@ -2358,7 +2393,9 @@
               onCaret: (pane, off) => { if (pane.docId === active) onCaret(off); }, onJump: (pane, off) => { if (pane.docId === active) onEditorJump(off); },
               onSourceSel, onPreviewClick, onPreviewMouseUp, onPreviewScroll, registerPreview,
               getFileURL, getFileData, onPrint: onPrintDoc, onWord: onWordDoc, listFiles: listProjFiles, externalDocs: externalDocsList,
-              selPaneId, selQuote, selPos, onComment: () => startAnnotation('comment'), onTodo: () => startAnnotation('todo'), onCloseSel: () => { setSelQuote(''); setSelPaneId(null); }
+              selPaneId, selQuote, selPos, onComment: () => startAnnotation('comment'), onTodo: () => startAnnotation('todo'),
+              onCloseSel: () => { setSelQuote(''); setSelPaneId(null); pendingRegion.current = null; },
+              onRegionSelect, regionAnns: regionAnnsFor, onOpenRegion
             }} />
           </div>
 

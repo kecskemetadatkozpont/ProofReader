@@ -569,7 +569,7 @@
    * spans are aligned to the engine's spoken sentences (data-sid). Highlights the active sentence
    * and routes clicks through ctx.onPreviewClick (same read-from-here contract as the Preview pane). */
   function ctNorm(s) { return (s || '').toLowerCase().replace(/[^a-z0-9áéíóöőúüű]+/gi, ' ').trim().split(/\s+/).filter(Boolean); }
-  function CompiledPdfView({ pane, ctx, bytes }) {
+  function CompiledPdfView({ pane, ctx, bytes, regionOn }) {
     const docId = pane.docId;
     const ref = useRef(null);
     const stRef = useRef(null);
@@ -779,7 +779,7 @@
             tl.addEventListener('mousedown', (e) => { const b = tl.getBoundingClientRect(); const r = b.height ? Math.max(0, Math.min(1, (e.clientY - b.top) / b.height)) : 0; eoc.style.top = (r * 100).toFixed(2) + '%'; eoc.classList.add('active'); });
             const clearEoc = () => { eoc.style.top = ''; eoc.classList.remove('active'); };
             tl.addEventListener('mouseup', clearEoc); tl.addEventListener('mouseleave', clearEoc);
-            applyHighlight(root); applyAnno(root); applyVoiced(root); applyReview(root); applyMarginCards(root);
+            applyHighlight(root); applyAnno(root); applyVoiced(root); applyReview(root); applyMarginCards(root); applyRegions(root);
           };
           st.renderPage = renderPage;
           const io = new IntersectionObserver((ents) => { ents.forEach((e) => { if (e.isIntersecting) renderPage(+e.target.dataset.page).catch(() => { }); }); }, { root: root, rootMargin: '800px 0px' });
@@ -835,6 +835,86 @@
     // re-apply AI-review markers when the review set changes
     useEffect(() => { applyReview(); }, [JSON.stringify(reviewMap), state]);
 
+    /* ---- TERÜLET-kijelölés: ábra, táblázat, egyenlet ----
+       A szövegréteg szavakra bomlik, így egy ábrára vagy képletre nem lehet „mondatot” jelölni.
+       Ezért a lapon húzható egy téglalap (Alt/⌥ + húzás, vagy a fejléc ⬚ gombjával), és a
+       megjegyzés ehhez a területhez kötődik. A téglalapot a laphoz képest ARÁNYOSAN tároljuk,
+       így nagyításnál és újrafordításnál is a helyén marad. */
+    function labelFor(txt) {
+      var m = /(Figure|Fig\.|Table|Scheme|Ábra|Táblázat)\s*([0-9]+[a-z]?)/i.exec(txt);
+      if (m) return m[1].replace(/\.$/, '') + ' ' + m[2];
+      m = /^\s*\(\s*([0-9]+[a-z]?)\s*\)/.exec(txt) || /\(\s*([0-9]+[a-z]?)\s*\)\s*$/.exec(txt);
+      if (m) return 'Egyenlet (' + m[1] + ')';
+      return null;
+    }
+    function startRegion(e) {
+      if (!ctx.canComment || !ctx.onRegionSelect) return;
+      if (!(e.altKey || regionOn)) return;
+      var pageEl = e.target.closest && e.target.closest('.ct-page'); if (!pageEl) return;
+      e.preventDefault(); e.stopPropagation();
+      try { window.getSelection().removeAllRanges(); } catch (er) { }
+      var pr = pageEl.getBoundingClientRect();
+      var x0 = e.clientX, y0 = e.clientY;
+      var box = document.createElement('div'); box.className = 'ct-regionsel';
+      pageEl.appendChild(box);
+      var put = function (ev) {
+        var l = Math.min(x0, ev.clientX), tp = Math.min(y0, ev.clientY);
+        var w = Math.abs(ev.clientX - x0), hh = Math.abs(ev.clientY - y0);
+        box.style.left = ((l - pr.left) / pr.width * 100) + '%';
+        box.style.top = ((tp - pr.top) / pr.height * 100) + '%';
+        box.style.width = (w / pr.width * 100) + '%';
+        box.style.height = (hh / pr.height * 100) + '%';
+        return { l: l, t: tp, w: w, h: hh };
+      };
+      var move = function (ev) { put(ev); };
+      var up = function (ev) {
+        window.removeEventListener('mousemove', move);
+        var g = put(ev);
+        try { box.remove(); } catch (er) { }
+        if (g.w < 14 || g.h < 10) return;                       // véletlen kattintás
+        var rect = [(g.l - pr.left) / pr.width, (g.t - pr.top) / pr.height, g.w / pr.width, g.h / pr.height];
+        // mi van a téglalapban: szavak + mondat-azonosítók
+        var sids = {}, txt = [];
+        pageEl.querySelectorAll('.ct-textlayer > span').forEach(function (sp) {
+          var r = sp.getBoundingClientRect();
+          if (r.right < g.l || r.left > g.l + g.w || r.bottom < g.t || r.top > g.t + g.h) return;
+          if (sp.dataset && sp.dataset.sid != null) sids[sp.dataset.sid] = 1;
+          txt.push(sp.textContent || '');
+        });
+        var text = txt.join(' ').replace(/\s+/g, ' ').trim();
+        // setTimeout: a panel saját onMouseUp-ja (szövegkijelölés) ELŐBB fut és ürítené a
+        // kijelölés-sávot; így a terület-kijelölés mindig utána érkezik.
+        setTimeout(function () { ctx.onRegionSelect(pane, {
+          page: +pageEl.dataset.page, rect: rect, sids: Object.keys(sids), text: text,
+          label: labelFor(text), at: { x: ev.clientX, y: g.t },
+        }); }, 0);
+      };
+      window.addEventListener('mousemove', move);
+      window.addEventListener('mouseup', up, { once: true });
+    }
+
+    // a mentett terület-jegyzetek dobozai a lapokon
+    function applyRegions(root) {
+      root = root || ref.current; if (!root) return;
+      var list = (ctx.regionAnns ? ctx.regionAnns(docId) : []) || [];
+      root.querySelectorAll('.ct-region').forEach(function (el) { el.remove(); });
+      list.forEach(function (a) {
+        var pageEl = root.querySelector('.ct-page[data-page="' + a.page + '"]'); if (!pageEl) return;
+        var d = document.createElement('div');
+        d.className = 'ct-region' + (a.kind === 'todo' ? ' todo' : '') + (a.status === 'resolved' || a.status === 'done' ? ' done' : '');
+        d.style.left = (a.rect[0] * 100) + '%'; d.style.top = (a.rect[1] * 100) + '%';
+        d.style.width = (a.rect[2] * 100) + '%'; d.style.height = (a.rect[3] * 100) + '%';
+        d.title = (a.label ? a.label + ' — ' : '') + (a.body || '').slice(0, 200);
+        var tag = document.createElement('span'); tag.className = 'ct-region-tag';
+        tag.textContent = (a.kind === 'todo' ? '☑ ' : '💬 ') + (a.label || 'megjegyzés');
+        d.appendChild(tag);
+        d.addEventListener('click', function (ev) { ev.stopPropagation(); if (ctx.onOpenRegion) ctx.onOpenRegion(a); });
+        pageEl.appendChild(d);
+      });
+    }
+    var regionsKey = JSON.stringify((ctx.regionAnns ? ctx.regionAnns(docId) : []) || []);
+    useEffect(function () { applyRegions(); }, [regionsKey, state, zoom]);
+
     // register this pane's scroll element so comment/todo selection (ctx.onPreviewMouseUp) works here too
     useEffect(() => {
       if (ctx.registerPreview && ref.current) ctx.registerPreview(pane.id, ref.current);
@@ -844,7 +924,8 @@
     // The ref'd scroll div is imperatively filled (kept empty in JSX so React never reconciles its
     // children); status overlays are React-managed siblings inside the positioned pdf-view-wrap.
     return <React.Fragment>
-      <div className="ct-scroll" ref={ref} data-doc={docId} onScroll={updateRail}
+      <div className={'ct-scroll' + (regionOn ? ' region-mode' : '')} ref={ref} data-doc={docId} onScroll={updateRail}
+        onMouseDown={startRegion}
         onClick={(e) => ctx.onPreviewClick && ctx.onPreviewClick(pane, e)}
         onMouseUp={(e) => ctx.onPreviewMouseUp && ctx.onPreviewMouseUp(pane, e)} />
       {state === 'loading' && <div className="pdf-status">Rendering…</div>}
@@ -872,6 +953,7 @@
    * byte-identical "Pontos PDF"), then renders the resulting PDF via CompiledPdfView. Hybrid Version B. */
   function CompiledView({ pane, ctx }) {
     const docId = pane.docId;
+    const [regionOn, setRegionOn] = useState(false);   // ⬚ területkijelölés (ábra/táblázat/egyenlet)
     const st = ctx.getCompiledPdf ? ctx.getCompiledPdf(docId) : null;
     const src = ctx.getSource ? ctx.getSource(docId) : '';
     // initial compile on mount — NON-forced, so re-opening/switching to an already-compiled doc reuses the
@@ -894,6 +976,9 @@
       <div className="pdf-render-bar">
         <span className="prb-title">{busy ? <span className="cspin" /> : null}Compiled · {ctx.docLabel(docId)}{st && st.pages ? ' · ' + st.pages + ' p.' : ''} · {modeLabel}{busy ? (' · ' + (phase || 'compiling…')) : (pending ? ' · ⏳ changes — waiting to compile' : (err ? ' · ⚠ compile error' : ''))}</span>
         <span style={{ display: 'inline-flex', gap: 6, flex: 'none' }}>
+          {ctx.canComment && ctx.onRegionSelect ? <button className={regionOn ? 'on' : ''} onClick={() => setRegionOn((v) => !v)}
+            title="Terület kijelölése megjegyzéshez: ábra, táblázat, egyenlet (vagy tartsd nyomva az Alt/⌥ billentyűt húzás közben)"
+            style={regionOn ? { background: 'var(--accent)', color: '#fff', borderColor: 'var(--accent)' } : null}>⬚ Terület</button> : null}
           <button onClick={() => ctx.requestCompile && ctx.requestCompile(docId, true)} disabled={busy} title="Full 3-pass recompile — resolves all cross-references, citations and page numbers (typing does a fast 1-pass draft)">Recompile</button>
           <button onClick={() => ctx.onCompileExact && ctx.onCompileExact(docId)} disabled={busy} title="Byte-identical PDF via an external TeX Live 2026 API">Exact PDF</button>
         </span>
@@ -904,7 +989,7 @@
       </div> : null}
       <div className="pdf-view-wrap" style={{ flex: 1, minHeight: 0 }}>
         {err && !pdf ? <div className="pdf-status" style={{ maxWidth: '82%', whiteSpace: 'normal', lineHeight: 1.45, textAlign: 'center', background: 'rgba(120,30,30,.55)' }}>⚠️ {String(err)}</div>
-          : pdf ? <div style={{ height: '100%', display: 'flex', flexDirection: 'column', opacity: showBar ? .45 : 1, transition: 'opacity .2s ease' }}><CompiledPdfView pane={pane} ctx={ctx} bytes={pdf} /></div>
+          : pdf ? <div style={{ height: '100%', display: 'flex', flexDirection: 'column', opacity: showBar ? .45 : 1, transition: 'opacity .2s ease' }}><CompiledPdfView pane={pane} ctx={ctx} bytes={pdf} regionOn={regionOn} /></div>
           : <div className="pdf-status">{busy ? (phase || 'Compiling…') : (pending ? 'Changes — waiting to compile…' : 'Waiting to compile…')}</div>}
       </div>
     </div>;
