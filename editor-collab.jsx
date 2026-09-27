@@ -298,7 +298,7 @@
   }
 
   function RightDrawer(p) {
-    const tabs = [['comments', 'Comments'], ['todos', 'To-dos'], ['review', 'Review'], ['numbers', 'Numbers'], ['refs', 'References'], ['spelling', 'Spelling'], ['history', 'History'], ['activity', 'Activity'], ['kpi', 'KPIs']];
+    const tabs = [['notes', 'Jegyzetek'], ['review', 'AI-ellenőrzés'], ['numbers', 'Numbers'], ['refs', 'References'], ['spelling', 'Spelling'], ['history', 'History'], ['activity', 'Activity'], ['kpi', 'KPIs']];
     const reviewOpen = (p.review || []).filter((a) => a.status !== 'resolved').length;
     const numConflicts = (p.consistency || []).filter((g) => g.distinct > 1).length;
     const spellOpen = p.spellOn && p.spell ? p.spell.misspelled.length : 0;
@@ -308,6 +308,24 @@
     const openCount = p.annotations.filter((a) => a.status === 'open' && a.kind === 'comment').length;
     const todoOpen = todos.filter((a) => a.status !== 'done').length;
     const [vlabel, setVlabel] = useState('');
+    /* Egy lista: megjegyzés, ToDo és AI-észrevétel együtt, színnel megkülönböztetve.
+       A fülek korábbi kulcsai (comments/todos) ide futnak be, a megfelelő szűrővel. */
+    const isNotes = p.tab === 'notes' || p.tab === 'comments' || p.tab === 'todos';
+    const [nf, setNf] = useState('all');          // all | comment | todo | review
+    const [openOnly, setOpenOnly] = useState(false);
+    useEffect(() => { if (p.tab === 'todos') setNf('todo'); else if (p.tab === 'comments') setNf('comment'); }, [p.tab]);
+    const KIND_LBL = { comment: '💬 Megjegyzés', todo: '☑ ToDo', review: '✦ AI' };
+    const isOpen = (a) => a.kind === 'todo' ? a.status !== 'done' : a.status !== 'resolved';
+    const noteAll = (p.annotations || []).slice().sort((a, b) => {
+      const fa = (a.anchor && a.anchor.file) || '', fb = (b.anchor && b.anchor.file) || '';
+      if (fa !== fb) return fa < fb ? -1 : 1;
+      const pa = (a.anchor && a.anchor.region && a.anchor.region.page) || 0;
+      const pb = (b.anchor && b.anchor.region && b.anchor.region.page) || 0;
+      if (pa !== pb) return pa - pb;
+      return ((a.anchor && a.anchor.start) || 0) - ((b.anchor && b.anchor.start) || 0);
+    });
+    const noteCount = (k) => noteAll.filter((a) => (a.kind || 'comment') === k).length;
+    const notes = noteAll.filter((a) => (nf === 'all' || (a.kind || 'comment') === nf) && (!openOnly || isOpen(a)));
     function exportMd() {
       const md = buildMarkdown(todos, p.project.title);
       const blob = new Blob([md], { type: 'text/markdown' });
@@ -322,16 +340,23 @@
       </div>
       {(p.tab === 'comments' || p.tab === 'todos') && p.docName && <div className="drawer-doc"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M4 2.5h5l3 3V13a.5.5 0 01-.5.5h-7A.5.5 0 014 13z" strokeLinejoin="round" /></svg>Active document <b>{p.docName}</b><span className="dd-hint">· each note is tagged with its file</span></div>}
       <div className="drawer-body">
-        {p.tab === 'comments' && <>
-          {p.draft && p.draft.kind === 'comment' && <Compose kind="comment" members={p.members} onSave={(d) => p.onSaveDraft(d)} onCancel={p.onCancelDraft} />}
-          {comments.length === 0 && !p.draft && <div className="empty-d">Select text in the editor and click <b>Comment</b> to start a thread.</div>}
-          {comments.map((a) => <Thread key={a.id} ann={a} me={p.me} members={p.members} canEdit={p.canEdit} onReply={p.onReply} onResolve={p.onResolve} onDelete={p.onDelete} onJump={p.onJump} onEdit={p.onEdit} />)}
-        </>}
-        {p.tab === 'todos' && <>
-          <div className="drawer-head"><span>{todoOpen} open · {todos.length} total</span><button className="link" onClick={exportMd} disabled={!todos.length}>↓ Markdown</button></div>
-          {p.draft && p.draft.kind === 'todo' && <Compose kind="todo" members={p.members} onSave={(d) => p.onSaveDraft(d)} onCancel={p.onCancelDraft} />}
-          {todos.length === 0 && !p.draft && <div className="empty-d">Select text and click <b>To-do</b> to add a task. All tasks roll up here and export as Markdown.</div>}
-          {todos.map((a) => <TodoItem key={a.id} ann={a} me={p.me} members={p.members} canEdit={p.canEdit} onToggle={p.onToggleTodo} onJump={p.onJump} onDelete={p.onDelete} onEdit={p.onEdit} />)}
+        {isNotes && <>
+          <div className="note-filter">
+            {[['all', 'Mind'], ['comment', KIND_LBL.comment], ['todo', KIND_LBL.todo], ['review', KIND_LBL.review]].map(([k, l]) =>
+              <button key={k} className={'nf-chip k-' + k + (nf === k ? ' on' : '')} onClick={() => setNf(k)}>
+                {l}<i>{k === 'all' ? noteAll.length : noteCount(k)}</i>
+              </button>)}
+            <span className="nf-sp" />
+            <button className={'nf-chip' + (openOnly ? ' on' : '')} title="Csak a nyitott tételek" onClick={() => setOpenOnly((v) => !v)}>csak nyitott</button>
+            <button className="link" title="Megjegyzések, ToDo-k és AI-észrevételek egy .md fájlban" onClick={() => (p.onExportNotes ? p.onExportNotes() : exportMd())} disabled={!noteAll.length}>↓ .md</button>
+          </div>
+          {p.draft && <Compose kind={p.draft.kind} members={p.members} onSave={(d) => p.onSaveDraft(d)} onCancel={p.onCancelDraft} />}
+          {!notes.length && !p.draft && <div className="empty-d">Jelölj ki szöveget — vagy a fordított PDF-en egy ábrát, táblázatot, képletet — és kattints a <b>Comment</b> vagy <b>To-do</b> gombra.</div>}
+          {notes.map((a) => <div key={a.id} className={'note-row k-' + (a.kind || 'comment')}>
+            {a.kind === 'todo'
+              ? <TodoItem ann={a} me={p.me} members={p.members} canEdit={p.canEdit} onToggle={p.onToggleTodo} onJump={p.onJump} onDelete={p.onDelete} onEdit={p.onEdit} />
+              : <Thread ann={a} me={p.me} members={p.members} canEdit={p.canEdit} onReply={p.onReply} onResolve={p.onResolve} onDelete={p.onDelete} onJump={p.onJump} onEdit={p.onEdit} />}
+          </div>)}
         </>}
         {p.tab === 'history' && <>
           <div className="compose" style={{ display: 'flex', gap: 6 }}>

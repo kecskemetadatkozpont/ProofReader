@@ -5,6 +5,84 @@
   const { useState, useRef, useEffect } = React;
   const bn = (p) => { const i = (p || '').lastIndexOf('/'); return i < 0 ? p : p.slice(i + 1); };
 
+  /* A jelölődoboz felirata: ikon + (ha van) a hivatkozott ábra/képlet neve + MAGA a
+     megjegyzés szövege. A CSS a dobozhoz igazítja és levágja, ami nem fér ki. */
+  function regionTagText(a) {
+    var ico = a.kind === 'todo' ? '☑' : a.kind === 'review' ? '✦' : '💬';
+    var body = String(a.body || '').replace(/\s+/g, ' ').trim();
+    var lab = a.label ? a.label : '';
+    if (lab && body) return ico + ' ' + lab + ' — ' + body.slice(0, 120);
+    if (body) return ico + ' ' + body.slice(0, 120);
+    return ico + ' ' + (lab || 'megjegyzés');
+  }
+
+  /* ---------------- mit jelöltem ki a PDF-en? ----------------
+     Egy téglalap koordinátája egy ellenőrző ügynöknek használhatatlan: tudni kell, MELYIK
+     ábráról, táblázatról vagy képletről van szó. Ezért a kijelölés körül megkeressük a
+     feliratot — az ábráké alatta, a táblázatoké fölötte szokott lenni, a képlet száma a
+     jobb margón —, és ezt mentjük a jegyzethez (a .tex-beli \label feloldása az app.jsx-ben). */
+  function pageLines(pageEl) {
+    const out = [];
+    const pr = pageEl.getBoundingClientRect();
+    const byY = {};
+    pageEl.querySelectorAll('.ct-textlayer > span').forEach((sp) => {
+      const r = sp.getBoundingClientRect();
+      const y = Math.round((r.top - pr.top) / pr.height * 1000);
+      if (!byY[y]) byY[y] = { y: y, top: r.top, bottom: r.bottom, left: r.left, right: r.right, parts: [] };
+      byY[y].parts.push(sp.textContent || '');
+      byY[y].left = Math.min(byY[y].left, r.left); byY[y].right = Math.max(byY[y].right, r.right);
+      byY[y].top = Math.min(byY[y].top, r.top); byY[y].bottom = Math.max(byY[y].bottom, r.bottom);
+    });
+    Object.keys(byY).sort((a, b) => a - b).forEach((k) => {
+      const L = byY[k]; L.text = L.parts.join(' ').replace(/\s+/g, ' ').trim();
+      if (L.text) out.push(L);
+    });
+    return out;
+  }
+  const CAP_RE = /^(Figure|Fig\.?|Table|Scheme|Algorithm|Listing|Ábra|Táblázat)\s*([0-9]+[a-z]?)[.:)]?\s*(.*)$/i;
+  const EQNUM_RE = /^\(\s*([0-9]+[a-z]?)\s*\)$/;
+  const HEAD_RE2 = /^(\d+(?:\.\d+)*)\.?\s+([A-ZÁÉÍÓÖŐÚÜŰ][^.]{2,70})$/;
+  const KIND_OF = { figure: 'figure', fig: 'figure', 'ábra': 'figure', table: 'table', 'táblázat': 'table', scheme: 'figure', algorithm: 'algorithm', listing: 'listing' };
+  function identifyTarget(pageEl, g) {
+    const lines = pageLines(pageEl);
+    const inside = lines.filter((L) => L.bottom > g.t && L.top < g.t + g.h);
+    const below = lines.filter((L) => L.top >= g.t + g.h);
+    const above = lines.filter((L) => L.bottom <= g.t);
+    const pr = pageEl.getBoundingClientRect();
+    const near = (arr, rev) => (rev ? arr.slice(-6).reverse() : arr.slice(0, 6));
+    const findCap = (arr) => { for (const L of arr) { const m = CAP_RE.exec(L.text); if (m) return { line: L, m: m }; } return null; };
+    // 1) felirat a kijelölésen belül, 2) alatta (ábra), 3) fölötte (táblázat)
+    let hit = findCap(inside) || findCap(near(below)) || findCap(near(above, true));
+    if (hit) {
+      const word = hit.m[1].replace(/\.$/, '');
+      return {
+        kind: KIND_OF[word.toLowerCase()] || 'figure',
+        number: hit.m[2],
+        label: word.charAt(0).toUpperCase() + word.slice(1).toLowerCase() + ' ' + hit.m[2],
+        caption: (hit.m[3] || '').slice(0, 400),
+        section: sectionOf(lines, g),
+        text: inside.map((L) => L.text).join(' ').slice(0, 400),
+      };
+    }
+    // képlet: a jobb margón álló (N) a kijelölés magasságában
+    const eq = lines.filter((L) => L.bottom > g.t - 6 && L.top < g.t + g.h + 6 && EQNUM_RE.test(L.text))[0]
+      || inside.map((L) => EQNUM_RE.exec(L.text.split(' ').pop() || '') ? L : null).filter(Boolean)[0];
+    if (eq) {
+      const m = EQNUM_RE.exec(eq.text) || EQNUM_RE.exec(eq.text.split(' ').pop());
+      if (m) return { kind: 'equation', number: m[1], label: 'Egyenlet (' + m[1] + ')', caption: '',
+        section: sectionOf(lines, g), text: inside.map((L) => L.text).join(' ').slice(0, 400) };
+    }
+    const txt = inside.map((L) => L.text).join(' ').replace(/\s+/g, ' ').trim();
+    return { kind: txt ? 'text' : 'area', number: null, label: null, caption: '', section: sectionOf(lines, g), text: txt.slice(0, 400) };
+  }
+  function sectionOf(lines, g) {
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const L = lines[i]; if (L.top > g.t) continue;
+      const m = HEAD_RE2.exec(L.text); if (m) return m[1] + ' ' + m[2].trim();
+    }
+    return null;
+  }
+
   /* ---------------- pure tree operations ---------------- */
   let _id = 1;
   const nid = () => 'n' + (_id++) + Math.random().toString(36).slice(2, 5);
@@ -555,7 +633,7 @@
         d.style.width = (a.rect[2] * 100) + '%'; d.style.height = (a.rect[3] * 100) + '%';
         d.title = (a.label ? a.label + ' — ' : '') + (a.body || '').slice(0, 200);
         const tag = document.createElement('span'); tag.className = 'ct-region-tag';
-        tag.textContent = (a.kind === 'todo' ? '☑ ' : '💬 ') + (a.label || 'megjegyzés');
+        tag.textContent = regionTagText(a);
         d.appendChild(tag);
         d.addEventListener('click', (ev) => { ev.stopPropagation(); if (ctx.onOpenRegion) ctx.onOpenRegion(a); });
         pageEl.appendChild(d);
@@ -588,9 +666,10 @@
           txt.push(sp.textContent || '');
         });
         const text = txt.join(' ').replace(/\s+/g, ' ').trim();
+        const target = identifyTarget(pageEl, g);
         setTimeout(() => ctx.onPdfSelect(pane, {
           page: +pageEl.dataset.page, rect: [(g.l - pr.left) / pr.width, (g.t - pr.top) / pr.height, g.w / pr.width, g.h / pr.height],
-          text, label: labelFor(text), at: { x: ev.clientX, y: g.t },
+          text, label: target.label || labelFor(text), target, at: { x: ev.clientX, y: g.t },
         }), 0);
       };
       window.addEventListener('mousemove', move);
@@ -607,10 +686,12 @@
       if (!pageEl || !ref.current.contains(pageEl)) return;
       const pr = pageEl.getBoundingClientRect(); const rr = range.getBoundingClientRect();
       const text = sel.toString().replace(/\s+/g, ' ').trim();
+      const g2 = { l: rr.left, t: rr.top, w: rr.width, h: rr.height };
       ctx.onPdfSelect(pane, {
         page: +pageEl.dataset.page,
         rect: [(rr.left - pr.left) / pr.width, (rr.top - pr.top) / pr.height, rr.width / pr.width, rr.height / pr.height],
-        text, label: null, at: { x: rr.left + rr.width / 2, y: rr.top },
+        text, label: null, target: { kind: 'text', label: null, caption: '', section: sectionOf(pageLines(pageEl), g2), text: text.slice(0, 400) },
+        at: { x: rr.left + rr.width / 2, y: rr.top },
       });
     }
 
@@ -998,11 +1079,12 @@
           txt.push(sp.textContent || '');
         });
         var text = txt.join(' ').replace(/\s+/g, ' ').trim();
+        var target = identifyTarget(pageEl, g);   // MELYIK ábra/táblázat/képlet — a felirat alapján
         // setTimeout: a panel saját onMouseUp-ja (szövegkijelölés) ELŐBB fut és ürítené a
         // kijelölés-sávot; így a terület-kijelölés mindig utána érkezik.
         setTimeout(function () { ctx.onRegionSelect(pane, {
           page: +pageEl.dataset.page, rect: rect, sids: Object.keys(sids), sidCounts: sids, text: text,
-          label: labelFor(text), at: { x: ev.clientX, y: g.t },
+          label: target.label || labelFor(text), target: target, at: { x: ev.clientX, y: g.t },
         }); }, 0);
       };
       window.addEventListener('mousemove', move);
@@ -1022,7 +1104,8 @@
         d.style.width = (a.rect[2] * 100) + '%'; d.style.height = (a.rect[3] * 100) + '%';
         d.title = (a.label ? a.label + ' — ' : '') + (a.body || '').slice(0, 200);
         var tag = document.createElement('span'); tag.className = 'ct-region-tag';
-        tag.textContent = (a.kind === 'todo' ? '☑ ' : '💬 ') + (a.label || 'megjegyzés');
+        // magát a megjegyzést mutatjuk (a címkével együtt) — a CSS levágja, ami nem fér ki
+        tag.textContent = regionTagText(a);
         d.appendChild(tag);
         d.addEventListener('click', function (ev) { ev.stopPropagation(); if (ctx.onOpenRegion) ctx.onOpenRegion(a); });
         pageEl.appendChild(d);

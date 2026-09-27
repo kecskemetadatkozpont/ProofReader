@@ -321,6 +321,9 @@
     const [canFigures, setCanFigures] = useState(false);   // admin-granted AI figure generation (PaperBanana)
     const [figOpen, setFigOpen] = useState(false);
     const [pkgOpen, setPkgOpen] = useState(false);   // 📦 Beküldési csomagok (submission-ui.js)
+    // a jegyzet-Markdown generátora később definiálódik (kell hozzá az annotations state),
+    // a ZIP-export viszont fentebb van — ezért refen keresztül érjük el
+    const annotationsMarkdownRef = useRef(null);
     /* A beküldési csomag fájljai megjelennek a bal oldali fájlfában, saját mappában és
        halvány jelöléssel (`pkg: true`). Csak HIVATKOZÁSOK: a bájtok a tárolóban vannak,
        a szövegeseknél a manifestben őrzött szöveg látszik. A fordításból ki vannak zárva,
@@ -518,11 +521,7 @@
           atts.forEach((att, i) => { if (att && att.dataURL) { try { zip.file('publify-data/attachments/' + a.id + '-' + (att.name || ('attachment-' + (i + 1))), dataURLToBlob(att.dataURL)); } catch (e) { } } });
         });
         const fmtA = (a) => { const where = a.anchor ? (a.anchor.file + (a.anchor.quote ? ' — „' + String(a.anchor.quote).slice(0, 90) + '"' : '')) : ''; let s = '- **' + nm(a.authorId) + '**' + (a.status ? ' _(' + a.status + ')_' : '') + ': ' + String(a.body || a.comment || '').replace(/\n+/g, ' ') + (where ? '\n  - ' + where : ''); (a.replies || []).forEach((r) => { s += '\n  - ↳ **' + nm(r.authorId) + '**: ' + String(r.body || '').replace(/\n+/g, ' '); }); return s; };
-        let md = '# ' + (init.title || 'Project') + ' — annotations\n\nExported: ' + db.exportedAt + '\n\n';
-        md += '## Comments (' + byKind('comment').length + ')\n\n' + (byKind('comment').map(fmtA).join('\n') || '_none_') + '\n\n';
-        md += '## To-dos (' + byKind('todo').length + ')\n\n' + (byKind('todo').map((a) => '- [' + (a.status === 'done' ? 'x' : ' ') + '] ' + String(a.body || '').replace(/\n+/g, ' ') + (a.assignee ? ' (assignee: ' + nm(a.assignee) + ')' : '') + (a.due ? ' — ' + a.due : '')).join('\n') || '_none_') + '\n\n';
-        md += '## AI review (' + byKind('review').length + ')\n\n' + (byKind('review').map(fmtA).join('\n') || '_none_') + '\n';
-        zip.file('publify-data/ANNOTATIONS.md', md);
+        zip.file('publify-data/ANNOTATIONS.md', annotationsMarkdownRef.current ? annotationsMarkdownRef.current() : '');
         const blob = await zip.generateAsync({ type: 'blob' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a'); a.href = url;
@@ -1284,6 +1283,35 @@
        „mondatot” jelölni. A panel visszaadja a lapszámot, az arányos téglalapot és azt,
        mely mondatok szövege esik bele — az utóbbiból lesz a forrásbeli horgony. */
     const pendingRegion = useRef(null);
+    /* A felismert ábra/táblázat/képlet megkeresése a .tex FORRÁSBAN, hogy a jegyzet a
+       \label-t és a feliratot is hordozza. Egy ellenőrző ügynöknek a „3. ábra
+       (\label{fig:pug}) a 4.2 szakaszban" használható hivatkozás, egy téglalap nem.
+       Először a felirat szövegére illesztünk, és csak utána a sorszámra. */
+    const resolveTexTarget = useCallback((target, docId) => {
+      if (!target || !target.kind || target.kind === 'text' || target.kind === 'area') return target;
+      const src = getSource(docId) || ''; if (!src) return target;
+      const env = { figure: 'figure', table: 'table', algorithm: 'algorithm', listing: 'lstlisting', equation: 'equation' }[target.kind];
+      if (!env) return target;
+      const blocks = [];
+      const re = new RegExp('\\\\begin\\{' + env + '\\*?\\}([\\s\\S]*?)\\\\end\\{' + env + '\\*?\\}', 'g');
+      let m; while ((m = re.exec(src))) blocks.push({ body: m[1], at: m.index });
+      if (!blocks.length) return target;
+      const norm = (s) => String(s || '').toLowerCase().replace(/\\[a-zA-Z@]+/g, ' ').replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
+      const want = norm(target.caption);
+      let pick = null;
+      if (want.length > 12) {
+        const needle = want.slice(0, 40);
+        pick = blocks.filter((b) => { const c = /\\caption\*?\{([\s\S]{0,400})/.exec(b.body); return c && norm(c[1]).indexOf(needle) >= 0; })[0] || null;
+      }
+      if (!pick && target.number) { const i = parseInt(target.number, 10); if (i >= 1 && i <= blocks.length) pick = blocks[i - 1]; }
+      if (!pick) return target;
+      const lab = /\\label\{([^}]+)\}/.exec(pick.body);
+      const cap = /\\caption\*?\{([\s\S]{0,300})/.exec(pick.body);
+      return Object.assign({}, target, {
+        texLabel: lab ? lab[1] : null, texFile: docId,
+        texExcerpt: cap ? ('\\caption{' + String(cap[1]).split('\n')[0].slice(0, 200)) : null,
+      });
+    }, [getSource]);
     const onRegionSelect = useCallback((pane, info) => {
       const docId = pane.docId;
       const comp = getCompiled(docId);
@@ -1314,12 +1342,14 @@
       }
       selRange.current = { start: start, end: end };
       selDocRef.current = docId;
-      pendingRegion.current = { page: info.page, rect: info.rect, label: info.label || null, text: String(info.text || '').slice(0, 300) };
-      setSelQuote(info.label || (info.text ? String(info.text).slice(0, 60) : 'kijelölt terület'));
+      const tgt = resolveTexTarget(info.target, docId);
+      pendingRegion.current = { page: info.page, rect: info.rect, label: (tgt && tgt.label) || info.label || null,
+        text: String(info.text || '').slice(0, 300), target: tgt || null };
+      setSelQuote((tgt && tgt.label) || info.label || (info.text ? String(info.text).slice(0, 60) : 'kijelölt terület'));
       setSelPos({ top: Math.max(56, (info.at && info.at.y || 120) - 46), left: Math.max(130, Math.min(window.innerWidth - 130, (info.at && info.at.x) || 300)) });
       setSelPaneId(pane.id);
-    }, [getCompiled]);
-    const onOpenRegion = useCallback((a) => { setDrawer({ open: true, tab: a.kind === 'todo' ? 'todos' : 'comments' }); }, []);
+    }, [getCompiled, resolveTexTarget]);
+    const onOpenRegion = useCallback((a) => { setDrawer({ open: true, tab: 'notes' }); }, []);
 
     /* ---- file upload (into the selected folder) ---- */
     const fileInput = useRef(null);
@@ -1914,7 +1944,7 @@
       const reg = pendingRegion.current; pendingRegion.current = null;
       const quote = reg ? (reg.label || reg.text || 'kijelölt terület') : src.slice(r.start, r.end);
       setDraft({ kind: kind, anchor: Object.assign({ file: file, start: r.start, end: r.end, quote: quote }, reg ? { region: reg } : null) });
-      setSelQuote(''); setSelPaneId(null); setPreviewSel(null); setDrawer({ open: true, tab: kind === 'todo' ? 'todos' : 'comments' });
+      setSelQuote(''); setSelPaneId(null); setPreviewSel(null); setDrawer({ open: true, tab: 'notes' });
     }
     /* selection inside a source pane */
     const onSourceSel = useCallback((pane, s, e) => {
@@ -1927,6 +1957,67 @@
         setSelPaneId(pane.id);
       } else if (selPaneId === pane.id) { setSelQuote(''); setSelPaneId(null); }
     }, [isCurProj, getSource, selPaneId]);
+    /* A megjegyzések / ToDo-k / AI-észrevételek EGY Markdown fájlban, ellenőrző ügynöknek.
+       A lényeg a HORGONY: egy téglalap koordinátája használhatatlan, ezért minden területhez
+       kiírjuk, hogy melyik ábra/táblázat/képlet, mi a felirata, melyik szakaszban van, és ha
+       feloldható, a .tex-beli \label-t is. Így a jegyzet önmagában végrehajtható utasítás. */
+    const annotationsMarkdown = useCallback(() => {
+      const members = (projMeta && projMeta.members) || [];
+      const nm = (id) => { const m = members.filter((x) => x.id === id)[0]; return (m && (m.name || m.email)) || (id === me.id ? me.name : '') || id || '—'; };
+      const KIND = { comment: '💬 Megjegyzés', todo: '☑ ToDo', review: '✦ AI-észrevétel' };
+      const list = (annotations || []).slice().sort((a, b) => {
+        const fa = (a.anchor && a.anchor.file) || '', fb = (b.anchor && b.anchor.file) || '';
+        if (fa !== fb) return fa < fb ? -1 : 1;
+        const pa = (a.anchor && a.anchor.region && a.anchor.region.page) || 0;
+        const pb = (b.anchor && b.anchor.region && b.anchor.region.page) || 0;
+        if (pa !== pb) return pa - pb;
+        return ((a.anchor && a.anchor.start) || 0) - ((b.anchor && b.anchor.start) || 0);
+      });
+      const L = [];
+      L.push('# ' + (init.title || 'Publikáció') + ' — megjegyzések és teendők', '');
+      L.push('Exportálva: ' + new Date().toISOString().slice(0, 19).replace('T', ' ') + ' · ' +
+        list.length + ' tétel (' + list.filter((a) => (a.kind || 'comment') === 'comment').length + ' megjegyzés, ' +
+        list.filter((a) => a.kind === 'todo').length + ' ToDo, ' + list.filter((a) => a.kind === 'review').length + ' AI-észrevétel)', '');
+      L.push('> Minden tétel megmondja, HOL kell beavatkozni: fájl, és ahol értelmezhető, a', 
+             '> hivatkozott ábra/táblázat/képlet a feliratával és a LaTeX-címkéjével együtt.', '');
+      if (!list.length) { L.push('_Nincs megjegyzés._'); return L.join('\n') + '\n'; }
+      list.forEach((a, i) => {
+        const an = a.anchor || {}, rg = an.region || null, tg = (rg && rg.target) || null;
+        const head = [KIND[a.kind || 'comment'] || a.kind];
+        if (tg && tg.label) head.push(tg.label);
+        else if (rg && rg.label) head.push(rg.label);
+        if (rg && rg.page) head.push(rg.page + '. oldal');
+        if (tg && tg.section) head.push('§' + tg.section);
+        L.push('## ' + (i + 1) + '. ' + head.join(' · '));
+        L.push('- **Fájl:** `' + (an.file || '—') + '`' + (tg && tg.texLabel ? ' → `\\label{' + tg.texLabel + '}`' : ''));
+        if (tg && tg.kind && tg.kind !== 'text' && tg.kind !== 'area') {
+          L.push('- **Típus:** ' + ({ figure: 'ábra', table: 'táblázat', equation: 'képlet', algorithm: 'algoritmus', listing: 'kódrészlet' }[tg.kind] || tg.kind) +
+            (tg.number ? ' (' + tg.number + '.)' : ''));
+        }
+        if (tg && tg.caption) L.push('- **Felirat:** „' + String(tg.caption).replace(/\n+/g, ' ').slice(0, 300) + '"');
+        if (tg && tg.texExcerpt) L.push('- **Forrásban:** `' + String(tg.texExcerpt).replace(/`/g, "'") + '`');
+        if (!tg || tg.kind === 'text' || tg.kind === 'area') {
+          const q = an.quote || (rg && rg.text) || '';
+          if (q) L.push('- **Kijelölt szöveg:** „' + String(q).replace(/\n+/g, ' ').slice(0, 300) + '"');
+        } else if (rg && rg.text && (!tg.caption || rg.text.slice(0, 40) !== String(tg.caption).slice(0, 40))) {
+          L.push('- **A kijelölésben:** „' + String(rg.text).replace(/\n+/g, ' ').slice(0, 200) + '"');
+        }
+        L.push('- **Szerző:** ' + nm(a.authorId) + (a.status ? ' · állapot: ' + a.status : '') +
+          (a.assignee ? ' · felelős: ' + nm(a.assignee) : '') + (a.due ? ' · határidő: ' + a.due : ''));
+        L.push('', (a.kind === 'todo' ? '- [' + (a.status === 'done' ? 'x' : ' ') + '] ' : '') + String(a.body || a.comment || '').trim(), '');
+        (a.replies || []).forEach((r) => L.push('  - ↳ **' + nm(r.authorId) + ':** ' + String(r.body || '').replace(/\n+/g, ' ')));
+        if ((a.replies || []).length) L.push('');
+      });
+      return L.join('\n') + '\n';
+    }, [annotations, projMeta, init.title, me]);
+    annotationsMarkdownRef.current = annotationsMarkdown;
+    const downloadAnnotationsMd = useCallback(() => {
+      const md = annotationsMarkdown();
+      const blob = new Blob([md], { type: 'text/markdown' });
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+      a.download = ((init.title || 'publikacio').replace(/[^\w\s-]+/g, '').trim().replace(/\s+/g, '-') || 'publikacio') + '-jegyzetek.md';
+      document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    }, [annotationsMarkdown, init.title]);
     const saveDraft = (d) => { if (!draft) return; window.PRStore.addAnnotation(projectId, { kind: draft.kind, anchor: draft.anchor, body: d.body, authorId: me.id, assignee: d.assignee || null, due: d.due || null, mentions: d.mentions || [], attachments: d.attachments || [], status: 'open' }); setDraft(null); refreshCollab(); };
     const onReply = (ann, payload) => { const o = typeof payload === 'string' ? { body: payload } : payload; window.PRStore.replyAnnotation(projectId, ann.id, me.id, o.body, { mentions: o.mentions || [], attachments: o.attachments || [] }); refreshCollab(); };
     const onResolve = (ann) => { window.PRStore.updateAnnotation(projectId, ann.id, { status: ann.status === 'open' ? 'resolved' : 'open' }); refreshCollab(); };
@@ -1993,8 +2084,9 @@
       if (!pane || !pane.file) return;
       selRange.current = { start: 0, end: 0 };
       selDocRef.current = pane.file;
-      pendingRegion.current = { page: info.page, rect: info.rect, label: info.label || null, text: String(info.text || '').slice(0, 300) };
-      setSelQuote(info.label || (info.text ? String(info.text).slice(0, 60) : 'kijelölt terület'));
+      pendingRegion.current = { page: info.page, rect: info.rect, label: (info.target && info.target.label) || info.label || null,
+        text: String(info.text || '').slice(0, 300), target: info.target || null };
+      setSelQuote((info.target && info.target.label) || info.label || (info.text ? String(info.text).slice(0, 60) : 'kijelölt terület'));
       setSelPos({ top: Math.max(56, (info.at && info.at.y || 120) - 46), left: Math.max(130, Math.min(window.innerWidth - 130, (info.at && info.at.x) || 300)) });
       setSelPaneId(pane.id);
     }, []);
@@ -2435,6 +2527,7 @@
               <span className="ws-tb-sp" />
               {canFigures ? <button className="ws-tb-btn" title="Generate AI figure (PaperBanana)" onClick={() => setFigOpen(true)}>✨ Figure</button> : null}
               {projectId && window.PRPackages ? <button className="ws-tb-btn" title="Beküldési csomagok — verziók feltöltése és összehasonlítása" onClick={() => setPkgOpen(true)}>📦 Csomagok</button> : null}
+              {annotations.length ? <button className="ws-tb-btn" title="Megjegyzések, ToDo-k és AI-észrevételek letöltése egy .md fájlban (ellenőrző ügynöknek)" onClick={downloadAnnotationsMd}>⬇ Jegyzetek</button> : null}
               {diags.length > 0
                 ? <div className="diag-wrap">
                     <button className={'diag-chip' + (diagOpen ? ' on' : '')} title="Rendering issues" onClick={(e) => { e.stopPropagation(); setDiagOpen((o) => !o); }}>
@@ -2499,6 +2592,7 @@
             me={me} project={projForShare} members={collabMembers} canEdit={canEdit} docName={bn(active)}
             annotations={displayAnns} draft={draft} onSaveDraft={saveDraft} onCancelDraft={() => setDraft(null)}
             onReply={onReply} onResolve={onResolve} onDelete={onDeleteAnn} onToggleTodo={onToggleTodo} onJump={onJumpAnn} onEdit={onEditAnn}
+            onExportNotes={downloadAnnotationsMd}
             versions={versions} onCompare={(v) => setDiffVersion(v)} onRestore={onRestore} onSaveVersion={onSaveVersion}
             activity={projMeta.activity}
             metrics={kpiMetrics} journalMeta={projMeta.journalMeta} journal={projMeta.journal} templateId={projMeta.templateId}
