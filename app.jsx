@@ -320,6 +320,7 @@
     const [isAdmin, setIsAdmin] = useState(() => !!(window.PR_BACKEND && window.PR_BACKEND.user && window.PR_BACKEND.user.role === 'admin'));
     const [canFigures, setCanFigures] = useState(false);   // admin-granted AI figure generation (PaperBanana)
     const [figOpen, setFigOpen] = useState(false);
+    const [pkgOpen, setPkgOpen] = useState(false);   // 📦 Beküldési csomagok (submission-ui.js)
     useEffect(() => { try { if (window.PR_SB && me && me.id) window.PR_SB.from('profiles').select('can_figures').eq('id', me.id).maybeSingle().then((r) => { if (r && r.data) setCanFigures(!!r.data.can_figures); }, function () { }); } catch (e) { } }, []);
     useEffect(() => { const h = (e) => setIsAdmin(!!(e.detail && e.detail.role === 'admin')); window.addEventListener('pr-profile', h); return () => window.removeEventListener('pr-profile', h); }, []);
     const [voiceOpen, setVoiceOpen] = useState(false);
@@ -2302,6 +2303,7 @@
               <window.Workspace.Presets ctx={{ preset, onPreset: wsOnPreset }} />
               <span className="ws-tb-sp" />
               {canFigures ? <button className="ws-tb-btn" title="Generate AI figure (PaperBanana)" onClick={() => setFigOpen(true)}>✨ Figure</button> : null}
+              {projectId && window.PRPackages ? <button className="ws-tb-btn" title="Beküldési csomagok — verziók feltöltése és összehasonlítása" onClick={() => setPkgOpen(true)}>📦 Csomagok</button> : null}
               {diags.length > 0
                 ? <div className="diag-wrap">
                     <button className={'diag-chip' + (diagOpen ? ' on' : '')} title="Rendering issues" onClick={(e) => { e.stopPropagation(); setDiagOpen((o) => !o); }}>
@@ -2379,6 +2381,7 @@
           <input ref={pdfInput} type="file" accept="application/pdf,.pdf" style={{ display: 'none' }} onChange={onPdfPicked} />
           <input ref={imgInsertInput} type="file" accept="image/png,image/jpeg,image/gif,image/svg+xml,.png,.jpg,.jpeg,.gif,.svg" style={{ display: 'none' }} onChange={onInsertImagePicked} />
           <FigureGenModal open={figOpen} defaultCaption="" defaultMethod="" onClose={() => setFigOpen(false)} onPick={(blob, cap) => { onInsertFigure(blob, cap); setFigOpen(false); }} />
+          {pkgOpen && window.PRPackages && <window.PRPackages.Modal projectId={projectId} title={init.title} canEdit={canEdit} onClose={() => setPkgOpen(false)} />}
         </div>
 
         <Transport status={status} idx={idx} total={total} sentence={sentence} docLabel={bn(active)}
