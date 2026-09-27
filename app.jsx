@@ -321,6 +321,39 @@
     const [canFigures, setCanFigures] = useState(false);   // admin-granted AI figure generation (PaperBanana)
     const [figOpen, setFigOpen] = useState(false);
     const [pkgOpen, setPkgOpen] = useState(false);   // 📦 Beküldési csomagok (submission-ui.js)
+    /* A beküldési csomag fájljai megjelennek a bal oldali fájlfában, saját mappában és
+       halvány jelöléssel (`pkg: true`). Csak HIVATKOZÁSOK: a bájtok a tárolóban vannak,
+       a szövegeseknél a manifestben őrzött szöveg látszik. A fordításból ki vannak zárva,
+       különben egy csomagbeli ábra vagy .tex felülírhatná a kézirat saját fájljait. */
+    const PKG_DIR = 'Beküldési csomagok';
+    const addPackageFiles = useCallback((version, manifest) => {
+      const base = PKG_DIR + '/v' + version;
+      const add = {}, paths = [], dirs = { [PKG_DIR]: 1, [base]: 1 };
+      ((manifest && manifest.files) || []).forEach((e) => {
+        const rel = String(e.path || '').replace(/^\/+/, '');
+        if (!rel) return;
+        const full = base + '/' + rel;
+        const parts = rel.split('/'); parts.pop();
+        let acc = base; parts.forEach((d) => { acc = acc + '/' + d; dirs[acc] = 1; });
+        const type = e.kind === 'pdf' ? 'pdf' : e.kind === 'image' ? 'image'
+          : (e.text != null ? 'md' : 'bin');            // szöveges → olvasható, .tex NEM lesz fordítási gyökér
+        add[full] = Object.assign({ type: type, pkg: true, name: rel.split('/').pop(), size: e.size },
+          e.text != null ? { content: e.text } : null,
+          e.sp ? { storagePath: e.sp } : { note: 'Csak ujjlenyomat — a fájl a tárhely 50 MB-os korlátja miatt nem került fel.' });
+        paths.push(full);
+      });
+      if (!paths.length) return;
+      setFiles((f) => Object.assign({}, f, add));
+      setOrder((o) => o.concat(paths.filter((p) => o.indexOf(p) < 0)));
+      setFolders((fl) => fl.concat(Object.keys(dirs).filter((d) => fl.indexOf(d) < 0)));
+      setExpanded((s) => new Set(s).add(PKG_DIR));
+    }, []);
+    const removePackageFiles = useCallback((version) => {
+      const base = PKG_DIR + '/v' + version + '/';
+      setFiles((f) => { const c = {}; Object.keys(f).forEach((k) => { if (k.indexOf(base) !== 0) c[k] = f[k]; }); return c; });
+      setOrder((o) => o.filter((p) => p.indexOf(base) !== 0));
+      setFolders((fl) => fl.filter((d) => d !== base.slice(0, -1) && d.indexOf(base) !== 0));
+    }, []);
     useEffect(() => { try { if (window.PR_SB && me && me.id) window.PR_SB.from('profiles').select('can_figures').eq('id', me.id).maybeSingle().then((r) => { if (r && r.data) setCanFigures(!!r.data.can_figures); }, function () { }); } catch (e) { } }, []);
     useEffect(() => { const h = (e) => setIsAdmin(!!(e.detail && e.detail.role === 'admin')); window.addEventListener('pr-profile', h); return () => window.removeEventListener('pr-profile', h); }, []);
     const [voiceOpen, setVoiceOpen] = useState(false);
@@ -534,7 +567,7 @@
       let main = (docId && docId[0] !== '@' && files[docId] && files[docId].type === 'tex') ? docId : active;
       // Compile the real ROOT document (the one with \documentclass) even if the pane is bound to a
       // chapter/fragment — a fragment alone produces "No pages of output" (status -253) in real pdfTeX.
-      const roots = Object.keys(files).filter((p) => files[p] && files[p].type === 'tex' && /\\documentclass/.test(files[p].content || ''));
+      const roots = Object.keys(files).filter((p) => files[p] && !files[p].pkg && files[p].type === 'tex' && /\\documentclass/.test(files[p].content || ''));
       if (roots.length && roots.indexOf(main) < 0) main = (roots.indexOf(active) >= 0 ? active : roots[0]);
       // Rebase to the main file's directory so the engine compiles from the root: the SwiftLaTeX worker
       // chdir's to /work and reads "<mainfile-without-.tex>.pdf", so a main .tex inside a subfolder (e.g.
@@ -571,7 +604,7 @@
       const TEX_ASSET_RE = /\.(eps|ps|otf|ttf|pfb|afm|tfm|vf|enc|map)$/i;
       const isCompileBin = (f, path) => f.type === 'image' || f.type === 'pdf' || (f.type === 'bin' && TEX_ASSET_RE.test(path));
       Object.keys(files).forEach((path) => {
-        const f = files[path]; if (!f) return;
+        const f = files[path]; if (!f || f.pkg) return;   // beküldési csomag fájljai sosem mennek a fordítóba
         const isText = f.type === 'tex' || f.type === 'bib'
           || /\.(bbl|cls|sty|def|clo|cfg|tex|bib|ltx|bst|bbx|cbx|lbx|fd)$/i.test(path);
         if (isText) { out.push({ path: rebase(path), text: f.content != null ? f.content : '' }); return; }
@@ -581,7 +614,7 @@
       });
       // binaries that need fetching: bundled assets (.src), or cloud signed URLs (.storagePath)
       const toFetch = Object.keys(files).filter((p) => {
-        const f = files[p]; if (!f || !isCompileBin(f, p) || f.dataURL) return false;
+        const f = files[p]; if (!f || f.pkg || !isCompileBin(f, p) || f.dataURL) return false;
         return f.src || (f.storagePath && window.PR_SIGNED && window.PR_SIGNED[f.storagePath]);
       });
       await Promise.all(toFetch.map(async (p) => {
@@ -2436,7 +2469,8 @@
           <input ref={pdfInput} type="file" accept="application/pdf,.pdf" style={{ display: 'none' }} onChange={onPdfPicked} />
           <input ref={imgInsertInput} type="file" accept="image/png,image/jpeg,image/gif,image/svg+xml,.png,.jpg,.jpeg,.gif,.svg" style={{ display: 'none' }} onChange={onInsertImagePicked} />
           <FigureGenModal open={figOpen} defaultCaption="" defaultMethod="" onClose={() => setFigOpen(false)} onPick={(blob, cap) => { onInsertFigure(blob, cap); setFigOpen(false); }} />
-          {pkgOpen && window.PRPackages && <window.PRPackages.Modal projectId={projectId} title={init.title} canEdit={canEdit} onClose={() => setPkgOpen(false)} />}
+          {pkgOpen && window.PRPackages && <window.PRPackages.Modal projectId={projectId} title={init.title} canEdit={canEdit}
+            onPackageSaved={addPackageFiles} onPackageDeleted={removePackageFiles} onClose={() => setPkgOpen(false)} />}
         </div>
 
         <Transport status={status} idx={idx} total={total} sentence={sentence} docLabel={bn(active)}
@@ -2541,7 +2575,7 @@
       const isRen = renaming && renaming.type === 'folder' && renaming.path === path;
       return (
         <div key={'d:' + path}>
-          <div className={'tree-row folder' + (props.currentDir === path ? ' sel' : '') + (dragOver === path ? ' drop' : '')}
+          <div className={'tree-row folder' + (props.currentDir === path ? ' sel' : '') + (dragOver === path ? ' drop' : '') + (/^Beküldési csomagok(\/|$)/.test(path) ? ' pkg' : '')}
             style={{ paddingLeft: 8 + depth * 14 }} draggable
             onClick={() => { props.onSetDir(path); props.onToggle(path); }}
             onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('text/plain', path); e.dataTransfer.effectAllowed = 'move'; }}
@@ -2567,7 +2601,7 @@
       const isRen = renaming && renaming.type === 'file' && renaming.path === path;
       return (
         <React.Fragment key={'f:' + path}>
-        <div className={'tree-row file' + (props.active === path ? ' active' : '')}
+        <div className={'tree-row file' + (props.active === path ? ' active' : '') + (f.pkg ? ' pkg' : '')}
           style={{ paddingLeft: 8 + depth * 14 }} draggable
           onDragStart={(e) => { e.dataTransfer.setData('text/plain', path); e.dataTransfer.effectAllowed = 'move'; }}
           onClick={() => { props.onSetDir(dn(path)); props.onOpen(path); }}>

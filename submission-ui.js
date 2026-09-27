@@ -159,6 +159,8 @@
         if (r && r.error) throw new Error(r.error.message);
         if (!alive.current) return;
         setBusy(false); setProg(''); setStage(null); setView('list');
+        // a csomag fájljai jelenjenek meg a bal oldali fájlfában (külön mappában, halványan)
+        try { if (props.onPackageSaved) props.onPackageSaved(r.data && r.data.version, payload.manifest); } catch (e) { }
         toast('Csomag mentve (v' + (r.data && r.data.version) + ')' + (skipped ? ' — ' + skipped + ' fájl csak ujjlenyomattal' : ''), 'success');
         load();
       } catch (er) {
@@ -198,6 +200,7 @@
         if (r && r.error) { toast('Törlés sikertelen: ' + r.error.message, 'error'); return; }
         var paths = (r.data && r.data.storage_paths) || [];
         paths.forEach(function (sp) { try { window.PRUploads && window.PRUploads.remove && window.PRUploads.remove(sp); } catch (e) { } });
+        try { if (props.onPackageDeleted) props.onPackageDeleted(ver); } catch (e) { }
         toast('Csomag törölve', 'success'); load();
         if (detail && detail.id === id) { setDetail(null); setView('list'); }
       });
@@ -246,7 +249,14 @@
     var body;
     if (view === 'stage' && stage) body = h(Stage, { stage: stage, setStage: setStage, onSave: save, onCancel: function () { setStage(null); setView('list'); }, busy: busy });
     else if (view === 'compare' && report) body = h(Report, { report: report, onDownload: downloadReport });
-    else if (view === 'detail' && detail) body = h(Detail, { pkg: detail, canEdit: ce, onDelete: function () { del(detail.id, detail.version); } });
+    else if (view === 'detail' && detail) body = h(Detail, {
+      pkg: detail, canEdit: ce,
+      onDelete: function () { del(detail.id, detail.version); },
+      onShowInTree: props.onPackageSaved ? function () {
+        props.onPackageSaved(detail.version, detail.manifest);
+        toast('A csomag fájljai megjelentek a fájlfában (Beküldési csomagok / v' + detail.version + ')', 'success');
+      } : null,
+    });
     else body = h('div', { style: { padding: 22, color: 'var(--muted)', fontSize: 13, lineHeight: 1.6, maxWidth: 620 } },
       h('h3', { style: { marginTop: 0, color: 'var(--ink)' } }, 'Mi tartozik egy beküldési csomagba?'),
       h('p', null, 'Ezt a listát kérjük minden körben. A feltöltött ZIP-ben a rendszer felismeri a szerepeket, és jelzi, ha valami hiányzik.'),
@@ -312,6 +322,7 @@
           var b = new Blob([md], { type: 'text/markdown' }); var a = document.createElement('a');
           a.href = URL.createObjectURL(b); a.download = 'CONTENTS_v' + p.version + '.md'; document.body.appendChild(a); a.click(); a.remove();
         } }, '⬇ CONTENTS.md'),
+        props.onShowInTree ? h('button', { className: 'btn-ghost', style: { height: 30 }, title: 'A csomag fájljai megjelennek a bal oldali fájlfában, külön mappában', onClick: props.onShowInTree }, '📂 Fájlok a fában') : null,
         props.canEdit ? h('button', { className: 'btn-ghost', style: { height: 30, color: 'var(--danger)' }, onClick: props.onDelete }, 'Törlés') : null),
       h('div', { style: { fontSize: 12, color: 'var(--muted)', margin: '4px 0 12px' } },
         fmtDate(p.created_at) + ' · ' + (m.files || []).length + ' fájl · ' + mb(m.bytes) + (p.archive_name ? ' · ' + p.archive_name : '')),
