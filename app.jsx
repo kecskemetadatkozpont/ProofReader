@@ -1223,7 +1223,14 @@
       const comp = getCompiled(docId);
       let start = 0, end = 0;
       if (comp && info.sids && info.sids.length) {
-        const ids = Object.create(null); info.sids.forEach((s) => { ids[s] = 1; });
+        // Csak a TÖBBSÉGI mondatokat vesszük horgonynak: a PDF-szavak mondathoz rendelése
+        // heurisztikus, és egyetlen félreillesztett szó miatt a horgony átfoghatná a fél
+        // dokumentumot (a kijelölt terület helyett az egész szöveg lenne kiemelve).
+        const counts = info.sidCounts || {};
+        let max = 0; Object.keys(counts).forEach((k) => { if (counts[k] > max) max = counts[k]; });
+        const minHit = Math.max(1, Math.ceil(max * 0.25));
+        const ids = Object.create(null);
+        info.sids.forEach((s) => { if ((counts[s] || 1) >= minHit) ids[s] = 1; });
         const sents = comp.sentences.filter((s) => ids[s.id] != null);
         if (sents.length) {
           start = Math.min.apply(null, sents.map((s) => s.start));
@@ -1237,10 +1244,6 @@
       setSelPos({ top: Math.max(56, (info.at && info.at.y || 120) - 46), left: Math.max(130, Math.min(window.innerWidth - 130, (info.at && info.at.x) || 300)) });
       setSelPaneId(pane.id);
     }, [getCompiled]);
-    const regionAnnsFor = useCallback((docId) => displayAnns
-      .filter((a) => a.anchor && a.anchor.region && a.anchor.region.rect && (a.anchor.file || active) === docId)
-      .map((a) => ({ id: a.id, kind: a.kind, status: a.status, body: a.body || '', label: a.anchor.region.label,
-        page: a.anchor.region.page, rect: a.anchor.region.rect })), [displayAnns, active]);
     const onOpenRegion = useCallback((a) => { setDrawer({ open: true, tab: a.kind === 'todo' ? 'todos' : 'comments' }); }, []);
 
     /* ---- file upload (into the selected folder) ---- */
@@ -1906,6 +1909,12 @@
     /* ---- AI review import (workflow findings → anchored review notes) ---- */
     const reviewInput = useRef(null);
     const reviewAnns = useMemo(() => displayAnns.filter((a) => a.kind === 'review'), [displayAnns]);
+    // FONTOS: a displayAnns UTÁN kell definiálni — fölötte a useCallback a még üres listát
+    // zárná magába (Babel var-ra fordít, így nem hibázik, csak soha nem frissül).
+    const regionAnnsFor = useCallback((docId) => displayAnns
+      .filter((a) => a.anchor && a.anchor.region && a.anchor.region.rect && (a.anchor.file || active) === docId)
+      .map((a) => ({ id: a.id, kind: a.kind, status: a.status, body: a.body || '', label: a.anchor.region.label,
+        page: a.anchor.region.page, rect: a.anchor.region.rect })), [displayAnns, active]);
     const onImportReview = () => { if (reviewInput.current) reviewInput.current.click(); };
     const onReviewFile = (e) => {
       const f = e.target.files && e.target.files[0]; e.target.value = '';

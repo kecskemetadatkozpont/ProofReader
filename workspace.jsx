@@ -878,14 +878,14 @@
         pageEl.querySelectorAll('.ct-textlayer > span').forEach(function (sp) {
           var r = sp.getBoundingClientRect();
           if (r.right < g.l || r.left > g.l + g.w || r.bottom < g.t || r.top > g.t + g.h) return;
-          if (sp.dataset && sp.dataset.sid != null) sids[sp.dataset.sid] = 1;
+          if (sp.dataset && sp.dataset.sid != null) sids[sp.dataset.sid] = (sids[sp.dataset.sid] || 0) + 1;
           txt.push(sp.textContent || '');
         });
         var text = txt.join(' ').replace(/\s+/g, ' ').trim();
         // setTimeout: a panel saját onMouseUp-ja (szövegkijelölés) ELŐBB fut és ürítené a
         // kijelölés-sávot; így a terület-kijelölés mindig utána érkezik.
         setTimeout(function () { ctx.onRegionSelect(pane, {
-          page: +pageEl.dataset.page, rect: rect, sids: Object.keys(sids), text: text,
+          page: +pageEl.dataset.page, rect: rect, sids: Object.keys(sids), sidCounts: sids, text: text,
           label: labelFor(text), at: { x: ev.clientX, y: g.t },
         }); }, 0);
       };
