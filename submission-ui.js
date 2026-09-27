@@ -160,7 +160,13 @@
         if (!alive.current) return;
         setBusy(false); setProg(''); setStage(null); setView('list');
         // a csomag fájljai jelenjenek meg a bal oldali fájlfában (külön mappában, halványan)
-        try { if (props.onPackageSaved) props.onPackageSaved(r.data && r.data.version, payload.manifest); } catch (e) { }
+        try {
+          if (props.onPackageSaved) props.onPackageSaved(r.data && r.data.version, payload.manifest);
+          // A fába bevezetett fájlok a projekt 500 ms-cal késleltetett mentésével kerülnének ki;
+          // ha a felhasználó azonnal bezárja a lapot, elvesznének. Ezért kikényszerítjük a kiírást,
+          // miután a React elvégezte az állapotfrissítést.
+          setTimeout(function () { try { window.PRStore.flushNow && window.PRStore.flushNow(props.projectId); } catch (e) { } }, 900);
+        } catch (e) { }
         toast('Csomag mentve (v' + (r.data && r.data.version) + ')' + (skipped ? ' — ' + skipped + ' fájl csak ujjlenyomattal' : ''), 'success');
         load();
       } catch (er) {
