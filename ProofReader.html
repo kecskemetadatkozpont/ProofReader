@@ -301,13 +301,26 @@
     .note-row.k-comment { border-left-color: var(--accent); }
     .note-row.k-todo { border-left-color: #d9760b; }
     .note-row.k-review { border-left-color: #7c3aed; }
+    /* PDF-nézet: nagyítás + keresés */
+    .pdf-doc { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+    .pdf-tools { position: absolute; right: 12px; top: 10px; z-index: 9; display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; max-width: calc(100% - 24px); }
+    .pdf-tool { height: 26px; padding: 0 10px; font-size: 11.5px; font-weight: 600; border: 1px solid var(--line); border-radius: 7px; background: var(--pane); color: var(--ink); opacity: .92; }
+    .pdf-tool:hover { opacity: 1; }
+    .pdf-tool.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .pdf-find { display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 4px 0 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--pane); }
+    .pdf-find input { width: 170px; height: 22px; border: 0; outline: none; background: transparent; color: var(--ink); font: inherit; font-size: 12px; }
+    .pdf-find i { font-style: normal; font-size: 11px; color: var(--muted); min-width: 34px; text-align: right; }
+    .pdf-find button { border: 0; background: transparent; color: var(--muted); font-size: 13px; width: 20px; height: 22px; border-radius: 5px; cursor: pointer; }
+    .pdf-find button:hover:not(:disabled) { background: var(--surface-2); color: var(--ink); }
+    .pdf-find button:disabled { opacity: .35; cursor: default; }
+    .pdf-zoomers { display: inline-flex; align-items: center; gap: 2px; border: 1px solid var(--line); border-radius: 7px; background: var(--pane); padding: 1px; }
+    .pdf-zoomers button { border: 0; background: transparent; color: var(--ink); font: inherit; font-size: 12px; font-weight: 700; min-width: 26px; height: 24px; border-radius: 5px; cursor: pointer; }
+    .pdf-zoomers button:hover { background: color-mix(in srgb, var(--accent) 12%, var(--pane)); color: var(--accent); }
+    .ct-textlayer > span.pdf-hit { background: rgba(255,200,0,.45); border-radius: 2px; }
+    .ct-textlayer > span.pdf-hit-cur { background: rgba(255,145,0,.8); box-shadow: 0 0 0 1px rgba(170,90,0,.8); border-radius: 2px; }
     /* Sima PDF-nézet: laponkénti burok + területjelölő gomb */
     .pdf-plain-page { margin: 0 auto 14px; position: relative; }
     .pdf-view.region-mode .ct-page, .pdf-view.region-mode .ct-textlayer > span { cursor: crosshair; }
-    .pdf-region-btn { position: absolute; right: 12px; top: 10px; z-index: 8; height: 26px; padding: 0 10px; font-size: 11.5px; font-weight: 600;
-      border: 1px solid var(--line); border-radius: 7px; background: var(--pane); color: var(--ink); opacity: .9; }
-    .pdf-region-btn:hover { opacity: 1; }
-    .pdf-region-btn.on { background: var(--accent); color: #fff; border-color: var(--accent); }
     /* Beküldési csomagból származó fájlok a fájlfában — halvány, dőlt, nem szerkesztendő tartalom */
     .tree-row.file.pkg .fp-name, .tree-row.folder.pkg .fp-name { opacity: .62; font-style: italic; }
     .tree-row.file.pkg .fp-ico, .tree-row.folder.pkg .fp-ico { opacity: .5; }
@@ -1086,10 +1099,10 @@
     .diff-split { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; } .diff-split pre { font-family: 'JetBrains Mono', monospace; font-size: 11.5px; margin: 0; white-space: pre-wrap; }
     .diff-split .del { background: var(--danger-bg); } .diff-split .add { background: var(--ok-bg); }
   </style>
-  <script src="theme.js?v=1790538027"></script>
+  <script src="theme.js?v=1790539367"></script>
   <script>window.PR_NAV_BARLESS = true;</script><!-- editor has its own full top bar; keep only the bug widget, no 2nd bar -->
-  <script src="nav.js?v=1790538027"></script>
-  <script src="entitlements.js?v=1790538027"></script>
+  <script src="nav.js?v=1790539367"></script>
+  <script src="entitlements.js?v=1790539367"></script>
 </head>
 
 <body>
@@ -1114,44 +1127,44 @@
     </svg>
   </template>
 
-  <script src="engine.js?v=1790538027"></script>
-  <script src="sample.js?v=1790538027"></script>
-  <script src="templates.js?v=1790538027"></script>
-  <script src="metrics.js?v=1790538027"></script>
-  <script src="pdf-cache.js?v=1790538027"></script>
-  <script src="consistency.js?v=1790538027"></script>
-  <script src="refs.js?v=1790538027"></script>
-  <script src="spell.js?v=1790538027"></script>
-  <script src="auth.js?v=1790538027"></script>
-  <script src="publications.js?v=1790538027"></script>
-  <script src="passwords.js?v=1790538027"></script>
-  <script src="store.js?v=1790538027"></script>
+  <script src="engine.js?v=1790539367"></script>
+  <script src="sample.js?v=1790539367"></script>
+  <script src="templates.js?v=1790539367"></script>
+  <script src="metrics.js?v=1790539367"></script>
+  <script src="pdf-cache.js?v=1790539367"></script>
+  <script src="consistency.js?v=1790539367"></script>
+  <script src="refs.js?v=1790539367"></script>
+  <script src="spell.js?v=1790539367"></script>
+  <script src="auth.js?v=1790539367"></script>
+  <script src="publications.js?v=1790539367"></script>
+  <script src="passwords.js?v=1790539367"></script>
+  <script src="store.js?v=1790539367"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script src="backend/config.js?v=1790538027"></script>
-  <script src="backend.js?v=1790538027"></script>
-  <script src="store-cloud.js?v=1790538027"></script>
-  <script src="office.js?v=1790538027"></script>
-  <script src="uploads.js?v=1790538027"></script>
-  <script src="universities.js?v=1790538027"></script>
-  <script src="cost-centers.js?v=1790538027"></script>
-  <script src="onboarding.js?v=1790538027"></script>
-  <script src="eleven.js?v=1790538027"></script>
-  <script src="doi.js?v=1790538027"></script>
-  <script src="diff.js?v=1790538027"></script>
-  <script src="submission-package.js?v=1790538027"></script>
-  <script src="submission-ui.js?v=1790538027"></script>
+  <script src="backend/config.js?v=1790539367"></script>
+  <script src="backend.js?v=1790539367"></script>
+  <script src="store-cloud.js?v=1790539367"></script>
+  <script src="office.js?v=1790539367"></script>
+  <script src="uploads.js?v=1790539367"></script>
+  <script src="universities.js?v=1790539367"></script>
+  <script src="cost-centers.js?v=1790539367"></script>
+  <script src="onboarding.js?v=1790539367"></script>
+  <script src="eleven.js?v=1790539367"></script>
+  <script src="doi.js?v=1790539367"></script>
+  <script src="diff.js?v=1790539367"></script>
+  <script src="submission-package.js?v=1790539367"></script>
+  <script src="submission-ui.js?v=1790539367"></script>
   <!-- Hybrid Version B: real TeX compile (in-browser SwiftLaTeX + TeXlyre packages; external API for exact) -->
-  <script src="vendor/swiftlatex/PdfTeXEngine.js?v=1790538027"></script>
-  <script src="tex-compile.js?v=1790538027"></script>
-  <script type="text/babel" src="tweaks-panel.jsx?v=1790538027"></script>
-  <script type="text/babel" src="editor.jsx?v=1790538027"></script>
-  <script type="text/babel" src="editor-collab.jsx?v=1790538027"></script>
-  <script type="text/babel" src="workspace.jsx?v=1790538027"></script>
-  <script type="text/babel" src="app.jsx?v=1790538027"></script>
+  <script src="vendor/swiftlatex/PdfTeXEngine.js?v=1790539367"></script>
+  <script src="tex-compile.js?v=1790539367"></script>
+  <script type="text/babel" src="tweaks-panel.jsx?v=1790539367"></script>
+  <script type="text/babel" src="editor.jsx?v=1790539367"></script>
+  <script type="text/babel" src="editor-collab.jsx?v=1790539367"></script>
+  <script type="text/babel" src="workspace.jsx?v=1790539367"></script>
+  <script type="text/babel" src="app.jsx?v=1790539367"></script>
   <!-- build/version tracking -->
-  <script src="build.js?v=1790538027"></script>
-  <script src="version-badge.js?v=1790538027"></script>
+  <script src="build.js?v=1790539367"></script>
+  <script src="version-badge.js?v=1790539367"></script>
 </body>
 
 </html>

@@ -610,6 +610,12 @@
     const [state, setState] = useState('loading'); // loading | done | error
     const [regionOn, setRegionOn] = useState(false);
     const regionRef = useRef(false); regionRef.current = regionOn;
+    const [zoom, setZoom] = useState(1);
+    const [q, setQ] = useState('');                 // keresőkifejezés
+    const [hits, setHits] = useState({ n: 0, i: 0 });
+    const [findOpen, setFindOpen] = useState(false);
+    const docRef = useRef(null);                    // a lapokat tartó burok (ezt nagyítjuk)
+    const findRef = useRef(null);
     const filePath = pane && pane.file;
     const canAnn = !!(ctx && ctx.canComment && ctx.onPdfSelect && filePath);
     const annList = (canAnn && ctx.regionAnns) ? ctx.regionAnns(filePath) : [];
@@ -639,6 +645,68 @@
         pageEl.appendChild(d);
       });
     }
+    /* Keresés a szövegrétegben. A pdf.js szavanként rak le span-eket, ezért SOROKAT állítunk
+       össze belőlük (a span-ek megjegyzésével), a soron illesztünk, majd a találatot lefedő
+       span-eket jelöljük meg. Így a több szóból álló kifejezés is megtalálható. */
+    function runSearch(text, goto) {
+      const root = ref.current; if (!root) return;
+      root.querySelectorAll('.pdf-hit, .pdf-hit-cur').forEach((el) => el.classList.remove('pdf-hit', 'pdf-hit-cur'));
+      const needle = String(text || '').trim().toLowerCase();
+      if (!needle) { setHits({ n: 0, i: 0 }); return; }
+      const found = [];
+      root.querySelectorAll('.ct-page').forEach((pageEl) => {
+        const pr = pageEl.getBoundingClientRect();
+        const rows = {};
+        pageEl.querySelectorAll('.ct-textlayer > span').forEach((sp) => {
+          const r = sp.getBoundingClientRect();
+          const y = Math.round((r.top - pr.top) / Math.max(1, pr.height) * 1000);
+          (rows[y] = rows[y] || []).push(sp);
+        });
+        Object.keys(rows).sort((a, b) => a - b).forEach((y) => {
+          const spans = rows[y];
+          let line = '', at = [];
+          spans.forEach((sp) => { const s = sp.textContent || ''; at.push([line.length, line.length + s.length, sp]); line += s + ' '; });
+          const hay = line.toLowerCase();
+          let from = 0, k;
+          while ((k = hay.indexOf(needle, from)) >= 0) {
+            const end = k + needle.length;
+            const marked = at.filter(([a2, b2]) => b2 > k && a2 < end).map(([, , sp]) => sp);
+            if (marked.length) found.push(marked);
+            from = k + Math.max(1, needle.length);
+          }
+        });
+      });
+      found.forEach((g) => g.forEach((sp) => sp.classList.add('pdf-hit')));
+      const idx = found.length ? Math.min(Math.max(goto != null ? goto : 0, 0), found.length - 1) : 0;
+      if (found.length) {
+        found[idx].forEach((sp) => { sp.classList.remove('pdf-hit'); sp.classList.add('pdf-hit-cur'); });
+        try { found[idx][0].scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) { }
+      }
+      setHits({ n: found.length, i: found.length ? idx + 1 : 0 });
+    }
+    const step = (d) => { if (!hits.n) return; const next = ((hits.i - 1 + d) % hits.n + hits.n) % hits.n; runSearch(q, next); };
+    // Ctrl/⌘+F a panelen belül a saját keresőt nyitja
+    useEffect(() => {
+      const onKey = (e) => {
+        const el = ref.current; if (!el) return;
+        const here = el.matches(':hover') || el.contains(document.activeElement);
+        if (!here) return;
+        if ((e.metaKey || e.ctrlKey) && (e.key === 'f' || e.key === 'F')) { e.preventDefault(); setFindOpen(true); setTimeout(() => findRef.current && findRef.current.focus(), 30); }
+        else if (e.key === 'Escape' && findOpen) { setFindOpen(false); runSearch(''); setQ(''); }
+      };
+      document.addEventListener('keydown', onKey);
+      return () => document.removeEventListener('keydown', onKey);
+    }, [hits.n, q, findOpen]);
+    // nagyítás: CSS-zoom a lapokat tartó burkon (nincs újrarajzolás, nem villan)
+    useEffect(() => { if (docRef.current) docRef.current.style.zoom = zoom; }, [zoom, state]);
+    useEffect(() => {
+      const el = ref.current; if (!el) return;
+      const onWheel = (e) => { if (!(e.ctrlKey || e.metaKey)) return; e.preventDefault();
+        setZoom((z) => Math.max(0.5, Math.min(4, Math.round(z * Math.exp(-e.deltaY * 0.0022) * 100) / 100))); };
+      el.addEventListener('wheel', onWheel, { passive: false });
+      return () => el.removeEventListener('wheel', onWheel);
+    }, []);
+
     // téglalap-húzás (ábra / táblázat / egyenlet)
     function startRegion(e) {
       if (!canAnn || !(e.altKey || regionRef.current)) return;
@@ -715,7 +783,8 @@
             const base = page.getViewport({ scale: 1 });
             const scale = Math.min(2.0, width / base.width);
             const cssVp = page.getViewport({ scale });
-            const vp = page.getViewport({ scale: scale * dpr });
+            const RQ = 2;   // a bitmap ekkora ráhagyással készül, hogy CSS-nagyításnál is éles maradjon
+            const vp = page.getViewport({ scale: scale * dpr * RQ });
             // laponként külön burok, hogy a téglalap-jelölés és a szövegréteg ráülhessen
             const wrap = document.createElement('div');
             wrap.className = 'ct-page pdf-plain-page'; wrap.dataset.page = n;
@@ -724,7 +793,11 @@
             canvas.className = 'pdf-page';
             canvas.width = vp.width; canvas.height = vp.height;
             canvas.style.width = Math.floor(cssVp.width) + 'px'; canvas.style.height = Math.floor(cssVp.height) + 'px';
-            wrap.appendChild(canvas); cont.appendChild(wrap);
+            wrap.appendChild(canvas);
+            if (!docRef.current || !cont.contains(docRef.current)) {
+              const dd = document.createElement('div'); dd.className = 'pdf-doc'; cont.appendChild(dd); docRef.current = dd;
+            }
+            docRef.current.appendChild(wrap);
             await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
             if (cancelled) return;
             if (canAnn && lib.renderTextLayer) {
@@ -745,6 +818,8 @@
           }
           setState('done');
           applyRegions();
+          if (docRef.current) docRef.current.style.zoom = zoom;
+          if (q) runSearch(q, hits.i ? hits.i - 1 : 0);
         } catch (e) { clearTimeout(watchdog); if (!cancelled) setState('error'); }
       })();
       return () => { cancelled = true; clearTimeout(watchdog); };
@@ -754,9 +829,28 @@
     return <div className="pdf-view-wrap">
       <div className={'pdf-view' + (regionOn ? ' region-mode' : '')} ref={ref}
         onMouseDown={startRegion} onMouseUp={onUp} />
-      {canAnn && state === 'done' && <button className={'pdf-region-btn' + (regionOn ? ' on' : '')}
-        title="Terület kijelölése megjegyzéshez: ábra, táblázat, egyenlet (vagy Alt/⌥ + húzás)"
-        onMouseDown={(e) => e.stopPropagation()} onClick={() => setRegionOn((v) => !v)}>⬚ Terület</button>}
+      {state === 'done' && <div className="pdf-tools" onMouseDown={(e) => e.stopPropagation()}>
+        {canAnn && <button className={'pdf-tool' + (regionOn ? ' on' : '')}
+          title="Terület kijelölése megjegyzéshez: ábra, táblázat, egyenlet (vagy Alt/⌥ + húzás)"
+          onClick={() => setRegionOn((v) => !v)}>⬚ Terület</button>}
+        {findOpen
+          ? <span className="pdf-find">
+              <input ref={findRef} value={q} placeholder="Keresés a PDF-ben…" autoFocus
+                onChange={(e) => { setQ(e.target.value); runSearch(e.target.value, 0); }}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); step(e.shiftKey ? -1 : 1); }
+                                    if (e.key === 'Escape') { setFindOpen(false); setQ(''); runSearch(''); } }} />
+              <i>{hits.n ? hits.i + '/' + hits.n : (q ? '0' : '')}</i>
+              <button onClick={() => step(-1)} title="Előző találat" disabled={!hits.n}>‹</button>
+              <button onClick={() => step(1)} title="Következő találat" disabled={!hits.n}>›</button>
+              <button onClick={() => { setFindOpen(false); setQ(''); runSearch(''); }} title="Bezárás">✕</button>
+            </span>
+          : <button className="pdf-tool" title="Keresés a PDF-ben (Ctrl/⌘+F)" onClick={() => { setFindOpen(true); setTimeout(() => findRef.current && findRef.current.focus(), 30); }}>🔍 Keresés</button>}
+        <span className="pdf-zoomers">
+          <button onClick={() => setZoom((z) => Math.max(0.5, Math.round((z - 0.15) * 100) / 100))} title="Kicsinyítés">−</button>
+          <button onClick={() => setZoom(1)} title="Eredeti méret">{Math.round(zoom * 100)}%</button>
+          <button onClick={() => setZoom((z) => Math.min(4, Math.round((z + 0.15) * 100) / 100))} title="Nagyítás">+</button>
+        </span>
+      </div>}
       {state === 'loading' && <div className="pdf-status">Loading PDF…</div>}
       {state === 'error' && <div className="pdf-status">Couldn’t render this PDF inline.{url ? <> <a href={url} target="_blank" rel="noopener">Open in a new tab ↗</a></> : null}</div>}
     </div>;
