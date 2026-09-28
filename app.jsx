@@ -324,6 +324,7 @@
     // a jegyzet-Markdown generátora később definiálódik (kell hozzá az annotations state),
     // a ZIP-export viszont fentebb van — ezért refen keresztül érjük el
     const annotationsMarkdownRef = useRef(null);
+    const displayAnnsRef = useRef([]);   // a Word-nézet callbackje ezen át lát friss jegyzet-listát
     /* A beküldési csomag fájljai megjelennek a bal oldali fájlfában, saját mappában és
        halvány jelöléssel (`pkg: true`). Csak HIVATKOZÁSOK: a bájtok a tárolóban vannak,
        a szövegeseknél a manifestben őrzött szöveg látszik. A fordításból ki vannak zárva,
@@ -1942,8 +1943,10 @@
       // Terület-jegyzet (ábra/táblázat/egyenlet a fordított PDF-en): a szövegbeli horgony
       // megmarad (így a fiókban és a forrásban is ott a jelölés), mellé kerül a téglalap.
       const reg = pendingRegion.current; pendingRegion.current = null;
-      const quote = reg ? (reg.label || reg.text || 'kijelölt terület') : src.slice(r.start, r.end);
-      setDraft({ kind: kind, anchor: Object.assign({ file: file, start: r.start, end: r.end, quote: quote }, reg ? { region: reg } : null) });
+      const dx = pendingDocx.current; pendingDocx.current = null;
+      const quote = reg ? (reg.label || reg.text || 'kijelölt terület') : (dx ? dx.quote : src.slice(r.start, r.end));
+      setDraft({ kind: kind, anchor: Object.assign({ file: file, start: r.start, end: r.end, quote: quote },
+        reg ? { region: reg } : null, dx ? { docx: true } : null) });
       setSelQuote(''); setSelPaneId(null); setPreviewSel(null); setDrawer({ open: true, tab: 'notes' });
     }
     /* selection inside a source pane */
@@ -2075,11 +2078,28 @@
     /* ---- AI review import (workflow findings → anchored review notes) ---- */
     const reviewInput = useRef(null);
     const reviewAnns = useMemo(() => displayAnns.filter((a) => a.kind === 'review'), [displayAnns]);
+    displayAnnsRef.current = displayAnns;
     // FONTOS: a displayAnns UTÁN kell definiálni — fölötte a useCallback a még üres listát
     // zárná magába (Babel var-ra fordít, így nem hibázik, csak soha nem frissül).
     /* Kijelölés egy sima PDF-ben (feltöltött vagy beküldési csomagbeli): a horgony a
        lapszám + arányos téglalap, mert a PDF-nek nincs forrásszövege. Szöveg-kijelölésnél a
        kijelölés befoglaló téglalapja, területjelölésnél a húzott doboz. */
+    /* Word-dokumentumban kijelölt szöveg: a horgony maga az IDÉZET (a .docx-nek nincs
+       lapszáma és forrás-karakterpozíciója), így a jegyzet újranyitáskor is megtalálható. */
+    const pendingDocx = useRef(null);
+    const onDocxSelect = useCallback((pane, info) => {
+      if (!pane || !pane.file) return;
+      selRange.current = { start: 0, end: 0 };
+      selDocRef.current = pane.file;
+      pendingRegion.current = null;
+      pendingDocx.current = { quote: info.quote || '' };
+      setSelQuote(info.quote ? String(info.quote).slice(0, 80) : 'kijelölt szöveg');
+      setSelPos({ top: Math.max(56, (info.at && info.at.y || 120) - 46), left: Math.max(130, Math.min(window.innerWidth - 130, (info.at && info.at.x) || 300)) });
+      setSelPaneId(pane.id);
+    }, []);
+    const docxAnnsFor = useCallback((file) => (displayAnnsRef.current || [])
+      .filter((a) => a.anchor && a.anchor.docx && a.anchor.file === file)
+      .map((a) => ({ id: a.id, kind: a.kind, status: a.status, body: a.body || '', quote: a.anchor.quote })), []);
     const onPdfSelect = useCallback((pane, info) => {
       if (!pane || !pane.file) return;
       selRange.current = { start: 0, end: 0 };
@@ -2499,6 +2519,8 @@
             expanded={expanded} currentDir={currentDir} renaming={renaming}
             onOpen={(p) => {
               const f = files[p];
+              // Word-dokumentum: megnyitjuk átnézésre (formázva, kereshetően), nem letöltjük
+              if (/\.docx?$/i.test(p)) { wsOnAddMedia('docx', p); return; }
               if (f && f.type === 'bin') { downloadAttachment(p); return; }   // binary attachment → download
               if (f && (f.type === 'pdf' || f.type === 'image')) { wsOnAddMedia(f.type, p); return; }
               if (!docExists(p)) return;
@@ -2583,8 +2605,8 @@
               onSourceSel, onPreviewClick, onPreviewMouseUp, onPreviewScroll, registerPreview,
               getFileURL, getFileData, onPrint: onPrintDoc, onWord: onWordDoc, listFiles: listProjFiles, externalDocs: externalDocsList,
               selPaneId, selQuote, selPos, onComment: () => startAnnotation('comment'), onTodo: () => startAnnotation('todo'),
-              onCloseSel: () => { setSelQuote(''); setSelPaneId(null); pendingRegion.current = null; },
-              onRegionSelect, onPdfSelect, regionAnns: regionAnnsFor, onOpenRegion
+              onCloseSel: () => { setSelQuote(''); setSelPaneId(null); pendingRegion.current = null; pendingDocx.current = null; },
+              onRegionSelect, onPdfSelect, onDocxSelect, regionAnns: regionAnnsFor, docxAnns: docxAnnsFor, onOpenRegion
             }} />
           </div>
 

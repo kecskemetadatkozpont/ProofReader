@@ -147,9 +147,10 @@
     preview: <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M3 3h10v10H3z" /><path d="M5 6h6M5 8.5h6M5 11h4" strokeLinecap="round" /></svg>,
     pdf: <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M4 2h6l3 3v9H4z" strokeLinejoin="round" /><path d="M5.5 9h1.2a1 1 0 000-2H5.5v4" strokeLinecap="round" strokeLinejoin="round" /></svg>,
     image: <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><rect x="2.5" y="3" width="11" height="10" rx="1.5" /><circle cx="6" cy="6.5" r="1" /><path d="M3 11l3-2.5 2.5 2 3-3 2 2.5" strokeLinejoin="round" /></svg>,
+    docx: <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M4 2h6l3 3v9H4z" strokeLinejoin="round" /><path d="M5.5 8l1 3.5L8 8l1.5 3.5 1-3.5" strokeLinecap="round" strokeLinejoin="round" /></svg>,
     compiled: <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M4 2h6l3 3v9H4z" strokeLinejoin="round" /><path d="M6.5 8.5l-1.2 1.2 1.2 1.2M9.5 8.5l1.2 1.2-1.2 1.2" strokeLinecap="round" strokeLinejoin="round" /></svg>
   };
-  const KIND_LABEL = { source: 'Source', preview: 'Preview', pdf: 'PDF', image: 'Image', compiled: 'Compiled' };
+  const KIND_LABEL = { source: 'Source', preview: 'Preview', pdf: 'PDF', image: 'Image', compiled: 'Compiled', docx: 'Word' };
 
   /* ---------------- pane body renderers ---------------- */
   // The "Rendered PDF" (HTML paper) pane, with zoom (Ctrl/⌘+wheel or pinch) + pan (scroll). CSS `zoom`
@@ -212,6 +213,10 @@
       const url = ctx.getFileURL(pane.file);
       if (!data && !url) return <Missing label="PDF" />;
       return <PdfView data={data} url={url} pane={pane} ctx={ctx} />;
+    }
+    if (pane.kind === 'docx') {
+      if (!pane.file) return <Missing label="document" />;
+      return <DocxView pane={pane} ctx={ctx} />;
     }
     if (pane.kind === 'image') {
       const url = ctx.getFileURL(pane.file);
@@ -600,6 +605,165 @@
     const dec = decodeURIComponent(body); const b = new Uint8Array(dec.length); for (let j = 0; j < dec.length; j++) b[j] = dec.charCodeAt(j); return b;
   }
   /* PDF.js canvas renderer — renders from raw bytes (blob/data URLs are blocked in sandboxed previews). */
+  /* Word-dokumentum (.docx) megnyitása és átnézése a platformon.
+     A mammoth formázott HTML-t ad (címsorok, listák, táblázatok, képek), amit egy
+     lap-szerű felületen mutatunk. Ugyanaz a három dolog megy rajta, mint a PDF-en:
+     NAGYÍTÁS, KERESÉS, és mondat kijelölésére Komment/ToDo — a horgony itt a kijelölt
+     SZÖVEG (a .docx-nek nincs lapszáma, se forrás-karakterpozíciója). */
+  function DocxView({ pane, ctx }) {
+    const ref = useRef(null);
+    const [state, setState] = useState('loading');   // loading | done | error
+    const [err, setErr] = useState('');
+    const [zoom, setZoom] = useState(1);
+    const [q, setQ] = useState('');
+    const [hits, setHits] = useState({ n: 0, i: 0 });
+    const [findOpen, setFindOpen] = useState(false);
+    const findRef = useRef(null);
+    const filePath = pane && pane.file;
+    const canAnn = !!(ctx && ctx.canComment && ctx.onDocxSelect && filePath);
+    const notes = (ctx && ctx.docxAnns) ? ctx.docxAnns(filePath) : [];
+    const notesKey = JSON.stringify(notes);
+
+    // --- betöltés + renderelés ---
+    useEffect(() => {
+      let dead = false;
+      const cont = ref.current; if (!cont) return;
+      setState('loading'); setErr(''); cont.innerHTML = '';
+      (async () => {
+        try {
+          if (!window.PROffice || !window.PROffice.docxHtml) throw new Error('A Word-olvasó nem érhető el.');
+          let buf = null;
+          const data = ctx.getFileData ? ctx.getFileData(filePath) : null;      // beágyazott dataURL
+          if (data) buf = dataURLToBytes(data).buffer;
+          else {
+            const url = ctx.getFileURL ? ctx.getFileURL(filePath) : null;
+            if (!url) throw new Error('A fájl tartalma nem érhető el (lehet, hogy csak ujjlenyomattal szerepel).');
+            const r = await fetch(url); if (!r.ok) throw new Error('Letöltés: HTTP ' + r.status);
+            buf = await r.arrayBuffer();
+          }
+          const out = await window.PROffice.docxHtml(buf); if (dead) return;
+          const page = document.createElement('div'); page.className = 'docx-page';
+          page.innerHTML = out.html || '<p><em>A dokumentum üres.</em></p>';
+          const doc = document.createElement('div'); doc.className = 'docx-doc';
+          doc.appendChild(page); cont.appendChild(doc);
+          doc.style.zoom = zoom;
+          setState('done');
+        } catch (e) { if (!dead) { setErr((e && e.message) || String(e)); setState('error'); } }
+      })();
+      return () => { dead = true; };
+    }, [filePath]);
+
+    useEffect(() => { const d = ref.current && ref.current.querySelector('.docx-doc'); if (d) d.style.zoom = zoom; }, [zoom, state]);
+    useEffect(() => {
+      const el = ref.current; if (!el) return;
+      const onWheel = (e) => { if (!(e.ctrlKey || e.metaKey)) return; e.preventDefault();
+        setZoom((z) => Math.max(0.5, Math.min(3, Math.round(z * Math.exp(-e.deltaY * 0.0022) * 100) / 100))); };
+      el.addEventListener('wheel', onWheel, { passive: false });
+      return () => el.removeEventListener('wheel', onWheel);
+    }, []);
+
+    // --- szöveg-kereső: a szövegcsomópontokban jelölünk ---
+    function clearMarks(cls) {
+      const root = ref.current; if (!root) return;
+      root.querySelectorAll('mark.' + cls).forEach((m) => { const t = document.createTextNode(m.textContent); m.parentNode.replaceChild(t, m); });
+      root.normalize();
+    }
+    function markAll(needle, cls) {
+      const root = ref.current; if (!root || !needle) return [];
+      const hitsOut = [];
+      const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+        acceptNode: (n) => (n.parentNode && n.parentNode.nodeName === 'MARK') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT });
+      const targets = [];
+      let n; while ((n = walk.nextNode())) { if ((n.nodeValue || '').toLowerCase().indexOf(needle) >= 0) targets.push(n); }
+      targets.forEach((node) => {
+        const txt = node.nodeValue; const low = txt.toLowerCase();
+        let from = 0, k, frag = document.createDocumentFragment();
+        while ((k = low.indexOf(needle, from)) >= 0) {
+          if (k > from) frag.appendChild(document.createTextNode(txt.slice(from, k)));
+          const m = document.createElement('mark'); m.className = cls; m.textContent = txt.slice(k, k + needle.length);
+          frag.appendChild(m); hitsOut.push(m); from = k + needle.length;
+        }
+        if (from < txt.length) frag.appendChild(document.createTextNode(txt.slice(from)));
+        node.parentNode.replaceChild(frag, node);
+      });
+      return hitsOut;
+    }
+    function runSearch(text, goto) {
+      clearMarks('docx-hit');
+      const needle = String(text || '').trim().toLowerCase();
+      if (!needle) { setHits({ n: 0, i: 0 }); return; }
+      const found = markAll(needle, 'docx-hit');
+      const idx = found.length ? Math.min(Math.max(goto != null ? goto : 0, 0), found.length - 1) : 0;
+      found.forEach((m, i) => m.classList.toggle('cur', i === idx));
+      if (found[idx]) { try { found[idx].scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) { } }
+      setHits({ n: found.length, i: found.length ? idx + 1 : 0 });
+    }
+    const step = (d) => { if (!hits.n) return; const next = ((hits.i - 1 + d) % hits.n + hits.n) % hits.n; runSearch(q, next); };
+    useEffect(() => {
+      const onKey = (e) => {
+        const el = ref.current; if (!el) return;
+        if (!(el.matches(':hover') || el.contains(document.activeElement))) return;
+        if ((e.metaKey || e.ctrlKey) && (e.key === 'f' || e.key === 'F')) { e.preventDefault(); setFindOpen(true); setTimeout(() => findRef.current && findRef.current.focus(), 30); }
+        else if (e.key === 'Escape' && findOpen) { setFindOpen(false); setQ(''); runSearch(''); }
+      };
+      document.addEventListener('keydown', onKey);
+      return () => document.removeEventListener('keydown', onKey);
+    }, [hits.n, q, findOpen]);
+
+    // --- mentett jegyzetek kiemelése a szövegben ---
+    useEffect(() => {
+      if (state !== 'done') return;
+      clearMarks('docx-note');
+      (notes || []).forEach((a) => {
+        const quote = String(a.quote || '').trim(); if (quote.length < 3) return;
+        const found = markAll(quote.toLowerCase(), 'docx-note');
+        found.forEach((m) => {
+          m.classList.add(a.kind === 'todo' ? 'k-todo' : a.kind === 'review' ? 'k-review' : 'k-comment');
+          m.title = (a.kind === 'todo' ? '☑ ' : a.kind === 'review' ? '✦ ' : '💬 ') + String(a.body || '').slice(0, 200);
+          m.addEventListener('click', (ev) => { ev.stopPropagation(); if (ctx.onOpenRegion) ctx.onOpenRegion(a); });
+        });
+      });
+      if (q) runSearch(q, hits.i ? hits.i - 1 : 0);
+    }, [notesKey, state]);
+
+    // --- kijelölés → Komment / ToDo ---
+    function onUp(e) {
+      if (!canAnn || e.detail >= 2) return;
+      const sel = window.getSelection();
+      if (!sel || !sel.rangeCount || sel.isCollapsed || !sel.toString().trim()) return;
+      const range = sel.getRangeAt(0);
+      if (!ref.current.contains(range.commonAncestorContainer)) return;
+      const rr = range.getBoundingClientRect();
+      const text = sel.toString().replace(/\s+/g, ' ').trim();
+      ctx.onDocxSelect(pane, { quote: text.slice(0, 300), at: { x: rr.left + rr.width / 2, y: rr.top } });
+    }
+
+    return <div className="pdf-view-wrap">
+      <div className="docx-view" ref={ref} onMouseUp={onUp} />
+      {state === 'done' && <div className="pdf-tools" onMouseDown={(e) => e.stopPropagation()}>
+        {findOpen
+          ? <span className="pdf-find">
+              <input ref={findRef} value={q} placeholder="Keresés a dokumentumban…" autoFocus
+                onChange={(e) => { setQ(e.target.value); runSearch(e.target.value, 0); }}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); step(e.shiftKey ? -1 : 1); }
+                                    if (e.key === 'Escape') { setFindOpen(false); setQ(''); runSearch(''); } }} />
+              <i>{hits.n ? hits.i + '/' + hits.n : (q ? '0' : '')}</i>
+              <button onClick={() => step(-1)} disabled={!hits.n} title="Előző">‹</button>
+              <button onClick={() => step(1)} disabled={!hits.n} title="Következő">›</button>
+              <button onClick={() => { setFindOpen(false); setQ(''); runSearch(''); }} title="Bezárás">✕</button>
+            </span>
+          : <button className="pdf-tool" title="Keresés a dokumentumban (Ctrl/⌘+F)" onClick={() => { setFindOpen(true); setTimeout(() => findRef.current && findRef.current.focus(), 30); }}>🔍 Keresés</button>}
+        <span className="pdf-zoomers">
+          <button onClick={() => setZoom((z) => Math.max(0.5, Math.round((z - 0.1) * 100) / 100))} title="Kicsinyítés">−</button>
+          <button onClick={() => setZoom(1)} title="Eredeti méret">{Math.round(zoom * 100)}%</button>
+          <button onClick={() => setZoom((z) => Math.min(3, Math.round((z + 0.1) * 100) / 100))} title="Nagyítás">+</button>
+        </span>
+      </div>}
+      {state === 'loading' && <div className="pdf-status">A Word-dokumentum megnyitása…</div>}
+      {state === 'error' && <div className="pdf-status" style={{ maxWidth: '80%', whiteSpace: 'normal', textAlign: 'center' }}>⚠️ {err}</div>}
+    </div>;
+  }
+
   /* Sima PDF-nézet (feltöltött és beküldési-csomagbeli PDF-ek).
      Szövegréteggel: így ezeken is lehet MONDATOT kijelölni, és — Alt/⌥ vagy a ⬚ gomb
      segítségével — ÁBRÁT, TÁBLÁZATOT, EGYENLETET területként megjelölni, majd megjegyzést
@@ -1353,7 +1517,7 @@
           onDragOver={onDragOver} onDragLeave={(e) => { if (!bodyRef.current || !bodyRef.current.contains(e.relatedTarget)) setDz(null); }}
           onDrop={(e) => { e.preventDefault(); const sid = e.dataTransfer.getData('text/plain'); const z = dz; setDz(null); if (sid && z && sid !== pane.id) ctx.onMovePane(sid, pane.id, z); ctx.onDragEnd(); }}>
           <PaneBody pane={pane} ctx={ctx} />
-          {((syncable && ctx.isCurProj(pane.docId)) || (pane.kind === 'pdf' && !!pane.file)) && ctx.canComment && ctx.selPaneId === pane.id && ctx.selQuote &&
+          {((syncable && ctx.isCurProj(pane.docId)) || ((pane.kind === 'pdf' || pane.kind === 'docx') && !!pane.file)) && ctx.canComment && ctx.selPaneId === pane.id && ctx.selQuote &&
             <window.Collab.SelectionToolbar pos={ctx.selPos} quote={ctx.selQuote}
               onComment={() => ctx.onComment(pane)} onTodo={() => ctx.onTodo(pane)} onClose={ctx.onCloseSel} />}
           {dz && <div className={'ws-dropzone dz-' + dz}><div className="ws-drop-hint">{dz === 'center' ? 'Swap' : 'Move here'}</div></div>}

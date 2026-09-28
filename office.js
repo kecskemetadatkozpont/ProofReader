@@ -22,6 +22,23 @@
     return new Promise(function (res, rej) { var r = new FileReader(); r.onload = function () { res(r.result); }; r.onerror = rej; r.readAsArrayBuffer(file); });
   }
 
+  /* Megjelenítéshez: a .docx FORMÁZOTT HTML-ként (címsorok, félkövér, listák, táblázatok,
+     képek adat-URI-ként). A markdownos extractDocx megmarad az importhoz — az szerkeszthető
+     szöveget csinál, ez pedig olvasható, átnézhető dokumentumot. */
+  function docxHtml(source) {
+    return loadScript('https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js', 'mammoth').then(function (m) {
+      var ab = (source instanceof ArrayBuffer) ? Promise.resolve(source)
+        : (source && source.buffer instanceof ArrayBuffer) ? Promise.resolve(source.buffer)
+        : readArrayBuffer(source);
+      return ab.then(function (buf) {
+        return m.convertToHtml({ arrayBuffer: buf }, {
+          styleMap: ["p[style-name='Title'] => h1:fresh", "p[style-name='Subtitle'] => h2:fresh",
+                     "p[style-name='Quote'] => blockquote:fresh", "p[style-name='Intense Quote'] => blockquote:fresh"],
+        }).then(function (r) { return { html: (r && r.value) || '', messages: (r && r.messages) || [] }; });
+      });
+    });
+  }
+
   function extractDocx(file) {
     return loadScript('https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js', 'mammoth').then(function (m) {
       return readArrayBuffer(file).then(function (ab) {
@@ -61,6 +78,7 @@
   }
 
   window.PROffice = {
+    docxHtml: docxHtml,
     isOffice: function (name) { return /\.(docx|xlsx|xlsm|xls|pptx)$/i.test(String(name || '')); },
     // extract(file) → Promise<{ text:String, ext:'md'|'csv' }>; rejects for non-Office files / parse errors
     extract: function (file) {
