@@ -741,6 +741,8 @@
     return <div className="pdf-view-wrap">
       <div className="docx-view" ref={ref} onMouseUp={onUp} />
       {state === 'done' && <div className="pdf-tools" onMouseDown={(e) => e.stopPropagation()}>
+        {ctx.onDocxToMarkdown && <button className="pdf-tool" title="Szerkeszthető Markdown-változat létrehozása a projektben"
+          onClick={() => ctx.onDocxToMarkdown(filePath)}>📝 Markdown</button>}
         {findOpen
           ? <span className="pdf-find">
               <input ref={findRef} value={q} placeholder="Keresés a dokumentumban…" autoFocus

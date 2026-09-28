@@ -1476,7 +1476,9 @@
       const dir = currentDir;
       list.forEach((file) => {
         if (/\.zip$/i.test(file.name)) { importZip(file, dir); return; }   // submission package → extract in place
-        if (window.PROffice && window.PROffice.isOffice(file.name)) { importOfficeFile(file, dir); return; }
+        // A .docx ÖNMAGÁBAN marad, hogy formázva megnyitható és átnézhető legyen (Word-panel);
+        // a táblázat/diasor továbbra is szöveggé alakul, mert azokhoz nincs nézetünk.
+        if (window.PROffice && window.PROffice.isOffice(file.name) && !/\.docx?$/i.test(file.name)) { importOfficeFile(file, dir); return; }
         if (JUNK_RE.test(file.name)) return;
         const isTex = TEXT_EXT_RE.test(file.name);
         const isImg = MEDIA_EXT_RE.test(file.name);
@@ -2097,6 +2099,25 @@
       setSelPos({ top: Math.max(56, (info.at && info.at.y || 120) - 46), left: Math.max(130, Math.min(window.innerWidth - 130, (info.at && info.at.x) || 300)) });
       setSelPaneId(pane.id);
     }, []);
+    /* A Word-panelből kérhető markdown-változat: ugyanaz a mammoth-os átalakítás, ami
+       korábban automatikusan futott — csak most a felhasználó dönt róla. */
+    const docxToMarkdown = useCallback((path) => {
+      const f = filesRef.current[path]; if (!f) return;
+      const get = async () => {
+        if (f.dataURL) return dataURLToBlob(f.dataURL);
+        const url = getFileURL(path); if (!url) throw new Error('A fájl tartalma nem érhető el.');
+        const r = await fetch(url); return await r.blob();
+      };
+      get().then((blob) => window.PROffice.extract(new File([blob], bn(path))))
+        .then((r) => {
+          const base = path.replace(/\.docx?$/i, '') + '.md';
+          const np = uniquePath((x) => !!filesRef.current[x], base);
+          filesRef.current = { ...filesRef.current, [np]: {} };
+          setFiles((fs) => ({ ...fs, [np]: { type: 'md', content: r.text || '' } }));
+          setOrder((o) => o.includes(np) ? o : [...o, np]);
+          window.PRUI.toast('Markdown-változat létrehozva: ' + bn(np), { kind: 'success' });
+        }, (e) => window.PRUI.toast('Nem sikerült: ' + ((e && e.message) || e), { kind: 'error' }));
+    }, [getFileURL]);
     const docxAnnsFor = useCallback((file) => (displayAnnsRef.current || [])
       .filter((a) => a.anchor && a.anchor.docx && a.anchor.file === file)
       .map((a) => ({ id: a.id, kind: a.kind, status: a.status, body: a.body || '', quote: a.anchor.quote })), []);
@@ -2606,7 +2627,8 @@
               getFileURL, getFileData, onPrint: onPrintDoc, onWord: onWordDoc, listFiles: listProjFiles, externalDocs: externalDocsList,
               selPaneId, selQuote, selPos, onComment: () => startAnnotation('comment'), onTodo: () => startAnnotation('todo'),
               onCloseSel: () => { setSelQuote(''); setSelPaneId(null); pendingRegion.current = null; pendingDocx.current = null; },
-              onRegionSelect, onPdfSelect, onDocxSelect, regionAnns: regionAnnsFor, docxAnns: docxAnnsFor, onOpenRegion
+              onRegionSelect, onPdfSelect, onDocxSelect, regionAnns: regionAnnsFor, docxAnns: docxAnnsFor,
+              onDocxToMarkdown: docxToMarkdown, onOpenRegion
             }} />
           </div>
 
